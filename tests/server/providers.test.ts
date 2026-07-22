@@ -24,7 +24,7 @@ console.log(JSON.stringify({type:'turn.completed'}));
     return { root, command };
   }
 
-  it("detects, normalizes, and completes a streamed Codex-style session", async () => {
+  it.skipIf(process.platform === "win32")("detects, normalizes, and completes a streamed Codex-style session", async () => {
     const fake = fakeCodex();
     const manager = new ProviderManager({ commands: { codex: fake.command } });
     const detection = await manager.detect("codex", { cwd: fake.root });

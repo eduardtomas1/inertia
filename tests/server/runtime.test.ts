@@ -81,7 +81,9 @@ describe("local runtime", () => {
 
   afterEach(async () => {
     await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
-    for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
+    for (const directory of temporaryDirectories.splice(0)) {
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
   });
 
   function temporaryWorkspace(): { root: string; data: string; workspace: string } {

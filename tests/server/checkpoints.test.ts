@@ -20,6 +20,7 @@ describe("Git checkpoints", () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-checkpoint-"));
     roots.push(root);
     git(root, "init", "-b", "main");
+    git(root, "config", "core.autocrlf", "false");
     git(root, "config", "user.name", "Inertia Test");
     git(root, "config", "user.email", "test@inertia.local");
     writeFileSync(join(root, "tracked.txt"), "base\n");
@@ -42,9 +43,9 @@ describe("Git checkpoints", () => {
     writeFileSync(join(root, "later-untracked.txt"), "keep me\n");
     await restoreCheckpoint(root, checkpoint.ref, conversationId);
 
-    expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("before agent\n");
-    expect(readFileSync(join(root, "existing-untracked.txt"), "utf8")).toBe("included\n");
-    expect(readFileSync(join(root, "later-untracked.txt"), "utf8")).toBe("keep me\n");
+    expect(readFileSync(join(root, "tracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("before agent\n");
+    expect(readFileSync(join(root, "existing-untracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("included\n");
+    expect(readFileSync(join(root, "later-untracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("keep me\n");
   });
 
   it("creates a provider-host pull request URL without network access", async () => {

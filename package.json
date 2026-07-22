@@ -2,6 +2,7 @@
   "name": "inertia",
   "version": "0.0.1",
   "description": "A calm local workspace for coding with agents.",
+  "desktopName": "dev.inertia.app.desktop",
   "main": "out/main/index.js",
   "author": "Eduard Tomas Velez",
   "license": "MIT",
@@ -16,8 +17,8 @@
     "test:e2e": "npm run build && playwright test",
     "check": "npm run typecheck && npm run test && npm run build",
     "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win --x64",
-    "dist:linux": "npm run build && electron-builder --linux AppImage --x64",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
+    "dist:linux": "npm run build && electron-builder --linux AppImage --x64 --publish never",
     "postinstall": "electron-builder install-app-deps && node scripts/ensure-node-pty-helper.mjs"
   },
   "build": {
@@ -60,6 +61,7 @@
     "linux": {
       "icon": "resources/icon.png",
       "category": "Development",
+      "syncDesktopName": true,
       "target": [
         "AppImage"
       ]

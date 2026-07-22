@@ -91,6 +91,15 @@ jobs:
         if: runner.os != 'Linux'
         run: npm run test:package-smoke
 
+      - name: Configure Linux sandbox helper for smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chown root:root release/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 release/linux-unpacked/chrome-sandbox
+          test "$(stat -c '%u:%g:%a' release/linux-unpacked/chrome-sandbox)" = "0:0:4755"
+
       - name: Smoke native packaged app under Xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm run test:package-smoke

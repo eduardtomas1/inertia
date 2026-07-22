@@ -72,7 +72,7 @@ export interface CodexAppServerOptions {
   sessionId?: string;
   imagePaths?: readonly string[];
   planMode: boolean;
-  access: "supervised" | "auto-edit";
+  access: "supervised" | "auto-edit" | "full";
   onText?: (text: string) => void;
   onActivity?: (kind: "system" | "turn" | "tool" | "command" | "reasoning", phase: "started" | "completed" | "failed" | "info", label: string) => void;
   onSession?: (sessionId: string) => void;
@@ -94,6 +94,7 @@ export interface CodexAppServerResult {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   diagnostic?: string;
+  compatibilityError?: "full-access-unsupported";
 }
 
 export interface CodexAppServerRun {

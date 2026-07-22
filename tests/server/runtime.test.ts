@@ -125,9 +125,10 @@ describe("local runtime", () => {
     const codex = join(executableDirectory, "codex");
     writeFileSync(codex, `#!${process.execPath}
 const { existsSync, writeFileSync } = require("node:fs");
+const readline = require("node:readline");
 const args = process.argv.slice(2);
 const authFile = ${JSON.stringify(authFile)};
-const runOutput = ${JSON.stringify(runEvents.map((event) => JSON.stringify(event)).join("\n"))};
+const runEvents = ${JSON.stringify(runEvents)};
 if (args.length === 1 && args[0] === "--version") {
   process.stdout.write("codex-cli 1.2.3\\n");
   process.exit(0);
@@ -149,9 +150,42 @@ if (args.length === 1 && args[0] === "login") {
   process.stdout.write("Sign-in complete\\n");
   process.exit(0);
 }
-if (args[0] === "exec" && runOutput) {
-  process.stdout.write(runOutput + "\\n");
-  process.exit(0);
+if (args.length === 1 && args[0] === "app-server") {
+  const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+  let threadId = "fake-thread";
+  const turnId = "fake-turn";
+  const itemType = (type) => type === "command_execution" ? "commandExecution" : type === "agent_message" ? "agentMessage" : type;
+  readline.createInterface({ input: process.stdin }).on("line", (line) => {
+    const message = JSON.parse(line);
+    if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "fake" } });
+    if (message.method === "initialized") return;
+    if (message.method === "model/list") return send({ id: message.id, result: { data: [], nextCursor: null } });
+    if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: null, rateLimitsByLimitId: null } });
+    if (message.method === "thread/start" || message.method === "thread/resume") {
+      threadId = message.params.threadId || threadId;
+      return send({ id: message.id, result: { thread: { id: threadId }, model: "fake" } });
+    }
+    if (message.method === "turn/start") {
+      send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+      send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+      for (const event of runEvents) {
+        if (event.type === "item.started" || event.type === "item.completed") {
+          send({
+            method: event.type === "item.started" ? "item/started" : "item/completed",
+            params: { threadId, turnId, item: { ...event.item, type: itemType(event.item?.type) } },
+          });
+        } else if (event.type === "turn.completed") {
+          send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+        }
+      }
+      return;
+    }
+    if (message.method === "turn/interrupt") {
+      send({ id: message.id, result: {} });
+      return send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
+    }
+  });
+  return;
 }
 process.stderr.write("Unexpected fake Codex invocation\\n");
 process.exit(2);

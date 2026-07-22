@@ -11,7 +11,7 @@ import {
   type ProviderRunResult,
 } from "../../src/server/providers";
 import { createAgentHarnessEmitter } from "../../src/server/provider/agent-harness";
-import { CLI_AGENT_HARNESS_CAPABILITIES } from "../../src/server/provider/cli-agent-harness";
+import { CLI_AGENT_HARNESS_CAPABILITIES, createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
 import { CODEX_APP_SERVER_HARNESS_CAPABILITIES } from "../../src/server/provider/codex-app-server-harness";
 
 function input(
@@ -30,12 +30,12 @@ function input(
 }
 
 describe("agent harness architecture", () => {
-  it("routes each current integration without hiding the Codex full-access compatibility path", () => {
+  it("routes every Codex access mode through the App Server harness", () => {
     const registry = createDefaultAgentHarnessRegistry();
 
     expect(registry.resolve(input("codex")).id).toBe("codex-app-server");
     expect(registry.resolve(input("codex", { access: "auto-edit" })).id).toBe("codex-app-server");
-    expect(registry.resolve(input("codex", { access: "full" })).id).toBe("codex-cli");
+    expect(registry.resolve(input("codex", { access: "full" })).id).toBe("codex-app-server");
     expect(registry.resolve(input("claude")).id).toBe("claude-cli");
     expect(registry.resolve(input("cursor")).id).toBe("cursor-cli");
     expect(registry.resolve(input("opencode")).id).toBe("opencode-cli");
@@ -48,7 +48,7 @@ describe("agent harness architecture", () => {
     const cursor = manager.harnessCapabilities("cursor")[0];
     const opencode = manager.harnessCapabilities("opencode")[0];
 
-    expect(codex.map(({ extension }) => extension.kind)).toEqual(["codex-app-server", "codex-cli"]);
+    expect(codex.map(({ extension }) => extension.kind)).toEqual(["codex-app-server"]);
     expect(codex[0]?.extension).toMatchObject({
       kind: "codex-app-server",
       approvals: "native",
@@ -276,7 +276,7 @@ describe("agent harness architecture", () => {
     );
     expect(() => new AgentHarnessRegistry([
       { ...createDefaultAgentHarnessRegistry().list("codex")[0]!, supports: () => true },
-      { ...createDefaultAgentHarnessRegistry().list("codex")[1]!, supports: () => true },
+      createCliAgentHarness("codex", { supports: () => true }),
     ]).resolve(input("codex", { access: "supervised" }))).toThrow("Multiple agent harnesses matched codex");
   });
 });

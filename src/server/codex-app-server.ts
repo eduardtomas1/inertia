@@ -67,6 +67,38 @@ const RPC_TIMEOUT_MS = 30_000;
 
 type CodexRunPhase = "opening" | "starting-turn" | "running" | "settled";
 
+interface CodexAccessPolicy {
+  approvalPolicy: "untrusted" | "on-request" | "never";
+  threadSandbox: "read-only" | "workspace-write" | "danger-full-access";
+  turnSandboxPolicy: JsonObject;
+}
+
+function codexAccessPolicy(options: Pick<CodexAppServerOptions, "access" | "planMode">): CodexAccessPolicy {
+  if (options.access === "full") {
+    return {
+      approvalPolicy: "never",
+      threadSandbox: "danger-full-access",
+      turnSandboxPolicy: { type: "dangerFullAccess" },
+    };
+  }
+
+  const readOnly = options.planMode || options.access === "supervised";
+  return {
+    approvalPolicy: options.access === "supervised" ? "untrusted" : "on-request",
+    threadSandbox: readOnly ? "read-only" : "workspace-write",
+    turnSandboxPolicy: readOnly
+      ? { type: "readOnly", networkAccess: false }
+      : { type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
+  };
+}
+
+function isUnsupportedFullAccessError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const unsupported = "(?:unknown|unsupported|unrecognized|invalid)";
+  const fullAccess = "(?:danger-full-access|dangerFullAccess)";
+  return new RegExp(`${unsupported}.{0,160}${fullAccess}|${fullAccess}.{0,160}${unsupported}`, "iu").test(message);
+}
+
 function isRecoverableResumeError(error: unknown): boolean {
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
   return message.includes("thread") && ["not found", "missing", "unknown", "does not exist", "no such"].some((part) => message.includes(part));
@@ -97,6 +129,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
   let spawned = false;
   let phase: CodexRunPhase = "opening";
   let lastError: string | undefined;
+  let compatibilityError: CodexAppServerResult["compatibilityError"];
   let resolveResult!: (result: CodexAppServerResult) => void;
 
   const result = new Promise<CodexAppServerResult>((resolve) => {
@@ -159,6 +192,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
       exitCode,
       signal,
       ...((lastError || diagnostic.toString()) ? { diagnostic: lastError ?? diagnostic.toString() } : {}),
+      ...(compatibilityError ? { compatibilityError } : {}),
     });
     if (child.exitCode === null && child.signalCode === null) terminateProcessTree(child, false);
   };
@@ -408,13 +442,12 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
         });
         notify("initialized");
 
-        const readOnly = options.planMode || options.access === "supervised";
-        const approvalPolicy = options.access === "supervised" ? "untrusted" : "on-request";
+        const accessPolicy = codexAccessPolicy(options);
         const threadConfig = {
           cwd: options.cwd,
-          approvalPolicy,
+          approvalPolicy: accessPolicy.approvalPolicy,
           approvalsReviewer: "user",
-          sandbox: readOnly ? "read-only" : "workspace-write",
+          sandbox: accessPolicy.threadSandbox,
           ...(options.model ? { model: options.model } : {}),
           ...(options.reasoningEffort ? { effort: options.reasoningEffort } : {}),
         };
@@ -449,11 +482,9 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
         const started = await request("turn/start", {
           threadId: openedThreadId,
           input,
-          approvalPolicy,
+          approvalPolicy: accessPolicy.approvalPolicy,
           approvalsReviewer: "user",
-          sandboxPolicy: readOnly
-            ? { type: "readOnly", networkAccess: false }
-            : { type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
+          sandboxPolicy: accessPolicy.turnSandboxPolicy,
           ...(options.model ? { model: options.model } : {}),
           ...(options.reasoningEffort ? { effort: options.reasoningEffort } : {}),
           summary: "auto",
@@ -477,6 +508,9 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
         phase = "running";
         options.onStatus?.("running");
       } catch (error) {
+        if (options.access === "full" && isUnsupportedFullAccessError(error)) {
+          compatibilityError = "full-access-unsupported";
+        }
         lastError = error instanceof Error ? error.message : "Codex App Server could not start.";
         finish(cancelRequested ? "cancelled" : "failed", null, null);
       }

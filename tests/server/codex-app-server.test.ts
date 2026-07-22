@@ -82,6 +82,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "model/list") return send({ id: message.id, result: { data: [{ id: "model-a", model: "model-a", displayName: "Model A", description: "A test model", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Quick" }, { reasoningEffort: "high", description: "Careful" }], defaultReasoningEffort: "low", inputModalities: ["text", "image"], isDefault: true }], nextCursor: null } });
   if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: { limitId: "codex", limitName: null, primary: { usedPercent: 37, windowDurationMins: 10080, resetsAt: 1893456000 }, secondary: null }, rateLimitsByLimitId: null } });
   if (message.method === "thread/start" || message.method === "thread/resume") {
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "incompatible-full-access" && message.params.approvalPolicy === "never") {
+      return send({ id: message.id, error: { code: -32602, message: "invalid params: unknown variant danger-full-access" } });
+    }
     threadId = message.params.threadId || "thread-new";
     send({ id: message.id, result: { thread: { id: threadId }, cwd: process.cwd(), model: "fake" } });
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-completion") {
@@ -100,6 +103,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     send({ method: "turn/completed", params: { threadId, turn: { id: "orphan-turn", status: "completed", items: [], error: null } } });
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt") return;
+    if (message.params.approvalPolicy === "never") {
+      requestInput();
+      return;
+    }
     const params = process.env.INERTIA_APP_SERVER_SCENARIO === "unsupported-decisions"
       ? { threadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: ["acceptForSession"] }
       : approvalMethod === "item/fileChange/requestApproval"
@@ -234,12 +242,27 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const messages = captured(fake.capturePath);
     const resumed = messages.find(({ method }) => method === "thread/resume") as { params: Record<string, unknown> };
     const turn = messages.find(({ method }) => method === "turn/start") as { params: Record<string, unknown> };
-    expect(resumed.params).toMatchObject({ threadId: "thread-existing", excludeTurns: true, approvalPolicy: "untrusted", approvalsReviewer: "user", sandbox: "read-only", effort: "high" });
-    expect(turn.params).toMatchObject({ approvalPolicy: "untrusted", sandboxPolicy: { type: "readOnly", networkAccess: false }, effort: "high", summary: "auto" });
-    expect(turn.params.input).toEqual([
-      { type: "text", text: "Work carefully", text_elements: [] },
-      { type: "localImage", path: join(fake.root, "reference.png") },
-    ]);
+    expect(resumed.params).toEqual({
+      threadId: "thread-existing",
+      excludeTurns: true,
+      cwd: fake.root,
+      approvalPolicy: "untrusted",
+      approvalsReviewer: "user",
+      sandbox: "read-only",
+      effort: "high",
+    });
+    expect(turn.params).toEqual({
+      threadId: "thread-existing",
+      input: [
+        { type: "text", text: "Work carefully", text_elements: [] },
+        { type: "localImage", path: join(fake.root, "reference.png") },
+      ],
+      approvalPolicy: "untrusted",
+      approvalsReviewer: "user",
+      sandboxPolicy: { type: "readOnly", networkAccess: false },
+      effort: "high",
+      summary: "auto",
+    });
     expect(messages.find(({ id }) => id === "approval-rpc")).toMatchObject({ result: { decision: "accept" } });
     expect(messages.find(({ id }) => id === "input-rpc")).toMatchObject({ result: { answers: { choice: { answers: ["  Safe  "] } } } });
     expect(messages.find(({ method }) => method === "initialized")).toEqual({ method: "initialized" });
@@ -266,9 +289,172 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
     await expect(result).resolves.toMatchObject({ status: "completed" });
     const messages = captured(fake.capturePath);
-    expect(messages.find(({ method }) => method === "thread/start")).toMatchObject({ params: { approvalPolicy: "on-request", sandbox: "workspace-write" } });
-    expect(messages.find(({ method }) => method === "turn/start")).toMatchObject({ params: { approvalPolicy: "on-request", sandboxPolicy: { type: "workspaceWrite", networkAccess: false } } });
+    expect(messages.find(({ method }) => method === "thread/start")).toEqual({
+      method: "thread/start",
+      id: 2,
+      params: {
+        cwd: fake.root,
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        sandbox: "workspace-write",
+      },
+    });
+    expect(messages.find(({ method }) => method === "turn/start")).toEqual({
+      method: "turn/start",
+      id: 3,
+      params: {
+        threadId: "thread-new",
+        input: [{ type: "text", text: "Try an edit", text_elements: [] }],
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          writableRoots: [],
+          networkAccess: false,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
+        summary: "auto",
+      },
+    });
     expect(messages.find(({ id }) => id === "approval-rpc")).toMatchObject({ result: { decision: "decline" } });
+    await manager.disposeAll();
+  });
+
+  it.skipIf(process.platform === "win32")("keeps full access on App Server while streaming rich plan-turn state", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    const manager = new ProviderManager({ commands: { codex: fake.command } });
+    const approvals: string[] = [];
+    const inputs: string[] = [];
+    const plans: string[] = [];
+    const reasoning: string[] = [];
+    const usage: number[] = [];
+
+    const result = manager.run({
+      providerId: "codex",
+      conversationId: "conversation-full",
+      cwd: fake.root,
+      prompt: "Plan with full access",
+      interactionMode: "plan",
+      access: "full",
+      sessionId: "thread-full",
+      imagePaths: [join(fake.root, "full-reference.png")],
+      reasoningEffort: "high",
+    }, {
+      onApproval: (event) => approvals.push(event.request.requestId),
+      onInput: (event) => {
+        inputs.push(event.request.questions[0]?.question ?? "");
+        expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Direct"] })).toBe(true);
+      },
+      onPlan: (event) => plans.push(event.explanation ?? ""),
+      onReasoning: (event) => reasoning.push(event.text),
+      onUsage: (event) => usage.push(event.usage.usedTokens),
+    });
+
+    await expect(result).resolves.toMatchObject({
+      status: "completed",
+      sessionId: "thread-full",
+      text: "Hello from Codex",
+    });
+    expect(approvals).toEqual([]);
+    expect(inputs).toEqual(["Which path should Codex take?"]);
+    expect(plans).toEqual(["A native plan"]);
+    expect(reasoning).toEqual(["Checking the safest path."]);
+    expect(usage).toEqual([126]);
+
+    const messages = captured(fake.capturePath);
+    const resumed = messages.find(({ method }) => method === "thread/resume") as { params: Record<string, unknown> };
+    const turn = messages.find(({ method }) => method === "turn/start") as { params: Record<string, unknown> };
+    expect(resumed.params).toEqual({
+      threadId: "thread-full",
+      excludeTurns: true,
+      cwd: fake.root,
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      sandbox: "danger-full-access",
+      effort: "high",
+    });
+    expect(turn.params).toEqual({
+      threadId: "thread-full",
+      input: [
+        { type: "text", text: "Plan with full access", text_elements: [] },
+        { type: "localImage", path: join(fake.root, "full-reference.png") },
+      ],
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      sandboxPolicy: { type: "dangerFullAccess" },
+      effort: "high",
+      summary: "auto",
+      collaborationMode: {
+        mode: "plan",
+        settings: { model: "fake", reasoning_effort: "high", developer_instructions: null },
+      },
+    });
+    expect(messages.find(({ id }) => id === "input-rpc")).toMatchObject({ result: { answers: { choice: { answers: ["Direct"] } } } });
+    await manager.disposeAll();
+  });
+
+  it.skipIf(process.platform === "win32")("interrupts a full-access App Server turn without changing transport", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "wait-for-interrupt";
+    const manager = new ProviderManager({ commands: { codex: fake.command }, cancelGraceMs: 500 });
+    let cancelled = false;
+
+    const result = manager.run({
+      providerId: "codex",
+      conversationId: "conversation-full-cancel",
+      cwd: fake.root,
+      prompt: "Wait",
+      interactionMode: "build",
+      access: "full",
+    }, {
+      onStatus: (event) => {
+        if (event.status !== "running" || cancelled) return;
+        cancelled = manager.cancel(event.conversationId);
+      },
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "cancelled", sessionId: "thread-new" });
+    expect(cancelled).toBe(true);
+    const messages = captured(fake.capturePath);
+    expect(messages.find(({ method }) => method === "turn/start")).toMatchObject({
+      params: { approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" } },
+    });
+    expect(messages.find(({ method }) => method === "turn/interrupt")).toMatchObject({
+      params: { threadId: "thread-new", turnId: "turn-1" },
+    });
+    await manager.disposeAll();
+  });
+
+  it.skipIf(process.platform === "win32")("fails closed when App Server rejects full-access policy fields", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "incompatible-full-access";
+    const manager = new ProviderManager({ commands: { codex: fake.command } });
+    const approvals: string[] = [];
+
+    const result = await manager.run({
+      providerId: "codex",
+      conversationId: "conversation-full-incompatible",
+      cwd: fake.root,
+      prompt: "Run with full access",
+      interactionMode: "build",
+      access: "full",
+    }, { onApproval: (event) => approvals.push(event.request.requestId) });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      error: "This Codex App Server version does not support Full Access. Update Codex CLI and try again.",
+    });
+    expect(result).not.toHaveProperty("compatibilityError");
+    expect(approvals).toEqual([]);
+    const messages = captured(fake.capturePath);
+    expect(messages.find(({ method }) => method === "thread/start")).toMatchObject({
+      params: { approvalPolicy: "never", sandbox: "danger-full-access" },
+    });
+    expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
     await manager.disposeAll();
   });
 

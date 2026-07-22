@@ -46,6 +46,7 @@ describe.sequential("provider runtime", () => {
     const result = options.result ?? "A calm result.";
     return nodeExecutable(root, name, `
 const fs = require("node:fs");
+const readline = require("node:readline");
 const args = process.argv.slice(2);
 if (args.includes("--version")) {
   console.log(${JSON.stringify(`fake-codex ${version}`)});
@@ -57,12 +58,43 @@ if (args[0] === "login" && args[1] === "status") {
 if (args[0] === "app-server" && args[1] === "--help") {
   ${options.appServer === false ? 'console.error("unknown subcommand app-server"); process.exit(2);' : 'console.log("Usage: codex app-server [OPTIONS] - Run the app server"); process.exit(0);'}
 }
-if (process.env.INERTIA_CAPTURE_PATH) {
-  fs.writeFileSync(process.env.INERTIA_CAPTURE_PATH, JSON.stringify({ args, stdin: fs.readFileSync(0, "utf8") }));
+if (args.length === 1 && args[0] === "app-server") {
+  const messages = [];
+  const capture = (message) => {
+    if (!process.env.INERTIA_CAPTURE_PATH) return;
+    messages.push(message);
+    fs.writeFileSync(process.env.INERTIA_CAPTURE_PATH, JSON.stringify({ args, messages }));
+  };
+  const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+  let threadId = "11111111-1111-4111-8111-111111111111";
+  const turnId = "turn-1";
+  readline.createInterface({ input: process.stdin }).on("line", (line) => {
+    const message = JSON.parse(line);
+    capture(message);
+    if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "fake" } });
+    if (message.method === "initialized") return;
+    if (message.method === "model/list") return send({ id: message.id, result: { data: [], nextCursor: null } });
+    if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: null, rateLimitsByLimitId: null } });
+    if (message.method === "thread/start" || message.method === "thread/resume") {
+      threadId = message.params.threadId || threadId;
+      return send({ id: message.id, result: { thread: { id: threadId }, model: "fake" } });
+    }
+    if (message.method === "turn/start") {
+      send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+      send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+      ${options.stayAlive ? "return;" : `const text = ${JSON.stringify(result)} + (process.env.INERTIA_DISCOVERY_MARKER ? ":" + process.env.INERTIA_DISCOVERY_MARKER : "");
+      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: text } });
+      return send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });`}
+    }
+    if (message.method === "turn/interrupt") {
+      send({ id: message.id, result: {} });
+      return send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
+    }
+  });
+  return;
 }
-console.log(JSON.stringify({ type: "thread.started", thread_id: "11111111-1111-4111-8111-111111111111" }));
-console.log(JSON.stringify({ type: "turn.started" }));
-${options.stayAlive ? "setInterval(() => undefined, 1000);" : `console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: ${JSON.stringify(result)} + (process.env.INERTIA_DISCOVERY_MARKER ? ":" + process.env.INERTIA_DISCOVERY_MARKER : "") } }));\nconsole.log(JSON.stringify({ type: "turn.completed" }));`}
+process.stderr.write("Unexpected fake Codex invocation\\n");
+process.exit(2);
 `);
   }
 
@@ -127,15 +159,27 @@ ${options.stayAlive ? "setInterval(() => undefined, 1000);" : `console.log(JSON.
     });
 
     expect(result).toMatchObject({ status: "completed", text: "newer:from-discovery" });
-    const invocation = JSON.parse(readFileSync(capturePath, "utf8")) as { args: string[]; stdin: string };
-    expect(invocation.args).toEqual([
-      "exec", "resume", "--json", "--skip-git-repo-check",
-      "--dangerously-bypass-approvals-and-sandbox",
-      "--model", "test-model",
-      "--image", join(root, "reference.png"),
-      "22222222-2222-4222-8222-222222222222", "-",
-    ]);
-    expect(invocation.stdin).toBe("Continue carefully");
+    const invocation = JSON.parse(readFileSync(capturePath, "utf8")) as { args: string[]; messages: Array<Record<string, unknown>> };
+    expect(invocation.args).toEqual(["app-server"]);
+    expect(invocation.messages.find(({ method }) => method === "thread/resume")).toMatchObject({
+      params: {
+        threadId: "22222222-2222-4222-8222-222222222222",
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+        model: "test-model",
+      },
+    });
+    expect(invocation.messages.find(({ method }) => method === "turn/start")).toMatchObject({
+      params: {
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        model: "test-model",
+        input: [
+          { type: "text", text: "Continue carefully", text_elements: [] },
+          { type: "localImage", path: join(root, "reference.png") },
+        ],
+      },
+    });
     await manager.disposeAll();
   });
 

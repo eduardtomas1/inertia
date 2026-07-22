@@ -42,7 +42,7 @@ export function createCodexAppServerHarness(): AgentHarness {
     id: "codex-app-server",
     providerId: "codex",
     capabilities: CODEX_APP_SERVER_HARNESS_CAPABILITIES,
-    supports: (input) => input.providerId === "codex" && input.access !== "full",
+    supports: (input) => input.providerId === "codex",
     start: startCodexRun,
   };
 }
@@ -71,7 +71,7 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       ...(options.input.sessionId ? { sessionId: options.input.sessionId } : {}),
       ...(options.input.imagePaths ? { imagePaths: options.input.imagePaths } : {}),
       planMode: options.input.interactionMode === "plan",
-      access: options.input.access === "auto-edit" ? "auto-edit" : "supervised",
+      access: options.input.access,
       onText: emitter.text,
       onActivity: emitter.activity,
       onSession: emitter.session,
@@ -95,13 +95,15 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   let cancelRequested = false;
   const result = codexRun.result.then((runtimeResult): ProviderRunResult => {
     settled = true;
-    const { diagnostic: runtimeDiagnostic, ...publicRuntimeResult } = runtimeResult;
+    const { diagnostic: runtimeDiagnostic, compatibilityError, ...publicRuntimeResult } = runtimeResult;
     if (runtimeResult.status === "cancelled" || cancelRequested) {
       emitter.status("cancelled");
       return { providerId, conversationId, ...publicRuntimeResult, status: "cancelled" };
     }
     if (runtimeResult.status === "failed") {
-      const message = providerFailureMessage(providerId, undefined, runtimeDiagnostic ?? "");
+      const message = compatibilityError === "full-access-unsupported"
+        ? "This Codex App Server version does not support Full Access. Update Codex CLI and try again."
+        : providerFailureMessage(providerId, undefined, runtimeDiagnostic ?? "");
       emitter.status("failed", message);
       return { providerId, conversationId, ...publicRuntimeResult, status: "failed", error: message };
     }

@@ -56,7 +56,6 @@ export class AgentHarnessRegistry {
 export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
   return new AgentHarnessRegistry([
     createCodexAppServerHarness(),
-    createCliAgentHarness("codex", { supports: (input) => input.providerId === "codex" && input.access === "full" }),
     createCliAgentHarness("claude"),
     createCliAgentHarness("cursor"),
     createCliAgentHarness("opencode"),

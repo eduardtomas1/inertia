@@ -17,6 +17,7 @@ import type {
   Usage,
 } from "@agentclientprotocol/sdk";
 
+import type { ProviderModel } from "../../shared/contracts";
 import type { CodexApprovalDecision, CodexInputRequest, CodexPlanStep } from "../codex/types";
 import { terminateProcessTree } from "../process-lifecycle";
 import {
@@ -75,6 +76,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   const inputs = new Map<string, PendingInput>();
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
+  let supportsImages = false;
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
 
@@ -113,7 +115,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     })
     .onNotification(acp.methods.client.session.update, ({ params }) => {
       if (!sessionId || params.sessionId !== sessionId) return;
-      handleCursorUpdate(params, resultText, emitter);
+      handleCursorUpdate(params, resultText, emitter, supportsImages);
     })
     .onRequest("cursor/ask_question", parseCursorQuestionRequest, async ({ params, signal }) => {
       if (cancelRequested) return { outcome: "cancelled" };
@@ -174,6 +176,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       clientInfo: { name: "Inertia", version: "0.0.3" },
     });
     validateCursorInitialize(initialized);
+    supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
     const cursorLogin = initialized.authMethods?.find((method) => method.id === "cursor_login");
     if (cursorLogin) await context.request(acp.methods.agent.authenticate, { methodId: cursorLogin.id });
 
@@ -196,6 +199,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       configOptions = created.configOptions;
     }
     if (!sessionId) throw new Error("Cursor ACP did not return a session ID.");
+    emitCursorMetadata(configOptions ?? [], supportsImages, emitter.rich);
     await configureCursorSession(context, sessionId, modes, configOptions ?? [], options.input.interactionMode, options.input.model, options.input.reasoningEffort);
     const prompt = await cursorPrompt(options.input.prompt, options.input.imagePaths ?? [], initialized);
     emitter.status("running");
@@ -299,6 +303,7 @@ function handleCursorUpdate(
   notification: SessionNotification,
   resultText: CappedProviderBuffer,
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
+  supportsImages: boolean,
 ): void {
   const update = notification.update;
   if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
@@ -328,7 +333,43 @@ function handleCursorUpdate(
         compactsAutomatically: false,
       },
     });
+  } else if (update.sessionUpdate === "config_option_update") {
+    emitCursorMetadata(update.configOptions, supportsImages, emitter.rich);
   }
+}
+
+function cursorSelectChoices(option: SessionConfigOption | undefined): Array<{ value: string; name: string; description?: string | null }> {
+  if (!option || option.type !== "select") return [];
+  return option.options.flatMap((entry) => "options" in entry ? entry.options : [entry]).slice(0, 64);
+}
+
+function emitCursorMetadata(
+  configOptions: SessionConfigOption[],
+  supportsImages: boolean,
+  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+): void {
+  const modelOption = configOptions.find((option) => option.type === "select" && option.category === "model");
+  const models = cursorSelectChoices(modelOption);
+  if (!modelOption || modelOption.type !== "select" || models.length === 0) return;
+  const effortOption = configOptions.find((option) => option.type === "select" && option.category === "thought_level");
+  const efforts = cursorSelectChoices(effortOption).slice(0, 12);
+  const defaultEffort = effortOption?.type === "select" && typeof effortOption.currentValue === "string"
+    ? effortOption.currentValue
+    : "";
+  const metadata: ProviderModel[] = models.map((model) => ({
+    id: bounded(model.value),
+    label: bounded(model.name || model.value),
+    description: bounded(model.description || "Cursor session model"),
+    isDefault: modelOption.currentValue === model.value,
+    inputModalities: supportsImages ? ["text", "image"] : ["text"],
+    reasoningOptions: efforts.map((effort) => ({
+      value: bounded(effort.value),
+      label: bounded(effort.name || effort.value),
+      description: bounded(effort.description || `${effort.name || effort.value} reasoning`),
+    })),
+    defaultReasoningEffort: defaultEffort,
+  }));
+  emit({ type: "metadata", metadata: { models: metadata }, source: "session", complete: true });
 }
 
 async function configureCursorSession(

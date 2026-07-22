@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
 
@@ -150,5 +151,58 @@ describe("RuntimeStore conversation lifecycle", () => {
     expect(snapshot.reasonings).toContainEqual(expect.objectContaining({ id: reasoning.id, content: "Checked the safe path.", status: "completed" }));
     expect(snapshot.usage).toContainEqual(expect.objectContaining({ conversationId: conversation.id, usedTokens: 126, maxTokens: 258_400, compactsAutomatically: true }));
     reopened.close();
+  });
+
+  it("persists bounded provider metadata independently of conversation state", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    store.saveProviderMetadata({
+      providerId: "codex",
+      executable: "/usr/local/bin/codex",
+      version: "1.2.3",
+      authState: "authenticated",
+      models: [{
+        id: "gpt-test",
+        label: "GPT Test",
+        description: "Test model",
+        isDefault: true,
+        inputModalities: ["text", "image"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+      }],
+      modelsUpdatedAt: "2026-07-22T10:00:00.000Z",
+      modelsLastAttemptedAt: "2026-07-22T10:00:00.000Z",
+      modelsProvenance: "provider",
+      modelsStale: false,
+      rateLimits: [{ id: "five-hour", label: "Five hour", usedPercent: 25, remainingPercent: 75, windowMinutes: 300, resetsAt: null }],
+      rateLimitsUpdatedAt: "2026-07-22T10:00:00.000Z",
+      rateLimitsLastAttemptedAt: "2026-07-22T10:00:00.000Z",
+      rateLimitsProvenance: "provider",
+      rateLimitsStale: false,
+    });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.loadProviderMetadata()).toEqual([expect.objectContaining({
+      providerId: "codex",
+      executable: "/usr/local/bin/codex",
+      models: [expect.objectContaining({ id: "gpt-test" })],
+      rateLimits: [expect.objectContaining({ id: "five-hour", usedPercent: 25 })],
+    })]);
+    reopened.close();
+  });
+
+  it("migrates an existing version-four database without rebuilding user data", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const projectId = store.snapshot().projects[0]?.id;
+    store.close();
+    const legacy = new Database(databasePath);
+    legacy.exec("DROP TABLE provider_metadata_cache");
+    legacy.prepare("DELETE FROM schema_migrations WHERE version = 5").run();
+    legacy.close();
+
+    const migrated = new RuntimeStore(databasePath, workspacePath);
+    expect(migrated.snapshot().projects[0]?.id).toBe(projectId);
+    expect(migrated.loadProviderMetadata()).toEqual([]);
+    migrated.close();
   });
 });

@@ -23,6 +23,7 @@ import {
   type ThreadStatus,
   type ThreadUsageSnapshot,
 } from "../shared/contracts";
+import type { PersistedProviderMetadata } from "./provider/metadata";
 
 const PROJECT_COLORS = ["#6f76d9", "#5b8ca8", "#8a73ba", "#a76c79", "#9a814f", "#687f91"] as const;
 
@@ -134,6 +135,23 @@ interface StateRow {
   default_interaction_mode: InteractionMode;
   active_project_id: string | null;
   active_conversation_id: string | null;
+}
+
+interface ProviderMetadataCacheRow {
+  provider_id: ProviderId;
+  executable: string | null;
+  version: string | null;
+  auth_state: PersistedProviderMetadata["authState"];
+  models_json: string;
+  models_updated_at: string | null;
+  models_last_attempted_at: string | null;
+  models_provenance: PersistedProviderMetadata["modelsProvenance"];
+  models_stale: 0 | 1;
+  rate_limits_json: string;
+  rate_limits_updated_at: string | null;
+  rate_limits_last_attempted_at: string | null;
+  rate_limits_provenance: PersistedProviderMetadata["rateLimitsProvenance"];
+  rate_limits_stale: 0 | 1;
 }
 
 const migrations = [
@@ -262,6 +280,24 @@ const migrations = [
       updated_at TEXT NOT NULL
     );
   `,
+  `
+    CREATE TABLE provider_metadata_cache (
+      provider_id TEXT PRIMARY KEY CHECK (provider_id IN ('codex', 'claude', 'cursor', 'opencode')),
+      executable TEXT CHECK (executable IS NULL OR length(executable) <= 4096),
+      version TEXT CHECK (version IS NULL OR length(version) <= 200),
+      auth_state TEXT CHECK (auth_state IS NULL OR auth_state IN ('checking', 'authenticated', 'unauthenticated', 'configured', 'unknown', 'error')),
+      models_json TEXT NOT NULL DEFAULT '[]' CHECK (length(models_json) <= 262144),
+      models_updated_at TEXT,
+      models_last_attempted_at TEXT,
+      models_provenance TEXT CHECK (models_provenance IS NULL OR models_provenance IN ('provider', 'session', 'persistent-cache')),
+      models_stale INTEGER NOT NULL DEFAULT 0 CHECK (models_stale IN (0, 1)),
+      rate_limits_json TEXT NOT NULL DEFAULT '[]' CHECK (length(rate_limits_json) <= 65536),
+      rate_limits_updated_at TEXT,
+      rate_limits_last_attempted_at TEXT,
+      rate_limits_provenance TEXT CHECK (rate_limits_provenance IS NULL OR rate_limits_provenance IN ('provider', 'session', 'persistent-cache')),
+      rate_limits_stale INTEGER NOT NULL DEFAULT 0 CHECK (rate_limits_stale IN (0, 1))
+    );
+  `,
 ] as const;
 
 function projectFromRow(row: ProjectRow): Project {
@@ -292,6 +328,15 @@ function parseAttachments(value: string): ChatAttachment[] {
   try {
     const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed) ? (parsed as ChatAttachment[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonArray(value: string): unknown[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -414,6 +459,60 @@ export class RuntimeStore {
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,
     };
+  }
+
+  loadProviderMetadata(): PersistedProviderMetadata[] {
+    const rows = this.database.prepare("SELECT * FROM provider_metadata_cache ORDER BY provider_id ASC").all() as ProviderMetadataCacheRow[];
+    return rows.map((row) => ({
+      providerId: row.provider_id,
+      executable: row.executable,
+      version: row.version,
+      authState: row.auth_state,
+      models: parseJsonArray(row.models_json),
+      modelsUpdatedAt: row.models_updated_at,
+      modelsLastAttemptedAt: row.models_last_attempted_at,
+      modelsProvenance: row.models_provenance,
+      modelsStale: row.models_stale === 1,
+      rateLimits: parseJsonArray(row.rate_limits_json),
+      rateLimitsUpdatedAt: row.rate_limits_updated_at,
+      rateLimitsLastAttemptedAt: row.rate_limits_last_attempted_at,
+      rateLimitsProvenance: row.rate_limits_provenance,
+      rateLimitsStale: row.rate_limits_stale === 1,
+    })) as PersistedProviderMetadata[];
+  }
+
+  saveProviderMetadata(metadata: PersistedProviderMetadata): void {
+    const modelsJson = JSON.stringify(metadata.models);
+    const rateLimitsJson = JSON.stringify(metadata.rateLimits);
+    if (modelsJson.length > 262_144 || rateLimitsJson.length > 65_536) return;
+    this.database.prepare(`
+      INSERT INTO provider_metadata_cache (
+        provider_id, executable, version, auth_state, models_json, models_updated_at, models_last_attempted_at, models_provenance, models_stale,
+        rate_limits_json, rate_limits_updated_at, rate_limits_last_attempted_at, rate_limits_provenance, rate_limits_stale
+      ) VALUES (
+        @providerId, @executable, @version, @authState, @modelsJson, @modelsUpdatedAt, @modelsLastAttemptedAt, @modelsProvenance, @modelsStaleValue,
+        @rateLimitsJson, @rateLimitsUpdatedAt, @rateLimitsLastAttemptedAt, @rateLimitsProvenance, @rateLimitsStaleValue
+      ) ON CONFLICT(provider_id) DO UPDATE SET
+        executable = excluded.executable,
+        version = excluded.version,
+        auth_state = excluded.auth_state,
+        models_json = excluded.models_json,
+        models_updated_at = excluded.models_updated_at,
+        models_last_attempted_at = excluded.models_last_attempted_at,
+        models_provenance = excluded.models_provenance,
+        models_stale = excluded.models_stale,
+        rate_limits_json = excluded.rate_limits_json,
+        rate_limits_updated_at = excluded.rate_limits_updated_at,
+        rate_limits_last_attempted_at = excluded.rate_limits_last_attempted_at,
+        rate_limits_provenance = excluded.rate_limits_provenance,
+        rate_limits_stale = excluded.rate_limits_stale
+    `).run({
+      ...metadata,
+      modelsJson,
+      rateLimitsJson,
+      modelsStaleValue: metadata.modelsStale ? 1 : 0,
+      rateLimitsStaleValue: metadata.rateLimitsStale ? 1 : 0,
+    });
   }
 
   createProject(name: string, projectPath: string): Project {

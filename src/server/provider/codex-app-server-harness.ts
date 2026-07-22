@@ -83,6 +83,7 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       onPlan: (explanation, steps) => emitter.codex({ type: "plan", explanation, steps }),
       onReasoning: (text) => emitter.codex({ type: "reasoning-summary", text }),
       onUsage: (usage) => emitter.codex({ type: "usage", usage }),
+      onRateLimits: (rateLimits, complete) => emitter.codex({ type: "metadata", metadata: { rateLimits }, source: "provider", complete }),
     });
   } catch (error) {
     const spawnError = error instanceof Error ? error as NodeJS.ErrnoException : undefined;

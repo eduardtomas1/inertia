@@ -38,6 +38,22 @@ export interface ProviderRateLimit {
   resetsAt: string | null;
 }
 
+export type ProviderMetadataFreshness = "unavailable" | "fresh" | "stale";
+export type ProviderMetadataProvenance = "provider" | "session" | "persistent-cache";
+
+export interface ProviderMetadataFieldState {
+  freshness: ProviderMetadataFreshness;
+  provenance: ProviderMetadataProvenance | null;
+  updatedAt: string | null;
+  lastAttemptedAt: string | null;
+  refreshing: boolean;
+}
+
+export interface ProviderMetadataState {
+  models: ProviderMetadataFieldState;
+  rateLimits: ProviderMetadataFieldState;
+}
+
 export interface ProviderInfo {
   id: ProviderId;
   label: string;
@@ -50,6 +66,7 @@ export interface ProviderInfo {
   statusMessage: string | null;
   models: ProviderModel[];
   rateLimits: ProviderRateLimit[];
+  metadataState: ProviderMetadataState;
   supportsReasoning: boolean;
   supportsUsage: boolean;
 }

@@ -6,8 +6,8 @@ import type { ProviderModel, ProviderRateLimit, ProviderReasoningOption } from "
 type JsonObject = Record<string, unknown>;
 
 export interface CodexMetadata {
-  models: ProviderModel[];
-  rateLimits: ProviderRateLimit[];
+  models?: ProviderModel[];
+  rateLimits?: ProviderRateLimit[];
 }
 
 interface PendingRequest {
@@ -49,7 +49,7 @@ function reasoningOptions(value: unknown): ProviderReasoningOption[] {
   }).slice(0, 12);
 }
 
-function parseModels(result: JsonObject): ProviderModel[] {
+export function parseCodexModels(result: JsonObject): ProviderModel[] {
   if (!Array.isArray(result.data)) return [];
   return result.data.flatMap((entry) => {
     const model = objectValue(entry);
@@ -93,7 +93,7 @@ function parseLimitWindow(limitId: string, label: string, suffix: "primary" | "s
   }];
 }
 
-function parseRateLimits(result: JsonObject): ProviderRateLimit[] {
+export function parseCodexRateLimits(result: JsonObject): ProviderRateLimit[] {
   const byId = objectValue(result.rateLimitsByLimitId);
   const fallback = objectValue(result.rateLimits);
   const entries: Array<[string, unknown]> = byId
@@ -118,6 +118,7 @@ export async function readCodexMetadata(
   environment: NodeJS.ProcessEnv,
   cwd: string,
   timeoutMs = 6_000,
+  fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
 ): Promise<CodexMetadata> {
   const child: ChildProcessWithoutNullStreams = spawn(executable, ["app-server"], {
     cwd,
@@ -188,11 +189,28 @@ export async function readCodexMetadata(
       processError,
     ]);
     child.stdin.write(`${JSON.stringify({ method: "initialized" })}\n`);
+    const readModels = async (): Promise<ProviderModel[]> => {
+      const models: ProviderModel[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 4; page += 1) {
+        const result = await request("model/list", { limit: 100, ...(cursor ? { cursor } : {}) });
+        if (!Array.isArray(result.data)) throw new Error("model/list returned malformed data.");
+        models.push(...parseCodexModels(result));
+        cursor = stringValue(result.nextCursor, 512) ?? null;
+        if (!cursor || models.length >= 256) break;
+      }
+      return models.slice(0, 256);
+    };
     const [modelsResult, limitsResult] = await Promise.all([
-      request("model/list", { limit: 100 }).catch(() => ({})),
-      request("account/rateLimits/read", {}).catch(() => ({})),
+      fields.includes("models") ? readModels().catch(() => undefined) : Promise.resolve(undefined),
+      fields.includes("rateLimits")
+        ? request("account/rateLimits/read", {}).then(parseCodexRateLimits).catch(() => undefined)
+        : Promise.resolve(undefined),
     ]);
-    return { models: parseModels(modelsResult), rateLimits: parseRateLimits(limitsResult) };
+    return {
+      ...(modelsResult === undefined ? {} : { models: modelsResult }),
+      ...(limitsResult === undefined ? {} : { rateLimits: limitsResult }),
+    };
   } finally {
     close();
   }

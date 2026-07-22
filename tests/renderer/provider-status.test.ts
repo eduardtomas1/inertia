@@ -17,6 +17,10 @@ describe("provider compatibility status", () => {
       statusMessage: "Update Codex CLI to enable agent conversations",
       models: [],
       rateLimits: [],
+      metadataState: {
+        models: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+        rateLimits: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+      },
       supportsReasoning: true,
       supportsUsage: true,
     };

@@ -64,6 +64,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const plans: string[] = [];
     const reasoning: string[] = [];
     const usage: number[] = [];
+    const metadata: string[][] = [];
 
     const result = await manager.run({
       providerId: "cursor",
@@ -87,6 +88,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
       onUsage: (event) => usage.push(event.usage.usedTokens),
+      onMetadata: (event) => metadata.push(event.metadata.models?.map((model) => model.id) ?? []),
     });
 
     expect(result).toMatchObject({ status: "completed", text: "Cursor response", sessionId: "44444444-4444-4444-8444-444444444444" });
@@ -95,6 +97,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(plans).toEqual(expect.arrayContaining(["Inspect", "Implement"]));
     expect(reasoning).toEqual(["Checking"]);
     expect(usage).toEqual([321, 320]);
+    expect(metadata).toContainEqual(["model-a"]);
+    expect(manager.cachedMetadata("cursor")).toMatchObject({
+      models: [expect.objectContaining({ id: "model-a", inputModalities: ["text", "image"] })],
+      metadataState: { models: { freshness: "fresh", provenance: "session" } },
+    });
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<Record<string, unknown>>;
     expect(captured.find((message) => message.id === 100)).toMatchObject({ result: { outcome: { outcome: "selected", optionId: "allow" } } });
     expect(captured.find((message) => message.id === 101)).toMatchObject({ result: { outcome: "answered", answers: [{ questionId: "scope", selectedOptionIds: ["focused"] }] } });

@@ -85,6 +85,7 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     const plans: string[] = [];
     const reasoning: string[] = [];
     const usage: number[] = [];
+    const metadata: string[][] = [];
 
     const result = await manager.run({
       providerId: "opencode",
@@ -109,6 +110,7 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
       onUsage: (event) => usage.push(event.usage.usedTokens),
+      onMetadata: (event) => metadata.push(event.metadata.models?.map((model) => model.id) ?? []),
     });
 
     expect(result).toMatchObject({ status: "completed", text: "OpenCode response", sessionId: "55555555-5555-4555-8555-555555555555" });
@@ -117,7 +119,13 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     expect(plans).toEqual(["Inspect"]);
     expect(reasoning).toEqual(["Checking constraints"]);
     expect(usage).toEqual([120]);
+    expect(metadata).toContainEqual(["fake/model-a"]);
+    expect(manager.cachedMetadata("opencode")).toMatchObject({
+      models: [expect.objectContaining({ id: "fake/model-a" })],
+      metadataState: { models: { freshness: "fresh", provenance: "provider" } },
+    });
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{ method: string; path: string; body?: Record<string, unknown> }>;
+    expect(captured.filter(({ path }) => path === "/provider")).toHaveLength(1);
     expect(captured.find(({ path }) => path === "/session")?.body).toMatchObject({ agent: "plan", model: { id: "model-a", providerID: "fake", variant: "high" } });
     expect(captured.find(({ path }) => path.endsWith("/prompt_async"))?.body).toMatchObject({
       agent: "plan",

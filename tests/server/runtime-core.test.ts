@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { projectActionCommand } from "../../src/server/runtime-commands";
 import { isAllowedRuntimeOrigin, parseRuntimeCommand } from "../../src/server/runtime-protocol";
-import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
+import { initialProviderSnapshots, providerSnapshot } from "../../src/server/runtime-snapshots";
 
 describe("runtime boundary helpers", () => {
   it("accepts only the desktop bundle and local development origins", () => {
@@ -33,5 +33,36 @@ describe("runtime boundary helpers", () => {
     const providers = initialProviderSnapshots(true);
     expect(providers.map(({ id }) => id)).toEqual(["codex", "claude", "cursor", "opencode"]);
     expect(providers.every(({ canRun, installState, authState }) => !canRun && installState === "checking" && authState === "checking")).toBe(true);
+  });
+
+  it("preserves cached selector metadata while discovery is checking and after a failed refresh", () => {
+    const metadata = {
+      models: [{
+        id: "model-a",
+        label: "Model A",
+        description: "Cached model",
+        isDefault: true,
+        inputModalities: ["text" as const],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+      }],
+      rateLimits: [],
+      metadataState: {
+        models: { freshness: "stale" as const, provenance: "persistent-cache" as const, updatedAt: "2026-07-22T10:00:00.000Z", lastAttemptedAt: "2026-07-22T10:01:00.000Z", refreshing: false },
+        rateLimits: { freshness: "unavailable" as const, provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+      },
+    };
+    const checking = initialProviderSnapshots(true, { codex: metadata }).find(({ id }) => id === "codex");
+    expect(checking).toMatchObject({ models: [expect.objectContaining({ id: "model-a" })], metadataState: { models: { freshness: "stale" } } });
+
+    const unavailable = providerSnapshot({
+      provider: { id: "codex", name: "Codex", command: "codex" },
+      available: false,
+      installState: "error",
+      authState: "unknown",
+      canRun: false,
+      statusMessage: "Discovery failed",
+    }, metadata);
+    expect(unavailable).toMatchObject({ models: [expect.objectContaining({ id: "model-a" })], metadataState: { models: { provenance: "persistent-cache" } } });
   });
 });

@@ -68,6 +68,7 @@ const complete = () => {
   send({ method: "turn/plan/updated", params: { threadId, turnId, explanation: "A native plan", plan: [{ step: "Inspect", status: "completed" }, { step: "Implement", status: "inProgress" }] } });
   send({ method: "item/reasoning/summaryTextDelta", params: { threadId, turnId, itemId: "reasoning-1", summaryIndex: 0, delta: "Checking the safest path." } });
   send({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { total: { totalTokens: 11839, inputTokens: 11833, cachedInputTokens: 3456, outputTokens: 6, reasoningOutputTokens: 0 }, last: { totalTokens: 126, inputTokens: 120, cachedInputTokens: 0, outputTokens: 6, reasoningOutputTokens: 0 }, modelContextWindow: 258400 } } });
+  send({ method: "account/rateLimits/updated", params: { rateLimits: { limitId: "codex", limitName: null, primary: { usedPercent: 41, windowDurationMins: 300, resetsAt: 1893456000 }, secondary: null }, rateLimitsByLimitId: null } });
   send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "Hello " } });
   send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "from Codex" } });
   send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
@@ -196,6 +197,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const plans: string[] = [];
     const reasoning: string[] = [];
     const usage: number[] = [];
+    const metadata: string[][] = [];
 
     const run = manager.run({
       providerId: "codex",
@@ -220,6 +222,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       onPlan: (event) => plans.push(event.explanation ?? ""),
       onReasoning: (event) => reasoning.push(event.text),
       onUsage: (event) => usage.push(event.usage.usedTokens),
+      onMetadata: (event) => metadata.push(event.metadata.rateLimits?.map((limit) => limit.id) ?? []),
     });
 
     const result = await run;
@@ -238,6 +241,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(plans).toEqual(["A native plan"]);
     expect(reasoning).toEqual(["Checking the safest path."]);
     expect(usage).toEqual([126]);
+    expect(metadata).toContainEqual(["codex:primary"]);
+    expect(manager.cachedMetadata("codex")).toMatchObject({
+      rateLimits: [expect.objectContaining({ id: "codex:primary", usedPercent: 41 })],
+      metadataState: { rateLimits: { freshness: "fresh", provenance: "provider" } },
+    });
 
     const messages = captured(fake.capturePath);
     const resumed = messages.find(({ method }) => method === "thread/resume") as { params: Record<string, unknown> };

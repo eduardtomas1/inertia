@@ -11,7 +11,15 @@ import {
   type ProviderDetection,
 } from "./providers";
 
-export function initialProviderSnapshots(executionEnabled = true): ProviderInfo[] {
+function emptyMetadataState(): ProviderInfo["metadataState"] {
+  const missing = () => ({ freshness: "unavailable" as const, provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false });
+  return { models: missing(), rateLimits: missing() };
+}
+
+export function initialProviderSnapshots(
+  executionEnabled = true,
+  cached: Partial<Record<ProviderInfo["id"], Pick<ProviderInfo, "models" | "rateLimits" | "metadataState">>> = {},
+): ProviderInfo[] {
   return PROVIDERS.map((provider) => ({
     id: provider.id,
     label: provider.name,
@@ -22,8 +30,9 @@ export function initialProviderSnapshots(executionEnabled = true): ProviderInfo[
     authState: "checking",
     canRun: !executionEnabled,
     statusMessage: "Checking installation and connection",
-    models: [],
-    rateLimits: [],
+    models: cached[provider.id]?.models ?? [],
+    rateLimits: cached[provider.id]?.rateLimits ?? [],
+    metadataState: cached[provider.id]?.metadataState ?? emptyMetadataState(),
     supportsReasoning: provider.id === "codex",
     supportsUsage: provider.id === "codex",
   }));
@@ -31,7 +40,7 @@ export function initialProviderSnapshots(executionEnabled = true): ProviderInfo[
 
 export function providerSnapshot(
   detection: ProviderDetection,
-  metadata: Pick<ProviderInfo, "models" | "rateLimits"> = { models: [], rateLimits: [] },
+  metadata: Pick<ProviderInfo, "models" | "rateLimits" | "metadataState"> = { models: [], rateLimits: [], metadataState: emptyMetadataState() },
 ): ProviderInfo {
   return {
     id: detection.provider.id,
@@ -45,6 +54,7 @@ export function providerSnapshot(
     statusMessage: detection.statusMessage ?? null,
     models: metadata.models,
     rateLimits: metadata.rateLimits,
+    metadataState: metadata.metadataState,
     supportsReasoning: detection.provider.id === "codex",
     supportsUsage: detection.provider.id === "codex",
   };

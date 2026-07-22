@@ -74,7 +74,18 @@ describe("Claude Agent SDK harness", () => {
         return Object.assign(stream, {
           interrupt: async () => undefined,
           close: () => undefined,
-          supportedModels: async () => [],
+          supportedModels: async () => [{
+            value: "sonnet",
+            resolvedModel: "claude-sonnet-test",
+            displayName: "Sonnet",
+            description: "Balanced model",
+            supportsEffort: true,
+            supportedEffortLevels: ["low", "high"],
+          }],
+          usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => ({
+            rate_limits_available: true,
+            rate_limits: { five_hour: { utilization: 30, resets_at: "2026-07-22T15:00:00.000Z" } },
+          }),
           getContextUsage: async () => ({}) as never,
         }) as unknown as Query;
       },
@@ -88,6 +99,7 @@ describe("Claude Agent SDK harness", () => {
     const plans: string[] = [];
     const reasoning: string[] = [];
     const usages: number[] = [];
+    const metadata: Array<{ models: string[]; rateLimits: string[] }> = [];
 
     const result = await manager.run({
       providerId: "claude",
@@ -111,6 +123,10 @@ describe("Claude Agent SDK harness", () => {
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
       onUsage: (event) => usages.push(event.usage.usedTokens),
+      onMetadata: (event) => metadata.push({
+        models: event.metadata.models?.map((model) => model.id) ?? [],
+        rateLimits: event.metadata.rateLimits?.map((limit) => limit.id) ?? [],
+      }),
     });
 
     expect(result).toMatchObject({ status: "completed", text: "Claude response", sessionId: "33333333-3333-4333-8333-333333333333" });
@@ -129,6 +145,14 @@ describe("Claude Agent SDK harness", () => {
     expect(plans).toEqual(["Inspect", "Implement"]);
     expect(reasoning).toEqual(["Checking constraints"]);
     expect(usages).toEqual([120]);
+    expect(metadata).toEqual(expect.arrayContaining([
+      { models: ["sonnet"], rateLimits: [] },
+      { models: [], rateLimits: ["claude:five_hour"] },
+    ]));
+    expect(manager.cachedMetadata("claude")).toMatchObject({
+      models: [expect.objectContaining({ id: "sonnet" })],
+      rateLimits: [expect.objectContaining({ id: "claude:five_hour", usedPercent: 30 })],
+    });
     expect(permissionResults).toMatchObject([
       { behavior: "allow", updatedInput: { command: "npm test" } },
       { behavior: "allow", updatedInput: { answers: { "Which scope?": "Focused" } } },

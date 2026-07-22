@@ -1,4 +1,4 @@
-import type { ThreadUsageSnapshot } from "../../shared/contracts";
+import type { ProviderModel, ProviderRateLimit, ThreadUsageSnapshot } from "../../shared/contracts";
 import type {
   CodexApprovalDecision,
   CodexApprovalRequest,
@@ -133,6 +133,17 @@ export interface ProviderUsageEvent extends ProviderEventBase {
   usage: Omit<ThreadUsageSnapshot, "conversationId" | "updatedAt">;
 }
 
+export interface ProviderMetadataEvent extends ProviderEventBase {
+  type: "metadata";
+  metadata: {
+    models?: ProviderModel[];
+    rateLimits?: ProviderRateLimit[];
+  };
+  source: "provider" | "session";
+  /** False denotes a sparse update that must merge by stable item id. */
+  complete: boolean;
+}
+
 export type ProviderEvent =
   | ProviderTextEvent
   | ProviderActivityEvent
@@ -144,7 +155,8 @@ export type ProviderEvent =
   | ProviderInputResolvedEvent
   | ProviderPlanEvent
   | ProviderReasoningEvent
-  | ProviderUsageEvent;
+  | ProviderUsageEvent
+  | ProviderMetadataEvent;
 
 export interface ProviderRunCallbacks {
   onEvent?: (event: ProviderEvent) => void;
@@ -159,6 +171,7 @@ export interface ProviderRunCallbacks {
   onPlan?: (event: ProviderPlanEvent) => void;
   onReasoning?: (event: ProviderReasoningEvent) => void;
   onUsage?: (event: ProviderUsageEvent) => void;
+  onMetadata?: (event: ProviderMetadataEvent) => void;
 }
 
 export interface ProviderRunResult {

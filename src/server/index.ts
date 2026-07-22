@@ -33,7 +33,8 @@ import {
   removeWorktree,
   switchBranch,
 } from "./git";
-import { ProviderManager, type ProviderActivityEvent, type ProviderDetection } from "./providers";
+import { PROVIDER_IDS, ProviderManager, type ProviderActivityEvent, type ProviderDetection } from "./providers";
+import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
 import { TerminalManager } from "./terminal";
 import {
   WorkspaceError,
@@ -82,8 +83,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const store = new RuntimeStore(join(dataDirectory, "inertia.sqlite"), options.defaultWorkspacePath);
   const enableProviders = options.enableProviders ?? true;
   const terminals = new TerminalManager();
-  const providers = new ProviderManager();
-  let providerInfo = initialProviderSnapshots(enableProviders);
+  const metadataCache = new ProviderMetadataCache({
+    persistence: {
+      load: () => store.loadProviderMetadata(),
+      save: (metadata) => store.saveProviderMetadata(metadata),
+    },
+  });
+  const providers = new ProviderManager({ metadataCache });
+  const cachedProviderMetadata = Object.fromEntries(PROVIDER_IDS.map((providerId) => [providerId, providers.cachedMetadata(providerId)]));
+  let providerInfo = initialProviderSnapshots(enableProviders, cachedProviderMetadata);
   const clients = new Set<WebSocket>();
   const pendingApprovals = new Map<string, AgentApprovalRequest>();
   const pendingInputs = new Map<string, AgentInputRequest>();
@@ -112,11 +120,27 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     for (const client of clients) send(client, event);
   };
   const broadcastSnapshot = (): void => broadcast({ type: "snapshot.updated", snapshot: currentSnapshot() });
-  const refreshProviderInfo = async (providerId?: ProviderInfo["id"], refreshEnvironment = false): Promise<void> => {
+  const applyProviderMetadata = (providerId: ProviderInfo["id"], metadata: ProviderMetadata): void => {
+    providerInfo = providerInfo.map((current) => current.id === providerId ? {
+      ...current,
+      models: metadata.models,
+      rateLimits: metadata.rateLimits,
+      metadataState: metadata.metadataState,
+    } : current);
+  };
+  const refreshProviderInfo = async (
+    providerId?: ProviderInfo["id"],
+    refreshEnvironment = false,
+    forceMetadata = false,
+  ): Promise<void> => {
     if (!enableProviders) return;
     const enrichedSnapshot = async (detection: ProviderDetection): Promise<ProviderInfo> => {
-      if (!detection.canRun) return providerSnapshot(detection);
-      const metadata = await providers.metadata(detection.provider.id, options.defaultWorkspacePath).catch(() => ({ models: [], rateLimits: [] }));
+      if (!detection.canRun) return providerSnapshot(detection, providers.cachedMetadata(detection.provider.id));
+      const metadata = await providers.metadata(
+        detection.provider.id,
+        options.defaultWorkspacePath,
+        { force: forceMetadata },
+      ).catch(() => providers.cachedMetadata(detection.provider.id));
       return providerSnapshot(detection, metadata);
     };
     if (providerId) {
@@ -138,6 +162,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const startAgent = (conversationId: string, prompt: string, attachmentPaths: string[]): void => {
     const conversation = store.conversation(conversationId);
     const runId = randomUUID();
+    const runStartedAt = Date.now();
     agentPlans.delete(conversationId);
     store.clearAgentPlan(conversationId);
     store.updateConversation(conversationId, { status: "running" });
@@ -316,6 +341,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             store.upsertAgentPlan(plan);
             broadcast({ type: "agent.plan.updated", plan });
           },
+          onMetadata: (event) => {
+            applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
+            broadcastSnapshot();
+          },
         },
       );
     } catch (error) {
@@ -351,7 +380,27 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         broadcast({ type: "agent.failed", conversationId, runId, message });
       }
       broadcastSnapshot();
-      void refreshProviderInfo(conversation.providerId).catch(() => undefined);
+      if (result.status === "completed") {
+        const current = providers.cachedMetadata(conversation.providerId);
+        const fields: Array<"models" | "rateLimits"> = [];
+        if (current.metadataState.models.freshness !== "fresh" && conversation.providerId !== "cursor") fields.push("models");
+        const rateLimitsUpdatedAt = current.metadataState.rateLimits.updatedAt
+          ? Date.parse(current.metadataState.rateLimits.updatedAt)
+          : Number.NaN;
+        if ((conversation.providerId === "codex" || conversation.providerId === "claude") && !(rateLimitsUpdatedAt >= runStartedAt)) {
+          fields.push("rateLimits");
+        }
+        if (fields.length > 0) {
+          void providers.metadata(
+            conversation.providerId,
+            options.defaultWorkspacePath,
+            { fields, force: true },
+          ).then((metadata) => {
+            applyProviderMetadata(conversation.providerId, metadata);
+            if (!closed) broadcastSnapshot();
+          }).catch(() => undefined);
+        }
+      }
     }).catch((error: unknown) => {
       flushAssistantMessage();
       settleReasoning("failed");
@@ -371,7 +420,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           send(socket, { type: "snapshot.updated", snapshot: currentSnapshot() });
           return;
         case "provider.refresh":
-          await refreshProviderInfo(command.payload.providerId, true);
+          await refreshProviderInfo(command.payload.providerId, true, true);
           send(socket, { type: "request.ok", requestId: command.requestId });
           return;
         case "provider.auth.start": {
@@ -384,7 +433,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             launch.env,
             command.payload.cols,
             command.payload.rows,
-            () => { void refreshProviderInfo(command.payload.providerId, true).catch(() => undefined); },
+            () => { void refreshProviderInfo(command.payload.providerId, true, true).catch(() => undefined); },
           );
           send(socket, { type: "terminal.created", requestId: command.requestId, terminalId });
           return;

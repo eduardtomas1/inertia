@@ -3,6 +3,7 @@ import type {
   ProviderActivityPhase,
   ProviderEvent,
   ProviderId,
+  ProviderMetadataEvent,
   ProviderRunCallbacks,
   ProviderRunStatus,
   ProviderUsageEvent,
@@ -37,6 +38,7 @@ export interface ProviderEmitter {
   plan: (explanation: string | null, steps: CodexPlanStep[]) => void;
   reasoning: (text: string) => void;
   usage: (usage: ProviderUsageEvent["usage"]) => void;
+  metadata: (metadata: ProviderMetadataEvent["metadata"], source: ProviderMetadataEvent["source"], complete: boolean) => void;
 }
 
 export function createProviderEmitter(
@@ -80,6 +82,9 @@ export function createProviderEmitter(
       case "usage":
         safeCallback(() => callbacks.onUsage?.(providerEvent));
         break;
+      case "metadata":
+        safeCallback(() => callbacks.onMetadata?.(providerEvent));
+        break;
     }
   };
 
@@ -97,6 +102,7 @@ export function createProviderEmitter(
     plan: (explanation, steps) => event({ ...base, type: "plan", explanation, steps }),
     reasoning: (text) => event({ ...base, type: "reasoning-summary", text }),
     usage: (usage) => event({ ...base, type: "usage", usage }),
+    metadata: (metadata, source, complete) => event({ ...base, type: "metadata", metadata, source, complete }),
   };
 }
 
@@ -144,6 +150,9 @@ function emitInteractiveExtension(
       break;
     case "usage":
       emitter.usage(event.usage);
+      break;
+    case "metadata":
+      emitter.metadata(event.metadata, event.source, event.complete);
       break;
   }
 }

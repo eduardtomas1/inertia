@@ -1,4 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ProviderRateLimit } from "../../shared/contracts";
 
 export type CodexApprovalDecision = "approve" | "deny" | "cancel";
 export type CodexApprovalKind = "command" | "file-change" | "permissions";
@@ -84,6 +85,7 @@ export interface CodexAppServerOptions {
   onPlan?: (explanation: string | null, steps: CodexPlanStep[]) => void;
   onReasoning?: (text: string) => void;
   onUsage?: (usage: CodexUsageSnapshot) => void;
+  onRateLimits?: (rateLimits: ProviderRateLimit[], complete: boolean) => void;
 }
 
 export interface CodexAppServerResult {

@@ -12,7 +12,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
-import type { ProviderModel } from "../../shared/contracts";
+import type { ProviderModel, ProviderRateLimit } from "../../shared/contracts";
 import type { CodexApprovalDecision, CodexInputRequest, CodexPlanStep } from "../codex/types";
 import { CappedProviderBuffer } from "./io";
 import {
@@ -52,13 +52,72 @@ export interface ClaudeAgentSdkHarnessOptions {
   createQuery?: ClaudeQueryFactory;
 }
 
-export async function readClaudeAgentSdkModels(
+function claudeModels(models: Awaited<ReturnType<Query["supportedModels"]>>): ProviderModel[] {
+  return models.slice(0, 64).map((model, index) => {
+    const efforts = model.supportedEffortLevels ?? [];
+    return {
+      id: model.value,
+      label: model.displayName || model.value,
+      description: model.description || "Claude model",
+      isDefault: index === 0,
+      inputModalities: ["text", "image"],
+      reasoningOptions: efforts.map((effort) => ({
+        value: effort,
+        label: effort === "xhigh" ? "Extra high" : `${effort[0]?.toUpperCase() ?? ""}${effort.slice(1)}`,
+        description: `${effort === "xhigh" ? "Extra-high" : effort} reasoning effort`,
+      })),
+      defaultReasoningEffort: efforts.includes("high") ? "high" : efforts[0] ?? "",
+    };
+  });
+}
+
+function claudeRateLimits(value: unknown): ProviderRateLimit[] {
+  const response = objectValue(value);
+  if (response?.rate_limits_available !== true) return [];
+  const limits = objectValue(response.rate_limits);
+  if (!limits) return [];
+  const windows: Array<{ key: string; label: string; minutes: number | null; value: unknown }> = [
+    { key: "five_hour", label: "Claude · 5 hour", minutes: 300, value: limits.five_hour },
+    { key: "seven_day", label: "Claude · 7 day", minutes: 10_080, value: limits.seven_day },
+    { key: "seven_day_oauth_apps", label: "Claude apps · 7 day", minutes: 10_080, value: limits.seven_day_oauth_apps },
+    { key: "seven_day_opus", label: "Claude Opus · 7 day", minutes: 10_080, value: limits.seven_day_opus },
+    { key: "seven_day_sonnet", label: "Claude Sonnet · 7 day", minutes: 10_080, value: limits.seven_day_sonnet },
+  ];
+  const modelScoped = Array.isArray(limits.model_scoped) ? limits.model_scoped : [];
+  modelScoped.slice(0, 8).forEach((entry, index) => {
+    const model = objectValue(entry);
+    windows.push({
+      key: `model_${index}`,
+      label: stringValue(model?.display_name) ?? `Claude model ${index + 1}`,
+      minutes: 10_080,
+      value: model,
+    });
+  });
+  return windows.flatMap((window) => {
+    const current = objectValue(window.value);
+    const utilization = finiteNumber(current?.utilization);
+    if (utilization === null) return [];
+    const usedPercent = Math.max(0, Math.min(100, utilization));
+    const reset = stringValue(current?.resets_at);
+    return [{
+      id: `claude:${window.key}`,
+      label: window.label,
+      usedPercent,
+      remainingPercent: Math.max(0, 100 - usedPercent),
+      windowMinutes: window.minutes,
+      resetsAt: reset && !Number.isNaN(Date.parse(reset)) ? new Date(reset).toISOString() : null,
+    }];
+  }).slice(0, 12);
+}
+
+export async function readClaudeAgentSdkMetadata(
   executable: string,
   environment: NodeJS.ProcessEnv,
   cwd: string,
   timeoutMs = 6_000,
   createQuery: ClaudeQueryFactory = claudeQuery,
-): Promise<ProviderModel[]> {
+  fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
+): Promise<{ models?: ProviderModel[]; rateLimits?: ProviderRateLimit[] }> {
   const abortController = new AbortController();
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });
@@ -70,29 +129,33 @@ export async function readClaudeAgentSdkModels(
   const timer = setTimeout(() => abortController.abort(), timeoutMs);
   timer.unref();
   try {
-    const models = await query.supportedModels();
-    return models.slice(0, 64).map((model, index) => {
-      const efforts = model.supportedEffortLevels ?? [];
-      return {
-        id: model.value,
-        label: model.displayName || model.value,
-        description: model.description || "Claude model",
-        isDefault: index === 0,
-        inputModalities: ["text", "image"],
-        reasoningOptions: efforts.map((effort) => ({
-          value: effort,
-          label: effort === "xhigh" ? "Extra high" : `${effort[0]?.toUpperCase() ?? ""}${effort.slice(1)}`,
-          description: `${effort === "xhigh" ? "Extra-high" : effort} reasoning effort`,
-        })),
-        defaultReasoningEffort: efforts.includes("high") ? "high" : efforts[0] ?? "",
-      };
-    });
+    const usageReader = query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+    const [modelsResult, limitsResult] = await Promise.allSettled([
+      fields.includes("models") ? query.supportedModels() : Promise.resolve(undefined),
+      fields.includes("rateLimits") && typeof usageReader === "function"
+        ? usageReader.call(query)
+        : Promise.resolve(undefined),
+    ]);
+    return {
+      ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
+      ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? { rateLimits: claudeRateLimits(limitsResult.value) } : {}),
+    };
   } finally {
     clearTimeout(timer);
     release();
     abortController.abort();
     try { query.close(); } catch { /* The metadata subprocess may already have exited. */ }
   }
+}
+
+export async function readClaudeAgentSdkModels(
+  executable: string,
+  environment: NodeJS.ProcessEnv,
+  cwd: string,
+  timeoutMs = 6_000,
+  createQuery: ClaudeQueryFactory = claudeQuery,
+): Promise<ProviderModel[]> {
+  return (await readClaudeAgentSdkMetadata(executable, environment, cwd, timeoutMs, createQuery, ["models"])).models ?? [];
 }
 
 interface PendingApproval {
@@ -230,6 +293,7 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
           ...(claudeEffort(options.input.reasoningEffort) ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
         },
       });
+      await emitClaudeModelMetadata(query, emitter.rich);
       emitter.status("running");
       let sawStreamText = false;
       let failure: string | undefined;
@@ -276,6 +340,7 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
         }
         if (message.type === "result") {
           emitClaudeUsage(record, emitter.rich);
+          await emitClaudeRateLimitMetadata(query, emitter.rich);
           if (message.subtype === "success") {
             if (!sawStreamText && typeof message.result === "string") emitText(message.result, text, emitter.text);
           } else {
@@ -331,6 +396,48 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
     cancel,
     extension: { kind: "claude-agent-sdk", respondToApproval: settleApproval, respondToInput: settleInput },
   };
+}
+
+async function emitClaudeRateLimitMetadata(
+  query: Query,
+  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+): Promise<void> {
+  const reader = query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+  if (typeof reader !== "function") return;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const timeout = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), 2_000);
+      timer.unref();
+    });
+    const response = await Promise.race([reader.call(query), timeout]);
+    if (response === undefined) return;
+    const rateLimits = claudeRateLimits(response);
+    if (rateLimits.length > 0) emit({ type: "metadata", metadata: { rateLimits }, source: "provider", complete: true });
+  } catch {
+    // Experimental usage metadata is optional and must not affect the provider run.
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function emitClaudeModelMetadata(
+  query: Query,
+  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const timeout = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), 2_000);
+      timer.unref();
+    });
+    const models = await Promise.race([query.supportedModels().catch(() => undefined), timeout]);
+    if (!models) return;
+    const mapped = claudeModels(models);
+    if (mapped.length > 0) emit({ type: "metadata", metadata: { models: mapped }, source: "provider", complete: true });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function* oneMessage(message: SDKUserMessage): AsyncIterable<SDKUserMessage> {

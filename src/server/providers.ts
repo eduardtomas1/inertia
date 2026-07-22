@@ -28,7 +28,11 @@ import {
   createProviderEmitter,
   providerCallbacksFromHarness,
 } from "./provider/emitter";
-import { readProviderMetadata, type ProviderMetadata } from "./provider/metadata";
+import {
+  ProviderMetadataCache,
+  type ProviderMetadata,
+  type ProviderMetadataRequestOptions,
+} from "./provider/metadata";
 
 export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider, detectProviders };
 export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
@@ -51,15 +55,17 @@ export class ProviderManager {
   private readonly resolvedCommands = new Map<ProviderId, string>();
   private readonly cancelGraceMs: number;
   private readonly harnessRegistry: AgentHarnessRegistry;
+  private readonly metadataCache: ProviderMetadataCache;
   private processEnvironment: NodeJS.ProcessEnv | undefined;
 
   constructor(
-    options: ProviderManagerOptions = {},
+    options: ProviderManagerOptions & { metadataCache?: ProviderMetadataCache } = {},
     harnessRegistry: AgentHarnessRegistry = createDefaultAgentHarnessRegistry(),
   ) {
     this.commands = { ...options.commands };
     this.cancelGraceMs = Math.max(100, Math.min(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS, 30_000));
     this.harnessRegistry = harnessRegistry;
+    this.metadataCache = options.metadataCache ?? new ProviderMetadataCache();
   }
 
   isRunning(conversationId: string): boolean {
@@ -79,8 +85,16 @@ export class ProviderManager {
     this.processEnvironment = (await providerEnvironment()).env;
     const configured = this.commands[providerId]?.trim() || PROVIDER_INFO[providerId].command;
     const detection = await detectProvider(providerId, { ...options, refreshEnvironment: false, command: configured });
-    if (detection.executable) this.resolvedCommands.set(providerId, detection.executable);
-    else this.resolvedCommands.delete(providerId);
+    if (detection.executable) {
+      this.resolvedCommands.set(providerId, detection.executable);
+    } else {
+      this.resolvedCommands.delete(providerId);
+    }
+    this.metadataCache.correlate(providerId, {
+      executable: detection.executable ?? null,
+      version: detection.version ?? null,
+      authState: detection.authState,
+    });
     return detection;
   }
 
@@ -98,13 +112,21 @@ export class ProviderManager {
     return { executable, args: providerAuthLoginArgs(providerId), env: environment.env };
   }
 
-  async metadata(providerId: ProviderId, cwd = process.cwd()): Promise<ProviderMetadata> {
+  cachedMetadata(providerId: ProviderId): ProviderMetadata {
+    return this.metadataCache.current(providerId);
+  }
+
+  async metadata(
+    providerId: ProviderId,
+    cwd = process.cwd(),
+    options: ProviderMetadataRequestOptions = {},
+  ): Promise<ProviderMetadata> {
     let executable = this.resolvedCommands.get(providerId);
     if (!executable) executable = (await this.detect(providerId)).executable;
-    if (!executable) return { models: [], rateLimits: [] };
+    if (!executable) return this.metadataCache.current(providerId);
     const environment = await providerEnvironment();
     this.processEnvironment = environment.env;
-    return await readProviderMetadata(providerId, executable, environment.env, cwd);
+    return await this.metadataCache.metadata(providerId, executable, environment.env, cwd, options);
   }
 
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks = {}): Promise<ProviderRunResult> {
@@ -114,11 +136,26 @@ export class ProviderManager {
     }
 
     const providerId = input.providerId;
-    const compatibilityEmitter = createProviderEmitter(providerId, conversationId, callbacks);
+    const executable = this.commandFor(providerId);
+    if (!this.resolvedCommands.has(providerId)) this.resolvedCommands.set(providerId, executable);
+    const managerCallbacks: ProviderRunCallbacks = {
+      ...callbacks,
+      onMetadata: (event) => {
+        this.metadataCache.learn(
+          event.providerId,
+          this.resolvedCommands.get(event.providerId) ?? this.commandFor(event.providerId),
+          event.metadata,
+          event.source,
+          { merge: !event.complete },
+        );
+        callbacks.onMetadata?.(event);
+      },
+    };
+    const compatibilityEmitter = createProviderEmitter(providerId, conversationId, managerCallbacks);
     const harness = this.harnessRegistry.resolve(input);
     const harnessRun = harness.start({
       input,
-      executable: this.commandFor(providerId),
+      executable,
       environment: this.processEnvironment ?? process.env,
       callbacks: providerCallbacksFromHarness(compatibilityEmitter),
     });

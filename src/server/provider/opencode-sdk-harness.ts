@@ -64,6 +64,21 @@ export function createOpenCodeSdkHarness(): AgentHarness {
   };
 }
 
+function openCodeModels(providers: Provider[], defaults: Record<string, string>): ProviderModel[] {
+  return providers.flatMap((provider) => Object.values(provider.models).map((model) => {
+    const variants = Object.keys(model.variants ?? {});
+    return {
+      id: `${provider.id}/${model.id}`,
+      label: model.name || model.id,
+      description: [provider.name, model.family, model.status !== "active" ? model.status : undefined].filter(Boolean).join(" · ") || "OpenCode model",
+      isDefault: defaults[provider.id] === model.id,
+      inputModalities: model.capabilities.input.image ? ["text", "image"] : ["text"],
+      reasoningOptions: variants.map((variant) => ({ value: variant, label: variant, description: `${variant} model variant` })),
+      defaultReasoningEffort: variants[0] ?? "",
+    } satisfies ProviderModel;
+  })).slice(0, 128);
+}
+
 export async function readOpenCodeSdkModels(
   executable: string,
   environment: NodeJS.ProcessEnv,
@@ -76,19 +91,7 @@ export async function readOpenCodeSdkModels(
   try {
     await waitForHealth(client, started.child);
     const response = await client.provider.list({ directory: cwd }, { throwOnError: true });
-    const defaults = response.data.default;
-    return response.data.all.flatMap((provider) => Object.values(provider.models).map((model) => {
-      const variants = Object.keys(model.variants ?? {});
-      return {
-        id: `${provider.id}/${model.id}`,
-        label: model.name || model.id,
-        description: [provider.name, model.family, model.status !== "active" ? model.status : undefined].filter(Boolean).join(" · ") || "OpenCode model",
-        isDefault: defaults[provider.id] === model.id,
-        inputModalities: model.capabilities.input.image ? ["text", "image"] : ["text"],
-        reasoningOptions: variants.map((variant) => ({ value: variant, label: variant, description: `${variant} model variant` })),
-        defaultReasoningEffort: variants[0] ?? "",
-      } satisfies ProviderModel;
-    })).slice(0, 128);
+    return openCodeModels(response.data.all, response.data.default);
   } finally {
     terminateProcessTree(started.child, true);
   }
@@ -166,6 +169,10 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
         client.provider.list({ directory: options.input.cwd }, { throwOnError: true }),
         client.app.agents({ directory: options.input.cwd }, { throwOnError: true }),
       ]);
+      const discoveredModels = openCodeModels(providerData.data.all, providerData.data.default);
+      if (discoveredModels.length > 0) {
+        emitter.rich({ type: "metadata", metadata: { models: discoveredModels }, source: "provider", complete: true });
+      }
       const selectedModel = resolveOpenCodeModel(options.input.model, providerData.data.all);
       const agent = resolveOpenCodeAgent(options.input.interactionMode, agents.data);
       if (options.input.reasoningEffort && selectedModel && !selectedModel.variants?.[options.input.reasoningEffort]) {

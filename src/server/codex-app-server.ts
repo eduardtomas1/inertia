@@ -15,6 +15,7 @@ import {
 import { codexInputAnswers, parseCodexInputRequest } from "./codex/questions";
 import { completedReasoningSummary } from "./codex/reasoning";
 import { parseCodexTokenUsage } from "./codex/usage";
+import { parseCodexRateLimits } from "./codex-metadata";
 import type {
   CodexAppServerOptions,
   CodexAppServerResult,
@@ -261,6 +262,11 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
 
   const handleNotification = (method: string, params: JsonObject): void => {
     if (settled) return;
+    if (method === "account/rateLimits/updated") {
+      const limits = parseCodexRateLimits({ rateLimits: params.rateLimits, rateLimitsByLimitId: params.rateLimitsByLimitId });
+      if (limits.length > 0) options.onRateLimits?.(limits, false);
+      return;
+    }
     if (method === "serverRequest/resolved") {
       const resolvedRpcId = rpcId(params.requestId);
       if (resolvedRpcId === undefined) return;

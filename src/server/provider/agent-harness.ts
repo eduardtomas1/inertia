@@ -7,6 +7,7 @@ import type {
 import type {
   ProviderActivityEvent,
   ProviderId,
+  ProviderMetadataEvent,
   ProviderRunInput,
   ProviderRunResult,
   ProviderSessionEvent,
@@ -187,7 +188,8 @@ export type CodexAppServerHarnessEvent =
   | { type: "input-resolved"; requestId: string }
   | { type: "plan"; explanation: string | null; steps: CodexPlanStep[] }
   | { type: "reasoning-summary"; text: string }
-  | { type: "usage"; usage: ProviderUsageEvent["usage"] };
+  | { type: "usage"; usage: ProviderUsageEvent["usage"] }
+  | Omit<ProviderMetadataEvent, "providerId" | "conversationId">;
 
 /** Canonical interactive event surface shared by rich provider transports. */
 export type ProviderInteractiveHarnessEvent = CodexAppServerHarnessEvent;

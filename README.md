@@ -13,6 +13,8 @@
 
 Inertia keeps the whole coding loop in one clear place: conversations, project files, live changes, plans, previews, Git actions, and a real terminal. It is designed to feel quiet when you need focus and powerful when it is time to move.
 
+![Start a new project in Inertia](docs/screenshots/inertia-new-project.png)
+
 ### Made for flow
 
 - Work with Codex, Claude, Cursor, or OpenCode from the same focused composer.
@@ -24,7 +26,7 @@ Inertia keeps the whole coding loop in one clear place: conversations, project f
 
 ### Version 0.0.1
 
-The first release establishes Inertia's local desktop workflow and its visual foundation. Download it from [Releases](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.1).
+The first release establishes Inertia's local desktop workflow and its visual foundation. Download it for macOS, Windows, or Linux from [Releases](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.1).
 
 To run from source:
 

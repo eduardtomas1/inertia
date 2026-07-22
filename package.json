@@ -16,6 +16,8 @@
     "test:e2e": "npm run build && playwright test",
     "check": "npm run typecheck && npm run test && npm run build",
     "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win --x64",
+    "dist:linux": "npm run build && electron-builder --linux AppImage --x64",
     "postinstall": "electron-builder install-app-deps && node scripts/ensure-node-pty-helper.mjs"
   },
   "build": {

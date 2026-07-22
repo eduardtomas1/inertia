@@ -24,12 +24,12 @@ describe("Codex protocol seams", () => {
       request: {
         kind: "command",
         command: "npm test",
-        cwd: "/workspace",
+        cwd: normalize("/workspace"),
         reason: "Run verification",
         networkScope: { host: "registry.npmjs.org", protocol: "https" },
         permissionRoots: [
-          { path: "/workspace", access: "read" },
-          { path: "/tmp", access: "write" },
+          { path: normalize("/workspace"), access: "read" },
+          { path: normalize("/tmp"), access: "write" },
         ],
         availableDecisions: ["approve", "deny"],
       },

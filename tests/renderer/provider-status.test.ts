@@ -21,8 +21,6 @@ describe("provider compatibility status", () => {
         models: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
         rateLimits: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
       },
-      supportsReasoning: true,
-      supportsUsage: true,
     };
 
     expect(providerStateLabel(provider)).toBe("Update required");

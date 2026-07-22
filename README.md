@@ -37,11 +37,11 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 
 ![Inertia settings in dark mode](docs/screenshots/inertia-settings.png)
 
-### Version 0.0.3
+### Version 0.0.4
 
-This release makes the agent workspace more aware and more flexible. Inertia now follows live provider model options, streams safe reasoning summaries, shows context and account usage, searches across the workspace, and lets both side panels get out of the way. Settings have also grown into a clear home for appearance, providers, source control, shortcuts, and local data.
+This release gives every supported agent a first-class runtime. Codex now runs through its app server, Claude through the Claude Agent SDK, Cursor through ACP, and OpenCode through its SDK—each with native sessions, streaming, approvals, questions, plans, reasoning, usage, and cancellation where the provider reports them. The local service now runs outside Electron's main process, can recover after a crash, and shuts down cleanly with the app. Provider metadata stays fresh across restarts, menus are easier to dismiss, and the frameless macOS header carries a sharper Inertia identity.
 
-Download Inertia for macOS, Windows, or Linux from the [v0.0.3 release](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.3). See the [changelog](CHANGELOG.md) for the useful details.
+Download Inertia for macOS, Windows, or Linux from the [v0.0.4 release](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.4). See the [changelog](CHANGELOG.md) for the useful details.
 
 To run from source:
 

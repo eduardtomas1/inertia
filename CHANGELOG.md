@@ -2,6 +2,30 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.4 — 2026-07-22
+
+### First-class provider runtimes
+
+- Codex conversations now use the versioned app-server protocol in every access mode instead of falling back to the legacy CLI path.
+- Claude, Cursor, and OpenCode now run through their native SDK or ACP integrations, with provider-owned sessions, streaming, approvals, questions, plans, reasoning, usage, attachments, model choices, and cancellation when supported.
+- Provider-specific capabilities are explicit, so an unavailable feature is reported honestly instead of being silently emulated by another runtime.
+- Usage accounting now preserves each provider's real scope: context occupancy, run totals, session totals, or thread totals are no longer presented as interchangeable values.
+
+### A resilient local runtime
+
+- Database, terminal, WebSocket, and provider work now live in a supervised Electron utility process instead of the main process.
+- If that runtime crashes, Inertia keeps the window open, rotates its local connection capability, recovers interrupted work safely, and reconnects without duplicating a live worker.
+- App shutdown now gives active providers time to cancel, escalates boundedly when a worker is unresponsive, and finishes through Electron's normal quit lifecycle.
+- Native modules remain outside ASAR where required, while hardened Electron fuses and complete-bundle signature checks remain enforced for packaged builds.
+
+### Metadata, interface, and release reliability
+
+- Models, reasoning options, account limits, provider versions, and authentication state now refresh through a correlated persistent cache without presenting stale values as live.
+- Usage controls stay out of the way until a provider has actually reported usage or quota data.
+- Composer menus now dismiss on outside click or Escape, restore focus predictably, and preserve the current choice until a new one is selected.
+- The frameless macOS titlebar now carries the compact Inertia mark without crowding native window controls.
+- CI now exercises Linux x64, Windows x64, and macOS arm64 with portable provider fixtures, Electron E2E coverage, dependency audits, native package smoke tests, signature and fuse checks, and exact non-clobbering release assets with attestations.
+
 ## 0.0.3 — 2026-07-22
 
 ### A more aware agent workspace

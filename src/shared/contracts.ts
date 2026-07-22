@@ -67,8 +67,6 @@ export interface ProviderInfo {
   models: ProviderModel[];
   rateLimits: ProviderRateLimit[];
   metadataState: ProviderMetadataState;
-  supportsReasoning: boolean;
-  supportsUsage: boolean;
 }
 
 export interface ChatAttachment {

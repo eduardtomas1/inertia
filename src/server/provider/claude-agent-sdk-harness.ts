@@ -32,7 +32,7 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 export const CLAUDE_AGENT_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
   session: { resume: "native", identity: "session" },
-  cancellation: { graceful: "protocol-interrupt", forceFallback: "process-tree-kill" },
+  cancellation: { graceful: "protocol-interrupt", forceFallback: "sdk-abort-close" },
   extension: {
     kind: "claude-agent-sdk",
     protocol: "claude-agent-sdk",

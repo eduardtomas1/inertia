@@ -18,6 +18,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 
 import type { ProviderModel } from "../../shared/contracts";
+import { INERTIA_VERSION } from "../../shared/version";
 import type { CodexApprovalDecision, CodexInputRequest, CodexPlanStep } from "../codex/types";
 import { terminateProcessTree } from "../process-lifecycle";
 import {
@@ -176,7 +177,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     const initialized = await context.request(acp.methods.agent.initialize, {
       protocolVersion: 1,
       clientCapabilities: {},
-      clientInfo: { name: "Inertia", version: "0.0.3" },
+      clientInfo: { name: "Inertia", version: INERTIA_VERSION },
     });
     validateCursorInitialize(initialized);
     supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;

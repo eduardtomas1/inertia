@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 
+import { INERTIA_VERSION } from "../shared/version";
 import { parseCodexApprovalRequest } from "./codex/approvals";
 import { parseCodexPlan } from "./codex/plans";
 import {
@@ -440,7 +441,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     void (async () => {
       try {
         await request("initialize", {
-          clientInfo: { name: "inertia", title: "Inertia", version: "0.0.3" },
+          clientInfo: { name: "inertia", title: "Inertia", version: INERTIA_VERSION },
           capabilities: {
             experimentalApi: true,
             requestAttestation: false,

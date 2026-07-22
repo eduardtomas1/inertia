@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import type { ProviderModel, ProviderRateLimit, ProviderReasoningOption } from "../shared/contracts";
+import { INERTIA_VERSION } from "../shared/version";
 import { providerTimestamp } from "./provider/usage-values";
 
 type JsonObject = Record<string, unknown>;
@@ -176,7 +177,7 @@ export async function readCodexMetadata(
   try {
     await Promise.race([
       request("initialize", {
-        clientInfo: { name: "inertia", title: "Inertia", version: "0.0.3" },
+        clientInfo: { name: "inertia", title: "Inertia", version: INERTIA_VERSION },
         capabilities: { experimentalApi: true, requestAttestation: false },
       }),
       processError,

@@ -309,7 +309,6 @@ export function Composer({
             usage={usage}
             rateLimits={selectedProvider.rateLimits}
             rateLimitState={selectedProvider.metadataState.rateLimits}
-            supportsUsage={selectedProvider.supportsUsage}
           />
         )}
       </div>

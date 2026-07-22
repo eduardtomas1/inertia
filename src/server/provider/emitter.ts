@@ -107,7 +107,7 @@ export function createProviderEmitter(
 }
 
 /**
- * Compatibility boundary for the v0.0.3 provider callback surface. Harnesses
+ * Compatibility boundary for the legacy provider callback surface. Harnesses
  * keep provider-specific events in a typed extension envelope; the runtime can
  * continue consuming its existing callbacks until that transport contract is
  * migrated independently.

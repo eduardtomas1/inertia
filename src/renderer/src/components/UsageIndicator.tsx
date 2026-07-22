@@ -6,7 +6,6 @@ type UsageIndicatorProps = {
   usage: ThreadUsageSnapshot | null;
   rateLimits: ProviderRateLimit[];
   rateLimitState: ProviderMetadataFieldState;
-  supportsUsage: boolean;
 };
 
 function compactNumber(value: number): string {
@@ -46,11 +45,11 @@ function processedScopeLabel(scope: ThreadUsageSnapshot["totalProcessedScope"]):
   return scope === "thread" ? "thread" : scope === "session" ? "session" : scope === "run" ? "run" : "provider report";
 }
 
-export function UsageIndicator({ usage, rateLimits, rateLimitState, supportsUsage }: UsageIndicatorProps): React.JSX.Element | null {
+export function UsageIndicator({ usage, rateLimits, rateLimitState }: UsageIndicatorProps): React.JSX.Element | null {
   const remainingContext = contextRemaining(usage);
   const primaryLimit = rateLimits[0] ?? null;
   const primaryRemaining = primaryLimit ? displayPercent(primaryLimit.remainingPercent) : null;
-  if (!supportsUsage && !usage && rateLimits.length === 0 && rateLimitState.freshness === "unavailable") return null;
+  if (!usage && rateLimits.length === 0) return null;
 
   return (
     <details className="usage-indicator">

@@ -21,6 +21,7 @@ import {
 import clsx from "clsx";
 
 import { defaultSettings, type AppSettings, type Conversation, type ProviderId, type ProviderInfo, type ThemePreference } from "@shared/contracts";
+import { INERTIA_VERSION } from "@shared/version";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { Switch } from "./ui";
 
@@ -71,7 +72,7 @@ export function SettingsView({ settings, disabled, providers, archived, onUpdate
   return (
     <main className="settings-view">
       <aside className="settings-navigation" aria-label="Settings sections">
-        <div className="settings-navigation-heading"><strong>Settings</strong><small>Inertia v0.0.3</small></div>
+        <div className="settings-navigation-heading"><strong>Settings</strong><small>Inertia v{INERTIA_VERSION}</small></div>
         <nav>
           {sections.map((item) => {
             const Icon = item.icon;

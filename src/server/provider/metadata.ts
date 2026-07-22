@@ -277,8 +277,8 @@ export class ProviderMetadataCache {
     const executable = cleanString(correlation.executable, 4_096) ?? null;
     const version = cleanString(correlation.version, 200) ?? null;
     const changed = entry.executable !== executable
-      || (entry.version !== null && entry.version !== version)
-      || (entry.authState !== null && entry.authState !== correlation.authState);
+      || entry.version !== version
+      || entry.authState !== correlation.authState;
     entry.executable = executable;
     entry.version = version;
     entry.authState = correlation.authState;

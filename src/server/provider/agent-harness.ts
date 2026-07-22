@@ -37,7 +37,7 @@ export interface AgentHarnessCoreCapabilities {
   };
   cancellation: {
     graceful: "protocol-interrupt" | "process-tree-signal";
-    forceFallback: "process-tree-kill";
+    forceFallback: "process-tree-kill" | "sdk-abort-close";
   };
 }
 

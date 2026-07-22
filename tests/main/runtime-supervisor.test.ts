@@ -172,33 +172,25 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.snapshot().phase).toBe("stopped");
   });
 
-  it("allows window teardown and unconditional main termination only after the worker exits", async () => {
+  it("allows the normal main quit only after the worker exits", async () => {
     const { children, supervisor } = createHarness();
     supervisor.start();
     children[0].spawn();
-    const destroyWindow = vi.fn();
-    const terminateMain = vi.fn();
-    const stopped = supervisor.stop().then(() => {
-      destroyWindow();
-      terminateMain(42_000);
-    });
+    const quitMain = vi.fn();
+    const stopped = supervisor.stop().then(quitMain);
     children[0].message({ type: "runtime.stopped" });
     await Promise.resolve();
-    expect(destroyWindow).not.toHaveBeenCalled();
-    expect(terminateMain).not.toHaveBeenCalled();
+    expect(quitMain).not.toHaveBeenCalled();
     expect(supervisor.snapshot()).toMatchObject({ phase: "stopping", pid: 10_000, restartScheduled: false });
     children[0].exit(0);
     await stopped;
-    expect(destroyWindow).toHaveBeenCalledOnce();
-    expect(terminateMain).toHaveBeenCalledOnce();
-    expect(terminateMain).toHaveBeenCalledWith(42_000);
-    expect(destroyWindow.mock.invocationCallOrder[0]).toBeLessThan(terminateMain.mock.invocationCallOrder[0]);
+    expect(quitMain).toHaveBeenCalledOnce();
     expect(supervisor.snapshot()).toMatchObject({ phase: "stopped", pid: null, restartScheduled: false });
     vi.advanceTimersByTime(60_000);
     expect(children).toHaveLength(1);
   });
 
-  it("forces an unresponsive utility process but never starts a replacement during shutdown", async () => {
+  it("settles after forcing an unresponsive utility process and never starts a replacement", async () => {
     const { children, forceKill, supervisor } = createHarness();
     supervisor.start();
     children[0].spawn();
@@ -208,11 +200,10 @@ describe("RuntimeSupervisor", () => {
     vi.advanceTimersByTime(500);
     expect(forceKill).toHaveBeenCalledWith(10_000);
     vi.advanceTimersByTime(500);
-    await Promise.resolve();
-    expect(supervisor.snapshot().phase).toBe("stopping");
     expect(forceKill).toHaveBeenCalledTimes(2);
-    children[0].exit(137);
     await stopped;
+    expect(supervisor.snapshot()).toMatchObject({ phase: "stopped", pid: null, lastError: expect.stringContaining("shutdown deadline") });
+    children[0].exit(137);
     vi.advanceTimersByTime(60_000);
     expect(children).toHaveLength(1);
   });

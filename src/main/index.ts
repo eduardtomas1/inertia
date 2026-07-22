@@ -16,6 +16,7 @@ import {
   utilityProcess,
   type IpcMainInvokeEvent,
 } from "electron";
+import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
 
 const IPC = {
@@ -401,7 +402,7 @@ async function createWindow(): Promise<void> {
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 18, y: 18 },
+          trafficLightPosition: MAC_TRAFFIC_LIGHT_POSITION,
         }
       : {}),
     webPreferences: {
@@ -469,22 +470,10 @@ function focusMainWindow(): void {
 }
 
 function finishQuitAfterCleanup(): void {
-  const window = mainWindow;
-  const terminateAfterWindowClosure = (): void => {
-    recordPackageSmokeStage("app-exit");
-    // Electron can remain inside the native quit cycle after before-quit is
-    // prevented. State, runtime persistence, the utility process, and renderer
-    // are gone before using Node's cross-platform unconditional termination.
-    process.kill(process.pid, "SIGKILL");
-  };
-  if (!window || window.isDestroyed()) {
-    terminateAfterWindowClosure();
-    return;
-  }
-  window.once("closed", terminateAfterWindowClosure);
-  // State has already been saved, so force-closing cannot discard owned data.
-  // Electron guarantees destroy() emits "closed" before main termination.
-  window.destroy();
+  recordPackageSmokeStage("app-exit");
+  // `stoppingRuntime` lets this second quit pass through before-quit after the
+  // owned runtime has settled, preserving Electron's normal shutdown sequence.
+  app.quit();
 }
 
 async function bootstrap(): Promise<void> {

@@ -167,6 +167,8 @@ export class RuntimeSupervisor {
       if (this.current !== record) return;
       const pid = child.pid;
       if (pid) this.forceKill(pid);
+      this.lastError = "The runtime process did not report exit before the shutdown deadline; forced termination was requested.";
+      this.settleStopped(record);
     }, this.shutdownGraceMs + this.forceKillWaitMs * 2);
     return this.stopPromise;
   }

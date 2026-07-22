@@ -219,6 +219,25 @@ describe("provider metadata cache", () => {
       metadataState: { models: { freshness: "stale", provenance: "persistent-cache" } },
     });
   });
+
+  it("invalidates persisted metadata when previously unknown correlation becomes known", () => {
+    let persisted: PersistedProviderMetadata | undefined;
+    const persistence = {
+      load: () => persisted ? [structuredClone(persisted)] : [],
+      save: (metadata: PersistedProviderMetadata) => { persisted = structuredClone(metadata); },
+    };
+    const cache = new ProviderMetadataCache({ persistence });
+    cache.correlate("codex", { executable: codexExecutable, version: null, authState: "unknown" });
+    cache.learn("codex", codexExecutable, { models: [model("model-a")], rateLimits: [rateLimit("five-hour")] }, "provider");
+
+    const restarted = new ProviderMetadataCache({ persistence });
+    expect(restarted.current("codex").metadataState.models.freshness).toBe("fresh");
+    restarted.correlate("codex", { executable: codexExecutable, version: "1.0.0", authState: "authenticated" });
+    expect(restarted.current("codex").metadataState).toMatchObject({
+      models: { freshness: "stale", provenance: "persistent-cache" },
+      rateLimits: { freshness: "stale", provenance: "persistent-cache" },
+    });
+  });
 });
 
 describe.sequential("provider metadata discovery invalidation", () => {

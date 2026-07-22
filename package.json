@@ -1,6 +1,6 @@
 {
   "name": "inertia",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "A calm local workspace for coding with agents.",
   "desktopName": "dev.inertia.app.desktop",
   "main": "out/main/index.js",
@@ -17,6 +17,7 @@
     "test:portable": "vitest run tests/main/runtime-process-protocol.test.ts tests/main/runtime-supervisor.test.ts tests/server/process-lifecycle.test.ts tests/server/providers.test.ts tests/server/provider-metadata.test.ts tests/server/agent-harness.test.ts tests/server/codex-app-server.test.ts tests/server/claude-agent-sdk-harness.test.ts tests/server/cursor-acp-harness.test.ts tests/server/opencode-sdk-harness.test.ts",
     "test:e2e": "npm run build && playwright test",
     "test:package-smoke": "node scripts/package-smoke.mjs",
+    "screenshots:readme": "npm run build && node scripts/capture-readme-screenshots.mjs",
     "check": "npm run typecheck && npm run test && npm run build",
     "dist:dir": "npm run build && electron-builder --dir --publish never",
     "dist:mac": "npm run build && electron-builder --mac --arm64 --publish never",

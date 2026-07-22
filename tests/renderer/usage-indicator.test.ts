@@ -38,10 +38,15 @@ function render(
   rateLimits: ProviderRateLimit[],
   rateLimitState: ProviderMetadataFieldState,
 ): string {
-  return renderToStaticMarkup(createElement(UsageIndicator, { usage: snapshot, rateLimits, rateLimitState, supportsUsage: true }));
+  return renderToStaticMarkup(createElement(UsageIndicator, { usage: snapshot, rateLimits, rateLimitState }));
 }
 
 describe("UsageIndicator", () => {
+  it("stays hidden until a provider reports usage or quota values", () => {
+    expect(render(null, [], { ...freshState, freshness: "unavailable", provenance: null, updatedAt: null })).toBe("");
+    expect(render(null, [], freshState)).toBe("");
+  });
+
   it("caps the wide popover and keeps it inside compact viewports", () => {
     const css = readFileSync(new URL("../../src/renderer/src/styles.css", import.meta.url), "utf8");
     expect(css).toMatch(/\.usage-popover\s*\{[^}]*width:\s*min\(310px,\s*calc\(100vw\s*-\s*36px\)\)/su);

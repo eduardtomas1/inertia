@@ -33,8 +33,6 @@ export function initialProviderSnapshots(
     models: cached[provider.id]?.models ?? [],
     rateLimits: cached[provider.id]?.rateLimits ?? [],
     metadataState: cached[provider.id]?.metadataState ?? emptyMetadataState(),
-    supportsReasoning: provider.id === "codex",
-    supportsUsage: true,
   }));
 }
 
@@ -55,8 +53,6 @@ export function providerSnapshot(
     models: metadata.models,
     rateLimits: metadata.rateLimits,
     metadataState: metadata.metadataState,
-    supportsReasoning: detection.provider.id === "codex",
-    supportsUsage: true,
   };
 }
 

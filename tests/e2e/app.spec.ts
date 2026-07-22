@@ -9,6 +9,12 @@ import { randomUUID } from "node:crypto";
 
 import Database from "better-sqlite3";
 
+import {
+  MAC_BRAND_MIN_CLEAR_GAP,
+  MAC_TRAFFIC_LIGHT_CLUSTER_WIDTH,
+  MAC_TRAFFIC_LIGHT_POSITION,
+} from "../../src/shared/window-chrome";
+
 const execFileAsync = promisify(execFile);
 
 let electronApp: ElectronApplication;
@@ -234,9 +240,12 @@ test("keeps the macOS brand in the native titlebar row and navigates it home", a
       const lockup = document.querySelector(".brand-lockup");
       const logo = document.querySelector(".brand-logo");
       const markStyles = lockup ? getComputedStyle(lockup, "::before") : null;
+      const lockupStyles = lockup ? getComputedStyle(lockup) : null;
       const logoStyles = logo ? getComputedStyle(logo) : null;
-      return row && markStyles && logoStyles ? {
+      const lockupBounds = lockup?.getBoundingClientRect();
+      return row && lockupBounds && markStyles && lockupStyles && logoStyles ? {
         row: { top: row.top, height: row.height },
+        markLeft: lockupBounds.left + Number.parseFloat(lockupStyles.paddingLeft),
         mark: { width: markStyles.width, height: markStyles.height, maskImage: markStyles.maskImage },
         logoDisplay: logoStyles.display,
       } : null;
@@ -248,12 +257,19 @@ test("keeps the macOS brand in the native titlebar row and navigates it home", a
     expect(geometry?.mark.height).toBe("20px");
     expect(geometry?.mark.maskImage).toContain("inertia-logo.png");
     expect(geometry?.logoDisplay).toBe("none");
+    const trafficLightClusterRight = MAC_TRAFFIC_LIGHT_POSITION.x + MAC_TRAFFIC_LIGHT_CLUSTER_WIDTH;
+    expect((geometry?.markLeft ?? 0) - trafficLightClusterRight).toBeGreaterThanOrEqual(MAC_BRAND_MIN_CLEAR_GAP);
     await page.screenshot({ path: testInfo.outputPath("v004-brand-wide.png") });
 
     await resizeWindow(760, 640);
     await page.getByRole("button", { name: "Toggle project navigation" }).click();
     await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
     await page.waitForTimeout(250);
+    const compactMarkLeft = await page.locator(".brand-lockup").evaluate((lockup) => {
+      const bounds = lockup.getBoundingClientRect();
+      return bounds.left + Number.parseFloat(getComputedStyle(lockup).paddingLeft);
+    });
+    expect(compactMarkLeft - trafficLightClusterRight).toBeGreaterThanOrEqual(MAC_BRAND_MIN_CLEAR_GAP);
     await page.screenshot({ path: testInfo.outputPath("v004-brand-compact.png") });
     await page.getByRole("button", { name: "Close navigation" }).last().click();
     await resizeWindow(1440, 920);

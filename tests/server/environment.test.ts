@@ -46,13 +46,18 @@ describe.sequential("provider environment discovery", () => {
     mkdirSync(shellBin, { recursive: true });
     const command = join(shellBin, "login-shell-agent");
     executable(command);
-    writeFileSync(join(home, ".zprofile"), `export PATH=${JSON.stringify(`${shellBin}${delimiter}/usr/bin${delimiter}/bin`)}\n`);
-    writeFileSync(join(home, ".zshrc"), "\n");
+    const shell = join(home, "zsh");
+    writeFileSync(
+      shell,
+      `#!/bin/sh\nPATH=${JSON.stringify(`${shellBin}${delimiter}/usr/bin${delimiter}/bin`)} INERTIA_LOGIN_SHELL_MARKER=ready /usr/bin/env -0\n`,
+    );
+    chmodSync(shell, 0o700);
 
-    setEnvironment({ HOME: home, ZDOTDIR: home, SHELL: "/bin/zsh", PATH: "/usr/bin:/bin" });
+    setEnvironment({ HOME: home, SHELL: shell, PATH: "/usr/bin:/bin" });
     const environment = await providerEnvironment(true);
     const candidates = await executableCandidates("login-shell-agent", environment, home);
 
+    expect(environment.env.INERTIA_LOGIN_SHELL_MARKER).toBe("ready");
     expect(environment.pathEntries[0]).toBe(shellBin);
     expect(candidates).toEqual([realpathSync(command)]);
   });

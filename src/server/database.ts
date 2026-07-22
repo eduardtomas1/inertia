@@ -8,6 +8,7 @@ import {
   type AccessMode,
   type AgentActivity,
   type AgentPlan,
+  type AgentReasoning,
   type AppSettings,
   type AppSnapshot,
   type ChatAttachment,
@@ -20,6 +21,7 @@ import {
   type ProviderInfo,
   type ThemePreference,
   type ThreadStatus,
+  type ThreadUsageSnapshot,
 } from "../shared/contracts";
 
 const PROJECT_COLORS = ["#6f76d9", "#5b8ca8", "#8a73ba", "#a76c79", "#9a814f", "#687f91"] as const;
@@ -40,6 +42,7 @@ interface ConversationRow {
   title: string;
   provider_id: ProviderId;
   model: string;
+  reasoning_effort: string;
   interaction_mode: InteractionMode;
   access_mode: AccessMode;
   status: ThreadStatus;
@@ -90,6 +93,28 @@ interface AgentPlanRow {
   steps_json: string;
 }
 
+interface AgentReasoningRow {
+  id: string;
+  conversation_id: string;
+  run_id: string;
+  content: string;
+  status: AgentReasoning["status"];
+  created_at: string;
+}
+
+interface ThreadUsageRow {
+  conversation_id: string;
+  used_tokens: number;
+  total_processed_tokens: number | null;
+  max_tokens: number | null;
+  input_tokens: number | null;
+  cached_input_tokens: number | null;
+  output_tokens: number | null;
+  reasoning_output_tokens: number | null;
+  compacts_automatically: 0 | 1;
+  updated_at: string;
+}
+
 interface StateRow {
   theme: ThemePreference;
   compact_sidebar: 0 | 1;
@@ -101,6 +126,12 @@ interface StateRow {
   new_thread_mode: AppSettings["newThreadMode"];
   wrap_diffs: 0 | 1;
   ignore_whitespace: 0 | 1;
+  show_thinking: 0 | 1;
+  show_usage: 0 | 1;
+  auto_open_plan: 0 | 1;
+  confirm_destructive_actions: 0 | 1;
+  default_reasoning_effort: string;
+  default_interaction_mode: InteractionMode;
   active_project_id: string | null;
   active_conversation_id: string | null;
 }
@@ -198,6 +229,39 @@ const migrations = [
       updated_at TEXT NOT NULL
     );
   `,
+  `
+    ALTER TABLE conversations ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE app_state ADD COLUMN show_thinking INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE app_state ADD COLUMN show_usage INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE app_state ADD COLUMN auto_open_plan INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE app_state ADD COLUMN confirm_destructive_actions INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE app_state ADD COLUMN default_reasoning_effort TEXT NOT NULL DEFAULT '';
+    ALTER TABLE app_state ADD COLUMN default_interaction_mode TEXT NOT NULL DEFAULT 'build';
+
+    CREATE TABLE agent_reasonings (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX agent_reasonings_conversation_id_idx ON agent_reasonings(conversation_id, created_at);
+
+    CREATE TABLE thread_usage (
+      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+      used_tokens INTEGER NOT NULL,
+      total_processed_tokens INTEGER,
+      max_tokens INTEGER,
+      input_tokens INTEGER,
+      cached_input_tokens INTEGER,
+      output_tokens INTEGER,
+      reasoning_output_tokens INTEGER,
+      compacts_automatically INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+  `,
 ] as const;
 
 function projectFromRow(row: ProjectRow): Project {
@@ -211,6 +275,7 @@ function conversationFromRow(row: ConversationRow): Conversation {
     title: row.title,
     providerId: row.provider_id,
     model: row.model,
+    reasoningEffort: row.reasoning_effort,
     interactionMode: row.interaction_mode,
     accessMode: row.access_mode,
     status: row.status,
@@ -262,9 +327,36 @@ function planFromRow(row: AgentPlanRow): AgentPlan {
   return { conversationId: row.conversation_id, runId: row.run_id, explanation: row.explanation, steps };
 }
 
+function reasoningFromRow(row: AgentReasoningRow): AgentReasoning {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    runId: row.run_id,
+    content: row.content,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+function usageFromRow(row: ThreadUsageRow): ThreadUsageSnapshot {
+  return {
+    conversationId: row.conversation_id,
+    usedTokens: row.used_tokens,
+    totalProcessedTokens: row.total_processed_tokens,
+    maxTokens: row.max_tokens,
+    inputTokens: row.input_tokens,
+    cachedInputTokens: row.cached_input_tokens,
+    outputTokens: row.output_tokens,
+    reasoningOutputTokens: row.reasoning_output_tokens,
+    compactsAutomatically: row.compacts_automatically === 1,
+    updatedAt: row.updated_at,
+  };
+}
+
 export interface NewConversationOptions {
   providerId?: ProviderId;
   model?: string;
+  reasoningEffort?: string;
   interactionMode?: InteractionMode;
   accessMode?: AccessMode;
   branch?: string | null;
@@ -296,6 +388,8 @@ export class RuntimeStore {
       conversations: (this.database.prepare("SELECT * FROM conversations ORDER BY updated_at DESC, id ASC").all() as ConversationRow[]).map(conversationFromRow),
       messages: (this.database.prepare("SELECT * FROM messages ORDER BY created_at ASC, id ASC").all() as MessageRow[]).map(messageFromRow),
       activities: (this.database.prepare("SELECT * FROM activities ORDER BY created_at ASC, id ASC").all() as ActivityRow[]).map(activityFromRow),
+      reasonings: (this.database.prepare("SELECT * FROM agent_reasonings ORDER BY created_at ASC, id ASC").all() as AgentReasoningRow[]).map(reasoningFromRow),
+      usage: (this.database.prepare("SELECT * FROM thread_usage ORDER BY updated_at ASC").all() as ThreadUsageRow[]).map(usageFromRow),
       plans: (this.database.prepare("SELECT conversation_id, run_id, explanation, steps_json FROM agent_plans ORDER BY updated_at ASC").all() as AgentPlanRow[]).map(planFromRow),
       checkpoints: (this.database.prepare("SELECT * FROM checkpoints ORDER BY turn_index ASC, created_at ASC").all() as CheckpointRow[]).map(checkpointFromRow),
       providers,
@@ -310,6 +404,12 @@ export class RuntimeStore {
         newThreadMode: state.new_thread_mode,
         wrapDiffs: state.wrap_diffs === 1,
         ignoreWhitespace: state.ignore_whitespace === 1,
+        showThinking: state.show_thinking === 1,
+        showUsage: state.show_usage === 1,
+        autoOpenPlan: state.auto_open_plan === 1,
+        confirmDestructiveActions: state.confirm_destructive_actions === 1,
+        defaultReasoningEffort: state.default_reasoning_effort,
+        defaultInteractionMode: state.default_interaction_mode,
       },
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,
@@ -349,13 +449,14 @@ export class RuntimeStore {
       id: randomUUID(), projectId, title,
       providerId: options.providerId ?? state.default_provider,
       model: options.model ?? state.default_model,
-      interactionMode: options.interactionMode ?? "build",
+      reasoningEffort: options.reasoningEffort ?? state.default_reasoning_effort,
+      interactionMode: options.interactionMode ?? state.default_interaction_mode,
       accessMode: options.accessMode ?? state.default_access_mode,
       status: "idle", branch: options.branch ?? null, worktreePath: options.worktreePath ?? null,
       providerSessionId: null, archivedAt: null, createdAt: now, updatedAt: now,
     };
     this.database.transaction(() => {
-      this.database.prepare(`INSERT INTO conversations (id, project_id, title, provider_id, model, interaction_mode, access_mode, status, branch, worktree_path, provider_session_id, archived_at, created_at, updated_at) VALUES (@id, @projectId, @title, @providerId, @model, @interactionMode, @accessMode, @status, @branch, @worktreePath, @providerSessionId, @archivedAt, @createdAt, @updatedAt)`).run(conversation);
+      this.database.prepare(`INSERT INTO conversations (id, project_id, title, provider_id, model, reasoning_effort, interaction_mode, access_mode, status, branch, worktree_path, provider_session_id, archived_at, created_at, updated_at) VALUES (@id, @projectId, @title, @providerId, @model, @reasoningEffort, @interactionMode, @accessMode, @status, @branch, @worktreePath, @providerSessionId, @archivedAt, @createdAt, @updatedAt)`).run(conversation);
       this.touchProject(projectId, now);
       this.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(projectId, conversation.id);
     })();
@@ -367,16 +468,18 @@ export class RuntimeStore {
     this.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(conversation.project_id, conversationId);
   }
 
-  updateConversation(conversationId: string, update: Partial<Pick<Conversation, "title" | "providerId" | "model" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status">>): Conversation {
+  updateConversation(conversationId: string, update: Partial<Pick<Conversation, "title" | "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status">>): Conversation {
     const current = conversationFromRow(this.requireConversation(conversationId));
     const providerChanged = update.providerId !== undefined && update.providerId !== current.providerId;
     const next = {
       ...current,
       ...update,
       providerSessionId: providerChanged ? null : (update.providerSessionId ?? current.providerSessionId),
+      model: providerChanged && update.model === undefined ? "" : (update.model ?? current.model),
+      reasoningEffort: providerChanged && update.reasoningEffort === undefined ? "" : (update.reasoningEffort ?? current.reasoningEffort),
       updatedAt: new Date().toISOString(),
     };
-    this.database.prepare(`UPDATE conversations SET title = @title, provider_id = @providerId, model = @model, interaction_mode = @interactionMode, access_mode = @accessMode, branch = @branch, worktree_path = @worktreePath, provider_session_id = @providerSessionId, status = @status, updated_at = @updatedAt WHERE id = @id`).run(next);
+    this.database.prepare(`UPDATE conversations SET title = @title, provider_id = @providerId, model = @model, reasoning_effort = @reasoningEffort, interaction_mode = @interactionMode, access_mode = @accessMode, branch = @branch, worktree_path = @worktreePath, provider_session_id = @providerSessionId, status = @status, updated_at = @updatedAt WHERE id = @id`).run(next);
     this.touchProject(current.projectId, next.updatedAt);
     return next;
   }
@@ -454,6 +557,48 @@ export class RuntimeStore {
     return next;
   }
 
+  createReasoning(conversationId: string, runId: string): AgentReasoning {
+    this.requireConversation(conversationId);
+    const reasoning: AgentReasoning = {
+      id: randomUUID(),
+      conversationId,
+      runId,
+      content: "",
+      status: "running",
+      createdAt: new Date().toISOString(),
+    };
+    this.database.prepare(`INSERT INTO agent_reasonings (id, conversation_id, run_id, content, status, created_at) VALUES (@id, @conversationId, @runId, @content, @status, @createdAt)`).run(reasoning);
+    return reasoning;
+  }
+
+  updateReasoning(id: string, update: Partial<Pick<AgentReasoning, "content" | "status">>): AgentReasoning {
+    const row = this.database.prepare("SELECT * FROM agent_reasonings WHERE id = ?").get(id) as AgentReasoningRow | undefined;
+    if (!row) throw new RecordNotFoundError("Reasoning summary not found.");
+    const next = { ...reasoningFromRow(row), ...update };
+    this.database.prepare("UPDATE agent_reasonings SET content = ?, status = ? WHERE id = ?").run(next.content, next.status, id);
+    return next;
+  }
+
+  upsertUsage(usage: Omit<ThreadUsageSnapshot, "updatedAt">): ThreadUsageSnapshot {
+    this.requireConversation(usage.conversationId);
+    const next: ThreadUsageSnapshot = { ...usage, updatedAt: new Date().toISOString() };
+    this.database.prepare(`
+      INSERT INTO thread_usage (conversation_id, used_tokens, total_processed_tokens, max_tokens, input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, compacts_automatically, updated_at)
+      VALUES (@conversationId, @usedTokens, @totalProcessedTokens, @maxTokens, @inputTokens, @cachedInputTokens, @outputTokens, @reasoningOutputTokens, @compactsAutomatically, @updatedAt)
+      ON CONFLICT(conversation_id) DO UPDATE SET
+        used_tokens = excluded.used_tokens,
+        total_processed_tokens = excluded.total_processed_tokens,
+        max_tokens = excluded.max_tokens,
+        input_tokens = excluded.input_tokens,
+        cached_input_tokens = excluded.cached_input_tokens,
+        output_tokens = excluded.output_tokens,
+        reasoning_output_tokens = excluded.reasoning_output_tokens,
+        compacts_automatically = excluded.compacts_automatically,
+        updated_at = excluded.updated_at
+    `).run({ ...next, compactsAutomatically: Number(next.compactsAutomatically) });
+    return next;
+  }
+
   addCheckpoint(input: Omit<CheckpointSummary, "id" | "createdAt">): CheckpointSummary {
     this.requireConversation(input.conversationId);
     const checkpoint: CheckpointSummary = { ...input, id: randomUUID(), createdAt: new Date().toISOString() };
@@ -470,7 +615,7 @@ export class RuntimeStore {
   updateSettings(update: Partial<AppSettings>): void {
     const current = this.snapshot().settings;
     const next = { ...current, ...update };
-    this.database.prepare(`UPDATE app_state SET theme = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?, default_provider = ?, default_model = ?, default_access_mode = ?, new_thread_mode = ?, wrap_diffs = ?, ignore_whitespace = ? WHERE id = 1`).run(next.theme, Number(next.compactSidebar), Number(next.showTimestamps), next.terminalFontSize, next.defaultProvider, next.defaultModel, next.defaultAccessMode, next.newThreadMode, Number(next.wrapDiffs), Number(next.ignoreWhitespace));
+    this.database.prepare(`UPDATE app_state SET theme = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?, default_provider = ?, default_model = ?, default_access_mode = ?, new_thread_mode = ?, wrap_diffs = ?, ignore_whitespace = ?, show_thinking = ?, show_usage = ?, auto_open_plan = ?, confirm_destructive_actions = ?, default_reasoning_effort = ?, default_interaction_mode = ? WHERE id = 1`).run(next.theme, Number(next.compactSidebar), Number(next.showTimestamps), next.terminalFontSize, next.defaultProvider, next.defaultModel, next.defaultAccessMode, next.newThreadMode, Number(next.wrapDiffs), Number(next.ignoreWhitespace), Number(next.showThinking), Number(next.showUsage), Number(next.autoOpenPlan), Number(next.confirmDestructiveActions), next.defaultReasoningEffort, next.defaultInteractionMode);
   }
 
   project(projectId: string): Project {
@@ -536,6 +681,7 @@ export class RuntimeStore {
     const now = new Date().toISOString();
     const markConversation = this.database.prepare("UPDATE conversations SET status = 'failed', updated_at = ? WHERE id = ?");
     const markActivities = this.database.prepare("UPDATE activities SET status = 'failed' WHERE conversation_id = ? AND status = 'running'");
+    const markReasonings = this.database.prepare("UPDATE agent_reasonings SET status = 'failed' WHERE conversation_id = ? AND status = 'running'");
     const addRecoveryActivity = this.database.prepare(`
       INSERT INTO activities (id, conversation_id, run_id, kind, title, detail, status, created_at)
       VALUES (?, ?, ?, 'error', ?, NULL, 'failed', ?)
@@ -545,6 +691,7 @@ export class RuntimeStore {
       for (const { id } of interrupted) {
         markConversation.run(now, id);
         markActivities.run(id);
+        markReasonings.run(id);
         addRecoveryActivity.run(
           randomUUID(),
           id,

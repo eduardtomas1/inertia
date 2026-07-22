@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing release tag to receive the builds
         required: true
-        default: v0.0.2
+        default: v0.0.3
 
 permissions:
   contents: write

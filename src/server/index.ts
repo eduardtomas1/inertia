@@ -142,10 +142,17 @@ function providerDefaults(executionEnabled = true): ProviderInfo[] {
     authState: "checking",
     canRun: !executionEnabled,
     statusMessage: "Checking installation and connection",
+    models: [],
+    rateLimits: [],
+    supportsReasoning: provider.id === "codex",
+    supportsUsage: provider.id === "codex",
   }));
 }
 
-function providerSnapshot(detection: ProviderDetection): ProviderInfo {
+function providerSnapshot(
+  detection: ProviderDetection,
+  metadata: Pick<ProviderInfo, "models" | "rateLimits"> = { models: [], rateLimits: [] },
+): ProviderInfo {
   return {
     id: detection.provider.id,
     label: detection.provider.name,
@@ -156,6 +163,10 @@ function providerSnapshot(detection: ProviderDetection): ProviderInfo {
     authState: detection.authState,
     canRun: detection.canRun,
     statusMessage: detection.statusMessage ?? null,
+    models: metadata.models,
+    rateLimits: metadata.rateLimits,
+    supportsReasoning: detection.provider.id === "codex",
+    supportsUsage: detection.provider.id === "codex",
   };
 }
 
@@ -246,11 +257,17 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const broadcastSnapshot = (): void => broadcast({ type: "snapshot.updated", snapshot: currentSnapshot() });
   const refreshProviderInfo = async (providerId?: ProviderInfo["id"], refreshEnvironment = false): Promise<void> => {
     if (!enableProviders) return;
+    const enrichedSnapshot = async (detection: ProviderDetection): Promise<ProviderInfo> => {
+      if (!detection.canRun) return providerSnapshot(detection);
+      const metadata = await providers.metadata(detection.provider.id, options.defaultWorkspacePath).catch(() => ({ models: [], rateLimits: [] }));
+      return providerSnapshot(detection, metadata);
+    };
     if (providerId) {
       const detection = await providers.detect(providerId, { timeoutMs: 4_000, refreshEnvironment });
-      providerInfo = providerInfo.map((current) => current.id === providerId ? providerSnapshot(detection) : current);
+      const next = await enrichedSnapshot(detection);
+      providerInfo = providerInfo.map((current) => current.id === providerId ? next : current);
     } else {
-      providerInfo = (await providers.detectAll({ timeoutMs: 4_000, refreshEnvironment })).map(providerSnapshot);
+      providerInfo = await Promise.all((await providers.detectAll({ timeoutMs: 4_000, refreshEnvironment })).map(enrichedSnapshot));
     }
     if (!closed) broadcastSnapshot();
   };
@@ -289,6 +306,31 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         assistantFlushTimer = setTimeout(flushAssistantMessage, 120);
         assistantFlushTimer.unref();
       }
+    };
+    let reasoningText = "";
+    let reasoningId: string | null = null;
+    let reasoningFlushTimer: NodeJS.Timeout | undefined;
+    const flushReasoning = (): void => {
+      if (reasoningFlushTimer) {
+        clearTimeout(reasoningFlushTimer);
+        reasoningFlushTimer = undefined;
+      }
+      if (!reasoningText) return;
+      if (!reasoningId) reasoningId = store.createReasoning(conversationId, runId).id;
+      store.updateReasoning(reasoningId, { content: reasoningText });
+    };
+    const appendReasoning = (text: string): void => {
+      reasoningText = `${reasoningText}${text}`.slice(0, 512 * 1024);
+      if (!reasoningId) flushReasoning();
+      else if (!reasoningFlushTimer) {
+        reasoningFlushTimer = setTimeout(flushReasoning, 120);
+        reasoningFlushTimer.unref();
+      }
+      broadcast({ type: "agent.reasoning", conversationId, runId, text });
+    };
+    const settleReasoning = (status: "completed" | "failed"): void => {
+      flushReasoning();
+      if (reasoningId) store.updateReasoning(reasoningId, { content: reasoningText, status });
     };
     const runningActivities = new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
     const recordProviderActivity = (event: ProviderActivityEvent): AgentActivity => {
@@ -339,6 +381,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           cwd: store.conversationPath(conversationId),
           prompt,
           model: conversation.model || undefined,
+          reasoningEffort: conversation.reasoningEffort || undefined,
           interactionMode: conversation.interactionMode,
           access: conversation.accessMode,
           sessionId: conversation.providerSessionId || undefined,
@@ -348,6 +391,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           onText: (event) => {
             appendAssistantText(event.text);
             broadcast({ type: "agent.text", conversationId, runId, text: event.text });
+          },
+          onReasoning: (event) => appendReasoning(event.text),
+          onUsage: (event) => {
+            const usage = store.upsertUsage({ conversationId, ...event.usage });
+            broadcast({ type: "agent.usage", usage });
           },
           onSession: (event) => {
             store.updateConversation(conversationId, { providerSessionId: event.sessionId });
@@ -415,6 +463,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       );
     } catch (error) {
       flushAssistantMessage();
+      settleReasoning("failed");
       settleRunningActivities("failed");
       const message = publicError(error);
       store.updateConversation(conversationId, { status: "failed" });
@@ -429,6 +478,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       if (result.sessionId) store.updateConversation(conversationId, { providerSessionId: result.sessionId });
       if (result.text && result.text !== assistantText) assistantText = result.text;
       flushAssistantMessage();
+      settleReasoning(result.status === "failed" ? "failed" : "completed");
       settleRunningActivities(result.status === "failed" ? "failed" : "completed");
       if (result.status === "completed") {
         store.updateConversation(conversationId, { status: "completed" });
@@ -442,11 +492,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         const activity = store.addActivity({ conversationId, runId, kind: "error", title: message, detail: null, status: "failed" });
         broadcast({ type: "agent.activity", activity });
         broadcast({ type: "agent.failed", conversationId, runId, message });
-        void refreshProviderInfo(conversation.providerId).catch(() => undefined);
       }
       broadcastSnapshot();
+      void refreshProviderInfo(conversation.providerId).catch(() => undefined);
     }).catch((error: unknown) => {
       flushAssistantMessage();
+      settleReasoning("failed");
       settleRunningActivities("failed");
       const message = publicError(error);
       store.updateConversation(conversationId, { status: "failed" });
@@ -543,6 +594,19 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             const selectedProvider = providerInfo.find(({ id }) => id === conversation.providerId);
             if (!selectedProvider?.canRun) {
               throw new RequestError(selectedProvider?.statusMessage ?? "This agent is not ready. Open Settings to finish setup.");
+            }
+            const selectedModel = conversation.model
+              ? selectedProvider.models.find(({ id }) => id === conversation.model)
+              : selectedProvider.models.find(({ isDefault }) => isDefault) ?? selectedProvider.models[0];
+            if (conversation.model && selectedProvider.models.length > 0 && !selectedModel) {
+              throw new RequestError("That model is no longer offered by this provider. Choose another model before sending.");
+            }
+            if (
+              conversation.reasoningEffort
+              && selectedModel?.reasoningOptions.length
+              && !selectedModel.reasoningOptions.some(({ value }) => value === conversation.reasoningEffort)
+            ) {
+              throw new RequestError("That reasoning level is not supported by the selected model.");
             }
           }
           if (enableProviders) {

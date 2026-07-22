@@ -18,6 +18,7 @@ import {
   type ProviderId,
   type ServerEvent,
   type ThemePreference,
+  type ThreadUsageSnapshot,
   type WorkspaceEntry,
   type WorkspaceFilePreview,
 } from "@shared/contracts";
@@ -91,7 +92,11 @@ export default function App(): React.JSX.Element {
   const connection = useInertiaConnection();
   const [view, setView] = useState<"workspace" | "settings">("workspace");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeTool, setActiveTool] = useState<WorkspacePanelTab | null>("terminal");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("inertia:layout:sidebar-collapsed:v1") === "true");
+  const [activeTool, setActiveTool] = useState<WorkspacePanelTab | null>(() => {
+    const saved = window.localStorage.getItem("inertia:layout:active-tool:v1");
+    return saved === "collapsed" ? null : saved === "changes" || saved === "files" || saved === "terminal" || saved === "plan" || saved === "preview" ? saved : "terminal";
+  });
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatusSnapshot | null>(null);
@@ -106,6 +111,8 @@ export default function App(): React.JSX.Element {
   const [projectActions, setProjectActions] = useState<ProjectAction[]>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  const [streamingReasoning, setStreamingReasoning] = useState("");
+  const [liveUsage, setLiveUsage] = useState<Record<string, ThreadUsageSnapshot>>({});
   const [pendingApprovals, setPendingApprovals] = useState<AgentApprovalRequest[]>([]);
   const [pendingInputs, setPendingInputs] = useState<AgentInputRequest[]>([]);
   const [nativePlans, setNativePlans] = useState<Record<string, AgentPlan>>({});
@@ -139,6 +146,8 @@ export default function App(): React.JSX.Element {
   useEffect(() => setSidebarWidth(persistedSidebarWidth), [persistedSidebarWidth]);
   useEffect(() => setToolsWidth(persistedToolsWidth), [persistedToolsWidth]);
   useEffect(() => setToolsHeight(persistedToolsHeight), [persistedToolsHeight]);
+  useEffect(() => window.localStorage.setItem("inertia:layout:sidebar-collapsed:v1", String(sidebarCollapsed)), [sidebarCollapsed]);
+  useEffect(() => window.localStorage.setItem("inertia:layout:active-tool:v1", activeTool ?? "collapsed"), [activeTool]);
 
   useEffect(() => {
     const shell = appShellRef.current;
@@ -172,6 +181,16 @@ export default function App(): React.JSX.Element {
     () => connection.snapshot?.activities.filter((activity) => activity.conversationId === conversation?.id).slice(-30) ?? [],
     [connection.snapshot, conversation?.id],
   );
+  const reasonings = useMemo(
+    () => connection.snapshot?.reasonings.filter((reasoning) => reasoning.conversationId === conversation?.id) ?? [],
+    [connection.snapshot, conversation?.id],
+  );
+  const usage = useMemo(() => {
+    if (!conversation) return null;
+    return liveUsage[conversation.id]
+      ?? connection.snapshot?.usage.find((item) => item.conversationId === conversation.id)
+      ?? null;
+  }, [connection.snapshot?.usage, conversation, liveUsage]);
   const checkpoints = useMemo(
     () => connection.snapshot?.checkpoints.filter((checkpoint) => checkpoint.conversationId === conversation?.id) ?? [],
     [connection.snapshot, conversation?.id],
@@ -227,13 +246,24 @@ export default function App(): React.JSX.Element {
     }
     if (event.type === "agent.plan.updated") {
       setNativePlans((current) => ({ ...current, [event.plan.conversationId]: event.plan }));
+      if (settings.autoOpenPlan && event.plan.conversationId === conversation?.id) setActiveTool("plan");
+      return;
+    }
+    if (event.type === "agent.usage") {
+      setLiveUsage((current) => ({ ...current, [event.usage.conversationId]: event.usage }));
       return;
     }
     if (!conversation || !("conversationId" in event) || event.conversationId !== conversation.id) return;
-    if (event.type === "agent.started") setStreamingText("");
+    if (event.type === "agent.started") { setStreamingText(""); setStreamingReasoning(""); }
     if (event.type === "agent.text") setStreamingText((current) => `${current}${event.text}`.slice(-500_000));
-    if (event.type === "agent.completed" || event.type === "agent.failed") setStreamingText("");
-  }), [connection.subscribe, conversation]);
+    if (event.type === "agent.reasoning") setStreamingReasoning((current) => `${current}${event.text}`.slice(-500_000));
+    if (event.type === "agent.completed" || event.type === "agent.failed") { setStreamingText(""); setStreamingReasoning(""); }
+  }), [connection.subscribe, conversation, settings.autoOpenPlan]);
+
+  useEffect(() => {
+    setStreamingText("");
+    setStreamingReasoning("");
+  }, [conversation?.id]);
 
   useEffect(() => {
     const shortcuts = (event: KeyboardEvent) => {
@@ -241,6 +271,7 @@ export default function App(): React.JSX.Element {
       if (event.key.toLowerCase() === "k") { event.preventDefault(); setPaletteOpen(true); }
       if (event.key.toLowerCase() === "n") { event.preventDefault(); createConversation(); }
       if (event.key.toLowerCase() === "j") { event.preventDefault(); setActiveTool((tool) => tool === "terminal" ? null : "terminal"); }
+      if (event.key.toLowerCase() === "b") { event.preventDefault(); if (mobileNavigation) setSidebarOpen(true); else setSidebarCollapsed((collapsed) => !collapsed); }
     };
     window.addEventListener("keydown", shortcuts);
     return () => window.removeEventListener("keydown", shortcuts);
@@ -311,7 +342,7 @@ export default function App(): React.JSX.Element {
   const createConversation = (targetProject: Project | null = project) => {
     if (!targetProject) return;
     const select = targetProject.id === project?.id ? Promise.resolve() : run("project.select", { type: "project.select", payload: { projectId: targetProject.id } });
-    void select.then(() => run("conversation.create", { type: "conversation.create", payload: { projectId: targetProject.id, title: "New thread", providerId: settings.defaultProvider, model: settings.defaultModel, accessMode: settings.defaultAccessMode, useWorktree: settings.newThreadMode === "worktree" } })).then(() => { setView("workspace"); setSidebarOpen(false); }).catch(() => undefined);
+    void select.then(() => run("conversation.create", { type: "conversation.create", payload: { projectId: targetProject.id, title: "New thread", providerId: settings.defaultProvider, model: settings.defaultModel, reasoningEffort: settings.defaultReasoningEffort, interactionMode: settings.defaultInteractionMode, accessMode: settings.defaultAccessMode, useWorktree: settings.newThreadMode === "worktree" } })).then(() => { setView("workspace"); setSidebarOpen(false); }).catch(() => undefined);
   };
   const sendMessage = async (content: string, attachments: ChatAttachment[]) => {
     if (!conversation) return;
@@ -329,7 +360,7 @@ export default function App(): React.JSX.Element {
       payload: { conversationId: request.conversationId, requestId: request.id, answers },
     });
   };
-  const updateConversation = (update: Partial<Pick<Conversation, "providerId" | "model" | "interactionMode" | "accessMode">>) => {
+  const updateConversation = (update: Partial<Pick<Conversation, "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => {
     if (!conversation) return;
     void run("conversation.update", { type: "conversation.update", payload: { conversationId: conversation.id, ...update } }).catch(() => undefined);
   };
@@ -417,7 +448,7 @@ export default function App(): React.JSX.Element {
     TOOLS_MIN_HEIGHT,
     Math.min(TOOLS_MAX_HEIGHT, workspaceBodySize.height - CHAT_MIN_HEIGHT - RESIZE_HANDLE_SIZE),
   );
-  const effectiveSidebarWidth = clamp(sidebarWidth, SIDEBAR_MIN_WIDTH, sidebarDynamicMax);
+  const effectiveSidebarWidth = !mobileNavigation && sidebarCollapsed ? 0 : clamp(sidebarWidth, SIDEBAR_MIN_WIDTH, sidebarDynamicMax);
   const effectiveToolsWidth = clamp(toolsWidth, TOOLS_MIN_WIDTH, toolsDynamicMaxWidth);
   const effectiveToolsHeight = clamp(toolsHeight, TOOLS_MIN_HEIGHT, toolsDynamicMaxHeight);
   const appShellStyle = { "--sidebar-width": `${effectiveSidebarWidth}px` } as CSSProperties;
@@ -427,17 +458,17 @@ export default function App(): React.JSX.Element {
   } as CSSProperties;
 
   return (
-    <div ref={appShellRef} className={`app-shell platform-${platform}`} style={appShellStyle}>
-      <Sidebar
+    <div ref={appShellRef} className={`app-shell platform-${platform}${sidebarCollapsed && !mobileNavigation ? " is-sidebar-collapsed" : ""}`} style={appShellStyle}>
+      {(mobileNavigation || !sidebarCollapsed) && <Sidebar
         snapshot={connection.snapshot} connectionStatus={connection.status} view={view} open={sidebarOpen} busy={busyAction === "project.create"}
         onClose={() => setSidebarOpen(false)} onViewChange={setView} onImportProject={() => void importProject()} onSelectProject={selectProject} onSelectConversation={selectConversation} onCreateConversation={createConversation}
         onRenameConversation={(thread, title) => { void run("conversation.update", { type: "conversation.update", payload: { conversationId: thread.id, title } }).catch(() => undefined); }}
         onArchiveConversation={(thread) => { void run("conversation.archive", { type: "conversation.archive", payload: { conversationId: thread.id } }).catch(() => undefined); }}
-        onDeleteConversation={(thread) => { if (window.confirm(`Delete “${thread.title}”? This cannot be undone.`)) void run("conversation.delete", { type: "conversation.delete", payload: { conversationId: thread.id } }).catch(() => undefined); }}
-        onRemoveProject={(item) => { if (window.confirm(`Remove “${item.name}” from Inertia? Files on disk will not be deleted.`)) void run("project.remove", { type: "project.remove", payload: { projectId: item.id } }).catch(() => undefined); }}
-      />
+        onDeleteConversation={(thread) => { if (!settings.confirmDestructiveActions || window.confirm(`Delete “${thread.title}”? This cannot be undone.`)) void run("conversation.delete", { type: "conversation.delete", payload: { conversationId: thread.id } }).catch(() => undefined); }}
+        onRemoveProject={(item) => { if (!settings.confirmDestructiveActions || window.confirm(`Remove “${item.name}” from Inertia? Files on disk will not be deleted.`)) void run("project.remove", { type: "project.remove", payload: { projectId: item.id } }).catch(() => undefined); }}
+      />}
 
-      {!mobileNavigation && (
+      {!mobileNavigation && !sidebarCollapsed && (
         <PaneResizeHandle
           label="Resize project navigation"
           controls="main-workspace"
@@ -457,8 +488,8 @@ export default function App(): React.JSX.Element {
       <section className="workspace-shell" id="main-workspace">
         <div className="workspace-frame">
           <WorkspaceHeader
-            project={project} conversation={conversation} view={view} activeTool={activeTool} theme={settings.theme} gitStatus={gitStatus} branches={branches} actions={projectActions} busy={Boolean(busyAction)}
-            onOpenSidebar={() => setSidebarOpen(true)} onToggleTools={() => setActiveTool((tool) => tool ? null : "terminal")} onCycleTheme={cycleTheme} onOpenSettings={() => setView("settings")}
+            project={project} conversation={conversation} view={view} activeTool={activeTool} sidebarCollapsed={sidebarCollapsed} theme={settings.theme} gitStatus={gitStatus} branches={branches} actions={projectActions} busy={Boolean(busyAction)}
+            onOpenSidebar={() => { if (mobileNavigation) setSidebarOpen(true); else setSidebarCollapsed((collapsed) => !collapsed); }} onToggleTools={() => setActiveTool((tool) => tool ? null : "terminal")} onCycleTheme={cycleTheme} onOpenSettings={() => setView("settings")}
             onOpenProject={() => { if (project) void window.inertia.openPath(project.path).then((error) => { if (error) setActionError(error); }); }} onRefreshBranches={loadBranches}
             onSwitchBranch={(name) => mutateBranch("git.branch.switch", name)} onCreateBranch={(name) => mutateBranch("git.branch.create", name)} onCommit={() => setCommitDialogOpen(true)} onRunAction={runProjectAction}
             onOpenPullRequest={() => { if (project) void run("git.pr.open", { type: "git.pr.open", payload: { projectId: project.id, conversationId: conversation?.id } }).then(resultEvent).then((event) => { if (event.result.kind === "external.url") return window.inertia.openExternal(event.result.url); }).catch(() => undefined); }}
@@ -483,7 +514,7 @@ export default function App(): React.JSX.Element {
                 onUnarchive={(thread) => { void run("conversation.unarchive", { type: "conversation.unarchive", payload: { conversationId: thread.id } }).catch(() => undefined); }}
               />
             ) : (
-              <ChatWorkspace project={project} conversation={conversation} messages={messages} activities={activities} checkpoints={checkpoints} streamingText={streamingText} approvals={pendingApprovals.filter((request) => request.conversationId === conversation?.id)} inputRequests={pendingInputs.filter((request) => request.conversationId === conversation?.id)} providers={connection.snapshot?.providers ?? []} actions={projectActions} mentionResults={mentionResults} showTimestamps={settings.showTimestamps} loading={!connection.snapshot && connection.status !== "offline"} sending={busyAction === "message.send"} onAddProject={() => void importProject()} onCreateConversation={() => createConversation()} onSendMessage={sendMessage} onRespondToApproval={respondToApproval} onRespondToInput={respondToInput} onUpdateConversation={updateConversation} onChooseAttachments={chooseComposerAttachments} onImportAttachments={importComposerAttachments} onRunAction={runProjectAction} onMentionQuery={searchMentions} onConnectProvider={connectProvider} onRefreshProvider={refreshProvider} onRevertCheckpoint={(checkpoint) => { if (conversation && window.confirm("Restore the project to before this turn? Untracked files created later will be left in place.")) void run("checkpoint.revert", { type: "checkpoint.revert", payload: { conversationId: conversation.id, checkpointId: checkpoint.id } }).then(() => loadGit()).catch(() => undefined); }} onStop={() => { if (conversation) void run("agent.stop", { type: "agent.stop", payload: { conversationId: conversation.id } }).catch(() => undefined); }} />
+              <ChatWorkspace project={project} conversation={conversation} messages={messages} activities={activities} reasonings={reasonings} checkpoints={checkpoints} streamingText={streamingText} streamingReasoning={streamingReasoning} usage={usage} approvals={pendingApprovals.filter((request) => request.conversationId === conversation?.id)} inputRequests={pendingInputs.filter((request) => request.conversationId === conversation?.id)} providers={connection.snapshot?.providers ?? []} actions={projectActions} mentionResults={mentionResults} showTimestamps={settings.showTimestamps} showThinking={settings.showThinking} showUsage={settings.showUsage} loading={!connection.snapshot && connection.status !== "offline"} sending={busyAction === "message.send"} onAddProject={() => void importProject()} onCreateConversation={() => createConversation()} onSendMessage={sendMessage} onRespondToApproval={respondToApproval} onRespondToInput={respondToInput} onUpdateConversation={updateConversation} onChooseAttachments={chooseComposerAttachments} onImportAttachments={importComposerAttachments} onRunAction={runProjectAction} onMentionQuery={searchMentions} onConnectProvider={connectProvider} onRefreshProvider={refreshProvider} onRevertCheckpoint={(checkpoint) => { if (conversation && (!settings.confirmDestructiveActions || window.confirm("Restore the project to before this turn? Untracked files created later will be left in place."))) void run("checkpoint.revert", { type: "checkpoint.revert", payload: { conversationId: conversation.id, checkpointId: checkpoint.id } }).then(() => loadGit()).catch(() => undefined); }} onStop={() => { if (conversation) void run("agent.stop", { type: "agent.stop", payload: { conversationId: conversation.id } }).catch(() => undefined); }} />
             )}
 
             {toolsVisible && (

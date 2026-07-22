@@ -53,12 +53,24 @@ export interface CodexPlanStep {
   status: "pending" | "inProgress" | "completed";
 }
 
+export interface CodexUsageSnapshot {
+  usedTokens: number;
+  totalProcessedTokens: number | null;
+  maxTokens: number | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  reasoningOutputTokens: number | null;
+  compactsAutomatically: boolean;
+}
+
 export interface CodexAppServerOptions {
   executable: string;
   environment: NodeJS.ProcessEnv;
   cwd: string;
   prompt: string;
   model?: string;
+  reasoningEffort?: string;
   sessionId?: string;
   imagePaths?: readonly string[];
   planMode: boolean;
@@ -72,6 +84,8 @@ export interface CodexAppServerOptions {
   onInputRequest?: (request: CodexInputRequest) => void;
   onInputResolved?: (requestId: string) => void;
   onPlan?: (explanation: string | null, steps: CodexPlanStep[]) => void;
+  onReasoning?: (text: string) => void;
+  onUsage?: (usage: CodexUsageSnapshot) => void;
 }
 
 export interface CodexAppServerResult {
@@ -130,6 +144,28 @@ function objectValue(value: unknown): JsonObject | undefined {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function nonNegativeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function tokenUsage(value: unknown): CodexUsageSnapshot | undefined {
+  const usage = objectValue(value);
+  const last = objectValue(usage?.last);
+  const total = objectValue(usage?.total);
+  const usedTokens = nonNegativeNumber(last?.totalTokens);
+  if (usedTokens === null || usedTokens <= 0) return undefined;
+  return {
+    usedTokens,
+    totalProcessedTokens: nonNegativeNumber(total?.totalTokens),
+    maxTokens: nonNegativeNumber(usage?.modelContextWindow),
+    inputTokens: nonNegativeNumber(last?.inputTokens),
+    cachedInputTokens: nonNegativeNumber(last?.cachedInputTokens),
+    outputTokens: nonNegativeNumber(last?.outputTokens),
+    reasoningOutputTokens: nonNegativeNumber(last?.reasoningOutputTokens),
+    compactsAutomatically: true,
+  };
 }
 
 function boundedText(value: unknown, maxChars: number): string | undefined {
@@ -445,6 +481,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
   const pendingApprovals = new Map<string, PendingApproval>();
   const pendingInputs = new Map<string, PendingInput>();
   const deltaItems = new Set<string>();
+  const reasoningDeltaItems = new Set<string>();
   let nextRequestId = 1;
   let providerThreadId = options.sessionId;
   let activeTurnId: string | undefined;
@@ -628,11 +665,37 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
       return;
     }
 
+    if (method === "item/reasoning/summaryTextDelta") {
+      const delta = stringValue(params.delta);
+      if (!delta) return;
+      const itemId = boundedText(params.itemId, 512);
+      if (itemId) reasoningDeltaItems.add(itemId);
+      options.onReasoning?.(delta);
+      return;
+    }
+
+    if (method === "thread/tokenUsage/updated") {
+      const usage = tokenUsage(params.tokenUsage);
+      if (usage) options.onUsage?.(usage);
+      return;
+    }
+
     if (method === "item/started" || method === "item/completed") {
       const item = objectValue(params.item);
       const itemType = stringValue(item?.type);
       const phase = method === "item/completed" ? "completed" : "started";
-      if (itemType === "reasoning") emitActivity("reasoning", phase, "Reasoning");
+      if (itemType === "reasoning") {
+        emitActivity("reasoning", phase, "Thinking");
+        if (method === "item/completed") {
+          const itemId = boundedText(item?.id, 512);
+          if (!itemId || !reasoningDeltaItems.has(itemId)) {
+            const summary = Array.isArray(item?.summary)
+              ? item.summary.flatMap((part) => boundedText(objectValue(part)?.text, 32_000) ?? []).join("\n")
+              : "";
+            if (summary) options.onReasoning?.(summary);
+          }
+        }
+      }
       else if (itemType === "commandExecution") emitActivity("command", phase, "Command");
       else if (itemType === "fileChange") emitActivity("tool", phase, "File change");
       else if (itemType === "agentMessage" && method === "item/completed") {
@@ -744,7 +807,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     void (async () => {
       try {
         await request("initialize", {
-          clientInfo: { name: "inertia", title: "Inertia", version: "0.0.2" },
+          clientInfo: { name: "inertia", title: "Inertia", version: "0.0.3" },
           capabilities: {
             experimentalApi: true,
             requestAttestation: false,
@@ -760,6 +823,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
           approvalsReviewer: "user",
           sandbox: readOnly ? "read-only" : "workspace-write",
           ...(options.model ? { model: options.model } : {}),
+          ...(options.reasoningEffort ? { effort: options.reasoningEffort } : {}),
         };
         let opened: JsonObject;
         if (options.sessionId) {
@@ -798,12 +862,14 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
             ? { type: "readOnly", networkAccess: false }
             : { type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
           ...(options.model ? { model: options.model } : {}),
+          ...(options.reasoningEffort ? { effort: options.reasoningEffort } : {}),
+          summary: "auto",
           ...(options.planMode ? {
             collaborationMode: {
               mode: "plan",
               settings: {
                 model: effectiveModel,
-                reasoning_effort: null,
+                reasoning_effort: options.reasoningEffort ?? null,
                 developer_instructions: null,
               },
             },

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Menu, PanelRightClose, PanelRightOpen, Plus, Settings, SunMoon } from "lucide-react";
+import { ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { IconButton } from "./ui";
@@ -9,6 +9,7 @@ type WorkspaceHeaderProps = {
   conversation: Conversation | null;
   view: "workspace" | "settings";
   activeTool: WorkspacePanelTab | null;
+  sidebarCollapsed: boolean;
   theme: ThemePreference;
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
@@ -33,6 +34,7 @@ export function WorkspaceHeader({
   conversation,
   view,
   activeTool,
+  sidebarCollapsed,
   theme,
   gitStatus,
   branches,
@@ -58,7 +60,9 @@ export function WorkspaceHeader({
   return (
     <header className="workspace-header drag-region">
       <div className="header-leading no-drag">
-        <IconButton label="Open navigation" className="menu-button" onClick={onOpenSidebar}><Menu size={18} /></IconButton>
+        <IconButton label="Toggle project navigation" className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
+          {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        </IconButton>
         <div className="header-title-wrap"><span className="header-eyebrow">{eyebrow}</span><h1>{title}</h1></div>
       </div>
 

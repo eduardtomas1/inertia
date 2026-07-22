@@ -60,7 +60,7 @@ test.beforeAll(async () => {
   await execFileAsync("git", ["-c", "user.name=Inertia", "-c", "user.email=test@inertia.local", "commit", "-qm", "fixture"], { cwd: workspaceDirectory });
   await writeFile(join(workspaceDirectory, "sample.ts"), "export const version = '0.0.1';\nexport const ready = true;\n", "utf8");
   electronApp = await electron.launch({
-    args: ["."],
+    args: [".", `--user-data-dir=${join(testDirectory, "electron-profile")}`],
     env: {
       ...process.env,
       NODE_ENV: "test",
@@ -96,9 +96,14 @@ test("boots the local workspace and terminal", async () => {
 
 test("navigates settings, changes theme, and returns to chat", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "A workspace that stays out of the way." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
   await page.getByRole("radio", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "Providers", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Providers", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Agent accounts" })).toBeVisible();
+  await page.getByRole("button", { name: "Keybindings", exact: true }).click();
+  await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Go to workspace" }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
@@ -111,8 +116,8 @@ test("navigates settings, changes theme, and returns to chat", async () => {
 test("opens the command palette and manages a thread", async () => {
   await resizeWindow(1440, 920);
   await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
-  await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
-  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: /New thread/ }).click();
+  await expect(page.getByRole("dialog", { name: "Search Inertia" })).toBeVisible();
+  await page.getByRole("dialog", { name: "Search Inertia" }).getByRole("option", { name: /New thread/ }).click();
   await expect(page.getByRole("heading", { name: "New thread", level: 1 })).toBeVisible();
 
   await page.getByRole("button", { name: "Thread actions for New thread" }).click();
@@ -125,6 +130,13 @@ test("opens the command palette and manages a thread", async () => {
   await page.getByRole("button", { name: "Thread actions for Focused V1 pass" }).click();
   await page.getByRole("menuitem", { name: "Archive" }).click();
   await expect(page.getByRole("heading", { name: "Welcome to Inertia", level: 1 })).toBeVisible();
+
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
+  const search = page.getByRole("combobox", { name: "Search commands, projects, and threads" });
+  await search.fill("settings");
+  await search.press("Enter");
+  await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Go to workspace" }).click();
   expect(rendererErrors).toEqual([]);
 });
 
@@ -211,6 +223,25 @@ test("resizes and persists the internal workspace panes", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
+test("collapses and restores both workspace sides without losing layout", async () => {
+  await resizeWindow(1440, 920);
+  const navigationToggle = page.getByRole("button", { name: "Toggle project navigation" });
+  await navigationToggle.click();
+  await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("inertia:layout:sidebar-collapsed:v1"))).toBe("true");
+  await navigationToggle.click();
+  await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
+
+  const toolsToggle = page.getByRole("button", { name: "Close workspace tools" }).first();
+  await toolsToggle.click();
+  await expect(page.locator(".workspace-panel")).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("inertia:layout:active-tool:v1"))).toBe("collapsed");
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await expect(page.locator(".workspace-panel")).toBeVisible();
+  await expectNoViewportOverflow();
+  expect(rendererErrors).toEqual([]);
+});
+
 for (const size of [
   { width: 1440, height: 920, label: "wide" },
   { width: 1024, height: 760, label: "stacked" },
@@ -223,8 +254,8 @@ for (const size of [
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
 
     if (size.width <= 760) {
-      await page.getByRole("button", { name: "Open navigation" }).click();
-      await expect(page.getByLabel("Project navigation")).toBeVisible();
+      await page.getByRole("button", { name: "Toggle project navigation" }).click();
+      await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
       await expectNoViewportOverflow();
       await page.getByRole("button", { name: "Close navigation" }).last().click();
     }

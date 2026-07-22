@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProviderManager, type ProviderAccessMode, type ProviderApprovalEvent } from "../../src/server/providers";
+import { readCodexMetadata } from "../../src/server/codex-metadata";
 
 describe.sequential("Codex App Server runtime", () => {
   const roots: string[] = [];
@@ -65,6 +66,8 @@ const requestInput = () => send({
 });
 const complete = () => {
   send({ method: "turn/plan/updated", params: { threadId, turnId, explanation: "A native plan", plan: [{ step: "Inspect", status: "completed" }, { step: "Implement", status: "inProgress" }] } });
+  send({ method: "item/reasoning/summaryTextDelta", params: { threadId, turnId, itemId: "reasoning-1", summaryIndex: 0, delta: "Checking the safest path." } });
+  send({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { total: { totalTokens: 11839, inputTokens: 11833, cachedInputTokens: 3456, outputTokens: 6, reasoningOutputTokens: 0 }, last: { totalTokens: 126, inputTokens: 120, cachedInputTokens: 0, outputTokens: 6, reasoningOutputTokens: 0 }, modelContextWindow: 258400 } } });
   send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "Hello " } });
   send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "from Codex" } });
   send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
@@ -76,6 +79,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return send({ id: message.id, result: { userAgent: "fake" } });
   }
   if (message.method === "initialized") return;
+  if (message.method === "model/list") return send({ id: message.id, result: { data: [{ id: "model-a", model: "model-a", displayName: "Model A", description: "A test model", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Quick" }, { reasoningEffort: "high", description: "Careful" }], defaultReasoningEffort: "low", inputModalities: ["text", "image"], isDefault: true }], nextCursor: null } });
+  if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: { limitId: "codex", limitName: null, primary: { usedPercent: 37, windowDurationMins: 10080, resetsAt: 1893456000 }, secondary: null }, rateLimitsByLimitId: null } });
   if (message.method === "thread/start" || message.method === "thread/resume") {
     threadId = message.params.threadId || "thread-new";
     send({ id: message.id, result: { thread: { id: threadId }, cwd: process.cwd(), model: "fake" } });
@@ -149,6 +154,29 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
   }
 
+  it.skipIf(process.platform === "win32")("reads provider-supplied models, reasoning options, and remaining usage", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    const metadata = await readCodexMetadata(fake.command, process.env, fake.root);
+    expect(metadata.models).toEqual([expect.objectContaining({
+      id: "model-a",
+      label: "Model A",
+      isDefault: true,
+      defaultReasoningEffort: "low",
+      reasoningOptions: [
+        { value: "low", label: "Low", description: "Quick" },
+        { value: "high", label: "High", description: "Careful" },
+      ],
+    })]);
+    expect(metadata.rateLimits).toEqual([expect.objectContaining({
+      id: "codex:primary",
+      label: "Codex usage",
+      usedPercent: 37,
+      remainingPercent: 63,
+      windowMinutes: 10080,
+    })]);
+  });
+
   it.skipIf(process.platform === "win32")("round-trips approve-once, user input, native plans, deltas, resume, and images", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
@@ -158,6 +186,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const approvalRequests: ProviderApprovalEvent["request"][] = [];
     const inputs: string[] = [];
     const plans: string[] = [];
+    const reasoning: string[] = [];
+    const usage: number[] = [];
 
     const run = manager.run({
       providerId: "codex",
@@ -168,6 +198,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       access: "supervised",
       sessionId: "thread-existing",
       imagePaths: [join(fake.root, "reference.png")],
+      reasoningEffort: "high",
     }, {
       onApproval: (event) => {
         approvals.push(event.request.command ?? "");
@@ -179,6 +210,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["  Safe  "] })).toBe(true);
       },
       onPlan: (event) => plans.push(event.explanation ?? ""),
+      onReasoning: (event) => reasoning.push(event.text),
+      onUsage: (event) => usage.push(event.usage.usedTokens),
     });
 
     const result = await run;
@@ -195,12 +228,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
     expect(inputs).toEqual(["Which path should Codex take?"]);
     expect(plans).toEqual(["A native plan"]);
+    expect(reasoning).toEqual(["Checking the safest path."]);
+    expect(usage).toEqual([126]);
 
     const messages = captured(fake.capturePath);
     const resumed = messages.find(({ method }) => method === "thread/resume") as { params: Record<string, unknown> };
     const turn = messages.find(({ method }) => method === "turn/start") as { params: Record<string, unknown> };
-    expect(resumed.params).toMatchObject({ threadId: "thread-existing", excludeTurns: true, approvalPolicy: "untrusted", approvalsReviewer: "user", sandbox: "read-only" });
-    expect(turn.params).toMatchObject({ approvalPolicy: "untrusted", sandboxPolicy: { type: "readOnly", networkAccess: false } });
+    expect(resumed.params).toMatchObject({ threadId: "thread-existing", excludeTurns: true, approvalPolicy: "untrusted", approvalsReviewer: "user", sandbox: "read-only", effort: "high" });
+    expect(turn.params).toMatchObject({ approvalPolicy: "untrusted", sandboxPolicy: { type: "readOnly", networkAccess: false }, effort: "high", summary: "auto" });
     expect(turn.params.input).toEqual([
       { type: "text", text: "Work carefully", text_elements: [] },
       { type: "localImage", path: join(fake.root, "reference.png") },

@@ -116,4 +116,39 @@ describe("RuntimeStore conversation lifecycle", () => {
     ]);
     reopened.close();
   });
+
+  it("persists reasoning summaries, context usage, and provider-aware thread defaults", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    store.updateSettings({
+      showThinking: false,
+      showUsage: true,
+      defaultModel: "model-a",
+      defaultReasoningEffort: "high",
+      defaultInteractionMode: "plan",
+    });
+    const project = store.snapshot().projects[0];
+    const conversation = store.createConversation(project.id, "Provider metadata");
+    const reasoning = store.createReasoning(conversation.id, "run-metadata");
+    store.updateReasoning(reasoning.id, { content: "Checked the safe path.", status: "completed" });
+    store.upsertUsage({
+      conversationId: conversation.id,
+      usedTokens: 126,
+      totalProcessedTokens: 11_839,
+      maxTokens: 258_400,
+      inputTokens: 120,
+      cachedInputTokens: 0,
+      outputTokens: 6,
+      reasoningOutputTokens: 0,
+      compactsAutomatically: true,
+    });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    const snapshot = reopened.snapshot();
+    expect(snapshot.settings).toMatchObject({ showThinking: false, showUsage: true, defaultModel: "model-a", defaultReasoningEffort: "high", defaultInteractionMode: "plan" });
+    expect(snapshot.conversations.find(({ id }) => id === conversation.id)).toMatchObject({ model: "model-a", reasoningEffort: "high", interactionMode: "plan" });
+    expect(snapshot.reasonings).toContainEqual(expect.objectContaining({ id: reasoning.id, content: "Checked the safe path.", status: "completed" }));
+    expect(snapshot.usage).toContainEqual(expect.objectContaining({ conversationId: conversation.id, usedTokens: 126, maxTokens: 258_400, compactsAutomatically: true }));
+    reopened.close();
+  });
 });

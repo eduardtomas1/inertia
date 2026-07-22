@@ -15,6 +15,10 @@ describe("provider compatibility status", () => {
       authState: "authenticated",
       canRun: false,
       statusMessage: "Update Codex CLI to enable agent conversations",
+      models: [],
+      rateLimits: [],
+      supportsReasoning: true,
+      supportsUsage: true,
     };
 
     expect(providerStateLabel(provider)).toBe("Update required");

@@ -7,6 +7,8 @@ import {
   type CodexInputRequest,
   type CodexPlanStep,
 } from "./codex-app-server";
+import type { ThreadUsageSnapshot } from "../shared/contracts";
+import { readCodexMetadata, type CodexMetadata } from "./codex-metadata";
 import { executableCandidates, providerEnvironment, type ProviderEnvironment } from "./environment";
 
 export const PROVIDER_IDS = ["codex", "claude", "cursor", "opencode"] as const;
@@ -103,6 +105,7 @@ interface ProviderRunRequest {
   cwd: string;
   prompt: string;
   model?: string;
+  reasoningEffort?: string;
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
@@ -182,6 +185,16 @@ export interface ProviderPlanEvent extends ProviderEventBase {
   steps: CodexPlanStep[];
 }
 
+export interface ProviderReasoningEvent extends ProviderEventBase {
+  type: "reasoning-summary";
+  text: string;
+}
+
+export interface ProviderUsageEvent extends ProviderEventBase {
+  type: "usage";
+  usage: Omit<ThreadUsageSnapshot, "conversationId" | "updatedAt">;
+}
+
 export type ProviderEvent =
   | ProviderTextEvent
   | ProviderActivityEvent
@@ -191,7 +204,9 @@ export type ProviderEvent =
   | ProviderApprovalResolvedEvent
   | ProviderInputEvent
   | ProviderInputResolvedEvent
-  | ProviderPlanEvent;
+  | ProviderPlanEvent
+  | ProviderReasoningEvent
+  | ProviderUsageEvent;
 
 export interface ProviderRunCallbacks {
   onEvent?: (event: ProviderEvent) => void;
@@ -204,6 +219,8 @@ export interface ProviderRunCallbacks {
   onInput?: (event: ProviderInputEvent) => void;
   onInputResolved?: (event: ProviderInputResolvedEvent) => void;
   onPlan?: (event: ProviderPlanEvent) => void;
+  onReasoning?: (event: ProviderReasoningEvent) => void;
+  onUsage?: (event: ProviderUsageEvent) => void;
 }
 
 export interface ProviderRunResult {
@@ -348,6 +365,8 @@ function makeEmitter(
   input: (request: CodexInputRequest) => void;
   inputResolved: (requestId: string) => void;
   plan: (explanation: string | null, steps: CodexPlanStep[]) => void;
+  reasoning: (text: string) => void;
+  usage: (usage: ProviderUsageEvent["usage"]) => void;
 } {
   const event = (providerEvent: ProviderEvent): void => {
     safeCallback(() => callbacks.onEvent?.(providerEvent));
@@ -379,6 +398,12 @@ function makeEmitter(
       case "plan":
         safeCallback(() => callbacks.onPlan?.(providerEvent));
         break;
+      case "reasoning-summary":
+        safeCallback(() => callbacks.onReasoning?.(providerEvent));
+        break;
+      case "usage":
+        safeCallback(() => callbacks.onUsage?.(providerEvent));
+        break;
     }
   };
 
@@ -394,6 +419,8 @@ function makeEmitter(
     input: (request) => event({ ...base, type: "input", request }),
     inputResolved: (requestId) => event({ ...base, type: "input-resolved", requestId }),
     plan: (explanation, steps) => event({ ...base, type: "plan", explanation, steps }),
+    reasoning: (text) => event({ ...base, type: "reasoning-summary", text }),
+    usage: (usage) => event({ ...base, type: "usage", usage }),
   };
 }
 
@@ -1019,6 +1046,16 @@ export class ProviderManager {
     return { executable, args: PROVIDER_AUTH[providerId].loginArgs, env: environment.env };
   }
 
+  async metadata(providerId: ProviderId, cwd = process.cwd()): Promise<CodexMetadata> {
+    if (providerId !== "codex") return { models: [], rateLimits: [] };
+    let executable = this.resolvedCommands.get(providerId);
+    if (!executable) executable = (await this.detect(providerId)).executable;
+    if (!executable) return { models: [], rateLimits: [] };
+    const environment = await providerEnvironment();
+    this.processEnvironment = environment.env;
+    return await readCodexMetadata(executable, environment.env, cwd);
+  }
+
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks = {}): Promise<ProviderRunResult> {
     const conversationId = validateRunInput(input);
     if (this.activeRuns.has(conversationId)) {
@@ -1259,6 +1296,7 @@ export class ProviderManager {
         cwd: input.cwd,
         prompt: input.prompt,
         ...(input.model ? { model: input.model } : {}),
+        ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         ...(input.imagePaths ? { imagePaths: input.imagePaths } : {}),
         planMode: input.interactionMode === "plan",
@@ -1272,6 +1310,8 @@ export class ProviderManager {
         onInputRequest: emitter.input,
         onInputResolved: emitter.inputResolved,
         onPlan: emitter.plan,
+        onReasoning: emitter.reasoning,
+        onUsage: emitter.usage,
       });
     } catch (error) {
       const spawnError = error instanceof Error ? error as NodeJS.ErrnoException : undefined;

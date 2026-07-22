@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Command, Paperclip, Send, ShieldCheck, Sparkles, Square, Wrench, X } from "lucide-react";
 import clsx from "clsx";
-import type { AccessMode, ChatAttachment, Conversation, InteractionMode, ProjectAction, ProviderId, ProviderInfo, WorkspaceEntry } from "@shared/contracts";
+import type { AccessMode, ChatAttachment, Conversation, InteractionMode, ProjectAction, ProviderId, ProviderInfo, ThreadUsageSnapshot, WorkspaceEntry } from "@shared/contracts";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { IconButton, LoadingMark } from "./ui";
+import { UsageIndicator } from "./UsageIndicator";
 
 type ComposerProps = {
   conversation: Conversation;
@@ -13,8 +14,10 @@ type ComposerProps = {
   sending: boolean;
   running: boolean;
   mentionResults: WorkspaceEntry[];
+  usage: ThreadUsageSnapshot | null;
+  showUsage: boolean;
   onSend: (message: string, attachments: ChatAttachment[]) => Promise<void>;
-  onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "model" | "interactionMode" | "accessMode">>) => void;
+  onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => void;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
   onRunAction: (action: ProjectAction) => void;
@@ -38,6 +41,8 @@ export function Composer({
   sending,
   running,
   mentionResults,
+  usage,
+  showUsage,
   onSend,
   onUpdateConversation,
   onChooseAttachments,
@@ -50,13 +55,10 @@ export function Composer({
 }: ComposerProps): React.JSX.Element {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [menu, setMenu] = useState<"provider" | "mode" | "access" | "action" | null>(null);
-  const [modelDraft, setModelDraft] = useState(conversation.model);
+  const [menu, setMenu] = useState<"provider" | "reasoning" | "mode" | "access" | "action" | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
-
-  useEffect(() => setModelDraft(conversation.model), [conversation.id, conversation.model]);
 
   useEffect(() => {
     setMessage(window.localStorage.getItem(`inertia:draft:${conversation.id}`) ?? "");
@@ -106,6 +108,10 @@ export function Composer({
   };
 
   const selectedProvider = providers.find((provider) => provider.id === conversation.providerId);
+  const selectedModel = selectedProvider?.models.find(({ id }) => id === conversation.model)
+    ?? selectedProvider?.models.find(({ isDefault }) => isDefault)
+    ?? selectedProvider?.models[0];
+  const selectedReasoning = conversation.reasoningEffort || selectedModel?.defaultReasoningEffort || "";
   const selectedProviderReady = selectedProvider?.canRun === true;
   const selectedProviderAction = selectedProvider ? providerSetupAction(selectedProvider) : "refresh";
   const canSend = (Boolean(message.trim()) || attachments.length > 0) && selectedProviderReady && !disabled && !sending && !running;
@@ -204,24 +210,46 @@ export function Composer({
           <div className="composer-options">
             <div className="popover-anchor">
               <button type="button" className={clsx("composer-pill", menu === "provider" && "is-active")} aria-expanded={menu === "provider"} onClick={() => setMenu(menu === "provider" ? null : "provider")}>
-                <Sparkles size={14} /><span>{selectedProvider?.label ?? conversation.providerId}</span><ChevronDown size={12} />
+                <Sparkles size={14} /><span>{selectedModel?.label ?? selectedProvider?.label ?? conversation.providerId}</span><ChevronDown size={12} />
               </button>
               {menu === "provider" && (
                 <div className="composer-popover provider-popover" role="menu" aria-label="Provider and model">
                   <div className="popover-title">Provider</div>
                   {providers.map((provider) => (
-                    <button type="button" role="menuitemradio" aria-checked={conversation.providerId === provider.id} key={provider.id} onClick={() => { onUpdateConversation({ providerId: provider.id as ProviderId }); setMenu(null); }}>
+                    <button type="button" role="menuitemradio" aria-checked={conversation.providerId === provider.id} key={provider.id} onClick={() => { onUpdateConversation({ providerId: provider.id as ProviderId, model: "", reasoningEffort: "" }); }}>
                       <span><strong>{provider.label}</strong><small>{providerStateLabel(provider)} · {providerStateDetail(provider)}</small></span>
                       {conversation.providerId === provider.id && <span className="option-check" />}
                     </button>
                   ))}
-                  <label className="model-input-label">
-                    <span>Model override</span>
-                    <input value={modelDraft} placeholder="Provider default" onChange={(event) => setModelDraft(event.target.value)} onBlur={() => onUpdateConversation({ model: modelDraft.trim() })} onKeyDown={(event) => { if (event.key === "Enter") { onUpdateConversation({ model: modelDraft.trim() }); setMenu(null); } }} />
-                  </label>
+                  <div className="popover-title model-popover-title">Model</div>
+                  {selectedProvider?.models.length ? selectedProvider.models.map((model) => (
+                    <button type="button" role="menuitemradio" aria-checked={selectedModel?.id === model.id} key={model.id} onClick={() => { onUpdateConversation({ model: model.id, reasoningEffort: model.defaultReasoningEffort }); setMenu(null); }}>
+                      <span><strong>{model.label}{model.isDefault ? " · Default" : ""}</strong><small>{model.description}</small></span>
+                      {selectedModel?.id === model.id && <span className="option-check" />}
+                    </button>
+                  )) : <p className="popover-empty">Model choices are not exposed by this provider yet. Its default will be used.</p>}
                 </div>
               )}
             </div>
+
+            {selectedModel && selectedModel.reasoningOptions.length > 0 && (
+              <div className="popover-anchor">
+                <button type="button" className={clsx("composer-pill reasoning-pill", menu === "reasoning" && "is-active")} aria-expanded={menu === "reasoning"} onClick={() => setMenu(menu === "reasoning" ? null : "reasoning")}>
+                  <span>{selectedModel.reasoningOptions.find(({ value }) => value === selectedReasoning)?.label ?? "Reasoning"}</span><ChevronDown size={12} />
+                </button>
+                {menu === "reasoning" && (
+                  <div className="composer-popover option-popover reasoning-popover" role="menu" aria-label="Reasoning level">
+                    <div className="popover-title">Reasoning</div>
+                    {selectedModel.reasoningOptions.map((option) => (
+                      <button type="button" role="menuitemradio" aria-checked={selectedReasoning === option.value} key={option.value} onClick={() => { onUpdateConversation({ reasoningEffort: option.value }); setMenu(null); }}>
+                        <span><strong>{option.label}{option.value === selectedModel.defaultReasoningEffort ? " · Default" : ""}</strong><small>{option.description}</small></span>
+                        {selectedReasoning === option.value && <span className="option-check" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="popover-anchor">
               <button type="button" className={clsx("composer-pill", menu === "mode" && "is-active")} aria-expanded={menu === "mode"} onClick={() => setMenu(menu === "mode" ? null : "mode")}>
@@ -266,7 +294,10 @@ export function Composer({
           </div>
         </div>
       </div>
-      <p className="composer-note">Use @ for project files and / for modes · review changes before committing</p>
+      <div className="composer-footer">
+        <p className="composer-note">Use @ for project files and / for modes · review changes before committing</p>
+        {showUsage && selectedProvider && <UsageIndicator usage={usage} rateLimits={selectedProvider.rateLimits} supportsUsage={selectedProvider.supportsUsage} />}
+      </div>
     </div>
   );
 }

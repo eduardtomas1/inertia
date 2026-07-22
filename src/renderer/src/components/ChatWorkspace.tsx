@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
-import { ArrowRight, CheckCircle2, CircleDot, Code2, FolderPlus, MessageSquarePlus, Paperclip, RotateCcw, ShieldCheck, TerminalSquare, TriangleAlert } from "lucide-react";
+import { ArrowRight, BrainCircuit, CheckCircle2, CircleDot, Code2, FolderPlus, MessageSquarePlus, Paperclip, RotateCcw, ShieldCheck, TerminalSquare, TriangleAlert } from "lucide-react";
 import clsx from "clsx";
-import type { AgentActivity, AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest, ChatAttachment, ChatMessage, CheckpointSummary, Conversation, Project, ProjectAction, ProviderId, ProviderInfo, WorkspaceEntry } from "@shared/contracts";
+import type { AgentActivity, AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest, AgentReasoning, ChatAttachment, ChatMessage, CheckpointSummary, Conversation, Project, ProjectAction, ProviderId, ProviderInfo, ThreadUsageSnapshot, WorkspaceEntry } from "@shared/contracts";
 import { formatClockTime } from "../lib/format";
 import { ApprovalCard, InputRequestCard } from "./AgentRequestCard";
 import { Composer } from "./Composer";
@@ -12,14 +12,19 @@ type ChatWorkspaceProps = {
   conversation: Conversation | null;
   messages: ChatMessage[];
   activities: AgentActivity[];
+  reasonings: AgentReasoning[];
   checkpoints: CheckpointSummary[];
   streamingText: string;
+  streamingReasoning: string;
+  usage: ThreadUsageSnapshot | null;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   providers: ProviderInfo[];
   actions: ProjectAction[];
   mentionResults: WorkspaceEntry[];
   showTimestamps: boolean;
+  showThinking: boolean;
+  showUsage: boolean;
   loading: boolean;
   sending: boolean;
   onAddProject: () => void;
@@ -27,7 +32,7 @@ type ChatWorkspaceProps = {
   onSendMessage: (content: string, attachments: ChatAttachment[]) => Promise<void>;
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
-  onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "model" | "interactionMode" | "accessMode">>) => void;
+  onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => void;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
   onRunAction: (action: ProjectAction) => void;
@@ -43,14 +48,19 @@ export function ChatWorkspace({
   conversation,
   messages,
   activities,
+  reasonings,
   checkpoints,
   streamingText,
+  streamingReasoning,
+  usage,
   approvals,
   inputRequests,
   providers,
   actions,
   mentionResults,
   showTimestamps,
+  showThinking,
+  showUsage,
   loading,
   sending,
   onAddProject,
@@ -76,7 +86,7 @@ export function ChatWorkspace({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, activities.length, streamingText, conversation?.id]);
+  }, [messages.length, activities.length, streamingText, streamingReasoning, conversation?.id]);
 
   if (loading) {
     return (
@@ -144,7 +154,18 @@ export function ChatWorkspace({
         {messages.map((message, messageIndex) => {
           const turnIndex = messages.slice(0, messageIndex + 1).filter(({ role }) => role === "user").length;
           const checkpoint = message.role === "user" ? checkpoints.find((item) => item.turnIndex === turnIndex) : undefined;
+          const precedingUser = [...messages.slice(0, messageIndex)].reverse().find(({ role }) => role === "user");
+          const reasoning = message.role === "assistant"
+            ? [...reasonings].reverse().find((item) => item.createdAt <= message.createdAt && (!precedingUser || item.createdAt >= precedingUser.createdAt))
+            : undefined;
           return (
+          <div className="message-group" key={message.id}>
+          {showThinking && reasoning?.content && (
+            <details className="thinking-summary">
+              <summary><BrainCircuit size={14} /><span>Thought through this turn</span><small>{reasoning.status === "running" ? "Live" : "Summary"}</small></summary>
+              <div>{reasoning.content}</div>
+            </details>
+          )}
           <article className={clsx("message", `is-${message.role}`)} key={message.id}>
             <div className="message-meta">
               <span>{message.role === "assistant" ? "Inertia" : message.role === "system" ? "System" : "You"}</span>
@@ -158,10 +179,17 @@ export function ChatWorkspace({
               </div>
             )}
           </article>
+          </div>
           );
         })}
-        {(activities.length > 0 || visibleStreamingText || approvals.length > 0 || inputRequests.length > 0) && (
+        {(activities.length > 0 || visibleStreamingText || streamingReasoning || approvals.length > 0 || inputRequests.length > 0) && (
           <section className="agent-run-card" aria-label="Agent activity">
+            {showThinking && streamingReasoning && (
+              <details className="thinking-summary is-live" open>
+                <summary><BrainCircuit size={14} /><span>Thinking</span><small>Live</small></summary>
+                <div>{streamingReasoning}<span className="streaming-caret" /></div>
+              </details>
+            )}
             {activities.map((activity) => (
               <div className={`agent-activity is-${activity.status}`} key={activity.id}>
                 {activity.status === "failed" ? <TriangleAlert size={14} /> : activity.status === "completed" ? <CheckCircle2 size={14} /> : <CircleDot size={14} />}
@@ -181,6 +209,8 @@ export function ChatWorkspace({
         providers={providers}
         actions={actions}
         mentionResults={mentionResults}
+        usage={usage}
+        showUsage={showUsage}
         disabled={!conversation}
         sending={sending}
         running={conversation.status === "running" || conversation.status === "needs-input"}

@@ -1,6 +1,6 @@
 {
   "name": "inertia",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A calm local workspace for coding with agents.",
   "desktopName": "dev.inertia.app.desktop",
   "main": "out/main/index.js",
@@ -49,6 +49,7 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icon.png",
+      "identity": "-",
       "target": [
         "dmg",
         "zip"

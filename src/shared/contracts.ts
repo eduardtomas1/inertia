@@ -13,6 +13,31 @@ export type AccessMode = "supervised" | "auto-edit" | "full";
 export type ThreadStatus = "idle" | "running" | "needs-input" | "completed" | "failed";
 export type AgentApprovalDecision = "approve" | "deny" | "cancel";
 
+export interface ProviderReasoningOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
+export interface ProviderModel {
+  id: string;
+  label: string;
+  description: string;
+  isDefault: boolean;
+  inputModalities: Array<"text" | "image">;
+  reasoningOptions: ProviderReasoningOption[];
+  defaultReasoningEffort: string;
+}
+
+export interface ProviderRateLimit {
+  id: string;
+  label: string;
+  usedPercent: number;
+  remainingPercent: number;
+  windowMinutes: number | null;
+  resetsAt: string | null;
+}
+
 export interface ProviderInfo {
   id: ProviderId;
   label: string;
@@ -23,6 +48,10 @@ export interface ProviderInfo {
   authState: ProviderAuthState;
   canRun: boolean;
   statusMessage: string | null;
+  models: ProviderModel[];
+  rateLimits: ProviderRateLimit[];
+  supportsReasoning: boolean;
+  supportsUsage: boolean;
 }
 
 export interface ChatAttachment {
@@ -44,6 +73,12 @@ export interface AppSettings {
   newThreadMode: "local" | "worktree";
   wrapDiffs: boolean;
   ignoreWhitespace: boolean;
+  showThinking: boolean;
+  showUsage: boolean;
+  autoOpenPlan: boolean;
+  confirmDestructiveActions: boolean;
+  defaultReasoningEffort: string;
+  defaultInteractionMode: InteractionMode;
 }
 
 export interface Project {
@@ -62,6 +97,7 @@ export interface Conversation {
   title: string;
   providerId: ProviderId;
   model: string;
+  reasoningEffort: string;
   interactionMode: InteractionMode;
   accessMode: AccessMode;
   status: ThreadStatus;
@@ -71,6 +107,28 @@ export interface Conversation {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ThreadUsageSnapshot {
+  conversationId: string;
+  usedTokens: number;
+  totalProcessedTokens: number | null;
+  maxTokens: number | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  reasoningOutputTokens: number | null;
+  compactsAutomatically: boolean;
+  updatedAt: string;
+}
+
+export interface AgentReasoning {
+  id: string;
+  conversationId: string;
+  runId: string;
+  content: string;
+  status: "running" | "completed" | "failed";
+  createdAt: string;
 }
 
 export interface ChatMessage {
@@ -165,6 +223,8 @@ export interface AppSnapshot {
   conversations: Conversation[];
   messages: ChatMessage[];
   activities: AgentActivity[];
+  reasonings: AgentReasoning[];
+  usage: ThreadUsageSnapshot[];
   plans: AgentPlan[];
   checkpoints: CheckpointSummary[];
   providers: ProviderInfo[];
@@ -293,6 +353,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
           title: z.string().trim().min(1).max(120),
           providerId: providerIdSchema.optional(),
           model: z.string().trim().max(160).optional(),
+          reasoningEffort: z.string().trim().max(40).optional(),
           interactionMode: interactionModeSchema.optional(),
           accessMode: accessModeSchema.optional(),
           useWorktree: z.boolean().optional(),
@@ -319,6 +380,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
           title: z.string().trim().min(1).max(120).optional(),
           providerId: providerIdSchema.optional(),
           model: z.string().trim().max(160).optional(),
+          reasoningEffort: z.string().trim().max(40).optional(),
           interactionMode: interactionModeSchema.optional(),
           accessMode: accessModeSchema.optional(),
         })
@@ -393,6 +455,12 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
           newThreadMode: z.enum(["local", "worktree"]).optional(),
           wrapDiffs: z.boolean().optional(),
           ignoreWhitespace: z.boolean().optional(),
+          showThinking: z.boolean().optional(),
+          showUsage: z.boolean().optional(),
+          autoOpenPlan: z.boolean().optional(),
+          confirmDestructiveActions: z.boolean().optional(),
+          defaultReasoningEffort: z.string().trim().max(40).optional(),
+          defaultInteractionMode: interactionModeSchema.optional(),
         })
         .strict(),
     })
@@ -582,6 +650,8 @@ export type ServerEvent =
   | { type: "snapshot.updated"; snapshot: AppSnapshot }
   | { type: "agent.started"; conversationId: string; runId: string }
   | { type: "agent.text"; conversationId: string; runId: string; text: string }
+  | { type: "agent.reasoning"; conversationId: string; runId: string; text: string }
+  | { type: "agent.usage"; usage: ThreadUsageSnapshot }
   | { type: "agent.activity"; activity: AgentActivity }
   | { type: "agent.approval.requested"; request: AgentApprovalRequest }
   | { type: "agent.approval.resolved"; conversationId: string; requestId: string; decision: "approve" | "deny" | "cancel" | "cancelled" }
@@ -605,4 +675,10 @@ export const defaultSettings: AppSettings = {
   newThreadMode: "local",
   wrapDiffs: true,
   ignoreWhitespace: false,
+  showThinking: true,
+  showUsage: true,
+  autoOpenPlan: true,
+  confirmDestructiveActions: true,
+  defaultReasoningEffort: "",
+  defaultInteractionMode: "build",
 };

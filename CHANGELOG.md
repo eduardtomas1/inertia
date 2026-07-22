@@ -23,7 +23,8 @@ The useful changes in each Inertia release, in plain language.
 - Models, reasoning options, account limits, provider versions, and authentication state now refresh through a correlated persistent cache without presenting stale values as live.
 - Usage controls stay out of the way until a provider has actually reported usage or quota data.
 - Composer menus now dismiss on outside click or Escape, restore focus predictably, and preserve the current choice until a new one is selected.
-- The frameless macOS titlebar now carries the compact Inertia mark without crowding native window controls.
+- Global shortcuts now remain available while the terminal is focused, including Command Palette on Windows and Linux.
+- The frameless macOS titlebar now carries a larger, compact Inertia mark with deliberate clearance from the native window controls.
 - CI now exercises Linux x64, Windows x64, and macOS arm64 with portable provider fixtures, Electron E2E coverage, dependency audits, native package smoke tests, signature and fuse checks, and exact non-clobbering release assets with attestations.
 
 ## 0.0.3 — 2026-07-22

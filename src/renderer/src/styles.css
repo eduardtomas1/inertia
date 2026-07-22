@@ -242,8 +242,8 @@ textarea {
 }
 
 .platform-darwin .brand-lockup::before {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   content: "";
   background: currentColor;

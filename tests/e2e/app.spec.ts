@@ -253,8 +253,8 @@ test("keeps the macOS brand in the native titlebar row and navigates it home", a
     expect(geometry).not.toBeNull();
     expect(geometry?.row.top).toBeCloseTo(12, 0);
     expect(geometry?.row.height).toBeLessThanOrEqual(30);
-    expect(geometry?.mark.width).toBe("20px");
-    expect(geometry?.mark.height).toBe("20px");
+    expect(geometry?.mark.width).toBe("24px");
+    expect(geometry?.mark.height).toBe("24px");
     expect(geometry?.mark.maskImage).toContain("inertia-logo.png");
     expect(geometry?.logoDisplay).toBe("none");
     const trafficLightClusterRight = MAC_TRAFFIC_LIGHT_POSITION.x + MAC_TRAFFIC_LIGHT_CLUSTER_WIDTH;
@@ -300,7 +300,9 @@ test("opens the command palette and manages a thread", async () => {
   await page.getByRole("menuitem", { name: "Archive" }).click();
   await expect(page.getByRole("heading", { name: "Welcome to Inertia", level: 1 })).toBeVisible();
 
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
+  const terminalInput = page.locator(".xterm-helper-textarea").first();
+  await terminalInput.focus();
+  await page.keyboard.press("Control+K");
   const search = page.getByRole("combobox", { name: "Search commands, projects, and threads" });
   await search.fill("settings");
   await search.press("Enter");

@@ -273,8 +273,10 @@ export default function App(): React.JSX.Element {
       if (event.key.toLowerCase() === "j") { event.preventDefault(); setActiveTool((tool) => tool === "terminal" ? null : "terminal"); }
       if (event.key.toLowerCase() === "b") { event.preventDefault(); if (mobileNavigation) setSidebarOpen(true); else setSidebarCollapsed((collapsed) => !collapsed); }
     };
-    window.addEventListener("keydown", shortcuts);
-    return () => window.removeEventListener("keydown", shortcuts);
+    // Capture app-wide shortcuts before focused widgets such as xterm can
+    // consume platform combinations like Ctrl+K.
+    window.addEventListener("keydown", shortcuts, true);
+    return () => window.removeEventListener("keydown", shortcuts, true);
   });
 
   const loadGit = useCallback(async () => {

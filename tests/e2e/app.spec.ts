@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
+
+import Database from "better-sqlite3";
 
 const execFileAsync = promisify(execFile);
 
@@ -14,6 +17,31 @@ let testDirectory: string;
 const rendererErrors: string[] = [];
 let previewServer: Server;
 let previewUrl: string;
+
+interface RuntimeTestSnapshot {
+  phase: string;
+  generation: number;
+  pid: number | null;
+  websocketUrl: string | null;
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function runtimeSnapshot(): Promise<RuntimeTestSnapshot> {
+  const snapshot = await electronApp.evaluate((_electron) => {
+    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as { snapshot: () => RuntimeTestSnapshot } | undefined;
+    return runtime?.snapshot() ?? null;
+  });
+  if (!snapshot) throw new Error("The test runtime supervisor is unavailable");
+  return snapshot;
+}
 
 async function resizeWindow(width: number, height: number): Promise<void> {
   await electronApp.evaluate(
@@ -80,7 +108,9 @@ test.afterAll(async () => {
   await page?.evaluate(() => window.inertia.previewClose()).catch(() => undefined);
   previewServer?.closeAllConnections();
   await new Promise<void>((resolve) => previewServer?.close(() => resolve()));
+  const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid ?? null;
   await electronApp?.close();
+  if (runtimePid) await expect.poll(() => processExists(runtimePid), { timeout: 5_000 }).toBe(false);
   if (testDirectory) await rm(testDirectory, { recursive: true, force: true });
 });
 
@@ -92,6 +122,47 @@ test("boots the local workspace and terminal", async () => {
   await expect(page.getByRole("heading", { name: "Welcome to Inertia", level: 1 })).toBeVisible();
   await expectNoViewportOverflow();
   expect(rendererErrors).toEqual([]);
+});
+
+test("keeps the window alive and reconnects with a rotated capability after a runtime crash", async () => {
+  const before = await runtimeSnapshot();
+  const beforeUrl = await page.evaluate(() => window.inertia.getRuntimeConnection().then(({ websocketUrl }) => websocketUrl));
+  const terminal = page.locator("aside.terminal-panel").first();
+  await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
+  const beforeTerminalId = await terminal.getAttribute("data-terminal-id");
+  const database = new Database(join(testDirectory, "data", "inertia.sqlite"));
+  const conversation = database.prepare("SELECT id FROM conversations ORDER BY created_at LIMIT 1").get() as { id: string };
+  database.prepare("UPDATE conversations SET status = 'running' WHERE id = ?").run(conversation.id);
+  database.prepare("INSERT INTO activities (id, conversation_id, run_id, kind, title, detail, status, created_at) VALUES (?, ?, ?, 'command', 'Interrupted E2E command', NULL, 'running', ?)")
+    .run(randomUUID(), conversation.id, "e2e-interrupted-run", new Date().toISOString());
+  database.close();
+  await page.evaluate(() => { Reflect.set(window, "__inertiaNoReloadMarker", crypto.randomUUID()); });
+  const marker = await page.evaluate(() => Reflect.get(window, "__inertiaNoReloadMarker") as string);
+
+  const crashed = await electronApp.evaluate((_electron) => {
+    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as { crash: () => RuntimeTestSnapshot } | undefined;
+    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
+    return runtime.crash();
+  });
+  expect(crashed.pid).toBe(before.pid);
+
+  await expect.poll(async () => {
+    const current = await runtimeSnapshot();
+    return current.phase === "ready" && current.generation > before.generation;
+  }, { timeout: 10_000 }).toBe(true);
+  const after = await runtimeSnapshot();
+  const afterUrl = await page.evaluate(() => window.inertia.getRuntimeConnection().then(({ websocketUrl }) => websocketUrl));
+  expect(after.generation).toBeGreaterThan(before.generation);
+  expect(after.pid).not.toBe(before.pid);
+  expect(afterUrl).not.toBe(beforeUrl);
+  expect(await page.evaluate(() => Reflect.get(window, "__inertiaNoReloadMarker"))).toBe(marker);
+  await expect(page.getByRole("heading", { name: "Welcome to Inertia", level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New thread" }).first()).toBeEnabled();
+  await expect(page.getByText("The previous run ended when Inertia closed. Send another message to continue.")).toBeVisible();
+  await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
+  expect(await terminal.getAttribute("data-terminal-id")).not.toBe(beforeTerminalId);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  if (before.pid) await expect.poll(() => processExists(before.pid as number), { timeout: 5_000 }).toBe(false);
 });
 
 test("navigates settings, changes theme, and returns to chat", async () => {

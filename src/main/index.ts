@@ -13,9 +13,10 @@ import {
   protocol,
   screen,
   shell,
+  utilityProcess,
   type IpcMainInvokeEvent,
 } from "electron";
-import { startRuntime } from "../server/index.js";
+import { RuntimeSupervisor } from "./runtime-supervisor.js";
 
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -46,12 +47,11 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-type Runtime = Awaited<ReturnType<typeof startRuntime>>;
-
 let mainWindow: BrowserWindow | null = null;
-let runtime: Runtime | null = null;
+let runtimeSupervisor: RuntimeSupervisor | null = null;
 let trustedRendererUrl = "";
 let stoppingRuntime = false;
+let packageSmokeFilePath: string | null = null;
 let previewView: WebContentsView | null = null;
 let previewBounds: Electron.Rectangle | null = null;
 
@@ -241,11 +241,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     assertTrustedIpc(event, args.length);
 
-    if (!runtime) {
+    if (!runtimeSupervisor) {
       throw new Error("The local runtime is not available");
     }
 
-    return { websocketUrl: runtime.websocketUrl };
+    return runtimeSupervisor.connection();
   });
 
   ipcMain.handle(IPC.selectDirectory, async (event, ...args) => {
@@ -454,7 +454,7 @@ async function createWindow(): Promise<void> {
 
 function focusMainWindow(): void {
   if (!mainWindow) {
-    if (app.isReady() && runtime) {
+    if (app.isReady()) {
       void createWindow();
     }
     return;
@@ -466,6 +466,25 @@ function focusMainWindow(): void {
 
   mainWindow.show();
   mainWindow.focus();
+}
+
+function finishQuitAfterCleanup(): void {
+  const window = mainWindow;
+  const terminateAfterWindowClosure = (): void => {
+    recordPackageSmokeStage("app-exit");
+    // Electron can remain inside the native quit cycle after before-quit is
+    // prevented. State, runtime persistence, the utility process, and renderer
+    // are gone before using Node's cross-platform unconditional termination.
+    process.kill(process.pid, "SIGKILL");
+  };
+  if (!window || window.isDestroyed()) {
+    terminateAfterWindowClosure();
+    return;
+  }
+  window.once("closed", terminateAfterWindowClosure);
+  // State has already been saved, so force-closing cannot discard owned data.
+  // Electron guarantees destroy() emits "closed" before main termination.
+  window.destroy();
 }
 
 async function bootstrap(): Promise<void> {
@@ -483,13 +502,65 @@ async function bootstrap(): Promise<void> {
   ]);
 
   registerAppProtocol();
-
-  runtime = await startRuntime({
-    dataDirectory,
-    defaultWorkspacePath,
-    enableProviders: process.env.NODE_ENV !== "test",
+  packageSmokeFilePath = process.env.NODE_ENV === "test"
+    && typeof process.env.INERTIA_PACKAGE_SMOKE_FILE === "string"
+    && process.env.INERTIA_PACKAGE_SMOKE_FILE.length <= 4096
+    && !process.env.INERTIA_PACKAGE_SMOKE_FILE.includes("\0")
+    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_FILE)
+    ? process.env.INERTIA_PACKAGE_SMOKE_FILE
+    : null;
+  let packageSmokeScheduled = false;
+  runtimeSupervisor = new RuntimeSupervisor({
+    workerOptions: {
+      dataDirectory,
+      defaultWorkspacePath,
+      enableProviders: process.env.NODE_ENV !== "test",
+    },
+    spawn: () => utilityProcess.fork(
+      fileURLToPath(new URL("./runtime-worker.js", import.meta.url)),
+      [],
+      {
+        cwd: app.getPath("home"),
+        stdio: "ignore",
+        serviceName: "Inertia Runtime",
+      },
+    ),
+    onStateChange: (snapshot) => {
+      if (snapshot.phase === "restarting" && snapshot.lastError) {
+        console.error("The local runtime stopped; restart scheduled", snapshot.lastError);
+      }
+      if (snapshot.phase === "stopped") recordPackageSmokeStage("runtime-stopped");
+      if (snapshot.phase === "ready" && snapshot.pid && packageSmokeFilePath && !packageSmokeScheduled) {
+        packageSmokeScheduled = true;
+        void writeFile(
+          packageSmokeFilePath,
+          JSON.stringify({ mainPid: process.pid, runtimePid: snapshot.pid, generation: snapshot.generation }),
+          { encoding: "utf8", mode: 0o600, flag: "wx" },
+        ).finally(() => setTimeout(() => app.quit(), 100));
+      }
+    },
   });
   registerIpcHandlers();
+  runtimeSupervisor.start();
+  if (process.env.NODE_ENV === "test") {
+    Object.defineProperty(globalThis, "__inertiaTestRuntime", {
+      configurable: true,
+      value: Object.freeze({
+        snapshot: () => runtimeSupervisor?.snapshot() ?? null,
+        crash: () => {
+          const snapshot = runtimeSupervisor?.snapshot();
+          if (!snapshot?.pid) throw new Error("The test runtime is not running");
+          process.kill(snapshot.pid, "SIGKILL");
+          return snapshot;
+        },
+        quit: () => {
+          const snapshot = runtimeSupervisor?.snapshot() ?? null;
+          setTimeout(() => app.quit(), 100);
+          return snapshot;
+        },
+      }),
+    });
+  }
   await createWindow();
 }
 
@@ -506,19 +577,21 @@ if (!hasSingleInstanceLock) {
     }
   });
   app.on("before-quit", (event) => {
-    if (!runtime || stoppingRuntime) {
+    if (!runtimeSupervisor || stoppingRuntime) {
       return;
     }
 
     event.preventDefault();
     stoppingRuntime = true;
-    const runtimeToClose = runtime;
-    runtime = null;
+    recordPackageSmokeStage("before-quit");
+    if (mainWindow) saveWindowState(mainWindow);
+    const supervisorToStop = runtimeSupervisor;
+    runtimeSupervisor = null;
 
-    void runtimeToClose
-      .close()
+    void supervisorToStop
+      .stop()
       .catch((error: unknown) => console.error("Failed to stop the local runtime", error))
-      .finally(() => app.quit());
+      .finally(finishQuitAfterCleanup);
   });
 
   void app
@@ -532,4 +605,13 @@ if (!hasSingleInstanceLock) {
       );
       app.quit();
     });
+}
+
+function recordPackageSmokeStage(stage: string): void {
+  if (!packageSmokeFilePath) return;
+  try {
+    writeFileSync(`${packageSmokeFilePath}.${stage}.json`, JSON.stringify({ stage, pid: process.pid }), { encoding: "utf8", mode: 0o600, flag: "wx" });
+  } catch {
+    // Packaged smoke diagnostics are best effort and test-only.
+  }
 }

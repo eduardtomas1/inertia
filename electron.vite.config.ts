@@ -8,7 +8,10 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        input: resolve("src/main/index.ts"),
+        input: {
+          index: resolve("src/main/index.ts"),
+          "runtime-worker": resolve("src/server/runtime-worker.ts"),
+        },
       },
     },
   },

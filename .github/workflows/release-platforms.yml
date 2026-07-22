@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing release tag to receive the builds
         required: true
-        default: v0.0.1
+        default: v0.0.2
 
 permissions:
   contents: write
@@ -32,13 +32,13 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Check out main
-        uses: actions/checkout@v5
+      - name: Check out release tag
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: main
+          ref: ${{ inputs.tag }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
@@ -55,7 +55,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Keep workflow artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.files }}

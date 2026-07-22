@@ -7,6 +7,7 @@ import {
   defaultSettings,
   type AccessMode,
   type AgentActivity,
+  type AgentPlan,
   type AppSettings,
   type AppSnapshot,
   type ChatAttachment,
@@ -80,6 +81,13 @@ interface CheckpointRow {
   insertions: number;
   deletions: number;
   created_at: string;
+}
+
+interface AgentPlanRow {
+  conversation_id: string;
+  run_id: string;
+  explanation: string | null;
+  steps_json: string;
 }
 
 interface StateRow {
@@ -181,6 +189,15 @@ const migrations = [
     );
     CREATE INDEX checkpoints_conversation_id_idx ON checkpoints(conversation_id, turn_index);
   `,
+  `
+    CREATE TABLE agent_plans (
+      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL,
+      explanation TEXT,
+      steps_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `,
 ] as const;
 
 function projectFromRow(row: ProjectRow): Project {
@@ -227,6 +244,24 @@ function checkpointFromRow(row: CheckpointRow): CheckpointSummary {
   return { id: row.id, conversationId: row.conversation_id, ref: row.ref, label: row.label, turnIndex: row.turn_index, filesChanged: row.files_changed, insertions: row.insertions, deletions: row.deletions, createdAt: row.created_at };
 }
 
+function planFromRow(row: AgentPlanRow): AgentPlan {
+  let steps: AgentPlan["steps"] = [];
+  try {
+    const parsed: unknown = JSON.parse(row.steps_json);
+    if (Array.isArray(parsed)) {
+      steps = parsed.flatMap((value) => {
+        if (!value || typeof value !== "object") return [];
+        const step = "step" in value && typeof value.step === "string" ? value.step : undefined;
+        const status = "status" in value && (value.status === "pending" || value.status === "inProgress" || value.status === "completed") ? value.status : undefined;
+        return step && status ? [{ step, status }] : [];
+      }).slice(0, 50);
+    }
+  } catch {
+    // A malformed legacy plan is represented as empty rather than breaking startup.
+  }
+  return { conversationId: row.conversation_id, runId: row.run_id, explanation: row.explanation, steps };
+}
+
 export interface NewConversationOptions {
   providerId?: ProviderId;
   model?: string;
@@ -246,6 +281,7 @@ export class RuntimeStore {
     this.database.pragma("busy_timeout = 5000");
     this.migrate();
     this.initializeState();
+    this.recoverInterruptedRuns();
     this.seed(resolve(defaultWorkspacePath));
   }
 
@@ -260,6 +296,7 @@ export class RuntimeStore {
       conversations: (this.database.prepare("SELECT * FROM conversations ORDER BY updated_at DESC, id ASC").all() as ConversationRow[]).map(conversationFromRow),
       messages: (this.database.prepare("SELECT * FROM messages ORDER BY created_at ASC, id ASC").all() as MessageRow[]).map(messageFromRow),
       activities: (this.database.prepare("SELECT * FROM activities ORDER BY created_at ASC, id ASC").all() as ActivityRow[]).map(activityFromRow),
+      plans: (this.database.prepare("SELECT conversation_id, run_id, explanation, steps_json FROM agent_plans ORDER BY updated_at ASC").all() as AgentPlanRow[]).map(planFromRow),
       checkpoints: (this.database.prepare("SELECT * FROM checkpoints ORDER BY turn_index ASC, created_at ASC").all() as CheckpointRow[]).map(checkpointFromRow),
       providers,
       settings: {
@@ -332,7 +369,13 @@ export class RuntimeStore {
 
   updateConversation(conversationId: string, update: Partial<Pick<Conversation, "title" | "providerId" | "model" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status">>): Conversation {
     const current = conversationFromRow(this.requireConversation(conversationId));
-    const next = { ...current, ...update, updatedAt: new Date().toISOString() };
+    const providerChanged = update.providerId !== undefined && update.providerId !== current.providerId;
+    const next = {
+      ...current,
+      ...update,
+      providerSessionId: providerChanged ? null : (update.providerSessionId ?? current.providerSessionId),
+      updatedAt: new Date().toISOString(),
+    };
     this.database.prepare(`UPDATE conversations SET title = @title, provider_id = @providerId, model = @model, interaction_mode = @interactionMode, access_mode = @accessMode, branch = @branch, worktree_path = @worktreePath, provider_session_id = @providerSessionId, status = @status, updated_at = @updatedAt WHERE id = @id`).run(next);
     this.touchProject(current.projectId, next.updatedAt);
     return next;
@@ -363,6 +406,37 @@ export class RuntimeStore {
       this.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(conversation.project_id, conversationId);
     })();
     return message;
+  }
+
+  updateMessageContent(messageId: string, content: string): void {
+    const message = this.database.prepare("SELECT conversation_id FROM messages WHERE id = ?").get(messageId) as { conversation_id: string } | undefined;
+    if (!message) throw new RecordNotFoundError("Message not found.");
+    this.database.prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, messageId);
+    this.database.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), message.conversation_id);
+  }
+
+  upsertAgentPlan(plan: AgentPlan): void {
+    this.requireConversation(plan.conversationId);
+    this.database.prepare(`
+      INSERT INTO agent_plans (conversation_id, run_id, explanation, steps_json, updated_at)
+      VALUES (@conversationId, @runId, @explanation, @stepsJson, @updatedAt)
+      ON CONFLICT(conversation_id) DO UPDATE SET
+        run_id = excluded.run_id,
+        explanation = excluded.explanation,
+        steps_json = excluded.steps_json,
+        updated_at = excluded.updated_at
+    `).run({
+      conversationId: plan.conversationId,
+      runId: plan.runId,
+      explanation: plan.explanation,
+      stepsJson: JSON.stringify(plan.steps.slice(0, 50)),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  clearAgentPlan(conversationId: string): void {
+    this.requireConversation(conversationId);
+    this.database.prepare("DELETE FROM agent_plans WHERE conversation_id = ?").run(conversationId);
   }
 
   addActivity(activity: Omit<AgentActivity, "id" | "createdAt">): AgentActivity {
@@ -453,6 +527,33 @@ export class RuntimeStore {
 
   private initializeState(): void {
     this.database.prepare(`INSERT OR IGNORE INTO app_state (id, theme, compact_sidebar, show_timestamps, terminal_font_size, default_provider, default_model, default_access_mode, new_thread_mode, wrap_diffs, ignore_whitespace, active_project_id, active_conversation_id) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`).run(defaultSettings.theme, Number(defaultSettings.compactSidebar), Number(defaultSettings.showTimestamps), defaultSettings.terminalFontSize, defaultSettings.defaultProvider, defaultSettings.defaultModel, defaultSettings.defaultAccessMode, defaultSettings.newThreadMode, Number(defaultSettings.wrapDiffs), Number(defaultSettings.ignoreWhitespace));
+  }
+
+  private recoverInterruptedRuns(): void {
+    const interrupted = this.database.prepare("SELECT id FROM conversations WHERE status IN ('running', 'needs-input')").all() as Array<{ id: string }>;
+    if (interrupted.length === 0) return;
+
+    const now = new Date().toISOString();
+    const markConversation = this.database.prepare("UPDATE conversations SET status = 'failed', updated_at = ? WHERE id = ?");
+    const markActivities = this.database.prepare("UPDATE activities SET status = 'failed' WHERE conversation_id = ? AND status = 'running'");
+    const addRecoveryActivity = this.database.prepare(`
+      INSERT INTO activities (id, conversation_id, run_id, kind, title, detail, status, created_at)
+      VALUES (?, ?, ?, 'error', ?, NULL, 'failed', ?)
+    `);
+
+    this.database.transaction(() => {
+      for (const { id } of interrupted) {
+        markConversation.run(now, id);
+        markActivities.run(id);
+        addRecoveryActivity.run(
+          randomUUID(),
+          id,
+          `recovery-${randomUUID()}`,
+          "The previous run ended when Inertia closed. Send another message to continue.",
+          now,
+        );
+      }
+    })();
   }
 
   private seed(workspacePath: string): void {

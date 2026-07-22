@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { Columns2, Maximize2, Plus, RotateCcw, TerminalSquare, X } from "lucide-react";
 import type { ClientCommand, ServerEvent, ThemePreference } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
+import { usePersistedSize } from "../hooks/usePersistedSize";
+import { PaneResizeHandle } from "./PaneResizeHandle";
 import { IconButton, LoadingMark } from "./ui";
 
 type TerminalPanelProps = {
@@ -18,6 +20,7 @@ type TerminalPanelProps = {
   actionId?: string | null;
   onActionStarted?: () => void;
   onClose: () => void;
+  visible?: boolean;
 };
 
 type CommandWithoutId = ClientCommand extends infer Command
@@ -53,6 +56,7 @@ function TerminalSession({
   actionId,
   onActionStarted,
   onClose,
+  visible = true,
 }: TerminalPanelProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -65,6 +69,7 @@ function TerminalSession({
   const [sessionKey, setSessionKey] = useState(0);
   const [sessionState, setSessionState] = useState<"starting" | "ready" | "closed" | "error">("starting");
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [terminalId, setTerminalId] = useState<string | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -149,6 +154,30 @@ function TerminalSession({
     return () => media.removeEventListener("change", update);
   }, [fontSize, theme]);
 
+  useEffect(() => {
+    if (!visible) return;
+    let secondFrame: number | undefined;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        try {
+          fitRef.current?.fit();
+          const terminal = terminalRef.current;
+          const terminalId = terminalIdRef.current;
+          if (!terminal || !terminalId) return;
+          const next = { cols: Math.max(20, terminal.cols), rows: Math.max(4, terminal.rows) };
+          lastSizeRef.current = next;
+          void sendCommand(command({ type: "terminal.resize", payload: { terminalId, ...next } })).catch(() => undefined);
+        } catch {
+          // ResizeObserver will retry after the revealed panel has settled.
+        }
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame !== undefined) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [sendCommand, visible]);
+
   useEffect(() => subscribe((event) => {
     if (event.type === "terminal.output") {
       if (event.terminalId === terminalIdRef.current) {
@@ -161,6 +190,7 @@ function TerminalSession({
     if (event.type === "terminal.exit" && event.terminalId === terminalIdRef.current) {
       terminalRef.current?.writeln(`\r\n\x1b[2mProcess exited with code ${event.exitCode}.\x1b[0m`);
       terminalIdRef.current = null;
+      setTerminalId(null);
       setSessionState("closed");
     }
   }), [subscribe]);
@@ -168,6 +198,7 @@ function TerminalSession({
   useEffect(() => {
     if (!instanceReady || status !== "online") {
       terminalIdRef.current = null;
+      setTerminalId(null);
       if (status === "offline") setSessionState("error");
       return;
     }
@@ -200,6 +231,7 @@ function TerminalSession({
           return;
         }
         terminalIdRef.current = event.terminalId;
+        setTerminalId(event.terminalId);
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
         pendingOutputRef.current.clear();
         setSessionState("ready");
@@ -217,6 +249,7 @@ function TerminalSession({
       cancelled = true;
       const terminalId = terminalIdRef.current;
       terminalIdRef.current = null;
+      setTerminalId(null);
       pendingOutputRef.current.clear();
       if (terminalId) {
         void sendCommand(command({ type: "terminal.close", payload: { terminalId } })).catch(() => undefined);
@@ -239,6 +272,7 @@ function TerminalSession({
         if (event.type !== "terminal.created") throw new Error("The action terminal returned an unexpected response.");
         const previousId = terminalIdRef.current;
         terminalIdRef.current = event.terminalId;
+        setTerminalId(event.terminalId);
         if (previousId) void sendCommand(command({ type: "terminal.close", payload: { terminalId: previousId } })).catch(() => undefined);
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
         pendingOutputRef.current.clear();
@@ -266,7 +300,7 @@ function TerminalSession({
   };
 
   return (
-    <aside className="terminal-panel" aria-label="Terminal panel">
+    <aside className="terminal-panel" aria-label="Terminal panel" data-terminal-id={terminalId ?? undefined}>
       <div className="terminal-header">
         <div className="terminal-title">
           <TerminalSquare size={16} />
@@ -309,6 +343,30 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const [tabs, setTabs] = useState<TerminalTab[]>([{ id: crypto.randomUUID(), label: "Terminal 1" }]);
   const [activeId, setActiveId] = useState(() => tabs[0].id);
   const [split, setSplit] = useState(false);
+  const [persistedSplitPercent, setPersistedSplitPercent] = usePersistedSize("inertia:layout:terminal-split-percent:v1", 50, { min: 25, max: 75 });
+  const [splitPercent, setSplitPercent] = useState(persistedSplitPercent);
+  const [splitOrientation, setSplitOrientation] = useState<"horizontal" | "vertical">("vertical");
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => setSplitPercent(persistedSplitPercent), [persistedSplitPercent]);
+
+  useEffect(() => {
+    if (!props.visible || tabs.length > 0) return;
+    const id = crypto.randomUUID();
+    setTabs([{ id, label: "Terminal 1" }]);
+    setActiveId(id);
+  }, [props.visible, tabs.length]);
+
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setSplitOrientation(width < 430 && height >= 280 ? "horizontal" : "vertical");
+    });
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, []);
 
   const addTerminal = (): string => {
     const id = crypto.randomUUID();
@@ -320,7 +378,12 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const closeTerminal = (id: string) => {
     setTabs((current) => {
       const next = current.filter((tab) => tab.id !== id);
-      if (next.length === 0) { props.onClose(); return current; }
+      if (next.length === 0) {
+        setActiveId("");
+        setSplit(false);
+        props.onClose();
+        return next;
+      }
       if (activeId === id) setActiveId(next.at(-1)?.id ?? next[0].id);
       if (next.length < 2) setSplit(false);
       return next;
@@ -333,20 +396,44 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   };
 
   const secondaryId = tabs.find((tab) => tab.id !== activeId)?.id ?? null;
+  const sessionIds = useMemo(() => new Map(tabs.map((tab) => [tab.id, `terminal-session-${tab.id}`])), [tabs]);
+  const gridStyle = { "--terminal-split-percent": `${splitPercent}%` } as CSSProperties;
 
   return (
-    <aside className="terminal-tabs-panel" aria-label="Terminal panel">
+    <aside className="terminal-tabs-panel" aria-label="Terminal panel" hidden={!props.visible}>
       <header className="terminal-tabbar">
         <div className="terminal-tablist" role="tablist" aria-label="Terminals">
           {tabs.map((tab) => <div role="tab" aria-selected={tab.id === activeId} className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}><button type="button" onClick={() => setActiveId(tab.id)}><TerminalSquare size={13} /><span>{tab.label}</span></button><button type="button" aria-label={`Close ${tab.label}`} onClick={() => closeTerminal(tab.id)}><X size={11} /></button></div>)}
         </div>
         <div className="terminal-tab-actions"><IconButton label="New terminal" onClick={() => addTerminal()}><Plus size={14} /></IconButton><IconButton label="Split terminals" aria-pressed={split} onClick={splitTerminal}><Columns2 size={14} /></IconButton></div>
       </header>
-      <div className={split ? "terminal-session-grid is-split" : "terminal-session-grid"}>
+      <div
+        ref={gridRef}
+        className={split ? `terminal-session-grid is-split is-${splitOrientation}` : "terminal-session-grid"}
+        style={gridStyle}
+      >
         {tabs.map((tab) => {
           const visible = tab.id === activeId || (split && tab.id === secondaryId);
-          return <div className="terminal-session-slot" hidden={!visible} key={tab.id}><TerminalSession {...props} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} onClose={() => closeTerminal(tab.id)} /></div>;
+          const placement = tab.id === activeId ? "is-primary" : tab.id === secondaryId ? "is-secondary" : "";
+          return <div id={sessionIds.get(tab.id)} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} visible={Boolean(props.visible && visible)} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} onClose={() => closeTerminal(tab.id)} /></div>;
         })}
+        {split && secondaryId && (
+          <PaneResizeHandle
+            label="Resize split terminals"
+            controls={`${sessionIds.get(activeId)} ${sessionIds.get(secondaryId)}`}
+            containerRef={gridRef}
+            orientation={splitOrientation}
+            unit="percent"
+            value={splitPercent}
+            min={25}
+            max={75}
+            defaultValue={50}
+            onChange={setSplitPercent}
+            onCommit={setPersistedSplitPercent}
+            valueText={(value) => `${value}% for the active terminal`}
+            className="terminal-split-handle"
+          />
+        )}
       </div>
     </aside>
   );

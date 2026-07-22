@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Command, Paperclip, Send, ShieldCheck, Sparkles, Square, Wrench, X } from "lucide-react";
 import clsx from "clsx";
 import type { AccessMode, ChatAttachment, Conversation, InteractionMode, ProjectAction, ProviderId, ProviderInfo, WorkspaceEntry } from "@shared/contracts";
+import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { IconButton, LoadingMark } from "./ui";
 
 type ComposerProps = {
@@ -18,6 +19,8 @@ type ComposerProps = {
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
   onRunAction: (action: ProjectAction) => void;
   onMentionQuery: (query: string) => void;
+  onConnectProvider: (providerId: ProviderId) => void;
+  onRefreshProvider: (providerId: ProviderId) => void;
   onStop: () => void;
 };
 
@@ -41,6 +44,8 @@ export function Composer({
   onImportAttachments,
   onRunAction,
   onMentionQuery,
+  onConnectProvider,
+  onRefreshProvider,
   onStop,
 }: ComposerProps): React.JSX.Element {
   const [message, setMessage] = useState("");
@@ -48,7 +53,6 @@ export function Composer({
   const [menu, setMenu] = useState<"provider" | "mode" | "access" | "action" | null>(null);
   const [modelDraft, setModelDraft] = useState(conversation.model);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const canSend = (Boolean(message.trim()) || attachments.length > 0) && !disabled && !sending && !running;
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
 
@@ -102,10 +106,34 @@ export function Composer({
   };
 
   const selectedProvider = providers.find((provider) => provider.id === conversation.providerId);
+  const selectedProviderReady = selectedProvider?.canRun === true;
+  const selectedProviderAction = selectedProvider ? providerSetupAction(selectedProvider) : "refresh";
+  const canSend = (Boolean(message.trim()) || attachments.length > 0) && selectedProviderReady && !disabled && !sending && !running;
   const access = accessOptions.find((item) => item.value === conversation.accessMode) ?? accessOptions[2];
 
   return (
     <div className="composer-shell">
+      {selectedProvider && !selectedProviderReady && (
+        <div className="provider-readiness" role="status">
+          <ProviderStatus provider={selectedProvider} />
+          <span className="provider-readiness-copy">
+            <strong>{selectedProvider.label} needs attention</strong>
+            <small>{providerStateDetail(selectedProvider)}</small>
+          </span>
+          {selectedProviderAction && (
+            <button
+              type="button"
+              className="secondary-button provider-readiness-action"
+              aria-label={`${selectedProviderAction === "connect" ? selectedProvider.id === "opencode" ? "Configure" : "Connect" : "Refresh"} ${selectedProvider.label}`}
+              disabled={disabled}
+              onClick={() => selectedProviderAction === "connect" ? onConnectProvider(selectedProvider.id) : onRefreshProvider(selectedProvider.id)}
+            >
+              <ProviderActionIcon action={selectedProviderAction} />
+              {selectedProviderAction === "connect" ? selectedProvider.id === "opencode" ? "Configure" : "Connect" : "Refresh"}
+            </button>
+          )}
+        </div>
+      )}
       <div className="composer" data-disabled={disabled} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}>
         {attachments.length > 0 && (
           <div className="composer-attachments" aria-label="Attached images">
@@ -182,8 +210,8 @@ export function Composer({
                 <div className="composer-popover provider-popover" role="menu" aria-label="Provider and model">
                   <div className="popover-title">Provider</div>
                   {providers.map((provider) => (
-                    <button type="button" role="menuitemradio" aria-checked={conversation.providerId === provider.id} disabled={!provider.available} key={provider.id} onClick={() => { onUpdateConversation({ providerId: provider.id as ProviderId }); setMenu(null); }}>
-                      <span><strong>{provider.label}</strong><small>{provider.available ? provider.version ?? "Available" : "CLI not found"}</small></span>
+                    <button type="button" role="menuitemradio" aria-checked={conversation.providerId === provider.id} key={provider.id} onClick={() => { onUpdateConversation({ providerId: provider.id as ProviderId }); setMenu(null); }}>
+                      <span><strong>{provider.label}</strong><small>{providerStateLabel(provider)} · {providerStateDetail(provider)}</small></span>
                       {conversation.providerId === provider.id && <span className="option-check" />}
                     </button>
                   ))}

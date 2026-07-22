@@ -100,7 +100,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await page.getByRole("radio", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
-  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByRole("button", { name: "Go to workspace" }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   await page.getByRole("textbox", { name: "Message" }).fill("Keep this V1 clear and calm.");
   await page.getByRole("button", { name: "Send message" }).click();
@@ -139,13 +139,27 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   await expect(page.getByRole("tab", { name: /Terminal 2/ })).toBeVisible();
   await page.getByRole("button", { name: "Split terminals" }).click();
   await expect(page.locator(".terminal-session-grid")).toHaveClass(/is-split/);
+  const liveTerminals = page.locator(".terminal-panel[data-terminal-id]");
+  await expect(liveTerminals).toHaveCount(2);
+  const terminalIdsBefore = (await liveTerminals.evaluateAll((terminals) => terminals.map((terminal) => terminal.getAttribute("data-terminal-id")).sort())).filter(Boolean);
 
+  await page.getByRole("tab", { name: /Changes/ }).click();
+  await page.getByRole("tab", { name: /Files/ }).click();
   await page.getByRole("tab", { name: /Preview/ }).click();
   const address = page.getByRole("textbox", { name: "Preview address" });
   await address.fill(previewUrl);
   await page.getByRole("button", { name: "Go", exact: true }).click();
   await expect.poll(() => electronApp.evaluate(({ webContents }, url) => webContents.getAllWebContents().some((contents) => contents.getURL() === url), previewUrl)).toBe(true);
+  await page.getByRole("tab", { name: /Plan/ }).click();
   await page.getByRole("tab", { name: /Terminal/ }).click();
+  await expect(page.getByRole("tab", { name: /Terminal 2/ })).toBeVisible();
+  await page.locator(".workspace-panel").getByRole("button", { name: "Close workspace tools" }).click();
+  await expect(page.locator(".workspace-panel")).toBeHidden();
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await expect(page.getByRole("tab", { name: /Terminal 2/ })).toBeVisible();
+  await expect(liveTerminals).toHaveCount(2);
+  const terminalIdsAfter = (await liveTerminals.evaluateAll((terminals) => terminals.map((terminal) => terminal.getAttribute("data-terminal-id")).sort())).filter(Boolean);
+  expect(terminalIdsAfter).toEqual(terminalIdsBefore);
   expect(rendererErrors).toEqual([]);
 });
 
@@ -157,6 +171,42 @@ test("keeps the Changes panel readable when the side tool area is narrow", async
   await expect(picker.locator("option:checked")).toHaveText("M · sample.ts");
   await expect(page.getByLabel("Changed files")).toBeHidden();
   await expect(page.getByLabel(/Diff for|Unified diff/)).toBeVisible();
+  await expectNoViewportOverflow();
+  expect(rendererErrors).toEqual([]);
+});
+
+test("resizes and persists the internal workspace panes", async () => {
+  await resizeWindow(1440, 920);
+  await page.getByRole("tab", { name: /Terminal/ }).click();
+
+  const sidebarHandle = page.getByRole("separator", { name: "Resize project navigation" });
+  const sidebarBefore = Number(await sidebarHandle.getAttribute("aria-valuenow"));
+  await sidebarHandle.focus();
+  await sidebarHandle.press("ArrowRight");
+  await expect.poll(async () => Number(await sidebarHandle.getAttribute("aria-valuenow"))).toBeGreaterThan(sidebarBefore);
+
+  const toolsHandle = page.getByRole("separator", { name: "Resize workspace tools" });
+  const toolsBefore = Number(await toolsHandle.getAttribute("aria-valuenow"));
+  await toolsHandle.focus();
+  await toolsHandle.press("ArrowRight");
+  await expect.poll(async () => Number(await toolsHandle.getAttribute("aria-valuenow"))).toBeLessThan(toolsBefore);
+
+  const splitButton = page.getByRole("button", { name: "Split terminals" });
+  if (await splitButton.getAttribute("aria-pressed") !== "true") await splitButton.click();
+  const terminalHandle = page.getByRole("separator", { name: "Resize split terminals" });
+  const terminalBefore = Number(await terminalHandle.getAttribute("aria-valuenow"));
+  await terminalHandle.focus();
+  await terminalHandle.press("ArrowLeft");
+  await expect.poll(async () => Number(await terminalHandle.getAttribute("aria-valuenow"))).toBeLessThan(terminalBefore);
+
+  const persisted = await page.evaluate(() => ({
+    sidebar: window.localStorage.getItem("inertia:layout:sidebar-width:v1"),
+    tools: window.localStorage.getItem("inertia:layout:workspace-tools-width:v1"),
+    terminal: window.localStorage.getItem("inertia:layout:terminal-split-percent:v1"),
+  }));
+  expect(Number(persisted.sidebar)).toBeGreaterThan(sidebarBefore);
+  expect(Number(persisted.tools)).toBeLessThan(toolsBefore);
+  expect(Number(persisted.terminal)).toBeLessThan(terminalBefore);
   await expectNoViewportOverflow();
   expect(rendererErrors).toEqual([]);
 });

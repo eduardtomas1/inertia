@@ -1,11 +1,21 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import {
+  startCodexAppServerRun,
+  type CodexApprovalDecision,
+  type CodexApprovalRequest,
+  type CodexInputRequest,
+  type CodexPlanStep,
+} from "./codex-app-server";
+import { executableCandidates, providerEnvironment, type ProviderEnvironment } from "./environment";
 
 export const PROVIDER_IDS = ["codex", "claude", "cursor", "opencode"] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderInteractionMode = "build" | "plan";
 export type ProviderAccessMode = "full" | "supervised" | "auto-edit";
+export type ProviderInstallState = "checking" | "installed" | "not-installed" | "error";
+export type ProviderAuthState = "checking" | "authenticated" | "unauthenticated" | "configured" | "unknown" | "error";
 
 export interface ProviderCapabilities {
   resume: true;
@@ -29,7 +39,7 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ProviderInfo>> = Object.
     capabilities: {
       resume: true,
       images: true,
-      nativePlanMode: false,
+      nativePlanMode: true,
       fullAccessFlag: "--dangerously-bypass-approvals-and-sandbox",
     },
   },
@@ -74,12 +84,18 @@ export interface ProviderDetection {
   provider: ProviderInfo;
   available: boolean;
   version?: string;
+  executable?: string;
+  installState: ProviderInstallState;
+  authState: ProviderAuthState;
+  canRun: boolean;
+  statusMessage?: string;
 }
 
 export interface ProviderDetectionOptions {
   command?: string;
   cwd?: string;
   timeoutMs?: number;
+  refreshEnvironment?: boolean;
 }
 
 interface ProviderRunRequest {
@@ -139,11 +155,43 @@ export interface ProviderSessionEvent extends ProviderEventBase {
   sessionId: string;
 }
 
+export interface ProviderApprovalEvent extends ProviderEventBase {
+  type: "approval";
+  request: CodexApprovalRequest;
+}
+
+export interface ProviderApprovalResolvedEvent extends ProviderEventBase {
+  type: "approval-resolved";
+  requestId: string;
+  decision: CodexApprovalDecision | "cancelled";
+}
+
+export interface ProviderInputEvent extends ProviderEventBase {
+  type: "input";
+  request: CodexInputRequest;
+}
+
+export interface ProviderInputResolvedEvent extends ProviderEventBase {
+  type: "input-resolved";
+  requestId: string;
+}
+
+export interface ProviderPlanEvent extends ProviderEventBase {
+  type: "plan";
+  explanation: string | null;
+  steps: CodexPlanStep[];
+}
+
 export type ProviderEvent =
   | ProviderTextEvent
   | ProviderActivityEvent
   | ProviderStatusEvent
-  | ProviderSessionEvent;
+  | ProviderSessionEvent
+  | ProviderApprovalEvent
+  | ProviderApprovalResolvedEvent
+  | ProviderInputEvent
+  | ProviderInputResolvedEvent
+  | ProviderPlanEvent;
 
 export interface ProviderRunCallbacks {
   onEvent?: (event: ProviderEvent) => void;
@@ -151,6 +199,11 @@ export interface ProviderRunCallbacks {
   onActivity?: (event: ProviderActivityEvent) => void;
   onStatus?: (event: ProviderStatusEvent) => void;
   onSession?: (event: ProviderSessionEvent) => void;
+  onApproval?: (event: ProviderApprovalEvent) => void;
+  onApprovalResolved?: (event: ProviderApprovalResolvedEvent) => void;
+  onInput?: (event: ProviderInputEvent) => void;
+  onInputResolved?: (event: ProviderInputResolvedEvent) => void;
+  onPlan?: (event: ProviderPlanEvent) => void;
 }
 
 export interface ProviderRunResult {
@@ -182,6 +235,12 @@ export interface ProviderManagerOptions {
   cancelGraceMs?: number;
 }
 
+export interface ProviderAuthLaunch {
+  executable: string;
+  args: readonly string[];
+  env: NodeJS.ProcessEnv;
+}
+
 interface ProviderInvocation {
   command: string;
   args: string[];
@@ -191,16 +250,20 @@ interface ProviderInvocation {
 interface ParserState {
   sessionId?: string;
   sawText: boolean;
+  sawStreamingDelta: boolean;
   hadErrorEvent: boolean;
+  failureText?: string;
 }
 
 interface ActiveRun {
-  child: ChildProcessWithoutNullStreams;
   result: Promise<ProviderRunResult>;
   cancelRequested: boolean;
   settled: boolean;
   hardKillTimer?: NodeJS.Timeout;
   emitStatus: (status: ProviderRunStatus, message?: string) => void;
+  cancel: (force: boolean) => void;
+  respondToApproval?: (requestId: string, decision: CodexApprovalDecision) => boolean;
+  respondToInput?: (requestId: string, answers: Record<string, string[]>) => boolean;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -212,6 +275,13 @@ const MAX_PROMPT_CHARS = 256 * 1024;
 const MAX_IMAGE_COUNT = 32;
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
 const DEFAULT_CANCEL_GRACE_MS = 2_000;
+
+const PROVIDER_AUTH: Readonly<Record<ProviderId, { statusArgs: readonly string[]; loginArgs: readonly string[] }>> = Object.freeze({
+  codex: { statusArgs: ["login", "status"], loginArgs: ["login"] },
+  claude: { statusArgs: ["auth", "status", "--json"], loginArgs: ["auth", "login"] },
+  cursor: { statusArgs: ["status"], loginArgs: ["login"] },
+  opencode: { statusArgs: ["auth", "list"], loginArgs: ["auth", "login"] },
+});
 
 const PLAN_PREFIX = [
   "You are in PLAN MODE.",
@@ -273,6 +343,11 @@ function makeEmitter(
   activity: (kind: ProviderActivityKind, phase: ProviderActivityPhase, label: string) => void;
   status: (status: ProviderRunStatus, message?: string) => void;
   session: (sessionId: string) => void;
+  approval: (request: CodexApprovalRequest) => void;
+  approvalResolved: (requestId: string, decision: CodexApprovalDecision | "cancelled") => void;
+  input: (request: CodexInputRequest) => void;
+  inputResolved: (requestId: string) => void;
+  plan: (explanation: string | null, steps: CodexPlanStep[]) => void;
 } {
   const event = (providerEvent: ProviderEvent): void => {
     safeCallback(() => callbacks.onEvent?.(providerEvent));
@@ -289,6 +364,21 @@ function makeEmitter(
       case "session":
         safeCallback(() => callbacks.onSession?.(providerEvent));
         break;
+      case "approval":
+        safeCallback(() => callbacks.onApproval?.(providerEvent));
+        break;
+      case "approval-resolved":
+        safeCallback(() => callbacks.onApprovalResolved?.(providerEvent));
+        break;
+      case "input":
+        safeCallback(() => callbacks.onInput?.(providerEvent));
+        break;
+      case "input-resolved":
+        safeCallback(() => callbacks.onInputResolved?.(providerEvent));
+        break;
+      case "plan":
+        safeCallback(() => callbacks.onPlan?.(providerEvent));
+        break;
     }
   };
 
@@ -299,6 +389,11 @@ function makeEmitter(
     activity: (kind, phase, label) => event({ ...base, type: "activity", kind, phase, label }),
     status: (status, message) => event({ ...base, type: "status", status, ...(message ? { message } : {}) }),
     session: (sessionId) => event({ ...base, type: "session", sessionId }),
+    approval: (request) => event({ ...base, type: "approval", request }),
+    approvalResolved: (requestId, decision) => event({ ...base, type: "approval-resolved", requestId, decision }),
+    input: (request) => event({ ...base, type: "input", request }),
+    inputResolved: (requestId) => event({ ...base, type: "input-resolved", requestId }),
+    plan: (explanation, steps) => event({ ...base, type: "plan", explanation, steps }),
   };
 }
 
@@ -378,6 +473,8 @@ function normalizeLine(
 
   if (type === "error" || type === "turn.failed" || event.is_error === true) {
     state.hadErrorEvent = true;
+    const error = objectValue(event.error);
+    state.failureText ??= stringValue(event.message) ?? stringValue(error?.message) ?? stringValue(event.result);
     emitActivity("system", "failed", `${PROVIDER_INFO[providerId].name} reported an error`);
   }
 
@@ -413,7 +510,9 @@ function normalizeLine(
       }
       if (type === "assistant") {
         const message = objectValue(event.message);
-        for (const text of contentTexts(message?.content)) emitNonEmptyText(text);
+        if (!state.sawStreamingDelta) {
+          for (const text of contentTexts(message?.content)) emitNonEmptyText(text);
+        }
         for (const name of toolNamesFromContent(message?.content)) emitActivity("tool", "started", name);
         return;
       }
@@ -427,11 +526,14 @@ function normalizeLine(
       if (type === "stream_event") {
         const streamEvent = objectValue(event.event);
         const delta = objectValue(streamEvent?.delta);
-        if (streamEvent?.type === "content_block_delta") emitNonEmptyText(delta?.text);
+        if (streamEvent?.type === "content_block_delta" && typeof delta?.text === "string" && delta.text.length > 0) {
+          state.sawStreamingDelta = true;
+          emitNonEmptyText(delta.text);
+        }
         return;
       }
       if (type === "result") {
-        if (!state.sawText) emitNonEmptyText(event.result);
+        if (event.is_error !== true && !state.sawText) emitNonEmptyText(event.result);
         emitActivity("turn", event.is_error === true ? "failed" : "completed", "Turn completed");
       }
       return;
@@ -452,7 +554,7 @@ function normalizeLine(
         return;
       }
       if (type === "result") {
-        if (!state.sawText) emitNonEmptyText(event.result);
+        if (event.is_error !== true && !state.sawText) emitNonEmptyText(event.result);
         emitActivity("turn", event.is_error === true ? "failed" : "completed", "Turn completed");
       }
       return;
@@ -587,7 +689,7 @@ function buildInvocation(input: ProviderRunInput, command: string): ProviderInvo
     }
 
     case "claude": {
-      const args = ["-p", "--output-format", "stream-json", "--verbose"];
+      const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
       if (input.access === "full") args.push("--dangerously-skip-permissions");
       else args.push("--permission-mode", input.interactionMode === "plan" ? "plan" : input.access === "auto-edit" ? "acceptEdits" : "manual");
       if (input.model) args.push("--model", input.model);
@@ -650,12 +752,16 @@ function publicFailureMessage(
   providerId: ProviderId,
   spawnError: NodeJS.ErrnoException | undefined,
   stderr: string,
+  providerOutput = "",
 ): string {
   const providerName = PROVIDER_INFO[providerId].name;
   if (spawnError?.code === "ENOENT") return `${providerName} CLI is not installed or is not available on PATH.`;
   if (spawnError?.code === "EACCES") return `${providerName} CLI could not be started because it is not executable.`;
-  const normalized = stderr.toLowerCase();
-  if (/not (?:logged|signed) in|authentication required|unauthorized|please (?:log|sign) in/.test(normalized)) {
+  const normalized = `${stderr}\n${providerOutput}`.toLowerCase();
+  if (/requires a newer version|please upgrade (?:to )?the latest (?:app|cli)|cli.+out of date/.test(normalized)) {
+    return `${providerName} needs an update before it can run the selected model.`;
+  }
+  if (/not (?:logged|signed) in|authentication required|failed to authenticate|oauth session expired|unauthorized|please (?:log|sign) in/.test(normalized)) {
     return `${providerName} is not authenticated. Sign in with its CLI and try again.`;
   }
   if (/rate.?limit|too many requests|quota/.test(normalized)) {
@@ -671,6 +777,131 @@ function versionFromOutput(output: string): string | undefined {
   return output.match(/\bv?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?\b/u)?.[0];
 }
 
+interface ProbeResult {
+  exitCode: number | null;
+  output: string;
+  started: boolean;
+  timedOut: boolean;
+}
+
+async function probeProcess(
+  executable: string,
+  args: readonly string[],
+  environment: ProviderEnvironment,
+  cwd: string,
+  timeoutMs: number,
+): Promise<ProbeResult> {
+  return await new Promise<ProbeResult>((resolveProbe) => {
+    const output = new CappedTextBuffer(16 * 1024);
+    let settled = false;
+    let started = false;
+    let timedOut = false;
+    let timer: NodeJS.Timeout | undefined;
+    const finish = (exitCode: number | null): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolveProbe({ exitCode, output: output.toString(), started, timedOut });
+    };
+
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = spawn(executable, [...args], {
+        cwd,
+        env: environment.env,
+        shell: false,
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      finish(null);
+      return;
+    }
+
+    child.once("spawn", () => { started = true; });
+    child.stdout.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
+    child.stderr.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
+    child.once("error", () => finish(null));
+    child.once("close", (code) => finish(code));
+    child.stdin.end();
+
+    timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill("SIGKILL"); } catch { /* The probe may already have exited. */ }
+      finish(null);
+    }, timeoutMs);
+    timer.unref();
+  });
+}
+
+function versionParts(version: string | undefined): number[] {
+  return (version?.match(/\d+(?:\.\d+){1,2}/u)?.[0] ?? "0.0.0").split(".").map((part) => Number(part));
+}
+
+function compareVersions(left: string | undefined, right: string | undefined): number {
+  const leftParts = versionParts(left);
+  const rightParts = versionParts(right);
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function terminateProviderProcess(child: ChildProcessWithoutNullStreams, force: boolean): void {
+  const pid = child.pid;
+  if (!pid) return;
+  if (process.platform === "win32") {
+    try {
+      spawn("taskkill.exe", ["/pid", String(pid), "/t", ...(force ? ["/f"] : [])], {
+        shell: false,
+        windowsHide: true,
+        stdio: "ignore",
+      }).unref();
+    } catch {
+      try { child.kill(force ? "SIGKILL" : "SIGTERM"); } catch { /* It may already be gone. */ }
+    }
+    return;
+  }
+  try {
+    process.kill(-pid, force ? "SIGKILL" : "SIGTERM");
+  } catch {
+    try { child.kill(force ? "SIGKILL" : "SIGTERM"); } catch { /* It may already be gone. */ }
+  }
+}
+
+function authStateFromProbe(providerId: ProviderId, probe: ProbeResult): ProviderAuthState {
+  if (!probe.started || probe.timedOut) return "unknown";
+  const normalized = probe.output.replace(/\u001b\[[0-9;]*m/gu, "").trim();
+  const lower = normalized.toLowerCase();
+
+  if (providerId === "claude") {
+    try {
+      const status = JSON.parse(normalized) as { loggedIn?: unknown };
+      if (status.loggedIn === true) return "authenticated";
+      if (status.loggedIn === false) return "unauthenticated";
+    } catch { /* Older Claude releases may return text. */ }
+  }
+
+  if (/not (?:logged|signed) in|loggedin["']?\s*:\s*false|authentication required|no credentials|please (?:log|sign) in/iu.test(lower)) {
+    return providerId === "opencode" ? "unknown" : "unauthenticated";
+  }
+  if (/logged in|signed in|authenticated|loggedin["']?\s*:\s*true/iu.test(lower)) return "authenticated";
+  if (providerId === "opencode" && probe.exitCode === 0 && normalized.length > 0) return "configured";
+  if (probe.exitCode && probe.exitCode !== 0) return providerId === "opencode" ? "unknown" : "unauthenticated";
+  return "unknown";
+}
+
+function statusMessage(installState: ProviderInstallState, authState: ProviderAuthState): string {
+  if (installState === "not-installed") return "CLI not found";
+  if (installState === "error") return "CLI did not respond";
+  if (authState === "authenticated") return "Connected";
+  if (authState === "configured") return "Configured";
+  if (authState === "unauthenticated") return "Sign in required";
+  if (authState === "error") return "Connection check failed";
+  return "Installed; connection not confirmed";
+}
+
 export async function detectProvider(
   providerId: ProviderId,
   options: ProviderDetectionOptions = {},
@@ -678,50 +909,64 @@ export async function detectProvider(
   const provider = PROVIDER_INFO[providerId];
   const command = options.command?.trim() || provider.command;
   const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, 10_000));
-  const output = new CappedTextBuffer(4 * 1024);
-
-  return await new Promise<ProviderDetection>((resolve) => {
-    let settled = false;
-    let started = false;
-    const finish = (available: boolean): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ provider, available, ...(available && versionFromOutput(output.toString()) ? { version: versionFromOutput(output.toString()) } : {}) });
+  const cwd = options.cwd ?? process.cwd();
+  const environment = await providerEnvironment(options.refreshEnvironment === true);
+  const candidates = await executableCandidates(command, environment, cwd);
+  if (candidates.length === 0) {
+    return {
+      provider,
+      available: false,
+      installState: "not-installed",
+      authState: "unknown",
+      canRun: false,
+      statusMessage: statusMessage("not-installed", "unknown"),
     };
+  }
 
-    let child: ChildProcessWithoutNullStreams;
-    try {
-      child = spawn(command, ["--version"], {
-        cwd: options.cwd ?? process.cwd(),
-        shell: false,
-        windowsHide: true,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-    } catch {
-      resolve({ provider, available: false });
-      return;
-    }
+  const versionProbes = await Promise.all(candidates.map(async (executable) => {
+    const probe = await probeProcess(executable, ["--version"], environment, cwd, timeoutMs);
+    return { executable, probe, version: versionFromOutput(probe.output) };
+  }));
+  const working = versionProbes
+    .filter(({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0)
+    .sort((left, right) => compareVersions(right.version, left.version));
+  const selected = working[0];
+  if (!selected) {
+    return {
+      provider,
+      available: false,
+      installState: "error",
+      authState: "unknown",
+      canRun: false,
+      statusMessage: statusMessage("error", "unknown"),
+    };
+  }
 
-    child.once("spawn", () => {
-      started = true;
-    });
-    child.stdout.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
-    child.stderr.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
-    child.once("error", () => finish(false));
-    child.once("close", () => finish(started));
-    child.stdin.end();
-
-    const timer = setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // A timed-out probe may already have exited.
-      }
-      finish(started);
-    }, timeoutMs);
-    timer.unref();
-  });
+  const authProbe = await probeProcess(selected.executable, PROVIDER_AUTH[providerId].statusArgs, environment, cwd, timeoutMs);
+  const authState = authStateFromProbe(providerId, authProbe);
+  const authenticated = authState === "authenticated" || authState === "configured";
+  const appServerProbe = providerId === "codex"
+    ? await probeProcess(selected.executable, ["app-server", "--help"], environment, cwd, timeoutMs)
+    : undefined;
+  const appServerReady = !appServerProbe || (
+    appServerProbe.started
+    && !appServerProbe.timedOut
+    && appServerProbe.exitCode === 0
+    && /(?:codex\s+app-server|run the app server)/iu.test(appServerProbe.output)
+  );
+  const canRun = authenticated && appServerReady;
+  return {
+    provider,
+    available: true,
+    executable: selected.executable,
+    ...(selected.version ? { version: selected.version } : {}),
+    installState: "installed",
+    authState,
+    canRun,
+    statusMessage: authenticated && !appServerReady
+      ? "Update Codex CLI to enable agent conversations"
+      : statusMessage("installed", authState),
+  };
 }
 
 export async function detectProviders(
@@ -733,7 +978,9 @@ export async function detectProviders(
 export class ProviderManager {
   private readonly activeRuns = new Map<string, ActiveRun>();
   private readonly commands: Partial<Record<ProviderId, string>>;
+  private readonly resolvedCommands = new Map<ProviderId, string>();
   private readonly cancelGraceMs: number;
+  private processEnvironment: NodeJS.ProcessEnv | undefined;
 
   constructor(options: ProviderManagerOptions = {}) {
     this.commands = { ...options.commands };
@@ -748,12 +995,28 @@ export class ProviderManager {
     return [...this.activeRuns.keys()];
   }
 
-  detect(providerId: ProviderId, options: Omit<ProviderDetectionOptions, "command"> = {}): Promise<ProviderDetection> {
-    return detectProvider(providerId, { ...options, command: this.commandFor(providerId) });
+  async detect(providerId: ProviderId, options: Omit<ProviderDetectionOptions, "command"> = {}): Promise<ProviderDetection> {
+    if (options.refreshEnvironment) await providerEnvironment(true);
+    this.processEnvironment = (await providerEnvironment()).env;
+    const configured = this.commands[providerId]?.trim() || PROVIDER_INFO[providerId].command;
+    const detection = await detectProvider(providerId, { ...options, refreshEnvironment: false, command: configured });
+    if (detection.executable) this.resolvedCommands.set(providerId, detection.executable);
+    else this.resolvedCommands.delete(providerId);
+    return detection;
   }
 
-  detectAll(options: Omit<ProviderDetectionOptions, "command"> = {}): Promise<ProviderDetection[]> {
-    return Promise.all(PROVIDER_IDS.map((id) => this.detect(id, options)));
+  async detectAll(options: Omit<ProviderDetectionOptions, "command"> = {}): Promise<ProviderDetection[]> {
+    if (options.refreshEnvironment) await providerEnvironment(true);
+    return await Promise.all(PROVIDER_IDS.map((id) => this.detect(id, { ...options, refreshEnvironment: false })));
+  }
+
+  async authLaunch(providerId: ProviderId): Promise<ProviderAuthLaunch> {
+    let executable = this.resolvedCommands.get(providerId);
+    if (!executable) executable = (await this.detect(providerId, { refreshEnvironment: true })).executable;
+    if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name} CLI is not installed.`);
+    const environment = await providerEnvironment();
+    this.processEnvironment = environment.env;
+    return { executable, args: PROVIDER_AUTH[providerId].loginArgs, env: environment.env };
   }
 
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks = {}): Promise<ProviderRunResult> {
@@ -764,10 +1027,15 @@ export class ProviderManager {
 
     const providerId = input.providerId;
     const emitter = makeEmitter(providerId, conversationId, callbacks);
+    if (providerId === "codex" && input.access !== "full") {
+      return this.runInteractiveCodex(input, conversationId, emitter);
+    }
     const parserState: ParserState = {
       sessionId: input.sessionId,
       sawText: false,
+      sawStreamingDelta: false,
       hadErrorEvent: false,
+      failureText: undefined,
     };
     const stderr = new CappedTextBuffer(MAX_STDERR_CHARS);
     const resultText = new CappedTextBuffer(MAX_RESULT_TEXT_CHARS);
@@ -810,6 +1078,8 @@ export class ProviderManager {
     try {
       child = spawn(invocation.command, invocation.args, {
         cwd: input.cwd,
+        env: this.processEnvironment ?? process.env,
+        detached: process.platform !== "win32",
         shell: false,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
@@ -836,11 +1106,11 @@ export class ProviderManager {
       resolveResult = resolve;
     });
     const active: ActiveRun = {
-      child,
       result,
       cancelRequested: false,
       settled: false,
       emitStatus: emitter.status,
+      cancel: (force) => terminateProviderProcess(child, force),
     };
     this.activeRuns.set(conversationId, active);
 
@@ -866,7 +1136,7 @@ export class ProviderManager {
       }
 
       if (spawnError || exitCode !== 0 || parserState.hadErrorEvent) {
-        const message = publicFailureMessage(providerId, spawnError, stderr.toString());
+        const message = publicFailureMessage(providerId, spawnError, stderr.toString(), parserState.failureText);
         emitter.status("failed", message);
         resolveResult({
           providerId,
@@ -934,14 +1204,14 @@ export class ProviderManager {
     active.cancelRequested = true;
     active.emitStatus("cancelling");
     try {
-      active.child.kill("SIGTERM");
+      active.cancel(false);
     } catch {
       // The close event may already be queued.
     }
     active.hardKillTimer = setTimeout(() => {
       if (active.settled) return;
       try {
-        active.child.kill("SIGKILL");
+        active.cancel(true);
       } catch {
         // The process may have exited between the check and kill.
       }
@@ -956,7 +1226,105 @@ export class ProviderManager {
     await Promise.allSettled(active.map(([, run]) => run.result));
   }
 
+  respondToApproval(conversationId: string, requestId: string, decision: CodexApprovalDecision): boolean {
+    const active = this.activeRuns.get(conversationId);
+    if (!active || active.settled || active.cancelRequested || !active.respondToApproval) return false;
+    return active.respondToApproval(requestId, decision);
+  }
+
+  respondToInput(conversationId: string, requestId: string, answers: Record<string, string[]>): boolean {
+    const active = this.activeRuns.get(conversationId);
+    if (!active || active.settled || active.cancelRequested || !active.respondToInput) return false;
+    return active.respondToInput(requestId, answers);
+  }
+
+  private runInteractiveCodex(
+    input: ProviderRunInput,
+    conversationId: string,
+    emitter: ReturnType<typeof makeEmitter>,
+  ): Promise<ProviderRunResult> {
+    emitter.status("starting");
+    let runningEmitted = false;
+    const emitRunning = (): void => {
+      if (runningEmitted) return;
+      runningEmitted = true;
+      emitter.status("running");
+    };
+
+    let codexRun: ReturnType<typeof startCodexAppServerRun>;
+    try {
+      codexRun = startCodexAppServerRun({
+        executable: this.commandFor("codex"),
+        environment: this.processEnvironment ?? process.env,
+        cwd: input.cwd,
+        prompt: input.prompt,
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        ...(input.imagePaths ? { imagePaths: input.imagePaths } : {}),
+        planMode: input.interactionMode === "plan",
+        access: input.access === "auto-edit" ? "auto-edit" : "supervised",
+        onText: emitter.text,
+        onActivity: emitter.activity,
+        onSession: emitter.session,
+        onStatus: emitRunning,
+        onApproval: emitter.approval,
+        onApprovalResolved: emitter.approvalResolved,
+        onInputRequest: emitter.input,
+        onInputResolved: emitter.inputResolved,
+        onPlan: emitter.plan,
+      });
+    } catch (error) {
+      const spawnError = error instanceof Error ? error as NodeJS.ErrnoException : undefined;
+      const message = publicFailureMessage("codex", spawnError, "");
+      emitter.status("failed", message);
+      return Promise.resolve({
+        providerId: "codex",
+        conversationId,
+        status: "failed",
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        text: "",
+        textTruncated: false,
+        exitCode: null,
+        signal: null,
+        error: message,
+      });
+    }
+
+    let active!: ActiveRun;
+    const result = codexRun.result.then((runtimeResult): ProviderRunResult => {
+      const { diagnostic: runtimeDiagnostic, ...publicRuntimeResult } = runtimeResult;
+      active.settled = true;
+      if (active.hardKillTimer) clearTimeout(active.hardKillTimer);
+      this.activeRuns.delete(conversationId);
+      if (runtimeResult.status === "cancelled" || active.cancelRequested) {
+        emitter.status("cancelled");
+        return { providerId: "codex", conversationId, ...publicRuntimeResult, status: "cancelled" };
+      }
+      if (runtimeResult.status === "failed") {
+        const message = publicFailureMessage("codex", undefined, runtimeDiagnostic ?? "");
+        emitter.status("failed", message);
+        return { providerId: "codex", conversationId, ...publicRuntimeResult, status: "failed", error: message };
+      }
+      emitter.status("completed");
+      return { providerId: "codex", conversationId, ...publicRuntimeResult, status: "completed" };
+    });
+
+    active = {
+      result,
+      cancelRequested: false,
+      settled: false,
+      emitStatus: emitter.status,
+      cancel: codexRun.cancel,
+      respondToApproval: codexRun.respondToApproval,
+      respondToInput: codexRun.respondToInput,
+    };
+    this.activeRuns.set(conversationId, active);
+    return result;
+  }
+
   private commandFor(providerId: ProviderId): string {
+    const resolved = this.resolvedCommands.get(providerId);
+    if (resolved) return resolved;
     const configured = this.commands[providerId]?.trim();
     if (configured && !configured.includes("\0")) return configured;
     return PROVIDER_INFO[providerId].command;

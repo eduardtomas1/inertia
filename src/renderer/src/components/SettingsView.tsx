@@ -1,6 +1,7 @@
-import { ArchiveRestore, Bot, Check, Clock3, GitCompareArrows, Laptop, Moon, PanelLeft, Sun, TerminalSquare } from "lucide-react";
+import { ArchiveRestore, Bot, Check, Clock3, GitCompareArrows, Laptop, Moon, PanelLeft, RefreshCw, Sun, TerminalSquare } from "lucide-react";
 import clsx from "clsx";
-import type { AppSettings, Conversation, ProviderInfo, ThemePreference } from "@shared/contracts";
+import type { AppSettings, Conversation, ProviderId, ProviderInfo, ThemePreference } from "@shared/contracts";
+import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { Switch } from "./ui";
 
 type SettingsViewProps = {
@@ -9,6 +10,8 @@ type SettingsViewProps = {
   providers: ProviderInfo[];
   archived: Conversation[];
   onUpdate: (settings: Partial<AppSettings>) => void;
+  onConnectProvider: (providerId: ProviderId) => void;
+  onRefreshProvider: (providerId?: ProviderId) => void;
   onUnarchive: (conversation: Conversation) => void;
 };
 
@@ -18,7 +21,7 @@ const themes: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
   { value: "dark", label: "Dark", icon: Moon },
 ];
 
-export function SettingsView({ settings, disabled, providers, archived, onUpdate, onUnarchive }: SettingsViewProps): React.JSX.Element {
+export function SettingsView({ settings, disabled, providers, archived, onUpdate, onConnectProvider, onRefreshProvider, onUnarchive }: SettingsViewProps): React.JSX.Element {
   return (
     <main className="settings-view">
       <div className="settings-content">
@@ -84,13 +87,50 @@ export function SettingsView({ settings, disabled, providers, archived, onUpdate
           </div>
         </section>
 
+        <section className="settings-card" aria-labelledby="agents-heading">
+          <div className="settings-card-heading">
+            <div><Bot size={18} /></div>
+            <span><h3 id="agents-heading">Agents</h3><p>Connect the local coding tools you already use.</p></span>
+            <button type="button" className="secondary-button provider-refresh-all" aria-label="Refresh all agents" disabled={disabled} onClick={() => onRefreshProvider()}>
+              <RefreshCw size={14} />Refresh
+            </button>
+          </div>
+          <div className="settings-rows provider-account-list">
+            {providers.map((provider) => {
+              const action = providerSetupAction(provider);
+              return (
+                <div className="setting-row provider-account-row" key={provider.id}>
+                  <span className="setting-row-icon"><Bot size={17} /></span>
+                  <span className="setting-copy provider-account-copy">
+                    <span className="provider-account-title"><strong>{provider.label}</strong><ProviderStatus provider={provider} /></span>
+                    <small>{providerStateDetail(provider)}</small>
+                  </span>
+                  {action && (
+                    <button
+                      type="button"
+                      className="secondary-button provider-account-action"
+                      aria-label={`${action === "connect" ? provider.id === "opencode" ? "Configure" : "Connect" : "Refresh"} ${provider.label}`}
+                      disabled={disabled}
+                      onClick={() => action === "connect" ? onConnectProvider(provider.id) : onRefreshProvider(provider.id)}
+                    >
+                      <ProviderActionIcon action={action} />
+                      {action === "connect" ? provider.id === "opencode" ? "Configure" : "Connect" : "Refresh"}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="settings-card-note">Sign-in stays with each provider. Inertia does not store your account credentials.</p>
+        </section>
+
         <section className="settings-card" aria-labelledby="agent-heading">
           <div className="settings-card-heading">
             <div><Bot size={18} /></div>
             <span><h3 id="agent-heading">Agent defaults</h3><p>Choose how new threads begin.</p></span>
           </div>
           <div className="settings-form-grid">
-            <label><span>Provider</span><select value={settings.defaultProvider} disabled={disabled} onChange={(event) => onUpdate({ defaultProvider: event.target.value as AppSettings["defaultProvider"] })}>{providers.map((provider) => <option value={provider.id} key={provider.id} disabled={!provider.available}>{provider.label}{provider.available ? "" : " — not installed"}</option>)}</select></label>
+            <label><span>Provider</span><select value={settings.defaultProvider} disabled={disabled} onChange={(event) => onUpdate({ defaultProvider: event.target.value as AppSettings["defaultProvider"] })}>{providers.map((provider) => <option value={provider.id} key={provider.id}>{provider.label} — {providerStateLabel(provider)}</option>)}</select></label>
             <label><span>Model override</span><input value={settings.defaultModel} disabled={disabled} placeholder="Provider default" onChange={(event) => onUpdate({ defaultModel: event.target.value })} /></label>
             <label><span>Access</span><select value={settings.defaultAccessMode} disabled={disabled} onChange={(event) => onUpdate({ defaultAccessMode: event.target.value as AppSettings["defaultAccessMode"] })}><option value="supervised">Supervised</option><option value="auto-edit">Auto-accept edits</option><option value="full">Full access</option></select></label>
             <label><span>New thread location</span><select value={settings.newThreadMode} disabled={disabled} onChange={(event) => onUpdate({ newThreadMode: event.target.value as AppSettings["newThreadMode"] })}><option value="local">Current checkout</option><option value="worktree">Isolated worktree</option></select></label>

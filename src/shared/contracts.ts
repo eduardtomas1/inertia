@@ -6,9 +6,12 @@ export type ThemePreference = "system" | "light" | "dark";
 export type ProjectStatus = "ready" | "working" | "attention";
 export type MessageRole = "user" | "assistant" | "system";
 export type ProviderId = "codex" | "claude" | "cursor" | "opencode";
+export type ProviderInstallState = "checking" | "installed" | "not-installed" | "error";
+export type ProviderAuthState = "checking" | "authenticated" | "unauthenticated" | "configured" | "unknown" | "error";
 export type InteractionMode = "build" | "plan";
 export type AccessMode = "supervised" | "auto-edit" | "full";
 export type ThreadStatus = "idle" | "running" | "needs-input" | "completed" | "failed";
+export type AgentApprovalDecision = "approve" | "deny" | "cancel";
 
 export interface ProviderInfo {
   id: ProviderId;
@@ -16,6 +19,10 @@ export interface ProviderInfo {
   command: string;
   available: boolean;
   version: string | null;
+  installState: ProviderInstallState;
+  authState: ProviderAuthState;
+  canRun: boolean;
+  statusMessage: string | null;
 }
 
 export interface ChatAttachment {
@@ -86,6 +93,61 @@ export interface AgentActivity {
   createdAt: string;
 }
 
+export interface AgentApprovalRequest {
+  id: string;
+  conversationId: string;
+  runId: string;
+  kind: "command" | "file-change" | "permissions";
+  title: string;
+  detail: string | null;
+  command: string | null;
+  cwd: string | null;
+  reason: string | null;
+  networkScope: {
+    host: string;
+    protocol: "http" | "https" | "socks5Tcp" | "socks5Udp";
+  } | null;
+  permissionRoots: Array<{
+    path: string;
+    access: "read" | "write";
+  }>;
+  availableDecisions: AgentApprovalDecision[];
+}
+
+export interface AgentInputOption {
+  label: string;
+  description: string;
+}
+
+export interface AgentInputQuestion {
+  id: string;
+  header: string;
+  question: string;
+  isOther: boolean;
+  isSecret: boolean;
+  options: AgentInputOption[];
+}
+
+export interface AgentInputRequest {
+  id: string;
+  conversationId: string;
+  runId: string;
+  questions: AgentInputQuestion[];
+  autoResolutionMs: number | null;
+}
+
+export interface AgentPlanStep {
+  step: string;
+  status: "pending" | "inProgress" | "completed";
+}
+
+export interface AgentPlan {
+  conversationId: string;
+  runId: string;
+  explanation: string | null;
+  steps: AgentPlanStep[];
+}
+
 export interface CheckpointSummary {
   id: string;
   conversationId: string;
@@ -103,6 +165,7 @@ export interface AppSnapshot {
   conversations: Conversation[];
   messages: ChatMessage[];
   activities: AgentActivity[];
+  plans: AgentPlan[];
   checkpoints: CheckpointSummary[];
   providers: ProviderInfo[];
   settings: AppSettings;
@@ -181,6 +244,24 @@ const attachmentSchema = z
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({ ...requestBase, type: z.literal("app.refresh") }).strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("provider.refresh"),
+      payload: z.object({ providerId: providerIdSchema.optional() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("provider.auth.start"),
+      payload: z.object({
+        providerId: providerIdSchema,
+        cols: z.number().int().min(40).max(240),
+        rows: z.number().int().min(10).max(80),
+      }).strict(),
+    })
+    .strict(),
   z
     .object({
       ...requestBase,
@@ -269,6 +350,31 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       ...requestBase,
       type: z.literal("agent.stop"),
       payload: z.object({ conversationId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("agent.approval.respond"),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        requestId: z.string().uuid(),
+        decision: z.enum(["approve", "deny", "cancel"]),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("agent.input.respond"),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        requestId: z.string().uuid(),
+        answers: z.record(
+          z.string().trim().min(1).max(120),
+          z.array(z.string().min(1).max(4_000)).min(1).max(5),
+        ).refine((answers) => Object.keys(answers).length <= 3),
+      }).strict(),
     })
     .strict(),
   z
@@ -477,6 +583,11 @@ export type ServerEvent =
   | { type: "agent.started"; conversationId: string; runId: string }
   | { type: "agent.text"; conversationId: string; runId: string; text: string }
   | { type: "agent.activity"; activity: AgentActivity }
+  | { type: "agent.approval.requested"; request: AgentApprovalRequest }
+  | { type: "agent.approval.resolved"; conversationId: string; requestId: string; decision: "approve" | "deny" | "cancel" | "cancelled" }
+  | { type: "agent.input.requested"; request: AgentInputRequest }
+  | { type: "agent.input.resolved"; conversationId: string; requestId: string }
+  | { type: "agent.plan.updated"; plan: AgentPlan }
   | { type: "agent.completed"; conversationId: string; runId: string }
   | { type: "agent.failed"; conversationId: string; runId: string; message: string }
   | { type: "terminal.created"; requestId: string; terminalId: string }

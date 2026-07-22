@@ -11,6 +11,7 @@ export type WorkspacePanelProps = {
   tabs?: readonly WorkspacePanelTab[];
   badges?: Partial<Record<WorkspacePanelTab, number>>;
   onClose?: () => void;
+  visible?: boolean;
 };
 
 const tabMeta: Record<WorkspacePanelTab, { label: string; icon: React.JSX.Element }> = {
@@ -30,12 +31,13 @@ export function WorkspacePanel({
   tabs = defaultTabs,
   badges,
   onClose,
+  visible = true,
 }: WorkspacePanelProps): React.JSX.Element {
   const activeMeta = tabMeta[activeTab];
   const panelId = useId();
 
   return (
-    <aside className="workspace-panel" aria-label="Workspace tools">
+    <aside className="workspace-panel" aria-label="Workspace tools" hidden={!visible}>
       <header className="workspace-panel-tabs">
         <div className="workspace-panel-tablist" role="tablist" aria-label="Workspace tools">
           {tabs.map((tab) => {

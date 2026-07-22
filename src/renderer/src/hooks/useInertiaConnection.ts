@@ -24,6 +24,21 @@ function isServerEvent(value: unknown): value is ServerEvent {
   return Boolean(value && typeof value === "object" && "type" in value && typeof value.type === "string");
 }
 
+function requestTimeoutMs(command: ClientCommand): number {
+  switch (command.type) {
+    case "git.pull":
+    case "git.push":
+    case "git.commit":
+    case "git.branch.create":
+    case "git.branch.switch":
+    case "git.worktree.create":
+    case "checkpoint.revert":
+      return 150_000;
+    default:
+      return 15_000;
+  }
+}
+
 export function useInertiaConnection(): InertiaConnection {
   const socketRef = useRef<WebSocket | null>(null);
   const pendingRef = useRef(new Map<string, PendingRequest>());
@@ -149,7 +164,7 @@ export function useInertiaConnection(): InertiaConnection {
       const timeout = window.setTimeout(() => {
         pendingRef.current.delete(command.requestId);
         reject(new Error("The request took too long to complete."));
-      }, 15_000);
+      }, requestTimeoutMs(command));
 
       pendingRef.current.set(command.requestId, { resolve, reject, timeout });
       try {

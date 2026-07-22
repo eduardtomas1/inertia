@@ -46,20 +46,33 @@ export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
 
   create(owner: WebSocket, cwd: string, cols: number, rows: number): string {
+    const shell = userShell();
+    return this.createProcess(owner, cwd, shell.executable, shell.args, process.env, cols, rows);
+  }
+
+  createProcess(
+    owner: WebSocket,
+    cwd: string,
+    executable: string,
+    args: readonly string[],
+    env: NodeJS.ProcessEnv,
+    cols: number,
+    rows: number,
+    onExit?: (exitCode: number) => void,
+  ): string {
     if (this.sessions.size >= MAX_TERMINALS) throw new TerminalError("The terminal session limit has been reached.");
     const ownerCount = [...this.sessions.values()].filter((session) => session.owner === owner).length;
     if (ownerCount >= MAX_TERMINALS_PER_CLIENT) throw new TerminalError("This window already has the maximum number of terminals.");
 
     const id = randomUUID();
-    const shell = userShell();
     let pseudoterminal: IPty;
     try {
-      pseudoterminal = spawn(shell.executable, shell.args, {
+      pseudoterminal = spawn(executable, [...args], {
         name: "xterm-256color",
         cols,
         rows,
         cwd,
-        env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" },
+        env: { ...env, TERM: "xterm-256color", COLORTERM: "truecolor" },
       });
     } catch {
       throw new TerminalError("Unable to start a terminal for this project.");
@@ -73,6 +86,7 @@ export class TerminalManager {
     const exitListener = pseudoterminal.onExit(({ exitCode }) => {
       this.dispose(id, false);
       send(owner, { type: "terminal.exit", terminalId: id, exitCode });
+      onExit?.(exitCode);
     });
     this.sessions.set(id, { id, owner, pty: pseudoterminal, dataListener, exitListener });
     return id;

@@ -22,6 +22,11 @@ test-results/
 .env
 .env.*
 !.env.example
+electron-builder.env
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
 
 # Logs and package manager noise
 *.log
@@ -43,5 +48,9 @@ pnpm-debug.log*
 *.swo
 
 # Local security-review output (never commit)
+.security-reports/
+security-reports/
 security_best_practices_report.md
+security-best-practices-report.md
+security-threat-model.md
 *-threat-model.md

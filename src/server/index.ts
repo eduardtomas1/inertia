@@ -9,6 +9,9 @@ import {
   PROTOCOL_VERSION,
   clientCommandSchema,
   type AgentActivity,
+  type AgentApprovalRequest,
+  type AgentInputRequest,
+  type AgentPlan,
   type AppSnapshot,
   type ChangedFile,
   type ClientCommand,
@@ -33,7 +36,7 @@ import {
   switchBranch,
   type GitRepositoryStatus,
 } from "./git";
-import { PROVIDERS, ProviderManager, ProviderRuntimeError, type ProviderActivityEvent } from "./providers";
+import { PROVIDERS, ProviderManager, ProviderRuntimeError, type ProviderActivityEvent, type ProviderDetection } from "./providers";
 import { TerminalError, TerminalManager } from "./terminal";
 import {
   WorkspaceError,
@@ -128,14 +131,32 @@ function publicError(error: unknown): string {
   return "The request could not be completed.";
 }
 
-function providerDefaults(): ProviderInfo[] {
+function providerDefaults(executionEnabled = true): ProviderInfo[] {
   return PROVIDERS.map((provider) => ({
     id: provider.id,
     label: provider.name,
     command: provider.command,
     available: false,
     version: null,
+    installState: "checking",
+    authState: "checking",
+    canRun: !executionEnabled,
+    statusMessage: "Checking installation and connection",
   }));
+}
+
+function providerSnapshot(detection: ProviderDetection): ProviderInfo {
+  return {
+    id: detection.provider.id,
+    label: detection.provider.name,
+    command: detection.provider.command,
+    available: detection.available,
+    version: detection.version ?? null,
+    installState: detection.installState,
+    authState: detection.authState,
+    canRun: detection.canRun,
+    statusMessage: detection.statusMessage ?? null,
+  };
 }
 
 function changedFiles(status: GitRepositoryStatus): ChangedFile[] {
@@ -194,8 +215,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const enableProviders = options.enableProviders ?? true;
   const terminals = new TerminalManager();
   const providers = new ProviderManager();
-  let providerInfo = providerDefaults();
+  let providerInfo = providerDefaults(enableProviders);
   const clients = new Set<WebSocket>();
+  const pendingApprovals = new Map<string, AgentApprovalRequest>();
+  const pendingInputs = new Map<string, AgentInputRequest>();
+  const agentPlans = new Map<string, AgentPlan>(store.snapshot().plans.map((plan) => [plan.conversationId, plan]));
   const token = randomBytes(32).toString("base64url");
   const websocketPath = `/runtime/${token}`;
   const webSockets = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES, perMessageDeflate: false });
@@ -220,6 +244,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     for (const client of clients) send(client, event);
   };
   const broadcastSnapshot = (): void => broadcast({ type: "snapshot.updated", snapshot: currentSnapshot() });
+  const refreshProviderInfo = async (providerId?: ProviderInfo["id"], refreshEnvironment = false): Promise<void> => {
+    if (!enableProviders) return;
+    if (providerId) {
+      const detection = await providers.detect(providerId, { timeoutMs: 4_000, refreshEnvironment });
+      providerInfo = providerInfo.map((current) => current.id === providerId ? providerSnapshot(detection) : current);
+    } else {
+      providerInfo = (await providers.detectAll({ timeoutMs: 4_000, refreshEnvironment })).map(providerSnapshot);
+    }
+    if (!closed) broadcastSnapshot();
+  };
   const workspacePath = (projectId: string, conversationId?: string): string => {
     if (!conversationId) return ensureDirectory(store.projectPath(projectId));
     const conversation = store.conversation(conversationId);
@@ -230,9 +264,71 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const startAgent = (conversationId: string, prompt: string, attachmentPaths: string[]): void => {
     const conversation = store.conversation(conversationId);
     const runId = randomUUID();
+    agentPlans.delete(conversationId);
+    store.clearAgentPlan(conversationId);
     store.updateConversation(conversationId, { status: "running" });
     broadcast({ type: "agent.started", conversationId, runId });
     broadcastSnapshot();
+
+    let assistantText = "";
+    let assistantMessageId: string | null = null;
+    let assistantFlushTimer: NodeJS.Timeout | undefined;
+    const flushAssistantMessage = (): void => {
+      if (assistantFlushTimer) {
+        clearTimeout(assistantFlushTimer);
+        assistantFlushTimer = undefined;
+      }
+      if (!assistantText) return;
+      if (assistantMessageId) store.updateMessageContent(assistantMessageId, assistantText);
+      else assistantMessageId = store.createMessage(conversationId, assistantText, "assistant").id;
+    };
+    const appendAssistantText = (text: string): void => {
+      assistantText = `${assistantText}${text}`.slice(0, 4 * 1024 * 1024);
+      if (!assistantMessageId) flushAssistantMessage();
+      else if (!assistantFlushTimer) {
+        assistantFlushTimer = setTimeout(flushAssistantMessage, 120);
+        assistantFlushTimer.unref();
+      }
+    };
+    const runningActivities = new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
+    const recordProviderActivity = (event: ProviderActivityEvent): AgentActivity => {
+      const status = activityStatus(event);
+      const candidates = runningActivities.get(event.kind) ?? [];
+
+      if (event.phase !== "started" && event.phase !== "info") {
+        let matchIndex = candidates.findIndex((activity) => activity.title === event.label);
+        if (matchIndex < 0 && (candidates.length === 1 || event.label === "Tool")) matchIndex = 0;
+        if (matchIndex >= 0) {
+          const [match] = candidates.splice(matchIndex, 1);
+          if (candidates.length === 0) runningActivities.delete(event.kind);
+          else runningActivities.set(event.kind, candidates);
+          return store.updateActivity(match.id, { title: event.label, status });
+        }
+      }
+
+      const activity = store.addActivity({
+        conversationId,
+        runId,
+        kind: activityKind(event),
+        title: event.label,
+        detail: null,
+        status,
+      });
+      if (event.phase === "started") {
+        candidates.push(activity);
+        runningActivities.set(event.kind, candidates);
+      }
+      return activity;
+    };
+    const settleRunningActivities = (status: AgentActivity["status"]): void => {
+      for (const activities of runningActivities.values()) {
+        for (const pending of activities) {
+          const activity = store.updateActivity(pending.id, { status });
+          broadcast({ type: "agent.activity", activity });
+        }
+      }
+      runningActivities.clear();
+    };
 
     let run: ReturnType<ProviderManager["run"]>;
     try {
@@ -249,24 +345,77 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           imagePaths: attachmentPaths,
         },
         {
-          onText: (event) => broadcast({ type: "agent.text", conversationId, runId, text: event.text }),
+          onText: (event) => {
+            appendAssistantText(event.text);
+            broadcast({ type: "agent.text", conversationId, runId, text: event.text });
+          },
           onSession: (event) => {
             store.updateConversation(conversationId, { providerSessionId: event.sessionId });
           },
           onActivity: (event) => {
-            const activity = store.addActivity({
+            const activity = recordProviderActivity(event);
+            broadcast({ type: "agent.activity", activity });
+          },
+          onApproval: (event) => {
+            const request: AgentApprovalRequest = {
+              id: event.request.requestId,
               conversationId,
               runId,
-              kind: activityKind(event),
-              title: event.label,
-              detail: null,
-              status: activityStatus(event),
-            });
-            broadcast({ type: "agent.activity", activity });
+              kind: event.request.kind,
+              title: event.request.title,
+              detail: event.request.detail ?? null,
+              command: event.request.command ?? null,
+              cwd: event.request.cwd ?? null,
+              reason: event.request.reason ?? null,
+              networkScope: event.request.networkScope ?? null,
+              permissionRoots: event.request.permissionRoots,
+              availableDecisions: event.request.availableDecisions,
+            };
+            pendingApprovals.set(request.id, request);
+            store.updateConversation(conversationId, { status: "needs-input" });
+            broadcast({ type: "agent.approval.requested", request });
+            broadcastSnapshot();
+          },
+          onApprovalResolved: (event) => {
+            pendingApprovals.delete(event.requestId);
+            broadcast({ type: "agent.approval.resolved", conversationId, requestId: event.requestId, decision: event.decision });
+            if (providers.isRunning(conversationId) && ![...pendingApprovals.values(), ...pendingInputs.values()].some((request) => request.conversationId === conversationId)) {
+              store.updateConversation(conversationId, { status: "running" });
+              broadcastSnapshot();
+            }
+          },
+          onInput: (event) => {
+            const request: AgentInputRequest = {
+              id: event.request.requestId,
+              conversationId,
+              runId,
+              questions: event.request.questions,
+              autoResolutionMs: event.request.autoResolutionMs,
+            };
+            pendingInputs.set(request.id, request);
+            store.updateConversation(conversationId, { status: "needs-input" });
+            broadcast({ type: "agent.input.requested", request });
+            broadcastSnapshot();
+          },
+          onInputResolved: (event) => {
+            pendingInputs.delete(event.requestId);
+            broadcast({ type: "agent.input.resolved", conversationId, requestId: event.requestId });
+            if (providers.isRunning(conversationId) && ![...pendingApprovals.values(), ...pendingInputs.values()].some((request) => request.conversationId === conversationId)) {
+              store.updateConversation(conversationId, { status: "running" });
+              broadcastSnapshot();
+            }
+          },
+          onPlan: (event) => {
+            const plan: AgentPlan = { conversationId, runId, explanation: event.explanation, steps: event.steps };
+            agentPlans.set(conversationId, plan);
+            store.upsertAgentPlan(plan);
+            broadcast({ type: "agent.plan.updated", plan });
           },
         },
       );
     } catch (error) {
+      flushAssistantMessage();
+      settleRunningActivities("failed");
       const message = publicError(error);
       store.updateConversation(conversationId, { status: "failed" });
       const activity = store.addActivity({ conversationId, runId, kind: "error", title: message, detail: null, status: "failed" });
@@ -278,7 +427,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
 
     void run.then((result) => {
       if (result.sessionId) store.updateConversation(conversationId, { providerSessionId: result.sessionId });
-      if (result.text.trim()) store.createMessage(conversationId, result.text, "assistant");
+      if (result.text && result.text !== assistantText) assistantText = result.text;
+      flushAssistantMessage();
+      settleRunningActivities(result.status === "failed" ? "failed" : "completed");
       if (result.status === "completed") {
         store.updateConversation(conversationId, { status: "completed" });
         broadcast({ type: "agent.completed", conversationId, runId });
@@ -291,9 +442,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         const activity = store.addActivity({ conversationId, runId, kind: "error", title: message, detail: null, status: "failed" });
         broadcast({ type: "agent.activity", activity });
         broadcast({ type: "agent.failed", conversationId, runId, message });
+        void refreshProviderInfo(conversation.providerId).catch(() => undefined);
       }
       broadcastSnapshot();
     }).catch((error: unknown) => {
+      flushAssistantMessage();
+      settleRunningActivities("failed");
       const message = publicError(error);
       store.updateConversation(conversationId, { status: "failed" });
       broadcast({ type: "agent.failed", conversationId, runId, message });
@@ -308,6 +462,25 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           send(socket, { type: "request.ok", requestId: command.requestId });
           send(socket, { type: "snapshot.updated", snapshot: currentSnapshot() });
           return;
+        case "provider.refresh":
+          await refreshProviderInfo(command.payload.providerId, true);
+          send(socket, { type: "request.ok", requestId: command.requestId });
+          return;
+        case "provider.auth.start": {
+          const launch = await providers.authLaunch(command.payload.providerId);
+          const terminalId = terminals.createProcess(
+            socket,
+            options.defaultWorkspacePath,
+            launch.executable,
+            launch.args,
+            launch.env,
+            command.payload.cols,
+            command.payload.rows,
+            () => { void refreshProviderInfo(command.payload.providerId, true).catch(() => undefined); },
+          );
+          send(socket, { type: "terminal.created", requestId: command.requestId, terminalId });
+          return;
+        }
         case "project.create":
           store.createProject(command.payload.name, ensureDirectory(command.payload.path));
           break;
@@ -367,6 +540,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           const conversation = store.conversation(command.payload.conversationId);
           if (providers.isRunning(conversation.id)) throw new RequestError("Wait for the current run to finish or stop it first.");
           if (enableProviders) {
+            const selectedProvider = providerInfo.find(({ id }) => id === conversation.providerId);
+            if (!selectedProvider?.canRun) {
+              throw new RequestError(selectedProvider?.statusMessage ?? "This agent is not ready. Open Settings to finish setup.");
+            }
+          }
+          if (enableProviders) {
             try {
               const path = store.conversationPath(conversation.id);
               const status = await getRepositoryStatus(path);
@@ -391,6 +570,26 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         case "agent.stop":
           if (!providers.cancel(command.payload.conversationId)) throw new RequestError("This thread does not have an active run.");
           break;
+        case "agent.approval.respond": {
+          const pending = pendingApprovals.get(command.payload.requestId);
+          if (!pending || pending.conversationId !== command.payload.conversationId) throw new RequestError("That approval request is no longer pending.");
+          if (!providers.respondToApproval(command.payload.conversationId, command.payload.requestId, command.payload.decision)) {
+            throw new RequestError("That approval request is no longer pending.");
+          }
+          break;
+        }
+        case "agent.input.respond": {
+          const pending = pendingInputs.get(command.payload.requestId);
+          if (!pending || pending.conversationId !== command.payload.conversationId) throw new RequestError("That question is no longer pending.");
+          const expected = new Set(pending.questions.map(({ id }) => id));
+          if (Object.keys(command.payload.answers).some((id) => !expected.has(id)) || [...expected].some((id) => !command.payload.answers[id]?.length)) {
+            throw new RequestError("Answer every question before continuing.");
+          }
+          if (!providers.respondToInput(command.payload.conversationId, command.payload.requestId, command.payload.answers)) {
+            throw new RequestError("That question is no longer pending.");
+          }
+          break;
+        }
         case "settings.update":
           store.updateSettings(command.payload);
           break;
@@ -547,6 +746,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     let inFlightCommands = 0;
     clients.add(socket);
     send(socket, { type: "server.welcome", protocolVersion: PROTOCOL_VERSION, snapshot: currentSnapshot() });
+    for (const request of pendingApprovals.values()) send(socket, { type: "agent.approval.requested", request });
+    for (const request of pendingInputs.values()) send(socket, { type: "agent.input.requested", request });
+    for (const plan of agentPlans.values()) send(socket, { type: "agent.plan.updated", plan });
     socket.on("message", (data, isBinary) => {
       const parsed = parseCommand(data, isBinary);
       if (parsed.error) send(socket, parsed.error);
@@ -573,9 +775,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const address = server.address();
   if (!address || typeof address === "string") { store.close(); throw new Error("Runtime did not receive a local port."); }
 
-  if (enableProviders) void providers.detectAll({ timeoutMs: 2_000 }).then((detections) => {
+  if (enableProviders) void refreshProviderInfo(undefined, true).catch(() => {
     if (closed) return;
-    providerInfo = detections.map(({ provider, available, version }) => ({ id: provider.id, label: provider.name, command: provider.command, available, version: version ?? null }));
+    providerInfo = providerInfo.map((provider) => ({
+      ...provider,
+      installState: "error",
+      authState: "error",
+      canRun: false,
+      statusMessage: "Agent discovery failed",
+    }));
     broadcastSnapshot();
   });
 

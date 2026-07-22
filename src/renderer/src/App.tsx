@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { AlertCircle, X } from "lucide-react";
 import {
   defaultSettings,
+  type AgentApprovalDecision,
+  type AgentApprovalRequest,
+  type AgentInputRequest,
+  type AgentPlan,
   type AppSettings,
   type ChatAttachment,
   type ClientCommand,
@@ -11,6 +15,7 @@ import {
   type GitStatusSnapshot,
   type Project,
   type ProjectAction,
+  type ProviderId,
   type ServerEvent,
   type ThemePreference,
   type WorkspaceEntry,
@@ -22,8 +27,10 @@ import { ChatWorkspace } from "./components/ChatWorkspace";
 import { CommandPalette } from "./components/CommandPalette";
 import { CommitDialog } from "./components/CommitDialog";
 import { FilesPanel } from "./components/FilesPanel";
+import { PaneResizeHandle } from "./components/PaneResizeHandle";
 import { PlanPanel, type PlanStep } from "./components/PlanPanel";
 import { PreviewPanel } from "./components/PreviewPanel";
+import { ProviderAuthDialog } from "./components/ProviderAuthDialog";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
 import { TerminalPanel } from "./components/TerminalPanel";
@@ -31,6 +38,8 @@ import { WorkspaceHeader } from "./components/WorkspaceHeader";
 import { WorkspacePanel, type WorkspacePanelTab } from "./components/WorkspacePanel";
 import { IconButton } from "./components/ui";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
+import { useMediaQuery } from "./hooks/useMediaQuery";
+import { usePersistedSize } from "./hooks/usePersistedSize";
 import { useTheme } from "./hooks/useTheme";
 import { projectNameFromPath } from "./lib/format";
 
@@ -52,6 +61,19 @@ function resultEvent(event: ServerEvent): ResultEvent {
 }
 
 const themeOrder: ThemePreference[] = ["system", "light", "dark"];
+const RESIZE_HANDLE_SIZE = 7;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 420;
+const CHAT_MIN_WIDTH = 340;
+const CHAT_MIN_HEIGHT = 220;
+const TOOLS_MIN_WIDTH = 300;
+const TOOLS_MAX_WIDTH = 960;
+const TOOLS_MIN_HEIGHT = 180;
+const TOOLS_MAX_HEIGHT = 720;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
 function planFromText(text: string, status: Conversation["status"]): PlanStep[] {
   const lines = text.split("\n");
@@ -84,14 +106,55 @@ export default function App(): React.JSX.Element {
   const [projectActions, setProjectActions] = useState<ProjectAction[]>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  const [pendingApprovals, setPendingApprovals] = useState<AgentApprovalRequest[]>([]);
+  const [pendingInputs, setPendingInputs] = useState<AgentInputRequest[]>([]);
+  const [nativePlans, setNativePlans] = useState<Record<string, AgentPlan>>({});
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewNavigation, setPreviewNavigation] = useState<PreviewState>({ url: "", loading: false, canGoBack: false, canGoForward: false });
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
+  const [persistedSidebarWidth, setPersistedSidebarWidth] = usePersistedSize("inertia:layout:sidebar-width:v1", 276, { min: SIDEBAR_MIN_WIDTH, max: SIDEBAR_MAX_WIDTH });
+  const [persistedToolsWidth, setPersistedToolsWidth] = usePersistedSize("inertia:layout:workspace-tools-width:v1", 520, { min: TOOLS_MIN_WIDTH, max: TOOLS_MAX_WIDTH });
+  const [persistedToolsHeight, setPersistedToolsHeight] = usePersistedSize("inertia:layout:workspace-tools-height:v1", 320, { min: TOOLS_MIN_HEIGHT, max: TOOLS_MAX_HEIGHT });
+  const [sidebarWidth, setSidebarWidth] = useState(persistedSidebarWidth);
+  const [toolsWidth, setToolsWidth] = useState(persistedToolsWidth);
+  const [toolsHeight, setToolsHeight] = useState(persistedToolsHeight);
+  const [shellWidth, setShellWidth] = useState(() => window.innerWidth);
+  const [workspaceBodySize, setWorkspaceBodySize] = useState(() => ({ width: Math.max(0, window.innerWidth - 300), height: Math.max(0, window.innerHeight - 80) }));
+  const stackedTools = useMediaQuery("(max-width: 1024px)");
+  const mobileNavigation = useMediaQuery("(max-width: 760px)");
   const searchTimer = useRef<number | null>(null);
+  const appShellRef = useRef<HTMLDivElement>(null);
+  const workspaceBodyRef = useRef<HTMLDivElement>(null);
   const settings = connection.snapshot?.settings ?? defaultSettings;
   useTheme(settings.theme);
+
+  useEffect(() => {
+    if (!connection.snapshot) return;
+    setNativePlans(Object.fromEntries(connection.snapshot.plans.map((plan) => [plan.conversationId, plan])));
+  }, [connection.snapshot?.plans]);
+
+  useEffect(() => setSidebarWidth(persistedSidebarWidth), [persistedSidebarWidth]);
+  useEffect(() => setToolsWidth(persistedToolsWidth), [persistedToolsWidth]);
+  useEffect(() => setToolsHeight(persistedToolsHeight), [persistedToolsHeight]);
+
+  useEffect(() => {
+    const shell = appShellRef.current;
+    if (!shell) return;
+    const observer = new ResizeObserver(([entry]) => setShellWidth(entry.contentRect.width));
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const body = workspaceBodyRef.current;
+    if (!body) return;
+    const observer = new ResizeObserver(([entry]) => setWorkspaceBodySize({ width: entry.contentRect.width, height: entry.contentRect.height }));
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, []);
 
   const project = useMemo(
     () => connection.snapshot?.projects.find((item) => item.id === connection.snapshot?.activeProjectId) ?? null,
@@ -113,10 +176,22 @@ export default function App(): React.JSX.Element {
     () => connection.snapshot?.checkpoints.filter((checkpoint) => checkpoint.conversationId === conversation?.id) ?? [],
     [connection.snapshot, conversation?.id],
   );
+  const authProvider = useMemo(
+    () => connection.snapshot?.providers.find(({ id }) => id === authProviderId) ?? null,
+    [authProviderId, connection.snapshot?.providers],
+  );
   const planSteps = useMemo(() => {
+    const nativePlan = conversation ? nativePlans[conversation.id] : undefined;
+    if (nativePlan) {
+      return nativePlan.steps.map((step, index) => ({
+        id: `native-${index}`,
+        title: step.step,
+        status: step.status === "inProgress" ? "in-progress" as const : step.status,
+      }));
+    }
     const text = [...messages].reverse().find((message) => message.role === "assistant")?.content ?? streamingText;
     return planFromText(text, conversation?.status ?? "idle");
-  }, [conversation?.status, messages, streamingText]);
+  }, [conversation, messages, nativePlans, streamingText]);
 
   const run = useCallback(async (key: string, command: CommandWithoutId): Promise<ServerEvent> => {
     setBusyAction(key);
@@ -134,6 +209,26 @@ export default function App(): React.JSX.Element {
   const request = useCallback((command: CommandWithoutId) => connection.sendCommand(withRequestId(command)), [connection.sendCommand]);
 
   useEffect(() => connection.subscribe((event) => {
+    if (event.type === "agent.approval.requested") {
+      setPendingApprovals((current) => [...current.filter(({ id }) => id !== event.request.id), event.request]);
+      return;
+    }
+    if (event.type === "agent.approval.resolved") {
+      setPendingApprovals((current) => current.filter(({ id }) => id !== event.requestId));
+      return;
+    }
+    if (event.type === "agent.input.requested") {
+      setPendingInputs((current) => [...current.filter(({ id }) => id !== event.request.id), event.request]);
+      return;
+    }
+    if (event.type === "agent.input.resolved") {
+      setPendingInputs((current) => current.filter(({ id }) => id !== event.requestId));
+      return;
+    }
+    if (event.type === "agent.plan.updated") {
+      setNativePlans((current) => ({ ...current, [event.plan.conversationId]: event.plan }));
+      return;
+    }
     if (!conversation || !("conversationId" in event) || event.conversationId !== conversation.id) return;
     if (event.type === "agent.started") setStreamingText("");
     if (event.type === "agent.text") setStreamingText((current) => `${current}${event.text}`.slice(-500_000));
@@ -222,12 +317,29 @@ export default function App(): React.JSX.Element {
     if (!conversation) return;
     await run("message.send", { type: "message.send", payload: { conversationId: conversation.id, content, attachments } });
   };
+  const respondToApproval = async (request: AgentApprovalRequest, decision: AgentApprovalDecision) => {
+    await run("agent.approval.respond", {
+      type: "agent.approval.respond",
+      payload: { conversationId: request.conversationId, requestId: request.id, decision },
+    });
+  };
+  const respondToInput = async (request: AgentInputRequest, answers: Record<string, string[]>) => {
+    await run("agent.input.respond", {
+      type: "agent.input.respond",
+      payload: { conversationId: request.conversationId, requestId: request.id, answers },
+    });
+  };
   const updateConversation = (update: Partial<Pick<Conversation, "providerId" | "model" | "interactionMode" | "accessMode">>) => {
     if (!conversation) return;
     void run("conversation.update", { type: "conversation.update", payload: { conversationId: conversation.id, ...update } }).catch(() => undefined);
   };
   const updateSettings = (updates: Partial<AppSettings>) => { void run("settings.update", { type: "settings.update", payload: updates }).catch(() => undefined); };
   const cycleTheme = () => updateSettings({ theme: themeOrder[(themeOrder.indexOf(settings.theme) + 1) % themeOrder.length] });
+  const refreshProvider = useCallback((providerId?: ProviderId) => {
+    void run("provider.refresh", { type: "provider.refresh", payload: { ...(providerId ? { providerId } : {}) } }).catch(() => undefined);
+  }, [run]);
+  const connectProvider = useCallback((providerId: ProviderId) => setAuthProviderId(providerId), []);
+  const closeProviderAuth = useCallback(() => setAuthProviderId(null), []);
 
   const loadBranches = () => {
     if (!project || !gitStatus?.isRepository) return;
@@ -289,9 +401,33 @@ export default function App(): React.JSX.Element {
 
   const visibleError = actionError ?? connection.error;
   const platform = window.inertia?.getPlatform() ?? "unknown";
+  const toolsVisible = view === "workspace" && Boolean(activeTool && project);
+  const minimumWorkspaceWidth = !stackedTools && toolsVisible
+    ? CHAT_MIN_WIDTH + TOOLS_MIN_WIDTH + RESIZE_HANDLE_SIZE + 18
+    : 440;
+  const sidebarDynamicMax = Math.max(
+    SIDEBAR_MIN_WIDTH,
+    Math.min(SIDEBAR_MAX_WIDTH, shellWidth - minimumWorkspaceWidth - RESIZE_HANDLE_SIZE),
+  );
+  const toolsDynamicMaxWidth = Math.max(
+    TOOLS_MIN_WIDTH,
+    Math.min(TOOLS_MAX_WIDTH, workspaceBodySize.width - CHAT_MIN_WIDTH - RESIZE_HANDLE_SIZE),
+  );
+  const toolsDynamicMaxHeight = Math.max(
+    TOOLS_MIN_HEIGHT,
+    Math.min(TOOLS_MAX_HEIGHT, workspaceBodySize.height - CHAT_MIN_HEIGHT - RESIZE_HANDLE_SIZE),
+  );
+  const effectiveSidebarWidth = clamp(sidebarWidth, SIDEBAR_MIN_WIDTH, sidebarDynamicMax);
+  const effectiveToolsWidth = clamp(toolsWidth, TOOLS_MIN_WIDTH, toolsDynamicMaxWidth);
+  const effectiveToolsHeight = clamp(toolsHeight, TOOLS_MIN_HEIGHT, toolsDynamicMaxHeight);
+  const appShellStyle = { "--sidebar-width": `${effectiveSidebarWidth}px` } as CSSProperties;
+  const workspaceBodyStyle = {
+    "--workspace-tools-width": `${effectiveToolsWidth}px`,
+    "--workspace-tools-height": `${effectiveToolsHeight}px`,
+  } as CSSProperties;
 
   return (
-    <div className={`app-shell platform-${platform}`}>
+    <div ref={appShellRef} className={`app-shell platform-${platform}`} style={appShellStyle}>
       <Sidebar
         snapshot={connection.snapshot} connectionStatus={connection.status} view={view} open={sidebarOpen} busy={busyAction === "project.create"}
         onClose={() => setSidebarOpen(false)} onViewChange={setView} onImportProject={() => void importProject()} onSelectProject={selectProject} onSelectConversation={selectConversation} onCreateConversation={createConversation}
@@ -301,7 +437,24 @@ export default function App(): React.JSX.Element {
         onRemoveProject={(item) => { if (window.confirm(`Remove “${item.name}” from Inertia? Files on disk will not be deleted.`)) void run("project.remove", { type: "project.remove", payload: { projectId: item.id } }).catch(() => undefined); }}
       />
 
-      <section className="workspace-shell">
+      {!mobileNavigation && (
+        <PaneResizeHandle
+          label="Resize project navigation"
+          controls="main-workspace"
+          containerRef={appShellRef}
+          orientation="vertical"
+          value={effectiveSidebarWidth}
+          min={SIDEBAR_MIN_WIDTH}
+          max={sidebarDynamicMax}
+          defaultValue={276}
+          onChange={setSidebarWidth}
+          onCommit={setPersistedSidebarWidth}
+          valueText={(value) => `${value} pixels for project navigation`}
+          className="sidebar-resize-handle"
+        />
+      )}
+
+      <section className="workspace-shell" id="main-workspace">
         <div className="workspace-frame">
           <WorkspaceHeader
             project={project} conversation={conversation} view={view} activeTool={activeTool} theme={settings.theme} gitStatus={gitStatus} branches={branches} actions={projectActions} busy={Boolean(busyAction)}
@@ -312,7 +465,12 @@ export default function App(): React.JSX.Element {
             onPull={() => { if (project) void run("git.pull", { type: "git.pull", payload: { projectId: project.id, conversationId: conversation?.id } }).then(() => loadGit()).catch(() => undefined); }}
           />
 
-          <div className="workspace-body">
+          <div
+            ref={workspaceBodyRef}
+            id="workspace-content"
+            className={toolsVisible ? "workspace-body has-tools" : "workspace-body"}
+            style={workspaceBodyStyle}
+          >
             {view === "settings" ? (
               <SettingsView
                 settings={settings}
@@ -320,22 +478,39 @@ export default function App(): React.JSX.Element {
                 providers={connection.snapshot?.providers ?? []}
                 archived={connection.snapshot?.conversations.filter(({ archivedAt }) => archivedAt !== null) ?? []}
                 onUpdate={updateSettings}
+                onConnectProvider={connectProvider}
+                onRefreshProvider={refreshProvider}
                 onUnarchive={(thread) => { void run("conversation.unarchive", { type: "conversation.unarchive", payload: { conversationId: thread.id } }).catch(() => undefined); }}
               />
             ) : (
-              <>
-                <ChatWorkspace project={project} conversation={conversation} messages={messages} activities={activities} checkpoints={checkpoints} streamingText={streamingText} providers={connection.snapshot?.providers ?? []} actions={projectActions} mentionResults={mentionResults} showTimestamps={settings.showTimestamps} loading={!connection.snapshot && connection.status !== "offline"} sending={busyAction === "message.send"} onAddProject={() => void importProject()} onCreateConversation={() => createConversation()} onSendMessage={sendMessage} onUpdateConversation={updateConversation} onChooseAttachments={chooseComposerAttachments} onImportAttachments={importComposerAttachments} onRunAction={runProjectAction} onMentionQuery={searchMentions} onRevertCheckpoint={(checkpoint) => { if (conversation && window.confirm("Restore the project to before this turn? Untracked files created later will be left in place.")) void run("checkpoint.revert", { type: "checkpoint.revert", payload: { conversationId: conversation.id, checkpointId: checkpoint.id } }).then(() => loadGit()).catch(() => undefined); }} onStop={() => { if (conversation) void run("agent.stop", { type: "agent.stop", payload: { conversationId: conversation.id } }).catch(() => undefined); }} />
+              <ChatWorkspace project={project} conversation={conversation} messages={messages} activities={activities} checkpoints={checkpoints} streamingText={streamingText} approvals={pendingApprovals.filter((request) => request.conversationId === conversation?.id)} inputRequests={pendingInputs.filter((request) => request.conversationId === conversation?.id)} providers={connection.snapshot?.providers ?? []} actions={projectActions} mentionResults={mentionResults} showTimestamps={settings.showTimestamps} loading={!connection.snapshot && connection.status !== "offline"} sending={busyAction === "message.send"} onAddProject={() => void importProject()} onCreateConversation={() => createConversation()} onSendMessage={sendMessage} onRespondToApproval={respondToApproval} onRespondToInput={respondToInput} onUpdateConversation={updateConversation} onChooseAttachments={chooseComposerAttachments} onImportAttachments={importComposerAttachments} onRunAction={runProjectAction} onMentionQuery={searchMentions} onConnectProvider={connectProvider} onRefreshProvider={refreshProvider} onRevertCheckpoint={(checkpoint) => { if (conversation && window.confirm("Restore the project to before this turn? Untracked files created later will be left in place.")) void run("checkpoint.revert", { type: "checkpoint.revert", payload: { conversationId: conversation.id, checkpointId: checkpoint.id } }).then(() => loadGit()).catch(() => undefined); }} onStop={() => { if (conversation) void run("agent.stop", { type: "agent.stop", payload: { conversationId: conversation.id } }).catch(() => undefined); }} />
+            )}
 
-                {activeTool && project && (
-                  <WorkspacePanel activeTab={activeTool} onTabChange={setActiveTool} badges={{ changes: gitStatus?.files.length ?? 0, plan: planSteps.length }} onClose={() => setActiveTool(null)}>
-                    {activeTool === "changes" && <ChangesPanel files={gitStatus?.files ?? []} diff={gitDiff} selectedPath={selectedChange} loading={toolsLoading} wrapLines={settings.wrapDiffs} onSelectFile={selectChangedFile} onRefresh={() => void loadGit().catch((error) => setActionError(error instanceof Error ? error.message : "Changes could not be refreshed."))} />}
-                    {activeTool === "files" && <FilesPanel entries={workspaceEntries} preview={filePreview} selectedPath={selectedFile} loading={toolsLoading} entriesTruncated={entriesTruncated} onSelectFile={selectWorkspaceFile} onRefresh={() => void loadFiles().catch((error) => setActionError(error instanceof Error ? error.message : "Files could not be refreshed."))} onSearchChange={searchFiles} onOpenFile={(path) => { const root = conversation?.worktreePath ?? project.path; void window.inertia.openPath(`${root.replace(/[\\/]$/u, "")}/${path}`).then((error) => { if (error) setActionError(error); }); }} />}
-                    {activeTool === "terminal" && <TerminalPanel projectId={project.id} conversationId={conversation?.id} projectName={project.name} status={connection.status} fontSize={settings.terminalFontSize} theme={settings.theme} sendCommand={connection.sendCommand} subscribe={connection.subscribe} actionId={pendingActionId} onActionStarted={() => setPendingActionId(null)} onClose={() => setActiveTool(null)} />}
-                    {activeTool === "plan" && <PlanPanel steps={planSteps} summary={conversation?.interactionMode === "plan" ? "The latest agent response is reflected as a working plan." : "Switch the composer to Plan mode and ask the agent to propose an approach."} onRefine={conversation && conversation.status !== "running" ? () => { updateConversation({ interactionMode: "plan" }); void sendMessage("Refine the implementation plan with clearer steps, risks, and validation.", []).catch(() => undefined); } : undefined} onImplement={conversation && planSteps.length > 0 && conversation.status !== "running" ? () => { updateConversation({ interactionMode: "build" }); void sendMessage("Implement the plan above and validate the result.", []).catch(() => undefined); setActiveTool("changes"); } : undefined} />}
-                    {activeTool === "preview" && <PreviewPanel url={previewUrl} loading={previewNavigation.loading} canGoBack={previewNavigation.canGoBack} canGoForward={previewNavigation.canGoForward} onNavigate={navigatePreview} onBack={() => previewCommand("back")} onForward={() => previewCommand("forward")} onReload={() => previewCommand("reload")} onBoundsChange={setPreviewBounds} onOpenExternal={(url) => { void window.inertia.openExternal(url).catch((error) => setActionError(error instanceof Error ? error.message : "The URL could not be opened.")); }} />}
-                  </WorkspacePanel>
-                )}
-              </>
+            {toolsVisible && (
+              <PaneResizeHandle
+                label="Resize workspace tools"
+                controls="workspace-content"
+                containerRef={workspaceBodyRef}
+                orientation={stackedTools ? "horizontal" : "vertical"}
+                pane="after"
+                value={stackedTools ? effectiveToolsHeight : effectiveToolsWidth}
+                min={stackedTools ? TOOLS_MIN_HEIGHT : TOOLS_MIN_WIDTH}
+                max={stackedTools ? toolsDynamicMaxHeight : toolsDynamicMaxWidth}
+                defaultValue={stackedTools ? 320 : 520}
+                onChange={stackedTools ? setToolsHeight : setToolsWidth}
+                onCommit={stackedTools ? setPersistedToolsHeight : setPersistedToolsWidth}
+                valueText={(value) => `${value} pixels for workspace tools`}
+                className="workspace-tools-resize-handle"
+              />
+            )}
+            {project && (
+              <WorkspacePanel activeTab={activeTool ?? "terminal"} visible={toolsVisible} onTabChange={setActiveTool} badges={{ changes: gitStatus?.files.length ?? 0, plan: planSteps.length }} onClose={() => setActiveTool(null)}>
+                {activeTool === "changes" && <ChangesPanel files={gitStatus?.files ?? []} diff={gitDiff} selectedPath={selectedChange} loading={toolsLoading} wrapLines={settings.wrapDiffs} onSelectFile={selectChangedFile} onRefresh={() => void loadGit().catch((error) => setActionError(error instanceof Error ? error.message : "Changes could not be refreshed."))} />}
+                {activeTool === "files" && <FilesPanel entries={workspaceEntries} preview={filePreview} selectedPath={selectedFile} loading={toolsLoading} entriesTruncated={entriesTruncated} onSelectFile={selectWorkspaceFile} onRefresh={() => void loadFiles().catch((error) => setActionError(error instanceof Error ? error.message : "Files could not be refreshed."))} onSearchChange={searchFiles} onOpenFile={(path) => { const root = conversation?.worktreePath ?? project.path; void window.inertia.openPath(`${root.replace(/[\\/]$/u, "")}/${path}`).then((error) => { if (error) setActionError(error); }); }} />}
+                <TerminalPanel key={`${project.id}:${conversation?.id ?? "project"}`} visible={toolsVisible && activeTool === "terminal"} projectId={project.id} conversationId={conversation?.id} projectName={project.name} status={connection.status} fontSize={settings.terminalFontSize} theme={settings.theme} sendCommand={connection.sendCommand} subscribe={connection.subscribe} actionId={pendingActionId} onActionStarted={() => setPendingActionId(null)} onClose={() => setActiveTool(null)} />
+                {activeTool === "plan" && <PlanPanel steps={planSteps} summary={conversation && nativePlans[conversation.id]?.explanation ? nativePlans[conversation.id].explanation! : conversation?.interactionMode === "plan" ? "The latest agent response is reflected as a working plan." : "Switch the composer to Plan mode and ask the agent to propose an approach."} onRefine={conversation && conversation.status !== "running" && conversation.status !== "needs-input" ? () => { updateConversation({ interactionMode: "plan" }); void sendMessage("Refine the implementation plan with clearer steps, risks, and validation.", []).catch(() => undefined); } : undefined} onImplement={conversation && planSteps.length > 0 && conversation.status !== "running" && conversation.status !== "needs-input" ? () => { updateConversation({ interactionMode: "build" }); void sendMessage("Implement the plan above and validate the result.", []).catch(() => undefined); setActiveTool("changes"); } : undefined} />}
+                {activeTool === "preview" && <PreviewPanel url={previewUrl} loading={previewNavigation.loading} canGoBack={previewNavigation.canGoBack} canGoForward={previewNavigation.canGoForward} onNavigate={navigatePreview} onBack={() => previewCommand("back")} onForward={() => previewCommand("forward")} onReload={() => previewCommand("reload")} onBoundsChange={setPreviewBounds} onOpenExternal={(url) => { void window.inertia.openExternal(url).catch((error) => setActionError(error instanceof Error ? error.message : "The URL could not be opened.")); }} />}
+              </WorkspacePanel>
             )}
           </div>
         </div>
@@ -352,6 +527,15 @@ export default function App(): React.JSX.Element {
         onNewThread={() => createConversation()}
         onAddProject={() => void importProject()}
         onOpenSettings={() => setView("settings")}
+      />
+      <ProviderAuthDialog
+        provider={authProvider}
+        status={connection.status}
+        theme={settings.theme}
+        fontSize={settings.terminalFontSize}
+        sendCommand={connection.sendCommand}
+        subscribe={connection.subscribe}
+        onClose={closeProviderAuth}
       />
       {visibleError && <div className="error-toast" role="alert"><AlertCircle size={17} /><span>{visibleError}</span><IconButton label="Dismiss error" onClick={() => { setActionError(null); connection.clearError(); }}><X size={15} /></IconButton></div>}
     </div>

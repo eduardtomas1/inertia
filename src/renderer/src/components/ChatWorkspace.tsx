@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
 import { ArrowRight, CheckCircle2, CircleDot, Code2, FolderPlus, MessageSquarePlus, Paperclip, RotateCcw, ShieldCheck, TerminalSquare, TriangleAlert } from "lucide-react";
 import clsx from "clsx";
-import type { AgentActivity, ChatAttachment, ChatMessage, CheckpointSummary, Conversation, Project, ProjectAction, ProviderInfo, WorkspaceEntry } from "@shared/contracts";
+import type { AgentActivity, AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest, ChatAttachment, ChatMessage, CheckpointSummary, Conversation, Project, ProjectAction, ProviderId, ProviderInfo, WorkspaceEntry } from "@shared/contracts";
 import { formatClockTime } from "../lib/format";
+import { ApprovalCard, InputRequestCard } from "./AgentRequestCard";
 import { Composer } from "./Composer";
 import { LoadingMark } from "./ui";
 
@@ -13,6 +14,8 @@ type ChatWorkspaceProps = {
   activities: AgentActivity[];
   checkpoints: CheckpointSummary[];
   streamingText: string;
+  approvals: AgentApprovalRequest[];
+  inputRequests: AgentInputRequest[];
   providers: ProviderInfo[];
   actions: ProjectAction[];
   mentionResults: WorkspaceEntry[];
@@ -22,11 +25,15 @@ type ChatWorkspaceProps = {
   onAddProject: () => void;
   onCreateConversation: () => void;
   onSendMessage: (content: string, attachments: ChatAttachment[]) => Promise<void>;
+  onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
+  onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "model" | "interactionMode" | "accessMode">>) => void;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
   onRunAction: (action: ProjectAction) => void;
   onMentionQuery: (query: string) => void;
+  onConnectProvider: (providerId: ProviderId) => void;
+  onRefreshProvider: (providerId: ProviderId) => void;
   onStop: () => void;
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
 };
@@ -38,6 +45,8 @@ export function ChatWorkspace({
   activities,
   checkpoints,
   streamingText,
+  approvals,
+  inputRequests,
   providers,
   actions,
   mentionResults,
@@ -47,15 +56,23 @@ export function ChatWorkspace({
   onAddProject,
   onCreateConversation,
   onSendMessage,
+  onRespondToApproval,
+  onRespondToInput,
   onUpdateConversation,
   onChooseAttachments,
   onImportAttachments,
   onRunAction,
   onMentionQuery,
+  onConnectProvider,
+  onRefreshProvider,
   onStop,
   onRevertCheckpoint,
 }: ChatWorkspaceProps): React.JSX.Element {
   const endRef = useRef<HTMLDivElement>(null);
+  const persistedAssistantText = [...messages].reverse().find(({ role }) => role === "assistant")?.content ?? "";
+  const visibleStreamingText = persistedAssistantText && streamingText.startsWith(persistedAssistantText)
+    ? streamingText.slice(persistedAssistantText.length)
+    : streamingText;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -143,7 +160,7 @@ export function ChatWorkspace({
           </article>
           );
         })}
-        {(activities.length > 0 || streamingText) && (
+        {(activities.length > 0 || visibleStreamingText || approvals.length > 0 || inputRequests.length > 0) && (
           <section className="agent-run-card" aria-label="Agent activity">
             {activities.map((activity) => (
               <div className={`agent-activity is-${activity.status}`} key={activity.id}>
@@ -151,7 +168,9 @@ export function ChatWorkspace({
                 <span><strong>{activity.title}</strong>{activity.detail && <small>{activity.detail}</small>}</span>
               </div>
             ))}
-            {streamingText && <div className="streaming-message"><span className="streaming-caret" />{streamingText}</div>}
+            {visibleStreamingText && <div className="streaming-message"><span className="streaming-caret" />{visibleStreamingText}</div>}
+            {approvals.map((request) => <ApprovalCard key={request.id} request={request} onRespond={onRespondToApproval} />)}
+            {inputRequests.map((request) => <InputRequestCard key={request.id} request={request} onRespond={onRespondToInput} />)}
           </section>
         )}
         <div ref={endRef} />
@@ -164,13 +183,15 @@ export function ChatWorkspace({
         mentionResults={mentionResults}
         disabled={!conversation}
         sending={sending}
-        running={conversation.status === "running"}
+        running={conversation.status === "running" || conversation.status === "needs-input"}
         onSend={onSendMessage}
         onUpdateConversation={onUpdateConversation}
         onChooseAttachments={onChooseAttachments}
         onImportAttachments={onImportAttachments}
         onRunAction={onRunAction}
         onMentionQuery={onMentionQuery}
+        onConnectProvider={onConnectProvider}
+        onRefreshProvider={onRefreshProvider}
         onStop={onStop}
       />
     </main>

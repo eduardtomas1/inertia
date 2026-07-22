@@ -19,6 +19,7 @@ import clsx from "clsx";
 import type { AppSnapshot, Conversation, Project } from "@shared/contracts";
 import { formatRelativeTime } from "../lib/format";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { IconButton, LoadingMark } from "./ui";
 
 type SidebarProps = {
@@ -58,20 +59,12 @@ export function Sidebar({
 }: SidebarProps): React.JSX.Element {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 760px)").matches);
+  const mobile = useMediaQuery("(max-width: 760px)");
   const [conversationMenu, setConversationMenu] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
   const compact = snapshot?.settings.compactSidebar ?? false;
-
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 760px)");
-    const update = () => setMobile(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
 
   useEffect(() => {
     if (!snapshot?.activeProjectId) return;
@@ -127,12 +120,15 @@ export function Sidebar({
         inert={mobile && !open ? true : undefined}
       >
         <div className="sidebar-brand drag-region">
-          <div className="brand-lockup no-drag">
+          <button
+            type="button"
+            className="brand-lockup no-drag"
+            aria-label="Go to workspace"
+            onClick={() => navigate("workspace")}
+          >
             <img src="./inertia-logo.png" alt="" className="brand-logo" />
-            <div>
-              <div className="brand-name">Inertia</div>
-            </div>
-          </div>
+            <span className="brand-name">Inertia</span>
+          </button>
           <IconButton label="Close navigation" className="mobile-close no-drag" onClick={onClose}>
             <X size={17} />
           </IconButton>

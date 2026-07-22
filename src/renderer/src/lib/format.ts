@@ -1,7 +1,7 @@
 export function formatRelativeTime(value: string): string {
   const timestamp = new Date(value).getTime();
   const seconds = Math.round((timestamp - Date.now()) / 1_000);
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  const formatter = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
   if (Math.abs(seconds) < 60) return formatter.format(seconds, "second");
   const minutes = Math.round(seconds / 60);
@@ -10,7 +10,7 @@ export function formatRelativeTime(value: string): string {
   if (Math.abs(hours) < 24) return formatter.format(hours, "hour");
   const days = Math.round(hours / 24);
   if (Math.abs(days) < 30) return formatter.format(days, "day");
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(timestamp);
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
 }
 
 export function formatClockTime(value: string): string {

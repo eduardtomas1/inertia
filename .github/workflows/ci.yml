@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux x64
+            runner: ubuntu-24.04
+            artifact: linux-x64
+          - label: Windows x64
+            runner: windows-2025
+            artifact: windows-x64
+          - label: macOS arm64
+            runner: macos-15
+            artifact: macos-arm64
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck, unit test, and build
+        run: npm run check
+
+      - name: Run portable runtime and provider protocol suite
+        run: npm run test:portable
+
+      - name: Audit dependencies
+        if: runner.os == 'Linux'
+        run: npm audit --audit-level=high
+
+      - name: Run Electron end-to-end tests
+        if: runner.os != 'Linux'
+        run: npm exec -- playwright test
+
+      - name: Run Electron end-to-end tests under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm exec -- playwright test
+
+      - name: Build native unpacked app
+        run: npm run dist:dir
+
+      - name: Smoke native packaged app
+        if: runner.os != 'Linux'
+        run: npm run test:package-smoke
+
+      - name: Smoke native packaged app under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run test:package-smoke
+
+      - name: Verify complete macOS bundle signature and fuses
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mac_app="release/mac-arm64/Inertia.app"
+          codesign --verify --deep --strict --verbose=2 "$mac_app"
+          fuse_report="$(npx --no-install electron-fuses read --app "$mac_app")"
+          printf '%s\n' "$fuse_report"
+          grep -Fq 'RunAsNode is Disabled' <<<"$fuse_report"
+          grep -Fq 'EnableCookieEncryption is Enabled' <<<"$fuse_report"
+          grep -Fq 'EnableNodeOptionsEnvironmentVariable is Disabled' <<<"$fuse_report"
+          grep -Fq 'EnableNodeCliInspectArguments is Disabled' <<<"$fuse_report"
+          grep -Fq 'EnableEmbeddedAsarIntegrityValidation is Enabled' <<<"$fuse_report"
+          grep -Fq 'OnlyLoadAppFromAsar is Enabled' <<<"$fuse_report"
+          grep -Fq 'GrantFileProtocolExtraPrivileges is Disabled' <<<"$fuse_report"
+
+      - name: Keep failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-test-results-${{ matrix.artifact }}
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7

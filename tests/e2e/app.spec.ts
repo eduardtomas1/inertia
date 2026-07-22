@@ -1,0 +1,200 @@
+import { expect, test, _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createServer, type Server } from "node:http";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+let electronApp: ElectronApplication;
+let page: Page;
+let testDirectory: string;
+const rendererErrors: string[] = [];
+let previewServer: Server;
+let previewUrl: string;
+
+async function resizeWindow(width: number, height: number): Promise<void> {
+  await electronApp.evaluate(
+    ({ BrowserWindow }, size) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      window?.setSize(size.width, size.height);
+    },
+    { width, height },
+  );
+  await page.waitForTimeout(250);
+}
+
+async function expectNoViewportOverflow(): Promise<void> {
+  const measurements = await page.evaluate(() => ({
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    documentWidth: document.documentElement.scrollWidth,
+    documentHeight: document.documentElement.scrollHeight,
+    bodyWidth: document.body.scrollWidth,
+    bodyHeight: document.body.scrollHeight,
+  }));
+
+  expect(measurements.documentWidth).toBeLessThanOrEqual(measurements.innerWidth + 1);
+  expect(measurements.bodyWidth).toBeLessThanOrEqual(measurements.innerWidth + 1);
+  expect(measurements.documentHeight).toBeLessThanOrEqual(measurements.innerHeight + 1);
+  expect(measurements.bodyHeight).toBeLessThanOrEqual(measurements.innerHeight + 1);
+}
+
+test.beforeAll(async () => {
+  previewServer = createServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'" });
+    response.end("<!doctype html><title>Inertia preview</title><style>body{font-family:sans-serif;padding:40px}</style><h1>Preview is ready</h1>");
+  });
+  await new Promise<void>((resolve) => previewServer.listen(0, "127.0.0.1", resolve));
+  const address = previewServer.address();
+  if (!address || typeof address === "string") throw new Error("Preview test server did not start");
+  previewUrl = `http://127.0.0.1:${address.port}/`;
+  testDirectory = await mkdtemp(join(tmpdir(), "inertia-e2e-"));
+  const workspaceDirectory = join(testDirectory, "Inertia");
+  await mkdir(workspaceDirectory, { recursive: true });
+  await writeFile(join(workspaceDirectory, "sample.ts"), "export const version = '0.0.1';\n", "utf8");
+  await execFileAsync("git", ["init", "-q"], { cwd: workspaceDirectory });
+  await execFileAsync("git", ["add", "sample.ts"], { cwd: workspaceDirectory });
+  await execFileAsync("git", ["-c", "user.name=Inertia", "-c", "user.email=test@inertia.local", "commit", "-qm", "fixture"], { cwd: workspaceDirectory });
+  await writeFile(join(workspaceDirectory, "sample.ts"), "export const version = '0.0.1';\nexport const ready = true;\n", "utf8");
+  electronApp = await electron.launch({
+    args: ["."],
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      INERTIA_DATA_DIR: join(testDirectory, "data"),
+      INERTIA_WORKSPACE_DIR: workspaceDirectory,
+    },
+  });
+  page = await electronApp.firstWindow();
+  page.on("console", (message) => {
+    if (message.type() === "error") rendererErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => rendererErrors.push(error.message));
+  await page.getByText("Welcome to Inertia", { exact: true }).first().waitFor();
+});
+
+test.afterAll(async () => {
+  await page?.evaluate(() => window.inertia.previewClose()).catch(() => undefined);
+  previewServer?.closeAllConnections();
+  await new Promise<void>((resolve) => previewServer?.close(() => resolve()));
+  await electronApp?.close();
+  if (testDirectory) await rm(testDirectory, { recursive: true, force: true });
+});
+
+test("boots the local workspace and terminal", async () => {
+  await resizeWindow(1440, 920);
+  await expect(page.getByText("Local service ready", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Local", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Welcome to Inertia", level: 1 })).toBeVisible();
+  await expectNoViewportOverflow();
+  expect(rendererErrors).toEqual([]);
+});
+
+test("navigates settings, changes theme, and returns to chat", async () => {
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "A workspace that stays out of the way." })).toBeVisible();
+  await page.getByRole("radio", { name: "Dark" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  await page.getByRole("textbox", { name: "Message" }).fill("Keep this V1 clear and calm.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText("Keep this V1 clear and calm.", { exact: true })).toBeVisible();
+  expect(rendererErrors).toEqual([]);
+});
+
+test("opens the command palette and manages a thread", async () => {
+  await resizeWindow(1440, 920);
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
+  await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
+  await page.getByRole("dialog", { name: "Command palette" }).getByRole("button", { name: /New thread/ }).click();
+  await expect(page.getByRole("heading", { name: "New thread", level: 1 })).toBeVisible();
+
+  await page.getByRole("button", { name: "Thread actions for New thread" }).click();
+  await page.getByRole("menuitem", { name: "Rename" }).click();
+  const rename = page.getByRole("textbox", { name: "Rename New thread" });
+  await rename.fill("Focused V1 pass");
+  await rename.press("Enter");
+  await expect(page.getByRole("heading", { name: "Focused V1 pass", level: 1 })).toBeVisible();
+
+  await page.getByRole("button", { name: "Thread actions for Focused V1 pass" }).click();
+  await page.getByRole("menuitem", { name: "Archive" }).click();
+  await expect(page.getByRole("heading", { name: "Welcome to Inertia", level: 1 })).toBeVisible();
+  expect(rendererErrors).toEqual([]);
+});
+
+test("switches workspace tools, opens multiple terminals, and loads a safe native preview", async () => {
+  await resizeWindow(1440, 920);
+  await page.getByRole("tab", { name: /Changes/ }).click();
+  await expect(page.getByLabel("Workspace changes")).toBeVisible();
+  await page.getByRole("tab", { name: /Files/ }).click();
+  await expect(page.getByRole("region", { name: "Project files" })).toBeVisible();
+  await page.getByRole("tab", { name: /Terminal/ }).click();
+  await page.getByRole("button", { name: "New terminal" }).click();
+  await expect(page.getByRole("tab", { name: /Terminal 2/ })).toBeVisible();
+  await page.getByRole("button", { name: "Split terminals" }).click();
+  await expect(page.locator(".terminal-session-grid")).toHaveClass(/is-split/);
+
+  await page.getByRole("tab", { name: /Preview/ }).click();
+  const address = page.getByRole("textbox", { name: "Preview address" });
+  await address.fill(previewUrl);
+  await page.getByRole("button", { name: "Go", exact: true }).click();
+  await expect.poll(() => electronApp.evaluate(({ webContents }, url) => webContents.getAllWebContents().some((contents) => contents.getURL() === url), previewUrl)).toBe(true);
+  await page.getByRole("tab", { name: /Terminal/ }).click();
+  expect(rendererErrors).toEqual([]);
+});
+
+test("keeps the Changes panel readable when the side tool area is narrow", async () => {
+  await resizeWindow(1180, 800);
+  await page.getByRole("tab", { name: /Changes/ }).click();
+  const picker = page.getByRole("combobox", { name: "Changed file" });
+  await expect(picker).toBeVisible();
+  await expect(picker.locator("option:checked")).toHaveText("M · sample.ts");
+  await expect(page.getByLabel("Changed files")).toBeHidden();
+  await expect(page.getByLabel(/Diff for|Unified diff/)).toBeVisible();
+  await expectNoViewportOverflow();
+  expect(rendererErrors).toEqual([]);
+});
+
+for (const size of [
+  { width: 1440, height: 920, label: "wide" },
+  { width: 1024, height: 760, label: "stacked" },
+  { width: 760, height: 640, label: "compact" },
+]) {
+  test(`keeps the ${size.label} layout reachable without overlap`, async () => {
+    await resizeWindow(size.width, size.height);
+    await expectNoViewportOverflow();
+    await expect(page.locator(".workspace-header")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+
+    if (size.width <= 760) {
+      await page.getByRole("button", { name: "Open navigation" }).click();
+      await expect(page.getByLabel("Project navigation")).toBeVisible();
+      await expectNoViewportOverflow();
+      await page.getByRole("button", { name: "Close navigation" }).last().click();
+    }
+
+    const geometry = await page.evaluate(() => {
+      const frame = document.querySelector(".workspace-frame")?.getBoundingClientRect();
+      const chat = document.querySelector(".chat-workspace")?.getBoundingClientRect();
+      const tools = document.querySelector(".workspace-panel")?.getBoundingClientRect();
+      return frame && chat && tools ? { frame: { left: frame.left, top: frame.top, right: frame.right, bottom: frame.bottom }, chat: { left: chat.left, top: chat.top, right: chat.right, bottom: chat.bottom }, tools: { left: tools.left, top: tools.top, right: tools.right, bottom: tools.bottom } } : null;
+    });
+    expect(geometry).not.toBeNull();
+    if (geometry) {
+      expect(geometry.frame.left).toBeGreaterThanOrEqual(0);
+      expect(geometry.frame.top).toBeGreaterThanOrEqual(0);
+      expect(geometry.frame.right).toBeLessThanOrEqual(size.width + 1);
+      expect(geometry.frame.bottom).toBeLessThanOrEqual(size.height + 1);
+      if (size.width > 1024) expect(geometry.chat.right).toBeLessThanOrEqual(geometry.tools.left + 1);
+      else expect(geometry.chat.bottom).toBeLessThanOrEqual(geometry.tools.top + 1);
+    }
+
+    expect(rendererErrors).toEqual([]);
+  });
+}

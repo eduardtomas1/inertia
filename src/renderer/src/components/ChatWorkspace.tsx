@@ -25,6 +25,7 @@ type ChatWorkspaceProps = {
   showTimestamps: boolean;
   showThinking: boolean;
   showUsage: boolean;
+  promptContext?: string | null;
   loading: boolean;
   sending: boolean;
   onAddProject: () => void;
@@ -41,6 +42,7 @@ type ChatWorkspaceProps = {
   onRefreshProvider: (providerId: ProviderId) => void;
   onStop: () => void;
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
+  onClearPromptContext?: () => void;
 };
 
 export function ChatWorkspace({
@@ -61,6 +63,7 @@ export function ChatWorkspace({
   showTimestamps,
   showThinking,
   showUsage,
+  promptContext,
   loading,
   sending,
   onAddProject,
@@ -77,6 +80,7 @@ export function ChatWorkspace({
   onRefreshProvider,
   onStop,
   onRevertCheckpoint,
+  onClearPromptContext,
 }: ChatWorkspaceProps): React.JSX.Element {
   const endRef = useRef<HTMLDivElement>(null);
   const persistedAssistantText = [...messages].reverse().find(({ role }) => role === "assistant")?.content ?? "";
@@ -211,6 +215,7 @@ export function ChatWorkspace({
         mentionResults={mentionResults}
         usage={usage}
         showUsage={showUsage}
+        promptContext={promptContext}
         disabled={!conversation}
         sending={sending}
         running={conversation.status === "running" || conversation.status === "needs-input"}
@@ -223,6 +228,7 @@ export function ChatWorkspace({
         onConnectProvider={onConnectProvider}
         onRefreshProvider={onRefreshProvider}
         onStop={onStop}
+        onClearPromptContext={onClearPromptContext}
       />
     </main>
   );

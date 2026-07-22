@@ -1,7 +1,8 @@
 import { constants as fsConstants } from "node:fs";
-import { access, lstat, realpath, stat } from "node:fs/promises";
+import { access, lstat, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, parse, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
+import { parseUnifiedDiff } from "../shared/diff-review";
 
 const DEFAULT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_DIFF_BYTES = 512 * 1024;
@@ -86,6 +87,14 @@ export interface GitUnifiedDiff {
   filesIncluded: number;
   totalFiles: number;
   truncated: boolean;
+}
+
+export interface GitDiffSelection {
+  fingerprint: string;
+  filePath: string;
+  hunkId: string;
+  lineIds: readonly string[];
+  ignoreWhitespace?: boolean;
 }
 
 export interface GitBranch {
@@ -568,6 +577,52 @@ export async function getUnifiedDiff(repositoryPath: string, options: GitDiffOpt
     truncated ||= preview.truncated || previewBuffer.length > remaining;
   }
   return { text, filesIncluded: selected.length, totalFiles: candidates.length, truncated };
+}
+
+export async function revertDiffSelection(repositoryPath: string, selection: GitDiffSelection): Promise<GitUnifiedDiff> {
+  const root = await repositoryRoot(repositoryPath);
+  const current = await getUnifiedDiff(root, { ignoreWhitespace: selection.ignoreWhitespace });
+  const structured = parseUnifiedDiff(current.text);
+  if (structured.fingerprint !== selection.fingerprint) {
+    throw new GitError("conflict", "The changes moved since this selection was made. Refresh the diff and try again.");
+  }
+  const file = structured.files.find((candidate) => candidate.path === selection.filePath);
+  const hunk = file?.hunks.find((candidate) => candidate.id === selection.hunkId);
+  if (!file || !hunk) throw new GitError("not-found", "The selected diff hunk is no longer available.");
+
+  const selectedIds = new Set(selection.lineIds);
+  const selected = hunk.lines.filter((line) => selectedIds.has(line.id) && (line.kind === "addition" || line.kind === "deletion"));
+  if (selected.length === 0) throw new GitError("invalid-input", "Select at least one added or removed line to revert.");
+  const validated = await validatedPaths(root, [file.path]);
+  const absolute = resolve(root, validated[0]!);
+  let info: Awaited<ReturnType<typeof lstat>>;
+  try { info = await lstat(absolute); }
+  catch { throw new GitError("conflict", "Deleted files must be restored as a whole from source control."); }
+  if (!info.isFile() || info.isSymbolicLink()) throw new GitError("invalid-input", "Only regular text files can be reverted by selection.");
+
+  const source = await readFile(absolute, "utf8");
+  if (source.includes("\0")) throw new GitError("invalid-input", "Binary files cannot be reverted by selection.");
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const trailingNewline = source.endsWith("\n");
+  const body = trailingNewline ? source.replace(/\r?\n$/u, "") : source;
+  const fileLines = body ? body.split(/\r?\n/u) : [];
+
+  for (const line of [...selected].reverse()) {
+    if (line.kind === "addition") {
+      const index = (line.newLineNumber ?? 0) - 1;
+      if (index < 0 || index >= fileLines.length || fileLines[index] !== line.content) {
+        throw new GitError("conflict", "The selected lines no longer match the file. Refresh the diff and try again.");
+      }
+      fileLines.splice(index, 1);
+    } else {
+      const index = Math.max(0, Math.min(line.newInsertionIndex, fileLines.length));
+      fileLines.splice(index, 0, line.content);
+    }
+  }
+
+  const next = `${fileLines.join(newline)}${trailingNewline ? newline : ""}`;
+  await writeFile(absolute, next, "utf8");
+  return await getUnifiedDiff(root, { ignoreWhitespace: selection.ignoreWhitespace });
 }
 
 function parseBranches(buffer: Buffer, kind: GitBranch["kind"]): GitBranch[] {

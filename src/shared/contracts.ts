@@ -248,6 +248,8 @@ export interface AppSnapshot {
   usage: ThreadUsageSnapshot[];
   plans: AgentPlan[];
   checkpoints: CheckpointSummary[];
+  reviewSummaries: DiffReviewSummary[];
+  runs: WorkspaceRun[];
   providers: ProviderInfo[];
   settings: AppSettings;
   activeProjectId: string | null;
@@ -278,6 +280,64 @@ export interface GitDiffSnapshot {
   patch: string;
   truncated: boolean;
   files: ChangedFile[];
+}
+
+export interface DiffLine {
+  id: string;
+  kind: "context" | "addition" | "deletion" | "meta";
+  content: string;
+  patchLine: string;
+  oldLineNumber: number | null;
+  newLineNumber: number | null;
+  newInsertionIndex: number;
+}
+
+export interface DiffHunk {
+  id: string;
+  header: string;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  lines: DiffLine[];
+}
+
+export interface DiffFile {
+  path: string;
+  oldPath: string;
+  newPath: string;
+  hunks: DiffHunk[];
+}
+
+export interface StructuredDiff {
+  fingerprint: string;
+  files: DiffFile[];
+}
+
+export interface DiffReviewSummary {
+  conversationId: string;
+  fingerprint: string;
+  providerId: ProviderId;
+  overall: string;
+  files: Array<{
+    path: string;
+    summary: string;
+    hunks: Array<{ hunkId: string; summary: string }>;
+  }>;
+  generatedAt: string;
+}
+
+export interface WorkspaceRun {
+  id: string;
+  kind: "agent" | "check" | "service" | "source-control";
+  projectId: string;
+  conversationId: string | null;
+  label: string;
+  detail: string | null;
+  status: "running" | "waiting" | "succeeded" | "failed" | "cancelled";
+  port: number | null;
+  startedAt: string;
+  finishedAt: string | null;
 }
 
 export interface GitBranchInfo {
@@ -505,6 +565,34 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...requestBase,
+      type: z.literal("git.selection.revert"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid().optional(),
+        fingerprint: z.string().regex(/^[0-9a-f]{8}$/u),
+        filePath: z.string().min(1).max(4096),
+        hunkId: z.string().min(1).max(128),
+        lineIds: z.array(z.string().min(1).max(160)).min(1).max(500),
+        comment: z.string().trim().max(2_000).optional(),
+        ignoreWhitespace: z.boolean().optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("review.summary.generate"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid(),
+        fingerprint: z.string().regex(/^[0-9a-f]{8}$/u),
+        ignoreWhitespace: z.boolean().optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("git.branches"),
       payload: z.object({ projectId: z.string().uuid() }).strict(),
     })
@@ -660,6 +748,7 @@ export type ServerEvent =
       result:
         | { kind: "git.status"; status: GitStatusSnapshot }
         | { kind: "git.diff"; diff: GitDiffSnapshot }
+        | { kind: "review.summary"; summary: DiffReviewSummary }
         | { kind: "git.branches"; branches: GitBranchInfo[] }
         | { kind: "workspace.entries"; entries: WorkspaceEntry[]; truncated: boolean }
         | { kind: "workspace.file"; file: WorkspaceFilePreview }

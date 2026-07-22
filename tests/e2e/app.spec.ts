@@ -359,6 +359,32 @@ test("keeps the Changes panel readable when the side tool area is narrow", async
   expect(rendererErrors).toEqual([]);
 });
 
+test("adds a selected diff range to the next agent prompt", async () => {
+  await resizeWindow(1440, 920);
+  await page.getByRole("tab", { name: /Changes/ }).click();
+  const addedLine = page.locator(".diff-line.is-addition").filter({ hasText: "export const ready = true;" }).first();
+  await expect(addedLine).toBeVisible();
+  await addedLine.click();
+  await expect(page.getByRole("button", { name: "Add to prompt" })).toBeVisible();
+  await page.getByRole("button", { name: "Add to prompt" }).click();
+  await expect(page.getByLabel("Selected diff context", { exact: true })).toContainText("Diff selection in sample.ts");
+  await page.getByRole("button", { name: "Remove selected diff context" }).click();
+  await expect(page.getByLabel("Selected diff context", { exact: true })).toHaveCount(0);
+  expect(rendererErrors).toEqual([]);
+});
+
+test("opens the categorized activity center", async () => {
+  await page.getByRole("button", { name: "Open activity center" }).click();
+  const center = page.getByRole("complementary", { name: "Activity center" });
+  await expect(center).toBeVisible();
+  for (const heading of ["Agents", "Checks", "Services", "Source Control"]) {
+    await expect(center.getByRole("heading", { name: heading })).toBeVisible();
+  }
+  await center.getByRole("button", { name: "Close activity center" }).click();
+  await expect(center).toHaveCount(0);
+  expect(rendererErrors).toEqual([]);
+});
+
 test("resizes and persists the internal workspace panes", async () => {
   await resizeWindow(1440, 920);
   await page.getByRole("tab", { name: /Terminal/ }).click();

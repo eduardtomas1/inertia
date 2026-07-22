@@ -118,6 +118,36 @@ describe("RuntimeStore conversation lifecycle", () => {
     reopened.close();
   });
 
+  it("persists review summaries and categorized workspace runs", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const project = store.snapshot().projects[0]!;
+    const conversation = store.snapshot().conversations[0]!;
+    store.upsertReviewSummary({
+      conversationId: conversation.id,
+      fingerprint: "1234abcd",
+      providerId: "codex",
+      overall: "Updates the review workflow.",
+      files: [{ path: "src/review.ts", summary: "Adds review context.", hunks: [{ hunkId: "hunk-test", summary: "Connects the selected lines to the composer." }] }],
+      generatedAt: "2026-07-22T10:00:00.000Z",
+    });
+    const run = store.createWorkspaceRun({
+      kind: "check",
+      projectId: project.id,
+      conversationId: conversation.id,
+      label: "typecheck",
+      detail: "npm run typecheck",
+      status: "running",
+      port: null,
+    });
+    store.updateWorkspaceRun(run.id, { status: "succeeded" });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.snapshot().reviewSummaries).toEqual([expect.objectContaining({ conversationId: conversation.id, fingerprint: "1234abcd" })]);
+    expect(reopened.snapshot().runs).toEqual([expect.objectContaining({ id: run.id, kind: "check", status: "succeeded", finishedAt: expect.any(String) })]);
+    reopened.close();
+  });
+
   it("persists reasoning summaries, context usage, and provider-aware thread defaults", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     store.updateSettings({

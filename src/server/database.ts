@@ -15,6 +15,7 @@ import {
   type ChatMessage,
   type CheckpointSummary,
   type Conversation,
+  type DiffReviewSummary,
   type InteractionMode,
   type Project,
   type ProviderId,
@@ -22,6 +23,7 @@ import {
   type ThemePreference,
   type ThreadStatus,
   type ThreadUsageSnapshot,
+  type WorkspaceRun,
 } from "../shared/contracts";
 import type { PersistedProviderMetadata } from "./provider/metadata";
 
@@ -154,6 +156,28 @@ interface ProviderMetadataCacheRow {
   rate_limits_last_attempted_at: string | null;
   rate_limits_provenance: PersistedProviderMetadata["rateLimitsProvenance"];
   rate_limits_stale: 0 | 1;
+}
+
+interface DiffReviewSummaryRow {
+  conversation_id: string;
+  fingerprint: string;
+  provider_id: ProviderId;
+  overall: string;
+  files_json: string;
+  generated_at: string;
+}
+
+interface WorkspaceRunRow {
+  id: string;
+  kind: WorkspaceRun["kind"];
+  project_id: string;
+  conversation_id: string | null;
+  label: string;
+  detail: string | null;
+  status: WorkspaceRun["status"];
+  port: number | null;
+  started_at: string;
+  finished_at: string | null;
 }
 
 const migrations = [
@@ -332,6 +356,31 @@ const migrations = [
     DROP TABLE thread_usage;
     ALTER TABLE thread_usage_v2 RENAME TO thread_usage;
   `,
+  `
+    CREATE TABLE diff_review_summaries (
+      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+      fingerprint TEXT NOT NULL CHECK (length(fingerprint) = 8),
+      provider_id TEXT NOT NULL CHECK (provider_id IN ('codex', 'claude', 'cursor', 'opencode')),
+      overall TEXT NOT NULL CHECK (length(overall) <= 4000),
+      files_json TEXT NOT NULL CHECK (length(files_json) <= 262144),
+      generated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE workspace_runs (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('agent', 'check', 'service', 'source-control')),
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+      label TEXT NOT NULL CHECK (length(label) BETWEEN 1 AND 200),
+      detail TEXT CHECK (detail IS NULL OR length(detail) <= 1000),
+      status TEXT NOT NULL CHECK (status IN ('running', 'waiting', 'succeeded', 'failed', 'cancelled')),
+      port INTEGER CHECK (port IS NULL OR port BETWEEN 1 AND 65535),
+      started_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE INDEX workspace_runs_started_at_idx ON workspace_runs(started_at DESC);
+    CREATE INDEX workspace_runs_active_idx ON workspace_runs(status, started_at DESC);
+  `,
 ] as const;
 
 function projectFromRow(row: ProjectRow): Project {
@@ -434,6 +483,39 @@ function usageFromRow(row: ThreadUsageRow): ThreadUsageSnapshot {
   };
 }
 
+function reviewSummaryFromRow(row: DiffReviewSummaryRow): DiffReviewSummary {
+  let files: DiffReviewSummary["files"] = [];
+  try {
+    const value: unknown = JSON.parse(row.files_json);
+    if (Array.isArray(value)) files = value as DiffReviewSummary["files"];
+  } catch {
+    files = [];
+  }
+  return {
+    conversationId: row.conversation_id,
+    fingerprint: row.fingerprint,
+    providerId: row.provider_id,
+    overall: row.overall,
+    files,
+    generatedAt: row.generated_at,
+  };
+}
+
+function workspaceRunFromRow(row: WorkspaceRunRow): WorkspaceRun {
+  return {
+    id: row.id,
+    kind: row.kind,
+    projectId: row.project_id,
+    conversationId: row.conversation_id,
+    label: row.label,
+    detail: row.detail,
+    status: row.status,
+    port: row.port,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+  };
+}
+
 export interface NewConversationOptions {
   providerId?: ProviderId;
   model?: string;
@@ -473,6 +555,8 @@ export class RuntimeStore {
       usage: (this.database.prepare("SELECT * FROM thread_usage ORDER BY updated_at ASC").all() as ThreadUsageRow[]).map(usageFromRow),
       plans: (this.database.prepare("SELECT conversation_id, run_id, explanation, steps_json FROM agent_plans ORDER BY updated_at ASC").all() as AgentPlanRow[]).map(planFromRow),
       checkpoints: (this.database.prepare("SELECT * FROM checkpoints ORDER BY turn_index ASC, created_at ASC").all() as CheckpointRow[]).map(checkpointFromRow),
+      reviewSummaries: (this.database.prepare("SELECT * FROM diff_review_summaries ORDER BY generated_at ASC").all() as DiffReviewSummaryRow[]).map(reviewSummaryFromRow),
+      runs: (this.database.prepare("SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200").all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
       settings: {
         theme: state.theme,
@@ -743,6 +827,66 @@ export class RuntimeStore {
     return checkpoint;
   }
 
+  upsertReviewSummary(summary: DiffReviewSummary): DiffReviewSummary {
+    this.requireConversation(summary.conversationId);
+    const filesJson = JSON.stringify(summary.files);
+    if (summary.overall.length > 4_000 || filesJson.length > 262_144) throw new Error("Review summary is too large.");
+    this.database.prepare(`
+      INSERT INTO diff_review_summaries (conversation_id, fingerprint, provider_id, overall, files_json, generated_at)
+      VALUES (@conversationId, @fingerprint, @providerId, @overall, @filesJson, @generatedAt)
+      ON CONFLICT(conversation_id) DO UPDATE SET
+        fingerprint = excluded.fingerprint,
+        provider_id = excluded.provider_id,
+        overall = excluded.overall,
+        files_json = excluded.files_json,
+        generated_at = excluded.generated_at
+    `).run({ ...summary, filesJson });
+    return summary;
+  }
+
+  createWorkspaceRun(input: Omit<WorkspaceRun, "id" | "startedAt" | "finishedAt"> & { id?: string }): WorkspaceRun {
+    this.requireProject(input.projectId);
+    if (input.conversationId) this.requireConversation(input.conversationId);
+    const run: WorkspaceRun = {
+      ...input,
+      id: input.id ?? randomUUID(),
+      label: input.label.trim().slice(0, 200),
+      detail: input.detail?.slice(0, 1_000) ?? null,
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+    };
+    this.database.prepare(`
+      INSERT INTO workspace_runs (id, kind, project_id, conversation_id, label, detail, status, port, started_at, finished_at)
+      VALUES (@id, @kind, @projectId, @conversationId, @label, @detail, @status, @port, @startedAt, @finishedAt)
+    `).run(run);
+    this.database.prepare(`
+      DELETE FROM workspace_runs WHERE id IN (
+        SELECT id FROM workspace_runs WHERE status NOT IN ('running', 'waiting') ORDER BY started_at DESC LIMIT -1 OFFSET 200
+      )
+    `).run();
+    return run;
+  }
+
+  updateWorkspaceRun(id: string, update: Partial<Pick<WorkspaceRun, "label" | "detail" | "status" | "port" | "finishedAt">>): WorkspaceRun {
+    const row = this.database.prepare("SELECT * FROM workspace_runs WHERE id = ?").get(id) as WorkspaceRunRow | undefined;
+    if (!row) throw new RecordNotFoundError("Workspace activity not found.");
+    const current = workspaceRunFromRow(row);
+    const next: WorkspaceRun = {
+      ...current,
+      ...update,
+      label: update.label === undefined ? current.label : update.label.trim().slice(0, 200),
+      detail: update.detail === undefined ? current.detail : update.detail?.slice(0, 1_000) ?? null,
+      finishedAt: update.finishedAt !== undefined
+        ? update.finishedAt
+        : update.status && !["running", "waiting"].includes(update.status)
+          ? new Date().toISOString()
+          : current.finishedAt,
+    };
+    this.database.prepare("UPDATE workspace_runs SET label = ?, detail = ?, status = ?, port = ?, finished_at = ? WHERE id = ?")
+      .run(next.label, next.detail, next.status, next.port, next.finishedAt, id);
+    return next;
+  }
+
   checkpoint(checkpointId: string): CheckpointSummary {
     const row = this.database.prepare("SELECT * FROM checkpoints WHERE id = ?").get(checkpointId) as CheckpointRow | undefined;
     if (!row) throw new RecordNotFoundError("Checkpoint not found.");
@@ -813,9 +957,10 @@ export class RuntimeStore {
 
   private recoverInterruptedRuns(): void {
     const interrupted = this.database.prepare("SELECT id FROM conversations WHERE status IN ('running', 'needs-input')").all() as Array<{ id: string }>;
+    const now = new Date().toISOString();
+    this.database.prepare("UPDATE workspace_runs SET status = 'failed', detail = COALESCE(detail, 'Interrupted when the local runtime stopped.'), finished_at = ? WHERE status IN ('running', 'waiting')").run(now);
     if (interrupted.length === 0) return;
 
-    const now = new Date().toISOString();
     const markConversation = this.database.prepare("UPDATE conversations SET status = 'failed', updated_at = ? WHERE id = ?");
     const markActivities = this.database.prepare("UPDATE activities SET status = 'failed' WHERE conversation_id = ? AND status = 'running'");
     const markReasonings = this.database.prepare("UPDATE agent_reasonings SET status = 'failed' WHERE conversation_id = ? AND status = 'running'");
@@ -823,7 +968,6 @@ export class RuntimeStore {
       INSERT INTO activities (id, conversation_id, run_id, kind, title, detail, status, created_at)
       VALUES (?, ?, ?, 'error', ?, NULL, 'failed', ?)
     `);
-
     this.database.transaction(() => {
       for (const { id } of interrupted) {
         markConversation.run(now, id);

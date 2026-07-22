@@ -13,10 +13,12 @@ import {
   type AgentPlan,
   type AppSnapshot,
   type ClientCommand,
+  type DiffReviewSummary,
   type GitStatusSnapshot,
   type ProviderInfo,
   type ServerEvent,
 } from "../shared/contracts";
+import { parseUnifiedDiff } from "../shared/diff-review";
 import { RuntimeStore } from "./database";
 import { CheckpointError, createCheckpoint, deleteCheckpoints, restoreCheckpoint } from "./checkpoints";
 import {
@@ -30,6 +32,7 @@ import {
   listBranches,
   pullRepository,
   pushCurrentBranch,
+  revertDiffSelection,
   removeWorktree,
   switchBranch,
 } from "./git";
@@ -65,6 +68,84 @@ import {
 const MAX_PAYLOAD_BYTES = 256 * 1024;
 const MAX_CLIENTS = 16;
 const MAX_IN_FLIGHT_COMMANDS = 32;
+const MAX_REVIEW_PATCH_CHARS = 180_000;
+
+function providerLabel(providerId: ProviderInfo["id"]): string {
+  return providerId === "codex" ? "Codex" : providerId === "claude" ? "Claude" : providerId === "cursor" ? "Cursor" : "OpenCode";
+}
+
+function compactText(value: unknown, maximum: number): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim().replace(/\s+/gu, " ");
+  return text ? text.slice(0, maximum) : null;
+}
+
+function jsonObjectFromText(text: string): Record<string, unknown> {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/iu.exec(text)?.[1];
+  const source = fenced ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  try {
+    const value: unknown = JSON.parse(source);
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) return value as Record<string, unknown>;
+  } catch {
+    // A clear public error below lets the user retry the review.
+  }
+  throw new RequestError("The review agent did not return readable structured summaries. Try again.");
+}
+
+function reviewPrompt(patch: string, files: ReturnType<typeof parseUnifiedDiff>["files"]): string {
+  const inventory = files.map((file) => ({ path: file.path, hunks: file.hunks.map((hunk) => ({ id: hunk.id, header: hunk.header })) }));
+  return [
+    "Review the Git diff below without using tools or modifying files.",
+    "Return only JSON with this exact shape:",
+    '{"overall":"1-3 sentence change summary","files":[{"path":"exact path","summary":"what changed and why","hunks":[{"hunkId":"exact id","summary":"1-3 sentences explaining this code, its purpose, and how it works with the surrounding code"}]}]}',
+    "Every listed file and every listed hunk ID must appear exactly once. Be concise and describe only evidence visible in the diff.",
+    `Required inventory: ${JSON.stringify(inventory)}`,
+    "Diff:",
+    patch,
+  ].join("\n\n");
+}
+
+function parsedReviewSummary(
+  conversationId: string,
+  providerId: ProviderInfo["id"],
+  fingerprint: string,
+  files: ReturnType<typeof parseUnifiedDiff>["files"],
+  text: string,
+): DiffReviewSummary {
+  const value = jsonObjectFromText(text);
+  const overall = compactText(value.overall, 2_000);
+  const candidates = Array.isArray(value.files) ? value.files : [];
+  if (!overall) throw new RequestError("The review agent omitted the overall change summary. Try again.");
+  const summaries = files.map((file) => {
+    const candidate = candidates.find((item) => typeof item === "object" && item !== null && (item as { path?: unknown }).path === file.path) as Record<string, unknown> | undefined;
+    const summary = compactText(candidate?.summary, 1_000);
+    const candidateHunks = Array.isArray(candidate?.hunks) ? candidate.hunks : [];
+    if (!summary) throw new RequestError(`The review agent omitted the summary for ${file.path}. Try again.`);
+    return {
+      path: file.path,
+      summary,
+      hunks: file.hunks.map((hunk) => {
+        const item = candidateHunks.find((entry) => typeof entry === "object" && entry !== null && (entry as { hunkId?: unknown }).hunkId === hunk.id) as Record<string, unknown> | undefined;
+        const hunkSummary = compactText(item?.summary, 800);
+        if (!hunkSummary) throw new RequestError(`The review agent omitted a hunk summary for ${file.path}. Try again.`);
+        return { hunkId: hunk.id, summary: hunkSummary };
+      }),
+    };
+  });
+  return { conversationId, fingerprint, providerId, overall, files: summaries, generatedAt: new Date().toISOString() };
+}
+
+function projectActionKind(name: string, command: string, preview: boolean): "check" | "service" {
+  const value = `${name} ${command}`.toLowerCase();
+  return preview || /(?:^|[:\s-])(dev|serve|server|start|watch|preview)(?:$|[:\s-])/u.test(value) ? "service" : "check";
+}
+
+function servicePort(output: string): number | null {
+  const plain = output.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/gu, "");
+  const match = /(?:https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])|\blocalhost)[:/](\d{2,5})/iu.exec(plain);
+  const port = Number(match?.[1]);
+  return Number.isInteger(port) && port >= 1 && port <= 65_535 ? port : null;
+}
 
 export interface RuntimeOptions {
   dataDirectory: string;
@@ -120,6 +201,38 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     for (const client of clients) send(client, event);
   };
   const broadcastSnapshot = (): void => broadcast({ type: "snapshot.updated", snapshot: currentSnapshot() });
+  const sourceControlDetail = (conversationId?: string): string => {
+    if (!conversationId) return "Started from the workspace";
+    const conversation = store.conversation(conversationId);
+    return `${providerLabel(conversation.providerId)} · ${conversation.title}`;
+  };
+  const trackedSourceControl = async <T>(
+    label: string,
+    projectId: string,
+    conversationId: string | undefined,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    const activity = store.createWorkspaceRun({
+      kind: "source-control",
+      projectId,
+      conversationId: conversationId ?? null,
+      label,
+      detail: sourceControlDetail(conversationId),
+      status: "running",
+      port: null,
+    });
+    broadcastSnapshot();
+    try {
+      const result = await operation();
+      store.updateWorkspaceRun(activity.id, { status: "succeeded" });
+      broadcastSnapshot();
+      return result;
+    } catch (error) {
+      store.updateWorkspaceRun(activity.id, { status: "failed", detail: publicError(error) });
+      broadcastSnapshot();
+      throw error;
+    }
+  };
   const applyProviderMetadata = (providerId: ProviderInfo["id"], metadata: ProviderMetadata): void => {
     providerInfo = providerInfo.map((current) => current.id === providerId ? {
       ...current,
@@ -171,6 +284,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     const conversation = store.conversation(conversationId);
     const runId = randomUUID();
     const runStartedAt = Date.now();
+    store.createWorkspaceRun({
+      id: runId,
+      kind: "agent",
+      projectId: conversation.projectId,
+      conversationId,
+      label: conversation.model ? `${providerLabel(conversation.providerId)} · ${conversation.model}` : providerLabel(conversation.providerId),
+      detail: conversation.title,
+      status: "running",
+      port: null,
+    });
     agentPlans.delete(conversationId);
     store.clearAgentPlan(conversationId);
     store.updateConversation(conversationId, { status: "running" });
@@ -311,6 +434,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             };
             pendingApprovals.set(request.id, request);
             store.updateConversation(conversationId, { status: "needs-input" });
+            store.updateWorkspaceRun(runId, { status: "waiting", detail: request.title });
             broadcast({ type: "agent.approval.requested", request });
             broadcastSnapshot();
           },
@@ -319,6 +443,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             broadcast({ type: "agent.approval.resolved", conversationId, requestId: event.requestId, decision: event.decision });
             if (providers.isRunning(conversationId) && ![...pendingApprovals.values(), ...pendingInputs.values()].some((request) => request.conversationId === conversationId)) {
               store.updateConversation(conversationId, { status: "running" });
+              store.updateWorkspaceRun(runId, { status: "running", detail: conversation.title });
               broadcastSnapshot();
             }
           },
@@ -332,6 +457,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             };
             pendingInputs.set(request.id, request);
             store.updateConversation(conversationId, { status: "needs-input" });
+            store.updateWorkspaceRun(runId, { status: "waiting", detail: request.questions[0]?.question ?? "Waiting for an answer" });
             broadcast({ type: "agent.input.requested", request });
             broadcastSnapshot();
           },
@@ -340,6 +466,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             broadcast({ type: "agent.input.resolved", conversationId, requestId: event.requestId });
             if (providers.isRunning(conversationId) && ![...pendingApprovals.values(), ...pendingInputs.values()].some((request) => request.conversationId === conversationId)) {
               store.updateConversation(conversationId, { status: "running" });
+              store.updateWorkspaceRun(runId, { status: "running", detail: conversation.title });
               broadcastSnapshot();
             }
           },
@@ -361,6 +488,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       settleRunningActivities("failed");
       const message = publicError(error);
       store.updateConversation(conversationId, { status: "failed" });
+      store.updateWorkspaceRun(runId, { status: "failed", detail: message });
       const activity = store.addActivity({ conversationId, runId, kind: "error", title: message, detail: null, status: "failed" });
       broadcast({ type: "agent.activity", activity });
       broadcast({ type: "agent.failed", conversationId, runId, message });
@@ -376,13 +504,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       settleRunningActivities(result.status === "failed" ? "failed" : "completed");
       if (result.status === "completed") {
         store.updateConversation(conversationId, { status: "completed" });
+        store.updateWorkspaceRun(runId, { status: "succeeded", detail: conversation.title });
         broadcast({ type: "agent.completed", conversationId, runId });
       } else if (result.status === "cancelled") {
         store.updateConversation(conversationId, { status: "idle" });
+        store.updateWorkspaceRun(runId, { status: "cancelled", detail: conversation.title });
         broadcast({ type: "agent.completed", conversationId, runId });
       } else {
         const message = result.error ?? "The provider could not complete the request.";
         store.updateConversation(conversationId, { status: "failed" });
+        store.updateWorkspaceRun(runId, { status: "failed", detail: message });
         const activity = store.addActivity({ conversationId, runId, kind: "error", title: message, detail: null, status: "failed" });
         broadcast({ type: "agent.activity", activity });
         broadcast({ type: "agent.failed", conversationId, runId, message });
@@ -415,6 +546,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       settleRunningActivities("failed");
       const message = publicError(error);
       store.updateConversation(conversationId, { status: "failed" });
+      store.updateWorkspaceRun(runId, { status: "failed", detail: message });
       broadcast({ type: "agent.failed", conversationId, runId, message });
       broadcastSnapshot();
     });
@@ -465,7 +597,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
               const branch = `inertia/${conversation.id.slice(0, 8)}`;
               const target = join(dataDirectory, "worktrees", conversation.id);
               mkdirSync(resolve(target, ".."), { recursive: true, mode: 0o700 });
-              await createWorktree(repositoryPath, target, { branch, createBranch: true, startPoint: status.branch });
+              await trackedSourceControl("Create worktree", command.payload.projectId, conversation.id, () =>
+                createWorktree(repositoryPath, target, { branch, createBranch: true, startPoint: status.branch! }));
               store.updateConversation(conversation.id, { worktreePath: target, branch });
             } catch (error) {
               store.deleteConversation(conversation.id);
@@ -591,6 +724,77 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.diff", diff: { patch: diff.text, truncated: diff.truncated, files: changedFiles(status) } } });
           return;
         }
+        case "git.selection.revert": {
+          const path = workspacePath(command.payload.projectId, command.payload.conversationId);
+          const diff = await revertDiffSelection(path, {
+            fingerprint: command.payload.fingerprint,
+            filePath: command.payload.filePath,
+            hunkId: command.payload.hunkId,
+            lineIds: command.payload.lineIds,
+            ignoreWhitespace: command.payload.ignoreWhitespace,
+          });
+          if (command.payload.comment && command.payload.conversationId) {
+            store.createMessage(
+              command.payload.conversationId,
+              `Reverted selected changes in ${command.payload.filePath}. Note: ${command.payload.comment}`,
+              "system",
+            );
+          }
+          const status = await getRepositoryStatus(path);
+          send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.diff", diff: { patch: diff.text, truncated: diff.truncated, files: changedFiles(status) } } });
+          broadcastSnapshot();
+          return;
+        }
+        case "review.summary.generate": {
+          if (!enableProviders) throw new RequestError("Agent summaries are unavailable in this runtime.");
+          const conversation = store.conversation(command.payload.conversationId);
+          if (conversation.projectId !== command.payload.projectId) throw new RequestError("The thread does not belong to this project.");
+          if (providers.isRunning(conversation.id)) throw new RequestError("Wait for the current agent run to finish before summarizing its changes.");
+          const provider = providerInfo.find(({ id }) => id === conversation.providerId);
+          if (!provider?.canRun) throw new RequestError(provider?.statusMessage ?? "The selected review agent is unavailable.");
+          const diff = await getUnifiedDiff(store.conversationPath(conversation.id), { ignoreWhitespace: command.payload.ignoreWhitespace });
+          if (diff.truncated) throw new RequestError("The diff preview is truncated. Reduce or commit part of the change set before generating a complete summary.");
+          if (diff.text.length > MAX_REVIEW_PATCH_CHARS) throw new RequestError("This diff is too large for a concise review. Review or commit it in smaller parts.");
+          const structured = parseUnifiedDiff(diff.text);
+          if (structured.fingerprint !== command.payload.fingerprint) throw new RequestError("The changes moved before the review started. Refresh and try again.");
+          if (structured.files.length === 0) throw new RequestError("There are no changes to summarize.");
+          const reviewRun = store.createWorkspaceRun({
+            kind: "agent",
+            projectId: conversation.projectId,
+            conversationId: conversation.id,
+            label: `${providerLabel(conversation.providerId)} review${conversation.model ? ` · ${conversation.model}` : ""}`,
+            detail: "Summarizing changes",
+            status: "running",
+            port: null,
+          });
+          broadcastSnapshot();
+          try {
+            let streamed = "";
+            const result = await providers.run({
+              providerId: conversation.providerId,
+              conversationId: conversation.id,
+              cwd: store.conversationPath(conversation.id),
+              prompt: reviewPrompt(diff.text, structured.files),
+              model: conversation.model || undefined,
+              reasoningEffort: conversation.reasoningEffort || undefined,
+              interactionMode: "plan",
+              access: "supervised",
+            }, {
+              onText: (event) => { streamed = `${streamed}${event.text}`.slice(0, 512_000); },
+            });
+            if (result.status !== "completed") throw new RequestError(result.error ?? "The review agent could not summarize these changes.");
+            const summary = parsedReviewSummary(conversation.id, conversation.providerId, structured.fingerprint, structured.files, result.text || streamed);
+            store.upsertReviewSummary(summary);
+            store.updateWorkspaceRun(reviewRun.id, { status: "succeeded", detail: `${structured.files.length} files summarized` });
+            send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "review.summary", summary } });
+            broadcastSnapshot();
+          } catch (error) {
+            store.updateWorkspaceRun(reviewRun.id, { status: "failed", detail: publicError(error) });
+            broadcastSnapshot();
+            throw error;
+          }
+          return;
+        }
         case "git.branches": {
           const path = workspacePath(command.payload.projectId);
           const branches = await listBranches(path);
@@ -598,12 +802,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           return;
         }
         case "git.branch.create": {
-          const result = await createBranch(workspacePath(command.payload.projectId), command.payload.name);
+          const result = await trackedSourceControl("Create branch", command.payload.projectId, undefined, () =>
+            createBranch(workspacePath(command.payload.projectId), command.payload.name));
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.action", message: `Created ${result.status.branch ?? command.payload.name}.` } });
           return;
         }
         case "git.branch.switch": {
-          const result = await switchBranch(workspacePath(command.payload.projectId), command.payload.name);
+          const result = await trackedSourceControl("Switch branch", command.payload.projectId, undefined, () =>
+            switchBranch(workspacePath(command.payload.projectId), command.payload.name));
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.action", message: `Switched to ${result.status.branch ?? command.payload.name}.` } });
           return;
         }
@@ -613,27 +819,32 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           if (conversation.worktreePath) throw new RequestError("This thread already has a worktree.");
           const target = join(dataDirectory, "worktrees", conversation.id);
           mkdirSync(resolve(target, ".."), { recursive: true, mode: 0o700 });
-          await createWorktree(store.projectPath(command.payload.projectId), target, { branch: command.payload.branch, createBranch: true, startPoint: command.payload.baseBranch });
+          await trackedSourceControl("Create worktree", command.payload.projectId, command.payload.conversationId, () =>
+            createWorktree(store.projectPath(command.payload.projectId), target, { branch: command.payload.branch, createBranch: true, startPoint: command.payload.baseBranch }));
           store.updateConversation(conversation.id, { worktreePath: target, branch: command.payload.branch });
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "worktree.created", path: target, branch: command.payload.branch } });
           broadcastSnapshot();
           return;
         }
         case "git.pull":
-          await pullRepository(workspacePath(command.payload.projectId, command.payload.conversationId));
+          await trackedSourceControl("Pull changes", command.payload.projectId, command.payload.conversationId, () =>
+            pullRepository(workspacePath(command.payload.projectId, command.payload.conversationId)));
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.action", message: "Pulled the latest changes." } });
           return;
         case "git.commit": {
-          const result = await commitChanges(workspacePath(command.payload.projectId, command.payload.conversationId), command.payload.message, command.payload.paths);
+          const result = await trackedSourceControl("Commit changes", command.payload.projectId, command.payload.conversationId, () =>
+            commitChanges(workspacePath(command.payload.projectId, command.payload.conversationId), command.payload.message, command.payload.paths));
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.action", message: `Committed ${result.commit.slice(0, 7)}.` } });
           return;
         }
         case "git.push":
-          await pushCurrentBranch(workspacePath(command.payload.projectId, command.payload.conversationId));
+          await trackedSourceControl("Push branch", command.payload.projectId, command.payload.conversationId, () =>
+            pushCurrentBranch(workspacePath(command.payload.projectId, command.payload.conversationId)));
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.action", message: "Pushed the current branch." } });
           return;
         case "git.pr.open": {
-          const url = await getPullRequestCreateUrl(workspacePath(command.payload.projectId, command.payload.conversationId));
+          const url = await trackedSourceControl("Prepare pull request", command.payload.projectId, command.payload.conversationId, () =>
+            getPullRequestCreateUrl(workspacePath(command.payload.projectId, command.payload.conversationId)));
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "external.url", url, label: "Open pull request" } });
           return;
         }
@@ -674,9 +885,58 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           const scripts = await discoverPackageScripts(cwd);
           const action = scripts.scripts.find((script) => script.name === command.payload.actionId);
           if (!action) throw new RequestError("That project action is no longer available.");
-          const terminalId = terminals.create(socket, cwd, command.payload.cols, command.payload.rows);
-          terminals.input(socket, terminalId, `${actionCommand(scripts.packageManager, action.name)}\r`);
+          const preview = identifyPreviewScripts(scripts.scripts).some((script) => script.name === action.name);
+          const kind = projectActionKind(action.name, action.command, preview);
+          const conversation = command.payload.conversationId ? store.conversation(command.payload.conversationId) : null;
+          const activity = store.createWorkspaceRun({
+            kind,
+            projectId: command.payload.projectId,
+            conversationId: command.payload.conversationId ?? null,
+            label: action.name,
+            detail: kind === "service"
+              ? conversation ? `${providerLabel(conversation.providerId)} · ${conversation.title}` : action.command
+              : action.command,
+            status: "running",
+            port: null,
+          });
+          let detectedPort: number | null = null;
+          let serviceOutput = "";
+          const terminalId = terminals.create(
+            socket,
+            cwd,
+            command.payload.cols,
+            command.payload.rows,
+            (exitCode) => {
+              try {
+                store.updateWorkspaceRun(activity.id, {
+                  status: exitCode === 0 ? "succeeded" : exitCode === 130 ? "cancelled" : "failed",
+                  detail: exitCode === 0 ? activity.detail : exitCode === 130 ? "Stopped" : `Exited with code ${exitCode}`,
+                });
+              } catch {
+                return; // The project may have been removed while its terminal was still open.
+              }
+              if (!closed) broadcastSnapshot();
+            },
+            (output) => {
+              if (kind !== "service" || detectedPort !== null) return;
+              serviceOutput = `${serviceOutput}${output}`.slice(-4_096);
+              const port = servicePort(serviceOutput);
+              if (!port) return;
+              detectedPort = port;
+              try { store.updateWorkspaceRun(activity.id, { port }); }
+              catch { return; }
+              if (!closed) broadcastSnapshot();
+            },
+          );
+          try {
+            terminals.input(socket, terminalId, `${actionCommand(scripts.packageManager, action.name)}\r`);
+          } catch (error) {
+            terminals.close(socket, terminalId);
+            store.updateWorkspaceRun(activity.id, { status: "failed", detail: publicError(error) });
+            throw error;
+          }
           send(socket, { type: "terminal.created", requestId: command.requestId, terminalId });
+          broadcastSnapshot();
           return;
         }
         case "checkpoint.revert": {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Command, Paperclip, Send, ShieldCheck, Sparkles, Square, Wrench, X } from "lucide-react";
+import { ChevronDown, Command, MessageSquarePlus, Paperclip, Send, ShieldCheck, Sparkles, Square, Wrench, X } from "lucide-react";
 import clsx from "clsx";
 import type { AccessMode, ChatAttachment, Conversation, InteractionMode, ProjectAction, ProviderId, ProviderInfo, ThreadUsageSnapshot, WorkspaceEntry } from "@shared/contracts";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
@@ -17,6 +17,7 @@ type ComposerProps = {
   mentionResults: WorkspaceEntry[];
   usage: ThreadUsageSnapshot | null;
   showUsage: boolean;
+  promptContext?: string | null;
   onSend: (message: string, attachments: ChatAttachment[]) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => void;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
@@ -26,6 +27,7 @@ type ComposerProps = {
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId: ProviderId) => void;
   onStop: () => void;
+  onClearPromptContext?: () => void;
 };
 
 const accessOptions: Array<{ value: AccessMode; label: string; description: string }> = [
@@ -50,6 +52,7 @@ export function Composer({
   mentionResults,
   usage,
   showUsage,
+  promptContext,
   onSend,
   onUpdateConversation,
   onChooseAttachments,
@@ -59,6 +62,7 @@ export function Composer({
   onConnectProvider,
   onRefreshProvider,
   onStop,
+  onClearPromptContext,
 }: ComposerProps): React.JSX.Element {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -91,12 +95,14 @@ export function Composer({
   }, [message]);
 
   const submit = async () => {
-    const content = message.trim() || "Please inspect the attached image.";
+    const typedContent = message.trim() || (attachments.length > 0 ? "Please inspect the attached image." : "Please review the selected diff context.");
+    const content = promptContext ? `${typedContent}\n\nSelected diff context:\n${promptContext}` : typedContent;
     if (!canSend) return;
     try {
       await onSend(content, attachments);
       setMessage("");
       setAttachments([]);
+      onClearPromptContext?.();
       textareaRef.current?.focus();
     } catch {
       // The workspace-level toast presents the failure.
@@ -122,7 +128,7 @@ export function Composer({
   const selectedReasoning = conversation.reasoningEffort || selectedModel?.defaultReasoningEffort || "";
   const selectedProviderReady = selectedProvider?.canRun === true;
   const selectedProviderAction = selectedProvider ? providerSetupAction(selectedProvider) : "refresh";
-  const canSend = (Boolean(message.trim()) || attachments.length > 0) && selectedProviderReady && !disabled && !sending && !running;
+  const canSend = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext)) && selectedProviderReady && !disabled && !sending && !running;
   const access = accessOptions.find((item) => item.value === conversation.accessMode) ?? accessOptions[2];
 
   return (
@@ -149,6 +155,13 @@ export function Composer({
         </div>
       )}
       <div className="composer" data-disabled={disabled} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}>
+        {promptContext && (
+          <div className="composer-context" aria-label="Selected diff context">
+            <MessageSquarePlus size={13} />
+            <span><strong>Diff selection</strong><small>{promptContext.split("\n")[0]}</small></span>
+            <button type="button" aria-label="Remove selected diff context" onClick={onClearPromptContext}><X size={12} /></button>
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="composer-attachments" aria-label="Attached images">
             {attachments.map((attachment) => (

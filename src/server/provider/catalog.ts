@@ -5,45 +5,21 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ProviderInfo>> = Object.
     id: "codex",
     name: "Codex",
     command: "codex",
-    capabilities: {
-      resume: true,
-      images: true,
-      nativePlanMode: true,
-      fullAccessFlag: "--dangerously-bypass-approvals-and-sandbox",
-    },
   },
   claude: {
     id: "claude",
     name: "Claude",
     command: "claude",
-    capabilities: {
-      resume: true,
-      images: true,
-      nativePlanMode: true,
-      fullAccessFlag: "--dangerously-skip-permissions",
-    },
   },
   cursor: {
     id: "cursor",
     name: "Cursor",
     command: "cursor-agent",
-    capabilities: {
-      resume: true,
-      images: true,
-      nativePlanMode: false,
-      fullAccessFlag: "--force",
-    },
   },
   opencode: {
     id: "opencode",
     name: "OpenCode",
     command: "opencode",
-    capabilities: {
-      resume: true,
-      images: true,
-      nativePlanMode: true,
-      fullAccessFlag: "--auto",
-    },
   },
 });
 

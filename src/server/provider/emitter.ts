@@ -13,6 +13,7 @@ import type {
   CodexInputRequest,
   CodexPlanStep,
 } from "../codex/types";
+import type { AgentHarnessCallbacks, AgentHarnessEvent } from "./agent-harness";
 
 function safeCallback(callback: (() => void) | undefined): void {
   if (!callback) return;
@@ -97,4 +98,52 @@ export function createProviderEmitter(
     reasoning: (text) => event({ ...base, type: "reasoning-summary", text }),
     usage: (usage) => event({ ...base, type: "usage", usage }),
   };
+}
+
+/**
+ * Compatibility boundary for the v0.0.3 provider callback surface. Harnesses
+ * keep provider-specific events in a typed extension envelope; the runtime can
+ * continue consuming its existing callbacks until that transport contract is
+ * migrated independently.
+ */
+export function providerCallbacksFromHarness(emitter: ProviderEmitter): AgentHarnessCallbacks {
+  return {
+    onEvent: (event) => {
+      if (event.type !== "extension") {
+        emitter.event(event);
+        return;
+      }
+      emitCodexExtension(emitter, event);
+    },
+  };
+}
+
+function emitCodexExtension(
+  emitter: ProviderEmitter,
+  envelope: Extract<AgentHarnessEvent, { type: "extension" }>,
+): void {
+  const event = envelope.event;
+  switch (event.type) {
+    case "approval":
+      emitter.approval(event.request);
+      break;
+    case "approval-resolved":
+      emitter.approvalResolved(event.requestId, event.decision);
+      break;
+    case "input":
+      emitter.input(event.request);
+      break;
+    case "input-resolved":
+      emitter.inputResolved(event.requestId);
+      break;
+    case "plan":
+      emitter.plan(event.explanation, event.steps);
+      break;
+    case "reasoning-summary":
+      emitter.reasoning(event.text);
+      break;
+    case "usage":
+      emitter.usage(event.usage);
+      break;
+  }
 }

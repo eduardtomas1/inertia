@@ -14,18 +14,10 @@ export type ProviderAccessMode = "full" | "supervised" | "auto-edit";
 export type ProviderInstallState = "checking" | "installed" | "not-installed" | "error";
 export type ProviderAuthState = "checking" | "authenticated" | "unauthenticated" | "configured" | "unknown" | "error";
 
-export interface ProviderCapabilities {
-  resume: true;
-  images: true;
-  nativePlanMode: boolean;
-  fullAccessFlag: string;
-}
-
 export interface ProviderInfo {
   id: ProviderId;
   name: string;
   command: string;
-  capabilities: ProviderCapabilities;
 }
 
 export interface ProviderDetection {

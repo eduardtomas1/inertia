@@ -61,6 +61,7 @@
     },
     "win": {
       "icon": "resources/icon.png",
+      "artifactName": "Inertia.Setup.${version}.${ext}",
       "target": "nsis"
     },
     "linux": {

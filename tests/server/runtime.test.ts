@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -75,15 +76,32 @@ function waitForRejectedUpgrade(url: string, origin: string): Promise<number> {
   });
 }
 
+async function removeTemporaryDirectory(directory: string): Promise<void> {
+  const retryDelays = process.platform === "win32" ? [0, 250, 750, 1_500, 3_000] : [0];
+  let lastError: unknown;
+
+  for (const retryDelay of retryDelays) {
+    if (retryDelay > 0) await delay(retryDelay);
+    try {
+      rmSync(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (typeof code !== "string" || !["EBUSY", "ENOTEMPTY", "EPERM"].includes(code)) throw error;
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
 describe("local runtime", () => {
   const temporaryDirectories: string[] = [];
   const runtimes: RunningRuntime[] = [];
 
   afterEach(async () => {
     await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
-    for (const directory of temporaryDirectories.splice(0)) {
-      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    }
+    for (const directory of temporaryDirectories.splice(0)) await removeTemporaryDirectory(directory);
   });
 
   function temporaryWorkspace(): { root: string; data: string; workspace: string } {

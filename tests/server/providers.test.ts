@@ -171,7 +171,7 @@ process.exit(2);
 
     const manager = new ProviderManager({ commands: { codex: "codex" } });
     const detection = await manager.detect("codex", { cwd: root, refreshEnvironment: true });
-    expect(detection).toMatchObject({ available: true, version: process.version, executable: realpathSync(selectedCommand), authState: "authenticated" });
+    expect(detection).toMatchObject({ available: true, version: process.version, executable: realpathSync.native(selectedCommand), authState: "authenticated" });
 
     process.env.PATH = root;
     process.env.INERTIA_DISCOVERY_MARKER = "after-discovery";

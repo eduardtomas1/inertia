@@ -1,3 +1,4 @@
+import { isAbsolute, join, normalize } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { parseCodexApprovalRequest } from "../../src/server/codex/approvals";
@@ -33,6 +34,28 @@ describe("Codex protocol seams", () => {
         availableDecisions: ["approve", "deny"],
       },
     });
+  });
+
+  it("normalizes absolute permission paths without rewriting provider display patterns", () => {
+    const absoluteRoot = isAbsolute("C:\\workspace") ? "C:\\workspace" : "/workspace";
+    const mixedAbsolutePath = `${absoluteRoot}/generated/../fixtures`;
+    const parsed = parseCodexApprovalRequest("item/permissions/requestApproval", {
+      permissions: {
+        fileSystem: {
+          read: [mixedAbsolutePath],
+          entries: [
+            { access: "read", path: { type: "glob_pattern", pattern: "src/**/{*.ts,*.tsx}" } },
+            { access: "write", path: { type: "special", value: { kind: "project_root", subpath: "generated/**" } } },
+          ],
+        },
+      },
+    });
+
+    expect(parsed?.request.permissionRoots).toEqual([
+      { path: normalize(join(absoluteRoot, "fixtures")), access: "read" },
+      { path: "glob: src/**/{*.ts,*.tsx}", access: "read" },
+      { path: "project root: generated/**", access: "write" },
+    ]);
   });
 
   it("parses and validates structured user questions", () => {

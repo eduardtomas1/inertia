@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isAbsolute, normalize } from "node:path";
 
 import { boundedText, objectValue, type JsonObject } from "./protocol";
 import type {
@@ -16,10 +17,15 @@ export interface ParsedCodexApprovalRequest {
   requestedPermissions?: JsonObject;
 }
 
+function normalizedFilesystemPath(value: unknown): string | undefined {
+  const path = boundedText(value, 4_096);
+  return path && isAbsolute(path) ? normalize(path) : path;
+}
+
 function permissionPath(value: unknown): string | undefined {
   const path = objectValue(value);
   if (!path) return undefined;
-  if (path.type === "path") return boundedText(path.path, 4_096);
+  if (path.type === "path") return normalizedFilesystemPath(path.path);
   if (path.type === "glob_pattern") {
     const pattern = boundedText(path.pattern, 4_080);
     return pattern ? `glob: ${pattern}` : undefined;
@@ -39,8 +45,8 @@ function permissionRoots(value: unknown): CodexApprovalPermissionRoot[] {
   if (!fileSystem) return [];
   const roots: CodexApprovalPermissionRoot[] = [];
   const seen = new Set<string>();
-  const add = (path: unknown, access: "read" | "write"): void => {
-    const bounded = boundedText(path, 4_096);
+  const add = (path: unknown, access: "read" | "write", filesystemPath = true): void => {
+    const bounded = filesystemPath ? normalizedFilesystemPath(path) : boundedText(path, 4_096);
     if (!bounded || roots.length >= MAX_PERMISSION_ROOTS) return;
     const key = `${access}\0${bounded}`;
     if (seen.has(key)) return;
@@ -53,7 +59,8 @@ function permissionRoots(value: unknown): CodexApprovalPermissionRoot[] {
     if (roots.length >= MAX_PERMISSION_ROOTS) break;
     const entry = objectValue(value);
     if (entry?.access !== "read" && entry?.access !== "write") continue;
-    add(permissionPath(entry.path), entry.access);
+    const typedPath = objectValue(entry.path);
+    add(permissionPath(entry.path), entry.access, typedPath?.type === "path");
   }
   return roots;
 }
@@ -69,7 +76,7 @@ function networkScope(value: unknown): CodexApprovalNetworkScope | undefined {
 export function parseCodexApprovalRequest(method: string, params: JsonObject): ParsedCodexApprovalRequest | undefined {
   const requestId = randomUUID();
   const command = boundedText(params.command, 4_000);
-  const cwd = boundedText(params.cwd, 4_096);
+  const cwd = normalizedFilesystemPath(params.cwd);
   const reason = boundedText(params.reason, 1_000);
   const additionalPermissions = objectValue(params.additionalPermissions);
   const requestedNetworkScope = networkScope(params.networkApprovalContext);
@@ -105,7 +112,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     };
   }
   if (method === "item/fileChange/requestApproval") {
-    const grantRoot = boundedText(params.grantRoot, 4_096);
+    const grantRoot = normalizedFilesystemPath(params.grantRoot);
     return {
       protocol: "decision",
       request: {

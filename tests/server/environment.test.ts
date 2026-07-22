@@ -58,7 +58,7 @@ describe.sequential("provider environment discovery", () => {
 
     expect(environment.env.INERTIA_LOGIN_SHELL_MARKER).toBe("ready");
     expect(environment.pathEntries[0]).toBe(shellBin);
-    expect(candidates).toEqual([realpathSync(command)]);
+    expect(candidates).toEqual([realpathSync.native(command)]);
   });
 
   it("searches known per-user CLI directories when the shell PATH is minimal", async () => {
@@ -72,7 +72,7 @@ describe.sequential("provider environment discovery", () => {
     const candidates = await executableCandidates("known-path-agent", environment, home);
 
     expect(environment.pathEntries).toContain(localBin);
-    expect(candidates).toEqual([realpathSync(command)]);
+    expect(candidates).toEqual([realpathSync.native(command)]);
   });
 
   it.skipIf(process.platform === "win32")("ignores non-executable and malformed command candidates", async () => {

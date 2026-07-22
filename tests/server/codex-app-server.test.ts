@@ -1,5 +1,5 @@
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProviderManager, type ProviderAccessMode, type ProviderApprovalEvent } from "../../src/server/providers";
@@ -13,12 +13,14 @@ import {
 
 describe.sequential("Codex App Server runtime", () => {
   const roots: string[] = [];
+  const managers: ProviderManager[] = [];
   const originalCapturePath = process.env.INERTIA_APP_SERVER_CAPTURE;
   const originalApprovalKind = process.env.INERTIA_APP_SERVER_APPROVAL_KIND;
   const originalOversize = process.env.INERTIA_APP_SERVER_OVERSIZE;
   const originalScenario = process.env.INERTIA_APP_SERVER_SCENARIO;
 
   afterEach(async () => {
+    await Promise.all(managers.splice(0).map((manager) => manager.disposeAll()));
     if (originalCapturePath === undefined) delete process.env.INERTIA_APP_SERVER_CAPTURE;
     else process.env.INERTIA_APP_SERVER_CAPTURE = originalCapturePath;
     if (originalApprovalKind === undefined) delete process.env.INERTIA_APP_SERVER_APPROVAL_KIND;
@@ -29,6 +31,15 @@ describe.sequential("Codex App Server runtime", () => {
     else process.env.INERTIA_APP_SERVER_SCENARIO = originalScenario;
     await Promise.all(roots.splice(0).map(removePortableFixture));
   });
+
+  function trackedManager(command: string, cancelGraceMs?: number): ProviderManager {
+    const manager = new ProviderManager({
+      commands: { codex: command },
+      ...(cancelGraceMs === undefined ? {} : { cancelGraceMs }),
+    });
+    managers.push(manager);
+    return manager;
+  }
 
   function fakeAppServer(): { root: string; command: string; capturePath: string } {
     const root = portableFixtureRoot("app server");
@@ -190,7 +201,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "command";
-    const manager = new ProviderManager({ commands: { codex: fake.command } });
+    const manager = trackedManager(fake.command);
     const approvals: string[] = [];
     const approvalRequests: ProviderApprovalEvent["request"][] = [];
     const inputs: string[] = [];
@@ -233,8 +244,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       availableDecisions: ["approve", "deny", "cancel"],
       networkScope: { host: "registry.npmjs.org", protocol: "https" },
       permissionRoots: [
-        { path: join(realpathSync(fake.root), "fixtures"), access: "read" },
-        { path: join(realpathSync(fake.root), "coverage"), access: "write" },
+        { path: normalize(join(realpathSync(fake.root), "fixtures")), access: "read" },
+        { path: normalize(join(realpathSync(fake.root), "coverage")), access: "write" },
       ],
     });
     expect(inputs).toEqual(["Which path should Codex take?"]);
@@ -281,7 +292,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "file-change";
-    const manager = new ProviderManager({ commands: { codex: fake.command } });
+    const manager = trackedManager(fake.command);
 
     const result = manager.run({
       providerId: "codex",
@@ -332,7 +343,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("keeps full access on App Server while streaming rich plan-turn state", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
-    const manager = new ProviderManager({ commands: { codex: fake.command } });
+    const manager = trackedManager(fake.command);
     const approvals: string[] = [];
     const inputs: string[] = [];
     const plans: string[] = [];
@@ -407,7 +418,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "wait-for-interrupt";
-    const manager = new ProviderManager({ commands: { codex: fake.command }, cancelGraceMs: 500 });
+    const manager = trackedManager(fake.command, 500);
     let cancelled = false;
 
     const result = manager.run({
@@ -440,7 +451,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "incompatible-full-access";
-    const manager = new ProviderManager({ commands: { codex: fake.command } });
+    const manager = trackedManager(fake.command);
     const approvals: string[] = [];
 
     const result = await manager.run({
@@ -470,7 +481,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "permissions";
-    const manager = new ProviderManager({ commands: { codex: fake.command } });
+    const manager = trackedManager(fake.command);
+    const approvalRequests: ProviderApprovalEvent["request"][] = [];
+    const approvalResponses: boolean[] = [];
+    const inputResponses: boolean[] = [];
 
     const result = manager.run({
       providerId: "codex",
@@ -481,16 +495,25 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       access: "supervised",
     }, {
       onApproval: (event) => {
-        expect(event.request.kind).toBe("permissions");
-        expect(event.request.permissionRoots).toEqual([{ path: join(realpathSync(fake.root), "generated"), access: "read" }]);
-        expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
+        approvalRequests.push(event.request);
+        approvalResponses.push(manager.respondToApproval(event.conversationId, event.request.requestId, "approve"));
       },
-      onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] })).toBe(true),
+      onInput: (event) => inputResponses.push(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] })),
     });
 
     await expect(result).resolves.toMatchObject({ status: "completed" });
+    expect(approvalRequests).toEqual([expect.objectContaining({
+      kind: "permissions",
+      permissionRoots: [{ path: normalize(join(realpathSync(fake.root), "generated")), access: "read" }],
+    })]);
+    expect(approvalResponses).toEqual([true]);
+    expect(inputResponses).toEqual([true]);
     const response = captured(fake.capturePath).find(({ id }) => id === "approval-rpc");
-    expect(response).toMatchObject({ result: { scope: "turn", permissions: { fileSystem: { read: [join(realpathSync(fake.root), "generated")] } } } });
+    expect(response).toMatchObject({ result: { scope: "turn" } });
+    const responsePath = (response as { result?: { permissions?: { fileSystem?: { read?: unknown[] } } } } | undefined)
+      ?.result?.permissions?.fileSystem?.read?.[0];
+    expect(typeof responsePath === "string" ? normalize(responsePath) : responsePath)
+      .toBe(normalize(join(realpathSync(fake.root), "generated")));
     expect(JSON.stringify(response)).not.toContain("environmentId");
     await manager.disposeAll();
   });
@@ -499,7 +522,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "command";
-    const manager = new ProviderManager({ commands: { codex: fake.command }, cancelGraceMs: 500 });
+    const manager = trackedManager(fake.command, 500);
 
     const result = manager.run({
       providerId: "codex",
@@ -530,7 +553,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_OVERSIZE = "1";
-    const manager = new ProviderManager({ commands: { codex: fake.command }, cancelGraceMs: 100 });
+    const manager = trackedManager(fake.command, 100);
     const approvals: string[] = [];
     const text: string[] = [];
     const result = await manager.run({
@@ -555,7 +578,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "stale-completion";
-    const manager = new ProviderManager({ commands: { codex: fake.command } });
+    const manager = trackedManager(fake.command);
 
     const result = manager.run({
       providerId: "codex",
@@ -577,7 +600,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "unsupported-decisions";
-    const manager = new ProviderManager({ commands: { codex: fake.command }, cancelGraceMs: 500 });
+    const manager = trackedManager(fake.command, 500);
     const approvals: string[] = [];
 
     const result = await manager.run({
@@ -601,7 +624,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const root = portableFixtureRoot("missing app server");
     roots.push(root);
     const missing = join(root, process.platform === "win32" ? "missing.exe" : "missing");
-    const manager = new ProviderManager({ commands: { codex: missing } });
+    const manager = trackedManager(missing);
 
     await expect(manager.run({
       providerId: "codex",

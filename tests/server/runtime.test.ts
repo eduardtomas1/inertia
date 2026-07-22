@@ -538,15 +538,17 @@ process.exit(2);
       (event): event is Extract<ServerEvent, { type: "terminal.created" }> =>
         event.type === "terminal.created" && event.requestId === authRequestId,
     );
-    const output = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "terminal.output" }> =>
-        event.type === "terminal.output" && event.terminalId === created.terminalId,
-    );
-    expect(output.data).toContain("Sign-in complete");
-    const exited = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "terminal.exit" }> =>
-        event.type === "terminal.exit" && event.terminalId === created.terminalId,
-    );
+    let terminalOutput = "";
+    let exited: Extract<ServerEvent, { type: "terminal.exit" }> | undefined;
+    while (!exited) {
+      const terminalEvent = await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "terminal.output" | "terminal.exit" }> =>
+          (event.type === "terminal.output" || event.type === "terminal.exit") && event.terminalId === created.terminalId,
+      );
+      if (terminalEvent.type === "terminal.output") terminalOutput += terminalEvent.data;
+      else exited = terminalEvent;
+    }
+    expect(terminalOutput).toContain("Sign-in complete");
     expect(exited.exitCode).toBe(0);
 
     const connected = await client.events.next(

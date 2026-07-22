@@ -1,25 +1,23 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 
-import WebSocket, { WebSocketServer, type RawData } from "ws";
+import WebSocket, { WebSocketServer } from "ws";
 
 import {
   PROTOCOL_VERSION,
-  clientCommandSchema,
   type AgentActivity,
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AgentPlan,
   type AppSnapshot,
-  type ChangedFile,
   type ClientCommand,
   type GitStatusSnapshot,
   type ProviderInfo,
   type ServerEvent,
 } from "../shared/contracts";
-import { RecordNotFoundError, RuntimeStore } from "./database";
+import { RuntimeStore } from "./database";
 import { CheckpointError, createCheckpoint, deleteCheckpoints, restoreCheckpoint } from "./checkpoints";
 import {
   GitError,
@@ -34,10 +32,9 @@ import {
   pushCurrentBranch,
   removeWorktree,
   switchBranch,
-  type GitRepositoryStatus,
 } from "./git";
-import { PROVIDERS, ProviderManager, ProviderRuntimeError, type ProviderActivityEvent, type ProviderDetection } from "./providers";
-import { TerminalError, TerminalManager } from "./terminal";
+import { ProviderManager, type ProviderActivityEvent, type ProviderDetection } from "./providers";
+import { TerminalManager } from "./terminal";
 import {
   WorkspaceError,
   discoverPackageScripts,
@@ -46,6 +43,23 @@ import {
   readWorkspaceTextFile,
   searchWorkspaceEntries,
 } from "./workspace";
+import { projectActionCommand as actionCommand, requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
+import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
+import {
+  isAllowedRuntimeOrigin as allowedOrigin,
+  parseRuntimeCommand as parseCommand,
+  rejectRuntimeUpgrade as rejectUpgrade,
+  sendRuntimeEvent as send,
+} from "./runtime-protocol";
+import {
+  agentActivityKind as activityKind,
+  agentActivityStatus as activityStatus,
+  changedFiles,
+  emptyGitStatusSnapshot as emptyGitStatus,
+  gitStatusSnapshot as statusSnapshot,
+  initialProviderSnapshots,
+  providerSnapshot,
+} from "./runtime-snapshots";
 
 const MAX_PAYLOAD_BYTES = 256 * 1024;
 const MAX_CLIENTS = 16;
@@ -62,163 +76,6 @@ export interface RunningRuntime {
   close: () => Promise<void>;
 }
 
-function allowedOrigin(origin: string | undefined): boolean {
-  if (origin === "inertia://bundle") return true;
-  if (origin === undefined || origin === "null" || origin === "file://") return false;
-  try {
-    const url = new URL(origin);
-    return (url.protocol === "http:" || url.protocol === "https:") &&
-      (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]");
-  } catch {
-    return false;
-  }
-}
-
-function rejectUpgrade(socket: import("node:stream").Duplex, status: 403 | 404 | 503): void {
-  const label = status === 403 ? "Forbidden" : status === 404 ? "Not Found" : "Service Unavailable";
-  socket.end(`HTTP/1.1 ${status} ${label}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
-}
-
-function requestIdFrom(value: unknown): string {
-  return typeof value === "object" && value !== null && "requestId" in value && typeof value.requestId === "string"
-    ? value.requestId
-    : randomUUID();
-}
-
-function send(socket: WebSocket, event: ServerEvent): void {
-  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event));
-}
-
-function parseCommand(data: RawData, isBinary: boolean): { command?: ClientCommand; error?: ServerEvent } {
-  if (isBinary) return { error: { type: "request.error", requestId: randomUUID(), message: "Binary commands are not supported." } };
-  const text = Buffer.isBuffer(data)
-    ? data.toString("utf8")
-    : data instanceof ArrayBuffer
-      ? Buffer.from(data).toString("utf8")
-      : Buffer.concat(data).toString("utf8");
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return { error: { type: "request.error", requestId: randomUUID(), message: "Command must be valid JSON." } };
-  }
-  const result = clientCommandSchema.safeParse(value);
-  return result.success
-    ? { command: result.data }
-    : { error: { type: "request.error", requestId: requestIdFrom(value), message: "Invalid command." } };
-}
-
-function ensureDirectory(path: string): string {
-  const absolutePath = resolve(path);
-  try {
-    if (!statSync(absolutePath).isDirectory()) throw new Error();
-  } catch {
-    throw new RequestError("Project path must be an existing directory.");
-  }
-  return absolutePath;
-}
-
-function publicError(error: unknown): string {
-  if (
-    error instanceof RequestError ||
-    error instanceof RecordNotFoundError ||
-    error instanceof TerminalError ||
-    error instanceof GitError ||
-    error instanceof WorkspaceError ||
-    error instanceof CheckpointError ||
-    error instanceof ProviderRuntimeError
-  ) return error.message;
-  return "The request could not be completed.";
-}
-
-function providerDefaults(executionEnabled = true): ProviderInfo[] {
-  return PROVIDERS.map((provider) => ({
-    id: provider.id,
-    label: provider.name,
-    command: provider.command,
-    available: false,
-    version: null,
-    installState: "checking",
-    authState: "checking",
-    canRun: !executionEnabled,
-    statusMessage: "Checking installation and connection",
-    models: [],
-    rateLimits: [],
-    supportsReasoning: provider.id === "codex",
-    supportsUsage: provider.id === "codex",
-  }));
-}
-
-function providerSnapshot(
-  detection: ProviderDetection,
-  metadata: Pick<ProviderInfo, "models" | "rateLimits"> = { models: [], rateLimits: [] },
-): ProviderInfo {
-  return {
-    id: detection.provider.id,
-    label: detection.provider.name,
-    command: detection.provider.command,
-    available: detection.available,
-    version: detection.version ?? null,
-    installState: detection.installState,
-    authState: detection.authState,
-    canRun: detection.canRun,
-    statusMessage: detection.statusMessage ?? null,
-    models: metadata.models,
-    rateLimits: metadata.rateLimits,
-    supportsReasoning: detection.provider.id === "codex",
-    supportsUsage: detection.provider.id === "codex",
-  };
-}
-
-function changedFiles(status: GitRepositoryStatus): ChangedFile[] {
-  return status.files.map((file) => ({
-    path: file.path,
-    status: file.status,
-    insertions: file.insertions,
-    deletions: file.deletions,
-    untracked: file.status === "untracked",
-  }));
-}
-
-function statusSnapshot(status: GitRepositoryStatus): GitStatusSnapshot {
-  return {
-    isRepository: true,
-    branch: status.branch,
-    upstream: status.upstream,
-    ahead: status.ahead,
-    behind: status.behind,
-    hasRemote: status.upstream !== null,
-    files: changedFiles(status),
-    insertions: status.insertions,
-    deletions: status.deletions,
-  };
-}
-
-function emptyGitStatus(): GitStatusSnapshot {
-  return { isRepository: false, branch: null, upstream: null, ahead: 0, behind: 0, hasRemote: false, files: [], insertions: 0, deletions: 0 };
-}
-
-function activityKind(event: ProviderActivityEvent): AgentActivity["kind"] {
-  if (event.kind === "command") return "command";
-  if (event.kind === "reasoning") return "reasoning";
-  if (event.kind === "tool") return "tool";
-  return "status";
-}
-
-function activityStatus(event: ProviderActivityEvent): AgentActivity["status"] {
-  if (event.phase === "failed") return "failed";
-  if (event.phase === "completed" || event.phase === "info") return "completed";
-  return "running";
-}
-
-function actionCommand(manager: string, actionId: string): string {
-  if (!/^[A-Za-z0-9:_-]+$/u.test(actionId)) throw new RequestError("This package script name cannot be run safely from the terminal.");
-  if (manager === "yarn") return `yarn ${actionId}`;
-  if (manager === "pnpm") return `pnpm run ${actionId}`;
-  if (manager === "bun") return `bun run ${actionId}`;
-  return `npm run ${actionId}`;
-}
-
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
   const dataDirectory = resolve(options.dataDirectory);
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
@@ -226,7 +83,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const enableProviders = options.enableProviders ?? true;
   const terminals = new TerminalManager();
   const providers = new ProviderManager();
-  let providerInfo = providerDefaults(enableProviders);
+  let providerInfo = initialProviderSnapshots(enableProviders);
   const clients = new Set<WebSocket>();
   const pendingApprovals = new Map<string, AgentApprovalRequest>();
   const pendingInputs = new Map<string, AgentInputRequest>();
@@ -868,5 +725,3 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   };
 }
-
-class RequestError extends Error {}

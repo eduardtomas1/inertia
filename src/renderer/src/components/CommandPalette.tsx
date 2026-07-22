@@ -33,13 +33,23 @@ function score(label: string, detail: string | undefined, query: string): number
   if (target.split(/\s+/u).some((word) => word.startsWith(query))) return 3;
   return target.includes(query) ? 2 : 0;
 }
+
+function filterItems(items: PaletteItem[], query: string): PaletteItem[] {
+  const needle = query.trim().toLocaleLowerCase();
+  return items
+    .map((item) => ({ item, rank: score(item.label, item.detail, needle) }))
+    .filter(({ rank }) => rank > 0)
+    .sort((left, right) => right.rank - left.rank)
+    .slice(0, needle ? 18 : 14)
+    .map(({ item }) => item);
+}
+
 export function CommandPalette({ open, projects, conversations, onClose, onSelectProject, onSelectConversation, onNewThread, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const items = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
+  const allItems = useMemo(() => {
     const actions: PaletteItem[] = [
       { id: "action:new-thread", group: "Actions", label: "New thread", detail: "Start work in the current project", icon: <SquarePen size={15} />, shortcut: "⌘N", run: onNewThread },
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
@@ -48,13 +58,9 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
     const projectItems: PaletteItem[] = projects.map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <Folder size={15} />, run: () => onSelectProject(project) }));
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={15} />, run: () => onSelectConversation(thread) }));
-    return [...actions, ...projectItems, ...threadItems]
-      .map((item) => ({ item, rank: score(item.label, item.detail, needle) }))
-      .filter(({ rank }) => rank > 0)
-      .sort((left, right) => right.rank - left.rank)
-      .slice(0, needle ? 18 : 14)
-      .map(({ item }) => item);
-  }, [conversations, onAddProject, onNewThread, onOpenSettings, onSelectConversation, onSelectProject, projects, query]);
+    return [...actions, ...projectItems, ...threadItems];
+  }, [conversations, onAddProject, onNewThread, onOpenSettings, onSelectConversation, onSelectProject, projects]);
+  const items = useMemo(() => filterItems(allItems, query), [allItems, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -86,7 +92,12 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
               if (event.key === "Escape") { event.preventDefault(); onClose(); }
               if (event.key === "ArrowDown") { event.preventDefault(); setActiveIndex((current) => items.length ? (current + 1) % items.length : 0); }
               if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((current) => items.length ? (current - 1 + items.length) % items.length : 0); }
-              if (event.key === "Enter") { event.preventDefault(); run(items[activeIndex]); }
+              if (event.key === "Enter") {
+                event.preventDefault();
+                const currentQuery = event.currentTarget.value;
+                const currentItems = filterItems(allItems, currentQuery);
+                run(currentItems[currentQuery === query ? activeIndex : 0]);
+              }
             }}
             placeholder="Search commands, projects, and threads…"
             aria-label="Search commands, projects, and threads"

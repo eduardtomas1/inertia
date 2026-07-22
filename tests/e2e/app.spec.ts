@@ -305,6 +305,7 @@ test("opens the command palette and manages a thread", async () => {
   await page.keyboard.press("Control+K");
   const search = page.getByRole("combobox", { name: "Search commands, projects, and threads" });
   await search.fill("settings");
+  await expect(page.getByRole("option", { name: /Open settings/ })).toHaveAttribute("aria-selected", "true");
   await search.press("Enter");
   await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Go to workspace" }).click();

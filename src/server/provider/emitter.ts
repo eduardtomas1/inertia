@@ -113,12 +113,12 @@ export function providerCallbacksFromHarness(emitter: ProviderEmitter): AgentHar
         emitter.event(event);
         return;
       }
-      emitCodexExtension(emitter, event);
+      emitInteractiveExtension(emitter, event);
     },
   };
 }
 
-function emitCodexExtension(
+function emitInteractiveExtension(
   emitter: ProviderEmitter,
   envelope: Extract<AgentHarnessEvent, { type: "extension" }>,
 ): void {

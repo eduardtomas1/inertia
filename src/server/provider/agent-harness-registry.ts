@@ -1,5 +1,7 @@
-import { createCliAgentHarness } from "./cli-agent-harness";
+import { createClaudeAgentSdkHarness } from "./claude-agent-sdk-harness";
 import { createCodexAppServerHarness } from "./codex-app-server-harness";
+import { createCursorAcpHarness } from "./cursor-acp-harness";
+import { createOpenCodeSdkHarness } from "./opencode-sdk-harness";
 import type {
   AgentHarness,
   AgentHarnessCapabilities,
@@ -13,6 +15,9 @@ const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "claude-cli": "claude",
   "cursor-cli": "cursor",
   "opencode-cli": "opencode",
+  "claude-agent-sdk": "claude",
+  "cursor-acp": "cursor",
+  "opencode-sdk": "opencode",
 };
 
 export class AgentHarnessRegistry {
@@ -56,8 +61,8 @@ export class AgentHarnessRegistry {
 export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
   return new AgentHarnessRegistry([
     createCodexAppServerHarness(),
-    createCliAgentHarness("claude"),
-    createCliAgentHarness("cursor"),
-    createCliAgentHarness("opencode"),
+    createClaudeAgentSdkHarness(),
+    createCursorAcpHarness(),
+    createOpenCodeSdkHarness(),
   ]);
 }

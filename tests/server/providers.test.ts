@@ -4,7 +4,8 @@ import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { providerEnvironment } from "../../src/server/environment";
-import { detectProvider, ProviderManager, type ProviderId } from "../../src/server/providers";
+import { AgentHarnessRegistry, detectProvider, ProviderManager, type ProviderId } from "../../src/server/providers";
+import { createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
 
 const MUTATED_ENVIRONMENT_KEYS = ["HOME", "PATH", "SHELL", "ZDOTDIR", "INERTIA_CAPTURE_PATH", "INERTIA_DISCOVERY_MARKER"] as const;
 
@@ -238,6 +239,38 @@ console.log(JSON.stringify({ loggedIn: false }));
     await expect(detectProvider("claude", { command: signedOut, cwd: signedOutRoot })).resolves.toMatchObject({ authState: "unauthenticated", canRun: false });
   });
 
+  it.skipIf(process.platform === "win32")("accepts Cursor only after the executable advertises ACP", async () => {
+    const readyRoot = temporaryRoot();
+    const wrongRoot = temporaryRoot();
+    const ready = nodeExecutable(readyRoot, "agent", `
+const args = process.argv.slice(2);
+if (args.includes("--version")) { console.log("Cursor Agent 9.9.9"); process.exit(0); }
+if (args[0] === "acp" && args[1] === "--help") { console.log("Cursor Agent Client Protocol (ACP)"); process.exit(0); }
+if (args[0] === "status") { console.log("Logged in"); process.exit(0); }
+process.exit(2);
+`);
+    const wrong = nodeExecutable(wrongRoot, "agent", `
+const args = process.argv.slice(2);
+if (args.includes("--version")) { console.log("unrelated-agent 9.9.9"); process.exit(0); }
+if (args[0] === "acp") { console.error("unknown command"); process.exit(2); }
+process.exit(0);
+`);
+
+    await expect(detectProvider("cursor", { command: ready, cwd: readyRoot })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      authState: "authenticated",
+      canRun: true,
+    });
+    await expect(detectProvider("cursor", { command: wrong, cwd: wrongRoot })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      statusMessage: "Cursor CLI found, but ACP is unavailable",
+    });
+  });
+
   it.skipIf(process.platform === "win32")("normalizes streamed session output from the other provider adapters", async () => {
     const fixtures: Array<{ providerId: ProviderId; lines: unknown[]; expectedText: string; sessionId: string }> = [
       {
@@ -277,7 +310,10 @@ console.log(JSON.stringify({ loggedIn: false }));
     for (const fixture of fixtures) {
       const root = temporaryRoot();
       const command = nodeExecutable(root, `fake-${fixture.providerId}`, fixture.lines.map((line) => `console.log(${JSON.stringify(JSON.stringify(line))});`).join("\n"));
-      const manager = new ProviderManager({ commands: { [fixture.providerId]: command } });
+      const manager = new ProviderManager(
+        { commands: { [fixture.providerId]: command } },
+        new AgentHarnessRegistry([createCliAgentHarness(fixture.providerId)]),
+      );
       const result = await manager.run({ providerId: fixture.providerId, conversationId: `${fixture.providerId}-conversation`, cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" });
       expect(result).toMatchObject({ status: "completed", text: fixture.expectedText, sessionId: fixture.sessionId });
       await manager.disposeAll();
@@ -296,7 +332,10 @@ console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block
 console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Partial reply" }] } }));
 console.log(JSON.stringify({ type: "result", is_error: false }));
 `);
-    const manager = new ProviderManager({ commands: { claude: command } });
+    const manager = new ProviderManager(
+      { commands: { claude: command } },
+      new AgentHarnessRegistry([createCliAgentHarness("claude")]),
+    );
 
     const result = await manager.run({ providerId: "claude", conversationId: "claude-partial", cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" });
 

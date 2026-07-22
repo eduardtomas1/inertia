@@ -20,7 +20,10 @@ export type AgentHarnessId =
   | "codex-cli"
   | "claude-cli"
   | "cursor-cli"
-  | "opencode-cli";
+  | "opencode-cli"
+  | "claude-agent-sdk"
+  | "cursor-acp"
+  | "opencode-sdk";
 
 export interface AgentHarnessCoreCapabilities {
   lifecycle: {
@@ -116,12 +119,60 @@ export interface OpenCodeCliHarnessCapabilities extends AgentHarnessCoreCapabili
   };
 }
 
+export interface ClaudeAgentSdkHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: {
+    kind: "claude-agent-sdk";
+    protocol: "claude-agent-sdk";
+    approvals: "native";
+    questions: "native";
+    plans: "native";
+    reasoning: "streaming-thinking";
+    usage: "result-usage";
+    images: "structured-base64-input";
+    authentication: "claude-cli";
+    modelMetadata: "agent-sdk";
+  };
+}
+
+export interface CursorAcpHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: {
+    kind: "cursor-acp";
+    protocol: "acp-v1-json-rpc";
+    approvals: "native";
+    questions: "cursor-extension";
+    plans: "native";
+    reasoning: "native";
+    usage: "optional-acp-v1";
+    images: "capability-negotiated";
+    authentication: "cursor-cli";
+    modelMetadata: "session-config-options";
+  };
+}
+
+export interface OpenCodeSdkHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: {
+    kind: "opencode-sdk";
+    protocol: "owned-server-sse";
+    approvals: "native";
+    questions: "native";
+    plans: "native";
+    reasoning: "native";
+    usage: "message-token-usage";
+    images: "native-file-input";
+    authentication: "opencode-cli";
+    modelMetadata: "server-config";
+  };
+}
+
 export type AgentHarnessCapabilities =
   | CodexAppServerHarnessCapabilities
   | CodexCliHarnessCapabilities
   | ClaudeCliHarnessCapabilities
   | CursorCliHarnessCapabilities
-  | OpenCodeCliHarnessCapabilities;
+  | OpenCodeCliHarnessCapabilities
+  | ClaudeAgentSdkHarnessCapabilities
+  | CursorAcpHarnessCapabilities
+  | OpenCodeSdkHarnessCapabilities;
 
 export type AgentHarnessCoreEvent =
   | ProviderTextEvent
@@ -138,6 +189,9 @@ export type CodexAppServerHarnessEvent =
   | { type: "reasoning-summary"; text: string }
   | { type: "usage"; usage: ProviderUsageEvent["usage"] };
 
+/** Canonical interactive event surface shared by rich provider transports. */
+export type ProviderInteractiveHarnessEvent = CodexAppServerHarnessEvent;
+
 export interface CodexAppServerHarnessExtensionEvent {
   providerId: "codex";
   conversationId: string;
@@ -146,7 +200,21 @@ export interface CodexAppServerHarnessExtensionEvent {
   event: CodexAppServerHarnessEvent;
 }
 
-export type AgentHarnessEvent = AgentHarnessCoreEvent | CodexAppServerHarnessExtensionEvent;
+interface ProviderInteractiveHarnessExtensionEventBase {
+  conversationId: string;
+  type: "extension";
+  event: ProviderInteractiveHarnessEvent;
+}
+
+export type ProviderInteractiveHarnessExtensionEvent =
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "claude"; extension: "claude-agent-sdk" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "cursor"; extension: "cursor-acp" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "opencode"; extension: "opencode-sdk" });
+
+export type AgentHarnessEvent =
+  | AgentHarnessCoreEvent
+  | CodexAppServerHarnessExtensionEvent
+  | ProviderInteractiveHarnessExtensionEvent;
 
 export interface AgentHarnessCallbacks {
   onEvent?: (event: AgentHarnessEvent) => void;
@@ -165,12 +233,21 @@ export interface CodexAppServerRunExtension {
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
 }
 
+export interface ProviderInteractiveRunExtension {
+  kind: "claude-agent-sdk" | "cursor-acp" | "opencode-sdk";
+  respondToApproval: (requestId: string, decision: CodexApprovalDecision) => boolean;
+  respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
+}
+
 export interface CliAgentHarnessRunExtension {
   kind: "cli";
   providerId: ProviderId;
 }
 
-export type AgentHarnessRunExtension = CodexAppServerRunExtension | CliAgentHarnessRunExtension;
+export type AgentHarnessRunExtension =
+  | CodexAppServerRunExtension
+  | ProviderInteractiveRunExtension
+  | CliAgentHarnessRunExtension;
 
 export interface AgentHarnessRun {
   harnessId: AgentHarnessId;
@@ -194,6 +271,7 @@ export interface AgentHarnessEmitter {
   status: (status: ProviderStatusEvent["status"], message?: string) => void;
   session: (sessionId: string) => void;
   codex: (event: CodexAppServerHarnessEvent) => void;
+  rich: (event: ProviderInteractiveHarnessEvent) => void;
 }
 
 export function createAgentHarnessEmitter(
@@ -217,6 +295,11 @@ export function createAgentHarnessEmitter(
     codex: (event) => {
       if (providerId !== "codex") return;
       emit({ providerId, conversationId, type: "extension", extension: "codex-app-server", event });
+    },
+    rich: (event) => {
+      if (providerId === "claude") emit({ providerId, conversationId, type: "extension", extension: "claude-agent-sdk", event });
+      else if (providerId === "cursor") emit({ providerId, conversationId, type: "extension", extension: "cursor-acp", event });
+      else if (providerId === "opencode") emit({ providerId, conversationId, type: "extension", extension: "opencode-sdk", event });
     },
   };
 }

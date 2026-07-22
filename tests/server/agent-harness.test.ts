@@ -36,9 +36,9 @@ describe("agent harness architecture", () => {
     expect(registry.resolve(input("codex")).id).toBe("codex-app-server");
     expect(registry.resolve(input("codex", { access: "auto-edit" })).id).toBe("codex-app-server");
     expect(registry.resolve(input("codex", { access: "full" })).id).toBe("codex-app-server");
-    expect(registry.resolve(input("claude")).id).toBe("claude-cli");
-    expect(registry.resolve(input("cursor")).id).toBe("cursor-cli");
-    expect(registry.resolve(input("opencode")).id).toBe("opencode-cli");
+    expect(registry.resolve(input("claude")).id).toBe("claude-agent-sdk");
+    expect(registry.resolve(input("cursor")).id).toBe("cursor-acp");
+    expect(registry.resolve(input("opencode")).id).toBe("opencode-sdk");
   });
 
   it("advertises typed provider extensions instead of common capability booleans", () => {
@@ -60,20 +60,30 @@ describe("agent harness architecture", () => {
       modelMetadata: "app-server",
     });
     expect(claude?.extension).toMatchObject({
-      kind: "claude-cli",
-      planMode: "native-cli",
-      approvals: "unavailable-in-current-harness",
-      images: "prompt-path-reference",
+      kind: "claude-agent-sdk",
+      approvals: "native",
+      questions: "native",
+      plans: "native",
+      reasoning: "streaming-thinking",
+      usage: "result-usage",
+      images: "structured-base64-input",
     });
     expect(cursor?.extension).toMatchObject({
-      kind: "cursor-cli",
-      plans: "prompt-emulated",
-      reasoning: "suppressed-by-print-mode",
+      kind: "cursor-acp",
+      approvals: "native",
+      questions: "cursor-extension",
+      plans: "native",
+      reasoning: "native",
+      usage: "optional-acp-v1",
+      images: "capability-negotiated",
     });
     expect(opencode?.extension).toMatchObject({
-      kind: "opencode-cli",
-      planMode: "native-agent-selection",
-      images: "native-cli-file",
+      kind: "opencode-sdk",
+      approvals: "native",
+      questions: "native",
+      plans: "native",
+      usage: "message-token-usage",
+      images: "native-file-input",
     });
   });
 

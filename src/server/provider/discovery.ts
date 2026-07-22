@@ -131,7 +131,12 @@ export async function detectProvider(
   const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, 10_000));
   const cwd = options.cwd ?? process.cwd();
   const environment = await providerEnvironment(options.refreshEnvironment === true);
-  const candidates = await executableCandidates(command, environment, cwd);
+  const candidateCommands = providerId === "cursor" && command === PROVIDER_INFO.cursor.command
+    ? [command, "cursor-agent"]
+    : [command];
+  const candidates = [...new Set((await Promise.all(candidateCommands.map(
+    async (candidate) => await executableCandidates(candidate, environment, cwd),
+  ))).flat())];
   if (candidates.length === 0) {
     return {
       provider,
@@ -145,20 +150,32 @@ export async function detectProvider(
 
   const versionProbes = await Promise.all(candidates.map(async (executable) => {
     const probe = await probeProcess(executable, ["--version"], environment, cwd, timeoutMs);
-    return { executable, probe, version: versionFromOutput(probe.output) };
+    const acpProbe = providerId === "cursor" && probe.started && !probe.timedOut && probe.exitCode === 0
+      ? await probeProcess(executable, ["acp", "--help"], environment, cwd, timeoutMs)
+      : undefined;
+    const acpReady = !acpProbe || (
+      acpProbe.started
+      && !acpProbe.timedOut
+      && acpProbe.exitCode === 0
+      && /(?:agent client protocol|\bacp\b|cursor)/iu.test(acpProbe.output)
+    );
+    return { executable, probe, version: versionFromOutput(probe.output), acpReady };
   }));
   const working = versionProbes
-    .filter(({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0)
+    .filter(({ probe, acpReady }) => probe.started && !probe.timedOut && probe.exitCode === 0 && acpReady)
     .sort((left, right) => compareVersions(right.version, left.version));
   const selected = working[0];
   if (!selected) {
+    const cursorWithoutAcp = providerId === "cursor" && versionProbes.some(
+      ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+    );
     return {
       provider,
-      available: false,
-      installState: "error",
+      available: cursorWithoutAcp,
+      installState: cursorWithoutAcp ? "installed" : "error",
       authState: "unknown",
       canRun: false,
-      statusMessage: statusMessage("error", "unknown"),
+      statusMessage: cursorWithoutAcp ? "Cursor CLI found, but ACP is unavailable" : statusMessage("error", "unknown"),
     };
   }
 

@@ -99,7 +99,6 @@ export class ProviderManager {
   }
 
   async metadata(providerId: ProviderId, cwd = process.cwd()): Promise<ProviderMetadata> {
-    if (providerId !== "codex") return { models: [], rateLimits: [] };
     let executable = this.resolvedCommands.get(providerId);
     if (!executable) executable = (await this.detect(providerId)).executable;
     if (!executable) return { models: [], rateLimits: [] };
@@ -191,7 +190,7 @@ export class ProviderManager {
     const active = this.activeRuns.get(conversationId);
     if (!active || active.settled || active.cancelRequested) return false;
     const extension = active.harnessRun.extension;
-    if (extension.kind !== "codex-app-server") return false;
+    if (!("respondToApproval" in extension)) return false;
     return extension.respondToApproval(requestId, decision);
   }
 
@@ -199,7 +198,7 @@ export class ProviderManager {
     const active = this.activeRuns.get(conversationId);
     if (!active || active.settled || active.cancelRequested) return false;
     const extension = active.harnessRun.extension;
-    if (extension.kind !== "codex-app-server") return false;
+    if (!("respondToInput" in extension)) return false;
     return extension.respondToInput(requestId, answers);
   }
 

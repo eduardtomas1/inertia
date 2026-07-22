@@ -1,5 +1,7 @@
 import { readCodexMetadata, type CodexMetadata } from "../codex-metadata";
+import { readClaudeAgentSdkModels } from "./claude-agent-sdk-harness";
 import type { ProviderId } from "./contracts";
+import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
 
 export type ProviderMetadata = CodexMetadata;
 
@@ -10,6 +12,8 @@ export async function readProviderMetadata(
   environment: NodeJS.ProcessEnv,
   cwd: string,
 ): Promise<ProviderMetadata> {
-  if (providerId !== "codex") return { models: [], rateLimits: [] };
-  return await readCodexMetadata(executable, environment, cwd);
+  if (providerId === "codex") return await readCodexMetadata(executable, environment, cwd);
+  if (providerId === "claude") return { models: await readClaudeAgentSdkModels(executable, environment, cwd), rateLimits: [] };
+  if (providerId === "opencode") return { models: await readOpenCodeSdkModels(executable, environment, cwd), rateLimits: [] };
+  return { models: [], rateLimits: [] };
 }

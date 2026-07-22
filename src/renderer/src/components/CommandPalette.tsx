@@ -64,23 +64,27 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
 
   useEffect(() => {
     if (!open) return;
-    setQuery("");
-    setActiveIndex(0);
-    window.setTimeout(() => inputRef.current?.focus(), 0);
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(focusTimer);
   }, [open]);
 
   useEffect(() => setActiveIndex((current) => Math.min(current, Math.max(0, items.length - 1))), [items.length]);
   if (!open) return null;
 
+  const closePalette = () => {
+    setQuery("");
+    setActiveIndex(0);
+    onClose();
+  };
   const run = (item: PaletteItem | undefined) => {
     if (!item) return;
-    onClose();
+    closePalette();
     item.run();
   };
   const groups = (["Actions", "Projects", "Threads"] as const).map((group) => ({ group, items: items.map((item, index) => ({ item, index })).filter(({ item }) => item.group === group) })).filter(({ items: groupItems }) => groupItems.length > 0);
 
   return (
-    <div className="palette-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="palette-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePalette(); }}>
       <section className="command-palette" role="dialog" aria-modal="true" aria-label="Search Inertia">
         <div className="palette-search">
           <Search size={17} />
@@ -89,7 +93,7 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
             value={query}
             onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
             onKeyDown={(event) => {
-              if (event.key === "Escape") { event.preventDefault(); onClose(); }
+              if (event.key === "Escape") { event.preventDefault(); closePalette(); }
               if (event.key === "ArrowDown") { event.preventDefault(); setActiveIndex((current) => items.length ? (current + 1) % items.length : 0); }
               if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((current) => items.length ? (current - 1 + items.length) % items.length : 0); }
               if (event.key === "Enter") {
@@ -107,7 +111,7 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
             aria-expanded="true"
             autoComplete="off"
           />
-          <IconButton label="Close search" onClick={onClose}><X size={15} /></IconButton>
+          <IconButton label="Close search" onClick={closePalette}><X size={15} /></IconButton>
         </div>
         <div className="palette-results" id="palette-results" role="listbox">
           {groups.map(({ group, items: groupItems }) => (

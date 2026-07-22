@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 
 import {
   isRuntimeWebSocketUrl,
@@ -7,25 +9,27 @@ import {
 } from "../../src/main/runtime-process-protocol";
 
 const capabilityUrl = `ws://127.0.0.1:43210/runtime/${"a".repeat(43)}`;
+const dataDirectory = resolve(tmpdir(), "inertia data");
+const workspaceDirectory = resolve(tmpdir(), "inertia workspace");
 
 describe("runtime process protocol", () => {
   it("accepts only absolute bounded startup options", () => {
     expect(parseRuntimeWorkerCommand({
       type: "runtime.start",
       options: {
-        dataDirectory: "/tmp/inertia-data",
-        defaultWorkspacePath: "/tmp/inertia-workspace",
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
       },
     })).toEqual({
       type: "runtime.start",
       options: {
-        dataDirectory: "/tmp/inertia-data",
-        defaultWorkspacePath: "/tmp/inertia-workspace",
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
       },
     });
-    expect(parseRuntimeWorkerCommand({ type: "runtime.start", options: { dataDirectory: "relative", defaultWorkspacePath: "/tmp/workspace", enableProviders: false } })).toBeNull();
+    expect(parseRuntimeWorkerCommand({ type: "runtime.start", options: { dataDirectory: "relative", defaultWorkspacePath: workspaceDirectory, enableProviders: false } })).toBeNull();
     expect(parseRuntimeWorkerCommand({ type: "runtime.shutdown", unexpected: true })).toBeNull();
   });
 

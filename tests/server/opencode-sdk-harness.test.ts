@@ -1,23 +1,83 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { createOpenCodeSdkHarness, readOpenCodeSdkModels } from "../../src/server/provider/opencode-sdk-harness";
+import {
+  loopbackPortIsOpen,
+  portableFixtureRoot,
+  portableNodeExecutable,
+  removePortableFixture,
+  waitFor,
+  writeNodeSubcommand,
+} from "../helpers/portable-provider-fixture";
+
+type LifecycleScenario = "resume" | "cancel" | "oversized" | "no-image";
+
+function lifecycleServerSource(root: string, capturePath: string, scenario: LifecycleScenario): string {
+  return `
+const http = require("node:http");
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
+const scenario = ${JSON.stringify(scenario)};
+const captured = [];
+const sessionID = "opencode-lifecycle-session";
+let events;
+const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
+const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
+const session = { id: sessionID, slug: "fixture", projectID: "project", directory: ${JSON.stringify(root)}, title: "Fixture", version: "1.18.4", model: { id: "model-a", providerID: "fake" }, time: { created: Date.now(), updated: Date.now() } };
+const model = { id: "model-a", providerID: "fake", api: { id: "fake", url: "http://fake", npm: "fake" }, name: "Model A", capabilities: { temperature: true, reasoning: true, attachment: true, toolcall: true, input: { text: true, audio: false, image: scenario !== "no-image", video: false, pdf: false }, output: { text: true, audio: false, image: false, video: false, pdf: false }, interleaved: true }, cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }, limit: { context: 200000, output: 32000 }, status: "active", options: {}, headers: {}, release_date: "2026-01-01" };
+const json = (res, value, status = 200) => { res.writeHead(status, { "content-type": "application/json" }); res.end(status === 204 ? undefined : JSON.stringify(value)); };
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, "http://127.0.0.1");
+  let body = "";
+  req.on("data", (chunk) => body += chunk);
+  req.on("end", () => {
+    const parsed = body ? JSON.parse(body) : undefined;
+    captured.push({ method: req.method, path: url.pathname, body: parsed }); save();
+    if (req.method === "GET" && url.pathname === "/global/health") return json(res, { healthy: true, version: "1.18.4" });
+    if (req.method === "GET" && url.pathname === "/provider") return json(res, { all: [{ id: "fake", name: "Fake", source: "config", env: [], options: {}, models: { "model-a": model } }], default: { fake: "model-a" }, connected: ["fake"] });
+    if (req.method === "GET" && url.pathname === "/agent") return json(res, []);
+    if (req.method === "POST" && url.pathname === "/session") return json(res, session);
+    if (url.pathname === "/session/" + sessionID && req.method === "GET") return json(res, session);
+    if (url.pathname === "/session/" + sessionID && req.method !== "GET") return json(res, session);
+    if (req.method === "GET" && url.pathname === "/event") { events = res; res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" }); return res.flushHeaders(); }
+    if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
+      json(res, undefined, 204);
+      if (scenario === "resume") setTimeout(() => {
+        sendEvent({ type: "session.idle", properties: { sessionID: "stale-session" } });
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant", sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "text", sessionID, messageID: "assistant", type: "text", text: "Resumed OpenCode response" } } });
+        sendEvent({ type: "session.idle", properties: { sessionID } });
+      }, 10);
+      if (scenario === "oversized") setTimeout(() => sendEvent({ type: "message.updated", properties: { sessionID, payload: "x".repeat(1024 * 1024 + 1) } }), 10);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/abort") {
+      json(res, true);
+      return setTimeout(() => sendEvent({ type: "session.idle", properties: { sessionID } }), 10);
+    }
+    return json(res, { error: "not found" }, 404);
+  });
+});
+server.listen(port, "127.0.0.1", save);
+`;
+}
 
 describe.sequential("OpenCode SDK harness", () => {
   const roots: string[] = [];
-  afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+  afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 
-  it.skipIf(process.platform === "win32")("owns the local server and bridges SSE text, reasoning, tools, todos, permissions, questions, usage, models, and images", async () => {
-    const root = mkdtempSync(join(tmpdir(), "inertia-opencode-sdk-"));
+  it("owns the local server and bridges SSE text, reasoning, tools, todos, permissions, questions, usage, models, and images", async () => {
+    const root = portableFixtureRoot("OpenCode SDK");
     roots.push(root);
     const capturePath = join(root, "capture.json");
     const imagePath = join(root, "reference.png");
     writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-    const command = join(root, "opencode");
-    writeFileSync(command, `#!${process.execPath}
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", `
 const http = require("node:http");
 const fs = require("node:fs");
 const args = process.argv.slice(2);
@@ -67,9 +127,7 @@ const server = http.createServer((req, res) => {
   });
 });
 server.listen(port, "127.0.0.1", () => console.log("opencode server listening on http://127.0.0.1:" + port));
-process.on("SIGTERM", () => server.close(() => process.exit(0)));
 `);
-    chmodSync(command, 0o700);
     const models = await readOpenCodeSdkModels(command, process.env, root);
     expect(models).toEqual([expect.objectContaining({
       id: "fake/model-a",
@@ -159,5 +217,148 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     });
     expect(captured.find(({ path }) => path === "/permission/permission-1/reply")?.body).toEqual({ reply: "once" });
     expect(captured.find(({ path }) => path === "/question/question-1/reply")?.body).toEqual({ answers: [["Focused"]] });
+  });
+
+  it("resumes the selected session and ignores stale-session events", async () => {
+    const root = portableFixtureRoot("OpenCode resume");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "resume"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.run({
+      providerId: "opencode",
+      conversationId: "opencode-resume",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    })).resolves.toMatchObject({
+      status: "completed",
+      sessionId: "opencode-lifecycle-session",
+      text: "Resumed OpenCode response",
+    });
+    const { captured } = JSON.parse(readFileSync(capturePath, "utf8")) as { captured: Array<{ method: string; path: string }> };
+    expect(captured.some(({ method, path }) => method === "POST" && path === "/session")).toBe(false);
+    expect(captured.some(({ method, path }) => method === "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
+    expect(captured.some(({ method, path }) => method !== "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
+  });
+
+  it("cancels through the owned server and leaves no listening process", async () => {
+    const root = portableFixtureRoot("OpenCode cancellation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "cancel"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => { markRunning = resolve; });
+    const result = manager.run({
+      providerId: "opencode",
+      conversationId: "opencode-cancel",
+      cwd: root,
+      prompt: "Wait",
+      interactionMode: "build",
+      access: "supervised",
+    }, { onStatus: ({ status }) => { if (status === "running") markRunning(); } });
+
+    await running;
+    expect(manager.cancel("opencode-cancel")).toBe(true);
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    await waitFor("the OpenCode abort request", () => {
+      try {
+        const value = JSON.parse(readFileSync(capturePath, "utf8")) as { captured: Array<{ path: string }> };
+        return value.captured.some(({ path }) => path.endsWith("/abort"));
+      } catch { return false; }
+    });
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as { port: number };
+    await waitFor("the OpenCode child socket to close", async () => !(await loopbackPortIsOpen(capture.port)));
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("rejects oversized events and unavailable image capability", async () => {
+    const oversizedRoot = portableFixtureRoot("OpenCode oversized");
+    roots.push(oversizedRoot);
+    const oversizedCapture = join(oversizedRoot, "capture.json");
+    const oversizedCommand = portableNodeExecutable(oversizedRoot, "opencode");
+    writeNodeSubcommand(oversizedRoot, "serve", lifecycleServerSource(oversizedRoot, oversizedCapture, "oversized"));
+    const oversizedManager = new ProviderManager(
+      { commands: { opencode: oversizedCommand } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    await expect(oversizedManager.run({
+      providerId: "opencode",
+      conversationId: "opencode-oversized",
+      cwd: oversizedRoot,
+      prompt: "Start",
+      interactionMode: "build",
+      access: "supervised",
+    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("oversized") });
+
+    const capabilityRoot = portableFixtureRoot("OpenCode image capability");
+    roots.push(capabilityRoot);
+    const capabilityCapture = join(capabilityRoot, "capture.json");
+    const imagePath = join(capabilityRoot, "reference.png");
+    writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const capabilityCommand = portableNodeExecutable(capabilityRoot, "opencode");
+    writeNodeSubcommand(capabilityRoot, "serve", lifecycleServerSource(capabilityRoot, capabilityCapture, "no-image"));
+    const capabilityManager = new ProviderManager(
+      { commands: { opencode: capabilityCommand } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    await expect(capabilityManager.run({
+      providerId: "opencode",
+      conversationId: "opencode-no-image",
+      cwd: capabilityRoot,
+      prompt: "Inspect",
+      interactionMode: "build",
+      access: "supervised",
+      imagePaths: [imagePath],
+    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("image input support") });
+  });
+
+  it("settles missing and early-exit startup failures", async () => {
+    const missingRoot = portableFixtureRoot("OpenCode missing");
+    roots.push(missingRoot);
+    const missing = join(missingRoot, process.platform === "win32" ? "missing.exe" : "missing");
+    const missingManager = new ProviderManager(
+      { commands: { opencode: missing } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    await expect(missingManager.run({
+      providerId: "opencode",
+      conversationId: "opencode-missing",
+      cwd: missingRoot,
+      prompt: "Start",
+      interactionMode: "build",
+      access: "supervised",
+    })).resolves.toMatchObject({ status: "failed" });
+
+    const exitRoot = portableFixtureRoot("OpenCode early exit");
+    roots.push(exitRoot);
+    const exitCommand = portableNodeExecutable(exitRoot, "opencode");
+    writeNodeSubcommand(exitRoot, "serve", `process.stderr.write("fixture startup failed\\n"); process.exit(7);`);
+    const exitManager = new ProviderManager(
+      { commands: { opencode: exitCommand } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    await expect(exitManager.run({
+      providerId: "opencode",
+      conversationId: "opencode-exit",
+      cwd: exitRoot,
+      prompt: "Start",
+      interactionMode: "build",
+      access: "supervised",
+    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("exited during startup") });
+    expect(missingManager.activeConversationIds()).toEqual([]);
+    expect(exitManager.activeConversationIds()).toEqual([]);
   });
 });

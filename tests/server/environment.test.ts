@@ -4,8 +4,9 @@ import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { executableCandidates, providerEnvironment } from "../../src/server/environment";
+import { portableNodeExecutable } from "../helpers/portable-provider-fixture";
 
-const ENVIRONMENT_KEYS = ["HOME", "PATH", "SHELL", "ZDOTDIR"] as const;
+const ENVIRONMENT_KEYS = ["APPDATA", "HOME", "LOCALAPPDATA", "PATH", "SHELL", "USERPROFILE", "ZDOTDIR"] as const;
 
 describe.sequential("provider environment discovery", () => {
   const roots: string[] = [];
@@ -17,9 +18,8 @@ describe.sequential("provider environment discovery", () => {
     return root;
   }
 
-  function executable(path: string): void {
-    writeFileSync(path, "#!/bin/sh\nexit 0\n");
-    chmodSync(path, 0o700);
+  function executable(root: string, name: string): string {
+    return portableNodeExecutable(root, name);
   }
 
   function setEnvironment(values: Partial<Record<(typeof ENVIRONMENT_KEYS)[number], string>>): void {
@@ -44,8 +44,7 @@ describe.sequential("provider environment discovery", () => {
     const home = temporaryRoot();
     const shellBin = join(home, "shell-bin");
     mkdirSync(shellBin, { recursive: true });
-    const command = join(shellBin, "login-shell-agent");
-    executable(command);
+    const command = executable(shellBin, "login-shell-agent");
     const shell = join(home, "zsh");
     writeFileSync(
       shell,
@@ -62,15 +61,13 @@ describe.sequential("provider environment discovery", () => {
     expect(candidates).toEqual([realpathSync(command)]);
   });
 
-  it.skipIf(process.platform === "win32")("searches known per-user CLI directories when the shell PATH is minimal", async () => {
+  it("searches known per-user CLI directories when the shell PATH is minimal", async () => {
     const home = temporaryRoot();
-    const localBin = join(home, ".local", "bin");
+    const localBin = process.platform === "win32" ? join(home, "npm") : join(home, ".local", "bin");
     mkdirSync(localBin, { recursive: true });
-    const command = join(localBin, "known-path-agent");
-    executable(command);
-    writeFileSync(join(home, ".profile"), "export PATH=/usr/bin:/bin\n");
+    const command = executable(localBin, "known-path-agent");
 
-    setEnvironment({ HOME: home, SHELL: "/bin/sh", PATH: "/usr/bin:/bin" });
+    setEnvironment({ APPDATA: home, HOME: home, PATH: home, SHELL: process.env.SHELL, USERPROFILE: home });
     const environment = await providerEnvironment(true);
     const candidates = await executableCandidates("known-path-agent", environment, home);
 

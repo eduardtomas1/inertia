@@ -114,6 +114,8 @@ const HARNESS_IDS: Readonly<Record<ProviderId, AgentHarnessId>> = {
 
 export interface CliAgentHarnessOptions {
   supports?: (input: AgentHarnessStartOptions["input"]) => boolean;
+  /** Arguments inserted before the provider CLI arguments (for native test launchers). */
+  prefixArgs?: readonly string[];
 }
 
 export function createCliAgentHarness(
@@ -126,7 +128,7 @@ export function createCliAgentHarness(
     providerId,
     capabilities: CLI_AGENT_HARNESS_CAPABILITIES[providerId],
     supports: options.supports ?? ((input) => input.providerId === providerId),
-    start: (startOptions) => startCliRun(harnessId, providerId, startOptions),
+    start: (startOptions) => startCliRun(harnessId, providerId, startOptions, options.prefixArgs ?? []),
   };
 }
 
@@ -134,6 +136,7 @@ function startCliRun(
   harnessId: AgentHarnessId,
   providerId: ProviderId,
   options: AgentHarnessStartOptions,
+  prefixArgs: readonly string[],
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(providerId, conversationId, options.callbacks);
@@ -166,6 +169,7 @@ function startCliRun(
   let invocation: ProviderInvocation;
   try {
     invocation = buildProviderInvocation(options.input, options.executable);
+    invocation.args.unshift(...prefixArgs);
   } catch {
     const message = "The provider could not be started.";
     emitter.status("starting");

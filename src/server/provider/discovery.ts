@@ -26,6 +26,11 @@ interface ProbeResult {
   timedOut: boolean;
 }
 
+interface ProviderDiscoveryDependencies {
+  executableCandidates?: typeof executableCandidates;
+  probeProcess?: typeof probeProcess;
+}
+
 async function probeProcess(
   executable: string,
   args: readonly string[],
@@ -125,7 +130,10 @@ function statusMessage(installState: ProviderInstallState, authState: ProviderAu
 export async function detectProvider(
   providerId: ProviderId,
   options: ProviderDetectionOptions = {},
+  dependencies: ProviderDiscoveryDependencies = {},
 ): Promise<ProviderDetection> {
+  const resolveCandidates = dependencies.executableCandidates ?? executableCandidates;
+  const runProbe = dependencies.probeProcess ?? probeProcess;
   const provider = PROVIDER_INFO[providerId];
   const command = options.command?.trim() || provider.command;
   const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, 10_000));
@@ -135,7 +143,7 @@ export async function detectProvider(
     ? [command, "cursor-agent"]
     : [command];
   const candidates = [...new Set((await Promise.all(candidateCommands.map(
-    async (candidate) => await executableCandidates(candidate, environment, cwd),
+    async (candidate) => await resolveCandidates(candidate, environment, cwd),
   ))).flat())];
   if (candidates.length === 0) {
     return {
@@ -149,9 +157,9 @@ export async function detectProvider(
   }
 
   const versionProbes = await Promise.all(candidates.map(async (executable) => {
-    const probe = await probeProcess(executable, ["--version"], environment, cwd, timeoutMs);
+    const probe = await runProbe(executable, ["--version"], environment, cwd, timeoutMs);
     const acpProbe = providerId === "cursor" && probe.started && !probe.timedOut && probe.exitCode === 0
-      ? await probeProcess(executable, ["acp", "--help"], environment, cwd, timeoutMs)
+      ? await runProbe(executable, ["acp", "--help"], environment, cwd, timeoutMs)
       : undefined;
     const acpReady = !acpProbe || (
       acpProbe.started
@@ -179,11 +187,11 @@ export async function detectProvider(
     };
   }
 
-  const authProbe = await probeProcess(selected.executable, providerAuthStatusArgs(providerId), environment, cwd, timeoutMs);
+  const authProbe = await runProbe(selected.executable, providerAuthStatusArgs(providerId), environment, cwd, timeoutMs);
   const authState = authStateFromProbe(providerId, authProbe);
   const authenticated = authState === "authenticated" || authState === "configured";
   const appServerProbe = providerId === "codex"
-    ? await probeProcess(selected.executable, ["app-server", "--help"], environment, cwd, timeoutMs)
+    ? await runProbe(selected.executable, ["app-server", "--help"], environment, cwd, timeoutMs)
     : undefined;
   const appServerReady = !appServerProbe || (
     appServerProbe.started

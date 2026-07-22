@@ -252,7 +252,7 @@ describe("agent harness architecture", () => {
               text: "",
               textTruncated: false,
               exitCode: null,
-              signal: "SIGTERM",
+              signal: null,
             });
           },
           extension: { kind: "cli", providerId: "claude" },

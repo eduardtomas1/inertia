@@ -112,9 +112,11 @@ function commonExecutableDirectories(): string[] {
 
 async function loadProviderEnvironment(): Promise<ProviderEnvironment> {
   const shellEnvironment = await loginShellEnvironment();
+  const inheritedPath = process.env.PATH ?? "";
   const env = { ...process.env, ...shellEnvironment };
   const pathEntries = unique([
     ...((env.PATH ?? "").split(delimiter)),
+    ...(inheritedPath.split(delimiter)),
     ...commonExecutableDirectories(),
   ]);
   env.PATH = pathEntries.join(delimiter);

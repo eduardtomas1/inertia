@@ -1,10 +1,15 @@
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProviderManager, type ProviderAccessMode, type ProviderApprovalEvent } from "../../src/server/providers";
 import { readCodexMetadata } from "../../src/server/codex-metadata";
+import {
+  portableFixtureRoot,
+  portableNodeExecutable,
+  removePortableFixture,
+  writeNodeSubcommand,
+} from "../helpers/portable-provider-fixture";
 
 describe.sequential("Codex App Server runtime", () => {
   const roots: string[] = [];
@@ -13,7 +18,7 @@ describe.sequential("Codex App Server runtime", () => {
   const originalOversize = process.env.INERTIA_APP_SERVER_OVERSIZE;
   const originalScenario = process.env.INERTIA_APP_SERVER_SCENARIO;
 
-  afterEach(() => {
+  afterEach(async () => {
     if (originalCapturePath === undefined) delete process.env.INERTIA_APP_SERVER_CAPTURE;
     else process.env.INERTIA_APP_SERVER_CAPTURE = originalCapturePath;
     if (originalApprovalKind === undefined) delete process.env.INERTIA_APP_SERVER_APPROVAL_KIND;
@@ -22,21 +27,17 @@ describe.sequential("Codex App Server runtime", () => {
     else process.env.INERTIA_APP_SERVER_OVERSIZE = originalOversize;
     if (originalScenario === undefined) delete process.env.INERTIA_APP_SERVER_SCENARIO;
     else process.env.INERTIA_APP_SERVER_SCENARIO = originalScenario;
-    roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
+    await Promise.all(roots.splice(0).map(removePortableFixture));
   });
 
   function fakeAppServer(): { root: string; command: string; capturePath: string } {
-    const root = mkdtempSync(join(tmpdir(), "inertia-app-server-"));
+    const root = portableFixtureRoot("app server");
     roots.push(root);
-    const command = join(root, "codex");
+    const command = portableNodeExecutable(root, "codex");
     const capturePath = join(root, "capture.jsonl");
-    writeFileSync(command, `#!${process.execPath}
+    writeNodeSubcommand(root, "app-server", `
 const fs = require("node:fs");
 const readline = require("node:readline");
-const args = process.argv.slice(2);
-if (args.includes("--version")) { console.log("codex-cli 0.145.0"); process.exit(0); }
-if (args[0] === "login" && args[1] === "status") { console.log("Logged in using ChatGPT"); process.exit(0); }
-if (args[0] !== "app-server") process.exit(9);
 const capture = (value) => fs.appendFileSync(process.env.INERTIA_APP_SERVER_CAPTURE, JSON.stringify(value) + "\\n");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 const approvalMethod = process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "file-change"
@@ -155,7 +156,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    chmodSync(command, 0o700);
     return { root, command, capturePath };
   }
 
@@ -163,7 +163,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
   }
 
-  it.skipIf(process.platform === "win32")("reads provider-supplied models, reasoning options, and remaining usage", async () => {
+  it("reads provider-supplied models, reasoning options, and remaining usage", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     const metadata = await readCodexMetadata(fake.command, process.env, fake.root);
@@ -186,7 +186,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     })]);
   });
 
-  it.skipIf(process.platform === "win32")("round-trips approve-once, user input, native plans, deltas, resume, and images", async () => {
+  it("round-trips approve-once, user input, native plans, deltas, resume, and images", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "command";
@@ -277,7 +277,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("uses workspace-write for auto-edit build turns and maps denial", async () => {
+  it("uses workspace-write for auto-edit build turns and maps denial", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "file-change";
@@ -329,7 +329,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("keeps full access on App Server while streaming rich plan-turn state", async () => {
+  it("keeps full access on App Server while streaming rich plan-turn state", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     const manager = new ProviderManager({ commands: { codex: fake.command } });
@@ -403,7 +403,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("interrupts a full-access App Server turn without changing transport", async () => {
+  it("interrupts a full-access App Server turn without changing transport", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "wait-for-interrupt";
@@ -436,7 +436,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("fails closed when App Server rejects full-access policy fields", async () => {
+  it("fails closed when App Server rejects full-access policy fields", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "incompatible-full-access";
@@ -466,7 +466,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("round-trips schema-native permission approvals without exposing raw params", async () => {
+  it("round-trips schema-native permission approvals without exposing raw params", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "permissions";
@@ -495,7 +495,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("keeps plan mode read-only and cancels the active turn from an approval", async () => {
+  it("keeps plan mode read-only and cancels the active turn from an approval", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "command";
@@ -526,7 +526,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("fails closed on an oversized protocol line instead of hanging", async () => {
+  it("fails closed on an oversized protocol line instead of hanging", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_OVERSIZE = "1";
@@ -551,7 +551,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("ignores a stale completion while opening the new turn", async () => {
+  it("ignores a stale completion while opening the new turn", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "stale-completion";
@@ -573,7 +573,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("interrupts deterministically when Codex offers only unsupported decisions", async () => {
+  it("interrupts deterministically when Codex offers only unsupported decisions", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "unsupported-decisions";
@@ -594,6 +594,24 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const messages = captured(fake.capturePath);
     expect(messages.find(({ id }) => id === "approval-rpc")).toMatchObject({ error: { code: -32602 } });
     expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(true);
+    await manager.disposeAll();
+  });
+
+  it("settles a missing App Server executable without leaving an active run", async () => {
+    const root = portableFixtureRoot("missing app server");
+    roots.push(root);
+    const missing = join(root, process.platform === "win32" ? "missing.exe" : "missing");
+    const manager = new ProviderManager({ commands: { codex: missing } });
+
+    await expect(manager.run({
+      providerId: "codex",
+      conversationId: "conversation-missing",
+      cwd: root,
+      prompt: "Start",
+      interactionMode: "build",
+      access: "supervised",
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(manager.activeConversationIds()).toEqual([]);
     await manager.disposeAll();
   });
 });

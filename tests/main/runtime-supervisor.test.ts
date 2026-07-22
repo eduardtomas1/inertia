@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +12,8 @@ import type { RuntimeWorkerCommand } from "../../src/main/runtime-process-protoc
 
 const firstUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
 const secondUrl = `ws://127.0.0.1:41002/runtime/${"b".repeat(43)}`;
+const dataDirectory = resolve(tmpdir(), "inertia data");
+const workspaceDirectory = resolve(tmpdir(), "inertia workspace");
 
 class FakeUtilityProcess extends EventEmitter {
   pid: number | undefined;
@@ -43,8 +47,8 @@ function createHarness(options: { stableUptimeMs?: number; shutdownGraceMs?: num
   const forceKill = vi.fn();
   const supervisor = new RuntimeSupervisor({
     workerOptions: {
-      dataDirectory: "/tmp/inertia-data",
-      defaultWorkspacePath: "/tmp/inertia-workspace",
+      dataDirectory,
+      defaultWorkspacePath: workspaceDirectory,
       enableProviders: false,
     },
     spawn: () => {
@@ -78,8 +82,8 @@ describe("RuntimeSupervisor", () => {
     expect(children[0].messages).toEqual([{
       type: "runtime.start",
       options: {
-        dataDirectory: "/tmp/inertia-data",
-        defaultWorkspacePath: "/tmp/inertia-workspace",
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
       },
     }]);
@@ -176,7 +180,7 @@ describe("RuntimeSupervisor", () => {
     const terminateMain = vi.fn();
     const stopped = supervisor.stop().then(() => {
       destroyWindow();
-      terminateMain(42_000, "SIGKILL");
+      terminateMain(42_000);
     });
     children[0].message({ type: "runtime.stopped" });
     await Promise.resolve();
@@ -187,7 +191,7 @@ describe("RuntimeSupervisor", () => {
     await stopped;
     expect(destroyWindow).toHaveBeenCalledOnce();
     expect(terminateMain).toHaveBeenCalledOnce();
-    expect(terminateMain).toHaveBeenCalledWith(42_000, "SIGKILL");
+    expect(terminateMain).toHaveBeenCalledWith(42_000);
     expect(destroyWindow.mock.invocationCallOrder[0]).toBeLessThan(terminateMain.mock.invocationCallOrder[0]);
     expect(supervisor.snapshot()).toMatchObject({ phase: "stopped", pid: null, restartScheduled: false });
     vi.advanceTimersByTime(60_000);

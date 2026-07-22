@@ -1,5 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -14,13 +13,14 @@ import type {
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { createClaudeAgentSdkHarness, readClaudeAgentSdkModels } from "../../src/server/provider/claude-agent-sdk-harness";
+import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 
 describe("Claude Agent SDK harness", () => {
   const roots: string[] = [];
-  afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+  afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 
   it("uses structured prompts and bridges native approvals, questions, plans, thinking, and usage", async () => {
-    const root = mkdtempSync(join(tmpdir(), "inertia-claude-sdk-"));
+    const root = portableFixtureRoot("Claude SDK");
     roots.push(root);
     const imagePath = join(root, "reference.png");
     writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
@@ -205,5 +205,107 @@ describe("Claude Agent SDK harness", () => {
       defaultReasoningEffort: "high",
       reasoningOptions: [expect.objectContaining({ value: "low" }), expect.objectContaining({ value: "high" })],
     })]);
+  });
+
+  it("resumes through the SDK contract and interrupts without leaving an active run", async () => {
+    const root = portableFixtureRoot("Claude SDK cancellation");
+    roots.push(root);
+    let capturedOptions: ClaudeOptions | undefined;
+    let release!: () => void;
+    const interrupted = new Promise<void>((resolve) => { release = resolve; });
+    let interruptCalls = 0;
+    let closeCalls = 0;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        capturedOptions = options;
+        const stream = (async function* (): AsyncGenerator<SDKMessage> {
+          await interrupted;
+          yield {
+            type: "result",
+            subtype: "success",
+            session_id: "66666666-6666-4666-8666-666666666666",
+            result: "late result",
+            usage: { input_tokens: 1, output_tokens: 1 },
+          } as unknown as SDKMessage;
+        })();
+        return Object.assign(stream, {
+          supportedModels: async () => [],
+          interrupt: async () => { interruptCalls += 1; release(); },
+          close: () => { closeCalls += 1; release(); },
+        }) as unknown as Query;
+      },
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([harness]),
+    );
+    let running!: () => void;
+    const started = new Promise<void>((resolve) => { running = resolve; });
+    const statuses: string[] = [];
+    const result = manager.run({
+      providerId: "claude",
+      conversationId: "claude-cancel",
+      cwd: root,
+      prompt: "Wait for cancellation",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "resume-session",
+    }, {
+      onStatus: ({ status }) => { statuses.push(status); if (status === "running") running(); },
+    });
+
+    await started;
+    expect(manager.cancel("claude-cancel")).toBe(true);
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    expect(capturedOptions?.resume).toBe("resume-session");
+    expect(interruptCalls).toBe(1);
+    expect(closeCalls).toBe(1);
+    expect(statuses).toEqual(["starting", "running", "cancelling", "cancelled"]);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("fails closed on SDK startup errors and unsupported image input", async () => {
+    const root = portableFixtureRoot("Claude SDK failures");
+    roots.push(root);
+    const unsupportedImage = join(root, "reference.txt");
+    writeFileSync(unsupportedImage, "not an image");
+    let queryCalls = 0;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => {
+        queryCalls += 1;
+        const stream = (async function* (): AsyncGenerator<SDKMessage> {
+          throw new Error("SDK transport unavailable");
+        })();
+        return Object.assign(stream, {
+          supportedModels: async () => [],
+          interrupt: async () => undefined,
+          close: () => undefined,
+        }) as unknown as Query;
+      },
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+
+    await expect(manager.run({
+      providerId: "claude",
+      conversationId: "claude-sdk-error",
+      cwd: root,
+      prompt: "Start",
+      interactionMode: "build",
+      access: "supervised",
+    })).resolves.toMatchObject({ status: "failed", error: "SDK transport unavailable" });
+    await expect(manager.run({
+      providerId: "claude",
+      conversationId: "claude-bad-image",
+      cwd: root,
+      prompt: "Inspect",
+      interactionMode: "build",
+      access: "supervised",
+      imagePaths: [unsupportedImage],
+    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("image type") });
+    expect(queryCalls).toBe(1);
+    expect(manager.activeConversationIds()).toEqual([]);
   });
 });

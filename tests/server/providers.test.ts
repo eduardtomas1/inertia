@@ -1,11 +1,16 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { providerEnvironment } from "../../src/server/environment";
 import { AgentHarnessRegistry, detectProvider, ProviderManager, type ProviderId } from "../../src/server/providers";
 import { createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
+import {
+  portableFixtureRoot,
+  portableNodeExecutable,
+  removePortableFixture,
+  writeNodeSubcommand,
+} from "../helpers/portable-provider-fixture";
 
 const MUTATED_ENVIRONMENT_KEYS = ["HOME", "PATH", "SHELL", "ZDOTDIR", "INERTIA_CAPTURE_PATH", "INERTIA_DISCOVERY_MARKER"] as const;
 
@@ -19,52 +24,53 @@ describe.sequential("provider runtime", () => {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
+    await Promise.all(roots.splice(0).map(removePortableFixture));
     await providerEnvironment(true);
   });
 
   function temporaryRoot(): string {
-    const root = mkdtempSync(join(tmpdir(), "inertia-provider-"));
+    const root = portableFixtureRoot("provider runtime");
     roots.push(root);
     return root;
   }
 
-  function nodeExecutable(root: string, name: string, source: string): string {
-    const command = join(root, name);
-    writeFileSync(command, `#!${process.execPath}\n${source}\n`);
-    chmodSync(command, 0o700);
-    return command;
+  function nodeProgram(root: string, name: string, source: string): { command: string; program: string } {
+    return {
+      command: portableNodeExecutable(root, name),
+      program: writeNodeSubcommand(root, `${name}-fixture`, source),
+    };
   }
 
   function codexExecutable(
     root: string,
     name: string,
-    options: { version?: string; versionExit?: number; authenticated?: boolean; result?: string; stayAlive?: boolean; appServer?: boolean } = {},
+    options: { authenticated?: boolean; result?: string; stayAlive?: boolean; appServer?: boolean } = {},
+    executableDirectory = root,
   ): string {
-    const version = options.version ?? "1.2.3";
-    const versionExit = options.versionExit ?? 0;
     const authenticated = options.authenticated ?? true;
     const result = options.result ?? "A calm result.";
-    return nodeExecutable(root, name, `
+    const command = portableNodeExecutable(executableDirectory, name);
+    writeNodeSubcommand(root, "login", `
+if (${JSON.stringify(authenticated)}) {
+  console.log("Logged in using ChatGPT");
+  process.exit(0);
+}
+console.error("Not logged in");
+process.exit(1);
+`);
+    writeNodeSubcommand(root, "app-server", `
 const fs = require("node:fs");
 const readline = require("node:readline");
 const args = process.argv.slice(2);
-if (args.includes("--version")) {
-  console.log(${JSON.stringify(`fake-codex ${version}`)});
-  process.exit(${versionExit});
-}
-if (args[0] === "login" && args[1] === "status") {
-  ${authenticated ? 'console.log("Logged in using ChatGPT"); process.exit(0);' : 'console.error("Not logged in"); process.exit(1);'}
-}
-if (args[0] === "app-server" && args[1] === "--help") {
+if (args[0] === "--help") {
   ${options.appServer === false ? 'console.error("unknown subcommand app-server"); process.exit(2);' : 'console.log("Usage: codex app-server [OPTIONS] - Run the app server"); process.exit(0);'}
 }
-if (args.length === 1 && args[0] === "app-server") {
+if (args.length === 0) {
   const messages = [];
   const capture = (message) => {
     if (!process.env.INERTIA_CAPTURE_PATH) return;
     messages.push(message);
-    fs.writeFileSync(process.env.INERTIA_CAPTURE_PATH, JSON.stringify({ args, messages }));
+    fs.writeFileSync(process.env.INERTIA_CAPTURE_PATH, JSON.stringify({ args: ["app-server", ...args], messages }));
   };
   const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
   let threadId = "11111111-1111-4111-8111-111111111111";
@@ -97,6 +103,7 @@ if (args.length === 1 && args[0] === "app-server") {
 process.stderr.write("Unexpected fake Codex invocation\\n");
 process.exit(2);
 `);
+    return command;
   }
 
   function fakeCodex(): { root: string; command: string } {
@@ -104,11 +111,11 @@ process.exit(2);
     return { root, command: codexExecutable(root, "fake-codex") };
   }
 
-  it.skipIf(process.platform === "win32")("detects, normalizes, and completes a streamed Codex-style session", async () => {
+  it("detects, normalizes, and completes a streamed Codex-style session", async () => {
     const fake = fakeCodex();
     const manager = new ProviderManager({ commands: { codex: fake.command } });
     const detection = await manager.detect("codex", { cwd: fake.root });
-    expect(detection).toMatchObject({ available: true, version: "1.2.3", installState: "installed", authState: "authenticated", canRun: true });
+    expect(detection).toMatchObject({ available: true, version: process.version, installState: "installed", authState: "authenticated", canRun: true });
 
     const text: string[] = [];
     const sessions: string[] = [];
@@ -122,30 +129,51 @@ process.exit(2);
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("selects the newest working candidate and reuses its absolute path and discovered environment", async () => {
+  it("selects the newest working candidate from a multi-install probe", async () => {
     const root = temporaryRoot();
-    const olderBin = join(root, "older");
-    const newerBin = join(root, "newer");
-    mkdirSync(olderBin, { recursive: true });
-    mkdirSync(newerBin, { recursive: true });
-    codexExecutable(olderBin, "codex", { version: "1.9.0", result: "older" });
-    const newerCommand = codexExecutable(newerBin, "codex", { version: "2.3.1", result: "newer" });
+    const older = join(root, "older provider", "codex");
+    const newer = join(root, "newer provider", "codex");
+    const detection = await detectProvider("codex", { command: "codex", cwd: root }, {
+      executableCandidates: async () => [older, newer],
+      probeProcess: async (executable, args) => ({
+        started: true,
+        timedOut: false,
+        exitCode: 0,
+        output: args[0] === "--version"
+          ? `codex ${executable === newer ? "2.3.1" : "1.9.0"}`
+          : args[0] === "login"
+            ? "Logged in using ChatGPT"
+            : "codex app-server - Run the app server",
+      }),
+    });
+
+    expect(detection).toMatchObject({
+      available: true,
+      executable: newer,
+      version: "2.3.1",
+      authState: "authenticated",
+      canRun: true,
+    });
+  });
+
+  it("resolves and reuses an absolute command path and its discovered environment", async () => {
+    const root = temporaryRoot();
+    const selectedBin = join(root, "selected provider bin");
+    mkdirSync(selectedBin, { recursive: true });
+    const selectedCommand = codexExecutable(root, "codex", { result: "selected" }, selectedBin);
     const capturePath = join(root, "invocation.json");
-    const path = [olderBin, newerBin, "/usr/bin", "/bin"].join(delimiter);
-    writeFileSync(join(root, ".zprofile"), `export PATH=${JSON.stringify(path)}\n`);
-    writeFileSync(join(root, ".zshrc"), "\n");
+    const path = [selectedBin, process.env.PATH ?? ""].filter(Boolean).join(delimiter);
     process.env.HOME = root;
     process.env.ZDOTDIR = root;
-    process.env.SHELL = "/bin/zsh";
     process.env.PATH = path;
     process.env.INERTIA_CAPTURE_PATH = capturePath;
     process.env.INERTIA_DISCOVERY_MARKER = "from-discovery";
 
     const manager = new ProviderManager({ commands: { codex: "codex" } });
     const detection = await manager.detect("codex", { cwd: root, refreshEnvironment: true });
-    expect(detection).toMatchObject({ available: true, version: "2.3.1", executable: realpathSync(newerCommand), authState: "authenticated" });
+    expect(detection).toMatchObject({ available: true, version: process.version, executable: realpathSync(selectedCommand), authState: "authenticated" });
 
-    process.env.PATH = "/usr/bin:/bin";
+    process.env.PATH = root;
     process.env.INERTIA_DISCOVERY_MARKER = "after-discovery";
     const result = await manager.run({
       providerId: "codex",
@@ -159,7 +187,7 @@ process.exit(2);
       imagePaths: [join(root, "reference.png")],
     });
 
-    expect(result).toMatchObject({ status: "completed", text: "newer:from-discovery" });
+    expect(result).toMatchObject({ status: "completed", text: "selected:from-discovery" });
     const invocation = JSON.parse(readFileSync(capturePath, "utf8")) as { args: string[]; messages: Array<Record<string, unknown>> };
     expect(invocation.args).toEqual(["app-server"]);
     expect(invocation.messages.find(({ method }) => method === "thread/resume")).toMatchObject({
@@ -184,17 +212,27 @@ process.exit(2);
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("reports an executable with a failing version probe as an installation error", async () => {
+  it("reports a missing executable without attempting provider authentication", async () => {
     const root = temporaryRoot();
-    const command = codexExecutable(root, "broken-codex", { versionExit: 7 });
+    const command = join(root, process.platform === "win32" ? "missing-codex.exe" : "missing-codex");
 
     const detection = await detectProvider("codex", { command, cwd: root, refreshEnvironment: true });
 
-    expect(detection).toMatchObject({ available: false, installState: "error", authState: "unknown", canRun: false });
+    expect(detection).toMatchObject({ available: false, installState: "not-installed", authState: "unknown", canRun: false });
     expect(detection.executable).toBeUndefined();
   });
 
-  it.skipIf(process.platform === "win32")("distinguishes authenticated and unauthenticated provider probes", async () => {
+  it("reports a candidate with a failing version probe as an installation error", async () => {
+    const root = temporaryRoot();
+    const command = portableNodeExecutable(root, "broken-codex");
+    const detection = await detectProvider("codex", { command, cwd: root }, {
+      probeProcess: async () => ({ started: true, timedOut: false, exitCode: 7, output: "version probe failed" }),
+    });
+
+    expect(detection).toMatchObject({ available: false, installState: "error", authState: "unknown", canRun: false });
+  });
+
+  it("distinguishes authenticated and unauthenticated provider probes", async () => {
     const authenticatedRoot = temporaryRoot();
     const unauthenticatedRoot = temporaryRoot();
     const authenticated = codexExecutable(authenticatedRoot, "connected-codex", { authenticated: true });
@@ -209,7 +247,7 @@ process.exit(2);
     expect(signedOut).toMatchObject({ installState: "installed", authState: "unauthenticated", canRun: false, statusMessage: "Sign in required" });
   });
 
-  it.skipIf(process.platform === "win32")("requires an app-server-compatible Codex CLI", async () => {
+  it("requires an app-server-compatible Codex CLI", async () => {
     const root = temporaryRoot();
     const command = codexExecutable(root, "old-codex", { authenticated: true, appServer: false });
 
@@ -221,40 +259,26 @@ process.exit(2);
     });
   });
 
-  it.skipIf(process.platform === "win32")("parses Claude authentication JSON", async () => {
+  it("parses Claude authentication JSON", async () => {
     const connectedRoot = temporaryRoot();
     const signedOutRoot = temporaryRoot();
-    const connected = nodeExecutable(connectedRoot, "claude-connected", `
-const args = process.argv.slice(2);
-if (args.includes("--version")) { console.log("2.1.207 (Claude Code)"); process.exit(0); }
-console.log(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }));
-`);
-    const signedOut = nodeExecutable(signedOutRoot, "claude-signed-out", `
-const args = process.argv.slice(2);
-if (args.includes("--version")) { console.log("2.1.207 (Claude Code)"); process.exit(0); }
-console.log(JSON.stringify({ loggedIn: false }));
-`);
+    const connected = portableNodeExecutable(connectedRoot, "claude-connected");
+    const signedOut = portableNodeExecutable(signedOutRoot, "claude-signed-out");
+    writeNodeSubcommand(connectedRoot, "auth", `console.log(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }));`);
+    writeNodeSubcommand(signedOutRoot, "auth", `console.log(JSON.stringify({ loggedIn: false }));`);
 
     await expect(detectProvider("claude", { command: connected, cwd: connectedRoot })).resolves.toMatchObject({ authState: "authenticated", canRun: true });
     await expect(detectProvider("claude", { command: signedOut, cwd: signedOutRoot })).resolves.toMatchObject({ authState: "unauthenticated", canRun: false });
   });
 
-  it.skipIf(process.platform === "win32")("accepts Cursor only after the executable advertises ACP", async () => {
+  it("accepts Cursor only after the executable advertises ACP", async () => {
     const readyRoot = temporaryRoot();
     const wrongRoot = temporaryRoot();
-    const ready = nodeExecutable(readyRoot, "agent", `
-const args = process.argv.slice(2);
-if (args.includes("--version")) { console.log("Cursor Agent 9.9.9"); process.exit(0); }
-if (args[0] === "acp" && args[1] === "--help") { console.log("Cursor Agent Client Protocol (ACP)"); process.exit(0); }
-if (args[0] === "status") { console.log("Logged in"); process.exit(0); }
-process.exit(2);
-`);
-    const wrong = nodeExecutable(wrongRoot, "agent", `
-const args = process.argv.slice(2);
-if (args.includes("--version")) { console.log("unrelated-agent 9.9.9"); process.exit(0); }
-if (args[0] === "acp") { console.error("unknown command"); process.exit(2); }
-process.exit(0);
-`);
+    const ready = portableNodeExecutable(readyRoot, "agent");
+    const wrong = portableNodeExecutable(wrongRoot, "agent");
+    writeNodeSubcommand(readyRoot, "acp", `console.log("Cursor Agent Client Protocol (ACP)");`);
+    writeNodeSubcommand(readyRoot, "status", `console.log("Logged in");`);
+    writeNodeSubcommand(wrongRoot, "acp", `console.error("unknown command"); process.exit(2);`);
 
     await expect(detectProvider("cursor", { command: ready, cwd: readyRoot })).resolves.toMatchObject({
       available: true,
@@ -271,7 +295,7 @@ process.exit(0);
     });
   });
 
-  it.skipIf(process.platform === "win32")("normalizes streamed session output from the other provider adapters", async () => {
+  it("normalizes streamed session output from the other provider adapters", async () => {
     const fixtures: Array<{ providerId: ProviderId; lines: unknown[]; expectedText: string; sessionId: string }> = [
       {
         providerId: "claude",
@@ -309,10 +333,10 @@ process.exit(0);
 
     for (const fixture of fixtures) {
       const root = temporaryRoot();
-      const command = nodeExecutable(root, `fake-${fixture.providerId}`, fixture.lines.map((line) => `console.log(${JSON.stringify(JSON.stringify(line))});`).join("\n"));
+      const { command, program } = nodeProgram(root, `fake-${fixture.providerId}`, fixture.lines.map((line) => `console.log(${JSON.stringify(JSON.stringify(line))});`).join("\n"));
       const manager = new ProviderManager(
         { commands: { [fixture.providerId]: command } },
-        new AgentHarnessRegistry([createCliAgentHarness(fixture.providerId)]),
+        new AgentHarnessRegistry([createCliAgentHarness(fixture.providerId, { prefixArgs: [program] })]),
       );
       const result = await manager.run({ providerId: fixture.providerId, conversationId: `${fixture.providerId}-conversation`, cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" });
       expect(result).toMatchObject({ status: "completed", text: fixture.expectedText, sessionId: fixture.sessionId });
@@ -320,11 +344,11 @@ process.exit(0);
     }
   });
 
-  it.skipIf(process.platform === "win32")("requests real partial messages from Claude without duplicating the final assistant event", async () => {
+  it("requests real partial messages from Claude without duplicating the final assistant event", async () => {
     const root = temporaryRoot();
     const capturePath = join(root, "claude-invocation.json");
     process.env.INERTIA_CAPTURE_PATH = capturePath;
-    const command = nodeExecutable(root, "fake-claude", `
+    const { command, program } = nodeProgram(root, "fake-claude", `
 const fs = require("node:fs");
 fs.writeFileSync(process.env.INERTIA_CAPTURE_PATH, JSON.stringify(process.argv.slice(2)));
 console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { text: "Partial " } } }));
@@ -334,7 +358,7 @@ console.log(JSON.stringify({ type: "result", is_error: false }));
 `);
     const manager = new ProviderManager(
       { commands: { claude: command } },
-      new AgentHarnessRegistry([createCliAgentHarness("claude")]),
+      new AgentHarnessRegistry([createCliAgentHarness("claude", { prefixArgs: [program] })]),
     );
 
     const result = await manager.run({ providerId: "claude", conversationId: "claude-partial", cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" });
@@ -344,13 +368,16 @@ console.log(JSON.stringify({ type: "result", is_error: false }));
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("classifies authentication failures from provider stderr", async () => {
+  it("classifies authentication failures from provider stderr", async () => {
     const root = temporaryRoot();
-    const command = nodeExecutable(root, "failing-codex", `
+    const { command, program } = nodeProgram(root, "failing-codex", `
 process.stderr.write("Authentication required. Please log in.\\n");
 process.exit(1);
 `);
-    const manager = new ProviderManager({ commands: { codex: command } });
+    const manager = new ProviderManager(
+      { commands: { codex: command } },
+      new AgentHarnessRegistry([createCliAgentHarness("codex", { prefixArgs: [program] })]),
+    );
 
     const result = await manager.run({ providerId: "codex", conversationId: "failed-conversation", cwd: root, prompt: "Respond", interactionMode: "build", access: "full" });
 
@@ -358,7 +385,7 @@ process.exit(1);
     await manager.disposeAll();
   });
 
-  it.skipIf(process.platform === "win32")("cancels a running provider and settles its run exactly once", async () => {
+  it("cancels a running provider and settles its run exactly once", async () => {
     const root = temporaryRoot();
     const command = codexExecutable(root, "waiting-codex", { stayAlive: true });
     const manager = new ProviderManager({ commands: { codex: command }, cancelGraceMs: 100 });

@@ -1,6 +1,5 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -12,6 +11,18 @@ import {
   validateProviderModels,
   validateProviderRateLimits,
 } from "../../src/server/provider/metadata";
+import {
+  portableFixtureRoot,
+  portableNodeExecutable,
+  removePortableFixture,
+  writeNodeSubcommand,
+} from "../helpers/portable-provider-fixture";
+
+const codexExecutable = resolve("provider metadata fixture", "codex");
+const cursorExecutable = resolve("provider metadata fixture", "cursor-agent");
+const openCodeExecutableOne = resolve("provider metadata fixture", "one", "opencode");
+const openCodeExecutableTwo = resolve("provider metadata fixture", "two", "opencode");
+const workspacePath = resolve("provider metadata fixture", "workspace");
 
 function model(id: string): ProviderModel {
   return {
@@ -48,9 +59,9 @@ describe("provider metadata cache", () => {
     const cache = new ProviderMetadataCache({ persistence, read: reader, now: () => now, modelTtlMs: 1_000, rateLimitTtlMs: 1_000 });
 
     const cold = [
-      cache.metadata("codex", "/bin/codex", {}, "/workspace"),
-      cache.metadata("codex", "/bin/codex", {}, "/workspace"),
-      cache.metadata("codex", "/bin/codex", {}, "/workspace"),
+      cache.metadata("codex", codexExecutable, {}, workspacePath),
+      cache.metadata("codex", codexExecutable, {}, workspacePath),
+      cache.metadata("codex", codexExecutable, {}, workspacePath),
     ];
     await Promise.resolve();
     expect(reads).toBe(1);
@@ -58,7 +69,7 @@ describe("provider metadata cache", () => {
     release();
     await Promise.all(cold);
 
-    await cache.metadata("codex", "/bin/codex", {}, "/workspace");
+    await cache.metadata("codex", codexExecutable, {}, workspacePath);
     expect(reads).toBe(1);
     expect(cache.current("codex").metadataState.models).toMatchObject({ freshness: "fresh", provenance: "provider" });
 
@@ -70,12 +81,12 @@ describe("provider metadata cache", () => {
       modelTtlMs: 1_000,
       rateLimitTtlMs: 1_000,
     });
-    await restarted.metadata("codex", "/bin/codex", {}, "/workspace");
+    await restarted.metadata("codex", codexExecutable, {}, workspacePath);
     expect(restartReads).toBe(0);
     expect(restarted.current("codex").metadataState.models.provenance).toBe("persistent-cache");
 
     now += 1_001;
-    await restarted.metadata("codex", "/bin/codex", {}, "/workspace", { fields: ["models"] });
+    await restarted.metadata("codex", codexExecutable, {}, workspacePath, { fields: ["models"] });
     expect(restartReads).toBe(1);
   });
 
@@ -100,21 +111,21 @@ describe("provider metadata cache", () => {
       },
     });
 
-    await cache.metadata("codex", "/bin/codex", {}, "/workspace");
+    await cache.metadata("codex", codexExecutable, {}, workspacePath);
     now += 1_001;
-    await cache.metadata("codex", "/bin/codex", {}, "/workspace");
+    await cache.metadata("codex", codexExecutable, {}, workspacePath);
     expect(cache.current("codex")).toMatchObject({
       models: [expect.objectContaining({ id: "model-a" })],
       rateLimits: [expect.objectContaining({ id: "five-hour", usedPercent: 40 })],
       metadataState: { models: { freshness: "stale" }, rateLimits: { freshness: "fresh" } },
     });
 
-    await cache.metadata("codex", "/bin/codex", {}, "/workspace", { force: true });
+    await cache.metadata("codex", codexExecutable, {}, workspacePath, { force: true });
     expect(cache.current("codex").models[0]?.id).toBe("model-a");
     expect(cache.current("codex").rateLimits[0]?.usedPercent).toBe(40);
     expect(cache.current("codex").metadataState).toMatchObject({ models: { freshness: "stale" }, rateLimits: { freshness: "stale" } });
 
-    await cache.metadata("codex", "/bin/codex", {}, "/workspace", { force: true });
+    await cache.metadata("codex", codexExecutable, {}, workspacePath, { force: true });
     expect(cache.current("codex").models[0]?.id).toBe("model-a");
     expect(cache.current("codex").rateLimits[0]?.usedPercent).toBe(40);
     const restarted = new ProviderMetadataCache({
@@ -148,13 +159,13 @@ describe("provider metadata cache", () => {
 
     let reads = 0;
     const cache = new ProviderMetadataCache({ read: async () => { reads += 1; return {}; } });
-    cache.learn("codex", "/bin/codex", { rateLimits: [rateLimit("five-hour"), rateLimit("weekly")] }, "provider");
-    cache.learn("codex", "/bin/codex", { rateLimits: [rateLimit("five-hour", 70)] }, "provider", { merge: true });
+    cache.learn("codex", codexExecutable, { rateLimits: [rateLimit("five-hour"), rateLimit("weekly")] }, "provider");
+    cache.learn("codex", codexExecutable, { rateLimits: [rateLimit("five-hour", 70)] }, "provider", { merge: true });
     expect(cache.current("codex").rateLimits).toEqual([
       expect.objectContaining({ id: "five-hour", usedPercent: 70 }),
       expect.objectContaining({ id: "weekly" }),
     ]);
-    await cache.metadata("cursor", "/bin/agent", {}, "/workspace", { force: true });
+    await cache.metadata("cursor", cursorExecutable, {}, workspacePath, { force: true });
     expect(reads).toBe(0);
     expect(cache.current("cursor").metadataState.rateLimits.freshness).toBe("unavailable");
   });
@@ -162,9 +173,9 @@ describe("provider metadata cache", () => {
   it("invalidates on executable changes", async () => {
     let reads = 0;
     const cache = new ProviderMetadataCache({ read: async () => ({ models: [model(`model-${++reads}`)] }) });
-    await cache.metadata("opencode", "/one/opencode", {}, "/workspace");
-    await cache.metadata("opencode", "/one/opencode", {}, "/workspace");
-    await cache.metadata("opencode", "/two/opencode", {}, "/workspace");
+    await cache.metadata("opencode", openCodeExecutableOne, {}, workspacePath);
+    await cache.metadata("opencode", openCodeExecutableOne, {}, workspacePath);
+    await cache.metadata("opencode", openCodeExecutableTwo, {}, workspacePath);
     expect(reads).toBe(2);
     expect(cache.current("opencode").models[0]?.id).toBe("model-2");
   });
@@ -176,17 +187,17 @@ describe("provider metadata cache", () => {
     const cache = new ProviderMetadataCache({
       read: async (_providerId, executable) => {
         reads.push(executable);
-        if (executable === "/one/opencode") await gate;
-        return { models: [model(executable === "/one/opencode" ? "old-model" : "new-model")] };
+        if (executable === openCodeExecutableOne) await gate;
+        return { models: [model(executable === openCodeExecutableOne ? "old-model" : "new-model")] };
       },
     });
-    const oldRead = cache.metadata("opencode", "/one/opencode", {}, "/workspace");
+    const oldRead = cache.metadata("opencode", openCodeExecutableOne, {}, workspacePath);
     await Promise.resolve();
-    const newRead = cache.metadata("opencode", "/two/opencode", {}, "/workspace");
+    const newRead = cache.metadata("opencode", openCodeExecutableTwo, {}, workspacePath);
     release();
     await Promise.all([oldRead, newRead]);
 
-    expect(reads).toEqual(["/one/opencode", "/two/opencode"]);
+    expect(reads).toEqual([openCodeExecutableOne, openCodeExecutableTwo]);
     expect(cache.current("opencode").models).toEqual([expect.objectContaining({ id: "new-model" })]);
   });
 
@@ -197,12 +208,12 @@ describe("provider metadata cache", () => {
       save: (metadata: PersistedProviderMetadata) => { persisted = structuredClone(metadata); },
     };
     const cache = new ProviderMetadataCache({ persistence });
-    cache.correlate("codex", { executable: "/bin/codex", version: "1.0.0", authState: "authenticated" });
-    cache.learn("codex", "/bin/codex", { models: [model("model-a")] }, "provider");
+    cache.correlate("codex", { executable: codexExecutable, version: "1.0.0", authState: "authenticated" });
+    cache.learn("codex", codexExecutable, { models: [model("model-a")] }, "provider");
 
     const restarted = new ProviderMetadataCache({ persistence });
     expect(restarted.current("codex").metadataState.models.freshness).toBe("fresh");
-    restarted.correlate("codex", { executable: "/bin/codex", version: "2.0.0", authState: "unauthenticated" });
+    restarted.correlate("codex", { executable: codexExecutable, version: "2.0.0", authState: "unauthenticated" });
     expect(restarted.current("codex")).toMatchObject({
       models: [expect.objectContaining({ id: "model-a" })],
       metadataState: { models: { freshness: "stale", provenance: "persistent-cache" } },
@@ -212,16 +223,24 @@ describe("provider metadata cache", () => {
 
 describe.sequential("provider metadata discovery invalidation", () => {
   const roots: string[] = [];
-  afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+  afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 
-  it.skipIf(process.platform === "win32")("marks cached metadata stale when provider authentication changes", async () => {
-    const root = mkdtempSync(join(tmpdir(), "inertia-metadata-auth-"));
+  it("marks cached metadata stale when provider authentication changes", async () => {
+    const root = portableFixtureRoot("metadata auth");
     roots.push(root);
     const marker = join(root, "authenticated");
-    const command = join(root, "codex");
+    const command = portableNodeExecutable(root, "codex");
     writeFileSync(marker, "yes");
-    writeFileSync(command, `#!${process.execPath}\nconst fs = require("node:fs");\nconst args = process.argv.slice(2);\nif (args.includes("--version")) { console.log("codex 1.2.3"); process.exit(0); }\nif (args[0] === "login" && args[1] === "status") process.exit(fs.readFileSync(${JSON.stringify(marker)}, "utf8").trim() === "yes" ? 0 : 1);\nif (args[0] === "app-server" && args[1] === "--help") { console.log("codex app-server"); process.exit(0); }\nprocess.exit(2);\n`);
-    chmodSync(command, 0o700);
+    writeNodeSubcommand(root, "login", `
+const fs = require("node:fs");
+if (fs.readFileSync(${JSON.stringify(marker)}, "utf8").trim() === "yes") {
+  console.log("Logged in using ChatGPT");
+  process.exit(0);
+}
+console.error("Not logged in");
+process.exit(1);
+`);
+    writeNodeSubcommand(root, "app-server", `console.log("codex app-server - Run the app server");`);
     const cache = new ProviderMetadataCache({ read: async () => ({ models: [model("model-a")] }) });
     const manager = new ProviderManager({ commands: { codex: command }, metadataCache: cache });
 

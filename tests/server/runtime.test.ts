@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import WebSocket from "ws";
@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { startRuntime, type RunningRuntime } from "../../src/server";
 import type { AppSnapshot, ProviderInfo, ServerEvent } from "../../src/shared/contracts";
+import { portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
 
 class EventQueue {
   private readonly events: ServerEvent[] = [];
@@ -33,7 +34,12 @@ class EventQueue {
     return await new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.listeners.delete(check);
-        reject(new Error("Timed out waiting for a server event."));
+        const pending = this.events.slice(-12).map((event) => event.type).join(", ") || "none";
+        const latestSnapshot = [...this.events].reverse().find((event) => event.type === "snapshot.updated");
+        const providers = latestSnapshot?.type === "snapshot.updated"
+          ? latestSnapshot.snapshot.providers.map(({ id, installState, authState, canRun }) => ({ id, installState, authState, canRun }))
+          : [];
+        reject(new Error(`Timed out waiting for a server event. Pending event types: ${pending}. Providers: ${JSON.stringify(providers)}.`));
       }, 3_000);
       const check = (): void => {
         const event = take();
@@ -117,23 +123,15 @@ describe("local runtime", () => {
 
   function fakeCodex(root: string, runEvents: readonly object[] = []): { authFile: string } {
     const executableDirectory = join(root, "provider-bin");
-    const shellDirectory = join(root, "provider-shell");
+    const commandCwd = join(root, "workspace");
     const authFile = join(root, "codex-authenticated");
     mkdirSync(executableDirectory);
-    mkdirSync(shellDirectory);
 
-    const codex = join(executableDirectory, "codex");
-    writeFileSync(codex, `#!${process.execPath}
+    portableNodeExecutable(executableDirectory, "codex");
+    writeNodeSubcommand(commandCwd, "login", `
 const { existsSync, writeFileSync } = require("node:fs");
-const readline = require("node:readline");
-const args = process.argv.slice(2);
 const authFile = ${JSON.stringify(authFile)};
-const runEvents = ${JSON.stringify(runEvents)};
-if (args.length === 1 && args[0] === "--version") {
-  process.stdout.write("codex-cli 1.2.3\\n");
-  process.exit(0);
-}
-if (args[0] === "login" && args[1] === "status") {
+if (process.argv[2] === "status") {
   if (existsSync(authFile)) {
     process.stdout.write("Logged in using ChatGPT\\n");
     process.exit(0);
@@ -141,16 +139,18 @@ if (args[0] === "login" && args[1] === "status") {
   process.stderr.write("Not logged in\\n");
   process.exit(1);
 }
-if (args[0] === "app-server" && args[1] === "--help") {
+writeFileSync(authFile, "connected");
+process.stdout.write("Sign-in complete\\n");
+`);
+    writeNodeSubcommand(commandCwd, "app-server", `
+const readline = require("node:readline");
+const args = process.argv.slice(2);
+const runEvents = ${JSON.stringify(runEvents)};
+if (args[0] === "--help") {
   process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n");
   process.exit(0);
 }
-if (args.length === 1 && args[0] === "login") {
-  writeFileSync(authFile, "connected");
-  process.stdout.write("Sign-in complete\\n");
-  process.exit(0);
-}
-if (args.length === 1 && args[0] === "app-server") {
+if (args.length === 0) {
   const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
   let threadId = "fake-thread";
   const turnId = "fake-turn";
@@ -189,24 +189,13 @@ if (args.length === 1 && args[0] === "app-server") {
 }
 process.stderr.write("Unexpected fake Codex invocation\\n");
 process.exit(2);
-`, { mode: 0o700 });
-    chmodSync(codex, 0o700);
-
-    const fakeShell = join(shellDirectory, "zsh");
-    writeFileSync(fakeShell, `#!${process.execPath}
-process.stdout.write(Object.entries(process.env).map(([key, value]) => key + "=" + value).join("\\0") + "\\0");
-`, { mode: 0o700 });
-    chmodSync(fakeShell, 0o700);
+`);
 
     const previousPath = process.env.PATH;
-    const previousShell = process.env.SHELL;
-    process.env.PATH = [executableDirectory, dirname(process.execPath), previousPath ?? ""].filter(Boolean).join(delimiter);
-    process.env.SHELL = fakeShell;
+    process.env.PATH = [executableDirectory, previousPath ?? ""].filter(Boolean).join(delimiter);
     restoreEnvironment.push(() => {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
-      if (previousShell === undefined) delete process.env.SHELL;
-      else process.env.SHELL = previousShell;
     });
 
     return { authFile };
@@ -390,7 +379,7 @@ process.stdout.write(Object.entries(process.env).map(([key, value]) => key + "="
     }
   });
 
-  it.skipIf(process.platform === "win32")("updates a matching provider activity instead of persisting duplicate lifecycle rows", async () => {
+  it("updates a matching provider activity instead of persisting duplicate lifecycle rows", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     const { authFile } = fakeCodex(root, [
       { type: "item.started", item: { type: "command_execution" } },
@@ -459,7 +448,7 @@ process.stdout.write(Object.entries(process.env).map(([key, value]) => key + "="
     ]);
   });
 
-  it.skipIf(process.platform === "win32")("rejects a known-unready provider before persisting a turn, then refreshes its state", async () => {
+  it("rejects a known-unready provider before persisting a turn, then refreshes its state", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     const { authFile } = fakeCodex(root);
     const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: true });
@@ -515,7 +504,7 @@ process.stdout.write(Object.entries(process.env).map(([key, value]) => key + "="
       installState: "installed",
       authState: "authenticated",
       canRun: true,
-      version: "1.2.3",
+      version: process.version,
     });
     await client.events.next(
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
@@ -523,7 +512,7 @@ process.stdout.write(Object.entries(process.env).map(([key, value]) => key + "="
     );
   });
 
-  it.skipIf(process.platform === "win32")("runs provider authentication in an owned terminal and refreshes state after exit", async () => {
+  it("runs provider authentication in an owned terminal and refreshes state after exit", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     fakeCodex(root);
     const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: true });

@@ -161,6 +161,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   } catch (error) {
     return failedCursorRun(conversationId, safeError(error, "Cursor ACP could not be started."), emitter);
   }
+  child.once("error", (error) => stderr.append(safeError(error, "Cursor ACP could not be started.")));
   child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk.toString("utf8")));
   child.stdin.on("error", () => { /* Connection failure is surfaced by the ACP SDK. */ });
   const wireGuard = new BoundedJsonLineTransform(MAX_WIRE_LINE_BYTES);

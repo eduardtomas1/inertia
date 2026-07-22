@@ -128,14 +128,20 @@ export interface Conversation {
 
 export interface ThreadUsageSnapshot {
   conversationId: string;
-  usedTokens: number;
+  /** Current context occupancy. Null means the provider did not report it. */
+  usedTokens: number | null;
+  /** Processed-token total at the provider-defined scope below. */
   totalProcessedTokens: number | null;
+  totalProcessedScope: "thread" | "session" | "run" | null;
   maxTokens: number | null;
+  /** Latest provider-reported token breakdown; it is not necessarily the live context. */
   inputTokens: number | null;
   cachedInputTokens: number | null;
+  cacheWriteInputTokens: number | null;
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
-  compactsAutomatically: boolean;
+  /** Null means the provider has not explicitly reported its auto-compaction state. */
+  compactsAutomatically: boolean | null;
   updatedAt: string;
 }
 

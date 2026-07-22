@@ -67,7 +67,7 @@ describe("Claude Agent SDK harness", () => {
             subtype: "success",
             session_id: "33333333-3333-4333-8333-333333333333",
             result: "Claude response",
-            usage: { input_tokens: 120, output_tokens: 30, cache_read_input_tokens: 10 },
+          usage: { input_tokens: 120, output_tokens: 30, cache_read_input_tokens: 10, cache_creation_input_tokens: 5 },
             modelUsage: { sonnet: { contextWindow: 200_000 } },
           } as unknown as SDKMessage;
         })();
@@ -86,7 +86,7 @@ describe("Claude Agent SDK harness", () => {
             rate_limits_available: true,
             rate_limits: { five_hour: { utilization: 30, resets_at: "2026-07-22T15:00:00.000Z" } },
           }),
-          getContextUsage: async () => ({}) as never,
+          getContextUsage: async () => ({ totalTokens: 75, maxTokens: 200_000, isAutoCompactEnabled: true }) as never,
         }) as unknown as Query;
       },
     });
@@ -98,7 +98,8 @@ describe("Claude Agent SDK harness", () => {
     const questions: string[] = [];
     const plans: string[] = [];
     const reasoning: string[] = [];
-    const usages: number[] = [];
+    const usages: Array<number | null> = [];
+    const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: Array<{ models: string[]; rateLimits: string[] }> = [];
 
     const result = await manager.run({
@@ -122,7 +123,10 @@ describe("Claude Agent SDK harness", () => {
       },
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
-      onUsage: (event) => usages.push(event.usage.usedTokens),
+      onUsage: (event) => {
+        usages.push(event.usage.usedTokens);
+        usageDetails.push(event.usage);
+      },
       onMetadata: (event) => metadata.push({
         models: event.metadata.models?.map((model) => model.id) ?? [],
         rateLimits: event.metadata.rateLimits?.map((limit) => limit.id) ?? [],
@@ -144,7 +148,18 @@ describe("Claude Agent SDK harness", () => {
     expect(questions).toEqual(["Which scope?"]);
     expect(plans).toEqual(["Inspect", "Implement"]);
     expect(reasoning).toEqual(["Checking constraints"]);
-    expect(usages).toEqual([120]);
+    expect(usages).toEqual([75]);
+    expect(usageDetails).toEqual([expect.objectContaining({
+      usedTokens: 75,
+      totalProcessedTokens: 165,
+      totalProcessedScope: "run",
+      maxTokens: 200_000,
+      inputTokens: 135,
+      cachedInputTokens: 10,
+      cacheWriteInputTokens: 5,
+      outputTokens: 30,
+      compactsAutomatically: true,
+    })]);
     expect(metadata).toEqual(expect.arrayContaining([
       { models: ["sonnet"], rateLimits: [] },
       { models: [], rateLimits: ["claude:five_hour"] },

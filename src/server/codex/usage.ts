@@ -10,15 +10,19 @@ export function parseCodexTokenUsage(value: unknown): CodexUsageSnapshot | undef
   const last = objectValue(usage?.last);
   const total = objectValue(usage?.total);
   const usedTokens = nonNegativeNumber(last?.totalTokens);
-  if (usedTokens === null || usedTokens <= 0) return undefined;
+  const totalProcessedTokens = nonNegativeNumber(total?.totalTokens);
+  const maxTokens = nonNegativeNumber(usage?.modelContextWindow);
+  if (usedTokens === null && totalProcessedTokens === null && maxTokens === null) return undefined;
   return {
     usedTokens,
-    totalProcessedTokens: nonNegativeNumber(total?.totalTokens),
-    maxTokens: nonNegativeNumber(usage?.modelContextWindow),
+    totalProcessedTokens,
+    totalProcessedScope: "thread",
+    maxTokens,
     inputTokens: nonNegativeNumber(last?.inputTokens),
     cachedInputTokens: nonNegativeNumber(last?.cachedInputTokens),
+    cacheWriteInputTokens: nonNegativeNumber(last?.cacheWriteInputTokens),
     outputTokens: nonNegativeNumber(last?.outputTokens),
     reasoningOutputTokens: nonNegativeNumber(last?.reasoningOutputTokens),
-    compactsAutomatically: true,
+    compactsAutomatically: null,
   };
 }

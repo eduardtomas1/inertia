@@ -53,14 +53,16 @@ export interface CodexPlanStep {
 }
 
 export interface CodexUsageSnapshot {
-  usedTokens: number;
+  usedTokens: number | null;
   totalProcessedTokens: number | null;
+  totalProcessedScope: "thread";
   maxTokens: number | null;
   inputTokens: number | null;
   cachedInputTokens: number | null;
+  cacheWriteInputTokens: number | null;
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
-  compactsAutomatically: boolean;
+  compactsAutomatically: null;
 }
 
 export interface CodexAppServerOptions {

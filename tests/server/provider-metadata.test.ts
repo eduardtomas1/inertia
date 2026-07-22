@@ -139,7 +139,12 @@ describe("provider metadata cache", () => {
     expect(models).toHaveLength(128);
     expect(models[0]?.label).toHaveLength(120);
     expect(limits).toHaveLength(16);
-    expect(limits.at(-1)?.usedPercent).toBe(100);
+    expect(limits.at(-1)).toMatchObject({ usedPercent: 300, remainingPercent: -200 });
+    expect(validateProviderRateLimits([
+      rateLimit("nan", Number.NaN),
+      rateLimit("infinite", Number.POSITIVE_INFINITY),
+      rateLimit("overflow", 130),
+    ])).toEqual([expect.objectContaining({ id: "overflow", usedPercent: 130, remainingPercent: -30 })]);
 
     let reads = 0;
     const cache = new ProviderMetadataCache({ read: async () => { reads += 1; return {}; } });

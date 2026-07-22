@@ -63,7 +63,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const questions: string[] = [];
     const plans: string[] = [];
     const reasoning: string[] = [];
-    const usage: number[] = [];
+    const usage: Array<number | null> = [];
+    const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: string[][] = [];
 
     const result = await manager.run({
@@ -87,7 +88,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       },
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
-      onUsage: (event) => usage.push(event.usage.usedTokens),
+      onUsage: (event) => {
+        usage.push(event.usage.usedTokens);
+        usageDetails.push(event.usage);
+      },
       onMetadata: (event) => metadata.push(event.metadata.models?.map((model) => model.id) ?? []),
     });
 
@@ -96,7 +100,18 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(questions).toEqual(["Which scope?"]);
     expect(plans).toEqual(expect.arrayContaining(["Inspect", "Implement"]));
     expect(reasoning).toEqual(["Checking"]);
-    expect(usage).toEqual([321, 320]);
+    expect(usage).toEqual([321, 321]);
+    expect(usageDetails.at(-1)).toMatchObject({
+      usedTokens: 321,
+      totalProcessedTokens: 350,
+      totalProcessedScope: "session",
+      maxTokens: 200_000,
+      inputTokens: 320,
+      cachedInputTokens: 20,
+      outputTokens: 30,
+      reasoningOutputTokens: 5,
+      compactsAutomatically: null,
+    });
     expect(metadata).toContainEqual(["model-a"]);
     expect(manager.cachedMetadata("cursor")).toMatchObject({
       models: [expect.objectContaining({ id: "model-a", inputModalities: ["text", "image"] })],

@@ -296,7 +296,14 @@ export function Composer({
       </div>
       <div className="composer-footer">
         <p className="composer-note">Use @ for project files and / for modes · review changes before committing</p>
-        {showUsage && selectedProvider && <UsageIndicator usage={usage} rateLimits={selectedProvider.rateLimits} supportsUsage={selectedProvider.supportsUsage} />}
+        {showUsage && selectedProvider && (
+          <UsageIndicator
+            usage={usage}
+            rateLimits={selectedProvider.rateLimits}
+            rateLimitState={selectedProvider.metadataState.rateLimits}
+            supportsUsage={selectedProvider.supportsUsage}
+          />
+        )}
       </div>
     </div>
   );

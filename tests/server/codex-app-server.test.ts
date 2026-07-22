@@ -196,7 +196,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const inputs: string[] = [];
     const plans: string[] = [];
     const reasoning: string[] = [];
-    const usage: number[] = [];
+    const usage: Array<number | null> = [];
     const metadata: string[][] = [];
 
     const run = manager.run({
@@ -337,7 +337,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const inputs: string[] = [];
     const plans: string[] = [];
     const reasoning: string[] = [];
-    const usage: number[] = [];
+    const usage: Array<number | null> = [];
 
     const result = manager.run({
       providerId: "codex",

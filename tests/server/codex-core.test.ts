@@ -78,13 +78,21 @@ describe("Codex protocol seams", () => {
     })).toEqual({
       usedTokens: 120,
       totalProcessedTokens: 900,
+      totalProcessedScope: "thread",
       maxTokens: 200_000,
       inputTokens: 80,
       cachedInputTokens: 20,
+      cacheWriteInputTokens: null,
       outputTokens: 40,
       reasoningOutputTokens: 10,
-      compactsAutomatically: true,
+      compactsAutomatically: null,
     });
+    expect(parseCodexTokenUsage({
+      last: { totalTokens: 0, inputTokens: Number.NaN },
+      total: { totalTokens: 1_200 },
+      modelContextWindow: 0,
+    })).toMatchObject({ usedTokens: 0, totalProcessedTokens: 1_200, maxTokens: 0, inputTokens: null });
+    expect(parseCodexTokenUsage({ last: { totalTokens: Number.POSITIVE_INFINITY } })).toBeUndefined();
   });
 
   it("frames split UTF-8 JSONL and rejects oversized protocol lines", () => {

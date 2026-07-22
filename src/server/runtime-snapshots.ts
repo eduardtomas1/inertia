@@ -34,7 +34,7 @@ export function initialProviderSnapshots(
     rateLimits: cached[provider.id]?.rateLimits ?? [],
     metadataState: cached[provider.id]?.metadataState ?? emptyMetadataState(),
     supportsReasoning: provider.id === "codex",
-    supportsUsage: provider.id === "codex",
+    supportsUsage: true,
   }));
 }
 
@@ -56,7 +56,7 @@ export function providerSnapshot(
     rateLimits: metadata.rateLimits,
     metadataState: metadata.metadataState,
     supportsReasoning: detection.provider.id === "codex",
-    supportsUsage: detection.provider.id === "codex",
+    supportsUsage: true,
   };
 }
 

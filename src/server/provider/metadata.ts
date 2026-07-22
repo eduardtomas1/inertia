@@ -114,7 +114,7 @@ function cleanString(value: unknown, maxLength: number): string | undefined {
 
 function finitePercent(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-  return Math.max(0, Math.min(100, value));
+  return value;
 }
 
 export function validateProviderModels(value: unknown): ProviderModel[] {
@@ -176,7 +176,7 @@ export function validateProviderRateLimits(value: unknown): ProviderRateLimit[] 
       id,
       label: cleanString(limit.label, 120) ?? id,
       usedPercent,
-      remainingPercent: finitePercent(limit.remainingPercent) ?? Math.max(0, 100 - usedPercent),
+      remainingPercent: finitePercent(limit.remainingPercent) ?? 100 - usedPercent,
       windowMinutes,
       resetsAt,
     }];

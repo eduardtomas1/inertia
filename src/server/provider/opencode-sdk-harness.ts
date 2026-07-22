@@ -53,6 +53,21 @@ export const OPENCODE_SDK_CAPABILITIES = {
 
 interface PendingApproval { nativeId: string; settled: boolean }
 interface PendingInput { nativeId: string; questions: QuestionInfo[]; settled: boolean }
+interface OpenCodeMessageUsage {
+  total: number | null;
+  input: number | null;
+  cachedRead: number | null;
+  cacheWrite: number | null;
+  output: number | null;
+  reasoning: number | null;
+}
+interface OpenCodeUsageState {
+  maxTokens: number | null;
+  currentContextTokens: number | null;
+  messages: Map<string, OpenCodeMessageUsage>;
+  last: OpenCodeMessageUsage | null;
+  compactsAutomatically: true | null;
+}
 
 export function createOpenCodeSdkHarness(): AgentHarness {
   return {
@@ -107,6 +122,7 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   const eventAbort = new AbortController();
   const assistantMessages = new Set<string>();
   const emittedParts = new Map<string, string>();
+  const usageState: OpenCodeUsageState = { maxTokens: null, currentContextTokens: null, messages: new Map(), last: null, compactsAutomatically: null };
   let sessionId = options.input.sessionId;
   let client: OpencodeClient | undefined;
   let child: ChildProcessWithoutNullStreams | undefined;
@@ -202,10 +218,11 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       if ((options.input.imagePaths?.length ?? 0) > 0 && effectiveModel?.capabilities.input.image !== true) {
         throw new Error("The active OpenCode model does not advertise image input support.");
       }
+      usageState.maxTokens = finite(effectiveModel?.limit.context);
       const subscribed = await client.event.subscribe({ directory: options.input.cwd }, { signal: eventAbort.signal, throwOnError: true });
       emitter.status("running");
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
-        onEvent: (event) => handleOpenCodeEvent(event, options, client!, text, emitter, approvals, inputs, assistantMessages, emittedParts, failInteraction),
+        onEvent: (event) => handleOpenCodeEvent(event, options, client!, text, emitter, approvals, inputs, assistantMessages, emittedParts, usageState, failInteraction),
         isDone: (event) => event.type === "session.idle" || event.type === "session.error",
       });
       await client.session.promptAsync({
@@ -340,6 +357,7 @@ function handleOpenCodeEvent(
   inputs: Map<string, PendingInput>,
   assistantMessages: Set<string>,
   emittedParts: Map<string, string>,
+  usageState: OpenCodeUsageState,
   onFailure: (error: unknown) => void,
 ): void {
   const properties = event.properties as Record<string, unknown>;
@@ -348,13 +366,13 @@ function handleOpenCodeEvent(
     if (info?.role === "assistant" && typeof info.id === "string") {
       assistantMessages.add(info.id);
       const tokens = objectValue(info.tokens);
-      if (tokens) emitOpenCodeUsage(tokens, emitter.rich);
+      if (tokens) emitOpenCodeUsage(info.id, tokens, usageState, emitter.rich);
       const error = objectValue(info.error);
       if (error) emitter.activity("system", "failed", bounded(errorMessage(error)));
     }
   } else if (event.type === "message.part.updated") {
     const part = objectValue(properties.part);
-    if (part) handleOpenCodePart(part, assistantMessages, emittedParts, resultText, emitter);
+    if (part) handleOpenCodePart(part, assistantMessages, emittedParts, resultText, emitter, usageState);
   } else if (event.type === "message.part.delta") {
     const partId = stringValue(properties.partID);
     const messageId = stringValue(properties.messageID);
@@ -404,6 +422,8 @@ function handleOpenCodeEvent(
     emitter.activity("system", "failed", bounded(message));
     throw new Error(message);
   } else if (event.type === "session.compacted") {
+    usageState.currentContextTokens = null;
+    emitOpenCodeUsageSnapshot(usageState, emitter.rich);
     emitter.activity("system", "info", "OpenCode compacted the session context");
   }
 }
@@ -414,7 +434,13 @@ function handleOpenCodePart(
   emittedParts: Map<string, string>,
   resultText: CappedProviderBuffer,
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
+  usageState: OpenCodeUsageState,
 ): void {
+  if (part.type === "compaction") {
+    usageState.currentContextTokens = null;
+    if (part.auto === true) usageState.compactsAutomatically = true;
+    emitOpenCodeUsageSnapshot(usageState, emitter.rich);
+  }
   const id = stringValue(part.id);
   const messageId = stringValue(part.messageID);
   if (!id || !messageId || !assistantMessages.has(messageId)) return;
@@ -470,14 +496,54 @@ function openCodePermissions(access: "full" | "supervised" | "auto-edit"): Permi
   ];
 }
 
-function emitOpenCodeUsage(tokens: Record<string, unknown>, emit: ReturnType<typeof createAgentHarnessEmitter>["rich"]): void {
+function emitOpenCodeUsage(
+  messageId: string,
+  tokens: Record<string, unknown>,
+  state: OpenCodeUsageState,
+  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+): void {
   const input = finite(tokens.input);
   const output = finite(tokens.output);
   const reasoning = finite(tokens.reasoning);
   const cache = objectValue(tokens.cache);
-  const cached = finite(cache?.read);
-  const total = finite(tokens.total) ?? (input !== null && output !== null ? input + output : null);
-  emit({ type: "usage", usage: { usedTokens: input ?? 0, totalProcessedTokens: total, maxTokens: null, inputTokens: input, cachedInputTokens: cached, outputTokens: output, reasoningOutputTokens: reasoning, compactsAutomatically: true } });
+  const cachedRead = finite(cache?.read);
+  const cacheWrite = finite(cache?.write);
+  const messageUsage: OpenCodeMessageUsage = {
+    total: finite(tokens.total) ?? sumTokenParts([input, output, reasoning, cachedRead, cacheWrite]),
+    input,
+    cachedRead,
+    cacheWrite,
+    output,
+    reasoning,
+  };
+  state.messages.set(messageId, messageUsage);
+  state.last = messageUsage;
+  state.currentContextTokens = sumTokenParts([input, cachedRead, cacheWrite]);
+  emitOpenCodeUsageSnapshot(state, emit);
+}
+
+function sumTokenParts(values: Array<number | null>): number | null {
+  return values.every((value): value is number => value !== null) ? values.reduce((sum, value) => sum + value, 0) : null;
+}
+
+function emitOpenCodeUsageSnapshot(state: OpenCodeUsageState, emit: ReturnType<typeof createAgentHarnessEmitter>["rich"]): void {
+  const knownTotals = [...state.messages.values()].map(({ total }) => total).filter((value): value is number => value !== null);
+  const last = state.last;
+  emit({
+    type: "usage",
+    usage: {
+      usedTokens: state.currentContextTokens,
+      totalProcessedTokens: state.messages.size > 0 && knownTotals.length === state.messages.size ? knownTotals.reduce((sum, value) => sum + value, 0) : null,
+      totalProcessedScope: "run",
+      maxTokens: state.maxTokens,
+      inputTokens: last?.input ?? null,
+      cachedInputTokens: last?.cachedRead ?? null,
+      cacheWriteInputTokens: last?.cacheWrite ?? null,
+      outputTokens: last?.output ?? null,
+      reasoningOutputTokens: last?.reasoning ?? null,
+      compactsAutomatically: state.compactsAutomatically,
+    },
+  });
 }
 
 function openCodeQuestions(requestId: string, questions: QuestionInfo[]): CodexInputRequest {

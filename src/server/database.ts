@@ -105,14 +105,16 @@ interface AgentReasoningRow {
 
 interface ThreadUsageRow {
   conversation_id: string;
-  used_tokens: number;
+  used_tokens: number | null;
   total_processed_tokens: number | null;
+  total_processed_scope: ThreadUsageSnapshot["totalProcessedScope"];
   max_tokens: number | null;
   input_tokens: number | null;
   cached_input_tokens: number | null;
+  cache_write_input_tokens: number | null;
   output_tokens: number | null;
   reasoning_output_tokens: number | null;
-  compacts_automatically: 0 | 1;
+  compacts_automatically: 0 | 1 | null;
   updated_at: string;
 }
 
@@ -298,6 +300,38 @@ const migrations = [
       rate_limits_stale INTEGER NOT NULL DEFAULT 0 CHECK (rate_limits_stale IN (0, 1))
     );
   `,
+  `
+    CREATE TABLE thread_usage_v2 (
+      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+      used_tokens INTEGER,
+      total_processed_tokens INTEGER,
+      total_processed_scope TEXT CHECK (total_processed_scope IS NULL OR total_processed_scope IN ('thread', 'session', 'run')),
+      max_tokens INTEGER,
+      input_tokens INTEGER,
+      cached_input_tokens INTEGER,
+      cache_write_input_tokens INTEGER,
+      output_tokens INTEGER,
+      reasoning_output_tokens INTEGER,
+      compacts_automatically INTEGER CHECK (compacts_automatically IS NULL OR compacts_automatically IN (0, 1)),
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO thread_usage_v2 (
+      conversation_id, used_tokens, total_processed_tokens, total_processed_scope, max_tokens,
+      input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens,
+      reasoning_output_tokens, compacts_automatically, updated_at
+    )
+    SELECT
+      usage.conversation_id,
+      CASE WHEN conversations.provider_id = 'codex' THEN usage.used_tokens ELSE NULL END,
+      CASE WHEN conversations.provider_id IN ('codex', 'cursor') THEN usage.total_processed_tokens ELSE NULL END,
+      CASE conversations.provider_id WHEN 'codex' THEN 'thread' WHEN 'cursor' THEN 'session' ELSE NULL END,
+      usage.max_tokens, usage.input_tokens, usage.cached_input_tokens, NULL, usage.output_tokens,
+      usage.reasoning_output_tokens, NULL, usage.updated_at
+    FROM thread_usage AS usage
+    JOIN conversations ON conversations.id = usage.conversation_id;
+    DROP TABLE thread_usage;
+    ALTER TABLE thread_usage_v2 RENAME TO thread_usage;
+  `,
 ] as const;
 
 function projectFromRow(row: ProjectRow): Project {
@@ -388,12 +422,14 @@ function usageFromRow(row: ThreadUsageRow): ThreadUsageSnapshot {
     conversationId: row.conversation_id,
     usedTokens: row.used_tokens,
     totalProcessedTokens: row.total_processed_tokens,
+    totalProcessedScope: row.total_processed_scope,
     maxTokens: row.max_tokens,
     inputTokens: row.input_tokens,
     cachedInputTokens: row.cached_input_tokens,
+    cacheWriteInputTokens: row.cache_write_input_tokens,
     outputTokens: row.output_tokens,
     reasoningOutputTokens: row.reasoning_output_tokens,
-    compactsAutomatically: row.compacts_automatically === 1,
+    compactsAutomatically: row.compacts_automatically === null ? null : row.compacts_automatically === 1,
     updatedAt: row.updated_at,
   };
 }
@@ -682,19 +718,21 @@ export class RuntimeStore {
     this.requireConversation(usage.conversationId);
     const next: ThreadUsageSnapshot = { ...usage, updatedAt: new Date().toISOString() };
     this.database.prepare(`
-      INSERT INTO thread_usage (conversation_id, used_tokens, total_processed_tokens, max_tokens, input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens, compacts_automatically, updated_at)
-      VALUES (@conversationId, @usedTokens, @totalProcessedTokens, @maxTokens, @inputTokens, @cachedInputTokens, @outputTokens, @reasoningOutputTokens, @compactsAutomatically, @updatedAt)
+      INSERT INTO thread_usage (conversation_id, used_tokens, total_processed_tokens, total_processed_scope, max_tokens, input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens, reasoning_output_tokens, compacts_automatically, updated_at)
+      VALUES (@conversationId, @usedTokens, @totalProcessedTokens, @totalProcessedScope, @maxTokens, @inputTokens, @cachedInputTokens, @cacheWriteInputTokens, @outputTokens, @reasoningOutputTokens, @compactsAutomatically, @updatedAt)
       ON CONFLICT(conversation_id) DO UPDATE SET
         used_tokens = excluded.used_tokens,
         total_processed_tokens = excluded.total_processed_tokens,
+        total_processed_scope = excluded.total_processed_scope,
         max_tokens = excluded.max_tokens,
         input_tokens = excluded.input_tokens,
         cached_input_tokens = excluded.cached_input_tokens,
+        cache_write_input_tokens = excluded.cache_write_input_tokens,
         output_tokens = excluded.output_tokens,
         reasoning_output_tokens = excluded.reasoning_output_tokens,
         compacts_automatically = excluded.compacts_automatically,
         updated_at = excluded.updated_at
-    `).run({ ...next, compactsAutomatically: Number(next.compactsAutomatically) });
+    `).run({ ...next, compactsAutomatically: next.compactsAutomatically === null ? null : Number(next.compactsAutomatically) });
     return next;
   }
 

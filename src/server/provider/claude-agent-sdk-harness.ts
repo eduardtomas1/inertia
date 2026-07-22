@@ -23,6 +23,7 @@ import {
   type ClaudeAgentSdkHarnessCapabilities,
 } from "./agent-harness";
 import type { ProviderRunResult } from "./contracts";
+import { providerTimestamp } from "./usage-values";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -71,7 +72,7 @@ function claudeModels(models: Awaited<ReturnType<Query["supportedModels"]>>): Pr
   });
 }
 
-function claudeRateLimits(value: unknown): ProviderRateLimit[] {
+export function parseClaudeRateLimits(value: unknown): ProviderRateLimit[] {
   const response = objectValue(value);
   if (response?.rate_limits_available !== true) return [];
   const limits = objectValue(response.rate_limits);
@@ -95,17 +96,15 @@ function claudeRateLimits(value: unknown): ProviderRateLimit[] {
   });
   return windows.flatMap((window) => {
     const current = objectValue(window.value);
-    const utilization = finiteNumber(current?.utilization);
+    const utilization = typeof current?.utilization === "number" && Number.isFinite(current.utilization) ? current.utilization : null;
     if (utilization === null) return [];
-    const usedPercent = Math.max(0, Math.min(100, utilization));
-    const reset = stringValue(current?.resets_at);
     return [{
       id: `claude:${window.key}`,
       label: window.label,
-      usedPercent,
-      remainingPercent: Math.max(0, 100 - usedPercent),
+      usedPercent: utilization,
+      remainingPercent: 100 - utilization,
       windowMinutes: window.minutes,
-      resetsAt: reset && !Number.isNaN(Date.parse(reset)) ? new Date(reset).toISOString() : null,
+      resetsAt: providerTimestamp(current?.resets_at),
     }];
   }).slice(0, 12);
 }
@@ -138,7 +137,7 @@ export async function readClaudeAgentSdkMetadata(
     ]);
     return {
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
-      ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? { rateLimits: claudeRateLimits(limitsResult.value) } : {}),
+      ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? { rateLimits: parseClaudeRateLimits(limitsResult.value) } : {}),
     };
   } finally {
     clearTimeout(timer);
@@ -339,7 +338,8 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
           continue;
         }
         if (message.type === "result") {
-          emitClaudeUsage(record, emitter.rich);
+          const contextUsage = await readClaudeContextUsage(query);
+          emitClaudeUsage(record, contextUsage, emitter.rich);
           await emitClaudeRateLimitMetadata(query, emitter.rich);
           if (message.subtype === "success") {
             if (!sawStreamText && typeof message.result === "string") emitText(message.result, text, emitter.text);
@@ -412,7 +412,7 @@ async function emitClaudeRateLimitMetadata(
     });
     const response = await Promise.race([reader.call(query), timeout]);
     if (response === undefined) return;
-    const rateLimits = claudeRateLimits(response);
+    const rateLimits = parseClaudeRateLimits(response);
     if (rateLimits.length > 0) emit({ type: "metadata", metadata: { rateLimits }, source: "provider", complete: true });
   } catch {
     // Experimental usage metadata is optional and must not affect the provider run.
@@ -499,27 +499,57 @@ function planSteps(markdown: string): CodexPlanStep[] {
   return (steps.length > 0 ? steps : [markdown]).slice(0, 100).map((step) => ({ step: bounded(step), status: "pending" }));
 }
 
-function emitClaudeUsage(record: Record<string, unknown>, emit: (event: Parameters<ReturnType<typeof createAgentHarnessEmitter>["rich"]>[0]) => void): void {
+function emitClaudeUsage(
+  record: Record<string, unknown>,
+  contextUsage: Record<string, unknown> | undefined,
+  emit: (event: Parameters<ReturnType<typeof createAgentHarnessEmitter>["rich"]>[0]) => void,
+): void {
   const usage = objectValue(record.usage);
-  if (!usage) return;
-  const input = finiteNumber(usage.input_tokens);
-  const output = finiteNumber(usage.output_tokens);
-  const cached = finiteNumber(usage.cache_read_input_tokens);
+  if (!usage && !contextUsage) return;
+  const input = finiteNumber(usage?.input_tokens);
+  const output = finiteNumber(usage?.output_tokens);
+  const cached = finiteNumber(usage?.cache_read_input_tokens);
+  const cacheWrite = finiteNumber(usage?.cache_creation_input_tokens);
+  const inputParts = [input, cached, cacheWrite].filter((value): value is number => value !== null);
+  const totalInput = inputParts.length > 0 ? inputParts.reduce((sum, value) => sum + value, 0) : null;
   const modelUsage = objectValue(record.modelUsage);
   const contextWindows = modelUsage ? Object.values(modelUsage).map((value) => finiteNumber(objectValue(value)?.contextWindow)).filter((value): value is number => value !== null) : [];
+  const uniqueContextWindows = [...new Set(contextWindows)];
+  const contextTokens = finiteNumber(contextUsage?.totalTokens);
+  const contextMax = finiteNumber(contextUsage?.maxTokens);
+  const autoCompact = typeof contextUsage?.isAutoCompactEnabled === "boolean" ? contextUsage.isAutoCompactEnabled : null;
   emit({
     type: "usage",
     usage: {
-      usedTokens: input ?? 0,
-      totalProcessedTokens: input !== null && output !== null ? input + output : null,
-      maxTokens: contextWindows.length > 0 ? Math.max(...contextWindows) : null,
-      inputTokens: input,
+      usedTokens: contextTokens,
+      totalProcessedTokens: totalInput !== null && output !== null ? totalInput + output : null,
+      totalProcessedScope: "run",
+      maxTokens: contextMax ?? (uniqueContextWindows.length === 1 ? uniqueContextWindows[0]! : null),
+      inputTokens: totalInput,
       cachedInputTokens: cached,
+      cacheWriteInputTokens: cacheWrite,
       outputTokens: output,
       reasoningOutputTokens: null,
-      compactsAutomatically: true,
+      compactsAutomatically: autoCompact,
     },
   });
+}
+
+async function readClaudeContextUsage(query: Query): Promise<Record<string, unknown> | undefined> {
+  if (typeof query.getContextUsage !== "function") return undefined;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const timeout = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), 2_000);
+      timer.unref();
+    });
+    const value = await Promise.race([query.getContextUsage(), timeout]);
+    return objectValue(value);
+  } catch {
+    return undefined;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function emitText(value: string, buffer: CappedProviderBuffer, emit: (text: string) => void): void {

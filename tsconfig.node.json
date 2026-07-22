@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "jsx": "react-jsx",
     "resolveJsonModule": true,
     "types": ["node", "electron-vite/node"]
   },
@@ -23,6 +24,7 @@
     "src/shared/**/*.ts",
     "src/renderer/src/lib/**/*.ts",
     "src/renderer/src/utils/**/*.ts",
+    "src/renderer/src/components/UsageIndicator.tsx",
     "tests/**/*.ts"
   ]
 }

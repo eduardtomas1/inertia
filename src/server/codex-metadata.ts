@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import type { ProviderModel, ProviderRateLimit, ProviderReasoningOption } from "../shared/contracts";
+import { providerTimestamp } from "./provider/usage-values";
 
 type JsonObject = Record<string, unknown>;
 
@@ -71,25 +72,17 @@ export function parseCodexModels(result: JsonObject): ProviderModel[] {
   }).slice(0, 64);
 }
 
-function resetDate(value: unknown): string | null {
-  const seconds = numberValue(value);
-  if (seconds === undefined || seconds <= 0) return null;
-  const date = new Date(seconds * 1_000);
-  return Number.isNaN(date.valueOf()) ? null : date.toISOString();
-}
-
 function parseLimitWindow(limitId: string, label: string, suffix: "primary" | "secondary", value: unknown): ProviderRateLimit[] {
   const window = objectValue(value);
-  const rawPercent = numberValue(window?.usedPercent);
-  if (rawPercent === undefined) return [];
-  const usedPercent = Math.max(0, Math.min(100, rawPercent));
+  const usedPercent = numberValue(window?.usedPercent);
+  if (usedPercent === undefined) return [];
   return [{
     id: `${limitId}:${suffix}`,
     label: suffix === "primary" ? label : `${label} · secondary`,
     usedPercent,
-    remainingPercent: Math.max(0, 100 - usedPercent),
+    remainingPercent: 100 - usedPercent,
     windowMinutes: numberValue(window?.windowDurationMins) ?? null,
-    resetsAt: resetDate(window?.resetsAt),
+    resetsAt: providerTimestamp(window?.resetsAt),
   }];
 }
 

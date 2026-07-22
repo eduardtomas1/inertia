@@ -58,7 +58,9 @@ const server = http.createServer((req, res) => {
       sendEvent({ id: "e5", type: "message.part.updated", properties: { sessionID, time: Date.now(), part: { id: "text-1", sessionID, messageID: "assistant-1", type: "text", text: "OpenCode response", time: { start: Date.now(), end: Date.now() } } } });
       sendEvent({ id: "e6", type: "message.part.updated", properties: { sessionID, time: Date.now(), part: { id: "tool-1", sessionID, messageID: "assistant-1", type: "tool", callID: "call-1", tool: "bash", state: { status: "completed", input: { command: "npm test" }, output: "ok", title: "Run tests", metadata: {}, time: { start: Date.now(), end: Date.now() } } } } });
       sendEvent({ id: "e7", type: "todo.updated", properties: { sessionID, todos: [{ content: "Inspect", status: "completed", priority: "high" }] } });
-      return sendEvent({ id: "e8", type: "session.idle", properties: { sessionID } });
+      sendEvent({ id: "e8", type: "message.updated", properties: { sessionID, info: { id: "assistant-1", sessionID, role: "assistant", tokens: { total: 160, input: 125, output: 30, reasoning: 5, cache: { read: 10, write: 0 } } } } });
+      sendEvent({ id: "e9", type: "message.updated", properties: { sessionID, info: { id: "assistant-2", sessionID, role: "assistant", tokens: { total: 40, input: 30, output: 10, reasoning: 0, cache: { read: 0, write: 0 } } } } });
+      return sendEvent({ id: "e10", type: "session.idle", properties: { sessionID } });
     }
     if (req.method === "POST" && url.pathname.endsWith("/abort")) return json(res, true);
     return json(res, { error: "not found" }, 404);
@@ -84,7 +86,8 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     const questions: string[] = [];
     const plans: string[] = [];
     const reasoning: string[] = [];
-    const usage: number[] = [];
+    const usage: Array<number | null> = [];
+    const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: string[][] = [];
 
     const result = await manager.run({
@@ -109,7 +112,10 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
       },
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
-      onUsage: (event) => usage.push(event.usage.usedTokens),
+      onUsage: (event) => {
+        usage.push(event.usage.usedTokens);
+        usageDetails.push(event.usage);
+      },
       onMetadata: (event) => metadata.push(event.metadata.models?.map((model) => model.id) ?? []),
     });
 
@@ -118,7 +124,25 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     expect(questions).toEqual(["Which scope?"]);
     expect(plans).toEqual(["Inspect"]);
     expect(reasoning).toEqual(["Checking constraints"]);
-    expect(usage).toEqual([120]);
+    expect(usage).toEqual([130, 135, 30]);
+    expect(usageDetails[0]).toEqual(expect.objectContaining({
+      usedTokens: 130,
+      totalProcessedTokens: 165,
+      totalProcessedScope: "run",
+      maxTokens: 200_000,
+      inputTokens: 120,
+      cachedInputTokens: 10,
+      cacheWriteInputTokens: 0,
+      outputTokens: 30,
+      reasoningOutputTokens: 5,
+      compactsAutomatically: null,
+    }));
+    expect(usageDetails.at(-1)).toMatchObject({
+      totalProcessedTokens: 200,
+      usedTokens: 30,
+      inputTokens: 30,
+      outputTokens: 10,
+    });
     expect(metadata).toContainEqual(["fake/model-a"]);
     expect(manager.cachedMetadata("opencode")).toMatchObject({
       models: [expect.objectContaining({ id: "fake/model-a" })],

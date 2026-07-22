@@ -56,6 +56,7 @@ export const CURSOR_ACP_CAPABILITIES = {
 
 interface PendingApproval { resolve: (decision: CodexApprovalDecision) => void; settled: boolean }
 interface PendingInput { resolve: (answers: Record<string, string[]>) => void; settled: boolean }
+interface CursorContextUsage { usedTokens: number | null; maxTokens: number | null }
 
 export function createCursorAcpHarness(): AgentHarness {
   return {
@@ -77,6 +78,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
   let supportsImages = false;
+  const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
 
@@ -115,7 +117,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     })
     .onNotification(acp.methods.client.session.update, ({ params }) => {
       if (!sessionId || params.sessionId !== sessionId) return;
-      handleCursorUpdate(params, resultText, emitter, supportsImages);
+      handleCursorUpdate(params, resultText, emitter, supportsImages, contextUsage);
     })
     .onRequest("cursor/ask_question", parseCursorQuestionRequest, async ({ params, signal }) => {
       if (cancelRequested) return { outcome: "cancelled" };
@@ -204,7 +206,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     const prompt = await cursorPrompt(options.input.prompt, options.input.imagePaths ?? [], initialized);
     emitter.status("running");
     const response = await context.request(acp.methods.agent.session.prompt, { sessionId, prompt });
-    if (response.usage) emitCursorPromptUsage(response.usage, emitter.rich);
+    if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter.rich);
     if (cancelRequested || response.stopReason === "cancelled") return finish("cancelled");
     if (response.stopReason !== "end_turn") return finish("failed", `Cursor stopped with reason: ${response.stopReason}.`);
     return finish("completed");
@@ -304,6 +306,7 @@ function handleCursorUpdate(
   resultText: CappedProviderBuffer,
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
   supportsImages: boolean,
+  contextUsage: CursorContextUsage,
 ): void {
   const update = notification.update;
   if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
@@ -320,17 +323,21 @@ function handleCursorUpdate(
   } else if (update.sessionUpdate === "plan") {
     emitter.rich({ type: "plan", explanation: null, steps: update.entries.map((entry) => ({ step: bounded(entry.content), status: entry.status === "in_progress" ? "inProgress" : entry.status })) });
   } else if (update.sessionUpdate === "usage_update") {
+    contextUsage.usedTokens = tokenCount(update.used);
+    contextUsage.maxTokens = tokenCount(update.size);
     emitter.rich({
       type: "usage",
       usage: {
-        usedTokens: update.used,
+        usedTokens: contextUsage.usedTokens,
         totalProcessedTokens: null,
-        maxTokens: update.size,
+        totalProcessedScope: "session",
+        maxTokens: contextUsage.maxTokens,
         inputTokens: null,
         cachedInputTokens: null,
+        cacheWriteInputTokens: null,
         outputTokens: null,
         reasoningOutputTokens: null,
-        compactsAutomatically: false,
+        compactsAutomatically: null,
       },
     });
   } else if (update.sessionUpdate === "config_option_update") {
@@ -442,20 +449,30 @@ function validateCursorInitialize(initialized: InitializeResponse): void {
   if (name && !name.includes("cursor")) throw new Error(`The selected executable exposed ACP as '${initialized.agentInfo?.name}', not Cursor.`);
 }
 
-function emitCursorPromptUsage(usage: Usage, emit: ReturnType<typeof createAgentHarnessEmitter>["rich"]): void {
+function emitCursorPromptUsage(
+  usage: Usage,
+  contextUsage: CursorContextUsage,
+  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+): void {
   emit({
     type: "usage",
     usage: {
-      usedTokens: usage.inputTokens,
-      totalProcessedTokens: usage.totalTokens,
-      maxTokens: null,
-      inputTokens: usage.inputTokens,
-      cachedInputTokens: usage.cachedReadTokens ?? null,
-      outputTokens: usage.outputTokens,
-      reasoningOutputTokens: usage.thoughtTokens ?? null,
-      compactsAutomatically: false,
+      usedTokens: contextUsage.usedTokens,
+      totalProcessedTokens: tokenCount(usage.totalTokens),
+      totalProcessedScope: "session",
+      maxTokens: contextUsage.maxTokens,
+      inputTokens: tokenCount(usage.inputTokens),
+      cachedInputTokens: tokenCount(usage.cachedReadTokens),
+      cacheWriteInputTokens: tokenCount(usage.cachedWriteTokens),
+      outputTokens: tokenCount(usage.outputTokens),
+      reasoningOutputTokens: tokenCount(usage.thoughtTokens),
+      compactsAutomatically: null,
     },
   });
+}
+
+function tokenCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 interface CursorQuestionParams {

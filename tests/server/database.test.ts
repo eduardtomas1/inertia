@@ -135,9 +135,11 @@ describe("RuntimeStore conversation lifecycle", () => {
       conversationId: conversation.id,
       usedTokens: 126,
       totalProcessedTokens: 11_839,
+      totalProcessedScope: "thread",
       maxTokens: 258_400,
       inputTokens: 120,
       cachedInputTokens: 0,
+      cacheWriteInputTokens: 4,
       outputTokens: 6,
       reasoningOutputTokens: 0,
       compactsAutomatically: true,
@@ -149,7 +151,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     expect(snapshot.settings).toMatchObject({ showThinking: false, showUsage: true, defaultModel: "model-a", defaultReasoningEffort: "high", defaultInteractionMode: "plan" });
     expect(snapshot.conversations.find(({ id }) => id === conversation.id)).toMatchObject({ model: "model-a", reasoningEffort: "high", interactionMode: "plan" });
     expect(snapshot.reasonings).toContainEqual(expect.objectContaining({ id: reasoning.id, content: "Checked the safe path.", status: "completed" }));
-    expect(snapshot.usage).toContainEqual(expect.objectContaining({ conversationId: conversation.id, usedTokens: 126, maxTokens: 258_400, compactsAutomatically: true }));
+    expect(snapshot.usage).toContainEqual(expect.objectContaining({ conversationId: conversation.id, usedTokens: 126, maxTokens: 258_400, cacheWriteInputTokens: 4, totalProcessedScope: "thread", compactsAutomatically: true }));
     reopened.close();
   });
 
@@ -203,6 +205,43 @@ describe("RuntimeStore conversation lifecycle", () => {
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.snapshot().projects[0]?.id).toBe(projectId);
     expect(migrated.loadProviderMetadata()).toEqual([]);
+    migrated.close();
+  });
+
+  it("migrates legacy usage without preserving manufactured context or compaction claims", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const project = store.snapshot().projects[0]!;
+    const codex = store.createConversation(project.id, "Codex legacy", { providerId: "codex" });
+    const claude = store.createConversation(project.id, "Claude legacy", { providerId: "claude" });
+    store.close();
+
+    const legacy = new Database(databasePath);
+    legacy.exec(`
+      DROP TABLE thread_usage;
+      CREATE TABLE thread_usage (
+        conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+        used_tokens INTEGER NOT NULL,
+        total_processed_tokens INTEGER,
+        max_tokens INTEGER,
+        input_tokens INTEGER,
+        cached_input_tokens INTEGER,
+        output_tokens INTEGER,
+        reasoning_output_tokens INTEGER,
+        compacts_automatically INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    const insert = legacy.prepare(`INSERT INTO thread_usage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    insert.run(codex.id, 111, 999, 200_000, 100, 10, 11, 1, 1, "2026-07-22T10:00:00.000Z");
+    insert.run(claude.id, 222, 888, 200_000, 200, 20, 22, 2, 1, "2026-07-22T10:00:00.000Z");
+    legacy.prepare("DELETE FROM schema_migrations WHERE version = 6").run();
+    legacy.close();
+
+    const migrated = new RuntimeStore(databasePath, workspacePath);
+    expect(migrated.snapshot().usage).toEqual(expect.arrayContaining([
+      expect.objectContaining({ conversationId: codex.id, usedTokens: 111, totalProcessedTokens: 999, totalProcessedScope: "thread", compactsAutomatically: null }),
+      expect.objectContaining({ conversationId: claude.id, usedTokens: null, totalProcessedTokens: null, totalProcessedScope: null, compactsAutomatically: null }),
+    ]));
     migrated.close();
   });
 });

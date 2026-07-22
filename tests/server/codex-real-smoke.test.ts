@@ -54,7 +54,7 @@ describe("real Codex App Server smoke", () => {
             breadcrumb(`reasoning:${event.text}`);
           },
           onUsage: (event) => {
-            usageSamples.push(event.usage.usedTokens);
+            if (event.usage.usedTokens !== null) usageSamples.push(event.usage.usedTokens);
             if (event.usage.maxTokens) contextWindows.push(event.usage.maxTokens);
             breadcrumb(`usage:${event.usage.usedTokens}/${event.usage.maxTokens ?? "unknown"}`);
           },

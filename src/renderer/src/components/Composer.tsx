@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Command, Paperclip, Send, ShieldCheck, Sparkles, Square, Wrench, X } from "lucide-react";
 import clsx from "clsx";
 import type { AccessMode, ChatAttachment, Conversation, InteractionMode, ProjectAction, ProviderId, ProviderInfo, ThreadUsageSnapshot, WorkspaceEntry } from "@shared/contracts";
+import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { IconButton, LoadingMark } from "./ui";
 import { UsageIndicator } from "./UsageIndicator";
@@ -33,6 +34,12 @@ const accessOptions: Array<{ value: AccessMode; label: string; description: stri
   { value: "full", label: "Full access", description: "Run commands and edit without prompts" },
 ];
 
+type ComposerMenu = "provider" | "reasoning" | "mode" | "access" | "action";
+
+function menuId(menu: ComposerMenu): string {
+  return `composer-${menu}-menu`;
+}
+
 export function Composer({
   conversation,
   providers,
@@ -55,7 +62,7 @@ export function Composer({
 }: ComposerProps): React.JSX.Element {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [menu, setMenu] = useState<"provider" | "reasoning" | "mode" | "access" | "action" | null>(null);
+  const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } = useDismissibleMenu<ComposerMenu>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
@@ -63,7 +70,8 @@ export function Composer({
   useEffect(() => {
     setMessage(window.localStorage.getItem(`inertia:draft:${conversation.id}`) ?? "");
     setAttachments([]);
-  }, [conversation.id]);
+    dismissMenu("context-change");
+  }, [conversation.id, dismissMenu]);
 
   useEffect(() => {
     const key = `inertia:draft:${conversation.id}`;
@@ -189,14 +197,14 @@ export function Composer({
             </IconButton>
             {actions.length > 0 && (
               <div className="popover-anchor">
-                <button type="button" className={clsx("composer-pill", menu === "action" && "is-active")} aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
+                <button ref={(node) => setMenuTrigger("action", node)} type="button" className={clsx("composer-pill", menu === "action" && "is-active")} aria-label="Open project actions" aria-haspopup="menu" aria-controls={menuId("action")} aria-expanded={menu === "action"} onClick={() => toggleMenu("action")}>
                   <Wrench size={14} /><span>Actions</span><ChevronDown size={12} />
                 </button>
                 {menu === "action" && (
-                  <div className="composer-popover action-popover" role="menu" aria-label="Project actions">
+                  <div ref={(node) => setMenuPopover("action", node)} id={menuId("action")} className="composer-popover action-popover" role="menu" aria-label="Project actions">
                     <div className="popover-title">Package scripts</div>
                     {actions.map((action) => (
-                      <button type="button" role="menuitem" key={action.id} onClick={() => { setMenu(null); onRunAction(action); }}>
+                      <button type="button" role="menuitem" key={action.id} onClick={() => { dismissMenu("selection"); onRunAction(action); }}>
                         <Command size={15} />
                         <span><strong>{action.label}</strong><small>{action.command}</small></span>
                       </button>
@@ -209,11 +217,11 @@ export function Composer({
 
           <div className="composer-options">
             <div className="popover-anchor">
-              <button type="button" className={clsx("composer-pill", menu === "provider" && "is-active")} aria-expanded={menu === "provider"} onClick={() => setMenu(menu === "provider" ? null : "provider")}>
+              <button ref={(node) => setMenuTrigger("provider", node)} type="button" className={clsx("composer-pill", menu === "provider" && "is-active")} aria-label="Choose provider and model" aria-haspopup="menu" aria-controls={menuId("provider")} aria-expanded={menu === "provider"} onClick={() => toggleMenu("provider")}>
                 <Sparkles size={14} /><span>{selectedModel?.label ?? selectedProvider?.label ?? conversation.providerId}</span><ChevronDown size={12} />
               </button>
               {menu === "provider" && (
-                <div className="composer-popover provider-popover" role="menu" aria-label="Provider and model">
+                <div ref={(node) => setMenuPopover("provider", node)} id={menuId("provider")} className="composer-popover provider-popover" role="menu" aria-label="Provider and model">
                   <div className="popover-title">Provider</div>
                   {providers.map((provider) => (
                     <button type="button" role="menuitemradio" aria-checked={conversation.providerId === provider.id} key={provider.id} onClick={() => { onUpdateConversation({ providerId: provider.id as ProviderId, model: "", reasoningEffort: "" }); }}>
@@ -223,7 +231,7 @@ export function Composer({
                   ))}
                   <div className="popover-title model-popover-title">Model</div>
                   {selectedProvider?.models.length ? selectedProvider.models.map((model) => (
-                    <button type="button" role="menuitemradio" aria-checked={selectedModel?.id === model.id} key={model.id} onClick={() => { onUpdateConversation({ model: model.id, reasoningEffort: model.defaultReasoningEffort }); setMenu(null); }}>
+                    <button type="button" role="menuitemradio" aria-checked={selectedModel?.id === model.id} key={model.id} onClick={() => { onUpdateConversation({ model: model.id, reasoningEffort: model.defaultReasoningEffort }); dismissMenu("selection"); }}>
                       <span><strong>{model.label}{model.isDefault ? " · Default" : ""}</strong><small>{model.description}</small></span>
                       {selectedModel?.id === model.id && <span className="option-check" />}
                     </button>
@@ -234,14 +242,14 @@ export function Composer({
 
             {selectedModel && selectedModel.reasoningOptions.length > 0 && (
               <div className="popover-anchor">
-                <button type="button" className={clsx("composer-pill reasoning-pill", menu === "reasoning" && "is-active")} aria-expanded={menu === "reasoning"} onClick={() => setMenu(menu === "reasoning" ? null : "reasoning")}>
+                <button ref={(node) => setMenuTrigger("reasoning", node)} type="button" className={clsx("composer-pill reasoning-pill", menu === "reasoning" && "is-active")} aria-label="Choose reasoning level" aria-haspopup="menu" aria-controls={menuId("reasoning")} aria-expanded={menu === "reasoning"} onClick={() => toggleMenu("reasoning")}>
                   <span>{selectedModel.reasoningOptions.find(({ value }) => value === selectedReasoning)?.label ?? "Reasoning"}</span><ChevronDown size={12} />
                 </button>
                 {menu === "reasoning" && (
-                  <div className="composer-popover option-popover reasoning-popover" role="menu" aria-label="Reasoning level">
+                  <div ref={(node) => setMenuPopover("reasoning", node)} id={menuId("reasoning")} className="composer-popover option-popover reasoning-popover" role="menu" aria-label="Reasoning level">
                     <div className="popover-title">Reasoning</div>
                     {selectedModel.reasoningOptions.map((option) => (
-                      <button type="button" role="menuitemradio" aria-checked={selectedReasoning === option.value} key={option.value} onClick={() => { onUpdateConversation({ reasoningEffort: option.value }); setMenu(null); }}>
+                      <button type="button" role="menuitemradio" aria-checked={selectedReasoning === option.value} key={option.value} onClick={() => { onUpdateConversation({ reasoningEffort: option.value }); dismissMenu("selection"); }}>
                         <span><strong>{option.label}{option.value === selectedModel.defaultReasoningEffort ? " · Default" : ""}</strong><small>{option.description}</small></span>
                         {selectedReasoning === option.value && <span className="option-check" />}
                       </button>
@@ -252,13 +260,13 @@ export function Composer({
             )}
 
             <div className="popover-anchor">
-              <button type="button" className={clsx("composer-pill", menu === "mode" && "is-active")} aria-expanded={menu === "mode"} onClick={() => setMenu(menu === "mode" ? null : "mode")}>
+              <button ref={(node) => setMenuTrigger("mode", node)} type="button" className={clsx("composer-pill", menu === "mode" && "is-active")} aria-label="Choose work mode" aria-haspopup="menu" aria-controls={menuId("mode")} aria-expanded={menu === "mode"} onClick={() => toggleMenu("mode")}>
                 <span>{conversation.interactionMode === "build" ? "Build" : "Plan"}</span><ChevronDown size={12} />
               </button>
               {menu === "mode" && (
-                <div className="composer-popover option-popover" role="menu" aria-label="Work mode">
+                <div ref={(node) => setMenuPopover("mode", node)} id={menuId("mode")} className="composer-popover option-popover" role="menu" aria-label="Work mode">
                   {(["build", "plan"] as InteractionMode[]).map((mode) => (
-                    <button type="button" role="menuitemradio" aria-checked={conversation.interactionMode === mode} key={mode} onClick={() => { onUpdateConversation({ interactionMode: mode }); setMenu(null); }}>
+                    <button type="button" role="menuitemradio" aria-checked={conversation.interactionMode === mode} key={mode} onClick={() => { onUpdateConversation({ interactionMode: mode }); dismissMenu("selection"); }}>
                       <span><strong>{mode === "build" ? "Build" : "Plan"}</strong><small>{mode === "build" ? "Work directly in the project" : "Inspect and propose steps first"}</small></span>
                       {conversation.interactionMode === mode && <span className="option-check" />}
                     </button>
@@ -268,14 +276,14 @@ export function Composer({
             </div>
 
             <div className="popover-anchor access-control">
-              <button type="button" className={clsx("composer-pill", menu === "access" && "is-active")} aria-expanded={menu === "access"} onClick={() => setMenu(menu === "access" ? null : "access")}>
+              <button ref={(node) => setMenuTrigger("access", node)} type="button" className={clsx("composer-pill", menu === "access" && "is-active")} aria-label="Choose project access" aria-haspopup="menu" aria-controls={menuId("access")} aria-expanded={menu === "access"} onClick={() => toggleMenu("access")}>
                 <ShieldCheck size={14} /><span>{access.label}</span><ChevronDown size={12} />
               </button>
               {menu === "access" && (
-                <div className="composer-popover access-popover" role="menu" aria-label="Project access">
+                <div ref={(node) => setMenuPopover("access", node)} id={menuId("access")} className="composer-popover access-popover" role="menu" aria-label="Project access">
                   <div className="popover-title">Project access</div>
                   {accessOptions.map((option) => (
-                    <button type="button" role="menuitemradio" aria-checked={conversation.accessMode === option.value} key={option.value} onClick={() => { onUpdateConversation({ accessMode: option.value }); setMenu(null); }}>
+                    <button type="button" role="menuitemradio" aria-checked={conversation.accessMode === option.value} key={option.value} onClick={() => { onUpdateConversation({ accessMode: option.value }); dismissMenu("selection"); }}>
                       <span><strong>{option.label}</strong><small>{option.description}</small></span>
                       {conversation.accessMode === option.value && <span className="option-check" />}
                     </button>

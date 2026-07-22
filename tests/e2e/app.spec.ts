@@ -184,6 +184,88 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
+test("dismisses and switches Composer menus without forcing a selection", async () => {
+  await resizeWindow(1440, 920);
+  const providerTrigger = page.getByRole("button", { name: "Choose provider and model" });
+  const providerMenu = page.getByRole("menu", { name: "Provider and model" });
+
+  await providerTrigger.click();
+  await expect(providerTrigger).toHaveAttribute("aria-expanded", "true");
+  await expect(providerTrigger).toHaveAttribute("aria-controls", "composer-provider-menu");
+  await expect(providerMenu).toBeVisible();
+
+  await providerMenu.getByText("Provider", { exact: true }).click();
+  await expect(providerMenu).toBeVisible();
+
+  await page.locator(".workspace-header").click({ position: { x: 12, y: 12 } });
+  await expect(providerMenu).toBeHidden();
+  await expect(providerTrigger).toHaveAttribute("aria-expanded", "false");
+
+  await providerTrigger.click();
+  await page.keyboard.press("Escape");
+  await expect(providerMenu).toBeHidden();
+  await expect(providerTrigger).toBeFocused();
+
+  await providerTrigger.click();
+  const modeTrigger = page.getByRole("button", { name: "Choose work mode" });
+  const modeMenu = page.getByRole("menu", { name: "Work mode" });
+  await modeTrigger.click();
+  await expect(providerMenu).toBeHidden();
+  await expect(modeMenu).toBeVisible();
+
+  const currentMode = await modeTrigger.locator("span").first().textContent();
+  const nextMode = currentMode === "Build" ? "Plan" : "Build";
+  await modeMenu.getByRole("menuitemradio", { name: new RegExp(`^${nextMode}`) }).click();
+  await expect(modeMenu).toBeHidden();
+  await expect(modeTrigger).toBeFocused();
+  await expect(modeTrigger.locator("span").first()).toHaveText(nextMode);
+  expect(rendererErrors).toEqual([]);
+});
+
+test("keeps the macOS brand in the native titlebar row and navigates it home", async ({}, testInfo) => {
+  await resizeWindow(1440, 920);
+  const shell = page.locator(".app-shell");
+  const brand = page.getByRole("button", { name: "Go to workspace" });
+  await expect(shell).toHaveClass(new RegExp(`platform-${process.platform}`));
+
+  if (process.platform === "darwin") {
+    const geometry = await page.evaluate(() => {
+      const row = document.querySelector(".sidebar-brand")?.getBoundingClientRect();
+      const lockup = document.querySelector(".brand-lockup");
+      const logo = document.querySelector(".brand-logo");
+      const markStyles = lockup ? getComputedStyle(lockup, "::before") : null;
+      const logoStyles = logo ? getComputedStyle(logo) : null;
+      return row && markStyles && logoStyles ? {
+        row: { top: row.top, height: row.height },
+        mark: { width: markStyles.width, height: markStyles.height, maskImage: markStyles.maskImage },
+        logoDisplay: logoStyles.display,
+      } : null;
+    });
+    expect(geometry).not.toBeNull();
+    expect(geometry?.row.top).toBeCloseTo(12, 0);
+    expect(geometry?.row.height).toBeLessThanOrEqual(30);
+    expect(geometry?.mark.width).toBe("20px");
+    expect(geometry?.mark.height).toBe("20px");
+    expect(geometry?.mark.maskImage).toContain("inertia-logo.png");
+    expect(geometry?.logoDisplay).toBe("none");
+    await page.screenshot({ path: testInfo.outputPath("v004-brand-wide.png") });
+
+    await resizeWindow(760, 640);
+    await page.getByRole("button", { name: "Toggle project navigation" }).click();
+    await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: testInfo.outputPath("v004-brand-compact.png") });
+    await page.getByRole("button", { name: "Close navigation" }).last().click();
+    await resizeWindow(1440, 920);
+  }
+
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+  await brand.click();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  expect(rendererErrors).toEqual([]);
+});
+
 test("opens the command palette and manages a thread", async () => {
   await resizeWindow(1440, 920);
   await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");

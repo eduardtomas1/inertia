@@ -226,7 +226,46 @@ textarea {
 }
 
 .platform-darwin .sidebar-brand {
-  padding-left: 69px;
+  min-height: 28px;
+  margin-bottom: 28px;
+  padding-left: 70px;
+}
+
+.platform-darwin .brand-lockup {
+  gap: 7px;
+  padding: 2px 4px 2px 2px;
+  border-radius: 7px;
+}
+
+.platform-darwin .brand-lockup:hover {
+  background: color-mix(in srgb, var(--surface-hover) 46%, transparent);
+}
+
+.platform-darwin .brand-lockup::before {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  content: "";
+  background: currentColor;
+  -webkit-mask-image: url("/inertia-logo.png");
+  mask-image: url("/inertia-logo.png");
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  mask-mode: luminance;
+}
+
+.platform-darwin .brand-logo {
+  display: none;
+}
+
+.platform-darwin .brand-name {
+  font-size: 13px;
+  font-weight: 660;
+  letter-spacing: -0.005em;
 }
 
 .brand-lockup {
@@ -3014,10 +3053,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   .mobile-close,
   .menu-button {
     display: inline-grid;
-  }
-
-  .platform-darwin .sidebar-brand {
-    padding-left: 69px;
   }
 
   .workspace-shell {

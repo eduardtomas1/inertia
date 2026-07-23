@@ -1,8 +1,10 @@
 import { constants as fsConstants } from "node:fs";
-import { access, lstat, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, parse, relative, resolve, sep } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { access, chmod, lstat, open, readFile, realpath, rename, stat, unlink } from "node:fs/promises";
+import { basename, dirname, isAbsolute, parse, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
-import { parseUnifiedDiff } from "../shared/diff-review";
+import type { DiffLine, DiffReversalOperation, DiffReversalPlan, DiffReversalValidation } from "../shared/contracts";
+import { parseUnifiedDiff, sha256 } from "../shared/diff-review";
 
 const DEFAULT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_DIFF_BYTES = 512 * 1024;
@@ -95,6 +97,12 @@ export interface GitDiffSelection {
   hunkId: string;
   lineIds: readonly string[];
   ignoreWhitespace?: boolean;
+  expected?: DiffReversalValidation;
+}
+
+export interface GitDiffReversalResult {
+  diff: GitUnifiedDiff;
+  operation: DiffReversalOperation;
 }
 
 export interface GitBranch {
@@ -135,6 +143,7 @@ interface RunOptions {
   timeoutMs?: number;
   maxOutputBytes?: number;
   truncateOutput?: boolean;
+  input?: Buffer;
   failureMessage: string;
 }
 
@@ -215,7 +224,7 @@ function runGit(cwd: string, args: readonly string[], options: RunOptions): Prom
       cwd,
       shell: false,
       windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: "0",
@@ -243,8 +252,12 @@ function runGit(cwd: string, args: readonly string[], options: RunOptions): Prom
       finish(new GitError("timeout", "Git took too long to complete the operation."));
     }, timeoutMs);
     timer.unref();
+    if (options.input && child.stdin) {
+      child.stdin.on("error", () => undefined);
+      child.stdin.end(options.input);
+    }
 
-    child.stdout.on("data", (chunk: Buffer) => {
+    child.stdout!.on("data", (chunk: Buffer) => {
       if (truncated) return;
       const remaining = maxOutputBytes - stdoutBytes;
       if (chunk.length <= remaining) {
@@ -257,7 +270,7 @@ function runGit(cwd: string, args: readonly string[], options: RunOptions): Prom
       truncated = true;
       child.kill("SIGKILL");
     });
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
       if (stderrBytes >= STDERR_BYTES) return;
       const part = chunk.subarray(0, STDERR_BYTES - stderrBytes);
       stderr.push(part);
@@ -579,50 +592,560 @@ export async function getUnifiedDiff(repositoryPath: string, options: GitDiffOpt
   return { text, filesIncluded: selected.length, totalFiles: candidates.length, truncated };
 }
 
-export async function revertDiffSelection(repositoryPath: string, selection: GitDiffSelection): Promise<GitUnifiedDiff> {
-  const root = await repositoryRoot(repositoryPath);
-  const current = await getUnifiedDiff(root, { ignoreWhitespace: selection.ignoreWhitespace });
+const REVERSAL_REF_PREFIX = "refs/inertia/reversals";
+
+interface IndexEntry {
+  mode: string;
+  oid: string;
+  content: Buffer;
+}
+
+interface ReversalState {
+  root: string;
+  plan: DiffReversalPlan;
+  absolute: string;
+  worktreeMode: number;
+  worktreeContent: Buffer;
+  index: IndexEntry;
+  selectedWorktreeLines: DiffLine[];
+  selectedIndexLines: DiffLine[];
+}
+
+interface ReversalBackup {
+  version: 1;
+  id: string;
+  path: string;
+  createdAt: string;
+  preWorktreeOid: string;
+  preWorktreeMode: number;
+  preIndexOid: string;
+  preIndexMode: string;
+  postWorktreeOid: string;
+  postWorktreeMode: number;
+  postIndexOid: string;
+  postIndexMode: string;
+  selectedLineCount: number;
+  affectedLayers: Array<"index" | "worktree">;
+}
+
+function bufferHash(content: Buffer): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function textBuffer(content: Buffer): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(content);
+  } catch {
+    throw new GitError("invalid-input", "Selective reversal supports UTF-8 text files only.");
+  }
+}
+
+async function completeRepositoryDiff(root: string, ignoreWhitespace = false): Promise<GitUnifiedDiff> {
+  const diff = await getUnifiedDiff(root, {
+    maxBytes: MAX_DIFF_BYTES,
+    maxFiles: MAX_DIFF_FILES,
+    ignoreWhitespace,
+  });
+  if (diff.truncated) {
+    throw new GitError("output-limit", "The complete repository diff is too large to reverse safely. Narrow the change set first.");
+  }
+  return diff;
+}
+
+async function completeLayerPatch(root: string, layer: "index" | "worktree", path?: string, ignoreWhitespace = false): Promise<string> {
+  const args = [
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--binary",
+    "--full-index",
+    "--unified=3",
+    ...(ignoreWhitespace ? ["--ignore-all-space"] : []),
+    ...(layer === "index" ? ["--cached", "HEAD"] : []),
+    "--",
+    ...(path ? [path] : []),
+  ];
+  try {
+    const result = await runGit(root, args, {
+      maxOutputBytes: MAX_DIFF_BYTES,
+      failureMessage: `Unable to inspect the ${layer === "index" ? "Git index" : "working tree"}.`,
+    });
+    return result.stdout.toString("utf8");
+  } catch (error) {
+    if (error instanceof GitError && error.code === "output-limit") {
+      throw new GitError("output-limit", "The staged or unstaged diff is too large to reverse safely. Narrow the change set first.");
+    }
+    throw error;
+  }
+}
+
+async function repositoryStateFingerprint(root: string): Promise<string> {
+  const [combined, staged, unstaged, status] = await Promise.all([
+    completeRepositoryDiff(root),
+    completeLayerPatch(root, "index"),
+    completeLayerPatch(root, "worktree"),
+    runGit(root, ["status", "--porcelain=v2", "-z", "--untracked-files=all"], {
+      maxOutputBytes: MAX_DIFF_BYTES,
+      failureMessage: "Unable to validate the repository state.",
+    }),
+  ]);
+  return sha256([
+    combined.text,
+    staged,
+    unstaged,
+    status.stdout.toString("utf8"),
+  ].join("\0"));
+}
+
+async function readIndexEntry(root: string, path: string): Promise<IndexEntry> {
+  const listed = await runGit(root, ["ls-files", "--stage", "-z", "--", path], {
+    maxOutputBytes: MAX_PATH_LENGTH + 256,
+    failureMessage: "Unable to inspect the selected file in the Git index.",
+  });
+  const records = listed.stdout.toString("utf8").split("\0").filter(Boolean);
+  if (records.length !== 1) throw new GitError("conflict", "The selected file does not have one resolved Git index entry.");
+  const match = /^([0-7]{6}) ([0-9a-f]{40,64}) 0\t([\s\S]+)$/u.exec(records[0]!);
+  if (!match || match[3] !== path) throw new GitError("conflict", "The selected file has an unsupported or unresolved Git index state.");
+  const content = await runGit(root, ["cat-file", "blob", match[2]!], {
+    maxOutputBytes: MAX_DIFF_BYTES,
+    failureMessage: "Unable to read the selected staged file.",
+  });
+  return { mode: match[1]!, oid: match[2]!, content: content.stdout };
+}
+
+function selectedLineSignature(line: DiffLine): string {
+  if (line.kind === "deletion") return `deletion\0${line.oldLineNumber ?? -1}\0${line.content}`;
+  return `addition\0${line.oldInsertionIndex}\0${line.content}`;
+}
+
+function reversalText(source: Buffer, selected: readonly DiffLine[]): Buffer {
+  const text = textBuffer(source);
+  if (text.includes("\0")) throw new GitError("invalid-input", "Binary files cannot be reverted by selection.");
+  const newline = text.includes("\r\n") ? "\r\n" : "\n";
+  let trailingNewline = text.endsWith("\n");
+  const body = trailingNewline ? text.slice(0, text.length - newline.length) : text;
+  const fileLines = body ? body.split(newline) : [];
+
+  const ordered = selected
+    .map((line, order) => ({
+      line,
+      order,
+      position: line.kind === "addition" ? (line.newLineNumber ?? 1) - 1 : line.newInsertionIndex,
+    }))
+    .sort((left, right) => left.position - right.position || left.order - right.order)
+    .map(({ line }) => line);
+  for (const line of ordered.reverse()) {
+    if (line.kind === "addition") {
+      const index = (line.newLineNumber ?? 0) - 1;
+      if (index < 0 || index >= fileLines.length || fileLines[index] !== line.content) {
+        throw new GitError("conflict", "The selected lines no longer match the file or Git layer. Refresh the diff and try again.");
+      }
+      const removedFinalLine = index === fileLines.length - 1;
+      fileLines.splice(index, 1);
+      if (removedFinalLine && line.noFinalNewline) trailingNewline = fileLines.length > 0;
+    } else if (line.kind === "deletion") {
+      const index = Math.max(0, Math.min(line.newInsertionIndex, fileLines.length));
+      fileLines.splice(index, 0, line.content);
+      if (index === fileLines.length - 1 && line.noFinalNewline) trailingNewline = false;
+    }
+  }
+  const next = `${fileLines.join(newline)}${trailingNewline && fileLines.length > 0 ? newline : ""}`;
+  return Buffer.from(next, "utf8");
+}
+
+function hunkFingerprint(header: string, lines: readonly DiffLine[]): string {
+  return sha256(JSON.stringify({
+    header,
+    lines: lines.map((line) => ({
+      id: line.id,
+      kind: line.kind,
+      content: line.content,
+      patchLine: line.patchLine,
+      oldLineNumber: line.oldLineNumber,
+      newLineNumber: line.newLineNumber,
+      oldInsertionIndex: line.oldInsertionIndex,
+      newInsertionIndex: line.newInsertionIndex,
+      noFinalNewline: line.noFinalNewline ?? false,
+    })),
+  }));
+}
+
+async function buildReversalState(root: string, selection: GitDiffSelection): Promise<ReversalState> {
+  if (!(await hasHead(root))) throw new GitError("invalid-input", "Selective reversal requires a repository with an initial commit.");
+  const status = await getRepositoryStatus(root);
+  if (status.truncated) throw new GitError("output-limit", "The complete Git status is too large to validate safely.");
+  const statusFile = status.files.find((candidate) => candidate.path === selection.filePath);
+  if (!statusFile) throw new GitError("not-found", "The selected file is no longer changed.");
+  if (statusFile.status === "unmerged") throw new GitError("conflict", "Resolve this file's Git conflict before selectively reverting it.");
+  if (statusFile.status === "renamed" || statusFile.status === "copied") {
+    throw new GitError("invalid-input", "Renamed and copied files must be reverted as a whole so both paths remain consistent.");
+  }
+  if (statusFile.status === "deleted") throw new GitError("invalid-input", "Deleted files must be restored as a whole from source control.");
+  if (statusFile.status === "untracked" || statusFile.status === "added") {
+    throw new GitError("invalid-input", "New and untracked files must be removed or edited directly; selective Git reversal is unavailable.");
+  }
+  if (statusFile.status === "type-changed") {
+    throw new GitError("invalid-input", "Type-changed files must be restored as a whole from source control.");
+  }
+  if (statusFile.status !== "modified" || ![".", "M"].includes(statusFile.indexStatus) || ![".", "M"].includes(statusFile.worktreeStatus)) {
+    throw new GitError("invalid-input", "This file's Git state is not supported for selective reversal.");
+  }
+
+  const stateBefore = await repositoryStateFingerprint(root);
+  const current = await completeRepositoryDiff(root, selection.ignoreWhitespace);
   const structured = parseUnifiedDiff(current.text);
   if (structured.fingerprint !== selection.fingerprint) {
-    throw new GitError("conflict", "The changes moved since this selection was made. Refresh the diff and try again.");
+    throw new GitError("conflict", "The complete diff changed since this selection was made. Refresh the diff and try again.");
   }
   const file = structured.files.find((candidate) => candidate.path === selection.filePath);
   const hunk = file?.hunks.find((candidate) => candidate.id === selection.hunkId);
   if (!file || !hunk) throw new GitError("not-found", "The selected diff hunk is no longer available.");
-
   const selectedIds = new Set(selection.lineIds);
-  const selected = hunk.lines.filter((line) => selectedIds.has(line.id) && (line.kind === "addition" || line.kind === "deletion"));
-  if (selected.length === 0) throw new GitError("invalid-input", "Select at least one added or removed line to revert.");
+  if (selectedIds.size !== selection.lineIds.length || hunk.lines.filter((line) => selectedIds.has(line.id)).length !== selectedIds.size) {
+    throw new GitError("conflict", "The selected line range no longer matches the complete current hunk.");
+  }
+  const selectedAll = hunk.lines.filter((line) => selectedIds.has(line.id));
+  const selectedWorktreeLines = selectedAll.filter((line) => line.kind === "addition" || line.kind === "deletion");
+  if (selectedWorktreeLines.length === 0) throw new GitError("invalid-input", "Select at least one added or removed line to revert.");
+
   const validated = await validatedPaths(root, [file.path]);
   const absolute = resolve(root, validated[0]!);
   let info: Awaited<ReturnType<typeof lstat>>;
   try { info = await lstat(absolute); }
-  catch { throw new GitError("conflict", "Deleted files must be restored as a whole from source control."); }
-  if (!info.isFile() || info.isSymbolicLink()) throw new GitError("invalid-input", "Only regular text files can be reverted by selection.");
+  catch { throw new GitError("conflict", "The selected file disappeared before it could be validated."); }
+  if (info.isSymbolicLink()) throw new GitError("invalid-input", "Symbolic links must be restored as a whole from source control.");
+  if (!info.isFile()) throw new GitError("invalid-input", "Only regular text files can be reverted by selection.");
+  if (info.size > MAX_DIFF_BYTES) throw new GitError("output-limit", "The selected file is too large to reverse safely.");
 
-  const source = await readFile(absolute, "utf8");
-  if (source.includes("\0")) throw new GitError("invalid-input", "Binary files cannot be reverted by selection.");
-  const newline = source.includes("\r\n") ? "\r\n" : "\n";
-  const trailingNewline = source.endsWith("\n");
-  const body = trailingNewline ? source.replace(/\r?\n$/u, "") : source;
-  const fileLines = body ? body.split(/\r?\n/u) : [];
-
-  for (const line of [...selected].reverse()) {
-    if (line.kind === "addition") {
-      const index = (line.newLineNumber ?? 0) - 1;
-      if (index < 0 || index >= fileLines.length || fileLines[index] !== line.content) {
-        throw new GitError("conflict", "The selected lines no longer match the file. Refresh the diff and try again.");
-      }
-      fileLines.splice(index, 1);
-    } else {
-      const index = Math.max(0, Math.min(line.newInsertionIndex, fileLines.length));
-      fileLines.splice(index, 0, line.content);
+  const [worktreeContent, index, stagedPatch] = await Promise.all([
+    readFile(absolute),
+    readIndexEntry(root, file.path),
+    completeLayerPatch(root, "index", file.path, selection.ignoreWhitespace),
+  ]);
+  textBuffer(worktreeContent);
+  textBuffer(index.content);
+  const stagedFile = parseUnifiedDiff(stagedPatch).files.find((candidate) => candidate.path === file.path);
+  const stagedCandidates = stagedFile?.hunks.flatMap((candidate) => candidate.lines)
+    .filter((line) => line.kind === "addition" || line.kind === "deletion") ?? [];
+  const fullCandidates = file.hunks.flatMap((candidate) => candidate.lines)
+    .filter((line) => line.kind === "addition" || line.kind === "deletion");
+  const usedStaged = new Set<string>();
+  const stagedByFullId = new Map<string, DiffLine>();
+  for (const line of fullCandidates) {
+    const signature = selectedLineSignature(line);
+    const match = stagedCandidates.find((candidate) => !usedStaged.has(candidate.id) && selectedLineSignature(candidate) === signature);
+    if (match) {
+      usedStaged.add(match.id);
+      stagedByFullId.set(line.id, match);
     }
   }
+  const anchors = new Set(fullCandidates.filter((line) => line.kind === "addition").map((line) => line.oldInsertionIndex));
+  for (const anchor of anchors) {
+    const unmatchedFull = fullCandidates.filter((line) => line.kind === "addition" && line.oldInsertionIndex === anchor && !stagedByFullId.has(line.id));
+    const unmatchedStaged = stagedCandidates.filter((line) => line.kind === "addition" && line.oldInsertionIndex === anchor && !usedStaged.has(line.id));
+    if (unmatchedFull.length === unmatchedStaged.length) {
+      unmatchedFull.forEach((line, index) => {
+        const staged = unmatchedStaged[index];
+        if (staged) {
+          stagedByFullId.set(line.id, staged);
+          usedStaged.add(staged.id);
+        }
+      });
+    } else if (
+      unmatchedStaged.length > 0
+      && unmatchedFull.some((line) => selectedWorktreeLines.some((selected) => selected.id === line.id))
+    ) {
+      throw new GitError("invalid-input", "This selected addition overlaps differently staged content and cannot be reversed without risking unrelated index changes.");
+    }
+  }
+  const selectedIndexLines = selectedWorktreeLines.flatMap((line) => {
+    const staged = stagedByFullId.get(line.id);
+    return staged ? [staged] : [];
+  });
+  // Validate both transformations before exposing the plan.
+  reversalText(worktreeContent, selectedWorktreeLines);
+  if (selectedIndexLines.length > 0) reversalText(index.content, selectedIndexLines);
 
-  const next = `${fileLines.join(newline)}${trailingNewline ? newline : ""}`;
-  await writeFile(absolute, next, "utf8");
-  return await getUnifiedDiff(root, { ignoreWhitespace: selection.ignoreWhitespace });
+  const stateAfter = await repositoryStateFingerprint(root);
+  if (stateAfter !== stateBefore) throw new GitError("conflict", "The repository changed while the reversal was being inspected. Refresh and try again.");
+  const affectedLayers: Array<"index" | "worktree"> = [
+    ...(selectedIndexLines.length > 0 ? ["index" as const] : []),
+    "worktree",
+  ];
+  const validation: DiffReversalValidation = {
+    diffFingerprint: structured.fingerprint,
+    fileFingerprint: bufferHash(worktreeContent),
+    hunkFingerprint: hunkFingerprint(hunk.header, hunk.lines),
+    selectionFingerprint: sha256(JSON.stringify(selectedAll.map((line) => ({
+      id: line.id,
+      kind: line.kind,
+      content: line.content,
+      patchLine: line.patchLine,
+    })))),
+    gitStateFingerprint: stateAfter,
+  };
+  return {
+    root,
+    absolute,
+    worktreeMode: info.mode,
+    worktreeContent,
+    index,
+    selectedWorktreeLines,
+    selectedIndexLines,
+    plan: {
+      filePath: file.path,
+      hunkId: hunk.id,
+      hunkHeader: hunk.header,
+      selectedLineCount: selectedAll.length,
+      changedLineCount: selectedWorktreeLines.length,
+      affectedLayers,
+      validation,
+    },
+  };
+}
+
+function sameValidation(left: DiffReversalValidation, right: DiffReversalValidation): boolean {
+  return left.diffFingerprint === right.diffFingerprint
+    && left.fileFingerprint === right.fileFingerprint
+    && left.hunkFingerprint === right.hunkFingerprint
+    && left.selectionFingerprint === right.selectionFingerprint
+    && left.gitStateFingerprint === right.gitStateFingerprint;
+}
+
+async function hashObject(root: string, content: Buffer): Promise<string> {
+  const result = await runGit(root, ["hash-object", "-w", "--stdin"], {
+    input: content,
+    maxOutputBytes: 256,
+    failureMessage: "Unable to create a reversible Git backup.",
+  });
+  const oid = result.stdout.toString("utf8").trim();
+  if (!/^[0-9a-f]{40,64}$/u.test(oid)) throw new GitError("operation-failed", "Git returned an invalid backup object.");
+  return oid;
+}
+
+async function setBackupRef(root: string, ref: string, oid: string): Promise<void> {
+  await runGit(root, ["update-ref", ref, oid], {
+    maxOutputBytes: 256,
+    failureMessage: "Unable to create a reversible Git backup.",
+  });
+}
+
+async function deleteBackupRef(root: string, ref: string): Promise<void> {
+  await runGit(root, ["update-ref", "-d", ref], {
+    maxOutputBytes: 256,
+    failureMessage: "Unable to clean up a reversal backup.",
+  }).catch(() => undefined);
+}
+
+async function createReversalBackup(
+  state: ReversalState,
+  nextWorktree: Buffer,
+  nextIndex: Buffer,
+): Promise<ReversalBackup> {
+  const id = randomUUID();
+  const prefix = `${REVERSAL_REF_PREFIX}/${id}`;
+  const [preWorktreeOid, postWorktreeOid, postIndexOid] = await Promise.all([
+    hashObject(state.root, state.worktreeContent),
+    hashObject(state.root, nextWorktree),
+    state.selectedIndexLines.length > 0 ? hashObject(state.root, nextIndex) : Promise.resolve(state.index.oid),
+  ]);
+  const backup: ReversalBackup = {
+    version: 1,
+    id,
+    path: state.plan.filePath,
+    createdAt: new Date().toISOString(),
+    preWorktreeOid,
+    preWorktreeMode: state.worktreeMode,
+    preIndexOid: state.index.oid,
+    preIndexMode: state.index.mode,
+    postWorktreeOid,
+    postWorktreeMode: state.worktreeMode,
+    postIndexOid,
+    postIndexMode: state.index.mode,
+    selectedLineCount: state.plan.selectedLineCount,
+    affectedLayers: state.plan.affectedLayers,
+  };
+  const metadataOid = await hashObject(state.root, Buffer.from(JSON.stringify(backup), "utf8"));
+  try {
+    await setBackupRef(state.root, `${prefix}/worktree`, preWorktreeOid);
+    await setBackupRef(state.root, `${prefix}/index`, state.index.oid);
+    await setBackupRef(state.root, `${prefix}/meta`, metadataOid);
+    return backup;
+  } catch (error) {
+    await Promise.all([
+      deleteBackupRef(state.root, `${prefix}/worktree`),
+      deleteBackupRef(state.root, `${prefix}/index`),
+      deleteBackupRef(state.root, `${prefix}/meta`),
+    ]);
+    throw error;
+  }
+}
+
+async function updateIndexEntry(root: string, path: string, mode: string, oid: string): Promise<void> {
+  await runGit(root, ["update-index", "--cacheinfo", mode, oid, path], {
+    maxOutputBytes: 256,
+    failureMessage: "Unable to update the selected file in the Git index.",
+  });
+}
+
+async function writeAtomic(root: string, path: string, content: Buffer, mode: number): Promise<void> {
+  let canonicalParent: string;
+  try { canonicalParent = await realpath(dirname(path)); }
+  catch { throw new GitError("conflict", "The selected file's parent folder is no longer available."); }
+  if (!isContained(root, canonicalParent)) throw new GitError("conflict", "The selected file's parent folder moved outside the repository.");
+  const temporary = resolve(dirname(path), `.${basename(path)}.inertia-${randomUUID()}.tmp`);
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    handle = await open(temporary, "wx", mode & 0o777);
+    await handle.writeFile(content);
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await chmod(temporary, mode & 0o777);
+    await rename(temporary, path);
+    try {
+      const directory = await open(dirname(path), fsConstants.O_RDONLY);
+      try { await directory.sync(); } finally { await directory.close(); }
+    } catch {
+      // Some platforms do not support syncing directory handles.
+    }
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporary).catch(() => undefined);
+  }
+}
+
+async function fileStateMatches(root: string, absolute: string, path: string, worktreeOid: string, worktreeMode: number, indexOid: string, indexMode: string): Promise<boolean> {
+  try {
+    const [info, content, index] = await Promise.all([lstat(absolute), readFile(absolute), readIndexEntry(root, path)]);
+    return info.isFile()
+      && !info.isSymbolicLink()
+      && (info.mode & 0o777) === (worktreeMode & 0o777)
+      && (await hashObject(root, content)) === worktreeOid
+      && index.oid === indexOid
+      && index.mode === indexMode;
+  } catch {
+    return false;
+  }
+}
+
+export async function inspectDiffSelection(repositoryPath: string, selection: GitDiffSelection): Promise<DiffReversalPlan> {
+  const root = await repositoryRoot(repositoryPath);
+  return (await buildReversalState(root, selection)).plan;
+}
+
+export async function revertDiffSelection(repositoryPath: string, selection: GitDiffSelection): Promise<GitDiffReversalResult> {
+  const root = await repositoryRoot(repositoryPath);
+  if (!selection.expected) throw new GitError("invalid-input", "Inspect the selected reversal before applying it.");
+  const state = await buildReversalState(root, selection);
+  if (!sameValidation(state.plan.validation, selection.expected)) {
+    throw new GitError("conflict", "The diff, file, hunk, selected lines, or staged state changed after confirmation. Refresh and try again.");
+  }
+  const nextWorktree = reversalText(state.worktreeContent, state.selectedWorktreeLines);
+  const nextIndex = state.selectedIndexLines.length > 0
+    ? reversalText(state.index.content, state.selectedIndexLines)
+    : state.index.content;
+  const backup = await createReversalBackup(state, nextWorktree, nextIndex);
+  if ((await repositoryStateFingerprint(root)) !== state.plan.validation.gitStateFingerprint) {
+    throw new GitError("conflict", "The repository changed immediately before the reversal. No files were changed.");
+  }
+  const nextIndexOid = state.selectedIndexLines.length > 0 ? await hashObject(root, nextIndex) : state.index.oid;
+  let indexUpdated = false;
+  let worktreeUpdated = false;
+  try {
+    if (state.selectedIndexLines.length > 0) {
+      await updateIndexEntry(root, state.plan.filePath, state.index.mode, nextIndexOid);
+      indexUpdated = true;
+    }
+    await writeAtomic(root, state.absolute, nextWorktree, state.worktreeMode);
+    worktreeUpdated = true;
+    if (!(await fileStateMatches(root, state.absolute, state.plan.filePath, backup.postWorktreeOid, backup.postWorktreeMode, backup.postIndexOid, backup.postIndexMode))) {
+      throw new GitError("conflict", "Git could not verify the completed reversal; the original file state was restored.");
+    }
+  } catch (error) {
+    if (indexUpdated) await updateIndexEntry(root, state.plan.filePath, state.index.mode, state.index.oid).catch(() => undefined);
+    if (worktreeUpdated) await writeAtomic(root, state.absolute, state.worktreeContent, state.worktreeMode).catch(() => undefined);
+    throw error;
+  }
+  return {
+    diff: await completeRepositoryDiff(root, selection.ignoreWhitespace),
+    operation: {
+      id: backup.id,
+      filePath: backup.path,
+      selectedLineCount: backup.selectedLineCount,
+      affectedLayers: backup.affectedLayers,
+      createdAt: backup.createdAt,
+    },
+  };
+}
+
+function parsedBackup(value: unknown, operationId: string): ReversalBackup {
+  if (!value || typeof value !== "object") throw new GitError("not-found", "This reversal backup is unavailable.");
+  const backup = value as Partial<ReversalBackup>;
+  if (
+    backup.version !== 1
+    || backup.id !== operationId
+    || typeof backup.path !== "string"
+    || typeof backup.createdAt !== "string"
+    || typeof backup.preWorktreeOid !== "string"
+    || typeof backup.preIndexOid !== "string"
+    || typeof backup.postWorktreeOid !== "string"
+    || typeof backup.postIndexOid !== "string"
+    || typeof backup.preWorktreeMode !== "number"
+    || typeof backup.postWorktreeMode !== "number"
+    || typeof backup.preIndexMode !== "string"
+    || typeof backup.postIndexMode !== "string"
+    || typeof backup.selectedLineCount !== "number"
+    || !Array.isArray(backup.affectedLayers)
+  ) {
+    throw new GitError("not-found", "This reversal backup is unreadable.");
+  }
+  return backup as ReversalBackup;
+}
+
+export async function undoDiffSelection(repositoryPath: string, operationId: string): Promise<GitUnifiedDiff> {
+  if (!/^[0-9a-f-]{36}$/u.test(operationId)) throw new GitError("invalid-input", "The reversal operation ID is invalid.");
+  const root = await repositoryRoot(repositoryPath);
+  const prefix = `${REVERSAL_REF_PREFIX}/${operationId}`;
+  const metadata = await runGit(root, ["cat-file", "blob", `${prefix}/meta`], {
+    maxOutputBytes: 16 * 1024,
+    failureMessage: "This reversal backup is unavailable.",
+  });
+  let decoded: unknown;
+  try { decoded = JSON.parse(metadata.stdout.toString("utf8")); }
+  catch { throw new GitError("not-found", "This reversal backup is unreadable."); }
+  const backup = parsedBackup(decoded, operationId);
+  const [path] = await validatedPaths(root, [backup.path]);
+  const absolute = resolve(root, path!);
+  if (!(await fileStateMatches(root, absolute, path!, backup.postWorktreeOid, backup.postWorktreeMode, backup.postIndexOid, backup.postIndexMode))) {
+    throw new GitError("conflict", "This file or its staged state changed after the reversal, so Undo was not applied.");
+  }
+  const [worktree, postWorktree] = await Promise.all([
+    runGit(root, ["cat-file", "blob", `${prefix}/worktree`], {
+      maxOutputBytes: MAX_DIFF_BYTES,
+      failureMessage: "The working-tree backup is unavailable.",
+    }),
+    runGit(root, ["cat-file", "blob", backup.postWorktreeOid], {
+      maxOutputBytes: MAX_DIFF_BYTES,
+      failureMessage: "The post-reversal recovery object is unavailable.",
+    }),
+  ]);
+  let indexUpdated = false;
+  let worktreeUpdated = false;
+  try {
+    await updateIndexEntry(root, path!, backup.preIndexMode, backup.preIndexOid);
+    indexUpdated = true;
+    await writeAtomic(root, absolute, worktree.stdout, backup.preWorktreeMode);
+    worktreeUpdated = true;
+    if (!(await fileStateMatches(root, absolute, path!, backup.preWorktreeOid, backup.preWorktreeMode, backup.preIndexOid, backup.preIndexMode))) {
+      throw new GitError("conflict", "Git could not verify the restored reversal backup.");
+    }
+  } catch (error) {
+    if (indexUpdated) await updateIndexEntry(root, path!, backup.postIndexMode, backup.postIndexOid).catch(() => undefined);
+    if (worktreeUpdated) await writeAtomic(root, absolute, postWorktree.stdout, backup.postWorktreeMode).catch(() => undefined);
+    throw error;
+  }
+  return await completeRepositoryDiff(root);
 }
 
 function parseBranches(buffer: Buffer, kind: GitBranch["kind"]): GitBranch[] {
@@ -773,6 +1296,9 @@ export async function commitChanges(
   const root = await repositoryRoot(repositoryPath);
   if (typeof message !== "string" || message.trim().length === 0 || message.length > 10_000 || message.includes("\0")) {
     throw new GitError("invalid-input", "Enter a commit message between 1 and 10,000 characters.");
+  }
+  if (paths && paths.length === 0) {
+    throw new GitError("invalid-input", "Select at least one path to commit.");
   }
   const selected = paths ? await validatedPaths(root, paths) : null;
   await runGit(root, ["add", "-A", "--", ...(selected ?? [])], { failureMessage: "Unable to stage the selected changes." });

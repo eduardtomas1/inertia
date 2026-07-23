@@ -62,6 +62,7 @@ function TerminalSession({
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(null);
+  const managedActionTerminalRef = useRef(false);
   const actionInFlightRef = useRef<string | null>(null);
   const pendingOutputRef = useRef(new Map<string, string>());
   const lastSizeRef = useRef({ cols: 0, rows: 0 });
@@ -190,6 +191,7 @@ function TerminalSession({
     if (event.type === "terminal.exit" && event.terminalId === terminalIdRef.current) {
       terminalRef.current?.writeln(`\r\n\x1b[2mProcess exited with code ${event.exitCode}.\x1b[0m`);
       terminalIdRef.current = null;
+      managedActionTerminalRef.current = false;
       setTerminalId(null);
       setSessionState("closed");
     }
@@ -198,6 +200,7 @@ function TerminalSession({
   useEffect(() => {
     if (!instanceReady || status !== "online") {
       terminalIdRef.current = null;
+      managedActionTerminalRef.current = false;
       setTerminalId(null);
       if (status === "offline") setSessionState("error");
       return;
@@ -231,6 +234,7 @@ function TerminalSession({
           return;
         }
         terminalIdRef.current = event.terminalId;
+        managedActionTerminalRef.current = false;
         setTerminalId(event.terminalId);
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
         pendingOutputRef.current.clear();
@@ -248,10 +252,14 @@ function TerminalSession({
     return () => {
       cancelled = true;
       const terminalId = terminalIdRef.current;
+      const managedActionTerminal = managedActionTerminalRef.current;
       terminalIdRef.current = null;
+      managedActionTerminalRef.current = false;
       setTerminalId(null);
       pendingOutputRef.current.clear();
-      if (terminalId) {
+      // Project actions are runtime-managed so checks and preview services can
+      // continue across workspace navigation and remain stoppable by run ID.
+      if (terminalId && !managedActionTerminal) {
         void sendCommand(command({ type: "terminal.close", payload: { terminalId } })).catch(() => undefined);
       }
     };
@@ -271,9 +279,13 @@ function TerminalSession({
       .then((event) => {
         if (event.type !== "terminal.created") throw new Error("The action terminal returned an unexpected response.");
         const previousId = terminalIdRef.current;
+        const previousWasManagedAction = managedActionTerminalRef.current;
         terminalIdRef.current = event.terminalId;
+        managedActionTerminalRef.current = true;
         setTerminalId(event.terminalId);
-        if (previousId) void sendCommand(command({ type: "terminal.close", payload: { terminalId: previousId } })).catch(() => undefined);
+        if (previousId && !previousWasManagedAction) {
+          void sendCommand(command({ type: "terminal.close", payload: { terminalId: previousId } })).catch(() => undefined);
+        }
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
         pendingOutputRef.current.clear();
         terminalRef.current?.clear();
@@ -300,7 +312,7 @@ function TerminalSession({
   };
 
   return (
-    <aside className="terminal-panel" aria-label="Terminal panel" data-terminal-id={terminalId ?? undefined}>
+    <aside className="terminal-panel" aria-label="Terminal panel" data-terminal-id={terminalId ?? undefined} data-terminal-font-size={fontSize}>
       <div className="terminal-header">
         <div className="terminal-title">
           <TerminalSquare size={16} />
@@ -376,18 +388,17 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   };
 
   const closeTerminal = (id: string) => {
-    setTabs((current) => {
-      const next = current.filter((tab) => tab.id !== id);
-      if (next.length === 0) {
-        setActiveId("");
-        setSplit(false);
-        props.onClose();
-        return next;
-      }
-      if (activeId === id) setActiveId(next.at(-1)?.id ?? next[0].id);
-      if (next.length < 2) setSplit(false);
-      return next;
-    });
+    const next = tabs.filter((tab) => tab.id !== id);
+    if (next.length === tabs.length) return;
+    setTabs(next);
+    if (next.length === 0) {
+      setActiveId("");
+      setSplit(false);
+      props.onClose();
+      return;
+    }
+    if (activeId === id) setActiveId(next.at(-1)!.id);
+    if (next.length < 2) setSplit(false);
   };
 
   const splitTerminal = () => {
@@ -403,7 +414,7 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     <aside className="terminal-tabs-panel" aria-label="Terminal panel" hidden={!props.visible}>
       <header className="terminal-tabbar">
         <div className="terminal-tablist" role="tablist" aria-label="Terminals">
-          {tabs.map((tab) => <div role="tab" aria-selected={tab.id === activeId} className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}><button type="button" onClick={() => setActiveId(tab.id)}><TerminalSquare size={13} /><span>{tab.label}</span></button><button type="button" aria-label={`Close ${tab.label}`} onClick={() => closeTerminal(tab.id)}><X size={11} /></button></div>)}
+          {tabs.map((tab) => <div className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}><button type="button" id={`terminal-tab-${tab.id}`} role="tab" aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)} onClick={() => setActiveId(tab.id)}><TerminalSquare size={13} /><span>{tab.label}</span></button><button type="button" aria-label={`Close ${tab.label}`} onClick={() => closeTerminal(tab.id)}><X size={11} /></button></div>)}
         </div>
         <div className="terminal-tab-actions"><IconButton label="New terminal" onClick={() => addTerminal()}><Plus size={14} /></IconButton><IconButton label="Split terminals" aria-pressed={split} onClick={splitTerminal}><Columns2 size={14} /></IconButton></div>
       </header>
@@ -415,7 +426,7 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
         {tabs.map((tab) => {
           const visible = tab.id === activeId || (split && tab.id === secondaryId);
           const placement = tab.id === activeId ? "is-primary" : tab.id === secondaryId ? "is-secondary" : "";
-          return <div id={sessionIds.get(tab.id)} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} visible={Boolean(props.visible && visible)} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} onClose={() => closeTerminal(tab.id)} /></div>;
+          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} visible={Boolean(props.visible && visible)} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} onClose={() => closeTerminal(tab.id)} /></div>;
         })}
         {split && secondaryId && (
           <PaneResizeHandle

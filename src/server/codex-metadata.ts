@@ -3,7 +3,8 @@ import { createInterface } from "node:readline";
 
 import type { ProviderModel, ProviderRateLimit, ProviderReasoningOption } from "../shared/contracts";
 import { INERTIA_VERSION } from "../shared/version";
-import { providerTimestamp } from "./provider/usage-values";
+import { providerProcessInvocation } from "./provider/process";
+import { clampProviderPercent, providerTimestamp } from "./provider/usage-values";
 
 type JsonObject = Record<string, unknown>;
 
@@ -75,8 +76,8 @@ export function parseCodexModels(result: JsonObject): ProviderModel[] {
 
 function parseLimitWindow(limitId: string, label: string, suffix: "primary" | "secondary", value: unknown): ProviderRateLimit[] {
   const window = objectValue(value);
-  const usedPercent = numberValue(window?.usedPercent);
-  if (usedPercent === undefined) return [];
+  const usedPercent = clampProviderPercent(window?.usedPercent);
+  if (usedPercent === null) return [];
   return [{
     id: `${limitId}:${suffix}`,
     label: suffix === "primary" ? label : `${label} · secondary`,
@@ -114,7 +115,8 @@ export async function readCodexMetadata(
   timeoutMs = 6_000,
   fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
 ): Promise<CodexMetadata> {
-  const child: ChildProcessWithoutNullStreams = spawn(executable, ["app-server"], {
+  const invocation = providerProcessInvocation(executable, ["app-server"], environment);
+  const child: ChildProcessWithoutNullStreams = spawn(invocation.command, invocation.args, {
     cwd,
     env: environment,
     detached: false,

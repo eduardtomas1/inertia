@@ -156,6 +156,36 @@ process.exit(2);
     });
   });
 
+  it("uses the newest App Server-capable Codex candidate and prefers a native executable at the same version", async () => {
+    const root = temporaryRoot();
+    const oldCompatible = join(root, "codex-old.exe");
+    const newUnsupported = join(root, "codex-new.cmd");
+    const nativeTie = join(root, "codex-native.exe");
+    const shimTie = join(root, "codex-shim.cmd");
+    const probes = async (executable: string, args: readonly string[]) => ({
+      started: true,
+      timedOut: false,
+      exitCode: args[0] === "app-server" && executable === newUnsupported ? 2 : 0,
+      output: args[0] === "--version"
+        ? `codex ${executable === oldCompatible ? "2.0.0" : executable === newUnsupported ? "3.0.0" : "4.0.0"}`
+        : args[0] === "login"
+          ? "Logged in using ChatGPT"
+          : executable === newUnsupported ? "unknown subcommand" : "codex app-server",
+    });
+
+    const compatibleFallback = await detectProvider("codex", { command: "codex", cwd: root }, {
+      executableCandidates: async () => [oldCompatible, newUnsupported],
+      probeProcess: probes,
+    });
+    expect(compatibleFallback).toMatchObject({ executable: oldCompatible, version: "2.0.0", canRun: true });
+
+    const nativePreference = await detectProvider("codex", { command: "codex", cwd: root }, {
+      executableCandidates: async () => [shimTie, nativeTie],
+      probeProcess: probes,
+    });
+    expect(nativePreference).toMatchObject({ executable: nativeTie, version: "4.0.0", canRun: true });
+  });
+
   it("resolves and reuses an absolute command path and its discovered environment", async () => {
     const root = temporaryRoot();
     const selectedBin = join(root, "selected provider bin");
@@ -220,6 +250,7 @@ process.exit(2);
 
     expect(detection).toMatchObject({ available: false, installState: "not-installed", authState: "unknown", canRun: false });
     expect(detection.executable).toBeUndefined();
+    expect(detection.statusMessage).toBe("Codex CLI not found");
   });
 
   it("reports a candidate with a failing version probe as an installation error", async () => {
@@ -230,6 +261,7 @@ process.exit(2);
     });
 
     expect(detection).toMatchObject({ available: false, installState: "error", authState: "unknown", canRun: false });
+    expect(detection.statusMessage).toBe("Codex CLI was found but failed to start");
   });
 
   it("distinguishes authenticated and unauthenticated provider probes", async () => {
@@ -255,7 +287,7 @@ process.exit(2);
       installState: "installed",
       authState: "authenticated",
       canRun: false,
-      statusMessage: "Update Codex CLI to enable agent conversations",
+      statusMessage: "Codex App Server is unsupported; update the selected CLI",
     });
   });
 

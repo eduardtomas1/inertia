@@ -1,7 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
+import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import WebSocket, { WebSocketServer } from "ws";
 
@@ -13,12 +14,20 @@ import {
   type AgentPlan,
   type AppSnapshot,
   type ClientCommand,
-  type DiffReviewSummary,
+  type CheckpointSummary,
   type GitStatusSnapshot,
+  type Conversation,
   type ProviderInfo,
   type ServerEvent,
 } from "../shared/contracts";
-import { parseUnifiedDiff } from "../shared/diff-review";
+import {
+  buildDiffContext,
+  diffFileFingerprint,
+  diffHunkFingerprint,
+  DiffContextError,
+  parseUnifiedDiff,
+  selectedLineFingerprint,
+} from "../shared/diff-review";
 import { RuntimeStore } from "./database";
 import { CheckpointError, createCheckpoint, deleteCheckpoints, restoreCheckpoint } from "./checkpoints";
 import {
@@ -29,14 +38,16 @@ import {
   getRepositoryStatus,
   getPullRequestCreateUrl,
   getUnifiedDiff,
+  inspectDiffSelection,
   listBranches,
   pullRepository,
   pushCurrentBranch,
   revertDiffSelection,
+  undoDiffSelection,
   removeWorktree,
   switchBranch,
 } from "./git";
-import { PROVIDER_IDS, ProviderManager, type ProviderActivityEvent, type ProviderDetection } from "./providers";
+import { PROVIDER_IDS, ProviderManager, type ProviderActivityEvent, type ProviderDetection, type ProviderRunInput } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
 import { TerminalManager } from "./terminal";
 import {
@@ -49,6 +60,7 @@ import {
 } from "./workspace";
 import { projectActionCommand as actionCommand, requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
+import { inspectProjectIdentity } from "./project-identity";
 import {
   isAllowedRuntimeOrigin as allowedOrigin,
   parseRuntimeCommand as parseCommand,
@@ -64,75 +76,41 @@ import {
   initialProviderSnapshots,
   providerSnapshot,
 } from "./runtime-snapshots";
+import {
+  ActiveReviewSummaryRegistry,
+  buildReviewSummaryPrompt,
+  DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS,
+  parseReviewSummaryResult,
+  requireCurrentReviewSummaryFingerprint,
+  withReviewSummaryTimeout,
+} from "./review-summary";
 
 const MAX_PAYLOAD_BYTES = 256 * 1024;
 const MAX_CLIENTS = 16;
 const MAX_IN_FLIGHT_COMMANDS = 32;
-const MAX_REVIEW_PATCH_CHARS = 180_000;
+
+type ReviewSelectionPayload = Extract<ClientCommand, { type: "review.selection.ask" | "review.selection.revise" }>["payload"];
+
+export function readOnlyReviewRunInput(
+  conversation: Pick<Conversation, "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "providerSessionId">,
+  conversationId: string,
+  cwd: string,
+  prompt: string,
+): ProviderRunInput {
+  return {
+    providerId: conversation.providerId,
+    conversationId,
+    cwd,
+    prompt,
+    model: conversation.model || undefined,
+    reasoningEffort: conversation.reasoningEffort || undefined,
+    interactionMode: "plan",
+    access: "supervised",
+  };
+}
 
 function providerLabel(providerId: ProviderInfo["id"]): string {
   return providerId === "codex" ? "Codex" : providerId === "claude" ? "Claude" : providerId === "cursor" ? "Cursor" : "OpenCode";
-}
-
-function compactText(value: unknown, maximum: number): string | null {
-  if (typeof value !== "string") return null;
-  const text = value.trim().replace(/\s+/gu, " ");
-  return text ? text.slice(0, maximum) : null;
-}
-
-function jsonObjectFromText(text: string): Record<string, unknown> {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/iu.exec(text)?.[1];
-  const source = fenced ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-  try {
-    const value: unknown = JSON.parse(source);
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) return value as Record<string, unknown>;
-  } catch {
-    // A clear public error below lets the user retry the review.
-  }
-  throw new RequestError("The review agent did not return readable structured summaries. Try again.");
-}
-
-function reviewPrompt(patch: string, files: ReturnType<typeof parseUnifiedDiff>["files"]): string {
-  const inventory = files.map((file) => ({ path: file.path, hunks: file.hunks.map((hunk) => ({ id: hunk.id, header: hunk.header })) }));
-  return [
-    "Review the Git diff below without using tools or modifying files.",
-    "Return only JSON with this exact shape:",
-    '{"overall":"1-3 sentence change summary","files":[{"path":"exact path","summary":"what changed and why","hunks":[{"hunkId":"exact id","summary":"1-3 sentences explaining this code, its purpose, and how it works with the surrounding code"}]}]}',
-    "Every listed file and every listed hunk ID must appear exactly once. Be concise and describe only evidence visible in the diff.",
-    `Required inventory: ${JSON.stringify(inventory)}`,
-    "Diff:",
-    patch,
-  ].join("\n\n");
-}
-
-function parsedReviewSummary(
-  conversationId: string,
-  providerId: ProviderInfo["id"],
-  fingerprint: string,
-  files: ReturnType<typeof parseUnifiedDiff>["files"],
-  text: string,
-): DiffReviewSummary {
-  const value = jsonObjectFromText(text);
-  const overall = compactText(value.overall, 2_000);
-  const candidates = Array.isArray(value.files) ? value.files : [];
-  if (!overall) throw new RequestError("The review agent omitted the overall change summary. Try again.");
-  const summaries = files.map((file) => {
-    const candidate = candidates.find((item) => typeof item === "object" && item !== null && (item as { path?: unknown }).path === file.path) as Record<string, unknown> | undefined;
-    const summary = compactText(candidate?.summary, 1_000);
-    const candidateHunks = Array.isArray(candidate?.hunks) ? candidate.hunks : [];
-    if (!summary) throw new RequestError(`The review agent omitted the summary for ${file.path}. Try again.`);
-    return {
-      path: file.path,
-      summary,
-      hunks: file.hunks.map((hunk) => {
-        const item = candidateHunks.find((entry) => typeof entry === "object" && entry !== null && (entry as { hunkId?: unknown }).hunkId === hunk.id) as Record<string, unknown> | undefined;
-        const hunkSummary = compactText(item?.summary, 800);
-        if (!hunkSummary) throw new RequestError(`The review agent omitted a hunk summary for ${file.path}. Try again.`);
-        return { hunkId: hunk.id, summary: hunkSummary };
-      }),
-    };
-  });
-  return { conversationId, fingerprint, providerId, overall, files: summaries, generatedAt: new Date().toISOString() };
 }
 
 function projectActionKind(name: string, command: string, preview: boolean): "check" | "service" {
@@ -151,6 +129,7 @@ export interface RuntimeOptions {
   dataDirectory: string;
   defaultWorkspacePath: string;
   enableProviders?: boolean;
+  reviewSummaryTimeoutMs?: number;
 }
 
 export interface RunningRuntime {
@@ -162,6 +141,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const dataDirectory = resolve(options.dataDirectory);
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
   const store = new RuntimeStore(join(dataDirectory, "inertia.sqlite"), options.defaultWorkspacePath);
+  await Promise.all(store.snapshot().projects.map(async (project) => {
+    try {
+      const identity = await inspectProjectIdentity(project.path);
+      store.updateProject(project.id, identity);
+    } catch {
+      // Missing or temporarily unavailable folders remain visible and isolated by their stored path.
+    }
+  }));
   const enableProviders = options.enableProviders ?? true;
   const terminals = new TerminalManager();
   const metadataCache = new ProviderMetadataCache({
@@ -170,13 +157,24 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       save: (metadata) => store.saveProviderMetadata(metadata),
     },
   });
-  const providers = new ProviderManager({ metadataCache });
+  const savedSettings = store.snapshot().settings;
+  const providers = new ProviderManager({
+    metadataCache,
+    commands: savedSettings.codexBinaryPath ? { codex: savedSettings.codexBinaryPath } : undefined,
+  });
   const cachedProviderMetadata = Object.fromEntries(PROVIDER_IDS.map((providerId) => [providerId, providers.cachedMetadata(providerId)]));
   let providerInfo = initialProviderSnapshots(enableProviders, cachedProviderMetadata);
   const clients = new Set<WebSocket>();
   const pendingApprovals = new Map<string, AgentApprovalRequest>();
   const pendingInputs = new Map<string, AgentInputRequest>();
   const agentPlans = new Map<string, AgentPlan>(store.snapshot().plans.map((plan) => [plan.conversationId, plan]));
+  const activeSelectionReviews = new Map<string, {
+    temporaryConversationId: string;
+    runId: string;
+    cancelled: boolean;
+  }>();
+  const activeReviewSummaries = new ActiveReviewSummaryRegistry<WebSocket>();
+  const managedActionRuns = new Map<string, { terminalId: string }>();
   const token = randomBytes(32).toString("base64url");
   const websocketPath = `/runtime/${token}`;
   const webSockets = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES, perMessageDeflate: false });
@@ -196,7 +194,21 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   server.keepAliveTimeout = 1_000;
   server.maxHeadersCount = 32;
 
-  const currentSnapshot = (): AppSnapshot => store.snapshot(providerInfo);
+  const canStopWorkspaceRun = (run: AppSnapshot["runs"][number]): boolean => {
+    if (run.status !== "running" && run.status !== "waiting") return false;
+    if (run.kind === "check" || run.kind === "service") return managedActionRuns.has(run.id);
+    if (run.kind !== "agent" || !run.conversationId) return false;
+    return providers.isRunning(run.conversationId)
+      || activeReviewSummaries.has(run.conversationId)
+      || activeSelectionReviews.get(run.conversationId)?.runId === run.id;
+  };
+  const currentSnapshot = (): AppSnapshot => {
+    const snapshot = store.snapshot(providerInfo);
+    return {
+      ...snapshot,
+      runs: snapshot.runs.map((run) => ({ ...run, canStop: canStopWorkspaceRun(run) })),
+    };
+  };
   const broadcast = (event: ServerEvent): void => {
     for (const client of clients) send(client, event);
   };
@@ -280,7 +292,96 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     return ensureDirectory(store.conversationPath(conversationId));
   };
 
-  const startAgent = (conversationId: string, prompt: string, attachmentPaths: string[]): void => {
+  const reconcileReviews = (conversationId: string, patch: string): void => {
+    const structured = parseUnifiedDiff(patch);
+    const files: Record<string, string> = {};
+    const hunks: Record<string, string> = {};
+    for (const file of structured.files) {
+      files[file.path] = diffFileFingerprint(file);
+      for (const hunk of file.hunks) hunks[`${file.path}\0${hunk.id}`] = diffHunkFingerprint(file, hunk);
+    }
+    const notes: Record<string, string | null> = {};
+    for (const note of store.reviewNotesFor(conversationId)) {
+      const file = structured.files.find((candidate) => candidate.path === note.path);
+      const hunk = file?.hunks.find((candidate) => candidate.id === note.hunkId);
+      if (note.lineIds.length > 0) {
+        notes[note.id] = file && hunk && note.lineIds.every((id) => hunk.lines.some((line) => line.id === id))
+          ? selectedLineFingerprint(file, hunk, note.lineIds)
+          : null;
+      } else if (hunk && file) {
+        notes[note.id] = diffHunkFingerprint(file, hunk);
+      } else {
+        notes[note.id] = file ? diffFileFingerprint(file) : null;
+      }
+    }
+    store.reconcileReviewTargets(conversationId, { files, hunks, notes });
+  };
+
+  const selectedReviewContext = async (
+    selection: ReviewSelectionPayload,
+    purpose: "ask" | "revision",
+  ): Promise<{
+    prompt: string;
+    patch: string;
+    filePath: string;
+    hunkHeader: string;
+    selectedLineCount: number;
+  }> => {
+    const conversation = store.conversation(selection.conversationId);
+    if (conversation.projectId !== selection.projectId) throw new RequestError("The thread does not belong to this project.");
+    const diff = await getUnifiedDiff(store.conversationPath(conversation.id), { ignoreWhitespace: selection.ignoreWhitespace });
+    if (diff.truncated) throw new RequestError("The current diff is truncated. Reduce the change set before reviewing a selection.");
+    const structured = parseUnifiedDiff(diff.text);
+    if (structured.fingerprint !== selection.fingerprint) throw new RequestError("The diff changed before this review action started. Refresh and select the lines again.");
+    const file = structured.files.find((candidate) => candidate.path === selection.filePath);
+    const hunk = file?.hunks.find((candidate) => candidate.id === selection.hunkId);
+    if (!file || !hunk) throw new RequestError("The selected file or hunk is no longer present.");
+    let context;
+    try {
+      context = buildDiffContext(file, hunk, selection.lineIds, {
+        purpose,
+        instruction: selection.comment,
+      });
+    } catch (error) {
+      if (error instanceof DiffContextError) throw new RequestError(error.message);
+      throw error;
+    }
+    return {
+      prompt: context.text,
+      patch: diff.text,
+      filePath: file.path,
+      hunkHeader: hunk.header,
+      selectedLineCount: context.selectedLineCount,
+    };
+  };
+
+  const captureRequiredCheckpoint = async (conversationId: string, label: string): Promise<CheckpointSummary> => {
+    const path = store.conversationPath(conversationId);
+    const status = await getRepositoryStatus(path);
+    let captured: Awaited<ReturnType<typeof createCheckpoint>>;
+    try {
+      captured = await createCheckpoint(path, join(dataDirectory, "checkpoint-indexes"), conversationId);
+    } catch (error) {
+      throw new RequestError(`A recovery checkpoint could not be created, so the revision was not started. ${publicError(error)}`);
+    }
+    const turnIndex = store.snapshot().checkpoints.filter((checkpoint) => checkpoint.conversationId === conversationId).length + 1;
+    return store.addCheckpoint({
+      conversationId,
+      ref: captured.ref,
+      label,
+      turnIndex,
+      filesChanged: status.files.length,
+      insertions: status.insertions,
+      deletions: status.deletions,
+    });
+  };
+
+  const startAgent = (
+    conversationId: string,
+    prompt: string,
+    attachmentPaths: string[],
+    onSettled?: (status: "completed" | "failed" | "cancelled") => Promise<void> | void,
+  ): void => {
     const conversation = store.conversation(conversationId);
     const runId = randomUUID();
     const runStartedAt = Date.now();
@@ -420,6 +521,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           onApproval: (event) => {
             const request: AgentApprovalRequest = {
               id: event.request.requestId,
+              providerId: event.providerId,
               conversationId,
               runId,
               kind: event.request.kind,
@@ -433,7 +535,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
               availableDecisions: event.request.availableDecisions,
             };
             pendingApprovals.set(request.id, request);
-            store.updateConversation(conversationId, { status: "needs-input" });
+            store.updateConversation(conversationId, { status: "needs-input", attentionKind: "approval" });
             store.updateWorkspaceRun(runId, { status: "waiting", detail: request.title });
             broadcast({ type: "agent.approval.requested", request });
             broadcastSnapshot();
@@ -442,7 +544,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             pendingApprovals.delete(event.requestId);
             broadcast({ type: "agent.approval.resolved", conversationId, requestId: event.requestId, decision: event.decision });
             if (providers.isRunning(conversationId) && ![...pendingApprovals.values(), ...pendingInputs.values()].some((request) => request.conversationId === conversationId)) {
-              store.updateConversation(conversationId, { status: "running" });
+              store.updateConversation(conversationId, { status: "running", attentionKind: null });
               store.updateWorkspaceRun(runId, { status: "running", detail: conversation.title });
               broadcastSnapshot();
             }
@@ -450,13 +552,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           onInput: (event) => {
             const request: AgentInputRequest = {
               id: event.request.requestId,
+              providerId: event.providerId,
               conversationId,
               runId,
               questions: event.request.questions,
               autoResolutionMs: event.request.autoResolutionMs,
             };
             pendingInputs.set(request.id, request);
-            store.updateConversation(conversationId, { status: "needs-input" });
+            store.updateConversation(conversationId, { status: "needs-input", attentionKind: "input" });
             store.updateWorkspaceRun(runId, { status: "waiting", detail: request.questions[0]?.question ?? "Waiting for an answer" });
             broadcast({ type: "agent.input.requested", request });
             broadcastSnapshot();
@@ -465,7 +568,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             pendingInputs.delete(event.requestId);
             broadcast({ type: "agent.input.resolved", conversationId, requestId: event.requestId });
             if (providers.isRunning(conversationId) && ![...pendingApprovals.values(), ...pendingInputs.values()].some((request) => request.conversationId === conversationId)) {
-              store.updateConversation(conversationId, { status: "running" });
+              store.updateConversation(conversationId, { status: "running", attentionKind: null });
               store.updateWorkspaceRun(runId, { status: "running", detail: conversation.title });
               broadcastSnapshot();
             }
@@ -493,10 +596,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcast({ type: "agent.activity", activity });
       broadcast({ type: "agent.failed", conversationId, runId, message });
       broadcastSnapshot();
+      void Promise.resolve(onSettled?.("failed")).catch(() => undefined);
       return;
     }
 
-    void run.then((result) => {
+    void run.then(async (result) => {
       if (result.sessionId) store.updateConversation(conversationId, { providerSessionId: result.sessionId });
       if (result.text && result.text !== assistantText) assistantText = result.text;
       flushAssistantMessage();
@@ -519,6 +623,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         broadcast({ type: "agent.failed", conversationId, runId, message });
       }
       broadcastSnapshot();
+      await Promise.resolve(onSettled?.(result.status === "completed" ? "completed" : result.status === "cancelled" ? "cancelled" : "failed")).catch(() => undefined);
+      broadcastSnapshot();
       if (result.status === "completed") {
         const current = providers.cachedMetadata(conversation.providerId);
         const fields: Array<"models" | "rateLimits"> = [];
@@ -540,7 +646,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           }).catch(() => undefined);
         }
       }
-    }).catch((error: unknown) => {
+    }).catch(async (error: unknown) => {
       flushAssistantMessage();
       settleReasoning("failed");
       settleRunningActivities("failed");
@@ -548,6 +654,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       store.updateConversation(conversationId, { status: "failed" });
       store.updateWorkspaceRun(runId, { status: "failed", detail: message });
       broadcast({ type: "agent.failed", conversationId, runId, message });
+      broadcastSnapshot();
+      await Promise.resolve(onSettled?.("failed")).catch(() => undefined);
       broadcastSnapshot();
     });
   };
@@ -578,15 +686,26 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           send(socket, { type: "terminal.created", requestId: command.requestId, terminalId });
           return;
         }
-        case "project.create":
-          store.createProject(command.payload.name, ensureDirectory(command.payload.path));
+        case "project.create": {
+          const path = ensureDirectory(command.payload.path);
+          const identity = await inspectProjectIdentity(path);
+          store.createProject(command.payload.name, path, identity);
           break;
+        }
         case "project.select":
           store.selectProject(command.payload.projectId);
           break;
         case "project.remove":
+          if (store.hasActiveWorkspaceRunForProject(command.payload.projectId)) {
+            throw new RequestError("Stop active work for this project before removing it.");
+          }
           store.removeProject(command.payload.projectId);
           break;
+        case "project.update": {
+          const { projectId, ...update } = command.payload;
+          store.updateProject(projectId, update);
+          break;
+        }
         case "conversation.create": {
           const conversation = store.createConversation(command.payload.projectId, command.payload.title, command.payload);
           if (command.payload.useWorktree) {
@@ -612,18 +731,42 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           break;
         case "conversation.update": {
           const { conversationId, ...update } = command.payload;
+          const changesRunConfiguration = (
+            update.providerId !== undefined
+            || update.model !== undefined
+            || update.reasoningEffort !== undefined
+            || update.interactionMode !== undefined
+            || update.accessMode !== undefined
+          );
+          if (changesRunConfiguration && store.hasActiveWorkspaceRunForConversation(conversationId)) {
+            throw new RequestError("Stop the active run or review before changing its agent configuration.");
+          }
           store.updateConversation(conversationId, update);
           break;
         }
         case "conversation.archive":
+          if (store.hasActiveWorkspaceRunForConversation(command.payload.conversationId)) {
+            throw new RequestError("Stop the active run or review before archiving this thread.");
+          }
           store.archiveConversation(command.payload.conversationId, true);
           break;
         case "conversation.unarchive":
           store.archiveConversation(command.payload.conversationId, false);
           break;
+        case "conversation.settle":
+          if (store.hasActiveWorkspaceRunForConversation(command.payload.conversationId)) {
+            throw new RequestError("Stop the active run or review before settling this thread.");
+          }
+          store.settleConversation(command.payload.conversationId, true);
+          break;
+        case "conversation.unsettle":
+          store.settleConversation(command.payload.conversationId, false);
+          break;
         case "conversation.delete": {
           const conversation = store.conversation(command.payload.conversationId);
-          await deleteCheckpoints(store.projectPath(conversation.projectId), conversation.id).catch(() => undefined);
+          if (store.hasActiveWorkspaceRunForConversation(conversation.id)) {
+            throw new RequestError("Stop the active run or review before deleting this thread.");
+          }
           if (conversation.worktreePath) {
             try {
               await removeWorktree(store.projectPath(conversation.projectId), conversation.worktreePath, false);
@@ -631,12 +774,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
               if (!(error instanceof GitError && error.code === "not-found")) throw error;
             }
           }
+          await deleteCheckpoints(store.projectPath(conversation.projectId), conversation.id).catch(() => undefined);
           store.deleteConversation(command.payload.conversationId);
           break;
         }
         case "message.send": {
           const conversation = store.conversation(command.payload.conversationId);
-          if (providers.isRunning(conversation.id)) throw new RequestError("Wait for the current run to finish or stop it first.");
+          if (providers.isRunning(conversation.id) || activeSelectionReviews.has(conversation.id) || activeReviewSummaries.has(conversation.id)) {
+            throw new RequestError("Wait for the current run or read-only review to finish first.");
+          }
           if (enableProviders) {
             const selectedProvider = providerInfo.find(({ id }) => id === conversation.providerId);
             if (!selectedProvider?.canRun) {
@@ -679,11 +825,53 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           return;
         }
         case "agent.stop":
-          if (!providers.cancel(command.payload.conversationId)) throw new RequestError("This thread does not have an active run.");
+          if (
+            !activeReviewSummaries.stop(command.payload.conversationId, "cancelled")
+            && !providers.cancel(command.payload.conversationId)
+          ) {
+            throw new RequestError("This thread does not have an active run.");
+          }
+          break;
+        case "activity.stop": {
+          const activity = store.workspaceRun(command.payload.runId);
+          if (activity.status !== "running" && activity.status !== "waiting") {
+            throw new RequestError("That activity has already finished.");
+          }
+          if (activity.kind === "check" || activity.kind === "service") {
+            const managed = managedActionRuns.get(activity.id);
+            if (!managed || !terminals.closeManaged(managed.terminalId)) {
+              throw new RequestError("That process is no longer owned by the local runtime.");
+            }
+            break;
+          }
+          if (activity.kind !== "agent" || !activity.conversationId) {
+            throw new RequestError("This activity cannot be stopped safely.");
+          }
+          const selection = activeSelectionReviews.get(activity.conversationId);
+          if (selection?.runId === activity.id) {
+            selection.cancelled = true;
+            if (!providers.cancel(selection.temporaryConversationId)) {
+              throw new RequestError("That read-only review has already finished.");
+            }
+            break;
+          }
+          if (
+            !activeReviewSummaries.stop(activity.conversationId, "cancelled")
+            && !providers.cancel(activity.conversationId)
+          ) {
+            throw new RequestError("That agent run is no longer active.");
+          }
+          break;
+        }
+        case "activity.dismiss":
+          store.dismissWorkspaceRun(command.payload.runId);
           break;
         case "agent.approval.respond": {
           const pending = pendingApprovals.get(command.payload.requestId);
           if (!pending || pending.conversationId !== command.payload.conversationId) throw new RequestError("That approval request is no longer pending.");
+          if (!pending.availableDecisions.includes(command.payload.decision)) {
+            throw new RequestError("That response is not available for this approval request.");
+          }
           if (!providers.respondToApproval(command.payload.conversationId, command.payload.requestId, command.payload.decision)) {
             throw new RequestError("That approval request is no longer pending.");
           }
@@ -692,8 +880,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         case "agent.input.respond": {
           const pending = pendingInputs.get(command.payload.requestId);
           if (!pending || pending.conversationId !== command.payload.conversationId) throw new RequestError("That question is no longer pending.");
-          const expected = new Set(pending.questions.map(({ id }) => id));
-          if (Object.keys(command.payload.answers).some((id) => !expected.has(id)) || [...expected].some((id) => !command.payload.answers[id]?.length)) {
+          const expected = new Map(pending.questions.map((question) => [question.id, question]));
+          const invalidAnswer = Object.entries(command.payload.answers).some(([id, values]) => {
+            const question = expected.get(id);
+            if (!question || values.length === 0 || (!question.allowMultiple && values.length !== 1)) return true;
+            const optionIds = new Set(question.options.map((option) => option.id));
+            return values.some((value) => !optionIds.has(value) && !question.isOther && question.options.length > 0);
+          });
+          if (invalidAnswer || [...expected.keys()].some((id) => !command.payload.answers[id]?.length)) {
             throw new RequestError("Answer every question before continuing.");
           }
           if (!providers.respondToInput(command.payload.conversationId, command.payload.requestId, command.payload.answers)) {
@@ -701,9 +895,28 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           }
           break;
         }
-        case "settings.update":
+        case "settings.update": {
+          if (command.payload.codexBinaryPath !== undefined) {
+            const manualPath = command.payload.codexBinaryPath.trim();
+            if (manualPath) {
+              if (!isAbsolute(manualPath)) throw new RequestError("Choose an absolute Codex executable path.");
+              const detection = await providers.validateCommand("codex", manualPath, {
+                cwd: options.defaultWorkspacePath,
+                timeoutMs: 4_000,
+                refreshEnvironment: true,
+              });
+              if (detection.installState !== "installed" || !detection.version) {
+                throw new RequestError("The selected file is not a working Codex executable.");
+              }
+            }
+            providers.setCommand("codex", manualPath || undefined);
+          }
           store.updateSettings(command.payload);
+          if (command.payload.codexBinaryPath !== undefined) {
+            await refreshProviderInfo("codex", true, true);
+          }
           break;
+        }
         case "git.refresh": {
           const path = workspacePath(command.payload.projectId, command.payload.conversationId);
           let status: GitStatusSnapshot;
@@ -721,18 +934,31 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             getUnifiedDiff(path, { ...(command.payload.path ? { paths: [command.payload.path] } : {}), ignoreWhitespace: command.payload.ignoreWhitespace }),
             getRepositoryStatus(path),
           ]);
+          if (command.payload.conversationId && !command.payload.path && !diff.truncated) {
+            reconcileReviews(command.payload.conversationId, diff.text);
+          }
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.diff", diff: { patch: diff.text, truncated: diff.truncated, files: changedFiles(status) } } });
+          if (command.payload.conversationId && !command.payload.path && !diff.truncated) broadcastSnapshot();
           return;
         }
         case "git.selection.revert": {
+          if (command.payload.conversationId && store.hasActiveWorkspaceRunForConversation(command.payload.conversationId)) {
+            throw new RequestError("Stop the active run or review before reverting selected changes.");
+          }
           const path = workspacePath(command.payload.projectId, command.payload.conversationId);
-          const diff = await revertDiffSelection(path, {
-            fingerprint: command.payload.fingerprint,
-            filePath: command.payload.filePath,
-            hunkId: command.payload.hunkId,
-            lineIds: command.payload.lineIds,
-            ignoreWhitespace: command.payload.ignoreWhitespace,
-          });
+          const reversed = await trackedSourceControl(
+            `Revert ${command.payload.lineIds.length} selected ${command.payload.lineIds.length === 1 ? "line" : "lines"} · ${command.payload.filePath}`,
+            command.payload.projectId,
+            command.payload.conversationId,
+            () => revertDiffSelection(path, {
+              fingerprint: command.payload.fingerprint,
+              filePath: command.payload.filePath,
+              hunkId: command.payload.hunkId,
+              lineIds: command.payload.lineIds,
+              expected: command.payload.expected,
+              ignoreWhitespace: command.payload.ignoreWhitespace,
+            }),
+          );
           if (command.payload.comment && command.payload.conversationId) {
             store.createMessage(
               command.payload.conversationId,
@@ -741,58 +967,344 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             );
           }
           const status = await getRepositoryStatus(path);
-          send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.diff", diff: { patch: diff.text, truncated: diff.truncated, files: changedFiles(status) } } });
+          send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: {
+              kind: "git.reversal",
+              diff: { patch: reversed.diff.text, truncated: reversed.diff.truncated, files: changedFiles(status) },
+              operation: reversed.operation,
+            },
+          });
           broadcastSnapshot();
           return;
         }
-        case "review.summary.generate": {
-          if (!enableProviders) throw new RequestError("Agent summaries are unavailable in this runtime.");
+        case "git.selection.inspect": {
+          const path = workspacePath(command.payload.projectId, command.payload.conversationId);
+          const plan = await inspectDiffSelection(path, {
+            fingerprint: command.payload.fingerprint,
+            filePath: command.payload.filePath,
+            hunkId: command.payload.hunkId,
+            lineIds: command.payload.lineIds,
+            ignoreWhitespace: command.payload.ignoreWhitespace,
+          });
+          send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.reversal.plan", plan } });
+          return;
+        }
+        case "git.selection.undo": {
+          if (command.payload.conversationId && store.hasActiveWorkspaceRunForConversation(command.payload.conversationId)) {
+            throw new RequestError("Stop the active run or review before restoring the selective-revert backup.");
+          }
+          const path = workspacePath(command.payload.projectId, command.payload.conversationId);
+          const diff = await trackedSourceControl(
+            "Undo selective reversal",
+            command.payload.projectId,
+            command.payload.conversationId,
+            () => undoDiffSelection(path, command.payload.operationId),
+          );
+          const status = await getRepositoryStatus(path);
+          send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: { kind: "git.diff", diff: { patch: diff.text, truncated: diff.truncated, files: changedFiles(status) } },
+          });
+          broadcastSnapshot();
+          return;
+        }
+        case "review.selection.ask": {
+          if (!enableProviders) throw new RequestError("Read-only review questions are unavailable in this runtime.");
           const conversation = store.conversation(command.payload.conversationId);
-          if (conversation.projectId !== command.payload.projectId) throw new RequestError("The thread does not belong to this project.");
-          if (providers.isRunning(conversation.id)) throw new RequestError("Wait for the current agent run to finish before summarizing its changes.");
+          if (providers.isRunning(conversation.id) || activeSelectionReviews.has(conversation.id) || activeReviewSummaries.has(conversation.id)) {
+            throw new RequestError("Wait for the current agent or review turn to finish first.");
+          }
           const provider = providerInfo.find(({ id }) => id === conversation.providerId);
           if (!provider?.canRun) throw new RequestError(provider?.statusMessage ?? "The selected review agent is unavailable.");
-          const diff = await getUnifiedDiff(store.conversationPath(conversation.id), { ignoreWhitespace: command.payload.ignoreWhitespace });
-          if (diff.truncated) throw new RequestError("The diff preview is truncated. Reduce or commit part of the change set before generating a complete summary.");
-          if (diff.text.length > MAX_REVIEW_PATCH_CHARS) throw new RequestError("This diff is too large for a concise review. Review or commit it in smaller parts.");
-          const structured = parseUnifiedDiff(diff.text);
-          if (structured.fingerprint !== command.payload.fingerprint) throw new RequestError("The changes moved before the review started. Refresh and try again.");
-          if (structured.files.length === 0) throw new RequestError("There are no changes to summarize.");
+          const context = await selectedReviewContext(command.payload, "ask");
+          const temporaryConversationId = `${conversation.id}:read-only-review:${randomUUID()}`;
+          const reviewDirectory = await mkdtemp(join(dataDirectory, "read-only-review-"));
+          await chmod(reviewDirectory, 0o500);
           const reviewRun = store.createWorkspaceRun({
             kind: "agent",
             projectId: conversation.projectId,
             conversationId: conversation.id,
-            label: `${providerLabel(conversation.providerId)} review${conversation.model ? ` · ${conversation.model}` : ""}`,
-            detail: "Summarizing changes",
+            label: `${providerLabel(conversation.providerId)} · read-only question`,
+            detail: `${context.filePath} · ${context.selectedLineCount} selected lines`,
             status: "running",
             port: null,
           });
+          activeSelectionReviews.set(conversation.id, {
+            temporaryConversationId,
+            runId: reviewRun.id,
+            cancelled: false,
+          });
+          store.createMessage(conversation.id, context.prompt, "user");
           broadcastSnapshot();
+          let streamed = "";
+          let unsupportedInteraction = false;
           try {
-            let streamed = "";
-            const result = await providers.run({
-              providerId: conversation.providerId,
-              conversationId: conversation.id,
-              cwd: store.conversationPath(conversation.id),
-              prompt: reviewPrompt(diff.text, structured.files),
-              model: conversation.model || undefined,
-              reasoningEffort: conversation.reasoningEffort || undefined,
-              interactionMode: "plan",
-              access: "supervised",
-            }, {
-              onText: (event) => { streamed = `${streamed}${event.text}`.slice(0, 512_000); },
+            const result = await providers.run(readOnlyReviewRunInput(
+              conversation,
+              temporaryConversationId,
+              reviewDirectory,
+              context.prompt,
+            ), {
+              onText: (event) => { streamed = `${streamed}${event.text}`.slice(0, 4 * 1024 * 1024); },
+              onApproval: () => {
+                unsupportedInteraction = true;
+                providers.cancel(temporaryConversationId);
+              },
+              onInput: () => {
+                unsupportedInteraction = true;
+                providers.cancel(temporaryConversationId);
+              },
             });
+            if (unsupportedInteraction) throw new RequestError("The review agent requested an unsupported interaction, so the read-only question was stopped.");
+            if (result.status !== "completed") throw new RequestError(result.error ?? "The review agent could not answer this question.");
+            const answer = (result.text || streamed).trim();
+            if (!answer) throw new RequestError("The review agent returned an empty answer.");
+            store.createMessage(conversation.id, answer.slice(0, 4 * 1024 * 1024), "assistant");
+            store.updateWorkspaceRun(reviewRun.id, { status: "succeeded", detail: `${context.filePath} reviewed without a resumable session` });
+            send(socket, { type: "request.ok", requestId: command.requestId });
+            broadcastSnapshot();
+          } catch (error) {
+            const cancelled = activeSelectionReviews.get(conversation.id)?.cancelled ?? false;
+            store.updateWorkspaceRun(reviewRun.id, {
+              status: cancelled ? "cancelled" : "failed",
+              detail: cancelled ? "Stopped" : publicError(error),
+            });
+            broadcastSnapshot();
+            if (cancelled) {
+              send(socket, { type: "request.ok", requestId: command.requestId });
+              return;
+            }
+            throw error;
+          } finally {
+            activeSelectionReviews.delete(conversation.id);
+            await chmod(reviewDirectory, 0o700).catch(() => undefined);
+            await rm(reviewDirectory, { recursive: true, force: true }).catch(() => undefined);
+          }
+          return;
+        }
+        case "review.selection.revise": {
+          if (!enableProviders) throw new RequestError("Revision requests are unavailable in this runtime.");
+          const conversation = store.conversation(command.payload.conversationId);
+          if (providers.isRunning(conversation.id) || activeSelectionReviews.has(conversation.id) || activeReviewSummaries.has(conversation.id)) {
+            throw new RequestError("Wait for the current agent or review turn to finish first.");
+          }
+          const provider = providerInfo.find(({ id }) => id === conversation.providerId);
+          if (!provider?.canRun) throw new RequestError(provider?.statusMessage ?? "The selected agent is unavailable.");
+          const context = await selectedReviewContext(command.payload, "revision");
+          const before = parseUnifiedDiff(context.patch);
+          const beforeFiles = Object.fromEntries(before.files.map((file) => [file.path, diffFileFingerprint(file)]));
+          const checkpoint = await captureRequiredCheckpoint(conversation.id, `Before revision · ${context.filePath}`);
+          store.createMessage(conversation.id, context.prompt, "user");
+          startAgent(conversation.id, context.prompt, [], async (status) => {
+            let audit = "The refreshed diff could not be audited automatically. Use the recovery checkpoint if the result is not acceptable.";
+            try {
+              const current = await getUnifiedDiff(store.conversationPath(conversation.id), { ignoreWhitespace: command.payload.ignoreWhitespace });
+              if (!current.truncated) {
+                reconcileReviews(conversation.id, current.text);
+                const afterFiles = Object.fromEntries(parseUnifiedDiff(current.text).files.map((file) => [file.path, diffFileFingerprint(file)]));
+                const outsidePaths = [...new Set([...Object.keys(beforeFiles), ...Object.keys(afterFiles)])]
+                  .filter((path) => path !== context.filePath && beforeFiles[path] !== afterFiles[path])
+                  .sort();
+                audit = outsidePaths.length > 0
+                  ? `Potential unrelated changes were detected outside the selected file: ${outsidePaths.join(", ")}. Review them before committing.`
+                  : "No changes outside the selected file were detected automatically. Review other hunks in the selected file because line boundaries are guidance, not a technical write fence.";
+              }
+            } catch {
+              // The persistent checkpoint is still the recovery path.
+            }
+            const outcome = status === "completed" ? "completed" : status === "cancelled" ? "was cancelled" : "failed";
+            store.createMessage(
+              conversation.id,
+              `Revision ${outcome}. Scope: ${context.filePath} · ${context.hunkHeader} · ${context.selectedLineCount} selected lines. ${audit} Recovery checkpoint: ${checkpoint.label}.`,
+              "system",
+            );
+          });
+          send(socket, { type: "request.ok", requestId: command.requestId });
+          broadcastSnapshot();
+          return;
+        }
+        case "review.state.set": {
+          const conversation = store.conversation(command.payload.conversationId);
+          const current = await getUnifiedDiff(store.conversationPath(conversation.id), { ignoreWhitespace: command.payload.ignoreWhitespace });
+          if (current.truncated) throw new RequestError("The complete diff is required before changing review state.");
+          const structured = parseUnifiedDiff(current.text);
+          const file = structured.files.find((candidate) => candidate.path === command.payload.path);
+          const hunk = file?.hunks.find((candidate) => candidate.id === command.payload.hunkId);
+          const actualFingerprint = command.payload.scope === "file"
+            ? file && diffFileFingerprint(file)
+            : file && hunk && diffHunkFingerprint(file, hunk);
+          if (!actualFingerprint || actualFingerprint !== command.payload.targetFingerprint) {
+            throw new RequestError("This review target changed. Refresh the diff before marking it reviewed.");
+          }
+          const { ignoreWhitespace: _ignoreWhitespace, ...state } = command.payload;
+          store.setReviewState(state);
+          break;
+        }
+        case "review.note.create": {
+          const conversation = store.conversation(command.payload.conversationId);
+          const current = await getUnifiedDiff(store.conversationPath(conversation.id), { ignoreWhitespace: command.payload.ignoreWhitespace });
+          if (current.truncated) throw new RequestError("The complete diff is required before saving a targeted note.");
+          const structured = parseUnifiedDiff(current.text);
+          const file = structured.files.find((candidate) => candidate.path === command.payload.path);
+          const hunk = file?.hunks.find((candidate) => candidate.id === command.payload.hunkId);
+          let actualFingerprint: string | null = null;
+          if (command.payload.lineIds.length > 0) {
+            if (!file || !hunk || !command.payload.lineIds.every((id) => hunk.lines.some((line) => line.id === id))) {
+              throw new RequestError("The selected note range changed. Refresh the diff.");
+            }
+            actualFingerprint = selectedLineFingerprint(file, hunk, command.payload.lineIds);
+          } else if (file && hunk) {
+            actualFingerprint = diffHunkFingerprint(file, hunk);
+          } else if (file && command.payload.hunkId === null) {
+            actualFingerprint = diffFileFingerprint(file);
+          }
+          if (!actualFingerprint || actualFingerprint !== command.payload.targetFingerprint) {
+            throw new RequestError("This note target changed. Refresh the diff before saving it.");
+          }
+          const { ignoreWhitespace: _ignoreWhitespace, ...note } = command.payload;
+          store.createReviewNote(note);
+          break;
+        }
+        case "review.note.update":
+          store.updateReviewNote(command.payload.conversationId, command.payload.noteId, command.payload.body);
+          break;
+        case "review.note.delete":
+          store.deleteReviewNote(command.payload.conversationId, command.payload.noteId);
+          break;
+        case "review.summary.generate": {
+          if (!enableProviders) throw new RequestError("Agent summaries are unavailable in this runtime.");
+          const conversation = store.conversation(command.payload.conversationId);
+          if (conversation.projectId !== command.payload.projectId) throw new RequestError("The thread does not belong to this project.");
+          if (providers.isRunning(conversation.id) || activeSelectionReviews.has(conversation.id)) {
+            throw new RequestError("Wait for the current agent or read-only review to finish before summarizing its changes.");
+          }
+          const provider = providerInfo.find(({ id }) => id === conversation.providerId);
+          if (!provider?.canRun) throw new RequestError(provider?.statusMessage ?? "The selected review agent is unavailable.");
+          const temporaryConversationId = `${conversation.id}:diff-summary:${randomUUID()}`;
+          activeReviewSummaries.reserve(conversation.id, temporaryConversationId, socket);
+          let reviewDirectory: string | null = null;
+          let reviewRunId: string | null = null;
+          let providerRun: ReturnType<ProviderManager["run"]> | null = null;
+          try {
+            const diff = await getUnifiedDiff(store.conversationPath(conversation.id), { ignoreWhitespace: command.payload.ignoreWhitespace });
+            if (diff.truncated) throw new RequestError("The diff preview is truncated. Reduce or commit part of the change set before generating a complete summary.");
+            const structured = parseUnifiedDiff(diff.text);
+            if (structured.fingerprint !== command.payload.fingerprint) throw new RequestError("The changes moved before the review started. Refresh and try again.");
+            if (structured.files.length === 0) throw new RequestError("There are no changes to summarize.");
+            const prompt = buildReviewSummaryPrompt(diff.text, structured.files);
+
+            if (activeReviewSummaries.stopReason(conversation.id, temporaryConversationId)) {
+              throw new RequestError("The change summary was cancelled before it started. No summary was saved.");
+            }
+            reviewDirectory = await mkdtemp(join(dataDirectory, "read-only-summary-"));
+            await chmod(reviewDirectory, 0o500);
+            const reviewRun = store.createWorkspaceRun({
+              kind: "agent",
+              projectId: conversation.projectId,
+              conversationId: conversation.id,
+              label: `${providerLabel(conversation.providerId)} · read-only diff summary${conversation.model ? ` · ${conversation.model}` : ""}`,
+              detail: `${structured.files.length} ${structured.files.length === 1 ? "file" : "files"} · isolated session`,
+              status: "running",
+              port: null,
+            });
+            reviewRunId = reviewRun.id;
+            broadcastSnapshot();
+
+            let streamed = "";
+            let streamedTruncated = false;
+            providerRun = providers.run(readOnlyReviewRunInput(
+              conversation,
+              temporaryConversationId,
+              reviewDirectory,
+              prompt,
+            ), {
+              onText: (event) => {
+                const next = `${streamed}${event.text}`;
+                if (next.length > 512_000) streamedTruncated = true;
+                streamed = next.slice(0, 512_000);
+              },
+              onApproval: () => {
+                activeReviewSummaries.stop(conversation.id, "unsupported-interaction");
+              },
+              onInput: () => {
+                activeReviewSummaries.stop(conversation.id, "unsupported-interaction");
+              },
+            });
+            activeReviewSummaries.attachCancel(conversation.id, temporaryConversationId, () => {
+              providers.cancel(temporaryConversationId);
+            });
+            const result = await withReviewSummaryTimeout(
+              providerRun,
+              options.reviewSummaryTimeoutMs ?? DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS,
+              () => activeReviewSummaries.stop(conversation.id, "timeout"),
+            );
+            const stopReason = activeReviewSummaries.stopReason(conversation.id, temporaryConversationId);
+            if (stopReason === "unsupported-interaction") {
+              throw new RequestError("The review agent requested an unsupported interaction, so the summary was stopped. No summary was saved.");
+            }
+            if (stopReason === "disconnected") {
+              throw new RequestError("The summary owner disconnected, so the isolated review was stopped. No summary was saved.");
+            }
+            if (stopReason === "cancelled") {
+              throw new RequestError("The change summary was cancelled. No summary was saved.");
+            }
+            if (stopReason === "timeout") {
+              throw new RequestError("The agent summary timed out and was stopped. No summary was saved.");
+            }
             if (result.status !== "completed") throw new RequestError(result.error ?? "The review agent could not summarize these changes.");
-            const summary = parsedReviewSummary(conversation.id, conversation.providerId, structured.fingerprint, structured.files, result.text || streamed);
+            if (result.textTruncated || streamedTruncated) {
+              throw new RequestError("The review agent returned a truncated result. No summary was saved.");
+            }
+            const summary = parseReviewSummaryResult(
+              conversation.id,
+              conversation.providerId,
+              structured.fingerprint,
+              structured.files,
+              result.text || streamed,
+            );
+
+            const current = await getUnifiedDiff(store.conversationPath(conversation.id), { ignoreWhitespace: command.payload.ignoreWhitespace });
+            requireCurrentReviewSummaryFingerprint(structured.fingerprint, current.text, current.truncated);
             store.upsertReviewSummary(summary);
-            store.updateWorkspaceRun(reviewRun.id, { status: "succeeded", detail: `${structured.files.length} files summarized` });
+            store.updateWorkspaceRun(reviewRun.id, {
+              status: "succeeded",
+              detail: `${structured.files.length} ${structured.files.length === 1 ? "file" : "files"} summarized · isolated session`,
+            });
             send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "review.summary", summary } });
             broadcastSnapshot();
           } catch (error) {
-            store.updateWorkspaceRun(reviewRun.id, { status: "failed", detail: publicError(error) });
-            broadcastSnapshot();
+            const stopReason = activeReviewSummaries.stopReason(conversation.id, temporaryConversationId);
+            if (reviewRunId) {
+              store.updateWorkspaceRun(reviewRunId, {
+                status: stopReason === "cancelled" || stopReason === "disconnected" ? "cancelled" : "failed",
+                detail: publicError(error),
+              });
+              broadcastSnapshot();
+            }
+            if (stopReason === "cancelled") {
+              send(socket, { type: "request.ok", requestId: command.requestId });
+              return;
+            }
             throw error;
+          } finally {
+            if (providers.isRunning(temporaryConversationId)) providers.cancel(temporaryConversationId);
+            activeReviewSummaries.finish(conversation.id, temporaryConversationId);
+            if (reviewDirectory) {
+              await chmod(reviewDirectory, 0o700).catch(() => undefined);
+              await rm(reviewDirectory, { recursive: true, force: true }).catch(() => undefined);
+            }
           }
+          return;
+        }
+        case "review.summary.cancel": {
+          const conversation = store.conversation(command.payload.conversationId);
+          if (!activeReviewSummaries.stop(conversation.id, "cancelled")) {
+            throw new RequestError("This thread does not have an active change summary.");
+          }
+          send(socket, { type: "request.ok", requestId: command.requestId });
           return;
         }
         case "git.branches": {
@@ -832,9 +1344,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.action", message: "Pulled the latest changes." } });
           return;
         case "git.commit": {
+          const path = workspacePath(command.payload.projectId, command.payload.conversationId);
           const result = await trackedSourceControl("Commit changes", command.payload.projectId, command.payload.conversationId, () =>
-            commitChanges(workspacePath(command.payload.projectId, command.payload.conversationId), command.payload.message, command.payload.paths));
+            commitChanges(path, command.payload.message, command.payload.paths));
+          if (command.payload.conversationId) {
+            const current = await getUnifiedDiff(path);
+            if (!current.truncated) reconcileReviews(command.payload.conversationId, current.text);
+          }
           send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "git.action", message: `Committed ${result.commit.slice(0, 7)}.` } });
+          broadcastSnapshot();
           return;
         }
         case "git.push":
@@ -892,6 +1410,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             kind,
             projectId: command.payload.projectId,
             conversationId: command.payload.conversationId ?? null,
+            actionId: action.name,
             label: action.name,
             detail: kind === "service"
               ? conversation ? `${providerLabel(conversation.providerId)} · ${conversation.title}` : action.command
@@ -907,6 +1426,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             command.payload.cols,
             command.payload.rows,
             (exitCode) => {
+              managedActionRuns.delete(activity.id);
               try {
                 store.updateWorkspaceRun(activity.id, {
                   status: exitCode === 0 ? "succeeded" : exitCode === 130 ? "cancelled" : "failed",
@@ -928,6 +1448,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
               if (!closed) broadcastSnapshot();
             },
           );
+          managedActionRuns.set(activity.id, { terminalId });
           try {
             terminals.input(socket, terminalId, `${actionCommand(scripts.packageManager, action.name)}\r`);
           } catch (error) {
@@ -942,6 +1463,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         case "checkpoint.revert": {
           const checkpoint = store.checkpoint(command.payload.checkpointId);
           if (checkpoint.conversationId !== command.payload.conversationId) throw new RequestError("The checkpoint does not belong to this thread.");
+          if (store.hasActiveWorkspaceRunForConversation(command.payload.conversationId)) {
+            throw new RequestError("Stop the active run or review before restoring a checkpoint.");
+          }
           await restoreCheckpoint(store.conversationPath(checkpoint.conversationId), checkpoint.ref, checkpoint.conversationId);
           send(socket, { type: "request.ok", requestId: command.requestId });
           broadcastSnapshot();
@@ -999,7 +1523,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         void execute(socket, parsed.command).finally(() => { inFlightCommands -= 1; });
       }
     });
-    socket.on("close", () => { clients.delete(socket); terminals.disposeOwner(socket); });
+    socket.on("close", () => {
+      clients.delete(socket);
+      terminals.disposeOwner(socket);
+      activeReviewSummaries.stopOwned(socket, "disconnected");
+    });
     socket.on("error", () => { /* Connection failures are isolated and cleaned up by close. */ });
   });
 
@@ -1031,6 +1559,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       if (closed) return;
       closed = true;
       terminals.disposeAll();
+      for (const client of clients) activeReviewSummaries.stopOwned(client, "disconnected");
       await providers.disposeAll();
       for (const client of clients) client.terminate();
       clients.clear();

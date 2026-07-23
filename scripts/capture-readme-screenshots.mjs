@@ -79,7 +79,7 @@ function seedShowcaseData() {
   ];
 
   database.transaction(() => {
-    database.prepare("UPDATE app_state SET theme = 'dark', show_timestamps = 0, show_thinking = 1, show_usage = 1").run();
+    database.prepare("UPDATE app_state SET theme = 'dark', show_timestamps = 0, show_thinking = 1, show_usage = 1, usage_display_mode = 'expanded'").run();
     database.prepare("UPDATE projects SET name = 'Getting Started', updated_at = ?").run(now);
     database.prepare("UPDATE conversations SET title = 'Welcome to Inertia', provider_id = 'codex', model = 'gpt-5.6-sol', reasoning_effort = 'high', interaction_mode = 'build', access_mode = 'supervised', status = 'completed', updated_at = ? WHERE id = ?").run(now, conversation.id);
     database.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversation.id);

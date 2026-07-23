@@ -16,7 +16,6 @@ import {
 } from "@opencode-ai/sdk/v2";
 
 import type { ProviderModel } from "../../shared/contracts";
-import type { CodexApprovalDecision, CodexInputRequest, CodexPlanStep } from "../codex/types";
 import { terminateProcessTree } from "../process-lifecycle";
 import {
   createAgentHarnessEmitter,
@@ -26,12 +25,18 @@ import {
   type OpenCodeSdkHarnessCapabilities,
 } from "./agent-harness";
 import type { ProviderRunResult } from "./contracts";
+import type {
+  AgentApprovalDecision,
+  AgentInputRequest,
+  AgentPlanStep,
+} from "./interactions";
 import { CappedProviderBuffer } from "./io";
 
 const MAX_EVENT_CHARS = 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_SERVER_OUTPUT_CHARS = 32 * 1024;
 const START_TIMEOUT_MS = 10_000;
+const CANCEL_FORCE_MS = 2_000;
 
 export const OPENCODE_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -128,17 +133,24 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   let child: ChildProcessWithoutNullStreams | undefined;
   let cancelRequested = false;
   let terminalError: string | undefined;
+  let cancelOwnedRun: (force: boolean) => void = () => {};
+  let cancelForceTimer: NodeJS.Timeout | undefined;
 
   const failInteraction = (error: unknown): void => {
     terminalError = safeError(error, "OpenCode could not deliver an interactive response.");
     eventAbort.abort();
     if (child) terminateProcessTree(child, false);
   };
-  const settleApproval = (requestId: string, decision: CodexApprovalDecision): boolean => {
+  const settleApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = approvals.get(requestId);
     if (!pending || pending.settled || !client) return false;
     pending.settled = true;
     approvals.delete(requestId);
+    if (decision === "cancel") {
+      emitter.rich({ type: "approval-resolved", requestId, decision });
+      cancelOwnedRun(false);
+      return true;
+    }
     const reply = decision === "approve" ? "once" : "reject";
     void client.permission.reply({ requestID: pending.nativeId, reply }, { throwOnError: true }).then(() => {
       emitter.rich({ type: "approval-resolved", requestId, decision });
@@ -150,7 +162,13 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     if (!pending || pending.settled || !client) return false;
     pending.settled = true;
     inputs.delete(requestId);
-    const ordered = pending.questions.map((_, index) => answers[openCodeQuestionId(index, pending.questions[index]!)] ?? []);
+    const ordered = pending.questions.map((question, index) => {
+      const labelsById = new Map(question.options.map((option, optionIndex) => [
+        openCodeOptionId(optionIndex),
+        option.label,
+      ]));
+      return (answers[openCodeQuestionId(index)] ?? []).map((value) => labelsById.get(value) ?? value);
+    });
     void client.question.reply({ requestID: pending.nativeId, answers: ordered }, { throwOnError: true }).then(() => {
       emitter.rich({ type: "input-resolved", requestId });
     }).catch(failInteraction);
@@ -244,6 +262,7 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       if (cancelRequested) return finish("cancelled");
       return finish("failed", terminalError ?? safeError(error, serverDiagnostic(serverOutput)));
     } finally {
+      if (cancelForceTimer) clearTimeout(cancelForceTimer);
       eventAbort.abort();
       rejectPending();
       if (child) terminateProcessTree(child, true);
@@ -265,17 +284,23 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     };
   }
 
-  const cancel = (force: boolean): void => {
+  cancelOwnedRun = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
     emitter.status("cancelling");
     rejectPending();
     if (!force && client && sessionId) {
+      cancelForceTimer ??= setTimeout(() => {
+        eventAbort.abort();
+        if (child) terminateProcessTree(child, true);
+      }, CANCEL_FORCE_MS);
+      cancelForceTimer.unref();
       void client.session.abort({ sessionID: sessionId, directory: options.input.cwd }, { throwOnError: true }).catch(() => {
         if (child) terminateProcessTree(child, false);
       });
       return;
     }
+    if (cancelForceTimer) clearTimeout(cancelForceTimer);
     eventAbort.abort();
     if (child) terminateProcessTree(child, force);
   };
@@ -284,7 +309,7 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     harnessId: "opencode-sdk",
     providerId: "opencode",
     result,
-    cancel,
+    cancel: cancelOwnedRun,
     extension: { kind: "opencode-sdk", respondToApproval: settleApproval, respondToInput: settleInput },
   };
 }
@@ -546,27 +571,35 @@ function emitOpenCodeUsageSnapshot(state: OpenCodeUsageState, emit: ReturnType<t
   });
 }
 
-function openCodeQuestions(requestId: string, questions: QuestionInfo[]): CodexInputRequest {
+function openCodeQuestions(requestId: string, questions: QuestionInfo[]): AgentInputRequest {
   return {
     requestId,
     autoResolutionMs: null,
     questions: questions.slice(0, 3).map((question, index) => ({
-      id: openCodeQuestionId(index, question),
+      id: openCodeQuestionId(index),
       header: bounded(question.header),
       question: bounded(question.question),
       isOther: question.custom !== false,
       isSecret: false,
-      options: question.options.slice(0, 20).map((option) => ({ label: bounded(option.label), description: bounded(option.description) })),
+      allowMultiple: question.multiple === true,
+      options: question.options.slice(0, 20).map((option, optionIndex) => ({
+        id: openCodeOptionId(optionIndex),
+        label: bounded(option.label),
+        description: bounded(option.description),
+      })),
     })),
   };
 }
 
-function openCodeQuestionId(index: number, question: QuestionInfo): string {
-  const header = question.header.toLowerCase().replace(/[^a-z0-9_-]+/gu, "-").replace(/^-|-$/gu, "");
-  return header ? `question-${index}-${header}` : `question-${index}`;
+function openCodeQuestionId(index: number): string {
+  return `question-${index + 1}`;
 }
 
-function todoStep(value: unknown): CodexPlanStep[] {
+function openCodeOptionId(index: number): string {
+  return `option-${index + 1}`;
+}
+
+function todoStep(value: unknown): AgentPlanStep[] {
   const todo = objectValue(value);
   const content = stringValue(todo?.content);
   if (!content) return [];

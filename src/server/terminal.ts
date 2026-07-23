@@ -119,6 +119,17 @@ export class TerminalManager {
     this.dispose(terminalId, true);
   }
 
+  /**
+   * Stops a terminal previously registered to a scoped runtime operation.
+   * This is intentionally not exposed through the client protocol by terminal
+   * ID, so callers must first resolve an owned run on the server.
+   */
+  closeManaged(terminalId: string): boolean {
+    if (!this.sessions.has(terminalId)) return false;
+    this.dispose(terminalId, true);
+    return true;
+  }
+
   disposeOwner(owner: WebSocket): void {
     for (const session of [...this.sessions.values()]) {
       if (session.owner === owner) this.dispose(session.id, true);

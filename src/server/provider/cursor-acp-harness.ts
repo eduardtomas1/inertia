@@ -19,7 +19,6 @@ import type {
 
 import type { ProviderModel } from "../../shared/contracts";
 import { INERTIA_VERSION } from "../../shared/version";
-import type { CodexApprovalDecision, CodexInputRequest, CodexPlanStep } from "../codex/types";
 import { terminateProcessTree } from "../process-lifecycle";
 import {
   createAgentHarnessEmitter,
@@ -29,6 +28,11 @@ import {
   type CursorAcpHarnessCapabilities,
 } from "./agent-harness";
 import type { ProviderRunResult } from "./contracts";
+import type {
+  AgentApprovalDecision,
+  AgentInputRequest,
+  AgentPlanStep,
+} from "./interactions";
 import { CappedProviderBuffer } from "./io";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
@@ -55,7 +59,7 @@ export const CURSOR_ACP_CAPABILITIES = {
   },
 } as const satisfies CursorAcpHarnessCapabilities;
 
-interface PendingApproval { resolve: (decision: CodexApprovalDecision) => void; settled: boolean }
+interface PendingApproval { resolve: (decision: AgentApprovalDecision) => void; settled: boolean }
 interface PendingInput { resolve: (answers: Record<string, string[]>) => void; settled: boolean }
 interface CursorContextUsage { usedTokens: number | null; maxTokens: number | null }
 
@@ -83,7 +87,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
 
-  const settleApproval = (requestId: string, decision: CodexApprovalDecision): boolean => {
+  const settleApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = approvals.get(requestId);
     if (!pending || pending.settled) return false;
     pending.settled = true;
@@ -136,7 +140,10 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
           questionId: question.id,
           selectedOptionIds: (answers[question.id] ?? []).flatMap((answer) => {
             const option = question.options.find((candidate) => candidate.id === answer || candidate.label === answer);
-            return option ? [option.id] : [];
+            // Cursor's extension only names this field for option IDs. Current
+            // agents also accept a raw value here for the native "Other"
+            // answer; dropping it would falsely report that the user answered.
+            return [option?.id ?? answer];
           }),
         })),
       };
@@ -270,7 +277,7 @@ async function cursorPermission(
     return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } };
   }
   const requestId = randomUUID();
-  const decision = await new Promise<CodexApprovalDecision>((resolve) => {
+  const decision = await new Promise<AgentApprovalDecision>((resolve) => {
     approvals.set(requestId, { resolve, settled: false });
     signal.addEventListener("abort", () => {
       const pending = approvals.get(requestId);
@@ -495,11 +502,14 @@ function parseCursorQuestionRequest(value: unknown): CursorQuestionParams {
     questions: rawQuestions.slice(0, 3).map((raw) => {
       const question = requireObject(raw, "question");
       return {
-        id: requireString(question.id, "question.id"),
+        id: requireNativeId(question.id, "question.id", 120),
         prompt: requireString(question.prompt, "question.prompt"),
         options: requireArray(question.options, "question.options").slice(0, 20).map((rawOption) => {
           const option = requireObject(rawOption, "question option");
-          return { id: requireString(option.id, "option.id"), label: requireString(option.label, "option.label") };
+          return {
+            id: requireNativeId(option.id, "option.id", 160),
+            label: requireString(option.label, "option.label"),
+          };
         }),
         ...(typeof question.allowMultiple === "boolean" ? { allowMultiple: question.allowMultiple } : {}),
       };
@@ -530,7 +540,7 @@ function parseTodos(value: unknown): CursorTodo[] {
   });
 }
 
-function cursorQuestions(requestId: string, params: CursorQuestionParams): CodexInputRequest {
+function cursorQuestions(requestId: string, params: CursorQuestionParams): AgentInputRequest {
   return {
     requestId,
     autoResolutionMs: null,
@@ -538,14 +548,19 @@ function cursorQuestions(requestId: string, params: CursorQuestionParams): Codex
       id: question.id,
       header: bounded(params.title ?? "Question"),
       question: bounded(question.prompt),
-      isOther: question.options.length === 0,
+      isOther: true,
       isSecret: false,
-      options: question.options.map((option) => ({ label: bounded(option.label), description: option.id })),
+      allowMultiple: question.allowMultiple === true,
+      options: question.options.map((option) => ({
+        id: bounded(option.id),
+        label: bounded(option.label),
+        description: "",
+      })),
     })),
   };
 }
 
-function cursorTodoSteps(todos: CursorTodo[], fallback?: string): CodexPlanStep[] {
+function cursorTodoSteps(todos: CursorTodo[], fallback?: string): AgentPlanStep[] {
   const steps = todos.flatMap((todo) => {
     const step = todo.content?.trim() || todo.title?.trim();
     if (!step) return [];
@@ -608,3 +623,8 @@ function jsonSummary(value: unknown): string { try { return value === undefined 
 function requireObject(value: unknown, label: string): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object.`); return value as Record<string, unknown>; }
 function requireArray(value: unknown, label: string): unknown[] { if (!Array.isArray(value)) throw new Error(`${label} must be an array.`); return value; }
 function requireString(value: unknown, label: string): string { if (typeof value !== "string" || value.length === 0 || value.length > MAX_EVENT_TEXT_CHARS) throw new Error(`${label} must be a bounded non-empty string.`); return value; }
+function requireNativeId(value: unknown, label: string, maxLength: number): string {
+  const id = requireString(value, label);
+  if (id.length > maxLength) throw new Error(`${label} exceeds ${maxLength} characters.`);
+  return id;
+}

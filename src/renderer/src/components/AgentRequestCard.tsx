@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FilePenLine, ShieldAlert, TerminalSquare } from "lucide-react";
 import type { AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest } from "@shared/contracts";
-import { buildAgentInputAnswers } from "@/utils/agentInput";
+import { buildAgentInputAnswers, inputRequestTitle } from "@/utils/agentInput";
 
 type ApprovalCardProps = {
   request: AgentApprovalRequest;
@@ -59,12 +59,12 @@ type InputRequestCardProps = {
 };
 
 export function InputRequestCard({ request, onRespond }: InputRequestCardProps): React.JSX.Element {
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState(false);
 
   useEffect(() => setAnswers({}), [request.id]);
   const complete = useMemo(
-    () => request.questions.every(({ id }) => Boolean(answers[id]?.trim())),
+    () => request.questions.every(({ id }) => (answers[id] ?? []).some((value) => Boolean(value.trim()))),
     [answers, request.questions],
   );
 
@@ -86,27 +86,52 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
       <div className="agent-request-heading">
         <span className="agent-request-icon"><ShieldAlert size={16} /></span>
         <span>
-          <strong id={`input-${request.id}`}>Codex needs your input</strong>
+          <strong id={`input-${request.id}`}>{inputRequestTitle(request.providerId)}</strong>
           <small>The turn will continue after every question is answered.</small>
         </span>
       </div>
       <div className="agent-input-questions">
         {request.questions.map((question) => {
-          const optionLabels = new Set(question.options.map(({ label }) => label));
-          const otherValue = optionLabels.has(answers[question.id] ?? "") ? "" : answers[question.id] ?? "";
+          const optionIds = new Set(question.options.map(({ id }) => id));
+          const selected = answers[question.id] ?? [];
+          const otherValue = selected.find((value) => !optionIds.has(value)) ?? "";
+          const selectOption = (optionId: string, checked: boolean): void => {
+            setAnswers((current) => {
+              const values = current[question.id] ?? [];
+              const custom = values.filter((value) => !optionIds.has(value));
+              if (!question.allowMultiple) return { ...current, [question.id]: [optionId] };
+              const selectedIds = values.filter((value) => optionIds.has(value) && value !== optionId);
+              return {
+                ...current,
+                [question.id]: checked ? [...selectedIds, optionId, ...custom] : [...selectedIds, ...custom],
+              };
+            });
+          };
+          const enterCustomAnswer = (value: string): void => {
+            setAnswers((current) => {
+              const selectedIds = (current[question.id] ?? []).filter((answer) => optionIds.has(answer));
+              return {
+                ...current,
+                [question.id]: [
+                  ...(question.allowMultiple ? selectedIds : []),
+                  ...(value ? [value] : []),
+                ],
+              };
+            });
+          };
           return (
             <fieldset className="agent-input-question" key={question.id}>
               <legend><span>{question.header}</span>{question.question}</legend>
               {question.options.length > 0 && (
                 <div className="agent-input-options">
                   {question.options.map((option) => (
-                    <label key={option.label}>
+                    <label key={option.id}>
                       <input
-                        type="radio"
+                        type={question.allowMultiple ? "checkbox" : "radio"}
                         name={`${request.id}-${question.id}`}
-                        value={option.label}
-                        checked={answers[question.id] === option.label}
-                        onChange={() => setAnswers((current) => ({ ...current, [question.id]: option.label }))}
+                        value={option.id}
+                        checked={selected.includes(option.id)}
+                        onChange={(event) => selectOption(option.id, event.target.checked)}
                       />
                       <span><strong>{option.label}</strong>{option.description && <small>{option.description}</small>}</span>
                     </label>
@@ -118,11 +143,11 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
                   className="agent-input-text"
                   type={question.isSecret ? "password" : "text"}
                   autoComplete="off"
-                  value={question.options.length > 0 ? otherValue : answers[question.id] ?? ""}
+                  value={otherValue}
                   maxLength={4_000}
                   placeholder={question.isOther && question.options.length > 0 ? "Or enter another answer" : "Your answer"}
                   aria-label={question.question}
-                  onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))}
+                  onChange={(event) => enterCustomAnswer(event.target.value)}
                 />
               )}
             </fieldset>

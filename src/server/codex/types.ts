@@ -1,56 +1,11 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ProviderRateLimit } from "../../shared/contracts";
-
-export type CodexApprovalDecision = "approve" | "deny" | "cancel";
-export type CodexApprovalKind = "command" | "file-change" | "permissions";
-
-export interface CodexApprovalNetworkScope {
-  host: string;
-  protocol: "http" | "https" | "socks5Tcp" | "socks5Udp";
-}
-
-export interface CodexApprovalPermissionRoot {
-  path: string;
-  access: "read" | "write";
-}
-
-export interface CodexApprovalRequest {
-  requestId: string;
-  kind: CodexApprovalKind;
-  title: string;
-  detail?: string;
-  command?: string;
-  cwd?: string;
-  reason?: string;
-  networkScope?: CodexApprovalNetworkScope;
-  permissionRoots: CodexApprovalPermissionRoot[];
-  availableDecisions: CodexApprovalDecision[];
-}
-
-export interface CodexInputOption {
-  label: string;
-  description: string;
-}
-
-export interface CodexInputQuestion {
-  id: string;
-  header: string;
-  question: string;
-  isOther: boolean;
-  isSecret: boolean;
-  options: CodexInputOption[];
-}
-
-export interface CodexInputRequest {
-  requestId: string;
-  questions: CodexInputQuestion[];
-  autoResolutionMs: number | null;
-}
-
-export interface CodexPlanStep {
-  step: string;
-  status: "pending" | "inProgress" | "completed";
-}
+import type {
+  AgentApprovalDecision,
+  AgentApprovalRequest,
+  AgentInputRequest,
+  AgentPlanStep,
+} from "../provider/interactions";
 
 export interface CodexUsageSnapshot {
   usedTokens: number | null;
@@ -80,11 +35,11 @@ export interface CodexAppServerOptions {
   onActivity?: (kind: "system" | "turn" | "tool" | "command" | "reasoning", phase: "started" | "completed" | "failed" | "info", label: string) => void;
   onSession?: (sessionId: string) => void;
   onStatus?: (status: "running") => void;
-  onApproval?: (request: CodexApprovalRequest) => void;
-  onApprovalResolved?: (requestId: string, decision: CodexApprovalDecision | "cancelled") => void;
-  onInputRequest?: (request: CodexInputRequest) => void;
+  onApproval?: (request: AgentApprovalRequest) => void;
+  onApprovalResolved?: (requestId: string, decision: AgentApprovalDecision | "cancelled") => void;
+  onInputRequest?: (request: AgentInputRequest) => void;
   onInputResolved?: (requestId: string) => void;
-  onPlan?: (explanation: string | null, steps: CodexPlanStep[]) => void;
+  onPlan?: (explanation: string | null, steps: AgentPlanStep[]) => void;
   onReasoning?: (text: string) => void;
   onUsage?: (usage: CodexUsageSnapshot) => void;
   onRateLimits?: (rateLimits: ProviderRateLimit[], complete: boolean) => void;
@@ -105,6 +60,6 @@ export interface CodexAppServerRun {
   child: ChildProcessWithoutNullStreams;
   result: Promise<CodexAppServerResult>;
   cancel: (force?: boolean) => void;
-  respondToApproval: (requestId: string, decision: CodexApprovalDecision) => boolean;
+  respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
 }

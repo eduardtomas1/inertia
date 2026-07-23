@@ -48,7 +48,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     promptRequestId = message.id;
     return send({ jsonrpc: "2.0", id: 100, method: "session/request_permission", params: { sessionId, toolCall: { toolCallId: "tool-1", title: "Run tests", kind: "execute", status: "pending", rawInput: { command: "npm test" } }, options: [{ optionId: "allow", name: "Allow once", kind: "allow_once" }, { optionId: "reject", name: "Reject", kind: "reject_once" }] } });
   }
-  if (message.id === 100) return send({ jsonrpc: "2.0", id: 101, method: "cursor/ask_question", params: { toolCallId: "tool-2", title: "Choose scope", questions: [{ id: "scope", prompt: "Which scope?", options: [{ id: "focused", label: "Focused" }] }] } });
+  if (message.id === 100) return send({ jsonrpc: "2.0", id: 101, method: "cursor/ask_question", params: { toolCallId: "tool-2", title: "Choose scope", questions: [
+    { id: "scope", prompt: "Which scopes?", options: [{ id: "focused", label: "Focused" }, { id: "broad", label: "Broad" }], allowMultiple: true },
+    { id: "notes", prompt: "Anything else?", options: [], allowMultiple: false }
+  ] } });
   if (message.id === 101) return send({ jsonrpc: "2.0", id: 102, method: "cursor/create_plan", params: { toolCallId: "tool-3", plan: "Inspect then implement", todos: [{ id: "todo-1", content: "Inspect", status: "in_progress" }] } });
   if (message.id === 102) {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "stale-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "stale" } } } });
@@ -90,7 +93,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       },
       onInput: (event) => {
         questions.push(event.request.questions[0]!.question);
-        expect(manager.respondToInput(event.conversationId, event.request.requestId, { scope: ["Focused"] })).toBe(true);
+        expect(event.request.questions).toMatchObject([
+          { id: "scope", allowMultiple: true, options: [{ id: "focused" }, { id: "broad" }] },
+          { id: "notes", allowMultiple: false, options: [] },
+        ]);
+        expect(manager.respondToInput(event.conversationId, event.request.requestId, {
+          scope: ["focused", "broad"],
+          notes: ["Use the exact free-text answer"],
+        })).toBe(true);
       },
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
@@ -103,7 +113,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
     expect(result).toMatchObject({ status: "completed", text: "Cursor response", sessionId: "44444444-4444-4444-8444-444444444444" });
     expect(approvals).toEqual(["Run tests"]);
-    expect(questions).toEqual(["Which scope?"]);
+    expect(questions).toEqual(["Which scopes?"]);
     expect(plans).toEqual(expect.arrayContaining(["Inspect", "Implement"]));
     expect(reasoning).toEqual(["Checking"]);
     expect(usage).toEqual([321, 321]);
@@ -125,7 +135,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<Record<string, unknown>>;
     expect(captured.find((message) => message.id === 100)).toMatchObject({ result: { outcome: { outcome: "selected", optionId: "allow" } } });
-    expect(captured.find((message) => message.id === 101)).toMatchObject({ result: { outcome: "answered", answers: [{ questionId: "scope", selectedOptionIds: ["focused"] }] } });
+    expect(captured.find((message) => message.id === 101)).toMatchObject({
+      result: {
+        outcome: "answered",
+        answers: [
+          { questionId: "scope", selectedOptionIds: ["focused", "broad"] },
+          { questionId: "notes", selectedOptionIds: ["Use the exact free-text answer"] },
+        ],
+      },
+    });
     const prompt = captured.find((message) => message.method === "session/prompt") as { params: { prompt: Array<Record<string, unknown>> } };
     expect(prompt.params.prompt).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "image", mimeType: "image/png", data: "iVBORw==" }),

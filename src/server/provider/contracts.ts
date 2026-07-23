@@ -1,10 +1,10 @@
 import type { ProviderModel, ProviderRateLimit, ThreadUsageSnapshot } from "../../shared/contracts";
 import type {
-  CodexApprovalDecision,
-  CodexApprovalRequest,
-  CodexInputRequest,
-  CodexPlanStep,
-} from "../codex/types";
+  AgentApprovalDecision,
+  AgentApprovalRequest,
+  AgentInputRequest,
+  AgentPlanStep,
+} from "./interactions";
 
 export const PROVIDER_IDS = ["codex", "claude", "cursor", "opencode"] as const;
 
@@ -98,18 +98,18 @@ export interface ProviderSessionEvent extends ProviderEventBase {
 
 export interface ProviderApprovalEvent extends ProviderEventBase {
   type: "approval";
-  request: CodexApprovalRequest;
+  request: AgentApprovalRequest;
 }
 
 export interface ProviderApprovalResolvedEvent extends ProviderEventBase {
   type: "approval-resolved";
   requestId: string;
-  decision: CodexApprovalDecision | "cancelled";
+  decision: AgentApprovalDecision | "cancelled";
 }
 
 export interface ProviderInputEvent extends ProviderEventBase {
   type: "input";
-  request: CodexInputRequest;
+  request: AgentInputRequest;
 }
 
 export interface ProviderInputResolvedEvent extends ProviderEventBase {
@@ -120,7 +120,7 @@ export interface ProviderInputResolvedEvent extends ProviderEventBase {
 export interface ProviderPlanEvent extends ProviderEventBase {
   type: "plan";
   explanation: string | null;
-  steps: CodexPlanStep[];
+  steps: AgentPlanStep[];
 }
 
 export interface ProviderReasoningEvent extends ProviderEventBase {

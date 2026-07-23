@@ -1,13 +1,13 @@
 import { boundedText, objectValue, stringValue, type JsonObject } from "./protocol";
-import type { CodexPlanStep } from "./types";
+import type { AgentPlanStep } from "../provider/interactions";
 
 export interface ParsedCodexPlan {
   explanation: string | null;
-  steps: CodexPlanStep[];
+  steps: AgentPlanStep[];
 }
 
 export function parseCodexPlan(params: JsonObject): ParsedCodexPlan {
-  const steps: CodexPlanStep[] = [];
+  const steps: AgentPlanStep[] = [];
   if (Array.isArray(params.plan)) {
     for (const value of params.plan.slice(0, 50)) {
       const planStep = objectValue(value);

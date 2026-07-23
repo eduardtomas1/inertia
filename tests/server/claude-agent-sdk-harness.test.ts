@@ -96,6 +96,7 @@ describe("Claude Agent SDK harness", () => {
     );
     const approvals: string[] = [];
     const questions: string[] = [];
+    const questionIds: string[] = [];
     const plans: string[] = [];
     const reasoning: string[] = [];
     const usages: Array<number | null> = [];
@@ -118,8 +119,13 @@ describe("Claude Agent SDK harness", () => {
         expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
       },
       onInput: (event) => {
-        questions.push(event.request.questions[0]!.question);
-        expect(manager.respondToInput(event.conversationId, event.request.requestId, { "Which scope?": ["Focused"] })).toBe(true);
+        const question = event.request.questions[0]!;
+        questions.push(question.question);
+        questionIds.push(question.id);
+        expect(question.id).not.toBe(question.question);
+        expect(manager.respondToInput(event.conversationId, event.request.requestId, {
+          [question.id]: [question.options[0]!.id],
+        })).toBe(true);
       },
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
@@ -146,6 +152,7 @@ describe("Claude Agent SDK harness", () => {
     expect(content[1]).toEqual({ type: "text", text: "Inspect this image" });
     expect(approvals).toEqual(["Run tests"]);
     expect(questions).toEqual(["Which scope?"]);
+    expect(questionIds).toEqual(["tool-2:question:1"]);
     expect(plans).toEqual(["Inspect", "Implement"]);
     expect(reasoning).toEqual(["Checking constraints"]);
     expect(usages).toEqual([75]);

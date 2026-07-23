@@ -21,27 +21,31 @@ import type {
   CodexAppServerOptions,
   CodexAppServerResult,
   CodexAppServerRun,
-  CodexApprovalDecision,
-  CodexApprovalRequest,
-  CodexInputRequest,
 } from "./codex/types";
+import type {
+  AgentApprovalDecision,
+  AgentApprovalRequest,
+  AgentInputRequest,
+} from "./provider/interactions";
+import { providerProcessInvocation } from "./provider/process";
 import { terminateProcessTree } from "./process-lifecycle";
 
 export type {
   CodexAppServerOptions,
   CodexAppServerResult,
   CodexAppServerRun,
-  CodexApprovalDecision,
-  CodexApprovalKind,
-  CodexApprovalNetworkScope,
-  CodexApprovalPermissionRoot,
-  CodexApprovalRequest,
-  CodexInputOption,
-  CodexInputQuestion,
-  CodexInputRequest,
-  CodexPlanStep,
   CodexUsageSnapshot,
 } from "./codex/types";
+export type {
+  AgentApprovalDecision,
+  AgentApprovalKind,
+  AgentApprovalNetworkScope,
+  AgentApprovalPermissionRoot,
+  AgentApprovalRequest,
+  AgentInputRequest,
+  AgentInputQuestion,
+  AgentPlanStep,
+} from "./provider/interactions";
 
 interface PendingClientRequest {
   method: string;
@@ -52,14 +56,14 @@ interface PendingClientRequest {
 
 interface PendingApproval {
   rpcId: RpcId;
-  request: CodexApprovalRequest;
+  request: AgentApprovalRequest;
   protocol: "decision" | "permissions";
   requestedPermissions?: JsonObject;
 }
 
 interface PendingInput {
   rpcId: RpcId;
-  request: CodexInputRequest;
+  request: AgentInputRequest;
 }
 
 const MAX_LINE_CHARS = 1024 * 1024;
@@ -107,7 +111,8 @@ function isRecoverableResumeError(error: unknown): boolean {
 }
 
 export function startCodexAppServerRun(options: CodexAppServerOptions): CodexAppServerRun {
-  const child = spawn(options.executable, ["app-server"], {
+  const invocation = providerProcessInvocation(options.executable, ["app-server"], options.environment);
+  const child = spawn(invocation.command, invocation.args, {
     cwd: options.cwd,
     env: options.environment,
     detached: process.platform !== "win32",
@@ -538,7 +543,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     });
   };
 
-  const respondToApproval = (requestId: string, decision: CodexApprovalDecision): boolean => {
+  const respondToApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = pendingApprovals.get(requestId);
     if (!pending || settled || !pending.request.availableDecisions.includes(decision)) return false;
     const result: JsonObject = pending.protocol === "permissions"

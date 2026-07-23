@@ -1,4 +1,4 @@
-import type { CodexApprovalDecision } from "./codex-app-server";
+import type { AgentApprovalDecision } from "./provider/interactions";
 import { providerEnvironment } from "./environment";
 import { validateProviderRunInput } from "./provider/adapters";
 import {
@@ -33,6 +33,7 @@ import {
   type ProviderMetadata,
   type ProviderMetadataRequestOptions,
 } from "./provider/metadata";
+import { providerProcessInvocation } from "./provider/process";
 
 export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider, detectProviders };
 export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
@@ -98,6 +99,22 @@ export class ProviderManager {
     return detection;
   }
 
+  async validateCommand(
+    providerId: ProviderId,
+    command: string,
+    options: Omit<ProviderDetectionOptions, "command"> = {},
+  ): Promise<ProviderDetection> {
+    return await detectProvider(providerId, { ...options, command });
+  }
+
+  setCommand(providerId: ProviderId, command?: string): void {
+    const value = command?.trim();
+    if (value) this.commands[providerId] = value;
+    else delete this.commands[providerId];
+    this.resolvedCommands.delete(providerId);
+    this.metadataCache.invalidate(providerId);
+  }
+
   async detectAll(options: Omit<ProviderDetectionOptions, "command"> = {}): Promise<ProviderDetection[]> {
     if (options.refreshEnvironment) await providerEnvironment(true);
     return await Promise.all(PROVIDER_IDS.map((id) => this.detect(id, { ...options, refreshEnvironment: false })));
@@ -109,7 +126,8 @@ export class ProviderManager {
     if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name} CLI is not installed.`);
     const environment = await providerEnvironment();
     this.processEnvironment = environment.env;
-    return { executable, args: providerAuthLoginArgs(providerId), env: environment.env };
+    const invocation = providerProcessInvocation(executable, providerAuthLoginArgs(providerId), environment.env);
+    return { executable: invocation.command, args: invocation.args, env: environment.env };
   }
 
   cachedMetadata(providerId: ProviderId): ProviderMetadata {
@@ -223,7 +241,7 @@ export class ProviderManager {
     await Promise.allSettled(active.map(([, run]) => run.result));
   }
 
-  respondToApproval(conversationId: string, requestId: string, decision: CodexApprovalDecision): boolean {
+  respondToApproval(conversationId: string, requestId: string, decision: AgentApprovalDecision): boolean {
     const active = this.activeRuns.get(conversationId);
     if (!active || active.settled || active.cancelRequested) return false;
     const extension = active.harnessRun.extension;

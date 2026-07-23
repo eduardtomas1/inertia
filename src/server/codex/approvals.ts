@@ -3,16 +3,16 @@ import { isAbsolute, normalize } from "node:path";
 
 import { boundedText, objectValue, type JsonObject } from "./protocol";
 import type {
-  CodexApprovalDecision,
-  CodexApprovalNetworkScope,
-  CodexApprovalPermissionRoot,
-  CodexApprovalRequest,
-} from "./types";
+  AgentApprovalDecision,
+  AgentApprovalNetworkScope,
+  AgentApprovalPermissionRoot,
+  AgentApprovalRequest,
+} from "../provider/interactions";
 
 const MAX_PERMISSION_ROOTS = 12;
 
 export interface ParsedCodexApprovalRequest {
-  request: CodexApprovalRequest;
+  request: AgentApprovalRequest;
   protocol: "decision" | "permissions";
   requestedPermissions?: JsonObject;
 }
@@ -39,11 +39,11 @@ function permissionPath(value: unknown): string | undefined {
   return subpath ? `${base}: ${subpath}` : base;
 }
 
-function permissionRoots(value: unknown): CodexApprovalPermissionRoot[] {
+function permissionRoots(value: unknown): AgentApprovalPermissionRoot[] {
   const profile = objectValue(value);
   const fileSystem = objectValue(profile?.fileSystem);
   if (!fileSystem) return [];
-  const roots: CodexApprovalPermissionRoot[] = [];
+  const roots: AgentApprovalPermissionRoot[] = [];
   const seen = new Set<string>();
   const add = (path: unknown, access: "read" | "write", filesystemPath = true): void => {
     const bounded = filesystemPath ? normalizedFilesystemPath(path) : boundedText(path, 4_096);
@@ -65,7 +65,7 @@ function permissionRoots(value: unknown): CodexApprovalPermissionRoot[] {
   return roots;
 }
 
-function networkScope(value: unknown): CodexApprovalNetworkScope | undefined {
+function networkScope(value: unknown): AgentApprovalNetworkScope | undefined {
   const context = objectValue(value);
   const host = boundedText(context?.host, 512);
   const protocol = context?.protocol;
@@ -81,16 +81,16 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
   const additionalPermissions = objectValue(params.additionalPermissions);
   const requestedNetworkScope = networkScope(params.networkApprovalContext);
   const requestedPermissionRoots = permissionRoots(additionalPermissions);
-  const decisionMap: Record<string, CodexApprovalDecision> = {
+  const decisionMap: Record<string, AgentApprovalDecision> = {
     accept: "approve",
     decline: "deny",
     cancel: "cancel",
   };
   const rawAdvertisedDecisions = Array.isArray(params.availableDecisions) ? params.availableDecisions : undefined;
-  const advertised: CodexApprovalDecision[] = rawAdvertisedDecisions
-    ? rawAdvertisedDecisions.flatMap((value): CodexApprovalDecision[] => typeof value === "string" && decisionMap[value] ? [decisionMap[value]] : [])
+  const advertised: AgentApprovalDecision[] = rawAdvertisedDecisions
+    ? rawAdvertisedDecisions.flatMap((value): AgentApprovalDecision[] => typeof value === "string" && decisionMap[value] ? [decisionMap[value]] : [])
     : [];
-  const availableDecisions: CodexApprovalDecision[] = rawAdvertisedDecisions
+  const availableDecisions: AgentApprovalDecision[] = rawAdvertisedDecisions
     ? [...new Set(advertised)]
     : ["approve", "deny", "cancel"];
 

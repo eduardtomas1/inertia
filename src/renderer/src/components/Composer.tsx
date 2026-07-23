@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Command, MessageSquarePlus, Paperclip, Send, ShieldCheck, Sparkles, Square, Wrench, X } from "lucide-react";
 import clsx from "clsx";
-import type { AccessMode, ChatAttachment, Conversation, InteractionMode, ProjectAction, ProviderId, ProviderInfo, ThreadUsageSnapshot, WorkspaceEntry } from "@shared/contracts";
+import type { AccessMode, ChatAttachment, Conversation, InteractionMode, ProjectAction, ProviderId, ProviderInfo, ThreadUsageSnapshot, UsageDisplayMode, WorkspaceEntry } from "@shared/contracts";
+import { MAX_CHAT_MESSAGE_CHARS } from "@shared/diff-review";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { IconButton, LoadingMark } from "./ui";
@@ -16,7 +17,7 @@ type ComposerProps = {
   running: boolean;
   mentionResults: WorkspaceEntry[];
   usage: ThreadUsageSnapshot | null;
-  showUsage: boolean;
+  usageDisplayMode: UsageDisplayMode;
   promptContext?: string | null;
   onSend: (message: string, attachments: ChatAttachment[]) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => void;
@@ -26,6 +27,7 @@ type ComposerProps = {
   onMentionQuery: (query: string) => void;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId: ProviderId) => void;
+  onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   onStop: () => void;
   onClearPromptContext?: () => void;
 };
@@ -42,6 +44,11 @@ function menuId(menu: ComposerMenu): string {
   return `composer-${menu}-menu`;
 }
 
+function diffContextDetail(context: string): string {
+  const target = /^Target file:\s*(.+)$/mu.exec(context)?.[1]?.trim();
+  return target ? `in ${target}` : context.split("\n")[0] ?? "";
+}
+
 export function Composer({
   conversation,
   providers,
@@ -51,7 +58,7 @@ export function Composer({
   running,
   mentionResults,
   usage,
-  showUsage,
+  usageDisplayMode,
   promptContext,
   onSend,
   onUpdateConversation,
@@ -61,6 +68,7 @@ export function Composer({
   onMentionQuery,
   onConnectProvider,
   onRefreshProvider,
+  onUsageDisplayModeChange,
   onStop,
   onClearPromptContext,
 }: ComposerProps): React.JSX.Element {
@@ -76,6 +84,10 @@ export function Composer({
     setAttachments([]);
     dismissMenu("context-change");
   }, [conversation.id, dismissMenu]);
+
+  useEffect(() => {
+    if (running) dismissMenu("context-change");
+  }, [dismissMenu, running]);
 
   useEffect(() => {
     const key = `inertia:draft:${conversation.id}`;
@@ -128,7 +140,11 @@ export function Composer({
   const selectedReasoning = conversation.reasoningEffort || selectedModel?.defaultReasoningEffort || "";
   const selectedProviderReady = selectedProvider?.canRun === true;
   const selectedProviderAction = selectedProvider ? providerSetupAction(selectedProvider) : "refresh";
-  const canSend = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext)) && selectedProviderReady && !disabled && !sending && !running;
+  const contextSuffix = promptContext ? `\n\nSelected diff context:\n${promptContext}` : "";
+  const composedLength = (message.trim() || (attachments.length > 0 ? "Please inspect the attached image." : "Please review the selected diff context.")).length + contextSuffix.length;
+  const typedMessageLimit = Math.max(0, MAX_CHAT_MESSAGE_CHARS - contextSuffix.length);
+  const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
+  const canSend = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext)) && messageFits && selectedProviderReady && !disabled && !sending && !running;
   const access = accessOptions.find((item) => item.value === conversation.accessMode) ?? accessOptions[2];
 
   return (
@@ -158,7 +174,7 @@ export function Composer({
         {promptContext && (
           <div className="composer-context" aria-label="Selected diff context">
             <MessageSquarePlus size={13} />
-            <span><strong>Diff selection</strong><small>{promptContext.split("\n")[0]}</small></span>
+            <span><strong>Diff selection </strong><small>{diffContextDetail(promptContext)}</small></span>
             <button type="button" aria-label="Remove selected diff context" onClick={onClearPromptContext}><X size={12} /></button>
           </div>
         )}
@@ -185,21 +201,22 @@ export function Composer({
             if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); }
           }}
           rows={1}
-          maxLength={20_000}
+          maxLength={typedMessageLimit}
           disabled={disabled || running}
           aria-label="Message"
           placeholder={running ? "The agent is working…" : "Ask Inertia to work with this project…"}
         />
+        {!messageFits && <p className="composer-limit-warning" role="alert">This message and diff context exceed the {MAX_CHAT_MESSAGE_CHARS.toLocaleString()} character limit. Shorten the message or selected context.</p>}
 
         {mentionMatch && mentionResults.length > 0 && (
           <div className="composer-suggestion-menu" role="listbox" aria-label="Project files">
             <div className="popover-title">Reference a file</div>
-            {mentionResults.slice(0, 8).map((entry) => <button type="button" role="option" key={entry.path} onClick={() => setMessage((current) => current.replace(/@[^\s@]*$/u, `@${entry.path}${entry.kind === "directory" ? "/" : " "}`))}><span>{entry.path}</span><small>{entry.kind}</small></button>)}
+            {mentionResults.slice(0, 8).map((entry) => <button type="button" role="option" aria-selected="false" key={entry.path} onClick={() => setMessage((current) => current.replace(/@[^\s@]*$/u, `@${entry.path}${entry.kind === "directory" ? "/" : " "}`))}><span>{entry.path}</span><small>{entry.kind}</small></button>)}
           </div>
         )}
         {slashMatch && (
           <div className="composer-suggestion-menu" role="listbox" aria-label="Composer commands">
-            {[{ id: "plan", label: "Plan mode", mode: "plan" as const }, { id: "build", label: "Build mode", mode: "build" as const }].filter(({ id }) => id.startsWith(slashMatch[1].toLowerCase())).map((item) => <button type="button" role="option" key={item.id} onClick={() => { onUpdateConversation({ interactionMode: item.mode }); setMessage(""); }}><span>/{item.id}</span><small>{item.label}</small></button>)}
+            {[{ id: "plan", label: "Plan mode", mode: "plan" as const }, { id: "build", label: "Build mode", mode: "build" as const }].filter(({ id }) => id.startsWith(slashMatch[1].toLowerCase())).map((item) => <button type="button" role="option" aria-selected="false" disabled={disabled || running} key={item.id} onClick={() => { onUpdateConversation({ interactionMode: item.mode }); setMessage(""); }}><span>/{item.id}</span><small>{item.label}</small></button>)}
           </div>
         )}
 
@@ -230,7 +247,7 @@ export function Composer({
 
           <div className="composer-options">
             <div className="popover-anchor">
-              <button ref={(node) => setMenuTrigger("provider", node)} type="button" className={clsx("composer-pill", menu === "provider" && "is-active")} aria-label="Choose provider and model" aria-haspopup="menu" aria-controls={menuId("provider")} aria-expanded={menu === "provider"} onClick={() => toggleMenu("provider")}>
+              <button ref={(node) => setMenuTrigger("provider", node)} type="button" className={clsx("composer-pill", menu === "provider" && "is-active")} aria-label="Choose provider and model" aria-haspopup="menu" aria-controls={menuId("provider")} aria-expanded={menu === "provider"} disabled={disabled || running} onClick={() => toggleMenu("provider")}>
                 <Sparkles size={14} /><span>{selectedModel?.label ?? selectedProvider?.label ?? conversation.providerId}</span><ChevronDown size={12} />
               </button>
               {menu === "provider" && (
@@ -255,7 +272,7 @@ export function Composer({
 
             {selectedModel && selectedModel.reasoningOptions.length > 0 && (
               <div className="popover-anchor">
-                <button ref={(node) => setMenuTrigger("reasoning", node)} type="button" className={clsx("composer-pill reasoning-pill", menu === "reasoning" && "is-active")} aria-label="Choose reasoning level" aria-haspopup="menu" aria-controls={menuId("reasoning")} aria-expanded={menu === "reasoning"} onClick={() => toggleMenu("reasoning")}>
+                <button ref={(node) => setMenuTrigger("reasoning", node)} type="button" className={clsx("composer-pill reasoning-pill", menu === "reasoning" && "is-active")} aria-label="Choose reasoning level" aria-haspopup="menu" aria-controls={menuId("reasoning")} aria-expanded={menu === "reasoning"} disabled={disabled || running} onClick={() => toggleMenu("reasoning")}>
                   <span>{selectedModel.reasoningOptions.find(({ value }) => value === selectedReasoning)?.label ?? "Reasoning"}</span><ChevronDown size={12} />
                 </button>
                 {menu === "reasoning" && (
@@ -273,7 +290,7 @@ export function Composer({
             )}
 
             <div className="popover-anchor">
-              <button ref={(node) => setMenuTrigger("mode", node)} type="button" className={clsx("composer-pill", menu === "mode" && "is-active")} aria-label="Choose work mode" aria-haspopup="menu" aria-controls={menuId("mode")} aria-expanded={menu === "mode"} onClick={() => toggleMenu("mode")}>
+              <button ref={(node) => setMenuTrigger("mode", node)} type="button" className={clsx("composer-pill", menu === "mode" && "is-active")} aria-label="Choose work mode" aria-haspopup="menu" aria-controls={menuId("mode")} aria-expanded={menu === "mode"} disabled={disabled || running} onClick={() => toggleMenu("mode")}>
                 <span>{conversation.interactionMode === "build" ? "Build" : "Plan"}</span><ChevronDown size={12} />
               </button>
               {menu === "mode" && (
@@ -289,7 +306,7 @@ export function Composer({
             </div>
 
             <div className="popover-anchor access-control">
-              <button ref={(node) => setMenuTrigger("access", node)} type="button" className={clsx("composer-pill", menu === "access" && "is-active")} aria-label="Choose project access" aria-haspopup="menu" aria-controls={menuId("access")} aria-expanded={menu === "access"} onClick={() => toggleMenu("access")}>
+              <button ref={(node) => setMenuTrigger("access", node)} type="button" className={clsx("composer-pill", menu === "access" && "is-active")} aria-label="Choose project access" aria-haspopup="menu" aria-controls={menuId("access")} aria-expanded={menu === "access"} disabled={disabled || running} onClick={() => toggleMenu("access")}>
                 <ShieldCheck size={14} /><span>{access.label}</span><ChevronDown size={12} />
               </button>
               {menu === "access" && (
@@ -315,15 +332,18 @@ export function Composer({
           </div>
         </div>
       </div>
+      {selectedProvider && (
+        <UsageIndicator
+          usage={usage}
+          rateLimits={selectedProvider.rateLimits}
+          rateLimitState={selectedProvider.metadataState.rateLimits}
+          mode={usageDisplayMode}
+          providerLabel={selectedProvider.label}
+          onModeChange={onUsageDisplayModeChange}
+        />
+      )}
       <div className="composer-footer">
         <p className="composer-note">Use @ for project files and / for modes · review changes before committing</p>
-        {showUsage && selectedProvider && (
-          <UsageIndicator
-            usage={usage}
-            rateLimits={selectedProvider.rateLimits}
-            rateLimitState={selectedProvider.metadataState.rateLimits}
-          />
-        )}
       </div>
     </div>
   );

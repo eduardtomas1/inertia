@@ -42,6 +42,22 @@ describe("client command contract", () => {
     expect(clientCommandSchema.safeParse(command).success).toBe(false);
   });
 
+  it("accepts only scoped UUID targets for Activity Center mutations", () => {
+    const runId = crypto.randomUUID();
+    for (const type of ["activity.stop", "activity.dismiss"] as const) {
+      expect(clientCommandSchema.safeParse({
+        type,
+        requestId: crypto.randomUUID(),
+        payload: { runId },
+      }).success).toBe(true);
+      expect(clientCommandSchema.safeParse({
+        type,
+        requestId: crypto.randomUUID(),
+        payload: { runId: "../process", terminalId: crypto.randomUUID() },
+      }).success).toBe(false);
+    }
+  });
+
   it("accepts bounded provider refresh commands", () => {
     const refreshAll = {
       type: "provider.refresh",
@@ -56,6 +72,38 @@ describe("client command contract", () => {
 
     expect(clientCommandSchema.parse(refreshAll)).toEqual(refreshAll);
     expect(clientCommandSchema.parse(refreshOne)).toEqual(refreshOne);
+  });
+
+  it("accepts only supported interface scales", () => {
+    const requestId = crypto.randomUUID();
+    for (const interfaceScale of ["compact", "default", "comfortable", "large"] as const) {
+      expect(clientCommandSchema.safeParse({
+        type: "settings.update",
+        requestId,
+        payload: { interfaceScale },
+      }).success).toBe(true);
+    }
+    expect(clientCommandSchema.safeParse({
+      type: "settings.update",
+      requestId,
+      payload: { interfaceScale: "125%" },
+    }).success).toBe(false);
+  });
+
+  it("accepts only supported usage display modes", () => {
+    const requestId = crypto.randomUUID();
+    for (const usageDisplayMode of ["expanded", "compact", "hidden"] as const) {
+      expect(clientCommandSchema.safeParse({
+        type: "settings.update",
+        requestId,
+        payload: { usageDisplayMode },
+      }).success).toBe(true);
+    }
+    expect(clientCommandSchema.safeParse({
+      type: "settings.update",
+      requestId,
+      payload: { usageDisplayMode: "popover" },
+    }).success).toBe(false);
   });
 
   it("accepts provider authentication terminals at their dimension boundaries", () => {

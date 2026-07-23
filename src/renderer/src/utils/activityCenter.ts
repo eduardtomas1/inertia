@@ -13,6 +13,61 @@ export interface ActivityRunActions {
   failureDetails: boolean;
 }
 
+export type ActivityRunSectionId = "attention" | "active" | "recent";
+
+export interface ActivityRunSection {
+  id: ActivityRunSectionId;
+  label: string;
+  runs: WorkspaceRun[];
+}
+
+export interface ActivityRunSummary {
+  attentionCount: number;
+  activeCount: number;
+}
+
+const FAILED_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1_000;
+
+function compareStartedAtDescending(a: WorkspaceRun, b: WorkspaceRun): number {
+  return b.startedAt.localeCompare(a.startedAt);
+}
+
+export function activityRunNeedsAttention(run: WorkspaceRun, now = Date.now()): boolean {
+  if (run.status === "waiting") return true;
+  if (run.status !== "failed") return false;
+  const failureTime = Date.parse(run.finishedAt ?? run.startedAt);
+  return Number.isFinite(failureTime) && now - failureTime <= FAILED_ATTENTION_WINDOW_MS;
+}
+
+export function activityRunSections(runs: readonly WorkspaceRun[], now = Date.now()): ActivityRunSection[] {
+  const attention = runs
+    .filter((run) => activityRunNeedsAttention(run, now))
+    .sort((a, b) => {
+      const waitingFirst = Number(b.status === "waiting") - Number(a.status === "waiting");
+      return waitingFirst || compareStartedAtDescending(a, b);
+    });
+  const active = runs
+    .filter((run) => run.finishedAt === null && !activityRunNeedsAttention(run, now))
+    .sort(compareStartedAtDescending);
+  const recent = runs
+    .filter((run) => run.finishedAt !== null && !activityRunNeedsAttention(run, now))
+    .sort(compareStartedAtDescending);
+
+  const sections: ActivityRunSection[] = [
+    { id: "attention", label: "Needs attention", runs: attention },
+    { id: "active", label: "In progress", runs: active },
+    { id: "recent", label: "Recent", runs: recent.slice(0, 12) },
+  ];
+  return sections.filter(({ runs: sectionRuns }) => sectionRuns.length > 0);
+}
+
+export function activityRunSummary(runs: readonly WorkspaceRun[], now = Date.now()): ActivityRunSummary {
+  return {
+    attentionCount: runs.filter((run) => activityRunNeedsAttention(run, now)).length,
+    activeCount: runs.filter(({ finishedAt }) => finishedAt === null).length,
+  };
+}
+
 export function activityWaitingKind(
   run: WorkspaceRun,
   conversations: readonly Conversation[],

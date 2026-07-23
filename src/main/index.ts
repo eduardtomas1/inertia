@@ -10,6 +10,7 @@ import {
   dialog,
   ipcMain,
   net,
+  nativeTheme,
   protocol,
   screen,
   shell,
@@ -20,6 +21,14 @@ import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import {
+  WINDOW_APPEARANCE_FILENAME,
+  isWindowThemePreference,
+  readWindowThemePreference,
+  resolveWindowBackground,
+  type WindowThemePreference,
+  writeWindowThemePreference,
+} from "./window-appearance.js";
 
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -34,6 +43,7 @@ const IPC = {
   previewCommand: "inertia:preview-command",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
+  syncThemePreference: "inertia:sync-theme-preference",
 } as const;
 
 const APP_SCHEME = "inertia";
@@ -60,10 +70,12 @@ let stoppingRuntime = false;
 let packageSmokeFilePath: string | null = null;
 let previewView: WebContentsView | null = null;
 let previewBounds: Electron.Rectangle | null = null;
+let windowThemePreference: WindowThemePreference = "system";
 
 interface WindowState { x?: number; y?: number; width: number; height: number; maximized: boolean }
 
 function windowStatePath(): string { return join(app.getPath("userData"), "window-state.json"); }
+function windowAppearancePath(): string { return join(app.getPath("userData"), WINDOW_APPEARANCE_FILENAME); }
 
 function isContained(root: string, target: string): boolean {
   const child = relative(root, target);
@@ -416,6 +428,21 @@ function registerIpcHandlers(): void {
     assertTrustedIpc(event, args.length);
     closePreview();
   });
+
+  ipcMain.handle(IPC.syncThemePreference, (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const [preference] = args;
+    if (!isWindowThemePreference(preference)) throw new Error("Invalid theme preference");
+    windowThemePreference = preference;
+    nativeTheme.themeSource = preference;
+    mainWindow?.setBackgroundColor(resolveWindowBackground(preference, nativeTheme.shouldUseDarkColors));
+    try {
+      writeWindowThemePreference(windowAppearancePath(), preference);
+    } catch {
+      // Appearance persistence is best effort; the renderer still applies the
+      // active preference immediately and will retry on the next snapshot.
+    }
+  });
 }
 
 async function createWindow(): Promise<void> {
@@ -430,6 +457,8 @@ async function createWindow(): Promise<void> {
     appPath: app.getAppPath(),
   });
   if (!existsSync(iconPath)) throw new Error(`The required Inertia window icon is missing: ${iconPath}`);
+  windowThemePreference = readWindowThemePreference(windowAppearancePath());
+  nativeTheme.themeSource = windowThemePreference;
   const savedWindow = readWindowState();
   const window = new BrowserWindow({
     title: "Inertia",
@@ -439,7 +468,7 @@ async function createWindow(): Promise<void> {
     minWidth: 760,
     minHeight: 600,
     show: false,
-    backgroundColor: "#101011",
+    backgroundColor: resolveWindowBackground(windowThemePreference, nativeTheme.shouldUseDarkColors),
     autoHideMenuBar: true,
     icon: iconPath,
     ...(process.platform === "darwin"
@@ -522,6 +551,12 @@ function finishQuitAfterCleanup(): void {
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
   runtimeDiagnostics.record("app.start");
+  nativeTheme.on("updated", () => {
+    if (windowThemePreference !== "system") return;
+    mainWindow?.setBackgroundColor(
+      resolveWindowBackground(windowThemePreference, nativeTheme.shouldUseDarkColors),
+    );
+  });
   const dataDirectory = process.env.INERTIA_DATA_DIR
     ? resolve(process.env.INERTIA_DATA_DIR)
     : join(app.getPath("userData"), "runtime");

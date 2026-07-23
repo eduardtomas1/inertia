@@ -16,7 +16,8 @@ type WorkspaceHeaderProps = {
   actions: ProjectAction[];
   busy: boolean;
   activityOpen: boolean;
-  activityCount: number;
+  activeRunCount: number;
+  attentionRunCount: number;
   onOpenSidebar: () => void;
   onToggleTools: () => void;
   onCycleTheme: () => void;
@@ -44,7 +45,8 @@ export function WorkspaceHeader({
   actions,
   busy,
   activityOpen,
-  activityCount,
+  activeRunCount,
+  attentionRunCount,
   onOpenSidebar,
   onToggleTools,
   onCycleTheme,
@@ -62,6 +64,12 @@ export function WorkspaceHeader({
   const [menu, setMenu] = useState<"branch" | "action" | null>(null);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
   const eyebrow = view === "settings" ? "Personalize your workspace" : project?.name && conversation ? project.name : "Inertia";
+  const activityBadgeCount = attentionRunCount || activeRunCount;
+  const activityLabel = attentionRunCount > 0
+    ? `Open runs, ${attentionRunCount} ${attentionRunCount === 1 ? "item needs" : "items need"} attention`
+    : activeRunCount > 0
+      ? `Open runs, ${activeRunCount} active`
+      : "Open runs";
 
   return (
     <header className="workspace-header drag-region">
@@ -114,8 +122,14 @@ export function WorkspaceHeader({
             {gitStatus?.hasRemote && <button type="button" className="header-button" onClick={onOpenPullRequest} disabled={busy}><GitPullRequest size={14} /><span>Pull request</span></button>}
           </>
         )}
-        <IconButton label="Open activity center" className="activity-center-button" aria-pressed={activityOpen} onClick={onToggleActivity}>
-          <Activity size={17} />{activityCount > 0 && <span className="activity-count">{activityCount > 9 ? "9+" : activityCount}</span>}
+        <IconButton
+          label={activityLabel}
+          className={`activity-center-button${attentionRunCount > 0 ? " has-attention" : ""}`}
+          aria-pressed={activityOpen}
+          onClick={onToggleActivity}
+        >
+          <Activity size={17} />
+          {activityBadgeCount > 0 && <span className="activity-count">{activityBadgeCount > 9 ? "9+" : activityBadgeCount}</span>}
         </IconButton>
         <IconButton label={`Change theme (current: ${theme})`} onClick={onCycleTheme}><SunMoon size={17} /></IconButton>
         {view === "workspace" ? (

@@ -9,6 +9,14 @@ export interface SidebarThreadView {
   settled: boolean;
 }
 
+export type SidebarWorkSectionId = "needs-you" | "in-progress" | "recent";
+
+export interface SidebarWorkSection {
+  id: SidebarWorkSectionId;
+  label: string;
+  threads: SidebarThreadView[];
+}
+
 export interface LogicalProjectGroup {
   key: string;
   label: string;
@@ -111,6 +119,27 @@ export function sortActivityThreads(
       || b.conversation.updatedAt.localeCompare(a.conversation.updatedAt)
       || a.conversation.id.localeCompare(b.conversation.id)
     ));
+}
+
+export function groupWorkThreads(threads: readonly SidebarThreadView[]): SidebarWorkSection[] {
+  const active = threads.filter(({ settled }) => !settled);
+  return [
+    {
+      id: "needs-you",
+      label: "Needs you",
+      threads: active.filter(({ status }) => status === "approval" || status === "input" || status === "failed"),
+    },
+    {
+      id: "in-progress",
+      label: "In progress",
+      threads: active.filter(({ status }) => status === "working"),
+    },
+    {
+      id: "recent",
+      label: "Recent",
+      threads: active.filter(({ status }) => status === "completed" || status === "idle"),
+    },
+  ];
 }
 
 export function nextSidebarNavigationIndex(

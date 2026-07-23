@@ -66,7 +66,7 @@ describe("response timeline", () => {
     expect(turns).toHaveLength(2);
     expect(turns[0]).toMatchObject({ assistantMessages: [{ content: "Done." }], toolCallCount: 1, checkpoint: { id: "checkpoint-1" } });
     expect(turns[1]).toMatchObject({ assistantMessages: [{ content: "Tests pass." }], toolCallCount: 1, reasoning: { content: "Check the focused suite." } });
-    expect(workSummaryLabel(turns[1]!, Date.parse("2026-07-23T10:01:09.000Z"))).toBe("Worked for 9s · 1 tool call");
+    expect(workSummaryLabel(turns[1]!, Date.parse("2026-07-23T10:01:09.000Z"))).toBe("Worked for 9s · 1 action");
   });
 
   it("never folds failures or important warnings into the successful work row", () => {

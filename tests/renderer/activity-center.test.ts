@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   activityRunActions,
+  activityRunSections,
+  activityRunSummary,
   activityStatusLabel,
   activityWaitingKind,
 } from "../../src/renderer/src/utils/activityCenter";
@@ -49,7 +51,78 @@ function conversation(attentionKind: Conversation["attentionKind"]): Conversatio
   };
 }
 
-describe("Activity Center control model", () => {
+describe("Runs control model", () => {
+  it("prioritizes attention, then active work, then bounded recent history", () => {
+    const sections = activityRunSections([
+      run({
+        id: "11111111-1111-4111-8111-111111111101",
+        status: "succeeded",
+        finishedAt: "2026-07-23T10:00:05.000Z",
+        startedAt: "2026-07-23T10:00:00.000Z",
+      }),
+      run({
+        id: "11111111-1111-4111-8111-111111111102",
+        status: "running",
+        startedAt: "2026-07-23T10:01:00.000Z",
+      }),
+      run({
+        id: "11111111-1111-4111-8111-111111111103",
+        status: "failed",
+        finishedAt: "2026-07-23T10:02:05.000Z",
+        startedAt: "2026-07-23T10:02:00.000Z",
+      }),
+      run({
+        id: "11111111-1111-4111-8111-111111111104",
+        kind: "agent",
+        status: "waiting",
+        startedAt: "2026-07-23T10:03:00.000Z",
+      }),
+    ], Date.parse("2026-07-23T10:04:00.000Z"));
+
+    expect(sections.map(({ id }) => id)).toEqual(["attention", "active", "recent"]);
+    expect(sections[0]?.runs.map(({ status }) => status)).toEqual(["waiting", "failed"]);
+    expect(sections[1]?.runs.map(({ status }) => status)).toEqual(["running"]);
+    expect(sections[2]?.runs.map(({ status }) => status)).toEqual(["succeeded"]);
+  });
+
+  it("omits empty sections and summarizes attention separately from active work", () => {
+    const completed = run({
+      status: "succeeded",
+      finishedAt: "2026-07-23T10:00:05.000Z",
+    });
+    expect(activityRunSections([completed]).map(({ id }) => id)).toEqual(["recent"]);
+    const history = Array.from({ length: 14 }, (_, index) => run({
+      id: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
+      status: "succeeded",
+      startedAt: `2026-07-23T10:${String(index).padStart(2, "0")}:00.000Z`,
+      finishedAt: `2026-07-23T10:${String(index).padStart(2, "0")}:05.000Z`,
+    }));
+    expect(activityRunSections(history)[0]?.runs).toHaveLength(12);
+    expect(activityRunSections([])).toEqual([]);
+    expect(activityRunSummary([
+      completed,
+      run({ id: "11111111-1111-4111-8111-111111111102", status: "waiting" }),
+      run({
+        id: "11111111-1111-4111-8111-111111111103",
+        status: "failed",
+        canStop: false,
+        finishedAt: "2026-07-23T10:00:05.000Z",
+      }),
+    ], Date.parse("2026-07-23T10:01:00.000Z"))).toEqual({ attentionCount: 2, activeCount: 1 });
+  });
+
+  it("moves historical failures into recent history instead of leaving a permanent badge", () => {
+    const staleFailure = run({
+      status: "failed",
+      canStop: false,
+      startedAt: "2026-07-20T10:00:00.000Z",
+      finishedAt: "2026-07-20T10:00:05.000Z",
+    });
+    const now = Date.parse("2026-07-23T10:00:00.000Z");
+    expect(activityRunSections([staleFailure], now).map(({ id }) => id)).toEqual(["recent"]);
+    expect(activityRunSummary([staleFailure], now)).toEqual({ attentionCount: 0, activeCount: 0 });
+  });
+
   it("shows only controls backed by the run's real capabilities", () => {
     expect(activityRunActions(run())).toMatchObject({
       openThread: true,

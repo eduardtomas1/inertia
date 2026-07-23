@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startRuntime, type RunningRuntime } from "../../src/server";
 import type { AppSnapshot, ProviderInfo, ServerEvent } from "../../src/shared/contracts";
 import { diffFileFingerprint, parseUnifiedDiff } from "../../src/shared/diff-review";
+import { RuntimeStore } from "../../src/server/database";
 import { getUnifiedDiff } from "../../src/server/git";
 import { portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
 
@@ -119,11 +120,18 @@ describe("local runtime", () => {
     for (const directory of temporaryDirectories.splice(0)) await removeTemporaryDirectory(directory);
   });
 
-  function temporaryWorkspace(): { root: string; data: string; workspace: string } {
+  function temporaryWorkspace(options: { withProject?: boolean } = {}): { root: string; data: string; workspace: string } {
     const root = mkdtempSync(join(tmpdir(), "inertia-runtime-"));
     const data = join(root, "data");
     const workspace = join(root, "workspace");
     mkdirSync(workspace);
+    if (options.withProject !== false) {
+      mkdirSync(data);
+      const store = new RuntimeStore(join(data, "inertia.sqlite"), workspace);
+      const project = store.createProject("Test project", workspace);
+      store.createConversation(project.id, "Test chat");
+      store.close();
+    }
     temporaryDirectories.push(root);
     return { root, data, workspace };
   }
@@ -288,8 +296,8 @@ process.exit(child.status ?? 1);
     });
   }
 
-  it("seeds, mutates, and persists a deterministic app snapshot", async () => {
-    const { data, workspace } = temporaryWorkspace();
+  it("starts empty, mutates, and persists a deterministic app snapshot", async () => {
+    const { data, workspace } = temporaryWorkspace({ withProject: false });
     const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });
     runtimes.push(runtime);
     expect(new URL(runtime.websocketUrl).hostname).toBe("127.0.0.1");
@@ -297,12 +305,10 @@ process.exit(child.status ?? 1);
 
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next((event): event is Extract<ServerEvent, { type: "server.welcome" }> => event.type === "server.welcome");
-    expect(welcome.snapshot.projects).toHaveLength(1);
-    expect(welcome.snapshot.projects[0]?.name).toBe("Getting Started");
-    expect(welcome.snapshot.conversations).toHaveLength(1);
-    expect(welcome.snapshot.conversations[0]?.accessMode).toBe("supervised");
+    expect(welcome.snapshot.projects).toEqual([]);
+    expect(welcome.snapshot.conversations).toEqual([]);
     expect(welcome.snapshot.settings.defaultAccessMode).toBe("supervised");
-    expect(welcome.snapshot.messages.map((message) => message.content)).toHaveLength(3);
+    expect(welcome.snapshot.messages).toEqual([]);
 
     const settingsRequestId = randomUUID();
     send(client.socket, {
@@ -351,6 +357,22 @@ process.exit(child.status ?? 1);
     );
     const conversation = conversationSnapshot.snapshot.conversations.find(({ title }) => title === "Runtime work");
 
+    const providerRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.update",
+      requestId: providerRequestId,
+      payload: { conversationId: conversation?.id, providerId: "claude" },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === providerRequestId,
+    );
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.conversations.some(({ id, providerId }) => id === conversation?.id && providerId === "claude"),
+    );
+
     const messageRequestId = randomUUID();
     send(client.socket, {
       type: "message.send",
@@ -365,6 +387,19 @@ process.exit(child.status ?? 1);
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated",
     );
     expect(messageSnapshot.snapshot.messages.some(({ content }) => content === "Keep the runtime calm.")).toBe(true);
+    expect(messageSnapshot.snapshot.conversations.find(({ id }) => id === conversation?.id)?.providerId).toBe("claude");
+
+    const lockedProviderRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.update",
+      requestId: lockedProviderRequestId,
+      payload: { conversationId: conversation?.id, providerId: "codex" },
+    });
+    const lockedProvider = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+        event.type === "request.error" && event.requestId === lockedProviderRequestId,
+    );
+    expect(lockedProvider.message).toBe("Start a new chat to use a different agent. Existing chats keep their original agent context.");
 
     client.socket.close();
     await runtime.close();
@@ -376,7 +411,7 @@ process.exit(child.status ?? 1);
     const persisted = await persistedClient.events.next(
       (event): event is Extract<ServerEvent, { type: "server.welcome" }> => event.type === "server.welcome",
     );
-    expect(persisted.snapshot.projects).toHaveLength(2);
+    expect(persisted.snapshot.projects).toHaveLength(1);
     expect(persisted.snapshot.settings.theme).toBe("dark");
     expect(persisted.snapshot.messages.some(({ content }) => content === "Keep the runtime calm.")).toBe(true);
   });

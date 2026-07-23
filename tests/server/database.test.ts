@@ -9,13 +9,18 @@ import { RuntimeStore } from "../../src/server/database";
 
 const temporaryDirectories: string[] = [];
 
-async function createStore(): Promise<{ directory: string; databasePath: string; workspacePath: string; store: RuntimeStore }> {
+async function createStore(options: { withProject?: boolean } = {}): Promise<{ directory: string; databasePath: string; workspacePath: string; store: RuntimeStore }> {
   const directory = await mkdtemp(join(tmpdir(), "inertia-store-test-"));
   const workspacePath = join(directory, "workspace");
   await mkdir(workspacePath);
   temporaryDirectories.push(directory);
   const databasePath = join(directory, "inertia.sqlite");
-  return { directory, databasePath, workspacePath, store: new RuntimeStore(databasePath, workspacePath) };
+  const store = new RuntimeStore(databasePath, workspacePath);
+  if (options.withProject !== false) {
+    const project = store.createProject("Test project", workspacePath);
+    store.createConversation(project.id, "Test chat");
+  }
+  return { directory, databasePath, workspacePath, store };
 }
 
 afterEach(async () => {
@@ -23,6 +28,23 @@ afterEach(async () => {
 });
 
 describe("RuntimeStore conversation lifecycle", () => {
+  it("keeps a new workspace empty until the user adds a project", async () => {
+    const { databasePath, workspacePath, store } = await createStore({ withProject: false });
+    expect(store.snapshot()).toMatchObject({
+      projects: [],
+      conversations: [],
+      messages: [],
+      activeProjectId: null,
+      activeConversationId: null,
+    });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.snapshot().projects).toEqual([]);
+    expect(reopened.snapshot().activeProjectId).toBeNull();
+    reopened.close();
+  });
+
   it("persists sidebar mode, canonical grouping metadata, and per-project overrides", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     store.updateSettings({
@@ -108,7 +130,7 @@ describe("RuntimeStore conversation lifecycle", () => {
 
   it("persists response presentation preferences across restart", async () => {
     const { databasePath, workspacePath, store } = await createStore();
-    expect(store.snapshot().settings.usageDisplayMode).toBe("expanded");
+    expect(store.snapshot().settings.usageDisplayMode).toBe("compact");
     store.updateSettings({
       responseDensity: "comfortable",
       defaultCodeWrap: true,
@@ -116,7 +138,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       showChangedFileSummaries: false,
       showTimestamps: false,
       showThinking: false,
-      usageDisplayMode: "hidden",
+      usageDisplayMode: "expanded",
       interfaceScale: "comfortable",
       terminalFontSize: 17,
     });
@@ -130,7 +152,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       showChangedFileSummaries: false,
       showTimestamps: false,
       showThinking: false,
-      usageDisplayMode: "hidden",
+      usageDisplayMode: "expanded",
       interfaceScale: "comfortable",
       terminalFontSize: 17,
     });
@@ -163,9 +185,9 @@ describe("RuntimeStore conversation lifecycle", () => {
     migrated.close();
   });
 
-  it("backfills legacy disabled usage as hidden while new profiles default to expanded", async () => {
+  it("backfills legacy disabled usage as hidden while new profiles default to compact", async () => {
     const { databasePath, workspacePath, store } = await createStore();
-    expect(store.snapshot().settings.usageDisplayMode).toBe("expanded");
+    expect(store.snapshot().settings.usageDisplayMode).toBe("compact");
     store.updateSettings({ usageDisplayMode: "hidden" });
     store.close();
 

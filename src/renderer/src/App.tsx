@@ -48,7 +48,8 @@ import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePersistedSize } from "./hooks/usePersistedSize";
 import { useTheme } from "./hooks/useTheme";
-import { nextQuickTheme } from "./utils/theme";
+import { activityRunSummary } from "./utils/activityCenter";
+import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
 import { projectNameFromPath } from "./lib/format";
 
 type CommandWithoutId = ClientCommand extends infer Command
@@ -72,7 +73,7 @@ const RESIZE_HANDLE_SIZE = 7;
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 420;
 const CHAT_MIN_WIDTH = 340;
-const CHAT_MIN_HEIGHT = 220;
+const CHAT_MIN_HEIGHT = 320;
 const TOOLS_MIN_WIDTH = 300;
 const TOOLS_MAX_WIDTH = 960;
 const TOOLS_MIN_HEIGHT = 180;
@@ -131,6 +132,7 @@ export default function App(): React.JSX.Element {
   const [pendingActivityAction, setPendingActivityAction] = useState<WorkspaceRun | null>(null);
   const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [activityNow, setActivityNow] = useState(Date.now());
   const [pendingDiffContext, setPendingDiffContext] = useState<string | null>(null);
   const [lastDiffReversal, setLastDiffReversal] = useState<DiffReversalOperation | null>(null);
   const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
@@ -147,8 +149,18 @@ export default function App(): React.JSX.Element {
   const searchTimer = useRef<number | null>(null);
   const appShellRef = useRef<HTMLDivElement>(null);
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
-  const settings = connection.snapshot?.settings ?? defaultSettings;
+  const settings = connection.snapshot?.settings ?? {
+    ...defaultSettings,
+    theme: cachedThemePreference(window.localStorage) ?? defaultSettings.theme,
+  };
   useTheme(settings.theme);
+
+  useEffect(() => {
+    const preference = connection.snapshot?.settings.theme;
+    if (!preference) return;
+    cacheThemePreference(window.localStorage, preference);
+    void window.inertia.syncThemePreference(preference).catch(() => undefined);
+  }, [connection.snapshot?.settings.theme]);
 
   useEffect(() => {
     document.documentElement.dataset.interfaceScale = settings.interfaceScale;
@@ -158,6 +170,19 @@ export default function App(): React.JSX.Element {
     if (!connection.snapshot) return;
     setNativePlans(Object.fromEntries(connection.snapshot.plans.map((plan) => [plan.conversationId, plan])));
   }, [connection.snapshot?.plans]);
+
+  useEffect(() => {
+    setActivityNow(Date.now());
+    const runs = connection.snapshot?.runs ?? [];
+    const hasUnfinishedRun = runs.some(({ finishedAt }) => finishedAt === null);
+    const hasFailedRun = runs.some(({ status }) => status === "failed");
+    if (!hasUnfinishedRun && !hasFailedRun) return;
+    const interval = window.setInterval(
+      () => setActivityNow(Date.now()),
+      activityOpen && hasUnfinishedRun ? 1_000 : 60_000,
+    );
+    return () => window.clearInterval(interval);
+  }, [activityOpen, connection.snapshot?.runs]);
 
   useEffect(() => setSidebarWidth(persistedSidebarWidth), [persistedSidebarWidth]);
   useEffect(() => setToolsWidth(persistedToolsWidth), [persistedToolsWidth]);
@@ -233,7 +258,10 @@ export default function App(): React.JSX.Element {
     () => connection.snapshot?.reviewNotes.filter((note) => note.conversationId === conversation?.id) ?? [],
     [connection.snapshot?.reviewNotes, conversation?.id],
   );
-  const activeRunCount = connection.snapshot?.runs.filter(({ finishedAt }) => finishedAt === null).length ?? 0;
+  const runsSummary = useMemo(
+    () => activityRunSummary(connection.snapshot?.runs ?? [], activityNow),
+    [activityNow, connection.snapshot?.runs],
+  );
   const planSteps = useMemo(() => {
     const nativePlan = conversation ? nativePlans[conversation.id] : undefined;
     if (nativePlan) {
@@ -404,7 +432,7 @@ export default function App(): React.JSX.Element {
   const createConversation = (targetProject: Project | null = project) => {
     if (!targetProject) return;
     const select = targetProject.id === project?.id ? Promise.resolve() : run("project.select", { type: "project.select", payload: { projectId: targetProject.id } });
-    void select.then(() => run("conversation.create", { type: "conversation.create", payload: { projectId: targetProject.id, title: "New thread", providerId: settings.defaultProvider, model: settings.defaultModel, reasoningEffort: settings.defaultReasoningEffort, interactionMode: settings.defaultInteractionMode, accessMode: settings.defaultAccessMode, useWorktree: settings.newThreadMode === "worktree" } })).then(() => { setView("workspace"); setSidebarOpen(false); }).catch(() => undefined);
+    void select.then(() => run("conversation.create", { type: "conversation.create", payload: { projectId: targetProject.id, title: "New chat", providerId: settings.defaultProvider, model: settings.defaultModel, reasoningEffort: settings.defaultReasoningEffort, interactionMode: settings.defaultInteractionMode, accessMode: settings.defaultAccessMode, useWorktree: settings.newThreadMode === "worktree" } })).then(() => { setView("workspace"); setSidebarOpen(false); }).catch(() => undefined);
   };
   const sendMessage = async (content: string, attachments: ChatAttachment[]) => {
     if (!conversation) return;
@@ -649,7 +677,10 @@ export default function App(): React.JSX.Element {
     void run(`activity.stop:${activity.id}`, {
       type: "activity.stop",
       payload: { runId: activity.id },
-    }).catch(() => undefined);
+    }).catch((error) => {
+      const detail = error instanceof Error ? error.message : "The run could not be stopped.";
+      setActionError(`Could not stop ${activity.label}: ${detail}`);
+    });
   };
   const rerunActivity = (activity: WorkspaceRun) => {
     if (!activity.actionId) return;
@@ -661,7 +692,10 @@ export default function App(): React.JSX.Element {
     void run(`activity.dismiss:${activity.id}`, {
       type: "activity.dismiss",
       payload: { runId: activity.id },
-    }).catch(() => undefined);
+    }).catch((error) => {
+      const detail = error instanceof Error ? error.message : "The run could not be dismissed.";
+      setActionError(`Could not dismiss ${activity.label}: ${detail}`);
+    });
   };
 
   const visibleError = actionError ?? connection.error;
@@ -725,11 +759,15 @@ export default function App(): React.JSX.Element {
         />
       )}
 
-      <section className="workspace-shell" id="main-workspace">
+      <section
+        className="workspace-shell"
+        id="main-workspace"
+        inert={mobileNavigation && sidebarOpen ? true : undefined}
+      >
         <div className="workspace-frame">
           <WorkspaceHeader
             project={project} conversation={conversation} view={view} activeTool={activeTool} sidebarCollapsed={sidebarCollapsed} theme={settings.theme} gitStatus={gitStatus} branches={branches} actions={projectActions} busy={Boolean(busyAction)}
-            activityOpen={activityOpen} activityCount={activeRunCount}
+            activityOpen={activityOpen} activeRunCount={runsSummary.activeCount} attentionRunCount={runsSummary.attentionCount}
             onOpenSidebar={() => { if (mobileNavigation) setSidebarOpen(true); else setSidebarCollapsed((collapsed) => !collapsed); }} onToggleTools={() => setActiveTool((tool) => tool ? null : "terminal")} onCycleTheme={cycleTheme} onOpenSettings={() => setView("settings")}
             onToggleActivity={() => setActivityOpen((open) => !open)}
             onOpenProject={() => { if (project) void window.inertia.openPath(project.path).then((error) => { if (error) setActionError(error); }); }} onRefreshBranches={loadBranches}
@@ -794,6 +832,7 @@ export default function App(): React.JSX.Element {
       <CommitDialog open={commitDialogOpen} status={gitStatus} reviewStates={reviewStates} diff={structuredDiff} busy={busyAction === "git.commit" || busyAction === "git.push"} onClose={() => setCommitDialogOpen(false)} onCommit={commit} />
       <ActivityCenter
         open={activityOpen}
+        now={activityNow}
         runs={connection.snapshot?.runs ?? []}
         projects={connection.snapshot?.projects ?? []}
         conversations={connection.snapshot?.conversations ?? []}

@@ -162,6 +162,8 @@ export function shouldFollowTimeline(scrollTop: number, clientHeight: number, sc
 
 export function workSummaryLabel(turn: ResponseTurn, now = Date.now()): string {
   const duration = formatElapsed(turnElapsedMs(turn, now));
-  const calls = turn.toolCallCount;
-  return `Worked for ${duration} · ${calls} tool ${calls === 1 ? "call" : "calls"}`;
+  const actions = turn.activities.length;
+  return actions > 0
+    ? `Worked for ${duration} · ${actions} ${actions === 1 ? "action" : "actions"}`
+    : `Worked for ${duration}`;
 }

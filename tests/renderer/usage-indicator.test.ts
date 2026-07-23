@@ -5,7 +5,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderMetadataFieldState, ProviderRateLimit, ThreadUsageSnapshot, UsageDisplayMode } from "../../src/shared/contracts";
-import { contextRemaining, displayPercent, UsageIndicator } from "../../src/renderer/src/components/UsageIndicator";
+import {
+  contextRemaining,
+  displayPercent,
+  usageAutoCollapseReason,
+  UsageIndicator,
+} from "../../src/renderer/src/components/UsageIndicator";
 
 const freshState: ProviderMetadataFieldState = {
   freshness: "fresh",
@@ -69,6 +74,15 @@ describe("UsageIndicator", () => {
     expect(css).toMatch(/\.composer-usage\s*\{[^}]*width:\s*min\(830px,\s*100%\)[^}]*max-width:\s*830px/su);
     expect(css).toMatch(/\.composer-region\s*\{[^}]*container-type:\s*inline-size/su);
     expect(css).toMatch(/@container\s*\(max-width:\s*560px\)\s*\{[^}]*\.usage-expanded-content\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/su);
+    expect(css).toMatch(/@media\s*\(max-width:\s*1024px\),\s*\(max-height:\s*760px\)\s*\{[^}]*\.usage-panel\.is-expanded\s+\.usage-expanded-content\s*\{[^}]*max-height:/su);
+  });
+
+  it("auto-collapses only when space is constrained or no useful report exists", () => {
+    expect(usageAutoCollapseReason(usage(), [], false)).toBeNull();
+    expect(usageAutoCollapseReason(usage(), [], true)).toBe("space");
+    expect(usageAutoCollapseReason(null, [], false)).toBe("unavailable");
+    expect(usageAutoCollapseReason(usage({ usedTokens: null, maxTokens: null, totalProcessedTokens: null }), [], false)).toBe("unavailable");
+    expect(usageAutoCollapseReason(usage({ usedTokens: null, maxTokens: 200_000 }), [], false)).toBeNull();
   });
 
   it("keeps raw quota overflow out of display values and meter widths", () => {
@@ -153,11 +167,12 @@ describe("UsageIndicator", () => {
       [],
       { ...freshState, freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null },
     );
-    expect(html).toContain("Context remaining");
-    expect(html).toContain("No context report from this provider");
-    expect(html).toContain("No windows reported");
-    expect(html).toContain("This provider did not return an account quota");
-    expect(html).toContain(">Unavailable<");
+    expect(html).toContain('data-mode="compact"');
+    expect(html).toContain('data-auto-collapsed="true"');
+    expect(html).toContain('data-collapse-reason="unavailable"');
+    expect(html).toContain("Usage unavailable");
+    expect(html).toContain("Provider quota unavailable");
+    expect(html).toContain('aria-label="Expand usage and context"');
     expect(html).not.toContain('role="progressbar"');
   });
 });

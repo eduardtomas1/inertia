@@ -1052,7 +1052,7 @@ export const defaultSettings: AppSettings = {
   wrapDiffs: true,
   ignoreWhitespace: false,
   showThinking: true,
-  usageDisplayMode: "expanded",
+  usageDisplayMode: "compact",
   interfaceScale: "default",
   responseDensity: "default",
   defaultCodeWrap: false,

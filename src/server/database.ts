@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import Database from "better-sqlite3";
 
@@ -721,7 +721,7 @@ export interface NewConversationOptions {
 export class RuntimeStore {
   private readonly database: Database.Database;
 
-  constructor(databasePath: string, defaultWorkspacePath: string) {
+  constructor(databasePath: string, _defaultWorkspacePath: string) {
     this.database = new Database(databasePath);
     this.database.pragma("foreign_keys = ON");
     this.database.pragma("journal_mode = WAL");
@@ -729,7 +729,6 @@ export class RuntimeStore {
     this.migrate();
     this.initializeState();
     this.recoverInterruptedRuns();
-    this.seed(resolve(defaultWorkspacePath));
   }
 
   close(): void {
@@ -958,6 +957,11 @@ export class RuntimeStore {
       this.database.prepare("UPDATE conversations SET last_viewed_at = ? WHERE id = ?").run(now, conversationId);
       this.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(conversation.project_id, conversationId);
     })();
+  }
+
+  hasConversationMessages(conversationId: string): boolean {
+    this.requireConversation(conversationId);
+    return this.database.prepare("SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1").get(conversationId) !== undefined;
   }
 
   updateConversation(conversationId: string, update: Partial<Pick<Conversation, "title" | "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind">>): Conversation {
@@ -1452,7 +1456,7 @@ export class RuntimeStore {
   }
 
   private initializeState(): void {
-    this.database.prepare(`INSERT OR IGNORE INTO app_state (id, theme, compact_sidebar, show_timestamps, terminal_font_size, default_provider, default_model, default_access_mode, new_thread_mode, wrap_diffs, ignore_whitespace, active_project_id, active_conversation_id) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`).run(defaultSettings.theme, Number(defaultSettings.compactSidebar), Number(defaultSettings.showTimestamps), defaultSettings.terminalFontSize, defaultSettings.defaultProvider, defaultSettings.defaultModel, defaultSettings.defaultAccessMode, defaultSettings.newThreadMode, Number(defaultSettings.wrapDiffs), Number(defaultSettings.ignoreWhitespace));
+    this.database.prepare(`INSERT OR IGNORE INTO app_state (id, theme, compact_sidebar, show_timestamps, terminal_font_size, default_provider, default_model, default_access_mode, new_thread_mode, wrap_diffs, ignore_whitespace, usage_display_mode, active_project_id, active_conversation_id) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`).run(defaultSettings.theme, Number(defaultSettings.compactSidebar), Number(defaultSettings.showTimestamps), defaultSettings.terminalFontSize, defaultSettings.defaultProvider, defaultSettings.defaultModel, defaultSettings.defaultAccessMode, defaultSettings.newThreadMode, Number(defaultSettings.wrapDiffs), Number(defaultSettings.ignoreWhitespace), defaultSettings.usageDisplayMode);
   }
 
   private recoverInterruptedRuns(): void {
@@ -1497,27 +1501,6 @@ export class RuntimeStore {
     })();
   }
 
-  private seed(workspacePath: string): void {
-    const projectCount = (this.database.prepare("SELECT COUNT(*) AS count FROM projects").get() as { count: number }).count;
-    if (projectCount > 0) return;
-    const baseTime = Date.now() - 10;
-    const projectId = randomUUID();
-    const conversationId = randomUUID();
-    const projectTime = new Date(baseTime).toISOString();
-    const workspaceName = basename(workspacePath) || "your workspace";
-    const messages = [
-      { role: "system" as const, content: "Welcome to Inertia — your local coding workspace." },
-      { role: "assistant" as const, content: "Start a conversation, open the terminal, and keep the work moving in one calm place." },
-      { role: "assistant" as const, content: `Getting Started is connected to ${workspaceName}.` },
-    ];
-    this.database.transaction(() => {
-      this.database.prepare(`INSERT INTO projects (id, name, path, color, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'ready', ?, ?)`).run(projectId, "Getting Started", workspacePath, PROJECT_COLORS[0], projectTime, projectTime);
-      this.database.prepare(`INSERT INTO conversations (id, project_id, title, provider_id, model, interaction_mode, access_mode, status, created_at, updated_at) VALUES (?, ?, ?, 'codex', '', 'build', 'supervised', 'idle', ?, ?)`).run(conversationId, projectId, "Welcome to Inertia", projectTime, projectTime);
-      const insertMessage = this.database.prepare(`INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at) VALUES (?, ?, ?, ?, '[]', ?)`);
-      messages.forEach((message, index) => insertMessage.run(randomUUID(), conversationId, message.role, message.content, new Date(baseTime + index + 1).toISOString()));
-      this.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(projectId, conversationId);
-    })();
-  }
 }
 
 export class RecordNotFoundError extends Error {}

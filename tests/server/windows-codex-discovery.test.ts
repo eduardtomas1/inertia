@@ -1,4 +1,5 @@
-import { copyFileSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -73,7 +74,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const program = join(directory, "codex-fixture.cjs");
     writeFileSync(program, codexProgram(version, text), "utf8");
     const command = join(directory, "codex.cmd");
-    writeFileSync(command, `@echo off\r\n"${process.execPath}" "${program}" %*\r\n`, "utf8");
+    // Real npm shims resolve their JavaScript entrypoint relative to the shim.
+    // Keeping the Unicode path out of the batch file itself also avoids cmd.exe
+    // decoding UTF-8 source text through the machine's legacy code page.
+    writeFileSync(command, `@echo off\r\n"${process.execPath}" "%~dp0codex-fixture.cjs" %*\r\n`, "utf8");
     return command;
   }
 
@@ -99,7 +103,7 @@ process.stdin.resume();
   it("finds the official standalone native executable with a minimal PATH", async () => {
     const home = root("official standalone");
     const official = join(home, ".codex", "packages", "standalone", "current", "bin");
-    const executable = realpathSync(nativeCodex(official, home));
+    const executable = await realpath(nativeCodex(official, home));
     process.env.USERPROFILE = home;
     process.env.LOCALAPPDATA = join(home, "AppData", "Local");
     process.env.APPDATA = join(home, "AppData", "Roaming");
@@ -119,7 +123,7 @@ process.stdin.resume();
   it("discovers and runs an npm shim from a Unicode path with spaces and parentheses", async () => {
     const home = root("npm Unicode Ω (profile)");
     const npm = join(home, "AppData", "Roaming", "npm");
-    const executable = realpathSync(batchCodex(npm, "9.4.1", "Safe shim response"));
+    const executable = await realpath(batchCodex(npm, "9.4.1", "Safe shim response"));
     process.env.USERPROFILE = home;
     process.env.LOCALAPPDATA = join(home, "AppData", "Local");
     process.env.APPDATA = join(home, "AppData", "Roaming");
@@ -148,7 +152,7 @@ process.stdin.resume();
     mkdirSync(broken, { recursive: true });
     writeFileSync(join(broken, "codex.exe"), "not a native executable", "utf8");
     batchCodex(older, "1.8.0");
-    const expected = realpathSync(batchCodex(newest, "3.2.1"));
+    const expected = await realpath(batchCodex(newest, "3.2.1"));
     process.env.USERPROFILE = home;
     process.env.LOCALAPPDATA = join(home, "AppData", "Local");
     process.env.APPDATA = join(home, "AppData", "Roaming");
@@ -167,7 +171,7 @@ process.stdin.resume();
     const automatic = join(home, "automatic");
     const manual = join(home, "manual");
     batchCodex(automatic, "8.0.0");
-    const expected = realpathSync(batchCodex(manual, "2.5.0"));
+    const expected = await realpath(batchCodex(manual, "2.5.0"));
     process.env.PATH = automatic;
     process.env.PATHEXT = ".EXE;.CMD;.BAT";
 

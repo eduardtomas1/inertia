@@ -72,8 +72,16 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm exec -- playwright test
 
-      - name: Build native unpacked app
-        if: runner.os != 'Linux'
+      - name: Build native unpacked Windows app
+        if: runner.os == 'Windows'
+        run: npm run dist:dir
+
+      - name: Build native unpacked macOS app
+        if: runner.os == 'macOS'
+        env:
+          # The builder is configured for ad-hoc signing (identity "-"), so no
+          # signing secret is exposed by enabling it for pull-request builds.
+          CSC_FOR_PULL_REQUEST: "true"
         run: npm run dist:dir
 
       - name: Build Linux AppImage and unpacked app

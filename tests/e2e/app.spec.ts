@@ -555,12 +555,15 @@ test("keeps the macOS brand in the native titlebar row and navigates it home", a
 
 test("opens the command palette and manages a thread", async () => {
   await resizeWindow(1440, 920);
+  const initialThreadCount = await page.locator(".conversation-item").count();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
   await expect(page.getByRole("dialog", { name: "Search Inertia" })).toBeVisible();
   await page.getByRole("dialog", { name: "Search Inertia" })
     .getByRole("option")
     .filter({ hasText: "Start work in the current project" })
     .click();
+  await expect(page.locator(".conversation-item")).toHaveCount(initialThreadCount + 1);
+  await expect(page.locator(".conversation-row.is-active")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "New thread", level: 1 })).toBeVisible();
 
   await page.locator(".conversation-item").filter({ has: page.locator(".conversation-row.is-active") })

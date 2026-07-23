@@ -1525,8 +1525,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           send(socket, { type: "request.ok", requestId: command.requestId });
           return;
       }
-      send(socket, { type: "request.ok", requestId: command.requestId });
+      // Publish the completed mutation before resolving its request. This keeps
+      // follow-up UI actions from targeting the previously active project or
+      // conversation while React is still waiting for the authoritative state.
       broadcastSnapshot();
+      send(socket, { type: "request.ok", requestId: command.requestId });
     } catch (error) {
       send(socket, { type: "request.error", requestId: command.requestId, message: publicError(error) });
     }

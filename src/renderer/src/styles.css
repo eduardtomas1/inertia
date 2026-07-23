@@ -131,8 +131,6 @@ body,
 }
 
 body {
-  min-width: 520px;
-  min-height: 520px;
   background: var(--app-bg);
 }
 

@@ -9,11 +9,11 @@ import type {
   ProviderUsageEvent,
 } from "./contracts";
 import type {
-  CodexApprovalDecision,
-  CodexApprovalRequest,
-  CodexInputRequest,
-  CodexPlanStep,
-} from "../codex/types";
+  AgentApprovalDecision,
+  AgentApprovalRequest,
+  AgentInputRequest,
+  AgentPlanStep,
+} from "./interactions";
 import type { AgentHarnessCallbacks, AgentHarnessEvent } from "./agent-harness";
 
 function safeCallback(callback: (() => void) | undefined): void {
@@ -31,11 +31,11 @@ export interface ProviderEmitter {
   activity: (kind: ProviderActivityKind, phase: ProviderActivityPhase, label: string) => void;
   status: (status: ProviderRunStatus, message?: string) => void;
   session: (sessionId: string) => void;
-  approval: (request: CodexApprovalRequest) => void;
-  approvalResolved: (requestId: string, decision: CodexApprovalDecision | "cancelled") => void;
-  input: (request: CodexInputRequest) => void;
+  approval: (request: AgentApprovalRequest) => void;
+  approvalResolved: (requestId: string, decision: AgentApprovalDecision | "cancelled") => void;
+  input: (request: AgentInputRequest) => void;
   inputResolved: (requestId: string) => void;
-  plan: (explanation: string | null, steps: CodexPlanStep[]) => void;
+  plan: (explanation: string | null, steps: AgentPlanStep[]) => void;
   reasoning: (text: string) => void;
   usage: (usage: ProviderUsageEvent["usage"]) => void;
   metadata: (metadata: ProviderMetadataEvent["metadata"], source: ProviderMetadataEvent["source"], complete: boolean) => void;

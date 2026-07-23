@@ -12,6 +12,12 @@ export type InteractionMode = "build" | "plan";
 export type AccessMode = "supervised" | "auto-edit" | "full";
 export type ThreadStatus = "idle" | "running" | "needs-input" | "completed" | "failed";
 export type AgentApprovalDecision = "approve" | "deny" | "cancel";
+export type ResponseDensity = "compact" | "default" | "comfortable";
+export type InterfaceScale = "compact" | "default" | "comfortable" | "large";
+export type UsageDisplayMode = "expanded" | "compact" | "hidden";
+export type SidebarMode = "classic" | "activity";
+export type ProjectGroupingMode = "repository" | "repository-path" | "separate";
+export type ThreadAttentionKind = "approval" | "input";
 
 export interface ProviderReasoningOption {
   value: string;
@@ -60,6 +66,8 @@ export interface ProviderInfo {
   command: string;
   available: boolean;
   version: string | null;
+  /** Resolved provider executable selected after discovery. */
+  executable?: string | null;
   installState: ProviderInstallState;
   authState: ProviderAuthState;
   canRun: boolean;
@@ -89,17 +97,31 @@ export interface AppSettings {
   wrapDiffs: boolean;
   ignoreWhitespace: boolean;
   showThinking: boolean;
-  showUsage: boolean;
+  usageDisplayMode: UsageDisplayMode;
+  interfaceScale: InterfaceScale;
+  responseDensity: ResponseDensity;
+  defaultCodeWrap: boolean;
+  autoCollapseWorkLog: boolean;
+  showChangedFileSummaries: boolean;
+  sidebarMode: SidebarMode;
+  projectGrouping: ProjectGroupingMode;
   autoOpenPlan: boolean;
   confirmDestructiveActions: boolean;
   defaultReasoningEffort: string;
   defaultInteractionMode: InteractionMode;
+  /** Empty uses automatic discovery; otherwise an explicitly validated Codex binary or shim. */
+  codexBinaryPath: string;
 }
 
 export interface Project {
   id: string;
   name: string;
   path: string;
+  normalizedPath: string;
+  repositoryIdentity: string | null;
+  repositoryRoot: string | null;
+  repositoryRelativePath: string;
+  groupingMode: ProjectGroupingMode | null;
   color: string;
   status: ProjectStatus;
   createdAt: string;
@@ -116,10 +138,14 @@ export interface Conversation {
   interactionMode: InteractionMode;
   accessMode: AccessMode;
   status: ThreadStatus;
+  attentionKind: ThreadAttentionKind | null;
   branch: string | null;
   worktreePath: string | null;
   providerSessionId: string | null;
   archivedAt: string | null;
+  settledAt: string | null;
+  completedAt: string | null;
+  lastViewedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -174,6 +200,8 @@ export interface AgentActivity {
 
 export interface AgentApprovalRequest {
   id: string;
+  /** Captured when the request is emitted; provider switches must not relabel it. */
+  providerId: ProviderId;
   conversationId: string;
   runId: string;
   kind: "command" | "file-change" | "permissions";
@@ -194,6 +222,8 @@ export interface AgentApprovalRequest {
 }
 
 export interface AgentInputOption {
+  /** Stable provider-native option identity when one exists. */
+  id: string;
   label: string;
   description: string;
 }
@@ -204,11 +234,14 @@ export interface AgentInputQuestion {
   question: string;
   isOther: boolean;
   isSecret: boolean;
+  allowMultiple: boolean;
   options: AgentInputOption[];
 }
 
 export interface AgentInputRequest {
   id: string;
+  /** Captured when the request is emitted; provider switches must not relabel it. */
+  providerId: ProviderId;
   conversationId: string;
   runId: string;
   questions: AgentInputQuestion[];
@@ -248,6 +281,10 @@ export interface AppSnapshot {
   usage: ThreadUsageSnapshot[];
   plans: AgentPlan[];
   checkpoints: CheckpointSummary[];
+  reviewSummaries: DiffReviewSummary[];
+  reviewStates: DiffReviewState[];
+  reviewNotes: DiffReviewNote[];
+  runs: WorkspaceRun[];
   providers: ProviderInfo[];
   settings: AppSettings;
   activeProjectId: string | null;
@@ -260,6 +297,10 @@ export interface ChangedFile {
   insertions: number;
   deletions: number;
   untracked: boolean;
+  staged: boolean;
+  unstaged: boolean;
+  indexStatus: string;
+  worktreeStatus: string;
 }
 
 export interface GitStatusSnapshot {
@@ -278,6 +319,144 @@ export interface GitDiffSnapshot {
   patch: string;
   truncated: boolean;
   files: ChangedFile[];
+}
+
+export interface DiffLine {
+  id: string;
+  kind: "context" | "addition" | "deletion" | "meta";
+  content: string;
+  patchLine: string;
+  oldLineNumber: number | null;
+  newLineNumber: number | null;
+  newInsertionIndex: number;
+  oldInsertionIndex: number;
+  noFinalNewline?: boolean;
+}
+
+export interface DiffHunk {
+  id: string;
+  header: string;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  lines: DiffLine[];
+}
+
+export interface DiffFile {
+  path: string;
+  oldPath: string;
+  newPath: string;
+  hunks: DiffHunk[];
+}
+
+export interface StructuredDiff {
+  fingerprint: string;
+  files: DiffFile[];
+}
+
+export type GitDiffLayer = "index" | "worktree";
+
+export interface DiffReversalValidation {
+  diffFingerprint: string;
+  fileFingerprint: string;
+  hunkFingerprint: string;
+  selectionFingerprint: string;
+  gitStateFingerprint: string;
+}
+
+export interface DiffReversalPlan {
+  filePath: string;
+  hunkId: string;
+  hunkHeader: string;
+  selectedLineCount: number;
+  changedLineCount: number;
+  affectedLayers: GitDiffLayer[];
+  validation: DiffReversalValidation;
+}
+
+export interface DiffReversalOperation {
+  id: string;
+  filePath: string;
+  selectedLineCount: number;
+  affectedLayers: GitDiffLayer[];
+  createdAt: string;
+}
+
+export interface DiffReviewSummary {
+  conversationId: string;
+  fingerprint: string;
+  providerId: ProviderId;
+  overall: string;
+  classifications?: DiffReviewClassificationHint[];
+  files: Array<{
+    path: string;
+    summary: string;
+    classifications?: DiffReviewClassificationHint[];
+    hunks: Array<{
+      hunkId: string;
+      summary: string;
+      classifications?: DiffReviewClassificationHint[];
+    }>;
+  }>;
+  generatedAt: string;
+}
+
+export type DiffReviewClassification =
+  | "behavior-change"
+  | "regression-risk"
+  | "security-sensitive"
+  | "migration"
+  | "test-impact"
+  | "performance-sensitive"
+  | "documentation-only";
+
+export interface DiffReviewClassificationHint {
+  classification: DiffReviewClassification;
+  evidence: string;
+}
+
+export type DiffReviewScope = "file" | "hunk";
+
+export interface DiffReviewState {
+  conversationId: string;
+  scope: DiffReviewScope;
+  path: string;
+  hunkId: string | null;
+  targetFingerprint: string;
+  reviewed: boolean;
+  stale: boolean;
+  updatedAt: string;
+}
+
+export interface DiffReviewNote {
+  id: string;
+  conversationId: string;
+  path: string;
+  hunkId: string | null;
+  lineIds: string[];
+  targetFingerprint: string;
+  body: string;
+  stale: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceRun {
+  id: string;
+  kind: "agent" | "check" | "service" | "source-control";
+  projectId: string;
+  conversationId: string | null;
+  /** Stable package-script identity for safely validated retry/rerun actions. */
+  actionId: string | null;
+  label: string;
+  detail: string | null;
+  status: "running" | "waiting" | "succeeded" | "failed" | "cancelled";
+  /** Ephemeral runtime capability. False after a restart or when no owned process exists. */
+  canStop: boolean;
+  port: number | null;
+  startedAt: string;
+  finishedAt: string | null;
 }
 
 export interface GitBranchInfo {
@@ -322,6 +501,16 @@ const attachmentSchema = z
     size: z.number().int().min(1).max(10 * 1024 * 1024),
   })
   .strict();
+const diffReviewSelectionSchema = z.object({
+  projectId: z.string().uuid(),
+  conversationId: z.string().uuid(),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+  filePath: z.string().min(1).max(4096),
+  hunkId: z.string().min(1).max(128),
+  lineIds: z.array(z.string().min(1).max(160)).min(1).max(500),
+  comment: z.string().trim().max(2_000).optional(),
+  ignoreWhitespace: z.boolean().optional(),
+}).strict();
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   z.object({ ...requestBase, type: z.literal("app.refresh") }).strict(),
@@ -362,6 +551,17 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       ...requestBase,
       type: z.literal("project.remove"),
       payload: z.object({ projectId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("project.update"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        name: z.string().trim().min(1).max(80).optional(),
+        groupingMode: z.enum(["repository", "repository-path", "separate"]).nullable().optional(),
+      }).strict(),
     })
     .strict(),
   z
@@ -411,7 +611,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...requestBase,
-      type: z.enum(["conversation.archive", "conversation.unarchive", "conversation.delete"]),
+      type: z.enum(["conversation.archive", "conversation.unarchive", "conversation.settle", "conversation.unsettle", "conversation.delete"]),
       payload: z.object({ conversationId: z.string().uuid() }).strict(),
     })
     .strict(),
@@ -438,6 +638,20 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...requestBase,
+      type: z.literal("activity.stop"),
+      payload: z.object({ runId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("activity.dismiss"),
+      payload: z.object({ runId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("agent.approval.respond"),
       payload: z.object({
         conversationId: z.string().uuid(),
@@ -455,7 +669,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
         requestId: z.string().uuid(),
         answers: z.record(
           z.string().trim().min(1).max(120),
-          z.array(z.string().min(1).max(4_000)).min(1).max(5),
+          z.array(z.string().min(1).max(4_000)).min(1).max(20),
         ).refine((answers) => Object.keys(answers).length <= 3),
       }).strict(),
     })
@@ -477,11 +691,19 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
           wrapDiffs: z.boolean().optional(),
           ignoreWhitespace: z.boolean().optional(),
           showThinking: z.boolean().optional(),
-          showUsage: z.boolean().optional(),
+          usageDisplayMode: z.enum(["expanded", "compact", "hidden"]).optional(),
+          interfaceScale: z.enum(["compact", "default", "comfortable", "large"]).optional(),
+          responseDensity: z.enum(["compact", "default", "comfortable"]).optional(),
+          defaultCodeWrap: z.boolean().optional(),
+          autoCollapseWorkLog: z.boolean().optional(),
+          showChangedFileSummaries: z.boolean().optional(),
+          sidebarMode: z.enum(["classic", "activity"]).optional(),
+          projectGrouping: z.enum(["repository", "repository-path", "separate"]).optional(),
           autoOpenPlan: z.boolean().optional(),
           confirmDestructiveActions: z.boolean().optional(),
           defaultReasoningEffort: z.string().trim().max(40).optional(),
           defaultInteractionMode: interactionModeSchema.optional(),
+          codexBinaryPath: z.string().trim().max(4096).optional(),
         })
         .strict(),
     })
@@ -500,6 +722,136 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       payload: z
         .object({ projectId: z.string().uuid(), conversationId: z.string().uuid().optional(), path: z.string().max(512).optional(), ignoreWhitespace: z.boolean().optional() })
         .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.selection.inspect"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid().optional(),
+        fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+        filePath: z.string().min(1).max(4096),
+        hunkId: z.string().min(1).max(128),
+        lineIds: z.array(z.string().min(1).max(160)).min(1).max(500),
+        ignoreWhitespace: z.boolean().optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.selection.revert"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid().optional(),
+        fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+        filePath: z.string().min(1).max(4096),
+        hunkId: z.string().min(1).max(128),
+        lineIds: z.array(z.string().min(1).max(160)).min(1).max(500),
+        expected: z.object({
+          diffFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+          fileFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+          hunkFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+          selectionFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+          gitStateFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+        }).strict(),
+        comment: z.string().trim().max(2_000).optional(),
+        ignoreWhitespace: z.boolean().optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.selection.undo"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid().optional(),
+        operationId: z.string().uuid(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("review.selection.ask"),
+      payload: diffReviewSelectionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("review.selection.revise"),
+      payload: diffReviewSelectionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("review.state.set"),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        scope: z.enum(["file", "hunk"]),
+        path: z.string().min(1).max(4096),
+        hunkId: z.string().min(1).max(128).nullable(),
+        targetFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+        reviewed: z.boolean(),
+        ignoreWhitespace: z.boolean().optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("review.note.create"),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        path: z.string().min(1).max(4096),
+        hunkId: z.string().min(1).max(128).nullable(),
+        lineIds: z.array(z.string().min(1).max(160)).max(500),
+        targetFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+        body: z.string().trim().min(1).max(8_000),
+        ignoreWhitespace: z.boolean().optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("review.note.update"),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        noteId: z.string().uuid(),
+        body: z.string().trim().min(1).max(8_000),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("review.note.delete"),
+      payload: z.object({ conversationId: z.string().uuid(), noteId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("review.summary.generate"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid(),
+        fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+        ignoreWhitespace: z.boolean().optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("review.summary.cancel"),
+      payload: z.object({ conversationId: z.string().uuid() }).strict(),
     })
     .strict(),
   z
@@ -660,6 +1012,9 @@ export type ServerEvent =
       result:
         | { kind: "git.status"; status: GitStatusSnapshot }
         | { kind: "git.diff"; diff: GitDiffSnapshot }
+        | { kind: "git.reversal.plan"; plan: DiffReversalPlan }
+        | { kind: "git.reversal"; diff: GitDiffSnapshot; operation: DiffReversalOperation }
+        | { kind: "review.summary"; summary: DiffReviewSummary }
         | { kind: "git.branches"; branches: GitBranchInfo[] }
         | { kind: "workspace.entries"; entries: WorkspaceEntry[]; truncated: boolean }
         | { kind: "workspace.file"; file: WorkspaceFilePreview }
@@ -697,9 +1052,17 @@ export const defaultSettings: AppSettings = {
   wrapDiffs: true,
   ignoreWhitespace: false,
   showThinking: true,
-  showUsage: true,
+  usageDisplayMode: "expanded",
+  interfaceScale: "default",
+  responseDensity: "default",
+  defaultCodeWrap: false,
+  autoCollapseWorkLog: true,
+  showChangedFileSummaries: true,
+  sidebarMode: "classic",
+  projectGrouping: "separate",
   autoOpenPlan: true,
   confirmDestructiveActions: true,
   defaultReasoningEffort: "",
   defaultInteractionMode: "build",
+  codexBinaryPath: "",
 };

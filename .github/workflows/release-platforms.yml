@@ -96,6 +96,21 @@ jobs:
           DIST_SCRIPT: ${{ matrix.dist_script }}
         run: npm run "$DIST_SCRIPT"
 
+      - name: Validate Linux AppImage identity, icons, and runtime resource
+        if: runner.os == 'Linux'
+        run: npm run validate:linux-package
+
+      - name: Verify packaged Electron fuses
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux) app="release/linux-unpacked/inertia" ;;
+            Windows) app="release/win-unpacked/Inertia.exe" ;;
+            macOS) app="release/mac-arm64/Inertia.app" ;;
+            *) echo "Unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+          npm run verify:fuses -- "$app"
+
       - name: Normalize Windows release filename
         if: runner.os == 'Windows'
         run: |
@@ -125,21 +140,12 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm run test:package-smoke
 
-      - name: Verify complete macOS bundle signature and fuses
+      - name: Verify complete macOS bundle signature
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
           mac_app="release/mac-arm64/Inertia.app"
           codesign --verify --deep --strict --verbose=2 "$mac_app"
-          fuse_report="$(npx --no-install electron-fuses read --app "$mac_app")"
-          printf '%s\n' "$fuse_report"
-          grep -Fq 'RunAsNode is Disabled' <<<"$fuse_report"
-          grep -Fq 'EnableCookieEncryption is Enabled' <<<"$fuse_report"
-          grep -Fq 'EnableNodeOptionsEnvironmentVariable is Disabled' <<<"$fuse_report"
-          grep -Fq 'EnableNodeCliInspectArguments is Disabled' <<<"$fuse_report"
-          grep -Fq 'EnableEmbeddedAsarIntegrityValidation is Enabled' <<<"$fuse_report"
-          grep -Fq 'OnlyLoadAppFromAsar is Enabled' <<<"$fuse_report"
-          grep -Fq 'GrantFileProtocolExtraPrivileges is Disabled' <<<"$fuse_report"
 
       - name: Stage exact release assets and checksums
         env:

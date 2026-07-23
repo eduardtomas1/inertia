@@ -26,6 +26,7 @@ export function initialProviderSnapshots(
     command: provider.command,
     available: false,
     version: null,
+    executable: null,
     installState: "checking",
     authState: "checking",
     canRun: !executionEnabled,
@@ -46,6 +47,7 @@ export function providerSnapshot(
     command: detection.provider.command,
     available: detection.available,
     version: detection.version ?? null,
+    executable: detection.executable ?? null,
     installState: detection.installState,
     authState: detection.authState,
     canRun: detection.canRun,
@@ -63,6 +65,10 @@ export function changedFiles(status: GitRepositoryStatus): ChangedFile[] {
     insertions: file.insertions,
     deletions: file.deletions,
     untracked: file.status === "untracked",
+    staged: file.staged,
+    unstaged: file.unstaged,
+    indexStatus: file.indexStatus,
+    worktreeStatus: file.worktreeStatus,
   }));
 }
 

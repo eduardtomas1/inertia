@@ -12,6 +12,8 @@ import {
   type ProviderInstallState,
 } from "./contracts";
 import { CappedProviderBuffer } from "./io";
+import { providerProcessInvocation } from "./process";
+import { windowsCodexExecutableCandidates } from "./windows-codex";
 
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
 
@@ -53,10 +55,12 @@ async function probeProcess(
 
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawn(executable, [...args], {
+      const invocation = providerProcessInvocation(executable, args, environment.env);
+      child = spawn(invocation.command, invocation.args, {
         cwd,
         env: environment.env,
         shell: false,
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -93,6 +97,10 @@ function compareVersions(left: string | undefined, right: string | undefined): n
     if (difference !== 0) return difference;
   }
   return 0;
+}
+
+function nativeExecutablePreference(executable: string): number {
+  return /\.exe$/iu.test(executable) ? 1 : 0;
 }
 
 function authStateFromProbe(providerId: ProviderId, probe: ProbeResult): ProviderAuthState {
@@ -142,9 +150,14 @@ export async function detectProvider(
   const candidateCommands = providerId === "cursor" && command === PROVIDER_INFO.cursor.command
     ? [command, "cursor-agent"]
     : [command];
-  const candidates = [...new Set((await Promise.all(candidateCommands.map(
-    async (candidate) => await resolveCandidates(candidate, environment, cwd),
-  ))).flat())];
+  const candidates = providerId === "codex"
+    && process.platform === "win32"
+    && command.toLocaleLowerCase("en-US") === PROVIDER_INFO.codex.command
+    && dependencies.executableCandidates === undefined
+    ? await windowsCodexExecutableCandidates(environment, cwd)
+    : [...new Set((await Promise.all(candidateCommands.map(
+      async (candidate) => await resolveCandidates(candidate, environment, cwd),
+    ))).flat())];
   if (candidates.length === 0) {
     return {
       provider,
@@ -152,7 +165,7 @@ export async function detectProvider(
       installState: "not-installed",
       authState: "unknown",
       canRun: false,
-      statusMessage: statusMessage("not-installed", "unknown"),
+      statusMessage: providerId === "codex" ? "Codex CLI not found" : statusMessage("not-installed", "unknown"),
     };
   }
 
@@ -167,12 +180,25 @@ export async function detectProvider(
       && acpProbe.exitCode === 0
       && /(?:agent client protocol|\bacp\b|cursor)/iu.test(acpProbe.output)
     );
-    return { executable, probe, version: versionFromOutput(probe.output), acpReady };
+    const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
+      ? await runProbe(executable, ["app-server", "--help"], environment, cwd, timeoutMs)
+      : undefined;
+    const appServerReady = !appServerProbe || (
+      appServerProbe.started
+      && !appServerProbe.timedOut
+      && appServerProbe.exitCode === 0
+      && /(?:codex\s+app-server|run the app server|\bapp-server\b)/iu.test(appServerProbe.output)
+    );
+    return { executable, probe, version: versionFromOutput(probe.output), acpReady, appServerReady };
   }));
   const working = versionProbes
     .filter(({ probe, acpReady }) => probe.started && !probe.timedOut && probe.exitCode === 0 && acpReady)
-    .sort((left, right) => compareVersions(right.version, left.version));
-  const selected = working[0];
+    .sort((left, right) =>
+      compareVersions(right.version, left.version)
+      || nativeExecutablePreference(right.executable) - nativeExecutablePreference(left.executable));
+  const selected = providerId === "codex"
+    ? working.find(({ appServerReady }) => appServerReady) ?? working[0]
+    : working[0];
   if (!selected) {
     const cursorWithoutAcp = providerId === "cursor" && versionProbes.some(
       ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
@@ -183,22 +209,16 @@ export async function detectProvider(
       installState: cursorWithoutAcp ? "installed" : "error",
       authState: "unknown",
       canRun: false,
-      statusMessage: cursorWithoutAcp ? "Cursor CLI found, but ACP is unavailable" : statusMessage("error", "unknown"),
+      statusMessage: cursorWithoutAcp
+        ? "Cursor CLI found, but ACP is unavailable"
+        : providerId === "codex" ? "Codex CLI was found but failed to start" : statusMessage("error", "unknown"),
     };
   }
 
   const authProbe = await runProbe(selected.executable, providerAuthStatusArgs(providerId), environment, cwd, timeoutMs);
   const authState = authStateFromProbe(providerId, authProbe);
   const authenticated = authState === "authenticated" || authState === "configured";
-  const appServerProbe = providerId === "codex"
-    ? await runProbe(selected.executable, ["app-server", "--help"], environment, cwd, timeoutMs)
-    : undefined;
-  const appServerReady = !appServerProbe || (
-    appServerProbe.started
-    && !appServerProbe.timedOut
-    && appServerProbe.exitCode === 0
-    && /(?:codex\s+app-server|run the app server)/iu.test(appServerProbe.output)
-  );
+  const appServerReady = selected.appServerReady;
   const canRun = authenticated && appServerReady;
   return {
     provider,
@@ -208,8 +228,8 @@ export async function detectProvider(
     installState: "installed",
     authState,
     canRun,
-    statusMessage: authenticated && !appServerReady
-      ? "Update Codex CLI to enable agent conversations"
+    statusMessage: providerId === "codex" && !appServerReady
+      ? "Codex App Server is unsupported; update the selected CLI"
       : statusMessage("installed", authState),
   };
 }

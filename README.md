@@ -21,7 +21,10 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Choose from the models and reasoning levels your provider actually offers.
 - See provider-supplied thinking summaries, remaining context, and account usage as work progresses.
 - Work with streaming Codex conversations, resumable threads, native plans, agent questions, and supervised approvals.
-- Review changes before they ship, move between branches, and keep parallel work isolated with worktrees.
+- Review changes line by line, ask or request revisions in place, add a selection to the next prompt, and safely revert only the selected edits.
+- Generate concise agent summaries for each changed file and hunk before reading the full patch.
+- Follow agents, checks, services, and source-control work from a compact Activity Center.
+- Move between branches and keep parallel work isolated with worktrees.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
 - Search commands, projects, and threads from one keyboard-friendly palette.
 - Resize or collapse either side of the workspace whenever the conversation needs more room.

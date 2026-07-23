@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { dismissibleMenuTransition, type DismissibleMenuAction } from "../../src/renderer/src/utils/dismissibleMenu";
+import {
+  chooseHorizontalSubmenuSide,
+  dismissibleMenuTransition,
+  type DismissibleMenuAction,
+} from "../../src/renderer/src/utils/dismissibleMenu";
 
 type Menu = "provider" | "reasoning" | "mode" | "access" | "action";
 
@@ -25,5 +29,11 @@ describe("Composer popover state", () => {
   it("switches directly between menus and toggles the active trigger", () => {
     expect(transition("provider", { type: "toggle", menu: "mode" })).toBe("mode");
     expect(transition("mode", { type: "toggle", menu: "mode" })).toBeNull();
+  });
+
+  it("prefers a right submenu, falls back left, and requests drill-down when neither side fits", () => {
+    expect(chooseHorizontalSubmenuSide({ left: 350, right: 574 }, 1_180, 288)).toBe("right");
+    expect(chooseHorizontalSubmenuSide({ left: 350, right: 930 }, 1_180, 288)).toBe("left");
+    expect(chooseHorizontalSubmenuSide({ left: 250, right: 930 }, 1_180, 288)).toBeNull();
   });
 });

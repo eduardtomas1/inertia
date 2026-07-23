@@ -6,10 +6,13 @@ import {
   Check,
   Clock3,
   Database,
+  FileCode2,
+  FolderOpen,
   Gauge,
   GitCompareArrows,
   Keyboard,
   Laptop,
+  ListCollapse,
   Moon,
   PanelLeft,
   RefreshCw,
@@ -17,6 +20,8 @@ import {
   ShieldCheck,
   Sun,
   TerminalSquare,
+  Trash2,
+  WrapText,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -33,6 +38,8 @@ type SettingsViewProps = {
   onUpdate: (settings: Partial<AppSettings>) => void;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
+  onChooseCodexBinary: () => void;
+  onRevealRuntimeLogs: () => Promise<string>;
   onUnarchive: (conversation: Conversation) => void;
 };
 
@@ -59,8 +66,10 @@ const shortcuts = [
   ["Toggle terminal", "⌘ J"],
 ] as const;
 
-export function SettingsView({ settings, disabled, providers, archived, onUpdate, onConnectProvider, onRefreshProvider, onUnarchive }: SettingsViewProps): React.JSX.Element {
+export function SettingsView({ settings, disabled, providers, archived, onUpdate, onConnectProvider, onRefreshProvider, onChooseCodexBinary, onRevealRuntimeLogs, onUnarchive }: SettingsViewProps): React.JSX.Element {
   const [section, setSection] = useState<SettingsSection>("general");
+  const [revealingLogs, setRevealingLogs] = useState(false);
+  const [logRevealStatus, setLogRevealStatus] = useState<string | null>(null);
   const defaultProvider = providers.find(({ id }) => id === settings.defaultProvider);
   const defaultModel = defaultProvider?.models.find(({ id }) => id === settings.defaultModel)
     ?? defaultProvider?.models.find(({ isDefault }) => isDefault)
@@ -68,6 +77,19 @@ export function SettingsView({ settings, disabled, providers, archived, onUpdate
   const reasoningOptions = defaultModel?.reasoningOptions ?? [];
   const title = sections.find(({ id }) => id === section)?.label ?? "Settings";
   const archivedByProvider = useMemo(() => new Map(providers.map((provider) => [provider.id, provider.label])), [providers]);
+  const revealRuntimeLogs = async (): Promise<void> => {
+    if (revealingLogs) return;
+    setRevealingLogs(true);
+    setLogRevealStatus(null);
+    try {
+      const error = await onRevealRuntimeLogs();
+      setLogRevealStatus(error ? "The runtime log folder could not be opened." : "Runtime log folder opened.");
+    } catch {
+      setLogRevealStatus("The runtime log folder could not be opened.");
+    } finally {
+      setRevealingLogs(false);
+    }
+  };
 
   return (
     <main className="settings-view">
@@ -91,21 +113,62 @@ export function SettingsView({ settings, disabled, providers, archived, onUpdate
         {section === "general" && (
           <>
             <section className="settings-card" aria-labelledby="appearance-heading">
-              <div className="settings-card-heading"><div><Sun size={18} /></div><span><h3 id="appearance-heading">Appearance</h3><p>Use system, light, or dark—nothing tinted or distracting.</p></span></div>
+              <div className="settings-card-heading"><div><Sun size={18} /></div><span><h3 id="appearance-heading">Appearance</h3><p>Choose a theme and a coherent scale for the whole interface.</p></span></div>
               <div className="theme-options" role="radiogroup" aria-label="Theme">
                 {themes.map((theme) => { const ThemeIcon = theme.icon; return <button type="button" role="radio" aria-checked={settings.theme === theme.value} className={clsx("theme-option", settings.theme === theme.value && "is-active")} disabled={disabled} key={theme.value} onClick={() => onUpdate({ theme: theme.value })}><ThemeIcon size={18} /><span>{theme.label}</span>{settings.theme === theme.value && <Check size={15} />}</button>; })}
+              </div>
+              <div className="response-density-setting interface-scale-setting">
+                <span><strong>Interface scale</strong><small>Scale navigation, messages, controls, files, and diffs live. Terminal text stays independent.</small></span>
+                <div role="radiogroup" aria-label="Interface scale">
+                  {(["compact", "default", "comfortable", "large"] as const).map((scale) => <button type="button" role="radio" aria-checked={settings.interfaceScale === scale} className={clsx(settings.interfaceScale === scale && "is-active")} disabled={disabled} key={scale} onClick={() => onUpdate({ interfaceScale: scale })}>{scale === "default" ? "Default" : scale[0].toUpperCase() + scale.slice(1)}</button>)}
+                </div>
               </div>
             </section>
 
             <section className="settings-card" aria-labelledby="workspace-heading">
               <div className="settings-card-heading"><div><PanelLeft size={18} /></div><span><h3 id="workspace-heading">Workspace</h3><p>Choose which quiet details help you stay oriented.</p></span></div>
+              <div className="response-density-setting">
+                <span><strong>Project navigation</strong><small>Keep the project tree or focus on active work across projects.</small></span>
+                <div role="radiogroup" aria-label="Project navigation">
+                  <button type="button" role="radio" aria-checked={settings.sidebarMode === "classic"} className={clsx(settings.sidebarMode === "classic" && "is-active")} disabled={disabled} onClick={() => onUpdate({ sidebarMode: "classic" })}>Classic projects</button>
+                  <button type="button" role="radio" aria-checked={settings.sidebarMode === "activity"} className={clsx(settings.sidebarMode === "activity" && "is-active")} disabled={disabled} onClick={() => onUpdate({ sidebarMode: "activity" })}>Activity first</button>
+                </div>
+              </div>
+              <div className="response-density-setting project-grouping-setting">
+                <span><strong>Logical project grouping</strong><small>Use canonical Git identity and normalized paths, never display names.</small></span>
+                <div role="radiogroup" aria-label="Logical project grouping">
+                  <button type="button" role="radio" aria-checked={settings.projectGrouping === "repository"} className={clsx(settings.projectGrouping === "repository" && "is-active")} disabled={disabled} onClick={() => onUpdate({ projectGrouping: "repository" })}>Repository</button>
+                  <button type="button" role="radio" aria-checked={settings.projectGrouping === "repository-path"} className={clsx(settings.projectGrouping === "repository-path" && "is-active")} disabled={disabled} onClick={() => onUpdate({ projectGrouping: "repository-path" })}>Repo + folder</button>
+                  <button type="button" role="radio" aria-checked={settings.projectGrouping === "separate"} className={clsx(settings.projectGrouping === "separate" && "is-active")} disabled={disabled} onClick={() => onUpdate({ projectGrouping: "separate" })}>Keep separate</button>
+                </div>
+              </div>
               <div className="settings-rows">
                 <SettingSwitch icon={<PanelLeft size={17} />} title="Compact project navigation" detail="Reduce spacing while keeping project names readable." checked={settings.compactSidebar} disabled={disabled} onChange={(compactSidebar) => onUpdate({ compactSidebar })} />
                 <SettingSwitch icon={<Clock3 size={17} />} title="Message timestamps" detail="Show a quiet time label alongside each message." checked={settings.showTimestamps} disabled={disabled} onChange={(showTimestamps) => onUpdate({ showTimestamps })} />
                 <SettingSwitch icon={<BrainCircuit size={17} />} title="Live thinking summaries" detail="Show provider-supplied reasoning summaries as they arrive." checked={settings.showThinking} disabled={disabled} onChange={(showThinking) => onUpdate({ showThinking })} />
-                <SettingSwitch icon={<Gauge size={17} />} title="Usage and context" detail="Show remaining account usage and context when reported." checked={settings.showUsage} disabled={disabled} onChange={(showUsage) => onUpdate({ showUsage })} />
                 <SettingSwitch icon={<Bot size={17} />} title="Open plan automatically" detail="Reveal the Plan panel when an agent publishes steps." checked={settings.autoOpenPlan} disabled={disabled} onChange={(autoOpenPlan) => onUpdate({ autoOpenPlan })} />
                 <SettingSwitch icon={<ShieldCheck size={17} />} title="Confirm destructive actions" detail="Ask before deleting threads or restoring checkpoints." checked={settings.confirmDestructiveActions} disabled={disabled} onChange={(confirmDestructiveActions) => onUpdate({ confirmDestructiveActions })} />
+              </div>
+              <div className="response-density-setting usage-display-setting">
+                <span><strong>Usage and context</strong><small>Choose a full composer card, a restrained summary, or hide provider usage entirely.</small></span>
+                <div role="radiogroup" aria-label="Usage and context display">
+                  {(["expanded", "compact", "hidden"] as const).map((mode) => <button type="button" role="radio" aria-checked={settings.usageDisplayMode === mode} className={clsx(settings.usageDisplayMode === mode && "is-active")} disabled={disabled} key={mode} onClick={() => onUpdate({ usageDisplayMode: mode })}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
+                </div>
+              </div>
+            </section>
+
+            <section className="settings-card" aria-labelledby="responses-heading">
+              <div className="settings-card-heading"><div><FileCode2 size={18} /></div><span><h3 id="responses-heading">Agent responses</h3><p>Choose how final answers and the work behind them are presented.</p></span></div>
+              <div className="response-density-setting">
+                <span><strong>Response density</strong><small>Adjust spacing and type size without changing terminal text.</small></span>
+                <div role="radiogroup" aria-label="Response density">
+                  {(["compact", "default", "comfortable"] as const).map((density) => <button type="button" role="radio" aria-checked={settings.responseDensity === density} className={clsx(settings.responseDensity === density && "is-active")} disabled={disabled} key={density} onClick={() => onUpdate({ responseDensity: density })}>{density === "default" ? "Default" : density[0].toUpperCase() + density.slice(1)}</button>)}
+                </div>
+              </div>
+              <div className="settings-rows">
+                <SettingSwitch icon={<WrapText size={17} />} title="Wrap code by default" detail="Start fenced code blocks wrapped; each block still has its own control." checked={settings.defaultCodeWrap} disabled={disabled} onChange={(defaultCodeWrap) => onUpdate({ defaultCodeWrap })} />
+                <SettingSwitch icon={<ListCollapse size={17} />} title="Collapse completed work logs" detail="Keep final answers visible while condensing successful tool activity." checked={settings.autoCollapseWorkLog} disabled={disabled} onChange={(autoCollapseWorkLog) => onUpdate({ autoCollapseWorkLog })} />
+                <SettingSwitch icon={<FileCode2 size={17} />} title="Changed-file summaries" detail="Show the current workspace file summary below the latest settled turn." checked={settings.showChangedFileSummaries} disabled={disabled} onChange={(showChangedFileSummaries) => onUpdate({ showChangedFileSummaries })} />
               </div>
             </section>
 
@@ -124,6 +187,18 @@ export function SettingsView({ settings, disabled, providers, archived, onUpdate
                 {providers.map((provider) => { const action = providerSetupAction(provider); return <div className="setting-row provider-account-row" key={provider.id}><span className="setting-row-icon"><Bot size={17} /></span><span className="setting-copy provider-account-copy"><span className="provider-account-title"><strong>{provider.label}</strong><ProviderStatus provider={provider} /></span><small>{providerStateDetail(provider)}{provider.models.length > 0 ? ` · ${provider.models.length} models available` : ""}</small></span>{action && <button type="button" className="secondary-button provider-account-action" disabled={disabled} onClick={() => action === "connect" ? onConnectProvider(provider.id) : onRefreshProvider(provider.id)}><ProviderActionIcon action={action} />{action === "connect" ? provider.id === "opencode" ? "Configure" : "Connect" : "Refresh"}</button>}</div>; })}
               </div>
               <p className="settings-card-note">Authentication remains with each provider. Inertia never stores account passwords or provider tokens.</p>
+            </section>
+
+            <section className="settings-card codex-binary-setting" aria-labelledby="codex-binary-heading">
+              <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="codex-binary-heading">Codex executable</h3><p>Automatic discovery checks official, package-manager, custom-home, and PATH installations.</p></span></div>
+              <div className="codex-binary-path">
+                <span><strong>{settings.codexBinaryPath ? "Manual override" : "Selected executable"}</strong><small title={settings.codexBinaryPath || providers.find(({ id }) => id === "codex")?.executable || undefined}>{settings.codexBinaryPath || providers.find(({ id }) => id === "codex")?.executable || "No working Codex executable detected"}</small></span>
+                <div>
+                  <button type="button" className="secondary-button" disabled={disabled} onClick={onChooseCodexBinary}><FolderOpen size={14} />Browse</button>
+                  {settings.codexBinaryPath && <button type="button" className="secondary-button" disabled={disabled} onClick={() => onUpdate({ codexBinaryPath: "" })}><Trash2 size={14} />Use automatic</button>}
+                </div>
+              </div>
+              <p className="settings-card-note">The selected file is version-checked before it is saved. Sign-in and App Server support are reported separately.</p>
             </section>
 
             <section className="settings-card" aria-labelledby="defaults-heading">
@@ -162,7 +237,18 @@ export function SettingsView({ settings, disabled, providers, archived, onUpdate
               <div className="settings-card-heading"><div><ArchiveRestore size={18} /></div><span><h3 id="archive-heading">Archived threads</h3><p>Restore earlier work without losing its provider or project context.</p></span></div>
               {archived.length > 0 ? <div className="archive-list">{archived.map((thread) => <div className="archive-row" key={thread.id}><span><strong>{thread.title}</strong><small>{archivedByProvider.get(thread.providerId) ?? thread.providerId}</small></span><button type="button" className="secondary-button" disabled={disabled} onClick={() => onUnarchive(thread)}><ArchiveRestore size={14} />Restore</button></div>)}</div> : <div className="settings-empty-state"><ArchiveRestore size={19} /><strong>No archived threads</strong><span>Archived work will appear here.</span></div>}
             </section>
-            <section className="settings-card" aria-labelledby="data-heading"><div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="data-heading">Local data</h3><p>Projects, sessions, context usage, and preferences are stored locally.</p></span></div><div className="settings-data-note"><ShieldCheck size={17} /><span><strong>Provider credentials stay outside Inertia.</strong><small>Account authentication remains in each provider’s own secure storage.</small></span></div></section>
+            <section className="settings-card" aria-labelledby="data-heading">
+              <div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="data-heading">Local data</h3><p>Projects, sessions, context usage, and preferences are stored locally.</p></span></div>
+              <div className="settings-data-note"><ShieldCheck size={17} /><span><strong>Provider credentials stay outside Inertia.</strong><small>Account authentication remains in each provider’s own secure storage.</small></span></div>
+              <div className="codex-binary-path runtime-log-setting">
+                <span>
+                  <strong>Runtime diagnostics</strong>
+                  <small>Local-only lifecycle and failure metadata. Prompts, source, token values, and credentials are excluded. Logs rotate at 256 KB and expire after seven days.</small>
+                </span>
+                <button type="button" className="secondary-button" disabled={revealingLogs} onClick={() => { void revealRuntimeLogs(); }}><FolderOpen size={14} />{revealingLogs ? "Opening…" : "Reveal log folder"}</button>
+              </div>
+              {logRevealStatus && <p className="settings-card-note" role="status">{logRevealStatus}</p>}
+            </section>
           </>
         )}
       </div>

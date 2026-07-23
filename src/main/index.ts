@@ -17,11 +17,15 @@ import {
   type IpcMainInvokeEvent,
 } from "electron";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
+import { resolveRuntimeIconPath } from "./runtime-assets.js";
+import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
 
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
   selectDirectory: "inertia:select-directory",
+  selectCodexExecutable: "inertia:select-codex-executable",
+  revealRuntimeLogs: "inertia:reveal-runtime-logs",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   openPath: "inertia:open-path",
@@ -50,6 +54,7 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
+let runtimeDiagnostics: RuntimeDiagnostics | null = null;
 let trustedRendererUrl = "";
 let stoppingRuntime = false;
 let packageSmokeFilePath: string | null = null;
@@ -193,7 +198,12 @@ function rendererLocation(): { target: string; isUrl: boolean } {
   const developmentUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL;
 
   if (developmentUrl) {
-    const parsed = new URL(developmentUrl);
+    let parsed: URL;
+    try {
+      parsed = new URL(developmentUrl);
+    } catch {
+      throw new Error("Development renderer must use a valid loopback HTTP origin");
+    }
     const isLoopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]";
     if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !isLoopback) {
       throw new Error("Development renderer must use a loopback HTTP origin");
@@ -264,6 +274,34 @@ function registerIpcHandlers(): void {
     });
 
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle(IPC.selectCodexExecutable, async (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Choose the Codex executable",
+      defaultPath: app.getPath("home"),
+      buttonLabel: "Use Codex executable",
+      ...(process.platform === "win32"
+        ? { filters: [{ name: "Codex executables", extensions: ["exe", "cmd", "bat", "com"] }] }
+        : {}),
+      properties: ["openFile"],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle(IPC.revealRuntimeLogs, async (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    const diagnostics = runtimeDiagnostics
+      ?? new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
+    runtimeDiagnostics = diagnostics;
+    const directory = diagnostics.ensureDirectory();
+    diagnostics.record("logs.reveal");
+    // E2E exercises the trusted no-argument bridge without launching a host file
+    // manager. Production always asks the OS to reveal this fixed local path.
+    if (process.env.NODE_ENV === "test") return "";
+    return await shell.openPath(directory);
   });
 
   ipcMain.handle(IPC.selectAttachments, async (event, ...args) => {
@@ -386,7 +424,12 @@ async function createWindow(): Promise<void> {
     ? new URL(renderer.target).href
     : pathToFileURL(renderer.target).href;
 
-  const iconPath = resolve(app.getAppPath(), "resources/icon.png");
+  const iconPath = resolveRuntimeIconPath({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+  });
+  if (!existsSync(iconPath)) throw new Error(`The required Inertia window icon is missing: ${iconPath}`);
   const savedWindow = readWindowState();
   const window = new BrowserWindow({
     title: "Inertia",
@@ -398,7 +441,7 @@ async function createWindow(): Promise<void> {
     show: false,
     backgroundColor: "#101011",
     autoHideMenuBar: true,
-    ...(existsSync(iconPath) ? { icon: iconPath } : {}),
+    icon: iconPath,
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hiddenInset" as const,
@@ -477,6 +520,8 @@ function finishQuitAfterCleanup(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
+  runtimeDiagnostics.record("app.start");
   const dataDirectory = process.env.INERTIA_DATA_DIR
     ? resolve(process.env.INERTIA_DATA_DIR)
     : join(app.getPath("userData"), "runtime");
@@ -503,7 +548,7 @@ async function bootstrap(): Promise<void> {
     workerOptions: {
       dataDirectory,
       defaultWorkspacePath,
-      enableProviders: process.env.NODE_ENV !== "test",
+      enableProviders: process.env.NODE_ENV !== "test" || Boolean(process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED),
     },
     spawn: () => utilityProcess.fork(
       fileURLToPath(new URL("./runtime-worker.js", import.meta.url)),
@@ -515,17 +560,21 @@ async function bootstrap(): Promise<void> {
       },
     ),
     onStateChange: (snapshot) => {
+      runtimeDiagnostics?.recordState(snapshot);
       if (snapshot.phase === "restarting" && snapshot.lastError) {
         console.error("The local runtime stopped; restart scheduled", snapshot.lastError);
       }
       if (snapshot.phase === "stopped") recordPackageSmokeStage("runtime-stopped");
-      if (snapshot.phase === "ready" && snapshot.pid && packageSmokeFilePath && !packageSmokeScheduled) {
+      if (snapshot.phase === "ready" && snapshot.pid && snapshot.websocketUrl && packageSmokeFilePath && !packageSmokeScheduled) {
         packageSmokeScheduled = true;
         void writeFile(
           packageSmokeFilePath,
-          JSON.stringify({ mainPid: process.pid, runtimePid: snapshot.pid, generation: snapshot.generation }),
+          JSON.stringify({ mainPid: process.pid, runtimePid: snapshot.pid, generation: snapshot.generation, websocketUrl: snapshot.websocketUrl }),
           { encoding: "utf8", mode: 0o600, flag: "wx" },
-        ).finally(() => setTimeout(() => app.quit(), 100));
+        ).finally(() => setTimeout(
+          () => app.quit(),
+          process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED ? 10_000 : 100,
+        ));
       }
     },
   });
@@ -576,10 +625,17 @@ if (!hasSingleInstanceLock) {
     if (mainWindow) saveWindowState(mainWindow);
     const supervisorToStop = runtimeSupervisor;
     runtimeSupervisor = null;
+    runtimeDiagnostics?.record("app.stop");
 
     void supervisorToStop
       .stop()
-      .catch((error: unknown) => console.error("Failed to stop the local runtime", error))
+      .catch((error: unknown) => {
+        runtimeDiagnostics?.record("runtime.failure", {
+          phase: "stopping",
+          message: error instanceof Error ? error.message : "The local runtime could not stop cleanly.",
+        });
+        console.error("Failed to stop the local runtime", error);
+      })
       .finally(finishQuitAfterCleanup);
   });
 
@@ -587,6 +643,10 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(bootstrap)
     .catch((error: unknown) => {
+      runtimeDiagnostics?.record("runtime.failure", {
+        phase: "starting",
+        message: error instanceof Error ? error.message : "Inertia could not start.",
+      });
       console.error("Failed to start Inertia", error);
       dialog.showErrorBox(
         "Inertia could not start",

@@ -66,6 +66,52 @@ server.listen(port, "127.0.0.1", save);
 `;
 }
 
+function permissionDecisionServerSource(root: string, capturePath: string): string {
+  return `
+const http = require("node:http");
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
+const captured = [];
+const sessionID = "opencode-permission-session";
+let events;
+const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
+const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
+const session = { id: sessionID, slug: "fixture", projectID: "project", directory: ${JSON.stringify(root)}, title: "Fixture", version: "1.18.4", model: { id: "model-a", providerID: "fake" }, time: { created: Date.now(), updated: Date.now() } };
+const model = { id: "model-a", providerID: "fake", api: { id: "fake", url: "http://fake", npm: "fake" }, name: "Model A", capabilities: { temperature: true, reasoning: true, attachment: true, toolcall: true, input: { text: true, audio: false, image: false, video: false, pdf: false }, output: { text: true, audio: false, image: false, video: false, pdf: false }, interleaved: true }, cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }, limit: { context: 200000, output: 32000 }, status: "active", options: {}, headers: {}, release_date: "2026-01-01" };
+const json = (res, value, status = 200) => { res.writeHead(status, { "content-type": "application/json" }); res.end(status === 204 ? undefined : JSON.stringify(value)); };
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, "http://127.0.0.1");
+  let body = "";
+  req.on("data", (chunk) => body += chunk);
+  req.on("end", () => {
+    const parsed = body ? JSON.parse(body) : undefined;
+    captured.push({ method: req.method, path: url.pathname, body: parsed }); save();
+    if (req.method === "GET" && url.pathname === "/global/health") return json(res, { healthy: true, version: "1.18.4" });
+    if (req.method === "GET" && url.pathname === "/provider") return json(res, { all: [{ id: "fake", name: "Fake", source: "config", env: [], options: {}, models: { "model-a": model } }], default: { fake: "model-a" }, connected: ["fake"] });
+    if (req.method === "GET" && url.pathname === "/agent") return json(res, []);
+    if (req.method === "POST" && url.pathname === "/session") return json(res, session);
+    if (req.method === "GET" && url.pathname === "/session/" + sessionID) return json(res, session);
+    if (req.method === "GET" && url.pathname === "/event") { events = res; res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" }); return res.flushHeaders(); }
+    if (req.method === "POST" && url.pathname.endsWith("/prompt_async")) {
+      json(res, undefined, 204);
+      return sendEvent({ type: "permission.asked", properties: { id: "deny-only", sessionID, permission: "bash", patterns: ["npm test"], metadata: {} } });
+    }
+    if (req.method === "POST" && url.pathname === "/permission/deny-only/reply") {
+      json(res, true);
+      return sendEvent({ type: "permission.asked", properties: { id: "cancel-turn", sessionID, permission: "edit", resources: ["src/app.ts"], metadata: {} } });
+    }
+    if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/abort") {
+      json(res, true);
+      return setTimeout(() => sendEvent({ type: "session.idle", properties: { sessionID } }), 10);
+    }
+    return json(res, { error: "not found" }, 404);
+  });
+});
+server.listen(port, "127.0.0.1", save);
+`;
+}
+
 describe.sequential("OpenCode SDK harness", () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
@@ -247,6 +293,45 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     expect(captured.some(({ method, path }) => method === "POST" && path === "/session")).toBe(false);
     expect(captured.some(({ method, path }) => method === "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
     expect(captured.some(({ method, path }) => method !== "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
+  });
+
+  it("denies one permission without aborting, then cancels the owned session and settles the turn", async () => {
+    const root = portableFixtureRoot("OpenCode permission semantics");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", permissionDecisionServerSource(root, capturePath));
+    const manager = new ProviderManager(
+      { commands: { opencode: command }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let approvals = 0;
+    const result = manager.run({
+      providerId: "opencode",
+      conversationId: "opencode-permission-semantics",
+      cwd: root,
+      prompt: "Exercise permissions",
+      interactionMode: "build",
+      access: "supervised",
+    }, {
+      onApproval: (event) => {
+        approvals += 1;
+        const decision = approvals === 1 ? "deny" : "cancel";
+        expect(manager.respondToApproval(event.conversationId, event.request.requestId, decision)).toBe(true);
+      },
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    expect(approvals).toBe(2);
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      port: number;
+      captured: Array<{ path: string; body?: Record<string, unknown> }>;
+    };
+    expect(capture.captured.find(({ path }) => path === "/permission/deny-only/reply")?.body).toEqual({ reply: "reject" });
+    expect(capture.captured.some(({ path }) => path === "/permission/cancel-turn/reply")).toBe(false);
+    expect(capture.captured.some(({ path }) => path.endsWith("/abort"))).toBe(true);
+    await waitFor("the cancelled OpenCode process to close", async () => !(await loopbackPortIsOpen(capture.port)));
+    expect(manager.activeConversationIds()).toEqual([]);
   });
 
   it("cancels through the owned server and leaves no listening process", async () => {

@@ -22,6 +22,9 @@ export interface PreviewState { url: string; loading: boolean; canGoBack: boolea
 export interface DesktopBridge {
   getRuntimeConnection: () => Promise<RuntimeConnection>;
   selectDirectory: () => Promise<string | null>;
+  selectCodexExecutable: () => Promise<string | null>;
+  /** Reveals Inertia's fixed local diagnostics directory; no caller-supplied path is accepted. */
+  revealRuntimeLogs: () => Promise<string>;
   selectAttachments: () => Promise<DesktopAttachment[]>;
   importAttachments: (files: AttachmentImport[]) => Promise<DesktopAttachment[]>;
   openPath: (path: string) => Promise<string>;

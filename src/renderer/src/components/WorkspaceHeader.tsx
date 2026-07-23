@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, Settings, SunMoon } from "lucide-react";
+import { Activity, ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { IconButton } from "./ui";
@@ -15,6 +15,8 @@ type WorkspaceHeaderProps = {
   branches: GitBranchInfo[];
   actions: ProjectAction[];
   busy: boolean;
+  activityOpen: boolean;
+  activityCount: number;
   onOpenSidebar: () => void;
   onToggleTools: () => void;
   onCycleTheme: () => void;
@@ -27,6 +29,7 @@ type WorkspaceHeaderProps = {
   onOpenPullRequest: () => void;
   onPull: () => void;
   onRunAction: (action: ProjectAction) => void;
+  onToggleActivity: () => void;
 };
 
 export function WorkspaceHeader({
@@ -40,6 +43,8 @@ export function WorkspaceHeader({
   branches,
   actions,
   busy,
+  activityOpen,
+  activityCount,
   onOpenSidebar,
   onToggleTools,
   onCycleTheme,
@@ -52,6 +57,7 @@ export function WorkspaceHeader({
   onOpenPullRequest,
   onPull,
   onRunAction,
+  onToggleActivity,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | null>(null);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
@@ -108,6 +114,9 @@ export function WorkspaceHeader({
             {gitStatus?.hasRemote && <button type="button" className="header-button" onClick={onOpenPullRequest} disabled={busy}><GitPullRequest size={14} /><span>Pull request</span></button>}
           </>
         )}
+        <IconButton label="Open activity center" className="activity-center-button" aria-pressed={activityOpen} onClick={onToggleActivity}>
+          <Activity size={17} />{activityCount > 0 && <span className="activity-count">{activityCount > 9 ? "9+" : activityCount}</span>}
+        </IconButton>
         <IconButton label={`Change theme (current: ${theme})`} onClick={onCycleTheme}><SunMoon size={17} /></IconButton>
         {view === "workspace" ? (
           <IconButton label={activeTool ? "Close workspace tools" : "Open workspace tools"} aria-pressed={Boolean(activeTool)} onClick={onToggleTools} disabled={!project}>

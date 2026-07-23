@@ -13,7 +13,6 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type { ProviderModel, ProviderRateLimit } from "../../shared/contracts";
-import type { CodexApprovalDecision, CodexInputRequest, CodexPlanStep } from "../codex/types";
 import { CappedProviderBuffer } from "./io";
 import {
   createAgentHarnessEmitter,
@@ -23,7 +22,12 @@ import {
   type ClaudeAgentSdkHarnessCapabilities,
 } from "./agent-harness";
 import type { ProviderRunResult } from "./contracts";
-import { providerTimestamp } from "./usage-values";
+import type {
+  AgentApprovalDecision,
+  AgentInputRequest,
+  AgentPlanStep,
+} from "./interactions";
+import { clampProviderPercent, providerTimestamp } from "./usage-values";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -96,7 +100,7 @@ export function parseClaudeRateLimits(value: unknown): ProviderRateLimit[] {
   });
   return windows.flatMap((window) => {
     const current = objectValue(window.value);
-    const utilization = typeof current?.utilization === "number" && Number.isFinite(current.utilization) ? current.utilization : null;
+    const utilization = clampProviderPercent(current?.utilization);
     if (utilization === null) return [];
     return [{
       id: `claude:${window.key}`,
@@ -158,7 +162,7 @@ export async function readClaudeAgentSdkModels(
 }
 
 interface PendingApproval {
-  resolve: (decision: CodexApprovalDecision) => void;
+  resolve: (decision: AgentApprovalDecision) => void;
   settled: boolean;
 }
 
@@ -188,7 +192,7 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
   let cancelRequested = false;
   let sessionId = options.input.sessionId;
 
-  const settleApproval = (requestId: string, decision: CodexApprovalDecision): boolean => {
+  const settleApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = approvals.get(requestId);
     if (!pending || pending.settled) return false;
     pending.settled = true;
@@ -219,7 +223,7 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
   const canUseTool: CanUseTool = async (toolName, toolInput, callbackOptions) => {
     if (toolName === "AskUserQuestion") {
       const requestId = randomUUID();
-      const request = claudeQuestions(requestId, toolInput);
+      const request = claudeQuestions(requestId, callbackOptions.toolUseID, toolInput);
       if (request.questions.length === 0) return deny("Claude sent an invalid question request.");
       const answers = await new Promise<Record<string, string[]>>((resolve) => {
         inputs.set(requestId, { resolve, settled: false });
@@ -227,7 +231,11 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
         emitter.rich({ type: "input", request });
       });
       if (callbackOptions.signal.aborted || cancelRequested) return deny("User cancelled the request.", true);
-      const sdkAnswers = Object.fromEntries(Object.entries(answers).map(([key, values]) => [key, values.join(", ")]));
+      const sdkAnswers = Object.fromEntries(request.questions.map((question) => {
+        const labelsById = new Map(question.options.map((option) => [option.id, option.label]));
+        const values = (answers[question.id] ?? []).map((value) => labelsById.get(value) ?? value);
+        return [question.question, values.join(", ")];
+      }));
       return { behavior: "allow", updatedInput: { questions: toolInput.questions, answers: sdkAnswers } };
     }
 
@@ -239,7 +247,7 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
 
     if (options.input.access === "full") return { behavior: "allow", updatedInput: toolInput };
     const requestId = randomUUID();
-    const decision = await new Promise<CodexApprovalDecision>((resolve) => {
+    const decision = await new Promise<AgentApprovalDecision>((resolve) => {
       approvals.set(requestId, { resolve, settled: false });
       callbackOptions.signal.addEventListener("abort", () => settleApproval(requestId, "cancel"), { once: true });
       emitter.rich({
@@ -469,8 +477,9 @@ function imageMediaType(path: string): "image/jpeg" | "image/png" | "image/gif" 
   }
 }
 
-function claudeQuestions(requestId: string, input: Record<string, unknown>): CodexInputRequest {
+function claudeQuestions(requestId: string, toolUseId: string, input: Record<string, unknown>): AgentInputRequest {
   const questions = Array.isArray(input.questions) ? input.questions : [];
+  const identityPrefix = (toolUseId || requestId).slice(0, 96);
   return {
     requestId,
     autoResolutionMs: null,
@@ -480,21 +489,26 @@ function claudeQuestions(requestId: string, input: Record<string, unknown>): Cod
       const text = bounded(stringValue(question.question) ?? `Question ${index + 1}`);
       const options = Array.isArray(question.options) ? question.options : [];
       return [{
-        id: text,
+        id: `${identityPrefix}:question:${index + 1}`,
         header: bounded(stringValue(question.header) ?? `Question ${index + 1}`),
         question: text,
         isOther: true,
         isSecret: false,
-        options: options.slice(0, 20).flatMap((option) => {
+        allowMultiple: question.multiSelect === true || question.allowMultiple === true,
+        options: options.slice(0, 20).flatMap((option, optionIndex) => {
           const item = objectValue(option);
-          return item ? [{ label: bounded(stringValue(item.label) ?? "Option"), description: bounded(stringValue(item.description) ?? "") }] : [];
+          return item ? [{
+            id: `option-${optionIndex + 1}`,
+            label: bounded(stringValue(item.label) ?? "Option"),
+            description: bounded(stringValue(item.description) ?? ""),
+          }] : [];
         }),
       }];
     }),
   };
 }
 
-function planSteps(markdown: string): CodexPlanStep[] {
+function planSteps(markdown: string): AgentPlanStep[] {
   const steps = markdown.split("\n").map((line) => line.match(/^\s*(?:[-*]|\d+[.)])\s+(.+)/u)?.[1]?.trim()).filter((value): value is string => Boolean(value));
   return (steps.length > 0 ? steps : [markdown]).slice(0, 100).map((step) => ({ step: bounded(step), status: "pending" }));
 }

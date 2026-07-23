@@ -18,6 +18,7 @@ import {
 } from "./agent-harness";
 import type { ProviderId, ProviderRunResult } from "./contracts";
 import { CappedProviderBuffer, ProviderNdjsonDecoder } from "./io";
+import { providerProcessInvocation } from "./process";
 
 const MAX_NDJSON_LINE_CHARS = 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
@@ -180,11 +181,13 @@ function startCliRun(
   emitter.status("starting");
   let child: ChildProcessWithoutNullStreams;
   try {
-    child = spawn(invocation.command, invocation.args, {
+    const processInvocation = providerProcessInvocation(invocation.command, invocation.args, options.environment);
+    child = spawn(processInvocation.command, processInvocation.args, {
       cwd: options.input.cwd,
       env: options.environment,
       detached: process.platform !== "win32",
       shell: false,
+      windowsVerbatimArguments: processInvocation.windowsVerbatimArguments,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });

@@ -21,27 +21,31 @@ import type {
   CodexAppServerOptions,
   CodexAppServerResult,
   CodexAppServerRun,
-  CodexApprovalDecision,
-  CodexApprovalRequest,
-  CodexInputRequest,
 } from "./codex/types";
+import type {
+  AgentApprovalDecision,
+  AgentApprovalRequest,
+  AgentInputRequest,
+} from "./provider/interactions";
+import { providerProcessInvocation } from "./provider/process";
 import { terminateProcessTree } from "./process-lifecycle";
 
 export type {
   CodexAppServerOptions,
   CodexAppServerResult,
   CodexAppServerRun,
-  CodexApprovalDecision,
-  CodexApprovalKind,
-  CodexApprovalNetworkScope,
-  CodexApprovalPermissionRoot,
-  CodexApprovalRequest,
-  CodexInputOption,
-  CodexInputQuestion,
-  CodexInputRequest,
-  CodexPlanStep,
   CodexUsageSnapshot,
 } from "./codex/types";
+export type {
+  AgentApprovalDecision,
+  AgentApprovalKind,
+  AgentApprovalNetworkScope,
+  AgentApprovalPermissionRoot,
+  AgentApprovalRequest,
+  AgentInputRequest,
+  AgentInputQuestion,
+  AgentPlanStep,
+} from "./provider/interactions";
 
 interface PendingClientRequest {
   method: string;
@@ -52,14 +56,14 @@ interface PendingClientRequest {
 
 interface PendingApproval {
   rpcId: RpcId;
-  request: CodexApprovalRequest;
+  request: AgentApprovalRequest;
   protocol: "decision" | "permissions";
   requestedPermissions?: JsonObject;
 }
 
 interface PendingInput {
   rpcId: RpcId;
-  request: CodexInputRequest;
+  request: AgentInputRequest;
 }
 
 const MAX_LINE_CHARS = 1024 * 1024;
@@ -68,6 +72,18 @@ const MAX_DIAGNOSTIC_CHARS = 32 * 1024;
 const RPC_TIMEOUT_MS = 30_000;
 
 type CodexRunPhase = "opening" | "starting-turn" | "running" | "settled";
+
+function commandExecutionLabel(item: JsonObject): string {
+  const raw = boundedText(item.command, 4_000)
+    ?? boundedText(item.cmd, 4_000)
+    ?? (Array.isArray(item.command)
+      ? item.command.filter((value): value is string => typeof value === "string").join(" ")
+      : undefined);
+  if (!raw) return "Command";
+  const packageScript = /\b(npm|pnpm|yarn|bun)\s+(?:(run)\s+)?([A-Za-z0-9:_-]{1,80})/u.exec(raw);
+  if (!packageScript) return "Command";
+  return `${packageScript[1]} ${packageScript[2] ? "run " : ""}${packageScript[3]}`;
+}
 
 interface CodexAccessPolicy {
   approvalPolicy: "untrusted" | "on-request" | "never";
@@ -107,11 +123,13 @@ function isRecoverableResumeError(error: unknown): boolean {
 }
 
 export function startCodexAppServerRun(options: CodexAppServerOptions): CodexAppServerRun {
-  const child = spawn(options.executable, ["app-server"], {
+  const invocation = providerProcessInvocation(options.executable, ["app-server"], options.environment);
+  const child = spawn(invocation.command, invocation.args, {
     cwd: options.cwd,
     env: options.environment,
     detached: process.platform !== "win32",
     shell: false,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -339,7 +357,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
           if (summary) options.onReasoning?.(summary);
         }
       }
-      else if (itemType === "commandExecution") emitActivity("command", phase, "Command");
+      else if (itemType === "commandExecution" && item) emitActivity("command", phase, commandExecutionLabel(item));
       else if (itemType === "fileChange") emitActivity("tool", phase, "File change");
       else if (itemType === "agentMessage" && method === "item/completed") {
         const itemId = boundedText(item?.id, 512);
@@ -538,7 +556,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     });
   };
 
-  const respondToApproval = (requestId: string, decision: CodexApprovalDecision): boolean => {
+  const respondToApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = pendingApprovals.get(requestId);
     if (!pending || settled || !pending.request.availableDecisions.includes(decision)) return false;
     const result: JsonObject = pending.protocol === "permissions"

@@ -15,8 +15,26 @@ export interface ProviderEnvironment {
 
 let environmentPromise: Promise<ProviderEnvironment> | undefined;
 
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values.filter(Boolean))];
+function unique(values: readonly string[], platform: NodeJS.Platform = process.platform): string[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    if (!value) return false;
+    const key = platform === "win32" ? value.toLocaleLowerCase("en-US") : value;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function environmentValue(
+  environment: NodeJS.ProcessEnv,
+  key: string,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform !== "win32") return environment[key];
+  const normalized = key.toUpperCase();
+  const match = Object.keys(environment).find((candidate) => candidate.toUpperCase() === normalized);
+  return match ? environment[match] : undefined;
 }
 
 function parseEnvironment(buffer: Buffer): NodeJS.ProcessEnv {
@@ -81,13 +99,26 @@ async function loginShellEnvironment(): Promise<NodeJS.ProcessEnv> {
   });
 }
 
-function commonExecutableDirectories(): string[] {
-  const home = homedir();
+function commonExecutableDirectories(environment: NodeJS.ProcessEnv): string[] {
+  const home = environmentValue(environment, "USERPROFILE") || homedir();
   if (process.platform === "win32") {
-    const local = process.env.LOCALAPPDATA;
-    const roaming = process.env.APPDATA;
+    const local = environmentValue(environment, "LOCALAPPDATA");
+    const roaming = environmentValue(environment, "APPDATA");
+    const pnpm = environmentValue(environment, "PNPM_HOME");
+    const bun = environmentValue(environment, "BUN_INSTALL");
+    const volta = environmentValue(environment, "VOLTA_HOME");
+    const codexInstall = environmentValue(environment, "CODEX_INSTALL_DIR");
+    const codexHome = environmentValue(environment, "CODEX_HOME");
     return unique([
+      codexInstall ?? "",
+      codexInstall ? join(codexInstall, "bin") : "",
+      codexHome ?? "",
+      codexHome ? join(codexHome, "bin") : "",
       roaming ? join(roaming, "npm") : "",
+      pnpm ?? "",
+      local ? join(local, "pnpm") : "",
+      bun ? join(bun, "bin") : join(home, ".bun", "bin"),
+      volta ? join(volta, "bin") : join(home, ".volta", "bin"),
       local ? join(local, "Programs", "OpenAI", "Codex", "bin") : "",
       local ? join(local, "Programs", "cursor", "resources", "app", "bin") : "",
       join(home, "AppData", "Roaming", "npm"),
@@ -112,13 +143,19 @@ function commonExecutableDirectories(): string[] {
 
 async function loadProviderEnvironment(): Promise<ProviderEnvironment> {
   const shellEnvironment = await loginShellEnvironment();
-  const inheritedPath = process.env.PATH ?? "";
   const env = { ...process.env, ...shellEnvironment };
+  const inheritedPath = environmentValue(process.env, "PATH") ?? "";
+  const effectivePath = environmentValue(env, "PATH") ?? "";
   const pathEntries = unique([
-    ...((env.PATH ?? "").split(delimiter)),
+    ...(effectivePath.split(delimiter)),
     ...(inheritedPath.split(delimiter)),
-    ...commonExecutableDirectories(),
+    ...commonExecutableDirectories(env),
   ]);
+  if (process.platform === "win32") {
+    for (const key of Object.keys(env)) {
+      if (key !== "PATH" && key.toUpperCase() === "PATH") delete env[key];
+    }
+  }
   env.PATH = pathEntries.join(delimiter);
   return { env, pathEntries };
 }
@@ -141,8 +178,11 @@ async function executableFile(path: string): Promise<string | null> {
 function commandNames(command: string, env: NodeJS.ProcessEnv): string[] {
   if (process.platform !== "win32") return [command];
   if (/\.[A-Za-z0-9]+$/u.test(command)) return [command];
-  const extensions = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
-  return [command, ...extensions.map((extension) => `${command}${extension.toLowerCase()}`), ...extensions.map((extension) => `${command}${extension.toUpperCase()}`)];
+  const extensions = (environmentValue(env, "PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((extension) => extension.trim())
+    .filter(Boolean);
+  return unique([command, ...extensions.map((extension) => `${command}${extension}`)]);
 }
 
 export async function executableCandidates(

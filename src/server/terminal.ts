@@ -17,6 +17,7 @@ interface TerminalSession {
   pty: IPty;
   dataListener: IDisposable;
   exitListener: IDisposable;
+  onExit?: (exitCode: number) => void;
 }
 
 function userShell(): { executable: string; args: string[] } {
@@ -45,20 +46,28 @@ function send(socket: WebSocket, event: ServerEvent): void {
 export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
 
-  create(owner: WebSocket, cwd: string, cols: number, rows: number): string {
+  create(
+    owner: WebSocket,
+    cwd: string,
+    cols: number,
+    rows: number,
+    onExit?: (exitCode: number) => void,
+    onOutput?: (data: string) => void,
+  ): string {
     const shell = userShell();
-    return this.createProcess(owner, cwd, shell.executable, shell.args, process.env, cols, rows);
+    return this.createProcess(owner, cwd, shell.executable, shell.args, process.env, cols, rows, onExit, onOutput);
   }
 
   createProcess(
     owner: WebSocket,
     cwd: string,
     executable: string,
-    args: readonly string[],
+    args: readonly string[] | string,
     env: NodeJS.ProcessEnv,
     cols: number,
     rows: number,
     onExit?: (exitCode: number) => void,
+    onOutput?: (data: string) => void,
   ): string {
     if (this.sessions.size >= MAX_TERMINALS) throw new TerminalError("The terminal session limit has been reached.");
     const ownerCount = [...this.sessions.values()].filter((session) => session.owner === owner).length;
@@ -67,7 +76,7 @@ export class TerminalManager {
     const id = randomUUID();
     let pseudoterminal: IPty;
     try {
-      pseudoterminal = spawn(executable, [...args], {
+      pseudoterminal = spawn(executable, typeof args === "string" ? args : [...args], {
         name: "xterm-256color",
         cols,
         rows,
@@ -79,6 +88,7 @@ export class TerminalManager {
     }
 
     const dataListener = pseudoterminal.onData((data) => {
+      onOutput?.(data);
       for (let offset = 0; offset < data.length; offset += OUTPUT_CHUNK_SIZE) {
         send(owner, { type: "terminal.output", terminalId: id, data: data.slice(offset, offset + OUTPUT_CHUNK_SIZE) });
       }
@@ -88,7 +98,7 @@ export class TerminalManager {
       send(owner, { type: "terminal.exit", terminalId: id, exitCode });
       onExit?.(exitCode);
     });
-    this.sessions.set(id, { id, owner, pty: pseudoterminal, dataListener, exitListener });
+    this.sessions.set(id, { id, owner, pty: pseudoterminal, dataListener, exitListener, onExit });
     return id;
   }
 
@@ -107,6 +117,17 @@ export class TerminalManager {
   close(owner: WebSocket, terminalId: string): void {
     this.ownedSession(owner, terminalId);
     this.dispose(terminalId, true);
+  }
+
+  /**
+   * Stops a terminal previously registered to a scoped runtime operation.
+   * This is intentionally not exposed through the client protocol by terminal
+   * ID, so callers must first resolve an owned run on the server.
+   */
+  closeManaged(terminalId: string): boolean {
+    if (!this.sessions.has(terminalId)) return false;
+    this.dispose(terminalId, true);
+    return true;
   }
 
   disposeOwner(owner: WebSocket): void {
@@ -137,6 +158,7 @@ export class TerminalManager {
       } catch {
         // The process may have exited between lookup and disposal.
       }
+      session.onExit?.(130);
     }
   }
 }

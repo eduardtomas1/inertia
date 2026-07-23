@@ -9,6 +9,7 @@ import { readCodexMetadata } from "../codex-metadata";
 import { readClaudeAgentSdkMetadata } from "./claude-agent-sdk-harness";
 import type { ProviderAuthState, ProviderId } from "./contracts";
 import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
+import { clampProviderPercent, providerTimestamp } from "./usage-values";
 
 export type ProviderMetadataField = "models" | "rateLimits";
 
@@ -112,11 +113,6 @@ function cleanString(value: unknown, maxLength: number): string | undefined {
   return clean ? clean.slice(0, maxLength) : undefined;
 }
 
-function finitePercent(value: unknown): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-  return value;
-}
-
 export function validateProviderModels(value: unknown): ProviderModel[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
@@ -164,10 +160,9 @@ export function validateProviderRateLimits(value: unknown): ProviderRateLimit[] 
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
     const limit = entry as Partial<ProviderRateLimit>;
     const id = cleanString(limit.id, 120);
-    const usedPercent = finitePercent(limit.usedPercent);
-    if (!id || usedPercent === undefined || seen.has(id)) return [];
-    const reset = cleanString(limit.resetsAt, 64);
-    const resetsAt = reset && !Number.isNaN(Date.parse(reset)) ? new Date(reset).toISOString() : null;
+    const usedPercent = clampProviderPercent(limit.usedPercent);
+    if (!id || usedPercent === null || seen.has(id)) return [];
+    const resetsAt = providerTimestamp(limit.resetsAt);
     const windowMinutes = typeof limit.windowMinutes === "number" && Number.isFinite(limit.windowMinutes) && limit.windowMinutes >= 0
       ? Math.min(limit.windowMinutes, 525_600)
       : null;
@@ -176,7 +171,7 @@ export function validateProviderRateLimits(value: unknown): ProviderRateLimit[] 
       id,
       label: cleanString(limit.label, 120) ?? id,
       usedPercent,
-      remainingPercent: finitePercent(limit.remainingPercent) ?? 100 - usedPercent,
+      remainingPercent: 100 - usedPercent,
       windowMinutes,
       resetsAt,
     }];

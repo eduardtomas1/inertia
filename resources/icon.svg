@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title description">
+  <title id="title">Inertia</title>
+  <desc id="description">The Inertia running figure and pointer mark.</desc>
+  <rect width="1024" height="1024" rx="168" fill="#07070a"/>
+  <path d="M384 521 446 459h145l50 62h96" fill="none" stroke="#fff" stroke-width="66" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m530 485-70 218H301m224-163 81 91 39 153" fill="none" stroke="#fff" stroke-width="72" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m520 184 186 123-69 22 49 73-57 38-49-76-45 51z" fill="#fff" stroke="#fff" stroke-width="13" stroke-linejoin="round"/>
+</svg>

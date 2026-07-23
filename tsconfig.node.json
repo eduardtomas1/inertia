@@ -24,6 +24,7 @@
     "src/shared/**/*.ts",
     "src/renderer/src/lib/**/*.ts",
     "src/renderer/src/utils/**/*.ts",
+    "src/renderer/src/components/ResponseMarkdown.tsx",
     "src/renderer/src/components/UsageIndicator.tsx",
     "tests/**/*.ts"
   ]

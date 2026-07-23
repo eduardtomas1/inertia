@@ -4,12 +4,16 @@ import {
   defaultSettings,
   type AgentApprovalDecision,
   type AgentApprovalRequest,
+  type AgentActivity,
   type AgentInputRequest,
   type AgentPlan,
   type AppSettings,
   type ChatAttachment,
   type ClientCommand,
   type Conversation,
+  type DiffReviewNote,
+  type DiffReviewState,
+  type DiffReversalOperation,
   type GitBranchInfo,
   type GitDiffSnapshot,
   type GitStatusSnapshot,
@@ -17,13 +21,15 @@ import {
   type ProjectAction,
   type ProviderId,
   type ServerEvent,
-  type ThemePreference,
   type ThreadUsageSnapshot,
   type WorkspaceEntry,
   type WorkspaceFilePreview,
+  type WorkspaceRun,
 } from "@shared/contracts";
+import { parseUnifiedDiff } from "@shared/diff-review";
 import type { PreviewBounds, PreviewState } from "@shared/desktop";
-import { ChangesPanel } from "./components/ChangesPanel";
+import { ChangesPanel, type DiffSelection } from "./components/ChangesPanel";
+import { ActivityCenter } from "./components/ActivityCenter";
 import { ChatWorkspace } from "./components/ChatWorkspace";
 import { CommandPalette } from "./components/CommandPalette";
 import { CommitDialog } from "./components/CommitDialog";
@@ -42,6 +48,7 @@ import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePersistedSize } from "./hooks/usePersistedSize";
 import { useTheme } from "./hooks/useTheme";
+import { nextQuickTheme } from "./utils/theme";
 import { projectNameFromPath } from "./lib/format";
 
 type CommandWithoutId = ClientCommand extends infer Command
@@ -61,7 +68,6 @@ function resultEvent(event: ServerEvent): ResultEvent {
   return event;
 }
 
-const themeOrder: ThemePreference[] = ["system", "light", "dark"];
 const RESIZE_HANDLE_SIZE = 7;
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 420;
@@ -113,6 +119,7 @@ export default function App(): React.JSX.Element {
   const [streamingText, setStreamingText] = useState("");
   const [streamingReasoning, setStreamingReasoning] = useState("");
   const [liveUsage, setLiveUsage] = useState<Record<string, ThreadUsageSnapshot>>({});
+  const [liveActivities, setLiveActivities] = useState<Record<string, AgentActivity[]>>({});
   const [pendingApprovals, setPendingApprovals] = useState<AgentApprovalRequest[]>([]);
   const [pendingInputs, setPendingInputs] = useState<AgentInputRequest[]>([]);
   const [nativePlans, setNativePlans] = useState<Record<string, AgentPlan>>({});
@@ -121,7 +128,12 @@ export default function App(): React.JSX.Element {
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [pendingActivityAction, setPendingActivityAction] = useState<WorkspaceRun | null>(null);
   const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [pendingDiffContext, setPendingDiffContext] = useState<string | null>(null);
+  const [lastDiffReversal, setLastDiffReversal] = useState<DiffReversalOperation | null>(null);
+  const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
   const [persistedSidebarWidth, setPersistedSidebarWidth] = usePersistedSize("inertia:layout:sidebar-width:v1", 276, { min: SIDEBAR_MIN_WIDTH, max: SIDEBAR_MAX_WIDTH });
   const [persistedToolsWidth, setPersistedToolsWidth] = usePersistedSize("inertia:layout:workspace-tools-width:v1", 520, { min: TOOLS_MIN_WIDTH, max: TOOLS_MAX_WIDTH });
   const [persistedToolsHeight, setPersistedToolsHeight] = usePersistedSize("inertia:layout:workspace-tools-height:v1", 320, { min: TOOLS_MIN_HEIGHT, max: TOOLS_MAX_HEIGHT });
@@ -137,6 +149,10 @@ export default function App(): React.JSX.Element {
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
   const settings = connection.snapshot?.settings ?? defaultSettings;
   useTheme(settings.theme);
+
+  useEffect(() => {
+    document.documentElement.dataset.interfaceScale = settings.interfaceScale;
+  }, [settings.interfaceScale]);
 
   useEffect(() => {
     if (!connection.snapshot) return;
@@ -178,8 +194,14 @@ export default function App(): React.JSX.Element {
     [connection.snapshot, conversation?.id],
   );
   const activities = useMemo(
-    () => connection.snapshot?.activities.filter((activity) => activity.conversationId === conversation?.id).slice(-30) ?? [],
-    [connection.snapshot, conversation?.id],
+    () => {
+      if (!conversation) return [];
+      const merged = new Map<string, AgentActivity>();
+      for (const activity of connection.snapshot?.activities.filter((item) => item.conversationId === conversation.id) ?? []) merged.set(activity.id, activity);
+      for (const activity of liveActivities[conversation.id] ?? []) merged.set(activity.id, activity);
+      return [...merged.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-100);
+    },
+    [connection.snapshot?.activities, conversation, liveActivities],
   );
   const reasonings = useMemo(
     () => connection.snapshot?.reasonings.filter((reasoning) => reasoning.conversationId === conversation?.id) ?? [],
@@ -199,6 +221,19 @@ export default function App(): React.JSX.Element {
     () => connection.snapshot?.providers.find(({ id }) => id === authProviderId) ?? null,
     [authProviderId, connection.snapshot?.providers],
   );
+  const structuredDiff = useMemo(() => parseUnifiedDiff(gitDiff?.patch ?? ""), [gitDiff?.patch]);
+  const reviewSummary = useMemo(() => connection.snapshot?.reviewSummaries.find((summary) => (
+    summary.conversationId === conversation?.id && summary.fingerprint === structuredDiff.fingerprint
+  )) ?? null, [connection.snapshot?.reviewSummaries, conversation?.id, structuredDiff.fingerprint]);
+  const reviewStates = useMemo(
+    () => connection.snapshot?.reviewStates.filter((state) => state.conversationId === conversation?.id) ?? [],
+    [connection.snapshot?.reviewStates, conversation?.id],
+  );
+  const reviewNotes = useMemo(
+    () => connection.snapshot?.reviewNotes.filter((note) => note.conversationId === conversation?.id) ?? [],
+    [connection.snapshot?.reviewNotes, conversation?.id],
+  );
+  const activeRunCount = connection.snapshot?.runs.filter(({ finishedAt }) => finishedAt === null).length ?? 0;
   const planSteps = useMemo(() => {
     const nativePlan = conversation ? nativePlans[conversation.id] : undefined;
     if (nativePlan) {
@@ -253,16 +288,32 @@ export default function App(): React.JSX.Element {
       setLiveUsage((current) => ({ ...current, [event.usage.conversationId]: event.usage }));
       return;
     }
+    if (event.type === "agent.activity") {
+      setLiveActivities((current) => {
+        const existing = current[event.activity.conversationId] ?? [];
+        return {
+          ...current,
+          [event.activity.conversationId]: [...existing.filter(({ id }) => id !== event.activity.id), event.activity].slice(-100),
+        };
+      });
+      return;
+    }
     if (!conversation || !("conversationId" in event) || event.conversationId !== conversation.id) return;
     if (event.type === "agent.started") { setStreamingText(""); setStreamingReasoning(""); }
     if (event.type === "agent.text") setStreamingText((current) => `${current}${event.text}`.slice(-500_000));
     if (event.type === "agent.reasoning") setStreamingReasoning((current) => `${current}${event.text}`.slice(-500_000));
-    if (event.type === "agent.completed" || event.type === "agent.failed") { setStreamingText(""); setStreamingReasoning(""); }
+    if (event.type === "agent.completed" || event.type === "agent.failed") {
+      setStreamingText("");
+      setStreamingReasoning("");
+      setGitRefreshVersion((current) => current + 1);
+    }
   }), [connection.subscribe, conversation, settings.autoOpenPlan]);
 
   useEffect(() => {
     setStreamingText("");
     setStreamingReasoning("");
+    setPendingDiffContext(null);
+    setLastDiffReversal(null);
   }, [conversation?.id]);
 
   useEffect(() => {
@@ -280,7 +331,7 @@ export default function App(): React.JSX.Element {
   });
 
   const loadGit = useCallback(async () => {
-    if (!project) return;
+    if (!project?.id) return;
     const event = resultEvent(await request({ type: "git.refresh", payload: { projectId: project.id, conversationId: conversation?.id } }));
     if (event.result.kind !== "git.status") throw new Error("Unexpected Git response.");
     setGitStatus(event.result.status);
@@ -291,23 +342,23 @@ export default function App(): React.JSX.Element {
       setGitDiff(nextDiff);
       setSelectedChange((current) => current && nextDiff.files.some(({ path }) => path === current) ? current : nextDiff.files[0]?.path ?? null);
     }
-  }, [conversation?.id, project, request, settings.ignoreWhitespace]);
+  }, [conversation?.id, project?.id, request, settings.ignoreWhitespace]);
 
   const loadFiles = useCallback(async (query?: string) => {
-    if (!project) return;
+    if (!project?.id) return;
     const event = resultEvent(await request({ type: "workspace.entries", payload: { projectId: project.id, conversationId: conversation?.id, ...(query?.trim() ? { query: query.trim() } : {}) } }));
     if (event.result.kind !== "workspace.entries") throw new Error("Unexpected file response.");
     setWorkspaceEntries(event.result.entries);
     setEntriesTruncated(event.result.truncated);
-  }, [conversation?.id, project, request]);
+  }, [conversation?.id, project?.id, request]);
 
   const loadActions = useCallback(async () => {
-    if (!project) return;
+    if (!project?.id) return;
     try {
       const event = resultEvent(await request({ type: "project.actions", payload: { projectId: project.id, conversationId: conversation?.id } }));
       if (event.result.kind === "project.actions") setProjectActions(event.result.actions);
     } catch { setProjectActions([]); }
-  }, [conversation?.id, project, request]);
+  }, [conversation?.id, project?.id, request]);
 
   useEffect(() => {
     setGitStatus(null); setGitDiff(null); setWorkspaceEntries([]); setFilePreview(null); setSelectedFile(null); setSelectedChange(null); setProjectActions([]);
@@ -321,7 +372,7 @@ export default function App(): React.JSX.Element {
       setToolsLoading(false);
     });
     return () => { cancelled = true; };
-  }, [connection.status, conversation?.id, loadActions, loadFiles, loadGit, project]);
+  }, [connection.status, conversation?.id, gitRefreshVersion, loadActions, loadFiles, loadGit, project?.id]);
 
   const importProject = async () => {
     if (busyAction) return;
@@ -340,6 +391,15 @@ export default function App(): React.JSX.Element {
   const selectConversation = (nextConversation: Conversation) => {
     if (nextConversation.id === conversation?.id) return;
     void run("conversation.select", { type: "conversation.select", payload: { conversationId: nextConversation.id } }).catch(() => undefined);
+  };
+  const activateActivityContext = (activity: WorkspaceRun, tool?: WorkspacePanelTab) => {
+    const targetConversation = connection.snapshot?.conversations.find(({ id }) => id === activity.conversationId);
+    const targetProject = connection.snapshot?.projects.find(({ id }) => id === activity.projectId);
+    if (targetConversation) selectConversation(targetConversation);
+    else if (targetProject) selectProject(targetProject);
+    setView("workspace");
+    setSidebarOpen(false);
+    if (tool) setActiveTool(tool);
   };
   const createConversation = (targetProject: Project | null = project) => {
     if (!targetProject) return;
@@ -366,8 +426,16 @@ export default function App(): React.JSX.Element {
     if (!conversation) return;
     void run("conversation.update", { type: "conversation.update", payload: { conversationId: conversation.id, ...update } }).catch(() => undefined);
   };
-  const updateSettings = (updates: Partial<AppSettings>) => { void run("settings.update", { type: "settings.update", payload: updates }).catch(() => undefined); };
-  const cycleTheme = () => updateSettings({ theme: themeOrder[(themeOrder.indexOf(settings.theme) + 1) % themeOrder.length] });
+  const updateSettings = async (updates: Partial<AppSettings>): Promise<void> => {
+    await run("settings.update", { type: "settings.update", payload: updates }).catch(() => undefined);
+  };
+  const chooseCodexBinary = async (): Promise<void> => {
+    const path = await window.inertia.selectCodexExecutable();
+    if (path) await updateSettings({ codexBinaryPath: path });
+  };
+  const cycleTheme = () => updateSettings({
+    theme: nextQuickTheme(settings.theme, window.matchMedia("(prefers-color-scheme: dark)").matches),
+  });
   const refreshProvider = useCallback((providerId?: ProviderId) => {
     void run("provider.refresh", { type: "provider.refresh", payload: { ...(providerId ? { providerId } : {}) } }).catch(() => undefined);
   }, [run]);
@@ -382,16 +450,140 @@ export default function App(): React.JSX.Element {
     if (!project) return;
     void run(type, { type, payload: { projectId: project.id, name } } as CommandWithoutId).then(() => Promise.all([loadGit(), Promise.resolve(loadBranches())])).catch(() => undefined);
   };
-  const commit = async (message: string, push: boolean) => {
+  const commit = async (message: string, push: boolean, paths: string[]) => {
     if (!project) return;
-    await run("git.commit", { type: "git.commit", payload: { projectId: project.id, conversationId: conversation?.id, message } });
+    if (paths.length === 0) throw new Error("Select at least one path to commit.");
+    await run("git.commit", { type: "git.commit", payload: { projectId: project.id, conversationId: conversation?.id, message, paths } });
     if (push) await run("git.push", { type: "git.push", payload: { projectId: project.id, conversationId: conversation?.id } });
     setCommitDialogOpen(false); await loadGit();
   };
   const selectChangedFile = (path: string) => {
+    setSelectedChange(path);
+  };
+  const askAboutDiff = async (selection: DiffSelection, comment: string) => {
+    if (!project || !conversation) return;
+    await run("review.selection.ask", { type: "review.selection.ask", payload: {
+      projectId: project.id,
+      conversationId: conversation.id,
+      fingerprint: selection.fingerprint,
+      filePath: selection.file.path,
+      hunkId: selection.hunk.id,
+      lineIds: selection.lineIds,
+      ...(comment.trim() ? { comment: comment.trim() } : {}),
+      ignoreWhitespace: settings.ignoreWhitespace,
+    } });
+  };
+  const requestDiffRevision = async (selection: DiffSelection, comment: string) => {
+    if (!project || !conversation) return;
+    await run("review.selection.revise", { type: "review.selection.revise", payload: {
+      projectId: project.id,
+      conversationId: conversation.id,
+      fingerprint: selection.fingerprint,
+      filePath: selection.file.path,
+      hunkId: selection.hunk.id,
+      lineIds: selection.lineIds,
+      ...(comment.trim() ? { comment: comment.trim() } : {}),
+      ignoreWhitespace: settings.ignoreWhitespace,
+    } });
+  };
+  const setDiffReviewState = async (state: Omit<DiffReviewState, "conversationId" | "stale" | "updatedAt">) => {
+    if (!conversation) return;
+    await run("review.state.set", { type: "review.state.set", payload: {
+      conversationId: conversation.id,
+      scope: state.scope,
+      path: state.path,
+      hunkId: state.hunkId,
+      targetFingerprint: state.targetFingerprint,
+      reviewed: state.reviewed,
+      ignoreWhitespace: settings.ignoreWhitespace,
+    } });
+  };
+  const createDiffReviewNote = async (note: Omit<DiffReviewNote, "id" | "conversationId" | "stale" | "createdAt" | "updatedAt">) => {
+    if (!conversation) return;
+    await run("review.note.create", { type: "review.note.create", payload: {
+      conversationId: conversation.id,
+      path: note.path,
+      hunkId: note.hunkId,
+      lineIds: note.lineIds,
+      targetFingerprint: note.targetFingerprint,
+      body: note.body,
+      ignoreWhitespace: settings.ignoreWhitespace,
+    } });
+  };
+  const updateDiffReviewNote = async (noteId: string, body: string) => {
+    if (!conversation) return;
+    await run("review.note.update", { type: "review.note.update", payload: { conversationId: conversation.id, noteId, body } });
+  };
+  const deleteDiffReviewNote = async (noteId: string) => {
+    if (!conversation) return;
+    await run("review.note.delete", { type: "review.note.delete", payload: { conversationId: conversation.id, noteId } });
+  };
+  const revertDiffSelection = async (selection: DiffSelection, comment: string) => {
     if (!project) return;
-    setSelectedChange(path); setToolsLoading(true);
-    void request({ type: "git.diff", payload: { projectId: project.id, conversationId: conversation?.id, path, ignoreWhitespace: settings.ignoreWhitespace } }).then(resultEvent).then((event) => { if (event.result.kind === "git.diff") setGitDiff(event.result.diff); }).catch((error) => setActionError(error instanceof Error ? error.message : "The diff could not be loaded.")).finally(() => setToolsLoading(false));
+    const inspected = resultEvent(await run("git.selection.inspect", { type: "git.selection.inspect", payload: {
+      projectId: project.id,
+      ...(conversation ? { conversationId: conversation.id } : {}),
+      fingerprint: selection.fingerprint,
+      filePath: selection.file.path,
+      hunkId: selection.hunk.id,
+      lineIds: selection.lineIds,
+      ignoreWhitespace: settings.ignoreWhitespace,
+    } }));
+    if (inspected.result.kind !== "git.reversal.plan") throw new Error("The local service returned an unexpected reversal plan.");
+    const plan = inspected.result.plan;
+    if (settings.confirmDestructiveActions) {
+      const layers = plan.affectedLayers.map((layer) => layer === "index" ? "Git index (staged)" : "working tree").join(" and ");
+      const confirmed = window.confirm([
+        `Revert ${plan.changedLineCount} changed ${plan.changedLineCount === 1 ? "line" : "lines"} in ${plan.filePath}?`,
+        "",
+        `Hunk: ${plan.hunkHeader}`,
+        `Selected lines: ${plan.selectedLineCount}`,
+        `Affected Git layers: ${layers}`,
+        "",
+        "Inertia will create an immediate reversible backup before changing either layer.",
+      ].join("\n"));
+      if (!confirmed) return;
+    }
+    const reversed = resultEvent(await run("git.selection.revert", { type: "git.selection.revert", payload: {
+      projectId: project.id,
+      ...(conversation ? { conversationId: conversation.id } : {}),
+      fingerprint: selection.fingerprint,
+      filePath: selection.file.path,
+      hunkId: selection.hunk.id,
+      lineIds: selection.lineIds,
+      expected: plan.validation,
+      ...(comment.trim() ? { comment: comment.trim() } : {}),
+      ignoreWhitespace: settings.ignoreWhitespace,
+    } }));
+    if (reversed.result.kind !== "git.reversal") throw new Error("The local service returned an unexpected reversal result.");
+    setGitDiff(reversed.result.diff);
+    setLastDiffReversal(reversed.result.operation);
+    await loadGit();
+  };
+  const undoDiffReversal = async () => {
+    if (!project || !lastDiffReversal) return;
+    const restored = resultEvent(await run("git.selection.undo", { type: "git.selection.undo", payload: {
+      projectId: project.id,
+      ...(conversation ? { conversationId: conversation.id } : {}),
+      operationId: lastDiffReversal.id,
+    } }));
+    if (restored.result.kind !== "git.diff") throw new Error("The local service returned an unexpected Undo result.");
+    setGitDiff(restored.result.diff);
+    setLastDiffReversal(null);
+    await loadGit();
+  };
+  const generateReviewSummary = async () => {
+    if (!project || !conversation || structuredDiff.files.length === 0) return;
+    await run("review.summary.generate", { type: "review.summary.generate", payload: {
+      projectId: project.id,
+      conversationId: conversation.id,
+      fingerprint: structuredDiff.fingerprint,
+      ignoreWhitespace: settings.ignoreWhitespace,
+    } });
+  };
+  const cancelReviewSummary = async () => {
+    if (!conversation) return;
+    await request({ type: "review.summary.cancel", payload: { conversationId: conversation.id } });
   };
   const selectWorkspaceFile = (path: string) => {
     if (!project) return;
@@ -432,6 +624,46 @@ export default function App(): React.JSX.Element {
   }, []);
   const setPreviewBounds = useCallback((bounds: PreviewBounds | null) => { void window.inertia.previewSetBounds(bounds).catch(() => undefined); }, []);
 
+  useEffect(() => {
+    if (!pendingActivityAction?.actionId || project?.id !== pendingActivityAction.projectId) return;
+    if (pendingActivityAction.conversationId && conversation?.id !== pendingActivityAction.conversationId) return;
+    setPendingActionId(pendingActivityAction.actionId);
+    setPendingActivityAction(null);
+  }, [conversation?.id, pendingActivityAction, project?.id]);
+
+  const openActivityLocation = (activity: WorkspaceRun) => {
+    const targetProject = connection.snapshot?.projects.find(({ id }) => id === activity.projectId);
+    const targetConversation = connection.snapshot?.conversations.find(({ id }) => id === activity.conversationId);
+    const path = targetConversation?.worktreePath ?? targetProject?.path;
+    if (!path) return;
+    void window.inertia.openPath(path).then((error) => { if (error) setActionError(error); })
+      .catch((error) => setActionError(error instanceof Error ? error.message : "The folder could not be opened."));
+  };
+  const openActivityPreview = (activity: WorkspaceRun) => {
+    if (!activity.port) return;
+    activateActivityContext(activity, "preview");
+    navigatePreview(`http://127.0.0.1:${activity.port}`);
+    setActivityOpen(false);
+  };
+  const stopActivity = (activity: WorkspaceRun) => {
+    void run(`activity.stop:${activity.id}`, {
+      type: "activity.stop",
+      payload: { runId: activity.id },
+    }).catch(() => undefined);
+  };
+  const rerunActivity = (activity: WorkspaceRun) => {
+    if (!activity.actionId) return;
+    setPendingActivityAction(activity);
+    activateActivityContext(activity, "terminal");
+    setActivityOpen(false);
+  };
+  const dismissActivity = (activity: WorkspaceRun) => {
+    void run(`activity.dismiss:${activity.id}`, {
+      type: "activity.dismiss",
+      payload: { runId: activity.id },
+    }).catch(() => undefined);
+  };
+
   const visibleError = actionError ?? connection.error;
   const platform = window.inertia?.getPlatform() ?? "unknown";
   const toolsVisible = view === "workspace" && Boolean(activeTool && project);
@@ -460,13 +692,19 @@ export default function App(): React.JSX.Element {
   } as CSSProperties;
 
   return (
-    <div ref={appShellRef} className={`app-shell platform-${platform}${sidebarCollapsed && !mobileNavigation ? " is-sidebar-collapsed" : ""}`} style={appShellStyle}>
+    <div ref={appShellRef} className={`app-shell platform-${platform}${sidebarCollapsed && !mobileNavigation ? " is-sidebar-collapsed" : ""}`} data-interface-scale={settings.interfaceScale} style={appShellStyle}>
       {(mobileNavigation || !sidebarCollapsed) && <Sidebar
         snapshot={connection.snapshot} connectionStatus={connection.status} view={view} open={sidebarOpen} busy={busyAction === "project.create"}
         onClose={() => setSidebarOpen(false)} onViewChange={setView} onImportProject={() => void importProject()} onSelectProject={selectProject} onSelectConversation={selectConversation} onCreateConversation={createConversation}
         onRenameConversation={(thread, title) => { void run("conversation.update", { type: "conversation.update", payload: { conversationId: thread.id, title } }).catch(() => undefined); }}
         onArchiveConversation={(thread) => { void run("conversation.archive", { type: "conversation.archive", payload: { conversationId: thread.id } }).catch(() => undefined); }}
+        onSettleConversation={(thread) => { void run("conversation.settle", { type: "conversation.settle", payload: { conversationId: thread.id } }).catch(() => undefined); }}
+        onRestoreConversation={(thread) => { void run("conversation.unsettle", { type: "conversation.unsettle", payload: { conversationId: thread.id } }).catch(() => undefined); }}
         onDeleteConversation={(thread) => { if (!settings.confirmDestructiveActions || window.confirm(`Delete “${thread.title}”? This cannot be undone.`)) void run("conversation.delete", { type: "conversation.delete", payload: { conversationId: thread.id } }).catch(() => undefined); }}
+        onOpenProject={(item) => { void window.inertia.openPath(item.path).then((error) => { if (error) setActionError(error); }); }}
+        onRenameProject={(item, name) => { void run("project.update", { type: "project.update", payload: { projectId: item.id, name } }).catch(() => undefined); }}
+        onSetProjectGrouping={(item, groupingMode) => { void run("project.update", { type: "project.update", payload: { projectId: item.id, groupingMode } }).catch(() => undefined); }}
+        onSidebarModeChange={(sidebarMode) => updateSettings({ sidebarMode })}
         onRemoveProject={(item) => { if (!settings.confirmDestructiveActions || window.confirm(`Remove “${item.name}” from Inertia? Files on disk will not be deleted.`)) void run("project.remove", { type: "project.remove", payload: { projectId: item.id } }).catch(() => undefined); }}
       />}
 
@@ -491,7 +729,9 @@ export default function App(): React.JSX.Element {
         <div className="workspace-frame">
           <WorkspaceHeader
             project={project} conversation={conversation} view={view} activeTool={activeTool} sidebarCollapsed={sidebarCollapsed} theme={settings.theme} gitStatus={gitStatus} branches={branches} actions={projectActions} busy={Boolean(busyAction)}
+            activityOpen={activityOpen} activityCount={activeRunCount}
             onOpenSidebar={() => { if (mobileNavigation) setSidebarOpen(true); else setSidebarCollapsed((collapsed) => !collapsed); }} onToggleTools={() => setActiveTool((tool) => tool ? null : "terminal")} onCycleTheme={cycleTheme} onOpenSettings={() => setView("settings")}
+            onToggleActivity={() => setActivityOpen((open) => !open)}
             onOpenProject={() => { if (project) void window.inertia.openPath(project.path).then((error) => { if (error) setActionError(error); }); }} onRefreshBranches={loadBranches}
             onSwitchBranch={(name) => mutateBranch("git.branch.switch", name)} onCreateBranch={(name) => mutateBranch("git.branch.create", name)} onCommit={() => setCommitDialogOpen(true)} onRunAction={runProjectAction}
             onOpenPullRequest={() => { if (project) void run("git.pr.open", { type: "git.pr.open", payload: { projectId: project.id, conversationId: conversation?.id } }).then(resultEvent).then((event) => { if (event.result.kind === "external.url") return window.inertia.openExternal(event.result.url); }).catch(() => undefined); }}
@@ -513,10 +753,12 @@ export default function App(): React.JSX.Element {
                 onUpdate={updateSettings}
                 onConnectProvider={connectProvider}
                 onRefreshProvider={refreshProvider}
+                onChooseCodexBinary={() => { void chooseCodexBinary().catch(() => undefined); }}
+                onRevealRuntimeLogs={() => window.inertia.revealRuntimeLogs()}
                 onUnarchive={(thread) => { void run("conversation.unarchive", { type: "conversation.unarchive", payload: { conversationId: thread.id } }).catch(() => undefined); }}
               />
             ) : (
-              <ChatWorkspace project={project} conversation={conversation} messages={messages} activities={activities} reasonings={reasonings} checkpoints={checkpoints} streamingText={streamingText} streamingReasoning={streamingReasoning} usage={usage} approvals={pendingApprovals.filter((request) => request.conversationId === conversation?.id)} inputRequests={pendingInputs.filter((request) => request.conversationId === conversation?.id)} providers={connection.snapshot?.providers ?? []} actions={projectActions} mentionResults={mentionResults} showTimestamps={settings.showTimestamps} showThinking={settings.showThinking} showUsage={settings.showUsage} loading={!connection.snapshot && connection.status !== "offline"} sending={busyAction === "message.send"} onAddProject={() => void importProject()} onCreateConversation={() => createConversation()} onSendMessage={sendMessage} onRespondToApproval={respondToApproval} onRespondToInput={respondToInput} onUpdateConversation={updateConversation} onChooseAttachments={chooseComposerAttachments} onImportAttachments={importComposerAttachments} onRunAction={runProjectAction} onMentionQuery={searchMentions} onConnectProvider={connectProvider} onRefreshProvider={refreshProvider} onRevertCheckpoint={(checkpoint) => { if (conversation && (!settings.confirmDestructiveActions || window.confirm("Restore the project to before this turn? Untracked files created later will be left in place."))) void run("checkpoint.revert", { type: "checkpoint.revert", payload: { conversationId: conversation.id, checkpointId: checkpoint.id } }).then(() => loadGit()).catch(() => undefined); }} onStop={() => { if (conversation) void run("agent.stop", { type: "agent.stop", payload: { conversationId: conversation.id } }).catch(() => undefined); }} />
+              <ChatWorkspace project={project} conversation={conversation} messages={messages} activities={activities} reasonings={reasonings} checkpoints={checkpoints} changedFiles={gitStatus?.files ?? []} streamingText={streamingText} streamingReasoning={streamingReasoning} usage={usage} approvals={pendingApprovals.filter((request) => request.conversationId === conversation?.id)} inputRequests={pendingInputs.filter((request) => request.conversationId === conversation?.id)} providers={connection.snapshot?.providers ?? []} actions={projectActions} mentionResults={mentionResults} showTimestamps={settings.showTimestamps} showThinking={settings.showThinking} usageDisplayMode={settings.usageDisplayMode} responseDensity={settings.responseDensity} defaultCodeWrap={settings.defaultCodeWrap} autoCollapseWorkLog={settings.autoCollapseWorkLog} showChangedFileSummaries={settings.showChangedFileSummaries} promptContext={pendingDiffContext} loading={!connection.snapshot && connection.status !== "offline"} sending={busyAction === "message.send" || busyAction === "review.summary.generate"} onAddProject={() => void importProject()} onCreateConversation={() => createConversation()} onSendMessage={sendMessage} onRespondToApproval={respondToApproval} onRespondToInput={respondToInput} onUpdateConversation={updateConversation} onChooseAttachments={chooseComposerAttachments} onImportAttachments={importComposerAttachments} onRunAction={runProjectAction} onMentionQuery={searchMentions} onConnectProvider={connectProvider} onRefreshProvider={refreshProvider} onUsageDisplayModeChange={(usageDisplayMode) => void updateSettings({ usageDisplayMode })} onClearPromptContext={() => setPendingDiffContext(null)} onRevertCheckpoint={(checkpoint) => { if (conversation && (!settings.confirmDestructiveActions || window.confirm("Restore the project to before this turn? Untracked files created later will be left in place."))) void run("checkpoint.revert", { type: "checkpoint.revert", payload: { conversationId: conversation.id, checkpointId: checkpoint.id } }).then(() => loadGit()).catch(() => undefined); }} onStop={() => { if (conversation) void run("agent.stop", { type: "agent.stop", payload: { conversationId: conversation.id } }).catch(() => undefined); }} />
             )}
 
             {toolsVisible && (
@@ -538,7 +780,7 @@ export default function App(): React.JSX.Element {
             )}
             {project && (
               <WorkspacePanel activeTab={activeTool ?? "terminal"} visible={toolsVisible} onTabChange={setActiveTool} badges={{ changes: gitStatus?.files.length ?? 0, plan: planSteps.length }} onClose={() => setActiveTool(null)}>
-                {activeTool === "changes" && <ChangesPanel files={gitStatus?.files ?? []} diff={gitDiff} selectedPath={selectedChange} loading={toolsLoading} wrapLines={settings.wrapDiffs} onSelectFile={selectChangedFile} onRefresh={() => void loadGit().catch((error) => setActionError(error instanceof Error ? error.message : "Changes could not be refreshed."))} />}
+                {activeTool === "changes" && <ChangesPanel files={gitStatus?.files ?? []} diff={gitDiff} selectedPath={selectedChange} summary={reviewSummary} reviewStates={reviewStates} notes={reviewNotes} loading={toolsLoading} summaryLoading={busyAction === "review.summary.generate"} wrapLines={settings.wrapDiffs} lastReversal={lastDiffReversal} onSelectFile={selectChangedFile} onRefresh={() => void loadGit().catch((error) => setActionError(error instanceof Error ? error.message : "Changes could not be refreshed."))} onGenerateSummary={generateReviewSummary} onCancelSummary={cancelReviewSummary} onAsk={askAboutDiff} onRequestRevision={requestDiffRevision} onRevert={revertDiffSelection} onUndoReversal={undoDiffReversal} onSetReviewState={setDiffReviewState} onCreateNote={createDiffReviewNote} onUpdateNote={updateDiffReviewNote} onDeleteNote={deleteDiffReviewNote} onAddTextToPrompt={setPendingDiffContext} onAddToPrompt={(selection) => setPendingDiffContext(selection.reference)} />}
                 {activeTool === "files" && <FilesPanel entries={workspaceEntries} preview={filePreview} selectedPath={selectedFile} loading={toolsLoading} entriesTruncated={entriesTruncated} onSelectFile={selectWorkspaceFile} onRefresh={() => void loadFiles().catch((error) => setActionError(error instanceof Error ? error.message : "Files could not be refreshed."))} onSearchChange={searchFiles} onOpenFile={(path) => { const root = conversation?.worktreePath ?? project.path; void window.inertia.openPath(`${root.replace(/[\\/]$/u, "")}/${path}`).then((error) => { if (error) setActionError(error); }); }} />}
                 <TerminalPanel key={`${project.id}:${conversation?.id ?? "project"}`} visible={toolsVisible && activeTool === "terminal"} projectId={project.id} conversationId={conversation?.id} projectName={project.name} status={connection.status} fontSize={settings.terminalFontSize} theme={settings.theme} sendCommand={connection.sendCommand} subscribe={connection.subscribe} actionId={pendingActionId} onActionStarted={() => setPendingActionId(null)} onClose={() => setActiveTool(null)} />
                 {activeTool === "plan" && <PlanPanel steps={planSteps} summary={conversation && nativePlans[conversation.id]?.explanation ? nativePlans[conversation.id].explanation! : conversation?.interactionMode === "plan" ? "The latest agent response is reflected as a working plan." : "Switch the composer to Plan mode and ask the agent to propose an approach."} onRefine={conversation && conversation.status !== "running" && conversation.status !== "needs-input" ? () => { updateConversation({ interactionMode: "plan" }); void sendMessage("Refine the implementation plan with clearer steps, risks, and validation.", []).catch(() => undefined); } : undefined} onImplement={conversation && planSteps.length > 0 && conversation.status !== "running" && conversation.status !== "needs-input" ? () => { updateConversation({ interactionMode: "build" }); void sendMessage("Implement the plan above and validate the result.", []).catch(() => undefined); setActiveTool("changes"); } : undefined} />}
@@ -549,7 +791,21 @@ export default function App(): React.JSX.Element {
         </div>
       </section>
 
-      <CommitDialog open={commitDialogOpen} status={gitStatus} busy={busyAction === "git.commit" || busyAction === "git.push"} onClose={() => setCommitDialogOpen(false)} onCommit={commit} />
+      <CommitDialog open={commitDialogOpen} status={gitStatus} reviewStates={reviewStates} diff={structuredDiff} busy={busyAction === "git.commit" || busyAction === "git.push"} onClose={() => setCommitDialogOpen(false)} onCommit={commit} />
+      <ActivityCenter
+        open={activityOpen}
+        runs={connection.snapshot?.runs ?? []}
+        projects={connection.snapshot?.projects ?? []}
+        conversations={connection.snapshot?.conversations ?? []}
+        onClose={() => setActivityOpen(false)}
+        onOpenThread={(thread) => { selectConversation(thread); setView("workspace"); setActivityOpen(false); }}
+        onOpenLocation={openActivityLocation}
+        onOpenTerminal={(activity) => { activateActivityContext(activity, "terminal"); setActivityOpen(false); }}
+        onOpenPreview={openActivityPreview}
+        onStop={stopActivity}
+        onRerun={rerunActivity}
+        onDismiss={dismissActivity}
+      />
       <CommandPalette
         open={paletteOpen}
         projects={connection.snapshot?.projects ?? []}

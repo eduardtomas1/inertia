@@ -1,9 +1,9 @@
 import type {
-  CodexApprovalDecision,
-  CodexApprovalRequest,
-  CodexInputRequest,
-  CodexPlanStep,
-} from "../codex/types";
+  AgentApprovalDecision,
+  AgentApprovalRequest,
+  AgentInputRequest,
+  AgentPlanStep,
+} from "./interactions";
 import type {
   ProviderActivityEvent,
   ProviderId,
@@ -181,25 +181,25 @@ export type AgentHarnessCoreEvent =
   | ProviderStatusEvent
   | ProviderSessionEvent;
 
-export type CodexAppServerHarnessEvent =
-  | { type: "approval"; request: CodexApprovalRequest }
-  | { type: "approval-resolved"; requestId: string; decision: CodexApprovalDecision | "cancelled" }
-  | { type: "input"; request: CodexInputRequest }
+export type AgentInteractiveHarnessEvent =
+  | { type: "approval"; request: AgentApprovalRequest }
+  | { type: "approval-resolved"; requestId: string; decision: AgentApprovalDecision | "cancelled" }
+  | { type: "input"; request: AgentInputRequest }
   | { type: "input-resolved"; requestId: string }
-  | { type: "plan"; explanation: string | null; steps: CodexPlanStep[] }
+  | { type: "plan"; explanation: string | null; steps: AgentPlanStep[] }
   | { type: "reasoning-summary"; text: string }
   | { type: "usage"; usage: ProviderUsageEvent["usage"] }
   | Omit<ProviderMetadataEvent, "providerId" | "conversationId">;
 
 /** Canonical interactive event surface shared by rich provider transports. */
-export type ProviderInteractiveHarnessEvent = CodexAppServerHarnessEvent;
+export type ProviderInteractiveHarnessEvent = AgentInteractiveHarnessEvent;
 
 export interface CodexAppServerHarnessExtensionEvent {
   providerId: "codex";
   conversationId: string;
   type: "extension";
   extension: "codex-app-server";
-  event: CodexAppServerHarnessEvent;
+  event: AgentInteractiveHarnessEvent;
 }
 
 interface ProviderInteractiveHarnessExtensionEventBase {
@@ -231,13 +231,13 @@ export interface AgentHarnessStartOptions {
 
 export interface CodexAppServerRunExtension {
   kind: "codex-app-server";
-  respondToApproval: (requestId: string, decision: CodexApprovalDecision) => boolean;
+  respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
 }
 
 export interface ProviderInteractiveRunExtension {
   kind: "claude-agent-sdk" | "cursor-acp" | "opencode-sdk";
-  respondToApproval: (requestId: string, decision: CodexApprovalDecision) => boolean;
+  respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
 }
 
@@ -272,7 +272,7 @@ export interface AgentHarnessEmitter {
   activity: (kind: ProviderActivityEvent["kind"], phase: ProviderActivityEvent["phase"], label: string) => void;
   status: (status: ProviderStatusEvent["status"], message?: string) => void;
   session: (sessionId: string) => void;
-  codex: (event: CodexAppServerHarnessEvent) => void;
+  codex: (event: AgentInteractiveHarnessEvent) => void;
   rich: (event: ProviderInteractiveHarnessEvent) => void;
 }
 

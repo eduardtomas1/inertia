@@ -56,6 +56,10 @@ jobs:
       - name: Run portable runtime and provider protocol suite
         run: npm run test:portable
 
+      - name: Verify native Windows Codex discovery and shim launching
+        if: runner.os == 'Windows'
+        run: npm run test:windows-codex
+
       - name: Audit dependencies
         if: runner.os == 'Linux'
         run: npm audit --audit-level=high
@@ -68,8 +72,37 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm exec -- playwright test
 
-      - name: Build native unpacked app
+      - name: Build native unpacked Windows app
+        if: runner.os == 'Windows'
         run: npm run dist:dir
+
+      - name: Build native unpacked macOS app
+        if: runner.os == 'macOS'
+        env:
+          # The builder is configured for ad-hoc signing (identity "-"), so no
+          # signing secret is exposed by enabling it for pull-request builds.
+          CSC_FOR_PULL_REQUEST: "true"
+        run: npm run dist:dir
+
+      - name: Build Linux AppImage and unpacked app
+        if: runner.os == 'Linux'
+        run: npm run dist:linux
+
+      - name: Validate Linux AppImage identity, icons, and runtime resource
+        if: runner.os == 'Linux'
+        run: npm run validate:linux-package
+
+      - name: Verify packaged Electron fuses
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux) app="release/linux-unpacked/inertia" ;;
+            Windows) app="release/win-unpacked/Inertia.exe" ;;
+            macOS) app="release/mac-arm64/Inertia.app" ;;
+            *) echo "Unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+          npm run verify:fuses -- "$app"
 
       - name: Smoke native packaged app
         if: runner.os != 'Linux'
@@ -88,22 +121,13 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm run test:package-smoke
 
-      - name: Verify complete macOS bundle signature and fuses
+      - name: Verify complete macOS bundle signature
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
           mac_app="release/mac-arm64/Inertia.app"
           codesign --verify --deep --strict --verbose=2 "$mac_app"
-          fuse_report="$(npx --no-install electron-fuses read --app "$mac_app")"
-          printf '%s\n' "$fuse_report"
-          grep -Fq 'RunAsNode is Disabled' <<<"$fuse_report"
-          grep -Fq 'EnableCookieEncryption is Enabled' <<<"$fuse_report"
-          grep -Fq 'EnableNodeOptionsEnvironmentVariable is Disabled' <<<"$fuse_report"
-          grep -Fq 'EnableNodeCliInspectArguments is Disabled' <<<"$fuse_report"
-          grep -Fq 'EnableEmbeddedAsarIntegrityValidation is Enabled' <<<"$fuse_report"
-          grep -Fq 'OnlyLoadAppFromAsar is Enabled' <<<"$fuse_report"
-          grep -Fq 'GrantFileProtocolExtraPrivileges is Disabled' <<<"$fuse_report"
 
       - name: Keep failure diagnostics
         if: failure()

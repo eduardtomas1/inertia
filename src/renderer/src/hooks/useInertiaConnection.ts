@@ -32,7 +32,12 @@ function requestTimeoutMs(command: ClientCommand): number {
     case "git.branch.create":
     case "git.branch.switch":
     case "git.worktree.create":
+    case "git.selection.inspect":
+    case "git.selection.revert":
+    case "git.selection.undo":
     case "checkpoint.revert":
+    case "review.selection.ask":
+    case "review.summary.generate":
       return 150_000;
     default:
       return 15_000;

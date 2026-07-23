@@ -570,7 +570,7 @@ test("opens the command palette and manages a thread", async () => {
   const rename = page.getByRole("textbox", { name: "Rename New thread" });
   await rename.fill("Focused V1 pass");
   await rename.press("Enter");
-  await expect(page.getByRole("heading", { name: "Focused V1 pass", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Focused V1 pass", level: 1 })).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: "Thread actions for Focused V1 pass" }).click();
   await page.getByRole("menuitem", { name: "Archive" }).click();

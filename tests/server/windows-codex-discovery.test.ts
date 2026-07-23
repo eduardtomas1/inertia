@@ -62,6 +62,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "thread/start") return send({ id: message.id, result: { thread: { id: threadId }, model: "fixture" } });
   if (message.method === "turn/start") {
     send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "answer", delta: ${JSON.stringify(text)} } });
     return send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
   }

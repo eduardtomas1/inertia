@@ -4,17 +4,69 @@ The useful changes in each Inertia release, in plain language.
 
 ## 0.0.5 — 2026-07-23
 
-### A clearer review workspace
+### Review changes with confidence
 
-- Changes now opens into a richer diff-review flow with better file navigation, review summaries, and safer commit workflows.
-- Responses render polished Markdown, while tool work, reasoning, approvals, and questions stay together in a chronological activity center.
-- The composer, project sidebar, usage display, request cards, and theme behavior have been refined across desktop sizes.
+- Changes is now a complete review workspace with per-file navigation, insertion and deletion totals, line wrapping, whitespace filtering, and a layout that remains usable in narrow side panels.
+- Select one line or a range and ask a read-only question, request a focused revision, save a local note, or add the exact selection to the next prompt.
+- Review questions always run in a fresh read-only agent turn, even when the main conversation is in Build mode with Full Access.
+- Selected revisions create a recovery checkpoint first and clearly explain that the selection is the requested focus rather than an unsafe promise that surrounding code can never be touched.
+- Selective revert now handles staged, unstaged, and mixed changes without discarding unrelated work. It revalidates the complete diff, file, hunk, selected lines, and both Git layers before writing.
+- Every selective revert creates an immediate recovery backup and offers Undo. Undo refuses to overwrite later file or index changes.
+- Line endings, final newlines, executable permissions, and the distinction between staged and working-tree content are preserved.
+- Conflicts, renamed or deleted files, untracked files, symbolic-link type changes, binary content, stale selections, and truncated diffs are rejected honestly when a safe line-level reversal cannot be guaranteed.
+- Agent-generated change summaries cover every current file and hunk in an isolated, tool-free review session. Compact hints flag visible behavior, regression, security, migration, test, performance, or documentation concerns without presenting them as established facts.
+- Review summaries are discarded if the diff changes while they are running. Oversized, incomplete, duplicated, malformed, or timed-out results are never saved.
+- Files and hunks can be marked reviewed, filtered by review state, and navigated with Previous and Next controls. Review progress persists across restarts and becomes stale when its target changes.
+- Local notes can be attached to a file, hunk, or selected lines, edited later, returned to the prompt, or used to request a revision. Changed targets keep their note but mark it stale.
+- The commit dialog can stage and commit only checked paths, preserves unrelated staged work, and warns when selected hunks have not been reviewed.
 
-### Stronger providers and desktop foundations
+### Conversations that stay readable
 
-- Provider interactions are more reliable across Codex, Claude, Cursor, and OpenCode, with better lifecycle handling and Windows Codex discovery.
-- Project identity, runtime diagnostics, database state, terminal behavior, and recovery information are clearer and more resilient.
-- Application icons were rebuilt, and Linux identity checks, Electron security validation, and packaged-app smoke coverage were strengthened across all three platforms.
+- Assistant responses now render safe GitHub-flavored Markdown with headings, lists, task lists, links, tables, and fenced code.
+- Code blocks support syntax highlighting, per-block wrapping, and one-click copy. Tables can be copied as Markdown or CSV.
+- External links open outside Inertia, project-file links open through the local desktop bridge, and unsafe HTML, protocols, path traversal, and escaping file links are blocked.
+- Streaming responses remain structurally stable while a code fence is still being written and switch to highlighting only when it is safe.
+- Each user request, reasoning summary, tool activity, approval, question, system message, final answer, and recovery checkpoint is grouped into one chronological turn.
+- Successful tool work can collapse into a quiet elapsed-time summary, while failures, cancellations, unsupported actions, and important warnings remain visible.
+- The latest settled turn can show a current changed-file summary, and any answer can be copied directly.
+- Transcript following no longer pulls the view away while reading older work; a Jump to latest control appears instead.
+- Response density, default code wrapping, completed-work collapsing, changed-file summaries, timestamps, and live thinking visibility now persist as preferences.
+
+### Activity-first projects and workspace control
+
+- A new Activity Center groups agents, checks, services, and source-control work with live elapsed time and clear running, waiting, completed, stopped, and failed states.
+- Waiting work distinguishes an approval from a provider question. Supported actions include opening the thread, folder, terminal, or service preview, plus stop, retry, rerun, failure details, and dismiss.
+- Activity survives restarts, while interrupted runs are recovered without pretending their old processes are still stoppable.
+- Project navigation now offers Classic and Activity-first modes. Active, waiting, failed, completed, unread, settled, and archived work remain visually distinct.
+- Completed background work gains an unread marker until visited. Finished threads can be settled into history, restored to active work, archived, renamed, or deleted when safe.
+- Projects are grouped using canonical Git identity and repository-relative paths rather than matching display names. Repository, repository-plus-folder, and separate grouping modes are available globally and per project.
+- Search and keyboard navigation work across the new project and activity models, including wrapping arrow navigation and Home/End movement.
+- Turn checkpoints can restore the project to its state before that request after active work has stopped.
+
+### Provider behavior, usage, and setup
+
+- Approvals, questions, plans, cancellation, activity, and failure handling now share one provider-neutral contract while retaining each provider's real capabilities.
+- Codex, Claude, Cursor, and OpenCode interactions update existing lifecycle records instead of producing duplicate activity rows.
+- A provider known to be unavailable is rejected before a user turn is persisted, then refreshed so the visible setup state remains accurate.
+- Provider authentication runs in an owned terminal and refreshes installation, account, model, and capability state when it exits.
+- Windows Codex discovery now checks official standalone installs, custom Codex locations, npm, pnpm, Bun, Volta, PATH, and `where.exe`, validates candidates, and selects a working executable.
+- Windows command shims support Unicode paths, spaces, and parentheses without enabling generic shell execution or treating arguments as command text. A manually selected Codex executable always takes precedence.
+- Settings show the selected Codex executable, allow a validated manual override, and report installation, sign-in, and App Server support separately.
+- Usage can be expanded, compact, or hidden. Context occupancy, provider-defined processed-token totals, quota windows, reset timing, freshness, and cached provenance remain distinct.
+- Missing or zero context limits, unavailable quotas, stale refreshes, and out-of-range provider values are shown honestly instead of producing invented capacity or misleading meters.
+
+### Desktop polish, privacy, and release reliability
+
+- The composer gained cleaner cascading menus for project actions, providers, models, reasoning, mode, and access. Menus dismiss on outside click or Escape without forcing a selection.
+- Selected diff context and image attachments remain visible before sending, with clear removal controls and enforcement of the real message-size limit.
+- Interface scale now supports Compact, Default, Comfortable, and Large across navigation, messages, controls, files, and diffs, independently from terminal text size.
+- The visible Light/Dark quick toggle, System theme behavior, panel boundaries, narrow layouts, send-button containment, request cards, commit-dialog focus, and macOS titlebar branding received another responsive pass.
+- Local runtime diagnostics record only bounded lifecycle and failure metadata. Prompts, source, token values, credentials, capabilities, and raw local paths are excluded or redacted.
+- Diagnostic files use private permissions, rotate at 256 KB, expire after seven days, and can be revealed from Settings without affecting app startup if logging fails.
+- The app preserves canonical project identity, review state, notes, response preferences, activity, provider sessions, streamed answers, plans, reasoning, usage, and metadata through database migrations and restarts.
+- Application icons now come from one deterministic vector mark with complete platform sizes. Linux packages validate desktop identity, icons, scaling behavior, and the bundled runtime resource.
+- CI and exact-tag releases exercise macOS arm64, Windows x64, and Linux x64 with locked installs, typechecks, unit and provider protocol suites, Electron end-to-end tests, dependency auditing, native packaging, hardened Electron fuse checks, and packaged-app smoke tests.
+- Release publication revalidates the exact tag, verifies platform assets, preserves the complete macOS signature, normalizes the Windows installer name, publishes checksums without replacing existing files, and records build provenance attestations.
 
 ## 0.0.4 — 2026-07-22
 

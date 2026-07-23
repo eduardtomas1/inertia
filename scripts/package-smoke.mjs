@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { constants } from "node:fs";
-import { access, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import WebSocket from "ws";
@@ -139,6 +139,7 @@ process.exit(2);
 }
 
 async function requirePackagedCodex(websocketUrl, expectedExecutable) {
+  const canonicalExpectedExecutable = await realpath(expectedExecutable);
   await new Promise((resolveCodex, rejectCodex) => {
     const socket = new WebSocket(websocketUrl, { headers: { Origin: "http://127.0.0.1" } });
     const timer = setTimeout(() => {
@@ -162,7 +163,7 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
         finish(new Error(`Packaged Codex discovery reported ${provider.statusMessage || provider.installState}.`));
         return;
       }
-      if (resolve(provider.executable || "").toLocaleLowerCase("en-US") !== resolve(expectedExecutable).toLocaleLowerCase("en-US")) {
+      if (resolve(provider.executable || "").toLocaleLowerCase("en-US") !== resolve(canonicalExpectedExecutable).toLocaleLowerCase("en-US")) {
         finish(new Error(`Packaged Codex discovery selected an unexpected executable: ${provider.executable || "none"}.`));
         return;
       }

@@ -1,6 +1,6 @@
 import { expect, test, _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
@@ -20,6 +20,7 @@ const execFileAsync = promisify(execFile);
 let electronApp: ElectronApplication;
 let page: Page;
 let testDirectory: string;
+let workspaceDirectory: string;
 const rendererErrors: string[] = [];
 let previewServer: Server;
 let previewUrl: string;
@@ -86,7 +87,7 @@ test.beforeAll(async () => {
   if (!address || typeof address === "string") throw new Error("Preview test server did not start");
   previewUrl = `http://127.0.0.1:${address.port}/`;
   testDirectory = await mkdtemp(join(tmpdir(), "inertia-e2e-"));
-  const workspaceDirectory = join(testDirectory, "Inertia");
+  workspaceDirectory = join(testDirectory, "Inertia");
   await mkdir(workspaceDirectory, { recursive: true });
   await writeFile(join(workspaceDirectory, "sample.ts"), "export const version = '0.0.1';\n", "utf8");
   await execFileAsync("git", ["init", "-q"], { cwd: workspaceDirectory });
@@ -107,7 +108,7 @@ test.beforeAll(async () => {
     if (message.type() === "error") rendererErrors.push(message.text());
   });
   page.on("pageerror", (error) => rendererErrors.push(error.message));
-  await page.getByText("Welcome to Inertia", { exact: true }).first().waitFor();
+  await page.getByRole("button", { name: "Add your first project" }).waitFor();
 });
 
 test.afterAll(async () => {
@@ -120,12 +121,33 @@ test.afterAll(async () => {
   if (testDirectory) await rm(testDirectory, { recursive: true, force: true });
 });
 
-test("boots the local workspace and terminal", async () => {
+test("starts without a demo and adds the first real project", async () => {
   await resizeWindow(1440, 920);
   await expect(page.getByText("Local service ready", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Local", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Bring a project into focus." })).toBeVisible();
+  await expect(page.getByText("Getting Started", { exact: true })).toHaveCount(0);
+  const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
+  await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toHaveCount(0);
+  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Work", exact: true }).click();
+  await expect(sidebar.getByText("No projects yet", { exact: true })).toHaveCount(1);
+  await expect(sidebar.getByText("No work yet", { exact: true })).toHaveCount(0);
+  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Projects", exact: true }).click();
+
+  await electronApp.evaluate(({ dialog }, directory) => {
+    Reflect.set(dialog, "showOpenDialog", async () => ({
+      canceled: false,
+      filePaths: [directory],
+      bookmarks: [],
+    }));
+  }, workspaceDirectory);
+  await page.getByRole("button", { name: "Add your first project" }).click();
+  await expect(page.getByRole("heading", { name: "Start with a clear chat." })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toHaveCount(1);
+  await page.locator(".project-welcome").getByRole("button", { name: "New chat", exact: true }).click();
+
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Welcome to Inertia", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
   await expectNoViewportOverflow();
   expect(rendererErrors).toEqual([]);
 });
@@ -169,8 +191,8 @@ test("keeps the window alive and reconnects with a rotated capability after a ru
   expect(after.pid).not.toBe(before.pid);
   expect(afterUrl).not.toBe(beforeUrl);
   expect(await page.evaluate(() => Reflect.get(window, "__inertiaNoReloadMarker"))).toBe(marker);
-  await expect(page.getByRole("heading", { name: "Welcome to Inertia", level: 1 })).toBeVisible();
-  await expect(page.getByRole("button", { name: "New thread" }).first()).toBeEnabled();
+  await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New chat" }).first()).toBeEnabled();
   await expect(page.getByText("The previous run ended when Inertia closed. Send another message to continue.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Timeline response", level: 1 })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy" }).first()).toBeVisible();
@@ -189,6 +211,19 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
   await page.getByRole("radio", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect.poll(async () => {
+    try {
+      return JSON.parse(await readFile(join(testDirectory, "electron-profile", "window-appearance.json"), "utf8"));
+    } catch {
+      return null;
+    }
+  }).toEqual({ theme: "dark" });
+  const nativeAppearance = await electronApp.evaluate(({ BrowserWindow, nativeTheme }) => ({
+    background: BrowserWindow.getAllWindows()[0]?.getBackgroundColor() ?? "",
+    themeSource: nativeTheme.themeSource,
+  }));
+  expect(nativeAppearance.themeSource).toBe("dark");
+  expect(nativeAppearance.background).toMatch(/^#101013(?:ff)?$/iu);
   await page.getByRole("radiogroup", { name: "Interface scale" }).getByRole("radio", { name: "Comfortable" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-interface-scale", "comfortable");
   await page.getByRole("radiogroup", { name: "Response density" }).getByRole("radio", { name: "Comfortable" }).click();
@@ -207,7 +242,9 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   await page.getByRole("textbox", { name: "Message" }).fill("Keep this V1 clear and calm.");
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.getByText("Keep this V1 clear and calm.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByLabel("Thread transcript").getByText("Keep this V1 clear and calm.", { exact: true }),
+  ).toBeVisible();
   expect(rendererErrors).toEqual([]);
 });
 
@@ -244,17 +281,6 @@ test("reveals the fixed local runtime diagnostics directory from settings", asyn
 test("persists composer usage modes without losing the followed transcript", async () => {
   await resizeWindow(1440, 920);
   const transcript = page.getByLabel("Thread transcript");
-  const expanded = page.getByRole("region", { name: "Usage and context" });
-  await expect(expanded).toHaveAttribute("data-mode", "expanded");
-  await expect(expanded.getByText("Context remaining", { exact: true })).toBeVisible();
-  await expect(expanded.getByText("Provider quota", { exact: true })).toBeVisible();
-  await transcript.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-
-  const collapse = expanded.getByRole("button", { name: "Collapse usage and context" });
-  await expect(collapse).toHaveAttribute("aria-expanded", "true");
-  await collapse.focus();
-  await collapse.press("Enter");
-
   const compact = page.getByRole("region", { name: "Usage and context" });
   await expect(compact).toHaveAttribute("data-mode", "compact");
   const expand = compact.getByRole("button", { name: "Expand usage and context" });
@@ -265,12 +291,39 @@ test("persists composer usage modes without losing the followed transcript", asy
     database.close();
     return row.usage_display_mode;
   }).toBe("compact");
+  await transcript.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+
+  await expand.focus();
+  await expand.press("Space");
+  const expanded = page.getByRole("region", { name: "Usage and context" });
+  await expect(expanded).toHaveAttribute("data-mode", "expanded");
+  await expect(expanded.getByText("Context remaining", { exact: true })).toBeVisible();
+  await expect(expanded.getByText("Provider quota", { exact: true })).toBeVisible();
+  await expect.poll(() => {
+    const database = new Database(join(testDirectory, "data", "inertia.sqlite"), { readonly: true });
+    const row = database.prepare("SELECT usage_display_mode FROM app_state WHERE id = 1").get() as { usage_display_mode: string };
+    database.close();
+    return row.usage_display_mode;
+  }).toBe("expanded");
+
+  const collapse = expanded.getByRole("button", { name: "Collapse usage and context" });
+  await expect(collapse).toHaveAttribute("aria-expanded", "true");
+  await collapse.focus();
+  await collapse.press("Enter");
+
+  const collapsed = page.getByRole("region", { name: "Usage and context" });
+  await expect(collapsed).toHaveAttribute("data-mode", "compact");
+  await expect.poll(() => {
+    const database = new Database(join(testDirectory, "data", "inertia.sqlite"), { readonly: true });
+    const row = database.prepare("SELECT usage_display_mode FROM app_state WHERE id = 1").get() as { usage_display_mode: string };
+    database.close();
+    return row.usage_display_mode;
+  }).toBe("compact");
   await expect.poll(() => transcript.evaluate((element) =>
     Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop),
   )).toBeLessThanOrEqual(2);
 
-  await expand.focus();
-  await expand.press("Space");
+  await collapsed.getByRole("button", { name: "Expand usage and context" }).click();
   await expect(page.getByRole("region", { name: "Usage and context" })).toHaveAttribute("data-mode", "expanded");
   await page.getByRole("region", { name: "Usage and context" }).getByRole("button", { name: "Hide usage and context" }).click();
   await expect(page.getByRole("region", { name: "Usage and context" })).toHaveCount(0);
@@ -286,6 +339,10 @@ test("persists composer usage modes without losing the followed transcript", asy
   await expect(usageModes.getByRole("radio", { name: "Hidden" })).toHaveAttribute("aria-checked", "true");
   await usageModes.getByRole("radio", { name: "Expanded" }).click();
   await page.getByRole("button", { name: "Go to workspace" }).click();
+  const autoCollapsed = page.getByRole("region", { name: "Usage and context" });
+  await expect(autoCollapsed).toHaveAttribute("data-mode", "compact");
+  await expect(autoCollapsed).toHaveAttribute("data-collapse-reason", "unavailable");
+  await autoCollapsed.getByRole("button", { name: "Expand usage and context" }).click();
   await expect(page.getByRole("region", { name: "Usage and context" })).toHaveAttribute("data-mode", "expanded");
   expect(rendererErrors).toEqual([]);
 });
@@ -334,46 +391,46 @@ test("applies every interface scale live and remains usable at common Linux disp
   expect(rendererErrors).toEqual([]);
 });
 
-test("switches sidebar modes and manages activity-first thread history", async () => {
+test("switches between Projects and Work and manages chat history", async () => {
   await resizeWindow(1440, 920);
-  await page.getByRole("button", { name: "New thread", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "New thread", level: 1 })).toBeVisible();
+  await page.getByRole("button", { name: "New chat", exact: true }).first().click();
+  await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
 
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
-  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Activity", exact: true }).click();
-  await expect(sidebar).toHaveClass(/sidebar-mode-activity/u);
-  const threadCard = sidebar.getByRole("button", { name: "New thread, Idle" });
-  await expect(threadCard).toBeVisible();
-  const activityCard = threadCard.locator("..");
-  const relativeTime = activityCard.locator(".activity-thread-topline time");
-  await expect(relativeTime).toHaveCSS("opacity", "1");
-  await activityCard.hover();
-  await expect(relativeTime).toHaveCSS("opacity", "0");
-
-  const firstNavigationItem = sidebar.locator("[data-sidebar-nav]").first();
-  await firstNavigationItem.focus();
-  const firstNavigationLabel = await firstNavigationItem.getAttribute("aria-label");
-  await firstNavigationItem.press("ArrowDown");
-  const focusedNavigationLabel = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
-  expect(focusedNavigationLabel).not.toBe(firstNavigationLabel);
-
-  await sidebar.getByRole("button", { name: "Project actions for Getting Started" }).first().click();
-  const projectMenu = sidebar.getByRole("menu", { name: "Project actions for Getting Started" });
+  await sidebar.getByRole("button", { name: "Project actions for Inertia" }).first().click();
+  const projectMenu = sidebar.getByRole("menu", { name: "Project actions for Inertia" });
   await expect(projectMenu.getByRole("menuitem", { name: "Open folder" })).toBeVisible();
-  await expect(projectMenu.getByRole("menuitem", { name: "New thread" })).toBeVisible();
+  await expect(projectMenu.getByRole("menuitem", { name: "New chat" })).toHaveCount(0);
   await expect(projectMenu.getByRole("menuitem", { name: "Rename" })).toBeVisible();
   await expect(projectMenu.getByText("Grouping behavior", { exact: true })).toBeVisible();
   await projectMenu.getByRole("menuitemradio", { name: "Keep separate", exact: true }).click();
 
-  await sidebar.getByRole("button", { name: "Thread actions for New thread" }).click();
-  await sidebar.getByRole("menuitem", { name: "Settle" }).click();
-  await expect(sidebar.getByText("Settled history", { exact: true })).toBeVisible();
-  await expect(sidebar.getByRole("button", { name: "New thread, Idle" })).toBeVisible();
-  await sidebar.getByRole("button", { name: "Thread actions for New thread" }).click();
-  await sidebar.getByRole("menuitem", { name: "Restore to activity" }).click();
-  await expect(sidebar.locator(".activity-thread.is-card").getByRole("button", { name: "New thread, Idle" })).toBeVisible();
+  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Work", exact: true }).click();
+  await expect(sidebar).toHaveClass(/sidebar-mode-activity/u);
+  await expect(sidebar.getByRole("heading", { name: "Recent" })).toBeVisible();
+  const activityCard = sidebar.locator(".activity-thread.is-card.is-active");
+  const threadCard = activityCard.getByRole("button", { name: "New chat, Idle" });
+  await expect(threadCard).toBeVisible();
+  const relativeTime = activityCard.locator(".activity-thread-topline time");
+  await expect(relativeTime).toHaveCSS("opacity", "1");
+  await activityCard.hover();
+  await expect(relativeTime).toHaveCSS("opacity", "1");
 
-  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Classic", exact: true }).click();
+  const firstNavigationItem = sidebar.locator("[data-sidebar-nav]").first();
+  await firstNavigationItem.focus();
+  await firstNavigationItem.press("ArrowDown");
+  expect(await firstNavigationItem.evaluate((item) => document.activeElement !== item)).toBe(true);
+
+  await activityCard.getByRole("button", { name: "Thread actions for New chat" }).click();
+  await sidebar.getByRole("menuitem", { name: "Done" }).click();
+  await expect(sidebar.getByText("History", { exact: true })).toBeVisible();
+  const historyCard = sidebar.locator(".activity-thread.is-history.is-active");
+  await expect(historyCard.getByRole("button", { name: "New chat, Idle" })).toBeVisible();
+  await historyCard.getByRole("button", { name: "Thread actions for New chat" }).click();
+  await sidebar.getByRole("menuitem", { name: "Reopen" }).click();
+  await expect(sidebar.locator(".activity-thread.is-card").getByRole("button", { name: "New chat, Idle" })).toBeVisible();
+
+  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Projects", exact: true }).click();
   await expect(sidebar).toHaveClass(/sidebar-mode-classic/u);
   expect(rendererErrors).toEqual([]);
 });
@@ -564,13 +621,13 @@ test("opens the command palette and manages a thread", async () => {
     .click();
   await expect(page.locator(".conversation-item")).toHaveCount(initialThreadCount + 1);
   await expect(page.locator(".conversation-row.is-active")).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "New thread", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
 
   await page.locator(".conversation-item").filter({ has: page.locator(".conversation-row.is-active") })
-    .getByRole("button", { name: "Thread actions for New thread" })
+    .getByRole("button", { name: "Thread actions for New chat" })
     .click();
   await page.getByRole("menuitem", { name: "Rename" }).click();
-  const rename = page.getByRole("textbox", { name: "Rename New thread" });
+  const rename = page.getByRole("textbox", { name: "Rename New chat" });
   await rename.fill("Focused V1 pass");
   await rename.press("Enter");
   await expect(page.getByRole("heading", { name: "Focused V1 pass", level: 1 })).toBeVisible({ timeout: 15_000 });
@@ -661,20 +718,42 @@ test("adds a selected diff range to the next agent prompt", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("opens the categorized activity center", async () => {
-  await page.getByRole("button", { name: "Open activity center" }).click();
-  const center = page.getByRole("complementary", { name: "Activity center" });
+test("opens and dismisses the prioritized Runs surface accessibly", async () => {
+  const trigger = page.getByRole("button", { name: /^Open runs/u });
+  await trigger.focus();
+  await trigger.click();
+  const center = page.getByRole("dialog", { name: "Runs" });
   await expect(center).toBeVisible();
-  for (const heading of ["Agents", "Checks", "Services", "Source Control"]) {
-    await expect(center.getByRole("heading", { name: heading })).toBeVisible();
+  await expect(center).toBeFocused();
+  await expect(center.getByRole("heading", { name: "Runs" })).toBeVisible();
+
+  const runRows = center.locator(".activity-run");
+  if (await runRows.count()) {
+    const timestamp = runRows.first().locator("time");
+    await expect(timestamp).toHaveCSS("opacity", "1");
+    await runRows.first().hover();
+    await expect(timestamp).toHaveCSS("opacity", "1");
+  } else {
+    await expect(center.getByRole("status")).toContainText("All clear");
   }
-  const activityRows = center.locator(".activity-run");
-  if (await activityRows.count()) {
-    const rowHeight = await activityRows.first().evaluate((row) => row.getBoundingClientRect().height);
-    expect(rowHeight).toBeLessThanOrEqual(42);
-  }
-  await center.getByRole("button", { name: "Close activity center" }).click();
+
+  const runsControls = center.locator("button:not([disabled])");
+  const firstRunsControl = runsControls.first();
+  const lastRunsControl = runsControls.last();
+  await lastRunsControl.focus();
+  await page.keyboard.press("Tab");
+  await expect(firstRunsControl).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(lastRunsControl).toBeFocused();
+
+  await page.keyboard.press("Escape");
   await expect(center).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await expect(page.getByRole("dialog", { name: "Runs" })).toBeVisible();
+  await page.locator(".activity-center-backdrop").click({ position: { x: 3, y: 3 } });
+  await expect(page.getByRole("dialog", { name: "Runs" })).toHaveCount(0);
   expect(rendererErrors).toEqual([]);
 });
 
@@ -736,7 +815,7 @@ test("collapses and restores both workspace sides without losing layout", async 
 for (const size of [
   { width: 1440, height: 920, label: "wide" },
   { width: 1024, height: 760, label: "stacked" },
-  { width: 760, height: 640, label: "compact" },
+  { width: 760, height: 600, label: "compact" },
 ]) {
   test(`keeps the ${size.label} layout reachable without overlap`, async () => {
     await resizeWindow(size.width, size.height);
@@ -745,10 +824,26 @@ for (const size of [
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
 
     if (size.width <= 760) {
-      await page.getByRole("button", { name: "Toggle project navigation" }).click();
-      await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
+      const navigationToggle = page.getByRole("button", { name: "Toggle project navigation" });
+      await navigationToggle.click();
+      const mobileSidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
+      await expect(mobileSidebar).toBeVisible();
+      await expect(page.locator(".workspace-shell")).toHaveAttribute("inert", "");
       await expectNoViewportOverflow();
-      await page.getByRole("button", { name: "Close navigation" }).last().click();
+      const drawerControls = mobileSidebar.locator('button:not([disabled]), input:not([disabled])');
+      const firstDrawerControl = drawerControls.first();
+      const lastDrawerControl = drawerControls.last();
+      await lastDrawerControl.focus();
+      await page.keyboard.press("Tab");
+      await expect(firstDrawerControl).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect(lastDrawerControl).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(mobileSidebar).toBeHidden();
+      await expect(navigationToggle).toBeFocused();
+      await expect(page.locator(".workspace-shell")).not.toHaveAttribute("inert", "");
+      await expect(page.locator(".sidebar-scrim")).toHaveAttribute("tabindex", "-1");
+      await expect(page.locator(".sidebar-scrim")).toHaveAttribute("aria-hidden", "true");
     }
 
     const geometry = await page.evaluate(() => {
@@ -765,6 +860,10 @@ for (const size of [
       expect(geometry.frame.bottom).toBeLessThanOrEqual(size.height + 1);
       if (size.width > 1024) expect(geometry.chat.right).toBeLessThanOrEqual(geometry.tools.left + 1);
       else expect(geometry.chat.bottom).toBeLessThanOrEqual(geometry.tools.top + 1);
+    }
+    if (size.width <= 760) {
+      const transcriptHeight = await page.getByLabel("Thread transcript").evaluate((element) => element.getBoundingClientRect().height);
+      expect(transcriptHeight).toBeGreaterThanOrEqual(100);
     }
 
     expect(rendererErrors).toEqual([]);

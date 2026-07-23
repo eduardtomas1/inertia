@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, Clock3, EyeOff, Gauge } from "lucide-react";
 
 import type {
@@ -38,6 +39,26 @@ export function contextRemaining(usage: ThreadUsageSnapshot | null): number | nu
     || usage.usedTokens > usage.maxTokens
   ) return null;
   return displayPercent(100 - (usage.usedTokens / usage.maxTokens) * 100);
+}
+
+function hasReportedUsage(usage: ThreadUsageSnapshot | null, rateLimits: ProviderRateLimit[]): boolean {
+  if (rateLimits.length > 0 || contextRemaining(usage) !== null) return true;
+  return Boolean(
+    usage
+    && (
+      (usage.maxTokens !== null && usage.maxTokens > 0)
+      || (usage.totalProcessedTokens !== null && usage.totalProcessedTokens >= 0)
+    )
+  );
+}
+
+export function usageAutoCollapseReason(
+  usage: ThreadUsageSnapshot | null,
+  rateLimits: ProviderRateLimit[],
+  spaceConstrained: boolean,
+): "space" | "unavailable" | null {
+  if (spaceConstrained) return "space";
+  return hasReportedUsage(usage, rateLimits) ? null : "unavailable";
 }
 
 function resetLabel(value: string | null): string {
@@ -132,36 +153,73 @@ export function UsageIndicator({
   providerLabel,
   onModeChange,
 }: UsageIndicatorProps): React.JSX.Element | null {
+  const [spaceConstrained, setSpaceConstrained] = useState(() => (
+    typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(max-width: 1024px), (max-height: 760px)").matches
+  ));
+  const [expandedOverride, setExpandedOverride] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 1024px), (max-height: 760px)");
+    const update = (): void => setSpaceConstrained(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => setExpandedOverride(false), [providerLabel]);
+  useEffect(() => {
+    if (mode !== "expanded") setExpandedOverride(false);
+  }, [mode]);
   if (mode === "hidden") return null;
 
   const remainingContext = contextRemaining(usage);
   const primaryLimit = rateLimits[0] ?? null;
   const primaryRemaining = primaryLimit ? displayPercent(primaryLimit.remainingPercent) : null;
+  const autoCollapseReason = mode === "expanded"
+    ? usageAutoCollapseReason(usage, rateLimits, spaceConstrained)
+    : null;
+  const effectiveMode = mode === "expanded" && autoCollapseReason && !expandedOverride ? "compact" : mode;
+  const expand = (): void => {
+    setExpandedOverride(true);
+    if (mode !== "expanded") onModeChange("expanded");
+  };
+  const collapse = (): void => {
+    setExpandedOverride(false);
+    if (mode !== "compact") onModeChange("compact");
+  };
 
-  if (mode === "compact") {
+  if (effectiveMode === "compact") {
+    const allUnavailable = remainingContext === null && primaryRemaining === null;
     return (
-      <section className="composer-usage usage-panel is-compact" aria-label="Usage and context" data-mode="compact">
+      <section
+        className="composer-usage usage-panel is-compact"
+        aria-label="Usage and context"
+        data-mode="compact"
+        data-auto-collapsed={autoCollapseReason ? "true" : undefined}
+        data-collapse-reason={autoCollapseReason ?? undefined}
+      >
         <button
           type="button"
           className="usage-compact-main"
           aria-controls={detailsId}
           aria-expanded="false"
           aria-label="Expand usage and context"
-          onClick={() => onModeChange("expanded")}
+          onClick={expand}
         >
           <UsageRing label="Context remaining" value={remainingContext} compact />
           <span id={detailsId} className="usage-compact-copy">
-            <strong>Usage &amp; context</strong>
+            <strong>{allUnavailable ? "Usage unavailable" : `Context ${remainingContext === null ? "unavailable" : `${Math.round(remainingContext)}% left`}`}</strong>
             <small>
-              Context {remainingContext === null ? "unavailable" : `${Math.round(remainingContext)}% left`}
-              {" · "}
               {primaryLimit
                 ? `${primaryLimit.label} ${primaryRemaining === null ? "unavailable" : `${Math.round(primaryRemaining)}% left`}`
                 : "Provider quota unavailable"}
               {rateLimits.length > 1 ? ` · +${rateLimits.length - 1} window${rateLimits.length === 2 ? "" : "s"}` : ""}
             </small>
           </span>
-          <span className={`usage-freshness is-${rateLimitState.freshness}`}>{quotaStateLabel(rateLimitState)}</span>
+          {rateLimitState.freshness !== "unavailable" && (
+            <span className={`usage-freshness is-${rateLimitState.freshness}`}>{quotaStateLabel(rateLimitState)}</span>
+          )}
           <ChevronUp size={15} aria-hidden="true" />
         </button>
         <button type="button" className="usage-visibility-button" aria-label="Hide usage and context" onClick={() => onModeChange("hidden")}>
@@ -189,7 +247,7 @@ export function UsageIndicator({
           aria-controls={detailsId}
           aria-expanded="true"
           aria-label="Collapse usage and context"
-          onClick={() => onModeChange("compact")}
+          onClick={collapse}
         >
           <ChevronDown size={15} />
         </button>

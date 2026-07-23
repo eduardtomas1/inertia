@@ -11,14 +11,12 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
-  GitBranch,
   History,
   Layers3,
   ListTree,
   MessageSquare,
   MoreHorizontal,
   Pencil,
-  Plus,
   Search,
   Settings,
   SquarePen,
@@ -32,6 +30,7 @@ import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   buildLogicalProjectGroups,
+  groupWorkThreads,
   nextSidebarNavigationIndex,
   sidebarThreadView,
   sortActivityThreads,
@@ -118,7 +117,9 @@ export function Sidebar({
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [historyVisible, setHistoryVisible] = useState(ACTIVITY_HISTORY_PAGE);
+  const sidebarRef = useRef<HTMLElement>(null);
   const navigationRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
   const mobile = useMediaQuery("(max-width: 760px)");
   const compact = snapshot?.settings.compactSidebar ?? false;
   const sidebarMode = snapshot?.settings.sidebarMode ?? "classic";
@@ -135,6 +136,46 @@ export function Sidebar({
   }, [snapshot?.activeProjectId]);
 
   useEffect(() => setHistoryVisible(ACTIVITY_HISTORY_PAGE), [query, sidebarMode]);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!mobile || !open) return;
+    const sidebar = sidebarRef.current;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => (
+      sidebar?.querySelector<HTMLElement>('[aria-label="Close navigation"]')?.focus({ preventScroll: true })
+    ));
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !sidebar) return;
+      const focusable = [...sidebar.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )];
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown);
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, [mobile, open]);
 
   const visibleProjects = useMemo(() => {
     const projects = snapshot?.projects ?? [];
@@ -171,6 +212,7 @@ export function Sidebar({
   }, [projectById, query, snapshot?.activeConversationId, snapshot?.conversations, visibleProjects]);
   const activeThreads = activityThreads.filter(({ settled }) => !settled);
   const settledThreads = activityThreads.filter(({ settled }) => settled);
+  const workSections = groupWorkThreads(activityThreads);
   const visibleHistory = settledThreads.slice(0, historyVisible);
   const activeRenameProject = renamingProject ? projectById.get(renamingProject) : undefined;
 
@@ -218,7 +260,6 @@ export function Sidebar({
   const projectActions = (project: Project) => (
     <div className="project-menu" role="menu" aria-label={`Project actions for ${project.name}`}>
       <button type="button" role="menuitem" onClick={() => { setProjectMenu(null); onOpenProject(project); }}><FolderOpen size={13} />Open folder</button>
-      <button type="button" role="menuitem" onClick={() => { setProjectMenu(null); onCreateConversation(project); }}><Plus size={13} />New thread</button>
       <button type="button" role="menuitem" onClick={() => startProjectRename(project)}><Pencil size={13} />Rename</button>
       <span className="project-menu-heading"><Layers3 size={12} />Grouping behavior</span>
       <button
@@ -262,8 +303,8 @@ export function Sidebar({
       <div className="conversation-menu" role="menu">
         <button type="button" role="menuitem" onClick={() => { setRenameDraft(conversation.title); setRenaming(conversation.id); setConversationMenu(null); }}><Pencil size={13} />Rename</button>
         {settled
-          ? <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onRestoreConversation(conversation); }}><ArchiveRestore size={13} />Restore to activity</button>
-          : canSettle && <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onSettleConversation(conversation); }}><CheckCircle2 size={13} />Settle</button>}
+          ? <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onRestoreConversation(conversation); }}><ArchiveRestore size={13} />Reopen</button>
+          : canSettle && <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onSettleConversation(conversation); }}><CheckCircle2 size={13} />Done</button>}
         <button type="button" role="menuitem" disabled={hasActiveWork} onClick={() => { setConversationMenu(null); onArchiveConversation(conversation); }}><Archive size={13} />Archive</button>
         <button type="button" role="menuitem" className="is-danger" disabled={hasActiveWork} onClick={() => { setConversationMenu(null); onDeleteConversation(conversation); }}><Trash2 size={13} />Delete</button>
       </div>
@@ -294,10 +335,7 @@ export function Sidebar({
   const activityRow = (conversation: Conversation, variant: "card" | "history") => {
     const model = sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
     const project = projectById.get(conversation.projectId);
-    const provider = snapshot?.providers.find(({ id }) => id === conversation.providerId);
     const isActive = snapshot?.activeConversationId === conversation.id && view === "workspace";
-    const projectMenuAnchor = `activity:${conversation.id}`;
-    const projectMenuOpen = projectMenu?.anchor === projectMenuAnchor && conversationMenu === null;
     return (
       <div
         className={clsx(
@@ -322,7 +360,7 @@ export function Sidebar({
               <time dateTime={conversation.updatedAt}>{formatRelativeTime(conversation.updatedAt)}</time>
             </span>
             {variant === "card" && (
-              <>
+              <span className="work-thread-meta">
                 <span className={clsx("thread-status-label", `is-${model.status}`)}>
                   <StatusIcon status={model.status} />
                   {statusLabels[model.status]}
@@ -330,34 +368,13 @@ export function Sidebar({
                 </span>
                 <span className="activity-thread-context">
                   <span><Folder size={12} />{project?.name ?? "Unknown project"}</span>
-                  {(conversation.branch || conversation.worktreePath) && (
-                    <span><GitBranch size={12} />{conversation.branch ?? "Worktree"}{conversation.worktreePath ? " · isolated" : ""}</span>
-                  )}
                 </span>
-                <span
-                  className="activity-thread-provider"
-                  title={`${provider?.label ?? conversation.providerId}${conversation.model ? ` · ${conversation.model}` : ""}`}
-                >
-                  {provider?.label ?? conversation.providerId}{conversation.model ? ` · ${conversation.model}` : ""}
-                </span>
-              </>
+              </span>
             )}
             {variant === "history" && (
               <span className="activity-history-context">{project?.name ?? "Unknown project"} · {statusLabels[model.status]}</span>
             )}
           </button>
-        )}
-        {project && variant === "card" && (
-          <IconButton
-            label={`Project actions for ${project.name}`}
-            className="activity-project-menu-button"
-            onClick={() => {
-              setConversationMenu(null);
-              setProjectMenu(projectMenuOpen ? null : { projectId: project.id, anchor: projectMenuAnchor });
-            }}
-          >
-            <Folder size={12} />
-          </IconButton>
         )}
         <IconButton
           label={`Thread actions for ${conversation.title}`}
@@ -370,15 +387,22 @@ export function Sidebar({
           <MoreHorizontal size={13} />
         </IconButton>
         {conversationMenu === conversation.id && conversationActions(conversation)}
-        {project && projectMenuOpen && projectActions(project)}
       </div>
     );
   };
 
   return (
     <>
-      <button type="button" aria-label="Close navigation" className={clsx("sidebar-scrim", open && "is-open")} onClick={onClose} />
+      <button
+        type="button"
+        aria-label="Close navigation"
+        aria-hidden={!open}
+        tabIndex={open ? 0 : -1}
+        className={clsx("sidebar-scrim", open && "is-open")}
+        onClick={onClose}
+      />
       <aside
+        ref={sidebarRef}
         className={clsx("sidebar", open && "is-open", compact && "is-compact", `sidebar-mode-${sidebarMode}`)}
         aria-label="Project navigation"
         aria-hidden={mobile && !open ? true : undefined}
@@ -392,30 +416,33 @@ export function Sidebar({
           <IconButton label="Close navigation" className="mobile-close no-drag" onClick={onClose}><X size={17} /></IconButton>
         </div>
 
-        <button
-          type="button"
-          className="new-thread-button"
-          disabled={!snapshot?.activeProjectId || connectionStatus !== "online"}
-          onClick={() => {
-            const activeProject = snapshot?.projects.find((project) => project.id === snapshot.activeProjectId);
-            if (activeProject) onCreateConversation(activeProject);
-          }}
-        >
-          <SquarePen size={16} /><span>New thread</span>
-        </button>
+        {snapshot && snapshot.projects.length > 0 && (
+          <button
+            type="button"
+            className="new-chat-button"
+            disabled={connectionStatus !== "online"}
+            onClick={() => {
+              const targetProject = snapshot.projects.find((project) => project.id === snapshot.activeProjectId)
+                ?? snapshot.projects[0];
+              if (targetProject) onCreateConversation(targetProject);
+            }}
+          >
+            <SquarePen size={16} /><span>New chat</span>
+          </button>
+        )}
 
         <button type="button" className={clsx("sidebar-destination", view === "workspace" && "is-active")} aria-current={view === "workspace" ? "page" : undefined} onClick={() => navigate("workspace")}>
           <MessageSquare size={16} /><span>Workspace</span>
         </button>
 
         <div className="sidebar-mode-switch" role="group" aria-label="Sidebar mode">
-          <button type="button" aria-pressed={sidebarMode === "classic"} disabled={connectionStatus !== "online"} onClick={() => onSidebarModeChange("classic")}><ListTree size={13} />Classic</button>
-          <button type="button" aria-pressed={sidebarMode === "activity"} disabled={connectionStatus !== "online"} onClick={() => onSidebarModeChange("activity")}><Activity size={13} />Activity</button>
+          <button type="button" aria-pressed={sidebarMode === "classic"} disabled={connectionStatus !== "online"} onClick={() => onSidebarModeChange("classic")}><ListTree size={13} />Projects</button>
+          <button type="button" aria-pressed={sidebarMode === "activity"} disabled={connectionStatus !== "online"} onClick={() => onSidebarModeChange("activity")}><Activity size={13} />Work</button>
         </div>
 
         <div className="sidebar-search-wrap">
           <Search size={15} aria-hidden="true" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder={sidebarMode === "activity" ? "Search activity" : "Search projects"} type="search" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder={sidebarMode === "activity" ? "Search work" : "Search projects"} type="search" />
           {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
         </div>
 
@@ -437,15 +464,17 @@ export function Sidebar({
         )}
 
         <div className="sidebar-section-title">
-          <span>{sidebarMode === "activity" ? "Activity" : "Projects"}</span>
+          <span>{sidebarMode === "activity" ? "Conversations" : "Projects"}</span>
           <IconButton label="Add project" disabled={busy || connectionStatus !== "online"} onClick={onImportProject}>
             {busy ? <LoadingMark label="Adding project" /> : <FolderPlus size={15} />}
           </IconButton>
         </div>
 
-        <div className="project-list" ref={navigationRef} onKeyDown={handleNavigationKeyDown} role="list" aria-label={sidebarMode === "activity" ? "Thread activity" : "Projects"}>
+        <div className="project-list" ref={navigationRef} onKeyDown={handleNavigationKeyDown} role="list" aria-label={sidebarMode === "activity" ? "Work" : "Projects"}>
           {!snapshot && <div className="sidebar-loading"><LoadingMark label="Loading projects" /><span>Opening your workspace…</span></div>}
-          {snapshot && visibleProjects.length === 0 && <div className="sidebar-empty"><Folder size={19} /><span>{query ? "No matching work" : "No projects yet"}</span></div>}
+          {snapshot && sidebarMode === "classic" && visibleProjects.length === 0 && (
+            <div className="sidebar-empty"><Folder size={19} /><span>{query ? "No matching projects" : "No projects yet"}</span></div>
+          )}
 
           {sidebarMode === "classic" && logicalGroups.map((group) => (
             <section className="logical-project-group" aria-label={group.label} key={group.key}>
@@ -512,9 +541,6 @@ export function Sidebar({
                             </div>
                           );
                         })}
-                        <button type="button" className="new-conversation-row" data-sidebar-nav onClick={() => onCreateConversation(project)} disabled={connectionStatus !== "online"}>
-                          <Plus size={13} /><span>New thread</span>
-                        </button>
                       </div>
                     )}
                   </div>
@@ -525,11 +551,21 @@ export function Sidebar({
 
           {sidebarMode === "activity" && snapshot && (
             <div className="activity-thread-stream">
-              {activeThreads.length === 0 && settledThreads.length === 0 && <div className="sidebar-empty"><Activity size={19} /><span>No thread activity yet</span></div>}
-              {activeThreads.map(({ conversation }) => activityRow(conversation, "card"))}
+              {activeThreads.length === 0 && settledThreads.length === 0 && (
+                <div className="sidebar-empty">
+                  <Activity size={19} />
+                  <span>{query ? "No matching work" : snapshot.projects.length === 0 ? "No projects yet" : "No work yet"}</span>
+                </div>
+              )}
+              {workSections.map((section) => section.threads.length > 0 && (
+                <section className={`work-thread-section is-${section.id}`} aria-labelledby={`work-section-${section.id}`} key={section.id}>
+                  <h2 id={`work-section-${section.id}`}><span>{section.label}</span><span>{section.threads.length}</span></h2>
+                  {section.threads.map(({ conversation }) => activityRow(conversation, "card"))}
+                </section>
+              ))}
               {settledThreads.length > 0 && (
                 <>
-                  <div className="activity-history-heading"><History size={12} /><span>Settled history</span><span>{settledThreads.length}</span></div>
+                  <div className="activity-history-heading"><History size={12} /><span>History</span><span>{settledThreads.length}</span></div>
                   {visibleHistory.map(({ conversation }) => activityRow(conversation, "history"))}
                   {visibleHistory.length < settledThreads.length && (
                     <button type="button" className="activity-show-more" onClick={() => setHistoryVisible((count) => count + ACTIVITY_HISTORY_PAGE)}>

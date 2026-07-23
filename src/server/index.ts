@@ -851,7 +851,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             }
           }
           store.createMessage(conversation.id, command.payload.content, "user", command.payload.attachments);
-          if (conversation.title === "New thread") store.updateConversation(conversation.id, { title: command.payload.content.slice(0, 64) });
+          if (conversation.title === "New chat" || conversation.title === "New thread") {
+            store.updateConversation(conversation.id, { title: command.payload.content.slice(0, 64) });
+          }
           send(socket, { type: "request.ok", requestId: command.requestId });
           broadcastSnapshot();
           if (enableProviders) {

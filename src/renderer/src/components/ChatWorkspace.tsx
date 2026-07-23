@@ -5,6 +5,7 @@ import {
   BrainCircuit,
   Check,
   CheckCircle2,
+  ChevronDown,
   CircleDot,
   Clock3,
   Code2,
@@ -141,29 +142,62 @@ function ActivityRow({ activity }: { activity: AgentActivity }): React.JSX.Eleme
   const Icon = activity.status === "failed" ? TriangleAlert : activity.status === "completed" ? CheckCircle2 : CircleDot;
   return (
     <div className={clsx("agent-activity", `is-${activity.status}`, activity.kind === "error" && "is-important")}>
-      <Icon size={14} />
+      <Icon size={14} aria-hidden="true" />
       <span><strong>{activity.title}</strong>{activity.detail && <small>{activity.detail}</small>}</span>
     </div>
   );
 }
 
-function WorkLog({ turn, autoCollapse }: { turn: ResponseTurn; autoCollapse: boolean }): React.JSX.Element | null {
+function LiveReasoning({ content }: { content: string }): React.JSX.Element {
+  return (
+    <details className="thinking-summary is-live" open>
+      <summary><BrainCircuit size={14} aria-hidden="true" /><span>Reasoning summary</span><small>Live</small></summary>
+      <div>{content}<span className="streaming-caret" aria-hidden="true" /></div>
+    </details>
+  );
+}
+
+function WorkLog({
+  turn,
+  autoCollapse,
+  reasoningContent,
+  showThinking,
+}: {
+  turn: ResponseTurn;
+  autoCollapse: boolean;
+  reasoningContent: string;
+  showThinking: boolean;
+}): React.JSX.Element | null {
   const [expanded, setExpanded] = useState(!autoCollapse);
   useEffect(() => setExpanded(!autoCollapse), [autoCollapse]);
-  if (turn.activities.length === 0) return null;
-  if (turn.isActive || !autoCollapse) {
-    return <div className="turn-work-log">{turn.activities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}</div>;
+  if (turn.isActive) {
+    if (turn.activities.length === 0) return null;
+    return <div className="turn-work-log is-live">{turn.activities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}</div>;
   }
+
+  const includesReasoning = showThinking && Boolean(reasoningContent);
+  const hasFoldableDetails = includesReasoning || turn.foldableActivities.length > 0;
+  if (!hasFoldableDetails && turn.importantActivities.length === 0) return null;
+
   return (
     <div className="turn-work-log is-settled">
-      {turn.foldableActivities.length > 0 && (
+      {hasFoldableDetails && (
         <details open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
           <summary>
-            <CheckCircle2 size={14} />
+            <CheckCircle2 size={14} aria-hidden="true" />
             <span>{workSummaryLabel(turn)}</span>
-            <small>{expanded ? "Hide details" : "Show details"}</small>
+            <small>{expanded ? "Hide" : "Details"}</small>
+            <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
           </summary>
-          <div>{turn.foldableActivities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}</div>
+          <div className="turn-work-details">
+            {includesReasoning && (
+              <div className="turn-reasoning-detail">
+                <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
+                <p>{reasoningContent}</p>
+              </div>
+            )}
+            {turn.foldableActivities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
+          </div>
         </details>
       )}
       {turn.importantActivities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
@@ -234,6 +268,11 @@ function TurnTimeline({
     : turn.assistantMessages;
   const reasoningContent = turn.isActive ? streamingReasoning || turn.reasoning?.content || "" : turn.reasoning?.content || "";
   const providerLabel = provider?.label ?? "Agent";
+  const hasRunFlow = turn.isActive
+    || turn.activities.length > 0
+    || (showThinking && Boolean(reasoningContent))
+    || approvals.length > 0
+    || inputRequests.length > 0;
 
   return (
     <section className={clsx("response-turn", turn.isActive && "is-active")} aria-label={`Turn ${turn.index}`}>
@@ -251,22 +290,17 @@ function TurnTimeline({
         )}
       </article>
 
-      {(turn.activities.length > 0 || reasoningContent || liveContent || turn.isActive || approvals.length > 0 || inputRequests.length > 0) && (
-        <section className="agent-run-card" aria-label={`${providerLabel} activity`}>
+      {hasRunFlow && (
+        <section className="agent-run-flow" aria-label={`${providerLabel} activity`}>
           {turn.isActive && (
             <header className="turn-working-state">
-              <span className="turn-working-pulse"><CircleDot size={14} /></span>
-              <strong>{providerLabel} is working</strong>
-              <span><Clock3 size={12} /><LiveElapsed startedAt={turn.startedAt} /></span>
+              <span className="turn-working-pulse"><CircleDot size={14} aria-hidden="true" /></span>
+              <strong>{providerLabel} working</strong>
+              <span aria-live="off"><Clock3 size={12} aria-hidden="true" /><LiveElapsed startedAt={turn.startedAt} /></span>
             </header>
           )}
-          {showThinking && reasoningContent && (
-            <details className={clsx("thinking-summary", turn.isActive && "is-live")} open={turn.isActive}>
-              <summary><BrainCircuit size={14} /><span>{turn.isActive ? "Reasoning summary" : "Thought through this turn"}</span><small>{turn.isActive ? "Live" : "Summary"}</small></summary>
-              <div>{reasoningContent}{turn.isActive && <span className="streaming-caret" />}</div>
-            </details>
-          )}
-          <WorkLog turn={turn} autoCollapse={autoCollapseWorkLog} />
+          {turn.isActive && showThinking && reasoningContent && <LiveReasoning content={reasoningContent} />}
+          <WorkLog turn={turn} autoCollapse={autoCollapseWorkLog} reasoningContent={reasoningContent} showThinking={showThinking} />
           {approvals.map((request) => <ApprovalCard key={request.id} request={request} onRespond={onRespondToApproval} />)}
           {inputRequests.map((request) => <InputRequestCard key={request.id} request={request} onRespond={onRespondToInput} />)}
         </section>
@@ -279,13 +313,12 @@ function TurnTimeline({
         </article>
       ))}
 
-      {settledAssistantMessages.map((message) => (
-        <article className="message is-assistant" key={message.id}>
-          <div className="message-meta"><span>Agent</span>{showTimestamps && <time dateTime={message.createdAt}>{formatClockTime(message.createdAt)}</time>}</div>
+      {settledAssistantMessages.map((message, index) => (
+        <article className={clsx("message is-assistant", index === settledAssistantMessages.length - 1 && "is-final-answer")} key={message.id}>
+          <div className="message-meta"><span>{providerLabel}</span>{showTimestamps && <time dateTime={message.createdAt}>{formatClockTime(message.createdAt)}</time>}</div>
           <ResponseMarkdown content={message.content} projectRoot={projectRoot} defaultCodeWrap={defaultCodeWrap} />
           <footer className="turn-meta">
-            <span><Clock3 size={11} />{formatElapsed(turnElapsedMs(turn))}</span>
-            {turn.toolCallCount > 0 && <span>{turn.toolCallCount} tool {turn.toolCallCount === 1 ? "call" : "calls"}</span>}
+            {!hasRunFlow && <span><Clock3 size={11} />{formatElapsed(turnElapsedMs(turn))}</span>}
             <CopyAnswerButton content={message.content} />
           </footer>
         </article>
@@ -293,7 +326,7 @@ function TurnTimeline({
 
       {turn.isActive && liveContent && (
         <article className="message is-assistant is-streaming" aria-label="Streaming assistant answer">
-          <div className="message-meta"><span>Agent</span><span className="live-label">Live</span></div>
+          <div className="message-meta"><span>{providerLabel}</span><span className="live-label">Live</span></div>
           <ResponseMarkdown content={liveContent} projectRoot={projectRoot} defaultCodeWrap={defaultCodeWrap} streaming />
           <span className="streaming-caret" aria-hidden="true" />
         </article>
@@ -441,9 +474,9 @@ export function ChatWorkspace({
         <section className="project-welcome" aria-labelledby="project-welcome-title">
           <span className="project-welcome-icon"><MessageSquarePlus size={22} /></span>
           <span className="welcome-kicker">{project.name}</span>
-          <h2 id="project-welcome-title">Start with a clear thread.</h2>
-          <p>Create a thread for the next feature, question, or focused pass through this project.</p>
-          <button type="button" className="primary-button" onClick={onCreateConversation}><MessageSquarePlus size={16} /><span>New thread</span></button>
+          <h2 id="project-welcome-title">Start with a clear chat.</h2>
+          <p>Create a chat for the next feature, question, or focused pass through this project.</p>
+          <button type="button" className="primary-button" onClick={onCreateConversation}><MessageSquarePlus size={16} /><span>New chat</span></button>
           <code className="project-path-display">{project.path}</code>
         </section>
       </main>
@@ -469,7 +502,7 @@ export function ChatWorkspace({
               );
             }
             if (item.kind === "activity") {
-              return <section className="agent-run-card orphan-run-card" aria-label="Agent activity" key={item.id}>{item.activities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}</section>;
+              return <section className="agent-run-flow orphan-run-flow" aria-label="Agent activity" key={item.id}><div className="turn-work-log">{item.activities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}</div></section>;
             }
             return (
               <TurnTimeline

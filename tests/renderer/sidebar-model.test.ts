@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildLogicalProjectGroups,
+  groupWorkThreads,
   hasUnreadCompletion,
   logicalProjectKey,
   nextSidebarNavigationIndex,
@@ -111,7 +112,7 @@ describe("sidebar logical project grouping", () => {
   });
 });
 
-describe("activity-first thread model", () => {
+describe("work-first chat model", () => {
   it("distinguishes every visible state and prioritizes actionable work", () => {
     const entries = [
       conversation({ id: "idle", projectId: "p" }),
@@ -136,6 +137,14 @@ describe("activity-first thread model", () => {
       "failed",
       "completed",
       "idle",
+    ]);
+    expect(groupWorkThreads(sortActivityThreads(entries, null)).map(({ id, threads }) => ({
+      id,
+      threads: threads.map(({ conversation: entry }) => entry.id),
+    }))).toEqual([
+      { id: "needs-you", threads: ["approval", "input", "failed"] },
+      { id: "in-progress", threads: ["working"] },
+      { id: "recent", threads: ["completed", "idle"] },
     ]);
   });
 

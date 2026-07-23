@@ -51,7 +51,9 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
 
   const allItems = useMemo(() => {
     const actions: PaletteItem[] = [
-      { id: "action:new-thread", group: "Actions", label: "New thread", detail: "Start work in the current project", icon: <SquarePen size={15} />, shortcut: "⌘N", run: onNewThread },
+      ...(projects.length > 0
+        ? [{ id: "action:new-thread", group: "Actions" as const, label: "New chat", detail: "Start work in the current project", icon: <SquarePen size={15} />, shortcut: "⌘N", run: onNewThread }]
+        : []),
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
       { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, providers, and defaults", icon: <Settings size={15} />, run: onOpenSettings },
     ];

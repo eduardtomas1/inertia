@@ -46,9 +46,9 @@ async function capture(page, filename) {
 
 function seedShowcaseData() {
   const database = new Database(databasePath);
-  const conversation = database.prepare("SELECT id FROM conversations ORDER BY created_at LIMIT 1").get();
-  if (!conversation) throw new Error("The Getting Started conversation was not created.");
   const now = new Date().toISOString();
+  const projectId = randomUUID();
+  const conversationId = randomUUID();
   const models = [{
     id: "gpt-5.6-sol",
     label: "GPT-5.6-Sol",
@@ -79,23 +79,40 @@ function seedShowcaseData() {
   ];
 
   database.transaction(() => {
-    database.prepare("UPDATE app_state SET theme = 'dark', show_timestamps = 0, show_thinking = 1, show_usage = 1, usage_display_mode = 'expanded'").run();
-    database.prepare("UPDATE projects SET name = 'Getting Started', updated_at = ?").run(now);
-    database.prepare("UPDATE conversations SET title = 'Welcome to Inertia', provider_id = 'codex', model = 'gpt-5.6-sol', reasoning_effort = 'high', interaction_mode = 'build', access_mode = 'supervised', status = 'completed', updated_at = ? WHERE id = ?").run(now, conversation.id);
-    database.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversation.id);
+    database.prepare(`
+      INSERT INTO projects (id, name, path, color, status, created_at, updated_at)
+      VALUES (?, 'Getting Started', ?, '#6f76d9', 'ready', ?, ?)
+    `).run(projectId, workspaceDirectory, now, now);
+    database.prepare(`
+      INSERT INTO conversations (
+        id, project_id, title, provider_id, model, reasoning_effort,
+        interaction_mode, access_mode, status, created_at, updated_at
+      ) VALUES (?, ?, 'Welcome to Inertia', 'codex', 'gpt-5.6-sol', 'high', 'build', 'supervised', 'completed', ?, ?)
+    `).run(conversationId, projectId, now, now);
+    database.prepare(`
+      UPDATE app_state
+      SET theme = 'dark',
+          show_timestamps = 0,
+          show_thinking = 1,
+          show_usage = 1,
+          usage_display_mode = 'expanded',
+          active_project_id = ?,
+          active_conversation_id = ?
+      WHERE id = 1
+    `).run(projectId, conversationId);
     const insertMessage = database.prepare("INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at) VALUES (?, ?, ?, ?, '[]', ?)");
-    messages.forEach(([role, content], index) => insertMessage.run(randomUUID(), conversation.id, role, content, new Date(Date.now() - (messages.length - index) * 1_000).toISOString()));
+    messages.forEach(([role, content], index) => insertMessage.run(randomUUID(), conversationId, role, content, new Date(Date.now() - (messages.length - index) * 1_000).toISOString()));
     database.prepare("INSERT INTO activities (id, conversation_id, run_id, kind, title, detail, status, created_at) VALUES (?, ?, ?, 'status', 'Turn completed', NULL, 'completed', ?)")
-      .run(randomUUID(), conversation.id, "readme-demo-run", now);
+      .run(randomUUID(), conversationId, "readme-demo-run", now);
     database.prepare("INSERT INTO agent_reasonings (id, conversation_id, run_id, content, status, created_at) VALUES (?, ?, ?, ?, 'completed', ?)")
-      .run(randomUUID(), conversation.id, "readme-demo-run", "Kept the plan scoped to the onboarding experience and preserved the existing workspace flow.", now);
+      .run(randomUUID(), conversationId, "readme-demo-run", "Kept the plan scoped to the onboarding experience and preserved the existing workspace flow.", now);
     database.prepare(`
       INSERT INTO thread_usage (
         conversation_id, used_tokens, total_processed_tokens, total_processed_scope, max_tokens,
         input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens,
         reasoning_output_tokens, compacts_automatically, updated_at
       ) VALUES (?, 12000, 28400, 'thread', 200000, 9400, 1800, 400, 2600, 700, 1, ?)
-    `).run(conversation.id, now);
+    `).run(conversationId, now);
     database.prepare(`
       INSERT INTO provider_metadata_cache (
         provider_id, executable, version, auth_state,
@@ -120,7 +137,7 @@ try {
 
   app = await launch();
   let page = await app.firstWindow();
-  await page.getByRole("heading", { name: "Welcome to Inertia", level: 1 }).waitFor();
+  await page.getByRole("button", { name: "Add your first project" }).waitFor();
   await app.close();
   app = undefined;
 

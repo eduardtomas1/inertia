@@ -14,6 +14,7 @@ const IPC = {
   previewCommand: "inertia:preview-command",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
+  syncThemePreference: "inertia:sync-theme-preference",
 } as const;
 
 const bridge: DesktopBridge = Object.freeze({
@@ -30,6 +31,7 @@ const bridge: DesktopBridge = Object.freeze({
   previewCommand: (action: "back" | "forward" | "reload") => ipcRenderer.invoke(IPC.previewCommand, action) as ReturnType<DesktopBridge["previewCommand"]>,
   previewSetBounds: (bounds: Parameters<DesktopBridge["previewSetBounds"]>[0]) => ipcRenderer.invoke(IPC.previewSetBounds, bounds) as Promise<void>,
   previewClose: () => ipcRenderer.invoke(IPC.previewClose) as Promise<void>,
+  syncThemePreference: (preference: Parameters<DesktopBridge["syncThemePreference"]>[0]) => ipcRenderer.invoke(IPC.syncThemePreference, preference) as Promise<void>,
   getPlatform: () => process.platform,
 });
 

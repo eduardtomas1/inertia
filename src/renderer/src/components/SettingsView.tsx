@@ -61,7 +61,7 @@ const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> 
 
 const shortcuts = [
   ["Search everything", "⌘ K"],
-  ["New thread", "⌘ N"],
+  ["New chat", "⌘ N"],
   ["Toggle project navigation", "⌘ B"],
   ["Toggle terminal", "⌘ J"],
 ] as const;
@@ -128,10 +128,10 @@ export function SettingsView({ settings, disabled, providers, archived, onUpdate
             <section className="settings-card" aria-labelledby="workspace-heading">
               <div className="settings-card-heading"><div><PanelLeft size={18} /></div><span><h3 id="workspace-heading">Workspace</h3><p>Choose which quiet details help you stay oriented.</p></span></div>
               <div className="response-density-setting">
-                <span><strong>Project navigation</strong><small>Keep the project tree or focus on active work across projects.</small></span>
+                <span><strong>Project navigation</strong><small>Browse projects or focus on work that needs attention across them.</small></span>
                 <div role="radiogroup" aria-label="Project navigation">
-                  <button type="button" role="radio" aria-checked={settings.sidebarMode === "classic"} className={clsx(settings.sidebarMode === "classic" && "is-active")} disabled={disabled} onClick={() => onUpdate({ sidebarMode: "classic" })}>Classic projects</button>
-                  <button type="button" role="radio" aria-checked={settings.sidebarMode === "activity"} className={clsx(settings.sidebarMode === "activity" && "is-active")} disabled={disabled} onClick={() => onUpdate({ sidebarMode: "activity" })}>Activity first</button>
+                  <button type="button" role="radio" aria-checked={settings.sidebarMode === "classic"} className={clsx(settings.sidebarMode === "classic" && "is-active")} disabled={disabled} onClick={() => onUpdate({ sidebarMode: "classic" })}>Projects</button>
+                  <button type="button" role="radio" aria-checked={settings.sidebarMode === "activity"} className={clsx(settings.sidebarMode === "activity" && "is-active")} disabled={disabled} onClick={() => onUpdate({ sidebarMode: "activity" })}>Work</button>
                 </div>
               </div>
               <div className="response-density-setting project-grouping-setting">
@@ -202,14 +202,14 @@ export function SettingsView({ settings, disabled, providers, archived, onUpdate
             </section>
 
             <section className="settings-card" aria-labelledby="defaults-heading">
-              <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="defaults-heading">New thread defaults</h3><p>These choices apply only when a new thread is created.</p></span></div>
+              <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="defaults-heading">New chat defaults</h3><p>These choices apply only when a new chat is created.</p></span></div>
               <div className="settings-form-grid">
                 <label><span>Provider</span><select value={settings.defaultProvider} disabled={disabled} onChange={(event) => onUpdate({ defaultProvider: event.target.value as ProviderId, defaultModel: "", defaultReasoningEffort: "" })}>{providers.map((provider) => <option value={provider.id} key={provider.id}>{provider.label} — {providerStateLabel(provider)}</option>)}</select></label>
                 <label><span>Model</span><select value={defaultModel?.id ?? ""} disabled={disabled || !defaultProvider?.models.length} onChange={(event) => { const model = defaultProvider?.models.find(({ id }) => id === event.target.value); onUpdate({ defaultModel: event.target.value, defaultReasoningEffort: model?.defaultReasoningEffort ?? "" }); }}><option value="">Provider default</option>{defaultProvider?.models.map((model) => <option value={model.id} key={model.id}>{model.label}{model.isDefault ? " — Default" : ""}</option>)}</select></label>
                 <label><span>Reasoning</span><select value={settings.defaultReasoningEffort || defaultModel?.defaultReasoningEffort || ""} disabled={disabled || reasoningOptions.length === 0} onChange={(event) => onUpdate({ defaultReasoningEffort: event.target.value })}><option value="">Model default</option>{reasoningOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
                 <label><span>Mode</span><select value={settings.defaultInteractionMode} disabled={disabled} onChange={(event) => onUpdate({ defaultInteractionMode: event.target.value as AppSettings["defaultInteractionMode"] })}><option value="build">Build</option><option value="plan">Plan</option></select></label>
                 <label><span>Access</span><select value={settings.defaultAccessMode} disabled={disabled} onChange={(event) => onUpdate({ defaultAccessMode: event.target.value as AppSettings["defaultAccessMode"] })}><option value="supervised">Supervised</option><option value="auto-edit">Auto-accept edits</option><option value="full">Full access</option></select></label>
-                <label><span>Thread location</span><select value={settings.newThreadMode} disabled={disabled} onChange={(event) => onUpdate({ newThreadMode: event.target.value as AppSettings["newThreadMode"] })}><option value="local">Current checkout</option><option value="worktree">Isolated worktree</option></select></label>
+                <label><span>Chat location</span><select value={settings.newThreadMode} disabled={disabled} onChange={(event) => onUpdate({ newThreadMode: event.target.value as AppSettings["newThreadMode"] })}><option value="local">Current checkout</option><option value="worktree">Isolated worktree</option></select></label>
               </div>
             </section>
           </>

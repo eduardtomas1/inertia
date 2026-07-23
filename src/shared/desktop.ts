@@ -33,6 +33,7 @@ export interface DesktopBridge {
   previewCommand: (action: "back" | "forward" | "reload") => Promise<PreviewState>;
   previewSetBounds: (bounds: PreviewBounds | null) => Promise<void>;
   previewClose: () => Promise<void>;
+  syncThemePreference: (preference: "system" | "light" | "dark") => Promise<void>;
   getPlatform: () => string;
 }
 

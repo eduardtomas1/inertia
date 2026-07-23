@@ -205,6 +205,6 @@ export interface ProviderManagerOptions {
 
 export interface ProviderAuthLaunch {
   executable: string;
-  args: readonly string[];
+  args: readonly string[] | string;
   env: NodeJS.ProcessEnv;
 }

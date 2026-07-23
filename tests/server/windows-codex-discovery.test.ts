@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -99,7 +99,7 @@ process.stdin.resume();
   it("finds the official standalone native executable with a minimal PATH", async () => {
     const home = root("official standalone");
     const official = join(home, ".codex", "packages", "standalone", "current", "bin");
-    const executable = nativeCodex(official, home);
+    const executable = realpathSync(nativeCodex(official, home));
     process.env.USERPROFILE = home;
     process.env.LOCALAPPDATA = join(home, "AppData", "Local");
     process.env.APPDATA = join(home, "AppData", "Roaming");
@@ -119,7 +119,7 @@ process.stdin.resume();
   it("discovers and runs an npm shim from a Unicode path with spaces and parentheses", async () => {
     const home = root("npm Unicode Ω (profile)");
     const npm = join(home, "AppData", "Roaming", "npm");
-    const executable = batchCodex(npm, "9.4.1", "Safe shim response");
+    const executable = realpathSync(batchCodex(npm, "9.4.1", "Safe shim response"));
     process.env.USERPROFILE = home;
     process.env.LOCALAPPDATA = join(home, "AppData", "Local");
     process.env.APPDATA = join(home, "AppData", "Roaming");
@@ -148,7 +148,7 @@ process.stdin.resume();
     mkdirSync(broken, { recursive: true });
     writeFileSync(join(broken, "codex.exe"), "not a native executable", "utf8");
     batchCodex(older, "1.8.0");
-    const expected = batchCodex(newest, "3.2.1");
+    const expected = realpathSync(batchCodex(newest, "3.2.1"));
     process.env.USERPROFILE = home;
     process.env.LOCALAPPDATA = join(home, "AppData", "Local");
     process.env.APPDATA = join(home, "AppData", "Roaming");
@@ -167,7 +167,7 @@ process.stdin.resume();
     const automatic = join(home, "automatic");
     const manual = join(home, "manual");
     batchCodex(automatic, "8.0.0");
-    const expected = batchCodex(manual, "2.5.0");
+    const expected = realpathSync(batchCodex(manual, "2.5.0"));
     process.env.PATH = automatic;
     process.env.PATHEXT = ".EXE;.CMD;.BAT";
 

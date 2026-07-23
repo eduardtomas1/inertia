@@ -60,6 +60,7 @@ async function probeProcess(
         cwd,
         env: environment.env,
         shell: false,
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });

@@ -1,7 +1,7 @@
 import { win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { providerProcessInvocation } from "../../src/server/provider/process";
+import { providerProcessInvocation, providerPtyArguments } from "../../src/server/provider/process";
 import {
   parseWhereExecutableOutput,
   windowsCodexKnownPaths,
@@ -70,10 +70,14 @@ describe("Windows Codex discovery primitives", () => {
         "/s",
         "/v:off",
         "/c",
-        "\"C:\\Users\\Álex (Dev)\\AppData\\Roaming\\npm\\codex.cmd\" \"app-server\" \"--help\"",
+        "\"C:\\Users\\Álex^ ^(Dev^)\\AppData\\Roaming\\npm\\codex.cmd ^\"app-server^\" ^\"--help^\"\"",
       ],
+      windowsVerbatimArguments: true,
     });
     expect(win32.extname(shim.command).toLowerCase()).toBe(".exe");
+    expect(providerPtyArguments(shim)).toBe(
+      "/d /s /v:off /c \"C:\\Users\\Álex^ ^(Dev^)\\AppData\\Roaming\\npm\\codex.cmd ^\"app-server^\" ^\"--help^\"\"",
+    );
   });
 
   it("prevents command-string injection while preserving literal percent signs", () => {
@@ -82,7 +86,13 @@ describe("Windows Codex discovery primitives", () => {
       ["login"],
       {},
       "win32",
-    ).args.at(-1)).toBe("\"C:\\Users\\100%% Ready\\codex.cmd\" \"login\"");
+    ).args.at(-1)).toBe("\"C:\\Users\\100^%^ Ready\\codex.cmd ^\"login^\"\"");
+    expect(providerProcessInvocation(
+      "C:\\codex.cmd",
+      ["safe & literal"],
+      {},
+      "win32",
+    ).args.at(-1)).toBe("\"C:\\codex.cmd ^\"safe^ ^&^ literal^\"\"");
     expect(() => providerProcessInvocation("C:\\codex.cmd", ["ok\r\nwhoami"], {}, "win32")).toThrow("cannot be passed safely");
     expect(() => providerProcessInvocation("C:\\codex.cmd", ["bad\" & whoami"], {}, "win32")).toThrow("cannot be passed safely");
   });

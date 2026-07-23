@@ -121,6 +121,7 @@ export async function readCodexMetadata(
     env: environment,
     detached: false,
     shell: false,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
   });

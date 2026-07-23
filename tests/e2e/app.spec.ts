@@ -428,7 +428,7 @@ test("dismisses and switches Composer menus without forcing a selection", async 
 });
 
 test("collapses composer settings without displacing send and right-aligns user turns", async () => {
-  await resizeWindow(1180, 800);
+  await resizeWindow(1180, 600);
   const composer = page.locator(".composer");
   const more = page.getByRole("button", { name: "More composer options" });
   const send = page.getByRole("button", { name: "Send message" });

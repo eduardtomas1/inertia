@@ -128,9 +128,11 @@ describe("safe selected diff reversal", () => {
 
   it("preserves CRLF, restores the final newline, keeps executable permissions, and supports Undo", async () => {
     const root = repository("alpha\r\nbeta\r\n");
-    chmodSync(join(root, "example.txt"), 0o755);
-    git(root, "add", "example.txt");
+    if (process.platform !== "win32") chmodSync(join(root, "example.txt"), 0o755);
+    git(root, "update-index", "--chmod=+x", "example.txt");
     git(root, "commit", "-m", "executable");
+    const executableBits = lstatSync(join(root, "example.txt")).mode & 0o111;
+    expect(git(root, "ls-files", "--stage", "example.txt")).toMatch(/^100755 /u);
     writeFileSync(join(root, "example.txt"), "alpha\r\nbeta\r\ndelta");
     git(root, "add", "example.txt");
     const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
@@ -138,12 +140,14 @@ describe("safe selected diff reversal", () => {
     const { result } = await apply(root, selection);
 
     expect(readFileSync(join(root, "example.txt"))).toEqual(Buffer.from("alpha\r\nbeta\r\n"));
-    expect(lstatSync(join(root, "example.txt")).mode & 0o111).toBe(0o111);
+    if (process.platform !== "win32") expect(lstatSync(join(root, "example.txt")).mode & 0o111).toBe(executableBits);
+    expect(git(root, "ls-files", "--stage", "example.txt")).toMatch(/^100755 /u);
     expect(git(root, "show", ":example.txt")).toBe("alpha\r\nbeta\r\n");
 
     await undoDiffSelection(root, result.operation.id);
     expect(readFileSync(join(root, "example.txt"))).toEqual(Buffer.from("alpha\r\nbeta\r\ndelta"));
-    expect(lstatSync(join(root, "example.txt")).mode & 0o111).toBe(0o111);
+    if (process.platform !== "win32") expect(lstatSync(join(root, "example.txt")).mode & 0o111).toBe(executableBits);
+    expect(git(root, "ls-files", "--stage", "example.txt")).toMatch(/^100755 /u);
     expect(git(root, "show", ":example.txt")).toBe("alpha\r\nbeta\r\ndelta");
   }, 30_000);
 

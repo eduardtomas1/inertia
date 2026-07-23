@@ -5,6 +5,11 @@ import type { ProviderEnvironment } from "../environment";
 export interface ProviderProcessInvocation {
   command: string;
   args: string[];
+  windowsVerbatimArguments?: boolean;
+}
+
+export function providerPtyArguments(invocation: ProviderProcessInvocation): readonly string[] | string {
+  return invocation.windowsVerbatimArguments ? invocation.args.join(" ") : invocation.args;
 }
 
 function windowsEnvironmentValue(environment: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -13,13 +18,25 @@ function windowsEnvironmentValue(environment: NodeJS.ProcessEnv, key: string): s
   return match ? environment[match] : undefined;
 }
 
-function cmdToken(value: string): string {
+const CMD_META_CHARACTERS = /([()\][%!^"`<>&|;, *?])/gu;
+
+function assertSafeCmdValue(value: string): void {
   if (value.includes("\0") || /[\r\n"]/u.test(value)) {
     throw new Error("The provider command contains characters that cannot be passed safely to a Windows command shim.");
   }
-  // Delayed expansion is disabled below. Doubling percent signs prevents
-  // environment expansion while preserving literal user paths and arguments.
-  return `"${value.replaceAll("%", "%%")}"`;
+}
+
+function escapeCmdCommand(value: string): string {
+  assertSafeCmdValue(value);
+  return value.replace(CMD_META_CHARACTERS, "^$1");
+}
+
+function escapeCmdArgument(value: string): string {
+  assertSafeCmdValue(value);
+  // Double trailing slashes before adding quotes, then protect cmd.exe
+  // metacharacters. Delayed expansion is disabled by the invocation below.
+  const quoted = `"${value.replace(/(\\+)$/u, "$1$1")}"`;
+  return quoted.replace(CMD_META_CHARACTERS, "^$1");
 }
 
 /**
@@ -37,12 +54,16 @@ export function providerProcessInvocation(
   if (platform !== "win32" || ![".cmd", ".bat"].includes(extname(executable).toLowerCase())) {
     return { command: executable, args: [...args] };
   }
-  const commandLine = [executable, ...args].map(cmdToken).join(" ");
+  const commandLine = [
+    escapeCmdCommand(executable),
+    ...args.map(escapeCmdArgument),
+  ].join(" ");
   const systemRoot = windowsEnvironmentValue(environment, "SystemRoot");
   const command = windowsEnvironmentValue(environment, "ComSpec")
     || (systemRoot ? win32.join(systemRoot, "System32", "cmd.exe") : "cmd.exe");
   return {
     command,
-    args: ["/d", "/s", "/v:off", "/c", commandLine],
+    args: ["/d", "/s", "/v:off", "/c", `"${commandLine}"`],
+    windowsVerbatimArguments: true,
   };
 }

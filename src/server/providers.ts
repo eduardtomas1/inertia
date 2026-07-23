@@ -33,7 +33,7 @@ import {
   type ProviderMetadata,
   type ProviderMetadataRequestOptions,
 } from "./provider/metadata";
-import { providerProcessInvocation } from "./provider/process";
+import { providerProcessInvocation, providerPtyArguments } from "./provider/process";
 
 export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider, detectProviders };
 export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
@@ -127,7 +127,11 @@ export class ProviderManager {
     const environment = await providerEnvironment();
     this.processEnvironment = environment.env;
     const invocation = providerProcessInvocation(executable, providerAuthLoginArgs(providerId), environment.env);
-    return { executable: invocation.command, args: invocation.args, env: environment.env };
+    return {
+      executable: invocation.command,
+      args: providerPtyArguments(invocation),
+      env: environment.env,
+    };
   }
 
   cachedMetadata(providerId: ProviderId): ProviderMetadata {

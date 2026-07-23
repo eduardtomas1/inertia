@@ -1944,9 +1944,15 @@ textarea {
 
 /* Composer */
 .composer-region {
+  position: relative;
+  z-index: 0;
   min-width: 0;
   flex: 0 0 auto;
   container-type: inline-size;
+}
+
+.composer-region:has(.composer.has-open-menu) {
+  z-index: 25;
 }
 
 .composer-shell {
@@ -1967,6 +1973,10 @@ textarea {
   backdrop-filter: var(--glass-filter);
   box-shadow: 0 18px 48px -28px rgba(0, 0, 0, 0.3), 0 4px 14px -8px rgba(0, 0, 0, 0.18), var(--glass-inset);
   transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.composer.has-open-menu {
+  z-index: 25;
 }
 
 .composer-suggestion-menu {

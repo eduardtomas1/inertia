@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, Command, MessageSquarePlus, Paperclip, Send, ShieldCheck, SlidersHorizontal, Sparkles, Square, Wrench, X } from "lucide-react";
 import clsx from "clsx";
 import type { AccessMode, ChatAttachment, Conversation, InteractionMode, ProjectAction, ProviderId, ProviderInfo, ThreadUsageSnapshot, UsageDisplayMode, WorkspaceEntry } from "@shared/contracts";
@@ -78,6 +78,7 @@ export function Composer({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [moreSection, setMoreSection] = useState<MoreSection | null>(null);
   const [moreSubmenuSide, setMoreSubmenuSide] = useState<HorizontalSubmenuSide | null>(null);
+  const [morePopoverMaxHeight, setMorePopoverMaxHeight] = useState<number | null>(null);
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } = useDismissibleMenu<ComposerMenu>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const morePopoverRef = useRef<HTMLDivElement>(null);
@@ -102,6 +103,23 @@ export function Composer({
     moreHoverTimerRef.current = null;
     setMoreSection(null);
     setMoreSubmenuSide(null);
+  }, [menu]);
+
+  useLayoutEffect(() => {
+    if (menu !== "more") {
+      setMorePopoverMaxHeight(null);
+      return;
+    }
+    const updateAvailableHeight = () => {
+      const popover = morePopoverRef.current;
+      if (!popover) return;
+      const header = popover.closest(".workspace-frame")?.querySelector<HTMLElement>(".workspace-header");
+      const safeTop = Math.max(8, (header?.getBoundingClientRect().bottom ?? 0) + 8);
+      setMorePopoverMaxHeight(Math.max(80, Math.floor(popover.getBoundingClientRect().bottom - safeTop)));
+    };
+    updateAvailableHeight();
+    window.addEventListener("resize", updateAvailableHeight);
+    return () => window.removeEventListener("resize", updateAvailableHeight);
   }, [menu]);
 
   useEffect(() => () => {
@@ -374,7 +392,7 @@ export function Composer({
           )}
         </div>
       )}
-      <div className="composer" data-disabled={disabled} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}>
+      <div className={clsx("composer", menu && "has-open-menu")} data-disabled={disabled} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}>
         {promptContext && (
           <div className="composer-context" aria-label="Selected diff context">
             <MessageSquarePlus size={13} />
@@ -554,6 +572,7 @@ export function Composer({
                     ref={morePopoverRef}
                     id={menuId("more")}
                     className="composer-popover composer-more-popover"
+                    style={morePopoverMaxHeight === null ? undefined : { maxHeight: morePopoverMaxHeight }}
                     role="menu"
                     aria-label={moreSection && !moreSubmenuSide ? `${moreSectionLabel(moreSection)} options` : "More composer options"}
                     onKeyDown={handleMoreMenuNavigation}
@@ -610,6 +629,7 @@ export function Composer({
                   {moreSection && moreSubmenuSide && (
                     <div
                       className={clsx("composer-popover composer-more-submenu", `opens-${moreSubmenuSide}`)}
+                      style={morePopoverMaxHeight === null ? undefined : { maxHeight: morePopoverMaxHeight }}
                       role="menu"
                       aria-label={`${moreSectionLabel(moreSection)} options`}
                       data-more-submenu

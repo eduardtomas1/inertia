@@ -187,6 +187,7 @@ function startCliRun(
       env: options.environment,
       detached: process.platform !== "win32",
       shell: false,
+      windowsVerbatimArguments: processInvocation.windowsVerbatimArguments,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });

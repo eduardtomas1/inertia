@@ -129,6 +129,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     env: options.environment,
     detached: process.platform !== "win32",
     shell: false,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
   });

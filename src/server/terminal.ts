@@ -62,7 +62,7 @@ export class TerminalManager {
     owner: WebSocket,
     cwd: string,
     executable: string,
-    args: readonly string[],
+    args: readonly string[] | string,
     env: NodeJS.ProcessEnv,
     cols: number,
     rows: number,
@@ -76,7 +76,7 @@ export class TerminalManager {
     const id = randomUUID();
     let pseudoterminal: IPty;
     try {
-      pseudoterminal = spawn(executable, [...args], {
+      pseudoterminal = spawn(executable, typeof args === "string" ? args : [...args], {
         name: "xterm-256color",
         cols,
         rows,

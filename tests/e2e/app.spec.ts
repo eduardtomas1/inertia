@@ -611,18 +611,23 @@ test("keeps the macOS brand in the native titlebar row and navigates it home", a
     expect((geometry?.markLeft ?? 0) - trafficLightClusterRight).toBeGreaterThanOrEqual(MAC_BRAND_MIN_CLEAR_GAP);
     await page.screenshot({ path: testInfo.outputPath("v004-brand-wide.png") });
 
-    await resizeWindow(760, 640);
-    await page.getByRole("button", { name: "Toggle project navigation" }).click();
-    await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
-    await page.waitForTimeout(250);
-    const compactMarkLeft = await page.locator(".brand-lockup").evaluate((lockup) => {
-      const bounds = lockup.getBoundingClientRect();
-      return bounds.left + Number.parseFloat(getComputedStyle(lockup).paddingLeft);
-    });
-    expect(compactMarkLeft - trafficLightClusterRight).toBeGreaterThanOrEqual(MAC_BRAND_MIN_CLEAR_GAP);
-    await page.screenshot({ path: testInfo.outputPath("v004-brand-compact.png") });
-    await page.getByRole("button", { name: "Close navigation" }).last().click();
-    await resizeWindow(1440, 920);
+    try {
+      await resizeWindow(760, 640);
+      await page.getByRole("button", { name: "Toggle project navigation" }).click();
+      await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
+      await expect.poll(async () => {
+        const compactMarkLeft = await page.locator(".brand-lockup").evaluate((lockup) => {
+          const bounds = lockup.getBoundingClientRect();
+          return bounds.left + Number.parseFloat(getComputedStyle(lockup).paddingLeft);
+        });
+        return compactMarkLeft - trafficLightClusterRight;
+      }).toBeGreaterThanOrEqual(MAC_BRAND_MIN_CLEAR_GAP);
+      await page.screenshot({ path: testInfo.outputPath("v004-brand-compact.png") });
+    } finally {
+      const closeNavigation = page.getByRole("button", { name: "Close navigation" }).last();
+      if (await closeNavigation.isVisible().catch(() => false)) await closeNavigation.click();
+      await resizeWindow(1440, 920);
+    }
   }
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();

@@ -544,6 +544,7 @@ export function ChatWorkspace({
           disabled={!conversation}
           sending={sending}
           running={conversation.status === "running" || conversation.status === "needs-input"}
+          providerLocked={messages.length > 0}
           onSend={onSendMessage}
           onUpdateConversation={onUpdateConversation}
           onChooseAttachments={onChooseAttachments}

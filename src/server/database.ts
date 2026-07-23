@@ -959,6 +959,11 @@ export class RuntimeStore {
     })();
   }
 
+  hasConversationMessages(conversationId: string): boolean {
+    this.requireConversation(conversationId);
+    return this.database.prepare("SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1").get(conversationId) !== undefined;
+  }
+
   updateConversation(conversationId: string, update: Partial<Pick<Conversation, "title" | "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind">>): Conversation {
     const current = conversationFromRow(this.requireConversation(conversationId));
     const providerChanged = update.providerId !== undefined && update.providerId !== current.providerId;

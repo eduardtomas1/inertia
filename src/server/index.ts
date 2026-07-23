@@ -766,6 +766,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           break;
         case "conversation.update": {
           const { conversationId, ...update } = command.payload;
+          if (update.providerId !== undefined) {
+            const current = store.conversation(conversationId);
+            if (
+              update.providerId !== current.providerId
+              && (current.providerSessionId !== null || store.hasConversationMessages(conversationId))
+            ) {
+              throw new RequestError("Start a new chat to use a different agent. Existing chats keep their original agent context.");
+            }
+          }
           const changesRunConfiguration = (
             update.providerId !== undefined
             || update.model !== undefined

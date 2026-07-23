@@ -16,6 +16,7 @@ type ComposerProps = {
   disabled: boolean;
   sending: boolean;
   running: boolean;
+  providerLocked: boolean;
   mentionResults: WorkspaceEntry[];
   usage: ThreadUsageSnapshot | null;
   usageDisplayMode: UsageDisplayMode;
@@ -58,6 +59,7 @@ export function Composer({
   disabled,
   sending,
   running,
+  providerLocked,
   mentionResults,
   usage,
   usageDisplayMode,
@@ -274,21 +276,27 @@ export function Composer({
       ));
     }
     if (section === "provider") {
-      return providers.map((provider) => (
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={conversation.providerId === provider.id}
-          key={provider.id}
-          onClick={() => {
-            onUpdateConversation({ providerId: provider.id as ProviderId, model: "", reasoningEffort: "" });
-            dismissMenu("selection");
-          }}
-        >
-          <span><strong>{provider.label}</strong><small>{providerStateLabel(provider)} · {providerStateDetail(provider)}</small></span>
-          {conversation.providerId === provider.id && <span className="option-check" />}
-        </button>
-      ));
+      return (
+        <>
+          {providerLocked && <p className="popover-empty">This chat keeps its original agent. Start a new chat to use another.</p>}
+          {providers.map((provider) => (
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={conversation.providerId === provider.id}
+              disabled={providerLocked && conversation.providerId !== provider.id}
+              key={provider.id}
+              onClick={() => {
+                onUpdateConversation({ providerId: provider.id as ProviderId, model: "", reasoningEffort: "" });
+                dismissMenu("selection");
+              }}
+            >
+              <span><strong>{provider.label}</strong><small>{providerStateLabel(provider)} · {providerStateDetail(provider)}</small></span>
+              {conversation.providerId === provider.id && <span className="option-check" />}
+            </button>
+          ))}
+        </>
+      );
     }
     if (section === "model") {
       if (!selectedProvider?.models.length) return <p className="popover-empty">This provider uses its default model.</p>;
@@ -475,8 +483,9 @@ export function Composer({
               {menu === "provider" && (
                 <div ref={(node) => setMenuPopover("provider", node)} id={menuId("provider")} className="composer-popover provider-popover" role="menu" aria-label="Provider and model">
                   <div className="popover-title">Provider</div>
+                  {providerLocked && <p className="popover-empty">This chat keeps its original agent. Start a new chat to use another.</p>}
                   {providers.map((provider) => (
-                    <button type="button" role="menuitemradio" aria-checked={conversation.providerId === provider.id} key={provider.id} onClick={() => { onUpdateConversation({ providerId: provider.id as ProviderId, model: "", reasoningEffort: "" }); }}>
+                    <button type="button" role="menuitemradio" aria-checked={conversation.providerId === provider.id} disabled={providerLocked && conversation.providerId !== provider.id} key={provider.id} onClick={() => { onUpdateConversation({ providerId: provider.id as ProviderId, model: "", reasoningEffort: "" }); }}>
                       <span><strong>{provider.label}</strong><small>{providerStateLabel(provider)} · {providerStateDetail(provider)}</small></span>
                       {conversation.providerId === provider.id && <span className="option-check" />}
                     </button>

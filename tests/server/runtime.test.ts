@@ -357,6 +357,22 @@ process.exit(child.status ?? 1);
     );
     const conversation = conversationSnapshot.snapshot.conversations.find(({ title }) => title === "Runtime work");
 
+    const providerRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.update",
+      requestId: providerRequestId,
+      payload: { conversationId: conversation?.id, providerId: "claude" },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === providerRequestId,
+    );
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.conversations.some(({ id, providerId }) => id === conversation?.id && providerId === "claude"),
+    );
+
     const messageRequestId = randomUUID();
     send(client.socket, {
       type: "message.send",
@@ -371,6 +387,19 @@ process.exit(child.status ?? 1);
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated",
     );
     expect(messageSnapshot.snapshot.messages.some(({ content }) => content === "Keep the runtime calm.")).toBe(true);
+    expect(messageSnapshot.snapshot.conversations.find(({ id }) => id === conversation?.id)?.providerId).toBe("claude");
+
+    const lockedProviderRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.update",
+      requestId: lockedProviderRequestId,
+      payload: { conversationId: conversation?.id, providerId: "codex" },
+    });
+    const lockedProvider = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+        event.type === "request.error" && event.requestId === lockedProviderRequestId,
+    );
+    expect(lockedProvider.message).toBe("Start a new chat to use a different agent. Existing chats keep their original agent context.");
 
     client.socket.close();
     await runtime.close();

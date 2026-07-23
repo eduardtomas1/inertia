@@ -454,6 +454,7 @@ test("dismisses and switches Composer menus without forcing a selection", async 
   await expect(providerTrigger).toHaveAttribute("aria-expanded", "true");
   await expect(providerTrigger).toHaveAttribute("aria-controls", "composer-provider-menu");
   await expect(providerMenu).toBeVisible();
+  await expect(providerMenu.getByRole("menuitemradio").filter({ hasText: /^Claude/u })).toBeEnabled();
 
   await providerMenu.getByText("Provider", { exact: true }).click();
   await expect(providerMenu).toBeVisible();
@@ -480,6 +481,26 @@ test("dismisses and switches Composer menus without forcing a selection", async 
   await expect(modeMenu).toBeHidden();
   await expect(modeTrigger).toBeFocused();
   await expect(modeTrigger.locator("span").first()).toHaveText(nextMode);
+
+  const messageId = randomUUID();
+  const database = new Database(join(testDirectory, "data", "inertia.sqlite"));
+  const state = database.prepare("SELECT active_conversation_id FROM app_state WHERE id = 1").get() as { active_conversation_id: string };
+  database.prepare("INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at) VALUES (?, ?, 'user', ?, '[]', ?)")
+    .run(messageId, state.active_conversation_id, "Keep this chat with its original agent.", new Date().toISOString());
+  database.close();
+  try {
+    await page.reload();
+    await page.getByRole("textbox", { name: "Message" }).waitFor();
+    await providerTrigger.click();
+    await expect(providerMenu.getByText("This chat keeps its original agent. Start a new chat to use another.")).toBeVisible();
+    await expect(providerMenu.getByRole("menuitemradio").filter({ hasText: /^Claude/u })).toBeDisabled();
+  } finally {
+    const cleanupDatabase = new Database(join(testDirectory, "data", "inertia.sqlite"));
+    cleanupDatabase.prepare("DELETE FROM messages WHERE id = ?").run(messageId);
+    cleanupDatabase.close();
+    await page.reload();
+    await page.getByRole("textbox", { name: "Message" }).waitFor();
+  }
   await workspaceHeader.getByRole("button", { name: "Open workspace tools" }).click();
   expect(rendererErrors).toEqual([]);
 });

@@ -2,6 +2,32 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.6 — 2026-07-23
+
+### A clearer way into every project
+
+- Fresh installs now open directly on the project picker instead of creating an example project and conversation.
+- Each project has one consistent New chat entry point. The empty project view explains the next step without repeating the same action throughout the sidebar.
+- Project navigation now separates Projects from Work: Projects keeps the repository tree calm, while Work prioritizes conversations that need attention, active runs, and a bounded recent history.
+- Completed background work, unread results, settled threads, archived conversations, and failures are easier to distinguish without leaving permanent noise behind.
+- Search, keyboard navigation, focus handling, and compact drawer behavior remain predictable across both navigation modes.
+
+### Agent work that is easier to follow
+
+- Live reasoning and tool activity now read as one compact provider run, followed by a clearly separated final answer.
+- Completed activity can fold into a quiet summary while failed, cancelled, waiting, or important work remains visible.
+- The Runs surface prioritizes approvals and provider questions before active and recent work, with only the actions each run can actually perform.
+- Conversations keep the provider they started with after the first message. Switching to a different agent now requires a new chat so provider-owned context is never implied to transfer.
+- Usage presentation responds more carefully to the available space and to whether the provider has supplied a meaningful report.
+
+### Smoother desktop behavior
+
+- Windows and macOS resolve the saved or system theme before the first visible paint, reducing mismatched background flashes while the renderer starts.
+- Native window backgrounds use only validated cached theme values and safely fall back when that cache is missing or invalid.
+- Sidebar transitions, titlebar spacing, composer controls, panel boundaries, and agent transcript density received another responsive pass.
+- End-to-end coverage now starts from a genuinely empty installation and exercises project creation, Projects and Work navigation, prioritized runs, theme bootstrap, and common workspace sizes.
+- The cross-platform suite also verifies Windows Codex discovery through safe Unicode npm shims and keeps timing-sensitive macOS layout checks isolated from later tests.
+
 ## 0.0.5 — 2026-07-23
 
 ### Review changes with confidence

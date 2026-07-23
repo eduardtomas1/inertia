@@ -64,13 +64,13 @@ Inertia uses the coding tools and accounts already installed on your computer. C
 
 Provider credentials remain in each provider's own storage. Inertia stores workspace history and preferences locally, and its optional runtime diagnostics exclude prompts, source, token values, credentials, and connection capabilities.
 
-### Version 0.0.5
+### Version 0.0.6
 
-This release turns Changes into a real review workflow: line-range questions and revisions, persistent notes and review progress, isolated agent summaries, selective commits, and guarded reversible edits that preserve staged and unstaged work. Conversations now have safe Markdown, readable work logs, stable streaming, changed-file summaries, and response preferences that survive a restart.
+This release makes the workspace easier to enter and easier to read. New installs open directly on the project picker instead of creating a demo, project navigation has one clear New chat path, and the Projects and Work views separate browsing from activity that needs attention.
 
-It also adds an Activity Center, activity-first project navigation, canonical repository grouping, stronger provider interactions, accurate usage freshness, broad Windows Codex discovery, private runtime diagnostics, responsive interface scaling, rebuilt application icons, and stricter native package validation.
+Agent activity, completed work, final answers, usage, and recent runs now have a calmer hierarchy. Each conversation also keeps its original provider once work begins, while first-paint theme handling reduces visual flashing across Windows and macOS.
 
-Download [Inertia v0.0.5](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.5):
+Download [Inertia v0.0.6](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.6):
 
 | Platform | Download |
 | --- | --- |

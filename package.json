@@ -1,6 +1,6 @@
 {
   "name": "inertia",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "A calm local workspace for coding with agents.",
   "desktopName": "dev.inertia.app.desktop",
   "main": "out/main/index.js",

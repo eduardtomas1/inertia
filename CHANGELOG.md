@@ -2,6 +2,20 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.5 — 2026-07-23
+
+### A clearer review workspace
+
+- Changes now opens into a richer diff-review flow with better file navigation, review summaries, and safer commit workflows.
+- Responses render polished Markdown, while tool work, reasoning, approvals, and questions stay together in a chronological activity center.
+- The composer, project sidebar, usage display, request cards, and theme behavior have been refined across desktop sizes.
+
+### Stronger providers and desktop foundations
+
+- Provider interactions are more reliable across Codex, Claude, Cursor, and OpenCode, with better lifecycle handling and Windows Codex discovery.
+- Project identity, runtime diagnostics, database state, terminal behavior, and recovery information are clearer and more resilient.
+- Application icons were rebuilt, and Linux identity checks, Electron security validation, and packaged-app smoke coverage were strengthened across all three platforms.
+
 ## 0.0.4 — 2026-07-22
 
 ### First-class provider runtimes

@@ -132,7 +132,9 @@ if (args[0] === "login" && args[1] === "status") { console.log("Logged in using 
 if (args[0] === "app-server" && args[1] === "--help") { console.log("codex app-server - Run the app server"); process.exit(0); }
 process.exit(2);
 `.trimStart(), "utf8");
-  await writeFile(command, `@echo off\r\n"${process.execPath}" "${program}" %*\r\n`, "utf8");
+  // Match npm's relative shim layout so Unicode paths are resolved by cmd.exe
+  // instead of being decoded from the batch file through a legacy code page.
+  await writeFile(command, `@echo off\r\n"${process.execPath}" "%~dp0codex-package-smoke.cjs" %*\r\n`, "utf8");
   return { command, directory };
 }
 
@@ -275,5 +277,13 @@ try {
       "forced packaged process cleanup",
     );
   }
-  await rm(temporaryRoot, { recursive: true, force: true });
+  await rm(temporaryRoot, {
+    recursive: true,
+    force: true,
+    // Chromium can briefly retain profile WAL handles after its owning
+    // process exits on Windows. Keep cleanup bounded while allowing the OS to
+    // release those handles instead of turning a successful smoke into EBUSY.
+    maxRetries: process.platform === "win32" ? 10 : 0,
+    retryDelay: 100,
+  });
 }

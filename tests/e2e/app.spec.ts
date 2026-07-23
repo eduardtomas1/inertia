@@ -850,6 +850,7 @@ for (const size of [
       await navigationToggle.click();
       const mobileSidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
       await expect(mobileSidebar).toBeVisible();
+      await expect(mobileSidebar.getByRole("button", { name: "Close navigation" })).toBeFocused();
       await expect(page.locator(".workspace-shell")).toHaveAttribute("inert", "");
       await expectNoViewportOverflow();
       const drawerControls = mobileSidebar.locator('button:not([disabled]), input:not([disabled])');

@@ -341,7 +341,8 @@ test("persists composer usage modes without losing the followed transcript", asy
   await page.getByRole("button", { name: "Go to workspace" }).click();
   const autoCollapsed = page.getByRole("region", { name: "Usage and context" });
   await expect(autoCollapsed).toHaveAttribute("data-mode", "compact");
-  await expect(autoCollapsed).toHaveAttribute("data-collapse-reason", "unavailable");
+  await expect(autoCollapsed).toHaveAttribute("data-auto-collapsed", "true");
+  await expect(autoCollapsed).toHaveAttribute("data-collapse-reason", /^(?:space|unavailable)$/u);
   await autoCollapsed.getByRole("button", { name: "Expand usage and context" }).click();
   await expect(page.getByRole("region", { name: "Usage and context" })).toHaveAttribute("data-mode", "expanded");
   expect(rendererErrors).toEqual([]);

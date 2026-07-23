@@ -588,8 +588,8 @@ process.exit(child.status ?? 1);
   it("updates a matching provider activity instead of persisting duplicate lifecycle rows", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     const { authFile } = fakeCodex(root, [
-      { type: "item.started", item: { type: "command_execution" } },
-      { type: "item.completed", item: { type: "command_execution" } },
+      { type: "item.started", item: { type: "command_execution", command: "npm test" } },
+      { type: "item.completed", item: { type: "command_execution", command: "npm test" } },
       { type: "item.completed", item: { type: "agent_message", text: "Activity lifecycle complete." } },
       { type: "turn.completed" },
     ]);
@@ -634,11 +634,37 @@ process.exit(child.status ?? 1);
       (event): event is Extract<ServerEvent, { type: "agent.activity" }> =>
         event.type === "agent.activity" && event.activity.kind === "command" && event.activity.status === "running",
     );
+    const runningCheck = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.runs.some((run) =>
+          run.conversationId === conversationId
+          && run.kind === "check"
+          && run.label === "npm test"
+          && run.status === "running"),
+    );
+    const commandRun = runningCheck.snapshot.runs.find((run) =>
+      run.conversationId === conversationId
+      && run.kind === "check"
+      && run.label === "npm test");
+    expect(commandRun).toMatchObject({
+      actionId: null,
+      canStop: false,
+      status: "running",
+    });
     const completed = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "agent.activity" }> =>
         event.type === "agent.activity" && event.activity.id === started.activity.id && event.activity.status === "completed",
     );
-    expect(completed.activity).toMatchObject({ id: started.activity.id, runId: started.activity.runId, title: "Command" });
+    expect(completed.activity).toMatchObject({ id: started.activity.id, runId: started.activity.runId, title: "npm test" });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.runs.some((run) =>
+          run.id === commandRun?.id
+          && run.status === "succeeded"
+          && run.finishedAt !== null),
+    );
     await client.events.next(
       (event): event is Extract<ServerEvent, { type: "agent.completed" }> =>
         event.type === "agent.completed" && event.conversationId === conversationId,
@@ -652,6 +678,13 @@ process.exit(child.status ?? 1);
     expect(persisted.snapshot.activities.filter((activity) => activity.runId === started.activity.runId && activity.kind === "command")).toEqual([
       expect.objectContaining({ id: started.activity.id, status: "completed" }),
     ]);
+    expect(persisted.snapshot.runs).toContainEqual(expect.objectContaining({
+      id: commandRun?.id,
+      kind: "check",
+      label: "npm test",
+      status: "succeeded",
+      canStop: false,
+    }));
   });
 
   it("invalidates reviewed targets and notes immediately after committing their change", async () => {

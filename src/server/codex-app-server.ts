@@ -73,6 +73,18 @@ const RPC_TIMEOUT_MS = 30_000;
 
 type CodexRunPhase = "opening" | "starting-turn" | "running" | "settled";
 
+function commandExecutionLabel(item: JsonObject): string {
+  const raw = boundedText(item.command, 4_000)
+    ?? boundedText(item.cmd, 4_000)
+    ?? (Array.isArray(item.command)
+      ? item.command.filter((value): value is string => typeof value === "string").join(" ")
+      : undefined);
+  if (!raw) return "Command";
+  const packageScript = /\b(npm|pnpm|yarn|bun)\s+(?:(run)\s+)?([A-Za-z0-9:_-]{1,80})/u.exec(raw);
+  if (!packageScript) return "Command";
+  return `${packageScript[1]} ${packageScript[2] ? "run " : ""}${packageScript[3]}`;
+}
+
 interface CodexAccessPolicy {
   approvalPolicy: "untrusted" | "on-request" | "never";
   threadSandbox: "read-only" | "workspace-write" | "danger-full-access";
@@ -344,7 +356,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
           if (summary) options.onReasoning?.(summary);
         }
       }
-      else if (itemType === "commandExecution") emitActivity("command", phase, "Command");
+      else if (itemType === "commandExecution" && item) emitActivity("command", phase, commandExecutionLabel(item));
       else if (itemType === "fileChange") emitActivity("tool", phase, "File change");
       else if (itemType === "agentMessage" && method === "item/completed") {
         const itemId = boundedText(item?.id, 512);

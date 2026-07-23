@@ -447,6 +447,36 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       if (reasoningId) store.updateReasoning(reasoningId, { content: reasoningText, status });
     };
     const runningActivities = new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
+    const providerCommandRuns = new Map<string, string>();
+    const syncProviderCommandRun = (
+      activity: AgentActivity,
+      phase?: ProviderActivityEvent["phase"],
+    ): void => {
+      if (activity.kind !== "command" || phase === "info") return;
+      const status = activity.status === "running"
+        ? "running"
+        : activity.status === "failed"
+          ? "failed"
+          : "succeeded";
+      const label = activity.title === "Command" ? "Agent command" : activity.title;
+      const existingId = providerCommandRuns.get(activity.id);
+      if (existingId) {
+        store.updateWorkspaceRun(existingId, { label, status });
+        if (status !== "running") providerCommandRuns.delete(activity.id);
+        return;
+      }
+      const workspaceRun = store.createWorkspaceRun({
+        kind: projectActionKind(activity.title, activity.title, false),
+        projectId: conversation.projectId,
+        conversationId,
+        label,
+        detail: `${providerLabel(conversation.providerId)} · ${conversation.title}`,
+        status: "running",
+        port: null,
+      });
+      if (status === "running") providerCommandRuns.set(activity.id, workspaceRun.id);
+      else store.updateWorkspaceRun(workspaceRun.id, { status });
+    };
     const recordProviderActivity = (event: ProviderActivityEvent): AgentActivity => {
       const status = activityStatus(event);
       const candidates = runningActivities.get(event.kind) ?? [];
@@ -458,7 +488,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           const [match] = candidates.splice(matchIndex, 1);
           if (candidates.length === 0) runningActivities.delete(event.kind);
           else runningActivities.set(event.kind, candidates);
-          return store.updateActivity(match.id, { title: event.label, status });
+          const activity = store.updateActivity(match.id, { title: event.label, status });
+          syncProviderCommandRun(activity, event.phase);
+          return activity;
         }
       }
 
@@ -470,6 +502,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         detail: null,
         status,
       });
+      syncProviderCommandRun(activity, event.phase);
       if (event.phase === "started") {
         candidates.push(activity);
         runningActivities.set(event.kind, candidates);
@@ -480,6 +513,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       for (const activities of runningActivities.values()) {
         for (const pending of activities) {
           const activity = store.updateActivity(pending.id, { status });
+          syncProviderCommandRun(activity);
           broadcast({ type: "agent.activity", activity });
         }
       }
@@ -517,6 +551,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           onActivity: (event) => {
             const activity = recordProviderActivity(event);
             broadcast({ type: "agent.activity", activity });
+            broadcastSnapshot();
           },
           onApproval: (event) => {
             const request: AgentApprovalRequest = {

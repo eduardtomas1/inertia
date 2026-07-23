@@ -211,6 +211,19 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
+test("changes the visible theme on every quick-toggle click", async () => {
+  const html = page.locator("html");
+  const themeTrigger = page.getByRole("button", { name: /^Change theme \(current:/ });
+
+  for (let click = 0; click < 3; click += 1) {
+    const before = await html.getAttribute("data-theme");
+    await themeTrigger.click();
+    await expect.poll(() => html.getAttribute("data-theme")).not.toBe(before);
+  }
+
+  expect(rendererErrors).toEqual([]);
+});
+
 test("reveals the fixed local runtime diagnostics directory from settings", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Archive & data", exact: true }).click();
@@ -331,6 +344,11 @@ test("switches sidebar modes and manages activity-first thread history", async (
   await expect(sidebar).toHaveClass(/sidebar-mode-activity/u);
   const threadCard = sidebar.getByRole("button", { name: "New thread, Idle" });
   await expect(threadCard).toBeVisible();
+  const activityCard = threadCard.locator("..");
+  const relativeTime = activityCard.locator(".activity-thread-topline time");
+  await expect(relativeTime).toHaveCSS("opacity", "1");
+  await activityCard.hover();
+  await expect(relativeTime).toHaveCSS("opacity", "0");
 
   const firstNavigationItem = sidebar.locator("[data-sidebar-nav]").first();
   await firstNavigationItem.focus();
@@ -362,6 +380,9 @@ test("switches sidebar modes and manages activity-first thread history", async (
 
 test("dismisses and switches Composer menus without forcing a selection", async () => {
   await resizeWindow(1440, 920);
+  const workspaceHeader = page.locator(".workspace-header");
+  const closeTools = workspaceHeader.getByRole("button", { name: "Close workspace tools" });
+  if (await closeTools.isVisible()) await closeTools.click();
   const composer = page.getByRole("textbox", { name: "Message" });
   await composer.fill("@sam");
   await expect(page.getByRole("listbox", { name: "Project files" }).getByRole("option").first()).toHaveAttribute("aria-selected", "false");
@@ -402,6 +423,61 @@ test("dismisses and switches Composer menus without forcing a selection", async 
   await expect(modeMenu).toBeHidden();
   await expect(modeTrigger).toBeFocused();
   await expect(modeTrigger.locator("span").first()).toHaveText(nextMode);
+  await workspaceHeader.getByRole("button", { name: "Open workspace tools" }).click();
+  expect(rendererErrors).toEqual([]);
+});
+
+test("collapses composer settings without displacing send and right-aligns user turns", async () => {
+  await resizeWindow(1180, 800);
+  const composer = page.locator(".composer");
+  const more = page.getByRole("button", { name: "More composer options" });
+  const send = page.getByRole("button", { name: "Send message" });
+  await expect(more).toBeVisible();
+  await expect(send).toBeVisible();
+  await expect(page.getByRole("button", { name: "Choose provider and model" })).toBeHidden();
+
+  const bounds = await composer.boundingBox();
+  const sendBounds = await send.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(sendBounds).not.toBeNull();
+  expect((sendBounds?.x ?? 0) + (sendBounds?.width ?? 0)).toBeLessThanOrEqual((bounds?.x ?? 0) + (bounds?.width ?? 0));
+
+  await more.click();
+  const compactOptions = page.getByRole("menu", { name: "More composer options" });
+  const providerItem = compactOptions.getByRole("menuitem", { name: /^Provider\b/ });
+  await expect(providerItem).toBeVisible();
+  const modelItem = compactOptions.getByRole("menuitem", { name: /^Model\b/ });
+  await expect(modelItem).toBeVisible();
+  await expect(compactOptions.getByRole("menuitem", { name: /^Mode\b/ })).toBeVisible();
+  await expect(compactOptions.getByRole("menuitem", { name: /^Access\b/ })).toBeVisible();
+  await providerItem.hover();
+  const providerOptions = page.getByRole("menu", { name: "Provider options" });
+  await expect(providerOptions).toBeVisible();
+  await expect(providerOptions.getByRole("menuitemradio").first()).toBeVisible();
+  await providerItem.click();
+  await expect(providerOptions).toBeVisible();
+  await page.mouse.move(20, 20);
+  await expect(providerOptions).toBeHidden();
+  await expect(compactOptions).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  const userAlignmentGap = await page.evaluate(() => {
+    const timeline = document.querySelector(".response-timeline");
+    if (!timeline) throw new Error("Response timeline is unavailable");
+    const turn = document.createElement("section");
+    turn.className = "response-turn";
+    const message = document.createElement("article");
+    message.className = "message is-user";
+    message.innerHTML = '<div class="message-meta"><span>You</span></div><div class="message-body">Alignment probe</div>';
+    turn.append(message);
+    timeline.append(turn);
+    const turnBounds = turn.getBoundingClientRect();
+    const messageBounds = message.getBoundingClientRect();
+    turn.remove();
+    return Math.abs(turnBounds.right - messageBounds.right);
+  });
+  expect(userAlignmentGap).toBeLessThanOrEqual(1);
+  await resizeWindow(1440, 920);
   expect(rendererErrors).toEqual([]);
 });
 
@@ -588,6 +664,11 @@ test("opens the categorized activity center", async () => {
   await expect(center).toBeVisible();
   for (const heading of ["Agents", "Checks", "Services", "Source Control"]) {
     await expect(center.getByRole("heading", { name: heading })).toBeVisible();
+  }
+  const activityRows = center.locator(".activity-run");
+  if (await activityRows.count()) {
+    const rowHeight = await activityRows.first().evaluate((row) => row.getBoundingClientRect().height);
+    expect(rowHeight).toBeLessThanOrEqual(42);
   }
   await center.getByRole("button", { name: "Close activity center" }).click();
   await expect(center).toHaveCount(0);

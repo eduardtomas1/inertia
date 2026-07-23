@@ -21,7 +21,6 @@ import {
   type ProjectAction,
   type ProviderId,
   type ServerEvent,
-  type ThemePreference,
   type ThreadUsageSnapshot,
   type WorkspaceEntry,
   type WorkspaceFilePreview,
@@ -49,6 +48,7 @@ import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePersistedSize } from "./hooks/usePersistedSize";
 import { useTheme } from "./hooks/useTheme";
+import { nextQuickTheme } from "./utils/theme";
 import { projectNameFromPath } from "./lib/format";
 
 type CommandWithoutId = ClientCommand extends infer Command
@@ -68,7 +68,6 @@ function resultEvent(event: ServerEvent): ResultEvent {
   return event;
 }
 
-const themeOrder: ThemePreference[] = ["system", "light", "dark"];
 const RESIZE_HANDLE_SIZE = 7;
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 420;
@@ -434,7 +433,9 @@ export default function App(): React.JSX.Element {
     const path = await window.inertia.selectCodexExecutable();
     if (path) await updateSettings({ codexBinaryPath: path });
   };
-  const cycleTheme = () => updateSettings({ theme: themeOrder[(themeOrder.indexOf(settings.theme) + 1) % themeOrder.length] });
+  const cycleTheme = () => updateSettings({
+    theme: nextQuickTheme(settings.theme, window.matchMedia("(prefers-color-scheme: dark)").matches),
+  });
   const refreshProvider = useCallback((providerId?: ProviderId) => {
     void run("provider.refresh", { type: "provider.refresh", payload: { ...(providerId ? { providerId } : {}) } }).catch(() => undefined);
   }, [run]);

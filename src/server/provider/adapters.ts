@@ -1,5 +1,13 @@
 import { PROVIDER_INFO } from "./catalog";
 import {
+  continuationIdentitySchema,
+  knownHarnessIdSchema,
+  modelBackendProfileSchema,
+  modelSelectionSchema,
+  nativeBackendProfile,
+  type ModelBackendProfile,
+} from "../../shared/model-routing";
+import {
   PROVIDER_IDS,
   ProviderRuntimeError,
   type ProviderActivityKind,
@@ -315,6 +323,18 @@ export function buildProviderInvocation(input: ProviderRunInput, command: string
 
 export function validateProviderRunInput(input: ProviderRunInput): string {
   if (!isProviderId(input.providerId)) throw new ProviderRuntimeError("invalid_input", "Unknown provider.");
+  if (!knownHarnessIdSchema.safeParse(input.harnessId).success) {
+    throw new ProviderRuntimeError("invalid_input", "Unknown agent harness.");
+  }
+  if (!modelBackendProfileSchema.safeParse(input.backendProfile).success) {
+    throw new ProviderRuntimeError("invalid_input", "The model backend profile is invalid.");
+  }
+  if (!modelSelectionSchema.safeParse(input.modelSelection).success) {
+    throw new ProviderRuntimeError("invalid_input", "The model selection is invalid.");
+  }
+  if (!continuationIdentitySchema.safeParse(input.continuationIdentity).success) {
+    throw new ProviderRuntimeError("invalid_input", "The continuation identity is invalid.");
+  }
   const conversationId = (input.conversationId ?? input.threadId)?.trim();
   if (!conversationId || conversationId.length > 512 || conversationId.includes("\0")) {
     throw new ProviderRuntimeError("invalid_input", "A valid conversation identifier is required.");
@@ -326,10 +346,13 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
   if (input.prompt.length > MAX_PROMPT_CHARS || input.prompt.includes("\0")) {
     throw new ProviderRuntimeError("invalid_input", "The prompt is too large.");
   }
-  for (const value of [input.model, input.sessionId]) {
+  for (const value of [input.runId, input.turnId, input.model, input.sessionId]) {
     if (value !== undefined && (!value.trim() || value.length > 512 || value.includes("\0"))) {
       throw new ProviderRuntimeError("invalid_input", "A provider option is invalid.");
     }
+  }
+  if ((input.runId === undefined) !== (input.turnId === undefined)) {
+    throw new ProviderRuntimeError("invalid_input", "Run and turn identities must be provided together.");
   }
   const imagePaths = input.imagePaths ?? [];
   if (imagePaths.length > MAX_IMAGE_COUNT) {
@@ -346,22 +369,43 @@ export function providerFailureMessage(
   spawnError: NodeJS.ErrnoException | undefined,
   stderr: string,
   providerOutput = "",
+  backendProfile?: Pick<
+    ModelBackendProfile,
+    "id" | "displayName" | "authenticationMode"
+  >,
 ): string {
   const providerName = PROVIDER_INFO[providerId].name;
+  const customBackend = backendProfile !== undefined
+    && backendProfile.id !== nativeBackendProfile(providerId).id;
+  const backendName = customBackend
+    ? safeProviderBackendLabel(backendProfile.displayName)
+    : providerName;
   if (spawnError?.code === "ENOENT") return `${providerName} CLI is not installed or is not available on PATH.`;
   if (spawnError?.code === "EACCES") return `${providerName} CLI could not be started because it is not executable.`;
   const normalized = `${stderr}\n${providerOutput}`.toLowerCase();
   if (/requires a newer version|please upgrade (?:to )?the latest (?:app|cli)|cli.+out of date/.test(normalized)) {
     return `${providerName} needs an update before it can run the selected model.`;
   }
-  if (/not (?:logged|signed) in|authentication required|failed to authenticate|oauth session expired|unauthorized|please (?:log|sign) in/.test(normalized)) {
-    return `${providerName} is not authenticated. Sign in with its CLI and try again.`;
+  if (/not (?:logged|signed) in|authentication required|failed to authenticate|oauth session expired|unauthorized|credential (?:is )?unavailable|invalid (?:api[ -]?key|token|credential)|please (?:log|sign) in|\b401\b/.test(normalized)) {
+    return customBackend
+      ? `Authentication failed for ${backendName}. Check this model backend's credential and try again.`
+      : `${providerName} is not authenticated. Sign in with its CLI and try again.`;
   }
-  if (/rate.?limit|too many requests|quota/.test(normalized)) {
-    return `${providerName} is temporarily rate limited. Try again shortly.`;
+  if (/rate.?limit|too many requests|quota|\b429\b/.test(normalized)) {
+    return `${backendName} is temporarily rate limited. Try again shortly.`;
   }
   if (/model.+(?:not found|unknown|invalid|unavailable)/.test(normalized)) {
-    return `The selected ${providerName} model is unavailable.`;
+    return `The selected ${backendName} model is unavailable.`;
   }
-  return `${providerName} could not complete the request.`;
+  return `${backendName} could not complete the request.`;
+}
+
+/** Safe persisted backend labels may still contain control characters. */
+export function safeProviderBackendLabel(value: string): string {
+  const label = value
+    .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 120);
+  return label || "the selected model backend";
 }

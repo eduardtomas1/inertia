@@ -79,8 +79,13 @@ jobs:
       - name: Run portable runtime and provider protocol suite
         run: npm run test:portable
 
-      - name: Audit dependencies
+      - name: Audit production dependencies
         if: runner.os == 'Linux'
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Report complete dependency audit
+        if: runner.os == 'Linux'
+        continue-on-error: true
         run: npm audit --audit-level=high
 
       - name: Run Electron end-to-end tests

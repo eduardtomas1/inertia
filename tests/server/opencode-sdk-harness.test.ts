@@ -12,6 +12,7 @@ import {
   waitFor,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
+import { nativeProviderRunInput } from "./model-route-fixture";
 
 type LifecycleScenario = "resume" | "cancel" | "oversized" | "no-image";
 
@@ -194,7 +195,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: string[][] = [];
 
-    const result = await manager.run({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-rich",
       cwd: root,
@@ -204,7 +205,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       model: "fake/model-a",
       reasoningEffort: "high",
       imagePaths: [imagePath],
-    }, {
+    }), {
       onApproval: (event) => {
         approvals.push(event.request.title);
         expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
@@ -276,7 +277,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
 
-    await expect(manager.run({
+    await expect(manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-resume",
       cwd: root,
@@ -284,7 +285,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       interactionMode: "build",
       access: "supervised",
       sessionId: "opencode-lifecycle-session",
-    })).resolves.toMatchObject({
+    }))).resolves.toMatchObject({
       status: "completed",
       sessionId: "opencode-lifecycle-session",
       text: "Resumed OpenCode response",
@@ -306,14 +307,14 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
     let approvals = 0;
-    const result = manager.run({
+    const result = manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-permission-semantics",
       cwd: root,
       prompt: "Exercise permissions",
       interactionMode: "build",
       access: "supervised",
-    }, {
+    }), {
       onApproval: (event) => {
         approvals += 1;
         const decision = approvals === 1 ? "deny" : "cancel";
@@ -346,14 +347,14 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     );
     let markRunning!: () => void;
     const running = new Promise<void>((resolve) => { markRunning = resolve; });
-    const result = manager.run({
+    const result = manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-cancel",
       cwd: root,
       prompt: "Wait",
       interactionMode: "build",
       access: "supervised",
-    }, { onStatus: ({ status }) => { if (status === "running") markRunning(); } });
+    }), { onStatus: ({ status }) => { if (status === "running") markRunning(); } });
 
     await running;
     expect(manager.cancel("opencode-cancel")).toBe(true);
@@ -379,14 +380,14 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       { commands: { opencode: oversizedCommand } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
-    await expect(oversizedManager.run({
+    await expect(oversizedManager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-oversized",
       cwd: oversizedRoot,
       prompt: "Start",
       interactionMode: "build",
       access: "supervised",
-    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("oversized") });
+    }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("oversized") });
 
     const capabilityRoot = portableFixtureRoot("OpenCode image capability");
     roots.push(capabilityRoot);
@@ -399,7 +400,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       { commands: { opencode: capabilityCommand } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
-    await expect(capabilityManager.run({
+    await expect(capabilityManager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-no-image",
       cwd: capabilityRoot,
@@ -407,7 +408,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       interactionMode: "build",
       access: "supervised",
       imagePaths: [imagePath],
-    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("image input support") });
+    }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("image input support") });
   });
 
   it("settles missing and early-exit startup failures", async () => {
@@ -418,14 +419,14 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       { commands: { opencode: missing } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
-    await expect(missingManager.run({
+    await expect(missingManager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-missing",
       cwd: missingRoot,
       prompt: "Start",
       interactionMode: "build",
       access: "supervised",
-    })).resolves.toMatchObject({ status: "failed" });
+    }))).resolves.toMatchObject({ status: "failed" });
 
     const exitRoot = portableFixtureRoot("OpenCode early exit");
     roots.push(exitRoot);
@@ -435,14 +436,14 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       { commands: { opencode: exitCommand } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
-    await expect(exitManager.run({
+    await expect(exitManager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-exit",
       cwd: exitRoot,
       prompt: "Start",
       interactionMode: "build",
       access: "supervised",
-    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("exited during startup") });
+    }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("exited during startup") });
     expect(missingManager.activeConversationIds()).toEqual([]);
     expect(exitManager.activeConversationIds()).toEqual([]);
   });

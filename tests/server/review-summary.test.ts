@@ -2,11 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { parseUnifiedDiff } from "../../src/shared/diff-review";
 import {
-  ActiveReviewSummaryRegistry,
   buildReviewSummaryPrompt,
+  parsePersistedReviewSummaryJson,
   parseReviewSummaryResult,
   requireCurrentReviewSummaryFingerprint,
-  withReviewSummaryTimeout,
+  upgradeLegacyPersistedReviewSummary,
+  validatePersistedReviewSummary,
 } from "../../src/server/review-summary";
 
 const patch = [
@@ -62,7 +63,12 @@ function validResult(): {
 function parse(value: unknown): ReturnType<typeof parseReviewSummaryResult> {
   return parseReviewSummaryResult(
     "conversation",
-    "claude",
+    {
+      providerId: "claude",
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "legacy:claude:claude-agent-sdk",
+      model: "claude-sonnet-4-5",
+    },
     structured.fingerprint,
     structured.files,
     JSON.stringify(value),
@@ -83,6 +89,9 @@ describe("AI diff review summaries", () => {
     expect(parse(validResult())).toEqual({
       conversationId: "conversation",
       providerId: "claude",
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "legacy:claude:claude-agent-sdk",
+      model: "claude-sonnet-4-5",
       fingerprint: structured.fingerprint,
       overall: "Updates two exported defaults.",
       classifications: [{ classification: "behavior-change", evidence: "Both exported values change." }],
@@ -131,7 +140,12 @@ describe("AI diff review summaries", () => {
   it("rejects surrounding Markdown, unknown fields, invalid hints, and duplicated hints", () => {
     expect(() => parseReviewSummaryResult(
       "conversation",
-      "codex",
+      {
+        providerId: "codex",
+        harnessId: "codex-app-server",
+        backendProfileId: "legacy:codex:codex-app-server",
+        model: "gpt-5.6",
+      },
       structured.fingerprint,
       structured.files,
       `\`\`\`json\n${JSON.stringify(validResult())}\n\`\`\``,
@@ -149,6 +163,65 @@ describe("AI diff review summaries", () => {
     expect(() => parse(duplicated)).toThrow(/duplicated the behavior-change classification/u);
   });
 
+  it("requires valid classifications at every level in complete persisted payloads", () => {
+    const summary = parse(validResult());
+    expect(validatePersistedReviewSummary(summary)).toEqual(summary);
+
+    const missingOverall = structuredClone(summary) as unknown as Record<string, unknown>;
+    delete missingOverall.classifications;
+    expect(() => validatePersistedReviewSummary(missingOverall)).toThrow(/not valid bounded data/u);
+
+    const invalidFile = structuredClone(summary);
+    invalidFile.files[0]!.classifications = [{
+      classification: "regression-risk",
+      evidence: "",
+    }];
+    expect(() => validatePersistedReviewSummary(invalidFile)).toThrow(/not valid bounded data/u);
+
+    const duplicatedHunk = structuredClone(summary);
+    duplicatedHunk.files[0]!.hunks[0]!.classifications = [
+      { classification: "test-impact", evidence: "First hint." },
+      { classification: "test-impact", evidence: "Duplicated hint." },
+    ];
+    expect(() => validatePersistedReviewSummary(duplicatedHunk)).toThrow(/not valid bounded data/u);
+  });
+
+  it("fails closed on malformed, oversized, or secret-bearing complete payloads and safely upgrades legacy rows", () => {
+    const summary = parse(validResult());
+    expect(parsePersistedReviewSummaryJson(JSON.stringify(summary))).toEqual(summary);
+    expect(parsePersistedReviewSummaryJson("{")).toBeNull();
+    expect(parsePersistedReviewSummaryJson(JSON.stringify({ ...summary, prompt: "hidden prompt" }))).toBeNull();
+    expect(parsePersistedReviewSummaryJson(" ".repeat(524_289))).toBeNull();
+
+    const legacy = {
+      conversationId: summary.conversationId,
+      fingerprint: summary.fingerprint,
+      providerId: summary.providerId,
+      overall: summary.overall,
+      files: summary.files.map((file) => ({
+        path: file.path,
+        summary: file.summary,
+        hunks: file.hunks.map(({ hunkId, summary: hunkSummary }) => ({
+          hunkId,
+          summary: hunkSummary,
+        })),
+      })),
+      generatedAt: summary.generatedAt,
+    };
+    expect(upgradeLegacyPersistedReviewSummary(legacy)).toEqual({
+      ...legacy,
+      harnessId: null,
+      backendProfileId: null,
+      model: null,
+      classifications: [],
+      files: legacy.files.map((file) => ({
+        ...file,
+        classifications: [],
+        hunks: file.hunks.map((hunk) => ({ ...hunk, classifications: [] })),
+      })),
+    });
+  });
+
   it("does not call persistence after a stale or truncated SHA-256 fingerprint", () => {
     const persist = vi.fn();
     const saveIfCurrent = (currentPatch: string, truncated = false) => {
@@ -162,32 +235,4 @@ describe("AI diff review summaries", () => {
     expect(persist).toHaveBeenCalledTimes(1);
   });
 
-  it("deduplicates runs, cancels explicit and unsupported interactions, and cleans up by owner", () => {
-    const registry = new ActiveReviewSummaryRegistry<object>();
-    const owner = {};
-    const otherOwner = {};
-    const cancel = vi.fn();
-    registry.reserve("thread-a", "temporary-a", owner);
-    expect(() => registry.reserve("thread-a", "temporary-b", otherOwner)).toThrow(/already running/u);
-    registry.attachCancel("thread-a", "temporary-a", cancel);
-    expect(registry.stop("thread-a", "unsupported-interaction")).toBe(true);
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(registry.stopReason("thread-a", "temporary-a")).toBe("unsupported-interaction");
-    registry.finish("thread-a", "temporary-a");
-    expect(registry.has("thread-a")).toBe(false);
-
-    registry.reserve("thread-a", "temporary-c", owner);
-    registry.attachCancel("thread-a", "temporary-c", cancel);
-    registry.reserve("thread-b", "temporary-d", otherOwner);
-    expect(registry.stopOwned(owner, "disconnected")).toEqual(["thread-a"]);
-    expect(registry.stopReason("thread-a", "temporary-c")).toBe("disconnected");
-    expect(registry.stopReason("thread-b", "temporary-d")).toBeNull();
-  });
-
-  it("times out bounded runs and invokes cancellation", async () => {
-    const cancel = vi.fn();
-    await expect(withReviewSummaryTimeout(new Promise<never>(() => undefined), 5, cancel, 0))
-      .rejects.toThrow(/timed out/u);
-    expect(cancel).toHaveBeenCalledTimes(1);
-  });
 });

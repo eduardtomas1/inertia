@@ -1,0 +1,63 @@
+import { describe, expect, it } from "vitest";
+
+import { parseOpenProjectPathRequest } from "../src/shared/desktop";
+import {
+  BACKEND_CREDENTIAL_MASK,
+  parseBackendCredentialProfileRequest,
+  parseSetBackendCredentialRequest,
+} from "../src/shared/backend-credentials";
+
+const projectId = "11111111-1111-4111-8111-111111111111";
+const conversationId = "22222222-2222-4222-8222-222222222222";
+
+describe("desktop project-path contract", () => {
+  it("accepts only scoped relative paths and enumerated OS actions", () => {
+    const request = {
+      projectId,
+      conversationId,
+      relativePath: "src/index.ts",
+      action: "open-externally",
+    };
+    expect(parseOpenProjectPathRequest(request)).toEqual(request);
+    expect(parseOpenProjectPathRequest({
+      projectId,
+      relativePath: ".",
+      action: "reveal",
+    })).toEqual({
+      projectId,
+      relativePath: ".",
+      action: "reveal",
+    });
+    for (const relativePath of ["../secret", "src/../../secret", "/etc/passwd", "C:\\Windows\\system.ini", "C:system.ini", "src/\0secret"]) {
+      expect(parseOpenProjectPathRequest({ ...request, relativePath })).toBeNull();
+    }
+    expect(parseOpenProjectPathRequest({ ...request, action: "open" })).toBeNull();
+    expect(parseOpenProjectPathRequest({ ...request, absolutePath: "/tmp/renderer-controlled" })).toBeNull();
+  });
+});
+
+describe("desktop credential contract", () => {
+  it("accepts explicit set and profile requests without accepting masked round trips", () => {
+    expect(parseSetBackendCredentialRequest({
+      profileId: "kimi",
+      secret: "fresh-secret",
+    })).toEqual({
+      profileId: "kimi",
+      secret: "fresh-secret",
+    });
+    expect(parseSetBackendCredentialRequest({
+      profileId: "kimi",
+      secret: BACKEND_CREDENTIAL_MASK,
+    })).toBeNull();
+    expect(parseSetBackendCredentialRequest({
+      profileId: "kimi",
+      secret: "line-one\nline-two",
+    })).toBeNull();
+    expect(parseBackendCredentialProfileRequest({ profileId: "kimi" }))
+      .toEqual({ profileId: "kimi" });
+    expect(parseBackendCredentialProfileRequest({
+      profileId: "kimi",
+      secret: "must-not-be-accepted",
+    })).toBeNull();
+  });
+});

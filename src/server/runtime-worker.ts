@@ -3,6 +3,7 @@ import {
   type RuntimeWorkerEvent,
 } from "../main/runtime-process-protocol.js";
 import { startRuntime, type RunningRuntime } from "./index.js";
+import { RuntimeCredentialBrokerClient } from "./runtime/backends/credential-broker-client.js";
 
 let runtime: RunningRuntime | null = null;
 let starting = false;
@@ -15,14 +16,17 @@ function post(event: RuntimeWorkerEvent): void {
   parentPort.postMessage(event);
 }
 
+const credentials = new RuntimeCredentialBrokerClient({ post });
+
 async function shutdown(exitCode = 0): Promise<void> {
   if (stopping) return;
   stopping = true;
   const activeRuntime = runtime;
   runtime = null;
+  credentials.close();
   if (activeRuntime) {
     try {
-      await activeRuntime.close();
+      await activeRuntime.close(exitCode === 0 ? "runtime-shutdown" : "runtime-crash");
     } catch {
       exitCode = 1;
     }
@@ -38,8 +42,34 @@ parentPort.on("message", (messageEvent) => {
     void shutdown(1);
     return;
   }
+  if (command.type === "runtime.credential-result") {
+    credentials.handle(command);
+    return;
+  }
   if (command.type === "runtime.shutdown") {
     void shutdown();
+    return;
+  }
+  if (command.type === "runtime.resolve-project-path") {
+    if (!runtime || stopping) {
+      post({
+        type: "runtime.project-path-rejected",
+        requestId: command.requestId,
+        message: "The local runtime is not ready.",
+      });
+      return;
+    }
+    void runtime.resolveProjectPath(command.request).then(
+      (path) => post({ type: "runtime.project-path-resolved", requestId: command.requestId, path }),
+      (error: unknown) => {
+        const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 1_000) : "";
+        post({
+          type: "runtime.project-path-rejected",
+          requestId: command.requestId,
+          message: detail || "The project path could not be resolved.",
+        });
+      },
+    );
     return;
   }
   if (starting || runtime || stopping) {
@@ -48,7 +78,10 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   starting = true;
-  void startRuntime(command.options).then((startedRuntime) => {
+  void startRuntime({
+    ...command.options,
+    backendCredentials: credentials,
+  }).then((startedRuntime) => {
     if (stopping) {
       void startedRuntime.close().finally(() => process.exit(0));
       return;

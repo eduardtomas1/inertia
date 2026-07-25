@@ -1,10 +1,19 @@
 import type {
+  KnownHarnessId,
+  ModelBackendProfile,
+  ModelSelection,
   ProviderMetadataFieldState,
   ProviderMetadataProvenance,
   ProviderMetadataState,
   ProviderModel,
   ProviderRateLimit,
 } from "../../shared/contracts";
+import {
+  knownHarnessIdSchema,
+  legacyProviderIdForHarness,
+  nativeBackendProfile,
+  nativeHarnessId,
+} from "../../shared/model-routing";
 import { readCodexMetadata } from "../codex-metadata";
 import { readClaudeAgentSdkMetadata } from "./claude-agent-sdk-harness";
 import type { ProviderAuthState, ProviderId } from "./contracts";
@@ -22,16 +31,33 @@ export interface ProviderMetadata extends ProviderMetadataValues {
   metadataState: ProviderMetadataState;
 }
 
+/**
+ * Exact, non-secret identity for one metadata cache partition. Catalog reads
+ * use `provider-catalog` as their model identity; run-emitted metadata uses
+ * the selected model ID. Authentication is deliberately represented only by
+ * public state. Credential values never participate in keys or persistence,
+ * while credential replacement is covered by backendConfigurationRevision.
+ */
+export interface ProviderMetadataScope {
+  providerId: ProviderId;
+  harnessId: KnownHarnessId;
+  backendProfileId: string;
+  modelId: string;
+  executable: string | null;
+  version: string | null;
+  backendConfigurationRevision: number;
+  authState: ProviderAuthState;
+}
+
+export const PROVIDER_METADATA_CATALOG_MODEL_ID = "provider-catalog";
+
 export interface ProviderMetadataReadResult {
   models?: ProviderModel[];
   rateLimits?: ProviderRateLimit[];
 }
 
 export interface PersistedProviderMetadata {
-  providerId: ProviderId;
-  executable: string | null;
-  version: string | null;
-  authState: ProviderAuthState | null;
+  scope: ProviderMetadataScope;
   models: ProviderModel[];
   modelsUpdatedAt: string | null;
   modelsLastAttemptedAt: string | null;
@@ -71,9 +97,7 @@ interface CachedField<T> {
 }
 
 interface CachedProviderMetadata {
-  executable: string | null;
-  version: string | null;
-  authState: ProviderAuthState | null;
+  scope: ProviderMetadataScope;
   revision: number;
   models: CachedField<ProviderModel>;
   rateLimits: CachedField<ProviderRateLimit>;
@@ -111,6 +135,104 @@ function cleanString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const clean = value.replaceAll("\0", "").trim();
   return clean ? clean.slice(0, maxLength) : undefined;
+}
+
+function normalizeProviderMetadataScope(
+  input: ProviderMetadataScope,
+): ProviderMetadataScope | null {
+  if (!Object.hasOwn(AVAILABLE_FIELDS, input.providerId)) return null;
+  const harness = knownHarnessIdSchema.safeParse(input.harnessId);
+  const backendProfileId = cleanString(input.backendProfileId, 200);
+  const modelId = cleanString(input.modelId, 300);
+  const executable = cleanString(input.executable, 4_096) ?? null;
+  const version = cleanString(input.version, 200) ?? null;
+  if (
+    !harness.success
+    || legacyProviderIdForHarness(harness.data) !== input.providerId
+    || !backendProfileId
+    || !modelId
+    || !Number.isSafeInteger(input.backendConfigurationRevision)
+    || input.backendConfigurationRevision < 0
+    || !AUTH_STATES.includes(input.authState)
+  ) return null;
+  return {
+    providerId: input.providerId,
+    harnessId: harness.data,
+    backendProfileId,
+    modelId,
+    executable,
+    version,
+    backendConfigurationRevision: input.backendConfigurationRevision,
+    authState: input.authState,
+  };
+}
+
+export function providerMetadataScopeKey(scopeInput: ProviderMetadataScope): string {
+  const scope = normalizeProviderMetadataScope(scopeInput);
+  if (!scope) throw new Error("The provider metadata scope is invalid.");
+  return JSON.stringify([
+    scope.providerId,
+    scope.harnessId,
+    scope.backendProfileId,
+    scope.modelId,
+    scope.executable,
+    scope.version,
+    scope.backendConfigurationRevision,
+    scope.authState,
+  ]);
+}
+
+export function nativeProviderMetadataScope(
+  providerId: ProviderId,
+  correlation: Partial<
+    Pick<ProviderMetadataScope, "executable" | "version" | "authState">
+  > = {},
+): ProviderMetadataScope {
+  const backend = nativeBackendProfile(providerId);
+  return {
+    providerId,
+    harnessId: nativeHarnessId(providerId),
+    backendProfileId: backend.id,
+    modelId: PROVIDER_METADATA_CATALOG_MODEL_ID,
+    executable: cleanString(correlation.executable, 4_096) ?? null,
+    version: cleanString(correlation.version, 200) ?? null,
+    backendConfigurationRevision: backend.configurationRevision,
+    authState: correlation.authState && AUTH_STATES.includes(correlation.authState)
+      ? correlation.authState
+      : "unknown",
+  };
+}
+
+export function providerMetadataScopeForSelection(
+  selection: ModelSelection,
+  backendProfile: ModelBackendProfile,
+  correlation: Pick<
+    ProviderMetadataScope,
+    "executable" | "version" | "authState"
+  >,
+): ProviderMetadataScope {
+  const harness = knownHarnessIdSchema.parse(selection.harnessId);
+  const providerId = legacyProviderIdForHarness(harness);
+  if (
+    !providerId
+    || selection.backendProfileId !== backendProfile.id
+    || selection.backendConfigurationRevision
+      !== backendProfile.configurationRevision
+  ) {
+    throw new Error("The model selection does not match its metadata backend.");
+  }
+  const normalized = normalizeProviderMetadataScope({
+    providerId,
+    harnessId: harness,
+    backendProfileId: backendProfile.id,
+    modelId: selection.modelId,
+    executable: correlation.executable,
+    version: correlation.version,
+    backendConfigurationRevision: backendProfile.configurationRevision,
+    authState: correlation.authState,
+  });
+  if (!normalized) throw new Error("The provider metadata scope is invalid.");
+  return normalized;
 }
 
 export function validateProviderModels(value: unknown): ProviderModel[] {
@@ -192,8 +314,8 @@ function blankField<T>(): CachedField<T> {
   return { values: [], updatedAt: null, lastAttemptedAt: null, provenance: null, stale: false };
 }
 
-function blankProvider(): CachedProviderMetadata {
-  return { executable: null, version: null, authState: null, revision: 0, models: blankField(), rateLimits: blankField() };
+function blankProvider(scope: ProviderMetadataScope): CachedProviderMetadata {
+  return { scope, revision: 0, models: blankField(), rateLimits: blankField() };
 }
 
 function mergeById<T extends { id: string }>(previous: readonly T[], next: readonly T[]): T[] {
@@ -204,6 +326,25 @@ function mergeById<T extends { id: string }>(previous: readonly T[], next: reado
 
 function safePersistenceLoad(persistence: ProviderMetadataPersistence | undefined): readonly PersistedProviderMetadata[] {
   try { return persistence?.load() ?? []; } catch { return []; }
+}
+
+function staleClone<T>(field: CachedField<T>): CachedField<T> {
+  return {
+    values: [...field.values],
+    updatedAt: field.updatedAt,
+    lastAttemptedAt: field.lastAttemptedAt,
+    provenance: field.provenance,
+    stale: field.values.length > 0 || field.stale,
+  };
+}
+
+function latestEntryTimestamp(entry: CachedProviderMetadata): number {
+  return Math.max(
+    entry.models.updatedAt ?? 0,
+    entry.models.lastAttemptedAt ?? 0,
+    entry.rateLimits.updatedAt ?? 0,
+    entry.rateLimits.lastAttemptedAt ?? 0,
+  );
 }
 
 /** Provider-specific metadata access. Cache and persistence policy live in ProviderMetadataCache. */
@@ -223,8 +364,9 @@ export async function readProviderMetadata(
 }
 
 export class ProviderMetadataCache {
-  private readonly entries = new Map<ProviderId, CachedProviderMetadata>();
-  private readonly inFlight = new Map<ProviderId, InFlightRefresh>();
+  private readonly entries = new Map<string, CachedProviderMetadata>();
+  private readonly nativeScopeKeys = new Map<ProviderId, string>();
+  private readonly inFlight = new Map<string, InFlightRefresh>();
   private readonly persistence?: ProviderMetadataPersistence;
   private readonly reader: typeof readProviderMetadata;
   private readonly now: () => number;
@@ -238,51 +380,99 @@ export class ProviderMetadataCache {
     this.modelTtlMs = Math.max(1_000, Math.min(options.modelTtlMs ?? DEFAULT_MODEL_TTL_MS, 24 * 60 * 60 * 1_000));
     this.rateLimitTtlMs = Math.max(1_000, Math.min(options.rateLimitTtlMs ?? DEFAULT_RATE_LIMIT_TTL_MS, 60 * 60 * 1_000));
     for (const cached of safePersistenceLoad(this.persistence)) this.hydrate(cached);
+    for (const providerId of Object.keys(AVAILABLE_FIELDS) as ProviderId[]) {
+      if (this.nativeScopeKeys.has(providerId)) continue;
+      const scope = nativeProviderMetadataScope(providerId);
+      this.nativeScopeKeys.set(providerId, providerMetadataScopeKey(scope));
+    }
   }
 
   current(providerId: ProviderId): ProviderMetadata {
-    const entry = this.entry(providerId);
+    return this.currentScoped(this.nativeScope(providerId));
+  }
+
+  currentScoped(scopeInput: ProviderMetadataScope): ProviderMetadata {
+    const scope = this.requireScope(scopeInput);
+    const key = providerMetadataScopeKey(scope);
+    const entry = this.entry(scope);
     return {
       models: [...entry.models.values],
       rateLimits: [...entry.rateLimits.values],
       metadataState: {
-        models: this.fieldState(providerId, "models", entry.models),
-        rateLimits: this.fieldState(providerId, "rateLimits", entry.rateLimits),
+        models: this.fieldState(scope.providerId, key, "models", entry.models),
+        rateLimits: this.fieldState(
+          scope.providerId,
+          key,
+          "rateLimits",
+          entry.rateLimits,
+        ),
       },
     };
   }
 
+  /**
+   * Returns the exact native catalog correlation currently projected into the
+   * legacy ProviderInfo shell. Callers may reuse its public executable,
+   * version, and auth state when constructing a model-specific route scope.
+   */
+  nativeScope(providerId: ProviderId): ProviderMetadataScope {
+    const key = this.nativeScopeKeys.get(providerId);
+    return key && this.entries.get(key)
+      ? { ...this.entries.get(key)!.scope }
+      : nativeProviderMetadataScope(providerId);
+  }
+
+  scopeForSelection(
+    selection: ModelSelection,
+    backendProfile: ModelBackendProfile,
+    executable?: string | null,
+  ): ProviderMetadataScope {
+    const providerId = legacyProviderIdForHarness(selection.harnessId);
+    if (!providerId) throw new Error("The model selection harness is unknown.");
+    const native = this.nativeScope(providerId);
+    const nativeBackend = nativeBackendProfile(providerId);
+    const selectedExecutable = cleanString(executable, 4_096) ?? null;
+    const sharesNativeExecutable = selectedExecutable === native.executable;
+    const ownsNativeAuthentication = backendProfile.id === nativeBackend.id
+      && backendProfile.configurationRevision
+        === nativeBackend.configurationRevision
+      && backendProfile.authenticationMode === "harness-managed";
+    return providerMetadataScopeForSelection(selection, backendProfile, {
+      executable: selectedExecutable,
+      version: sharesNativeExecutable ? native.version : null,
+      authState: ownsNativeAuthentication && sharesNativeExecutable
+        ? native.authState
+        : backendProfile.authenticationMode === "harness-managed"
+          ? "unknown"
+          : "configured",
+    });
+  }
+
   invalidate(providerId: ProviderId, executable?: string | null): void {
-    const entry = this.entry(providerId);
-    const changedExecutable = executable !== undefined && executable !== entry.executable;
-    if (executable !== undefined) entry.executable = executable;
-    if (changedExecutable || executable === undefined) {
-      entry.revision += 1;
-      if (entry.models.values.length > 0) entry.models.stale = true;
-      if (entry.rateLimits.values.length > 0) entry.rateLimits.stale = true;
-      this.persist(providerId, entry);
+    const currentScope = this.nativeScope(providerId);
+    if (
+      executable !== undefined
+      && (cleanString(executable, 4_096) ?? null) !== currentScope.executable
+    ) {
+      this.switchNativeScope(nativeProviderMetadataScope(providerId, {
+        executable,
+        version: null,
+        authState: "unknown",
+      }));
+      return;
     }
+    const entry = this.entry(currentScope);
+    entry.revision += 1;
+    if (entry.models.values.length > 0) entry.models.stale = true;
+    if (entry.rateLimits.values.length > 0) entry.rateLimits.stale = true;
+    this.persist(entry);
   }
 
   correlate(
     providerId: ProviderId,
     correlation: { executable: string | null; version: string | null; authState: ProviderAuthState },
   ): void {
-    const entry = this.entry(providerId);
-    const executable = cleanString(correlation.executable, 4_096) ?? null;
-    const version = cleanString(correlation.version, 200) ?? null;
-    const changed = entry.executable !== executable
-      || entry.version !== version
-      || entry.authState !== correlation.authState;
-    entry.executable = executable;
-    entry.version = version;
-    entry.authState = correlation.authState;
-    if (changed) {
-      entry.revision += 1;
-      if (entry.models.values.length > 0) entry.models.stale = true;
-      if (entry.rateLimits.values.length > 0) entry.rateLimits.stale = true;
-    }
-    this.persist(providerId, entry);
+    this.switchNativeScope(nativeProviderMetadataScope(providerId, correlation));
   }
 
   learn(
@@ -292,13 +482,35 @@ export class ProviderMetadataCache {
     provenance: Exclude<ProviderMetadataProvenance, "persistent-cache">,
     options: { merge?: boolean } = {},
   ): ProviderMetadata {
-    const entry = this.entry(providerId);
-    if (executable && entry.executable !== executable) this.invalidate(providerId, executable);
+    const normalizedExecutable = cleanString(executable, 4_096) ?? null;
+    if (normalizedExecutable !== this.nativeScope(providerId).executable) {
+      this.switchNativeScope(nativeProviderMetadataScope(providerId, {
+        executable: normalizedExecutable,
+        version: null,
+        authState: "unknown",
+      }));
+    }
+    return this.learnScoped(
+      this.nativeScope(providerId),
+      metadata,
+      provenance,
+      options,
+    );
+  }
+
+  learnScoped(
+    scopeInput: ProviderMetadataScope,
+    metadata: ProviderMetadataReadResult,
+    provenance: Exclude<ProviderMetadataProvenance, "persistent-cache">,
+    options: { merge?: boolean } = {},
+  ): ProviderMetadata {
+    const scope = this.requireScope(scopeInput);
+    const entry = this.entry(scope);
     const attemptedAt = this.now();
     const models = validateProviderModels(metadata.models);
     const rateLimits = validateProviderRateLimits(metadata.rateLimits);
     let learned = false;
-    if (models.length > 0 && AVAILABLE_FIELDS[providerId].includes("models")) {
+    if (models.length > 0 && AVAILABLE_FIELDS[scope.providerId].includes("models")) {
       entry.models.values = options.merge ? mergeById(entry.models.values, models).slice(0, MAX_MODELS) : models;
       entry.models.updatedAt = attemptedAt;
       entry.models.lastAttemptedAt = attemptedAt;
@@ -306,7 +518,10 @@ export class ProviderMetadataCache {
       entry.models.stale = false;
       learned = true;
     }
-    if (rateLimits.length > 0 && AVAILABLE_FIELDS[providerId].includes("rateLimits")) {
+    if (
+      rateLimits.length > 0
+      && AVAILABLE_FIELDS[scope.providerId].includes("rateLimits")
+    ) {
       entry.rateLimits.values = options.merge ? mergeById(entry.rateLimits.values, rateLimits).slice(0, MAX_RATE_LIMITS) : rateLimits;
       entry.rateLimits.updatedAt = attemptedAt;
       entry.rateLimits.lastAttemptedAt = attemptedAt;
@@ -315,8 +530,8 @@ export class ProviderMetadataCache {
       learned = true;
     }
     if (learned) entry.revision += 1;
-    this.persist(providerId, entry);
-    return this.current(providerId);
+    this.persist(entry);
+    return this.currentScoped(scope);
   }
 
   async metadata(
@@ -326,57 +541,99 @@ export class ProviderMetadataCache {
     cwd: string,
     options: ProviderMetadataRequestOptions = {},
   ): Promise<ProviderMetadata> {
-    const available = new Set(AVAILABLE_FIELDS[providerId]);
-    const probeable = new Set(PROBE_FIELDS[providerId]);
-    const requested = [...new Set(options.fields ?? AVAILABLE_FIELDS[providerId])].filter(
+    if ((cleanString(executable, 4_096) ?? null) !== this.nativeScope(providerId).executable) {
+      this.switchNativeScope(nativeProviderMetadataScope(providerId, {
+        executable,
+        version: null,
+        authState: "unknown",
+      }));
+    }
+    return await this.metadataScoped(
+      this.nativeScope(providerId),
+      environment,
+      cwd,
+      options,
+    );
+  }
+
+  async metadataScoped(
+    scopeInput: ProviderMetadataScope,
+    environment: NodeJS.ProcessEnv,
+    cwd: string,
+    options: ProviderMetadataRequestOptions = {},
+  ): Promise<ProviderMetadata> {
+    const scope = this.requireScope(scopeInput);
+    if (!scope.executable) return this.currentScoped(scope);
+    const available = new Set(AVAILABLE_FIELDS[scope.providerId]);
+    const probeable = new Set(PROBE_FIELDS[scope.providerId]);
+    const requested = [
+      ...new Set(options.fields ?? AVAILABLE_FIELDS[scope.providerId]),
+    ].filter(
       (field): field is ProviderMetadataField => available.has(field) && probeable.has(field),
     );
-    const entry = this.entry(providerId);
-    if (entry.executable !== executable) this.invalidate(providerId, executable);
-    if (requested.length === 0) return this.current(providerId);
+    const key = providerMetadataScopeKey(scope);
+    const entry = this.entry(scope);
+    if (requested.length === 0) return this.currentScoped(scope);
 
-    const existing = this.inFlight.get(providerId);
+    const existing = this.inFlight.get(key);
     if (existing) {
       await existing.promise;
-      if (existing.revision !== entry.revision) return await this.metadata(providerId, executable, environment, cwd, options);
+      if (existing.revision !== entry.revision) {
+        return await this.metadataScoped(scope, environment, cwd, options);
+      }
       const missing = requested.filter((field) => !existing.fields.has(field));
-      if (missing.length > 0) return await this.metadata(providerId, executable, environment, cwd, { ...options, fields: missing });
-      return this.current(providerId);
+      if (missing.length > 0) {
+        return await this.metadataScoped(
+          scope,
+          environment,
+          cwd,
+          { ...options, fields: missing },
+        );
+      }
+      return this.currentScoped(scope);
     }
 
     const fields = options.force === true
       ? requested
       : requested.filter((field) => !this.isFresh(field, entry[field]));
-    if (fields.length === 0) return this.current(providerId);
+    if (fields.length === 0) return this.currentScoped(scope);
 
     const inFlightFields = new Set(fields);
     const revision = entry.revision;
-    const promise = this.refresh(providerId, executable, environment, cwd, fields, revision).finally(() => {
-      if (this.inFlight.get(providerId)?.promise === promise) this.inFlight.delete(providerId);
-    });
-    this.inFlight.set(providerId, { fields: inFlightFields, revision, promise });
+    const promise = this.refresh(scope, environment, cwd, fields, revision)
+      .finally(() => {
+        if (this.inFlight.get(key)?.promise === promise) {
+          this.inFlight.delete(key);
+        }
+      });
+    this.inFlight.set(key, { fields: inFlightFields, revision, promise });
     await promise;
-    return this.current(providerId);
+    return this.currentScoped(scope);
   }
 
   private async refresh(
-    providerId: ProviderId,
-    executable: string,
+    scope: ProviderMetadataScope,
     environment: NodeJS.ProcessEnv,
     cwd: string,
     fields: readonly ProviderMetadataField[],
     revision: number,
   ): Promise<void> {
-    const entry = this.entry(providerId);
+    const entry = this.entry(scope);
     const attemptedAt = this.now();
     for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
     let result: ProviderMetadataReadResult;
     try {
-      result = await this.reader(providerId, executable, environment, cwd, fields);
+      result = await this.reader(
+        scope.providerId,
+        scope.executable!,
+        environment,
+        cwd,
+        fields,
+      );
     } catch {
       if (entry.revision !== revision) return;
       for (const field of fields) if (entry[field].values.length > 0) entry[field].stale = true;
-      this.persist(providerId, entry);
+      this.persist(entry);
       return;
     }
 
@@ -394,17 +651,15 @@ export class ProviderMetadataCache {
       entry[field].provenance = "provider";
       entry[field].stale = false;
     }
-    this.persist(providerId, entry);
+    this.persist(entry);
   }
 
   private hydrate(cached: PersistedProviderMetadata): void {
-    if (!Object.hasOwn(AVAILABLE_FIELDS, cached.providerId)) return;
+    const scope = normalizeProviderMetadataScope(cached.scope);
+    if (!scope) return;
     const models = validateProviderModels(cached.models);
     const rateLimits = validateProviderRateLimits(cached.rateLimits);
-    const entry = blankProvider();
-    entry.executable = cleanString(cached.executable, 4_096) ?? null;
-    entry.version = cleanString(cached.version, 200) ?? null;
-    entry.authState = cached.authState && AUTH_STATES.includes(cached.authState) ? cached.authState : null;
+    const entry = blankProvider(scope);
     entry.models = {
       values: models,
       updatedAt: models.length > 0 ? timestamp(cached.modelsUpdatedAt) : null,
@@ -419,14 +674,23 @@ export class ProviderMetadataCache {
       provenance: rateLimits.length > 0 ? "persistent-cache" : null,
       stale: cached.rateLimitsStale === true,
     };
-    this.entries.set(cached.providerId, entry);
+    const key = providerMetadataScopeKey(scope);
+    this.entries.set(key, entry);
+    if (!this.isNativeCatalogScope(scope)) return;
+    const currentKey = this.nativeScopeKeys.get(scope.providerId);
+    const current = currentKey ? this.entries.get(currentKey) : undefined;
+    if (!current || latestEntryTimestamp(entry) >= latestEntryTimestamp(current)) {
+      this.nativeScopeKeys.set(scope.providerId, key);
+    }
   }
 
-  private entry(providerId: ProviderId): CachedProviderMetadata {
-    let entry = this.entries.get(providerId);
+  private entry(scopeInput: ProviderMetadataScope): CachedProviderMetadata {
+    const scope = this.requireScope(scopeInput);
+    const key = providerMetadataScopeKey(scope);
+    let entry = this.entries.get(key);
     if (!entry) {
-      entry = blankProvider();
-      this.entries.set(providerId, entry);
+      entry = blankProvider(scope);
+      this.entries.set(key, entry);
     }
     return entry;
   }
@@ -438,25 +702,27 @@ export class ProviderMetadataCache {
     return age >= 0 && age <= ttl;
   }
 
-  private fieldState<T>(providerId: ProviderId, field: ProviderMetadataField, cached: CachedField<T>): ProviderMetadataFieldState {
+  private fieldState<T>(
+    providerId: ProviderId,
+    scopeKey: string,
+    field: ProviderMetadataField,
+    cached: CachedField<T>,
+  ): ProviderMetadataFieldState {
     const supported = AVAILABLE_FIELDS[providerId].includes(field);
     return {
       freshness: !supported || cached.values.length === 0 ? "unavailable" : this.isFresh(field, cached) ? "fresh" : "stale",
       provenance: cached.values.length > 0 ? cached.provenance : null,
       updatedAt: isoTimestamp(cached.updatedAt),
       lastAttemptedAt: isoTimestamp(cached.lastAttemptedAt),
-      refreshing: this.inFlight.get(providerId)?.fields.has(field) === true,
+      refreshing: this.inFlight.get(scopeKey)?.fields.has(field) === true,
     };
   }
 
-  private persist(providerId: ProviderId, entry: CachedProviderMetadata): void {
+  private persist(entry: CachedProviderMetadata): void {
     if (!this.persistence) return;
     try {
       this.persistence.save({
-        providerId,
-        executable: entry.executable,
-        version: entry.version,
-        authState: entry.authState,
+        scope: entry.scope,
         models: entry.models.values,
         modelsUpdatedAt: isoTimestamp(entry.models.updatedAt),
         modelsLastAttemptedAt: isoTimestamp(entry.models.lastAttemptedAt),
@@ -471,5 +737,59 @@ export class ProviderMetadataCache {
     } catch {
       // Metadata remains available in memory when the best-effort durable cache cannot be written.
     }
+  }
+
+  private requireScope(scope: ProviderMetadataScope): ProviderMetadataScope {
+    const normalized = normalizeProviderMetadataScope(scope);
+    if (!normalized) throw new Error("The provider metadata scope is invalid.");
+    return normalized;
+  }
+
+  private isNativeCatalogScope(scope: ProviderMetadataScope): boolean {
+    const backend = nativeBackendProfile(scope.providerId);
+    return scope.harnessId === nativeHarnessId(scope.providerId)
+      && scope.backendProfileId === backend.id
+      && scope.backendConfigurationRevision === backend.configurationRevision
+      && scope.modelId === PROVIDER_METADATA_CATALOG_MODEL_ID;
+  }
+
+  private switchNativeScope(scopeInput: ProviderMetadataScope): void {
+    const scope = this.requireScope(scopeInput);
+    if (!this.isNativeCatalogScope(scope)) {
+      throw new Error("Only a native provider catalog can become the legacy metadata scope.");
+    }
+    const key = providerMetadataScopeKey(scope);
+    const previousKey = this.nativeScopeKeys.get(scope.providerId);
+    if (previousKey === key) {
+      const entry = this.entry(scope);
+      this.persist(entry);
+      return;
+    }
+    const previous = previousKey ? this.entries.get(previousKey) : undefined;
+    let next = this.entries.get(key);
+    if (!next) {
+      next = previous
+        ? {
+            scope,
+            revision: previous.revision + 1,
+            models: staleClone(previous.models),
+            rateLimits: staleClone(previous.rateLimits),
+          }
+        : blankProvider(scope);
+      this.entries.set(key, next);
+    } else if (previous) {
+      if (next.models.values.length === 0 && previous.models.values.length > 0) {
+        next.models = staleClone(previous.models);
+      }
+      if (
+        next.rateLimits.values.length === 0
+        && previous.rateLimits.values.length > 0
+      ) {
+        next.rateLimits = staleClone(previous.rateLimits);
+      }
+      next.revision += 1;
+    }
+    this.nativeScopeKeys.set(scope.providerId, key);
+    this.persist(next);
   }
 }

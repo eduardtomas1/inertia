@@ -23,6 +23,7 @@ const freshState: ProviderMetadataFieldState = {
 function usage(update: Partial<ThreadUsageSnapshot> = {}): ThreadUsageSnapshot {
   return {
     conversationId: "conversation",
+    turnId: null,
     usedTokens: 50,
     totalProcessedTokens: 500,
     totalProcessedScope: "thread",

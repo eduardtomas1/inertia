@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Activity, ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, Settings, SunMoon } from "lucide-react";
+import { Activity, ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Info, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
+import { conversationContextMismatch } from "../lib/newConversation";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { IconButton } from "./ui";
 
@@ -26,6 +27,9 @@ type WorkspaceHeaderProps = {
   onRefreshBranches: () => void;
   onSwitchBranch: (name: string) => void;
   onCreateBranch: (name: string) => void;
+  onCreateConversationOnBranch: (branch: string) => void;
+  onCreateConversationInWorktree: () => void;
+  onCreateConversationInIsolatedWorktree: () => void;
   onCommit: () => void;
   onOpenPullRequest: () => void;
   onPull: () => void;
@@ -55,6 +59,9 @@ export function WorkspaceHeader({
   onRefreshBranches,
   onSwitchBranch,
   onCreateBranch,
+  onCreateConversationOnBranch,
+  onCreateConversationInWorktree,
+  onCreateConversationInIsolatedWorktree,
   onCommit,
   onOpenPullRequest,
   onPull,
@@ -70,6 +77,10 @@ export function WorkspaceHeader({
     : activeRunCount > 0
       ? `Open runs, ${activeRunCount} active`
       : "Open runs";
+  const contextMismatch = conversationContextMismatch(project, conversation, gitStatus);
+  const canCreateInWorktree = Boolean(conversation?.worktreePath);
+  const canCreateOnBranch = !canCreateInWorktree && Boolean(gitStatus?.branch);
+  const canCreateIsolatedWorktree = Boolean(gitStatus?.branch);
 
   return (
     <header className="workspace-header drag-region">
@@ -98,12 +109,37 @@ export function WorkspaceHeader({
             <button type="button" className="header-button" onClick={onOpenProject}><FolderOpen size={14} /><span>Open</span></button>
             {gitStatus?.isRepository && (
               <div className="header-popover-anchor">
-                <button type="button" className="header-button" aria-expanded={menu === "branch"} onClick={() => { const next = menu === "branch" ? null : "branch"; setMenu(next); if (next) onRefreshBranches(); }}>
-                  <GitBranch size={14} /><span>{gitStatus.branch ?? "Detached"}</span><ChevronDown size={12} />
+                <button
+                  type="button"
+                  className={`header-button${contextMismatch ? " has-context-mismatch" : ""}`}
+                  aria-expanded={menu === "branch"}
+                  aria-label={contextMismatch ? `Checkout context differs, current branch ${gitStatus.branch ?? "detached"}` : undefined}
+                  onClick={() => { const next = menu === "branch" ? null : "branch"; setMenu(next); if (next) onRefreshBranches(); }}
+                >
+                  <GitBranch size={14} /><span>{gitStatus.branch ?? "Detached"}</span>{contextMismatch && <span className="checkout-context-dot" aria-hidden="true" />}<ChevronDown size={12} />
                 </button>
                 {menu === "branch" && (
                   <div className="header-popover branch-popover" role="menu" aria-label="Branches">
                     <div className="header-popover-title">Branches</div>
+                    {contextMismatch && (
+                      <div className="checkout-context-note" role="status">
+                        <Info size={14} aria-hidden="true" />
+                        <span>
+                          <strong>Chat and checkout differ</strong>
+                          {contextMismatch.branchDiffers && (
+                            <small>This chat was saved on <code>{contextMismatch.expectedBranch}</code>. The checkout is now <code>{contextMismatch.actualBranch}</code>.</small>
+                          )}
+                          {contextMismatch.checkoutDiffers && (
+                            <small>The saved worktree and current Git checkout resolve to different folders.</small>
+                          )}
+                        </span>
+                        {contextMismatch.branchDiffers && contextMismatch.expectedBranch && !conversation?.worktreePath && (
+                          <button type="button" onClick={() => { setMenu(null); onSwitchBranch(contextMismatch.expectedBranch!); }}>
+                            Switch to {contextMismatch.expectedBranch}
+                          </button>
+                        )}
+                      </div>
+                    )}
                     {branches.filter((branch) => !branch.remote).map((branch) => (
                       <button type="button" role="menuitemradio" aria-checked={branch.current} key={branch.name} onClick={() => { setMenu(null); if (!branch.current) onSwitchBranch(branch.name); }}><span>{branch.name}</span>{branch.current && <span className="branch-current">Current</span>}</button>
                     ))}
@@ -111,6 +147,26 @@ export function WorkspaceHeader({
                       <input name="branch" placeholder="new-branch" aria-label="New branch name" maxLength={255} />
                       <button type="submit">Create</button>
                     </form>
+                    {(canCreateInWorktree || canCreateOnBranch || canCreateIsolatedWorktree) && (
+                      <div className="new-chat-location-actions">
+                        <div className="header-popover-title">Start another chat</div>
+                        {canCreateInWorktree && (
+                          <button type="button" role="menuitem" onClick={() => { setMenu(null); onCreateConversationInWorktree(); }}>
+                            <MessageSquarePlus size={13} /><span>New chat in this worktree</span>
+                          </button>
+                        )}
+                        {canCreateOnBranch && gitStatus.branch && (
+                          <button type="button" role="menuitem" onClick={() => { setMenu(null); onCreateConversationOnBranch(gitStatus.branch!); }}>
+                            <MessageSquarePlus size={13} /><span>New chat on {gitStatus.branch}</span>
+                          </button>
+                        )}
+                        {canCreateIsolatedWorktree && (
+                          <button type="button" role="menuitem" onClick={() => { setMenu(null); onCreateConversationInIsolatedWorktree(); }}>
+                            <MessageSquarePlus size={13} /><span>New chat in new isolated worktree</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

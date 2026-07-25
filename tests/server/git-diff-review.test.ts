@@ -2,9 +2,10 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  cleanupReversalOperations,
   commitChanges,
   getUnifiedDiff,
   inspectDiffSelection,
@@ -12,10 +13,49 @@ import {
   undoDiffSelection,
   type GitDiffSelection,
 } from "../../src/server/git";
+import { REVERSAL_MAX_ACTIVE_BACKUPS, REVERSAL_REGISTRY_REF } from "../../src/server/reversal-registry";
 import { parseUnifiedDiff } from "../../src/shared/diff-review";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
+}
+
+function hashBlob(cwd: string, content: string): string {
+  return execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd, encoding: "utf8", input: content }).trim();
+}
+
+interface TestRegistryOperation {
+  operationId: string;
+  status: string;
+  createdAt: string;
+  appliedAt: string | null;
+  undoneAt: string | null;
+  expiredAt: string | null;
+  expiresAt: string;
+  checkout: { fingerprint: string };
+  backupReferences: Array<{ ref: string; oid: string }>;
+}
+
+interface TestRegistry {
+  formatVersion: number;
+  repositoryIdentity: string;
+  operations: TestRegistryOperation[];
+}
+
+function readRegistry(cwd: string): TestRegistry {
+  return JSON.parse(git(cwd, "cat-file", "blob", REVERSAL_REGISTRY_REF)) as TestRegistry;
+}
+
+function writeRegistry(cwd: string, registry: unknown): string {
+  const oid = hashBlob(cwd, JSON.stringify(registry));
+  git(cwd, "update-ref", REVERSAL_REGISTRY_REF, oid);
+  return oid;
+}
+
+function reversalBackupRefs(cwd: string): string[] {
+  return git(cwd, "for-each-ref", "--format=%(refname)", "refs/inertia/reversal-backups")
+    .split("\n")
+    .filter(Boolean);
 }
 
 describe("safe selected diff reversal", () => {
@@ -151,6 +191,160 @@ describe("safe selected diff reversal", () => {
     expect(git(root, "show", ":example.txt")).toBe("alpha\r\nbeta\r\ndelta");
   }, 30_000);
 
+  it("persists an independent operation registry and deletes only its backup refs after Undo", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    const { result } = await apply(root, selection);
+
+    const applied = readRegistry(root);
+    const record = applied.operations.find(({ operationId }) => operationId === result.operation.id)!;
+    expect(record).toMatchObject({
+      operationId: result.operation.id,
+      status: "applied",
+      undoneAt: null,
+    });
+    expect(record.appliedAt).toEqual(expect.any(String));
+    expect(record.backupReferences).toHaveLength(4);
+    expect(reversalBackupRefs(root)).toHaveLength(4);
+
+    await undoDiffSelection(root, result.operation.id);
+
+    const undone = readRegistry(root).operations.find(({ operationId }) => operationId === result.operation.id)!;
+    expect(undone.status).toBe("undone");
+    expect(undone.undoneAt).toEqual(expect.any(String));
+    expect(reversalBackupRefs(root)).toEqual([]);
+    expect(git(root, "rev-parse", "--verify", REVERSAL_REGISTRY_REF).trim()).toMatch(/^[0-9a-f]{40,64}$/u);
+  });
+
+  it("cleans a complete backup when apply stops before mutation", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    const plan = await inspectDiffSelection(root, selection);
+
+    await expect(revertDiffSelection(root, { ...selection, expected: plan.validation }, {
+      afterBackupCreated: () => { throw new Error("injected before mutation"); },
+    })).rejects.toThrow(/injected before mutation/i);
+
+    expect(readFileSync(join(root, "example.txt"), "utf8")).toContain("delta");
+    expect(reversalBackupRefs(root)).toEqual([]);
+    expect(readRegistry(root).operations.at(-1)).toMatchObject({ status: "failed", appliedAt: null });
+  });
+
+  it("cleans backup refs when repository state races after backup creation", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    const plan = await inspectDiffSelection(root, selection);
+
+    await expect(revertDiffSelection(root, { ...selection, expected: plan.validation }, {
+      afterBackupCreated: () => writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\nconcurrent\n"),
+    })).rejects.toThrow(/changed immediately before/i);
+
+    expect(readFileSync(join(root, "example.txt"), "utf8")).toContain("concurrent");
+    expect(reversalBackupRefs(root)).toEqual([]);
+    expect(readRegistry(root).operations.at(-1)?.status).toBe("failed");
+  });
+
+  it("rolls back a partial staged apply and deletes its backup refs on failure", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    git(root, "add", "example.txt");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    const plan = await inspectDiffSelection(root, selection);
+
+    await expect(revertDiffSelection(root, { ...selection, expected: plan.validation }, {
+      afterIndexUpdated: () => { throw new Error("injected after index mutation"); },
+    })).rejects.toThrow(/injected after index mutation/i);
+
+    expect(readFileSync(join(root, "example.txt"), "utf8")).toContain("delta");
+    expect(git(root, "show", ":example.txt")).toContain("delta");
+    expect(reversalBackupRefs(root)).toEqual([]);
+    expect(readRegistry(root).operations.at(-1)?.status).toBe("failed");
+  });
+
+  it("recovers Undo from the persisted registry after module restart", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    const { result } = await apply(root, selection);
+    const interrupted = readRegistry(root);
+    interrupted.operations[0]!.status = "applying";
+    interrupted.operations[0]!.appliedAt = null;
+    writeRegistry(root, interrupted);
+    vi.resetModules();
+    const reopened = await import("../../src/server/git");
+
+    await reopened.undoDiffSelection(root, result.operation.id);
+
+    expect(readFileSync(join(root, "example.txt"), "utf8")).toContain("delta");
+    expect(readRegistry(root).operations.at(-1)?.status).toBe("undone");
+    expect(reversalBackupRefs(root)).toEqual([]);
+  });
+
+  it("expires unused successful backups and bounds active retention per repository", async () => {
+    const expiring = repository();
+    writeFileSync(join(expiring, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    const expiringSelection = await selectionFor(expiring, (line) => line.kind === "addition" && line.content === "delta");
+    await apply(expiring, expiringSelection);
+    const expiredRegistry = readRegistry(expiring);
+    expiredRegistry.operations[0]!.expiresAt = new Date(0).toISOString();
+    writeRegistry(expiring, expiredRegistry);
+
+    await cleanupReversalOperations(expiring);
+    await cleanupReversalOperations(expiring);
+
+    expect(readRegistry(expiring).operations[0]).toMatchObject({ status: "expired", expiredAt: expect.any(String) });
+    expect(reversalBackupRefs(expiring)).toEqual([]);
+
+    const bounded = repository();
+    for (let index = 0; index <= REVERSAL_MAX_ACTIVE_BACKUPS; index += 1) {
+      const marker = `retained-${index}`;
+      writeFileSync(join(bounded, "example.txt"), `alpha\nbeta\ngamma\n${marker}\n`);
+      const selection = await selectionFor(bounded, (line) => line.kind === "addition" && line.content === marker);
+      await apply(bounded, selection);
+    }
+    const boundedRegistry = readRegistry(bounded);
+    expect(boundedRegistry.operations.filter(({ status }) => status === "applied")).toHaveLength(REVERSAL_MAX_ACTIVE_BACKUPS);
+    expect(boundedRegistry.operations.filter(({ status }) => status === "expired")).toHaveLength(1);
+    expect(reversalBackupRefs(bounded)).toHaveLength(REVERSAL_MAX_ACTIVE_BACKUPS * 4);
+  }, 60_000);
+
+  it("never deletes a namespaced ref whose target no longer matches the registry", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    await apply(root, selection);
+    const registry = readRegistry(root);
+    const changedReference = registry.operations[0]!.backupReferences[0]!;
+    const unknownTarget = hashBlob(root, "not the registered backup\n");
+    git(root, "update-ref", changedReference.ref, unknownTarget, changedReference.oid);
+    registry.operations[0]!.expiresAt = new Date(0).toISOString();
+    writeRegistry(root, registry);
+
+    await cleanupReversalOperations(root);
+
+    expect(git(root, "rev-parse", changedReference.ref).trim()).toBe(unknownTarget);
+    expect(reversalBackupRefs(root)).toEqual([changedReference.ref]);
+    expect(readRegistry(root).operations[0]?.status).toBe("expired");
+  });
+
+  it("refuses restore when the durable checkout identity does not match", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    const { result } = await apply(root, selection);
+    const registry = readRegistry(root);
+    registry.operations[0]!.checkout.fingerprint = "0".repeat(64);
+    writeRegistry(root, registry);
+
+    await expect(undoDiffSelection(root, result.operation.id)).rejects.toThrow(/different repository or checkout identity/i);
+
+    expect(readFileSync(join(root, "example.txt"), "utf8")).not.toContain("delta");
+    expect(reversalBackupRefs(root)).toHaveLength(4);
+  });
+
   it("rejects stale fingerprints and changes made after inspection", async () => {
     const root = repository();
     writeFileSync(join(root, "example.txt"), "alpha\nBETA\ngamma\ndelta\n");
@@ -172,6 +366,36 @@ describe("safe selected diff reversal", () => {
 
     await expect(undoDiffSelection(root, result.operation.id)).rejects.toThrow(/changed after the reversal/i);
     expect(readFileSync(join(root, "example.txt"), "utf8")).toBe("later\n");
+
+    const indexRoot = repository();
+    writeFileSync(join(indexRoot, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    const indexSelection = await selectionFor(indexRoot, (line) => line.kind === "addition" && line.content === "delta");
+    const { result: indexResult } = await apply(indexRoot, indexSelection);
+    const laterOid = hashBlob(indexRoot, "index changed later\n");
+    git(indexRoot, "update-index", "--cacheinfo", "100644", laterOid, "example.txt");
+
+    await expect(undoDiffSelection(indexRoot, indexResult.operation.id)).rejects.toThrow(/staged state changed/i);
+    expect(git(indexRoot, "show", ":example.txt")).toBe("index changed later\n");
+  });
+
+  it("preserves unknown registry formats and their refs without rewriting or cleanup", async () => {
+    const root = repository();
+    const unknown = { formatVersion: 99, future: { keep: true } };
+    const unknownRegistryOid = writeRegistry(root, unknown);
+    const unknownBackupOid = hashBlob(root, "future backup\n");
+    const unknownBackupRef = "refs/inertia/reversal-backups/00000000-0000-4000-8000-000000000000/future";
+    git(root, "update-ref", unknownBackupRef, unknownBackupOid);
+
+    await cleanupReversalOperations(root);
+
+    expect(git(root, "rev-parse", REVERSAL_REGISTRY_REF).trim()).toBe(unknownRegistryOid);
+    expect(git(root, "rev-parse", unknownBackupRef).trim()).toBe(unknownBackupOid);
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    const plan = await inspectDiffSelection(root, selection);
+    await expect(revertDiffSelection(root, { ...selection, expected: plan.validation })).rejects.toThrow(/newer or unreadable/i);
+    expect(git(root, "rev-parse", REVERSAL_REGISTRY_REF).trim()).toBe(unknownRegistryOid);
+    expect(git(root, "rev-parse", unknownBackupRef).trim()).toBe(unknownBackupOid);
   });
 
   it("rejects unresolved conflicts honestly", async () => {

@@ -19,13 +19,18 @@
   "include": [
     "electron.vite.config.ts",
     "src/main/**/*.ts",
+    "src/node/**/*.ts",
     "src/preload/**/*.ts",
     "src/server/**/*.ts",
     "src/shared/**/*.ts",
     "src/renderer/src/lib/**/*.ts",
     "src/renderer/src/utils/**/*.ts",
+    "src/renderer/src/components/AgentRequestCard.tsx",
     "src/renderer/src/components/ResponseMarkdown.tsx",
+    "src/renderer/src/components/ResponseTimeline.tsx",
+    "src/renderer/src/components/SelectionReviewAnswerCard.tsx",
     "src/renderer/src/components/UsageIndicator.tsx",
+    "src/renderer/src/components/ui.tsx",
     "tests/**/*.ts"
   ]
 }

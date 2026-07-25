@@ -1,11 +1,18 @@
-import type { Conversation, Project, ProjectGroupingMode } from "@shared/contracts";
+import type { Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
+import {
+  selectConversationWorkspaceRun,
+  workspaceRunAttentionView,
+} from "../../../shared/attention";
 
 export type SidebarThreadStatus = "working" | "approval" | "input" | "failed" | "completed" | "idle";
 
 export interface SidebarThreadView {
   conversation: Conversation;
+  run: WorkspaceRun | null;
   status: SidebarThreadStatus;
+  needsAttention: boolean;
   unread: boolean;
+  hidden: boolean;
   settled: boolean;
 }
 
@@ -78,20 +85,37 @@ export function hasUnreadCompletion(conversation: Conversation, activeConversati
 export function sidebarThreadView(
   conversation: Conversation,
   activeConversationId: string | null,
+  runs: readonly WorkspaceRun[] = [],
 ): SidebarThreadView {
-  const status: SidebarThreadStatus = conversation.status === "needs-input"
+  const run = selectConversationWorkspaceRun(conversation.id, runs);
+  const runAttention = run ? workspaceRunAttentionView(run) : null;
+  const status: SidebarThreadStatus = run?.status === "waiting"
     ? conversation.attentionKind === "approval" ? "approval" : "input"
-    : conversation.status === "running"
+    : run?.status === "running"
       ? "working"
-      : conversation.status === "failed"
+      : run?.status === "failed"
         ? "failed"
-        : conversation.status === "completed"
+        : run?.status === "succeeded"
           ? "completed"
-          : "idle";
+          : run
+            ? "idle"
+            : conversation.status === "needs-input"
+              ? conversation.attentionKind === "approval" ? "approval" : "input"
+              : conversation.status === "running"
+                ? "working"
+                : conversation.status === "failed"
+                  ? "failed"
+                  : conversation.status === "completed"
+                    ? "completed"
+                    : "idle";
   return {
     conversation,
+    run,
     status,
-    unread: hasUnreadCompletion(conversation, activeConversationId),
+    needsAttention: runAttention?.needsAttention
+      ?? (status === "approval" || status === "input" || status === "failed"),
+    unread: runAttention?.unread ?? hasUnreadCompletion(conversation, activeConversationId),
+    hidden: runAttention?.bucket === "hidden",
     settled: conversation.settledAt !== null,
   };
 }
@@ -108,12 +132,14 @@ const statusPriority: Record<SidebarThreadStatus, number> = {
 export function sortActivityThreads(
   conversations: readonly Conversation[],
   activeConversationId: string | null,
+  runs: readonly WorkspaceRun[] = [],
 ): SidebarThreadView[] {
   return conversations
     .filter(({ archivedAt }) => archivedAt === null)
-    .map((conversation) => sidebarThreadView(conversation, activeConversationId))
+    .map((conversation) => sidebarThreadView(conversation, activeConversationId, runs))
     .sort((a, b) => (
       Number(a.settled) - Number(b.settled)
+      || Number(b.needsAttention) - Number(a.needsAttention)
       || statusPriority[a.status] - statusPriority[b.status]
       || Number(b.unread) - Number(a.unread)
       || b.conversation.updatedAt.localeCompare(a.conversation.updatedAt)
@@ -122,12 +148,12 @@ export function sortActivityThreads(
 }
 
 export function groupWorkThreads(threads: readonly SidebarThreadView[]): SidebarWorkSection[] {
-  const active = threads.filter(({ settled }) => !settled);
+  const active = threads.filter(({ hidden, settled }) => !settled && !hidden);
   return [
     {
       id: "needs-you",
       label: "Needs you",
-      threads: active.filter(({ status }) => status === "approval" || status === "input" || status === "failed"),
+      threads: active.filter(({ needsAttention }) => needsAttention),
     },
     {
       id: "in-progress",
@@ -137,7 +163,9 @@ export function groupWorkThreads(threads: readonly SidebarThreadView[]): Sidebar
     {
       id: "recent",
       label: "Recent",
-      threads: active.filter(({ status }) => status === "completed" || status === "idle"),
+      threads: active.filter(({ needsAttention, status }) => (
+        !needsAttention && status !== "working" && status !== "approval" && status !== "input"
+      )),
     },
   ];
 }

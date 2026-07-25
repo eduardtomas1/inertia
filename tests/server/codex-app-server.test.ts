@@ -10,6 +10,7 @@ import {
   removePortableFixture,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
+import { nativeProviderRunInput } from "./model-route-fixture";
 
 describe.sequential("Codex App Server runtime", () => {
   const roots: string[] = [];
@@ -97,6 +98,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "thread/start" || message.method === "thread/resume") {
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "incompatible-full-access" && message.params.approvalPolicy === "never") {
       return send({ id: message.id, error: { code: -32602, message: "invalid params: unknown variant danger-full-access" } });
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-resume" && message.method === "thread/resume") {
+      return send({ id: message.id, error: { code: -32001, message: "thread not found" } });
     }
     threadId = message.params.threadId || "thread-new";
     send({ id: message.id, result: { thread: { id: threadId }, cwd: process.cwd(), model: "fake" } });
@@ -210,7 +214,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const usage: Array<number | null> = [];
     const metadata: string[][] = [];
 
-    const run = manager.run({
+    const run = manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-approve",
       cwd: fake.root,
@@ -220,7 +224,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-existing",
       imagePaths: [join(fake.root, "reference.png")],
       reasoningEffort: "high",
-    }, {
+    }), {
       onApproval: (event) => {
         approvals.push(event.request.command ?? "");
         approvalRequests.push(event.request);
@@ -288,20 +292,48 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
+  it("fails a stale resume visibly instead of silently replacing the provider session", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "stale-resume";
+    const manager = trackedManager(fake.command);
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-stale",
+      cwd: fake.root,
+      prompt: "Do not lose this context.",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-stale",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining(
+        "saved provider session is no longer available",
+      ),
+    });
+
+    const messages = captured(fake.capturePath);
+    expect(messages.filter(({ method }) => method === "thread/resume")).toHaveLength(1);
+    expect(messages.some(({ method }) => method === "thread/start")).toBe(false);
+    expect(messages.some(({ method }) => method === "turn/start")).toBe(false);
+    expect(manager.isRunning("conversation-stale")).toBe(false);
+  });
+
   it("uses workspace-write for auto-edit build turns and maps denial", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "file-change";
     const manager = trackedManager(fake.command);
 
-    const result = manager.run({
+    const result = manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-deny",
       cwd: fake.root,
       prompt: "Try an edit",
       interactionMode: "build",
       access: "auto-edit",
-    }, {
+    }), {
       onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "deny")).toBe(true),
       onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] })).toBe(true),
     });
@@ -350,7 +382,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const reasoning: string[] = [];
     const usage: Array<number | null> = [];
 
-    const result = manager.run({
+    const result = manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-full",
       cwd: fake.root,
@@ -360,7 +392,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-full",
       imagePaths: [join(fake.root, "full-reference.png")],
       reasoningEffort: "high",
-    }, {
+    }), {
       onApproval: (event) => approvals.push(event.request.requestId),
       onInput: (event) => {
         inputs.push(event.request.questions[0]?.question ?? "");
@@ -421,14 +453,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const manager = trackedManager(fake.command, 500);
     let cancelled = false;
 
-    const result = manager.run({
+    const result = manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-full-cancel",
       cwd: fake.root,
       prompt: "Wait",
       interactionMode: "build",
       access: "full",
-    }, {
+    }), {
       onStatus: (event) => {
         if (event.status !== "running" || cancelled) return;
         cancelled = manager.cancel(event.conversationId);
@@ -454,14 +486,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const manager = trackedManager(fake.command);
     const approvals: string[] = [];
 
-    const result = await manager.run({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-full-incompatible",
       cwd: fake.root,
       prompt: "Run with full access",
       interactionMode: "build",
       access: "full",
-    }, { onApproval: (event) => approvals.push(event.request.requestId) });
+    }), { onApproval: (event) => approvals.push(event.request.requestId) });
 
     expect(result).toMatchObject({
       status: "failed",
@@ -486,14 +518,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const approvalResponses: boolean[] = [];
     const inputResponses: boolean[] = [];
 
-    const result = manager.run({
+    const result = manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-permissions",
       cwd: fake.root,
       prompt: "Inspect generated files",
       interactionMode: "build",
       access: "supervised",
-    }, {
+    }), {
       onApproval: (event) => {
         approvalRequests.push(event.request);
         approvalResponses.push(manager.respondToApproval(event.conversationId, event.request.requestId, "approve"));
@@ -524,14 +556,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "command";
     const manager = trackedManager(fake.command, 500);
 
-    const result = manager.run({
+    const result = manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-cancel",
       cwd: fake.root,
       prompt: "Plan only",
       interactionMode: "plan",
       access: "auto-edit" as ProviderAccessMode,
-    }, {
+    }), {
       onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "cancel")).toBe(true),
     });
 
@@ -556,14 +588,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const manager = trackedManager(fake.command, 100);
     const approvals: string[] = [];
     const text: string[] = [];
-    const result = await manager.run({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-overflow",
       cwd: fake.root,
       prompt: "Do nothing",
       interactionMode: "build",
       access: "supervised",
-    }, {
+    }), {
       onApproval: (event) => approvals.push(event.request.requestId),
       onText: (event) => text.push(event.text),
     });
@@ -580,14 +612,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     process.env.INERTIA_APP_SERVER_SCENARIO = "stale-completion";
     const manager = trackedManager(fake.command);
 
-    const result = manager.run({
+    const result = manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-stale",
       cwd: fake.root,
       prompt: "Continue",
       interactionMode: "build",
       access: "supervised",
-    }, {
+    }), {
       onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true),
       onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] })).toBe(true),
     });
@@ -603,14 +635,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const manager = trackedManager(fake.command, 500);
     const approvals: string[] = [];
 
-    const result = await manager.run({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-unsupported",
       cwd: fake.root,
       prompt: "Try a command",
       interactionMode: "build",
       access: "supervised",
-    }, { onApproval: (event) => approvals.push(event.request.requestId) });
+    }), { onApproval: (event) => approvals.push(event.request.requestId) });
 
     expect(result).toMatchObject({ status: "cancelled" });
     expect(approvals).toEqual([]);
@@ -626,14 +658,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const missing = join(root, process.platform === "win32" ? "missing.exe" : "missing");
     const manager = trackedManager(missing);
 
-    await expect(manager.run({
+    await expect(manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "conversation-missing",
       cwd: root,
       prompt: "Start",
       interactionMode: "build",
       access: "supervised",
-    })).resolves.toMatchObject({ status: "failed" });
+    }))).resolves.toMatchObject({ status: "failed" });
     expect(manager.activeConversationIds()).toEqual([]);
     await manager.disposeAll();
   });

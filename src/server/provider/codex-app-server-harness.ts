@@ -1,4 +1,5 @@
 import { startCodexAppServerRun } from "../codex-app-server";
+import { staleProviderSessionDecision } from "../../shared/continuation-policy";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -50,7 +51,13 @@ export function createCodexAppServerHarness(): AgentHarness {
 function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   const providerId = "codex" as const;
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
-  const emitter = createAgentHarnessEmitter(providerId, conversationId, options.callbacks);
+  const emitter = createAgentHarnessEmitter(
+    providerId,
+    conversationId,
+    options.callbacks,
+    options.input.runId ?? conversationId,
+    options.input.turnId ?? null,
+  );
   emitter.status("starting");
   let runningEmitted = false;
   const emitRunning = (): void => {
@@ -61,12 +68,21 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
 
   let codexRun: ReturnType<typeof startCodexAppServerRun>;
   try {
+    if (
+      options.harnessConfiguration
+      && options.harnessConfiguration.kind !== "codex-responses"
+    ) {
+      throw new Error("Codex received an incompatible harness configuration.");
+    }
     codexRun = startCodexAppServerRun({
       executable: options.executable,
       environment: options.environment,
       cwd: options.input.cwd,
       prompt: options.input.prompt,
       ...(options.input.model ? { model: options.input.model } : {}),
+      ...(options.harnessConfiguration
+        ? { modelProvider: options.harnessConfiguration }
+        : {}),
       ...(options.input.reasoningEffort ? { reasoningEffort: options.input.reasoningEffort } : {}),
       ...(options.input.sessionId ? { sessionId: options.input.sessionId } : {}),
       ...(options.input.imagePaths ? { imagePaths: options.input.imagePaths } : {}),
@@ -87,7 +103,13 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     });
   } catch (error) {
     const spawnError = error instanceof Error ? error as NodeJS.ErrnoException : undefined;
-    const message = providerFailureMessage(providerId, spawnError, "");
+    const message = providerFailureMessage(
+      providerId,
+      spawnError,
+      "",
+      "",
+      options.input.backendProfile,
+    );
     emitter.status("failed", message);
     return failedCodexRun(conversationId, options.input.sessionId, message);
   }
@@ -96,15 +118,28 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   let cancelRequested = false;
   const result = codexRun.result.then((runtimeResult): ProviderRunResult => {
     settled = true;
-    const { diagnostic: runtimeDiagnostic, compatibilityError, ...publicRuntimeResult } = runtimeResult;
+    const {
+      diagnostic: runtimeDiagnostic,
+      compatibilityError,
+      continuationError,
+      ...publicRuntimeResult
+    } = runtimeResult;
     if (runtimeResult.status === "cancelled" || cancelRequested) {
       emitter.status("cancelled");
       return { providerId, conversationId, ...publicRuntimeResult, status: "cancelled" };
     }
     if (runtimeResult.status === "failed") {
-      const message = compatibilityError === "full-access-unsupported"
-        ? "This Codex App Server version does not support Full Access. Update Codex CLI and try again."
-        : providerFailureMessage(providerId, undefined, runtimeDiagnostic ?? "");
+      const message = continuationError === "stale-provider-session"
+        ? staleProviderSessionDecision().reason
+        : compatibilityError === "full-access-unsupported"
+          ? "This Codex App Server version does not support Full Access. Update Codex CLI and try again."
+          : providerFailureMessage(
+              providerId,
+              undefined,
+              runtimeDiagnostic ?? "",
+              "",
+              options.input.backendProfile,
+            );
       emitter.status("failed", message);
       return { providerId, conversationId, ...publicRuntimeResult, status: "failed", error: message };
     }

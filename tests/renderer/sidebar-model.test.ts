@@ -9,7 +9,8 @@ import {
   sidebarThreadView,
   sortActivityThreads,
 } from "../../src/renderer/src/utils/sidebarModel";
-import type { Conversation, Project } from "../../src/shared/contracts";
+import type { Conversation, Project, WorkspaceRun } from "../../src/shared/contracts";
+import { nativeModelSelection } from "../../src/shared/model-routing";
 
 function project(overrides: Partial<Project> & Pick<Project, "id" | "name" | "path">): Project {
   return {
@@ -45,6 +46,31 @@ function conversation(overrides: Partial<Conversation> & Pick<Conversation, "id"
     lastViewedAt: "2026-07-20T10:00:00.000Z",
     createdAt: "2026-07-20T10:00:00.000Z",
     updatedAt: "2026-07-20T10:00:00.000Z",
+    ...overrides,
+    modelSelection: overrides.modelSelection
+      ?? nativeModelSelection({ providerId: overrides.providerId ?? "codex" }),
+    continuationIdentity: overrides.continuationIdentity ?? null,
+  };
+}
+
+function workspaceRun(
+  conversationId: string,
+  overrides: Partial<WorkspaceRun> = {},
+): WorkspaceRun {
+  return {
+    id: `run-${conversationId}`,
+    kind: "agent",
+    projectId: "p",
+    conversationId,
+    actionId: null,
+    label: conversationId,
+    detail: null,
+    status: "succeeded",
+    attentionState: "acknowledged",
+    canStop: false,
+    port: null,
+    startedAt: "2026-07-22T10:00:00.000Z",
+    finishedAt: "2026-07-22T10:01:00.000Z",
     ...overrides,
   };
 }
@@ -133,8 +159,8 @@ describe("work-first chat model", () => {
     expect(sortActivityThreads(entries, null).map(({ conversation: entry }) => entry.id)).toEqual([
       "approval",
       "input",
-      "working",
       "failed",
+      "working",
       "completed",
       "idle",
     ]);
@@ -160,6 +186,37 @@ describe("work-first chat model", () => {
     expect(hasUnreadCompletion(completed, completed.id)).toBe(false);
     expect(hasUnreadCompletion({ ...completed, lastViewedAt: completed.completedAt }, null)).toBe(false);
     expect(hasUnreadCompletion({ ...completed, completedAt: null }, null)).toBe(false);
+  });
+
+  it("joins Work to the same persisted run attention state used by Runs", () => {
+    const entries = ["failed", "acknowledged", "completed", "dismissed", "working"]
+      .map((id) => conversation({ id, projectId: "p" }));
+    const runs = [
+      workspaceRun("failed", { status: "failed", attentionState: "seen" }),
+      workspaceRun("acknowledged", { status: "failed", attentionState: "acknowledged" }),
+      workspaceRun("completed", { attentionState: "unseen" }),
+      workspaceRun("dismissed", { status: "failed", attentionState: "dismissed" }),
+      workspaceRun("working", {
+        status: "running",
+        attentionState: "acknowledged",
+        finishedAt: null,
+      }),
+    ];
+    const threads = sortActivityThreads(entries, null, runs);
+
+    expect(sidebarThreadView(entries[2]!, entries[2]!.id, runs)).toMatchObject({
+      status: "completed",
+      unread: true,
+      needsAttention: false,
+    });
+    expect(groupWorkThreads(threads).map(({ id, threads: sectionThreads }) => ({
+      id,
+      threads: sectionThreads.map(({ conversation: entry }) => entry.id),
+    }))).toEqual([
+      { id: "needs-you", threads: ["failed"] },
+      { id: "in-progress", threads: ["working"] },
+      { id: "recent", threads: ["acknowledged", "completed"] },
+    ]);
   });
 
   it("provides wrapping Arrow and bounded Home/End keyboard navigation", () => {

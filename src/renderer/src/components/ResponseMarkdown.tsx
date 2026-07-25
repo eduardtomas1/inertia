@@ -74,13 +74,15 @@ const sanitizeSchema = {
 type ResponseMarkdownProps = {
   content: string;
   projectRoot: string;
+  projectId: string;
+  conversationId?: string;
   defaultCodeWrap: boolean;
   streaming?: boolean;
 };
 
 type ProjectLink =
   | { kind: "external"; url: string }
-  | { kind: "project"; path: string }
+  | { kind: "project"; relativePath: string; action: "reveal" }
   | { kind: "anchor"; href: string }
   | { kind: "unsafe" };
 
@@ -145,7 +147,11 @@ export function resolveResponseLink(projectRoot: string, rawHref: string): Proje
   } catch {
     return { kind: "unsafe" };
   }
-  if (!decoded || /^[a-z][a-z0-9+.-]*:/iu.test(decoded) && !/^[a-z]:[\\/]/iu.test(decoded)) return { kind: "unsafe" };
+  if (
+    !decoded
+    || /[\0\r\n]/u.test(decoded)
+    || /^[a-z][a-z0-9+.-]*:/iu.test(decoded) && !/^[a-z]:[\\/]/iu.test(decoded)
+  ) return { kind: "unsafe" };
   const root = normalizedPath(projectRoot).replace(/\/+$/u, "");
   if (!root) return { kind: "unsafe" };
   const isAbsolute = decoded.startsWith("/") || /^[a-z]:[\\/]/iu.test(decoded);
@@ -154,7 +160,8 @@ export function resolveResponseLink(projectRoot: string, rawHref: string): Proje
   const comparableRoot = insensitive ? root.toLocaleLowerCase("en-US") : root;
   const comparableCandidate = insensitive ? candidate.toLocaleLowerCase("en-US") : candidate;
   if (comparableCandidate !== comparableRoot && !comparableCandidate.startsWith(`${comparableRoot}/`)) return { kind: "unsafe" };
-  return { kind: "project", path: candidate };
+  const relativePath = candidate === root ? "." : candidate.slice(root.length + 1);
+  return relativePath ? { kind: "project", relativePath, action: "reveal" } : { kind: "unsafe" };
 }
 
 function nodeText(node: ReactNode): string {
@@ -292,7 +299,14 @@ export function stabilizeStreamingMarkdown(content: string): string {
   return `${content}\n${marker}`;
 }
 
-export function ResponseMarkdown({ content, projectRoot, defaultCodeWrap, streaming = false }: ResponseMarkdownProps): React.JSX.Element {
+export function ResponseMarkdown({
+  content,
+  projectRoot,
+  projectId,
+  conversationId,
+  defaultCodeWrap,
+  streaming = false,
+}: ResponseMarkdownProps): React.JSX.Element {
   const renderedContent = streaming ? stabilizeStreamingMarkdown(content) : content;
   return (
     <div className="response-markdown">
@@ -306,7 +320,15 @@ export function ResponseMarkdown({ content, projectRoot, defaultCodeWrap, stream
               return <a {...props} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
             }
             if (target.kind === "project") {
-              return <a {...props} href={href} onClick={(event) => { event.preventDefault(); void window.inertia.openPath(target.path); }}>{children}</a>;
+              return <a {...props} href={href} onClick={(event) => {
+                event.preventDefault();
+                void window.inertia.openProjectPath({
+                  projectId,
+                  ...(conversationId ? { conversationId } : {}),
+                  relativePath: target.relativePath,
+                  action: target.action,
+                }).catch(() => undefined);
+              }}>{children}</a>;
             }
             if (target.kind === "anchor") return <a {...props} href={target.href}>{children}</a>;
             return <span className="response-unsafe-link" title="This link was blocked because it is outside the project or uses an unsafe protocol.">{children}</span>;

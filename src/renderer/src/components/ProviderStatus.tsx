@@ -1,10 +1,10 @@
 import { CheckCircle2, CircleAlert, CircleDot, LoaderCircle, PlugZap, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 import type { ProviderInfo } from "@shared/contracts";
-import { providerSetupAction, providerStateLabel, type ProviderSetupAction } from "@/utils/providerStatus";
+import { providerSetupAction, providerStateLabel, type ProviderSetupAction } from "../utils/providerStatus";
 
-export { providerSetupAction, providerStateDetail, providerStateLabel } from "@/utils/providerStatus";
-export type { ProviderSetupAction } from "@/utils/providerStatus";
+export { providerSetupAction, providerStateDetail, providerStateLabel } from "../utils/providerStatus";
+export type { ProviderSetupAction } from "../utils/providerStatus";
 
 export function ProviderStatus({ provider, compact = false }: { provider: ProviderInfo; compact?: boolean }): React.JSX.Element {
   const checking = provider.installState === "checking" || provider.authState === "checking";

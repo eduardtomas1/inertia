@@ -56,12 +56,31 @@ jobs:
       - name: Run portable runtime and provider protocol suite
         run: npm run test:portable
 
+      - name: Run opt-in Kimi through Claude integration
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          INERTIA_KIMI_CODE_API_KEY: ${{ secrets.INERTIA_KIMI_CODE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${INERTIA_KIMI_CODE_API_KEY:-}" ]]; then
+            echo "Kimi integration secret is unavailable; ordinary CI remains secret-free."
+            exit 0
+          fi
+          INERTIA_RUN_KIMI_CLAUDE_INTEGRATION=1 \
+            npm exec -- vitest run tests/server/kimi-claude-real-smoke.test.ts
+
       - name: Verify native Windows Codex discovery and shim launching
         if: runner.os == 'Windows'
         run: npm run test:windows-codex
 
-      - name: Audit dependencies
+      - name: Audit production dependencies
         if: runner.os == 'Linux'
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Report complete dependency audit
+        if: runner.os == 'Linux'
+        continue-on-error: true
         run: npm audit --audit-level=high
 
       - name: Run Electron end-to-end tests

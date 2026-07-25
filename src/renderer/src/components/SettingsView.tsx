@@ -17,6 +17,7 @@ import {
   PanelLeft,
   RefreshCw,
   RotateCcw,
+  ServerCog,
   ShieldCheck,
   Sun,
   TerminalSquare,
@@ -25,15 +26,32 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 
-import { defaultSettings, type AppSettings, type Conversation, type ProviderId, type ProviderInfo, type ThemePreference } from "@shared/contracts";
+import {
+  defaultSettings,
+  type AppSettings,
+  type Conversation,
+  type ModelBackendDefault,
+  type ModelBackendProfileDetail,
+  type ModelBackendProfileDraft,
+  type ModelBackendProfileView,
+  type ModelSelection,
+  type Project,
+  type ProviderId,
+  type ProviderInfo,
+  type ThemePreference,
+} from "@shared/contracts";
 import { INERTIA_VERSION } from "@shared/version";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { Switch } from "./ui";
+import { ModelBackendsSettings } from "./ModelBackendsSettings";
 
 type SettingsViewProps = {
   settings: AppSettings;
   disabled: boolean;
   providers: ProviderInfo[];
+  backendProfiles: ModelBackendProfileView[];
+  backendDefaults: ModelBackendDefault[];
+  projects: Project[];
   archived: Conversation[];
   onUpdate: (settings: Partial<AppSettings>) => void;
   onConnectProvider: (providerId: ProviderId) => void;
@@ -41,9 +59,18 @@ type SettingsViewProps = {
   onChooseCodexBinary: () => void;
   onRevealRuntimeLogs: () => Promise<string>;
   onUnarchive: (conversation: Conversation) => void;
+  onLoadBackendProfile: (profileId: string) => Promise<ModelBackendProfileDetail>;
+  onCreateBackendProfile: (draft: ModelBackendProfileDraft) => Promise<ModelBackendProfileDetail>;
+  onUpdateBackendProfile: (profileId: string, update: Partial<ModelBackendProfileDraft> & { enabled?: boolean }) => Promise<ModelBackendProfileDetail>;
+  onSetBackendCredential: (profileId: string, secret: string) => Promise<ModelBackendProfileDetail>;
+  onClearBackendCredential: (profileId: string) => Promise<ModelBackendProfileDetail>;
+  onProbeBackendProfile: (profileId: string, modelId: string) => Promise<ModelBackendProfileDetail>;
+  onDeleteBackendProfile: (profileId: string) => Promise<void>;
+  onSetBackendDefault: (projectId: string | null, selection: ModelSelection) => Promise<void>;
+  onClearBackendDefault: (projectId: string | null) => Promise<void>;
 };
 
-type SettingsSection = "general" | "providers" | "source" | "keybindings" | "archive";
+type SettingsSection = "general" | "providers" | "backends" | "source" | "keybindings" | "archive";
 
 const themes: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "System", icon: Laptop },
@@ -54,6 +81,7 @@ const themes: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
 const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> = [
   { id: "general", label: "General", icon: PanelLeft },
   { id: "providers", label: "Providers", icon: Bot },
+  { id: "backends", label: "Model backends", icon: ServerCog },
   { id: "source", label: "Source control", icon: GitCompareArrows },
   { id: "keybindings", label: "Keybindings", icon: Keyboard },
   { id: "archive", label: "Archive & data", icon: ArchiveRestore },
@@ -66,7 +94,30 @@ const shortcuts = [
   ["Toggle terminal", "⌘ J"],
 ] as const;
 
-export function SettingsView({ settings, disabled, providers, archived, onUpdate, onConnectProvider, onRefreshProvider, onChooseCodexBinary, onRevealRuntimeLogs, onUnarchive }: SettingsViewProps): React.JSX.Element {
+export function SettingsView({
+  settings,
+  disabled,
+  providers,
+  backendProfiles,
+  backendDefaults,
+  projects,
+  archived,
+  onUpdate,
+  onConnectProvider,
+  onRefreshProvider,
+  onChooseCodexBinary,
+  onRevealRuntimeLogs,
+  onUnarchive,
+  onLoadBackendProfile,
+  onCreateBackendProfile,
+  onUpdateBackendProfile,
+  onSetBackendCredential,
+  onClearBackendCredential,
+  onProbeBackendProfile,
+  onDeleteBackendProfile,
+  onSetBackendDefault,
+  onClearBackendDefault,
+}: SettingsViewProps): React.JSX.Element {
   const [section, setSection] = useState<SettingsSection>("general");
   const [revealingLogs, setRevealingLogs] = useState(false);
   const [logRevealStatus, setLogRevealStatus] = useState<string | null>(null);
@@ -104,7 +155,10 @@ export function SettingsView({ settings, disabled, providers, archived, onUpdate
         <p>Preferences and project history stay on this device.</p>
       </aside>
 
-      <div className="settings-content">
+      <div className={clsx(
+        "settings-content",
+        section === "backends" && "is-backends",
+      )}>
         <div className="settings-heading settings-heading-row">
           <span><span className="welcome-kicker">Make it yours</span><h2>{title}</h2><p>Keep the workspace calm, capable, and predictable.</p></span>
           <button type="button" className="secondary-button" disabled={disabled} onClick={() => onUpdate(defaultSettings)}><RotateCcw size={14} />Restore defaults</button>
@@ -213,6 +267,24 @@ export function SettingsView({ settings, disabled, providers, archived, onUpdate
               </div>
             </section>
           </>
+        )}
+
+        {section === "backends" && (
+          <ModelBackendsSettings
+            profiles={backendProfiles}
+            defaults={backendDefaults}
+            projects={projects}
+            disabled={disabled}
+            onLoadDetail={onLoadBackendProfile}
+            onCreate={onCreateBackendProfile}
+            onUpdate={onUpdateBackendProfile}
+            onSetCredential={onSetBackendCredential}
+            onClearCredential={onClearBackendCredential}
+            onProbe={onProbeBackendProfile}
+            onDelete={onDeleteBackendProfile}
+            onSetDefault={onSetBackendDefault}
+            onClearDefault={onClearBackendDefault}
+          />
         )}
 
         {section === "source" && (

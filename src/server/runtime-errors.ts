@@ -5,6 +5,7 @@ import { ProviderRuntimeError } from "./providers";
 import { ReviewSummaryError } from "./review-summary";
 import { TerminalError } from "./terminal";
 import { WorkspaceError } from "./workspace";
+import { BackendProfileControllerError } from "./runtime/backends/backend-profile-controller";
 
 export class RuntimeRequestError extends Error {}
 
@@ -18,6 +19,7 @@ export function publicRuntimeError(error: unknown): string {
     || error instanceof CheckpointError
     || error instanceof ProviderRuntimeError
     || error instanceof ReviewSummaryError
+    || error instanceof BackendProfileControllerError
   ) return error.message;
   return "The request could not be completed.";
 }

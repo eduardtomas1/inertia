@@ -24,7 +24,8 @@ import {
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import type { AppSnapshot, Conversation, Project, ProjectGroupingMode } from "@shared/contracts";
+import type { AppSnapshot, Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
+import { workspaceRunAttentionView } from "../../../shared/attention";
 import { formatRelativeTime } from "../lib/format";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -57,6 +58,8 @@ type SidebarProps = {
   onSettleConversation: (conversation: Conversation) => void;
   onRestoreConversation: (conversation: Conversation) => void;
   onDeleteConversation: (conversation: Conversation) => void;
+  onAcknowledgeRun: (run: WorkspaceRun) => void;
+  onDismissRun: (run: WorkspaceRun) => void;
   onOpenProject: (project: Project) => void;
   onRenameProject: (project: Project, name: string) => void;
   onSetProjectGrouping: (project: Project, groupingMode: ProjectGroupingMode | null) => void;
@@ -102,6 +105,8 @@ export function Sidebar({
   onSettleConversation,
   onRestoreConversation,
   onDeleteConversation,
+  onAcknowledgeRun,
+  onDismissRun,
   onOpenProject,
   onRenameProject,
   onSetProjectGrouping,
@@ -208,9 +213,10 @@ export function Sidebar({
           || projectById.get(conversation.projectId)?.name.toLocaleLowerCase().includes(needle))
       )),
       snapshot?.activeConversationId ?? null,
+      snapshot?.runs ?? [],
     );
-  }, [projectById, query, snapshot?.activeConversationId, snapshot?.conversations, visibleProjects]);
-  const activeThreads = activityThreads.filter(({ settled }) => !settled);
+  }, [projectById, query, snapshot?.activeConversationId, snapshot?.conversations, snapshot?.runs, visibleProjects]);
+  const activeThreads = activityThreads.filter(({ hidden, settled }) => !settled && !hidden);
   const settledThreads = activityThreads.filter(({ settled }) => settled);
   const workSections = groupWorkThreads(activityThreads);
   const visibleHistory = settledThreads.slice(0, historyVisible);
@@ -287,7 +293,9 @@ export function Sidebar({
         type="button"
         role="menuitem"
         className="is-danger"
-        disabled={snapshot?.runs.some((run) => run.projectId === project.id && run.finishedAt === null)}
+        disabled={snapshot?.runs.some((run) => (
+          run.projectId === project.id && (run.status === "running" || run.status === "waiting")
+        ))}
         onClick={() => { setProjectMenu(null); onRemoveProject(project); }}
       >
         <Trash2 size={13} />Remove project
@@ -297,11 +305,25 @@ export function Sidebar({
 
   const conversationActions = (conversation: Conversation) => {
     const settled = conversation.settledAt !== null;
-    const hasActiveWork = snapshot?.runs.some((run) => run.conversationId === conversation.id && run.finishedAt === null) ?? false;
+    const hasActiveWork = snapshot?.runs.some((run) => (
+      run.conversationId === conversation.id && (run.status === "running" || run.status === "waiting")
+    )) ?? false;
     const canSettle = !hasActiveWork && conversation.status !== "running" && conversation.status !== "needs-input";
+    const thread = sidebarThreadView(conversation, snapshot?.activeConversationId ?? null, snapshot?.runs ?? []);
+    const runAttention = thread.run ? workspaceRunAttentionView(thread.run) : null;
     return (
       <div className="conversation-menu" role="menu">
         <button type="button" role="menuitem" onClick={() => { setRenameDraft(conversation.title); setRenaming(conversation.id); setConversationMenu(null); }}><Pencil size={13} />Rename</button>
+        {thread.run && thread.needsAttention && runAttention?.canAcknowledge && (
+          <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onAcknowledgeRun(thread.run!); }}>
+            <CheckCircle2 size={13} />Acknowledge
+          </button>
+        )}
+        {sidebarMode === "activity" && thread.run && runAttention?.canDismiss && (
+          <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onDismissRun(thread.run!); }}>
+            <X size={13} />Dismiss from Work
+          </button>
+        )}
         {settled
           ? <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onRestoreConversation(conversation); }}><ArchiveRestore size={13} />Reopen</button>
           : canSettle && <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onSettleConversation(conversation); }}><CheckCircle2 size={13} />Done</button>}
@@ -333,7 +355,7 @@ export function Sidebar({
   );
 
   const activityRow = (conversation: Conversation, variant: "card" | "history") => {
-    const model = sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
+    const model = sidebarThreadView(conversation, snapshot?.activeConversationId ?? null, snapshot?.runs ?? []);
     const project = projectById.get(conversation.projectId);
     const isActive = snapshot?.activeConversationId === conversation.id && view === "workspace";
     return (
@@ -520,7 +542,7 @@ export function Sidebar({
                     {isExpanded && (
                       <div className="conversation-list" aria-label={`${project.name} threads`}>
                         {conversations.map((conversation) => {
-                          const thread = sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
+                          const thread = sidebarThreadView(conversation, snapshot?.activeConversationId ?? null, snapshot?.runs ?? []);
                           return (
                             <div className={clsx("conversation-item", thread.unread && "is-unread")} key={conversation.id}>
                               {renaming === conversation.id ? renameForm(conversation) : (

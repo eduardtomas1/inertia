@@ -119,7 +119,13 @@ export async function readOpenCodeSdkModels(
 
 function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
-  const emitter = createAgentHarnessEmitter("opencode", conversationId, options.callbacks);
+  const emitter = createAgentHarnessEmitter(
+    "opencode",
+    conversationId,
+    options.callbacks,
+    options.input.runId ?? conversationId,
+    options.input.turnId ?? null,
+  );
   const text = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const serverOutput = new CappedProviderBuffer(MAX_SERVER_OUTPUT_CHARS);
   const approvals = new Map<string, PendingApproval>();
@@ -486,19 +492,17 @@ function handleOpenCodePart(
   }
 }
 
-function resolveOpenCodeModel(selection: string | undefined, providers: Provider[]): Model | undefined {
+export function resolveOpenCodeModel(selection: string | undefined, providers: Provider[]): Model | undefined {
   if (!selection) return undefined;
   const slash = selection.indexOf("/");
-  if (slash > 0) {
-    const providerId = selection.slice(0, slash);
-    const modelId = selection.slice(slash + 1);
-    const model = findOpenCodeModel(providerId, modelId, providers);
-    if (!model) throw new Error(`OpenCode does not advertise the selected model '${selection}'.`);
-    return model;
+  if (slash <= 0 || slash === selection.length - 1) {
+    throw new Error(`OpenCode model '${selection}' must come from its native provider/model catalog.`);
   }
-  const matches = providers.flatMap((provider) => Object.values(provider.models)).filter((model) => model.id === selection || model.name === selection);
-  if (matches.length !== 1) throw new Error(`OpenCode model '${selection}' is unavailable or ambiguous; select provider/model.`);
-  return matches[0];
+  const providerId = selection.slice(0, slash);
+  const modelId = selection.slice(slash + 1);
+  const model = findOpenCodeModel(providerId, modelId, providers);
+  if (!model) throw new Error(`OpenCode does not advertise the selected model '${selection}'.`);
+  return model;
 }
 
 function findOpenCodeModel(providerId: string, modelId: string, providers: Provider[]): Model | undefined {

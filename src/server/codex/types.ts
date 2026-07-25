@@ -6,6 +6,7 @@ import type {
   AgentInputRequest,
   AgentPlanStep,
 } from "../provider/interactions";
+import type { CodexResponsesHarnessConfiguration } from "../provider/contracts";
 
 export interface CodexUsageSnapshot {
   usedTokens: number | null;
@@ -26,6 +27,7 @@ export interface CodexAppServerOptions {
   cwd: string;
   prompt: string;
   model?: string;
+  modelProvider?: CodexResponsesHarnessConfiguration;
   reasoningEffort?: string;
   sessionId?: string;
   imagePaths?: readonly string[];
@@ -54,6 +56,7 @@ export interface CodexAppServerResult {
   signal: NodeJS.Signals | null;
   diagnostic?: string;
   compatibilityError?: "full-access-unsupported";
+  continuationError?: "stale-provider-session";
 }
 
 export interface CodexAppServerRun {

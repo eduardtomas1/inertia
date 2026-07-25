@@ -12,13 +12,29 @@ import {
   net,
   nativeTheme,
   protocol,
+  safeStorage,
   screen,
   shell,
   utilityProcess,
   type IpcMainInvokeEvent,
 } from "electron";
+import {
+  parseBackendCredentialProfileRequest,
+  parseSetBackendCredentialRequest,
+} from "../shared/backend-credentials.js";
+import {
+  builtInKimiClaudeBackendProfile,
+  KIMI_CLAUDE_BUILTIN_PROFILE_ID,
+} from "../shared/claude-backend-profiles.js";
+import { parseOpenProjectPathRequest } from "../shared/desktop.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
+import {
+  CredentialVault,
+  ElectronSafeStorageBackend,
+  FileCredentialVaultPersistence,
+  backendSecretReferenceForProfile,
+} from "./credential-vault.js";
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
 import {
@@ -37,13 +53,16 @@ const IPC = {
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
-  openPath: "inertia:open-path",
+  openProjectPath: "inertia:open-project-path",
   openExternal: "inertia:open-external",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
   syncThemePreference: "inertia:sync-theme-preference",
+  setBackendCredential: "inertia:set-backend-credential",
+  clearBackendCredential: "inertia:clear-backend-credential",
+  getBackendCredentialState: "inertia:get-backend-credential-state",
 } as const;
 
 const APP_SCHEME = "inertia";
@@ -65,6 +84,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
+let credentialVault: CredentialVault | null = null;
 let trustedRendererUrl = "";
 let stoppingRuntime = false;
 let packageSmokeFilePath: string | null = null;
@@ -370,13 +390,17 @@ function registerIpcHandlers(): void {
     return attachments;
   });
 
-  ipcMain.handle(IPC.openPath, async (event, ...args) => {
+  ipcMain.handle(IPC.openProjectPath, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    const [path] = args;
-    if (typeof path !== "string" || path.length === 0 || path.length > 4096 || path.includes("\0")) {
-      throw new Error("Invalid path");
+    const request = parseOpenProjectPathRequest(args[0]);
+    if (!request) throw new Error("Invalid project path request");
+    if (!runtimeSupervisor) throw new Error("The local runtime is not available");
+    const path = await runtimeSupervisor.resolveProjectPath(request);
+    if (request.action === "reveal") {
+      shell.showItemInFolder(path);
+      return "";
     }
-    return await shell.openPath(resolve(path));
+    return await shell.openPath(path);
   });
 
   ipcMain.handle(IPC.openExternal, async (event, ...args) => {
@@ -442,6 +466,33 @@ function registerIpcHandlers(): void {
       // Appearance persistence is best effort; the renderer still applies the
       // active preference immediately and will retry on the next snapshot.
     }
+  });
+
+  ipcMain.handle(IPC.setBackendCredential, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const request = parseSetBackendCredentialRequest(args[0]);
+    if (!request || !credentialVault) {
+      throw new Error("The backend credential request is invalid.");
+    }
+    return await credentialVault.setForProfile(request.profileId, request.secret);
+  });
+
+  ipcMain.handle(IPC.clearBackendCredential, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const request = parseBackendCredentialProfileRequest(args[0]);
+    if (!request || !credentialVault) {
+      throw new Error("The backend credential request is invalid.");
+    }
+    return await credentialVault.clearForProfile(request.profileId);
+  });
+
+  ipcMain.handle(IPC.getBackendCredentialState, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const request = parseBackendCredentialProfileRequest(args[0]);
+    if (!request || !credentialVault) {
+      throw new Error("The backend credential request is invalid.");
+    }
+    return await credentialVault.stateForProfile(request.profileId);
   });
 }
 
@@ -563,6 +614,12 @@ async function bootstrap(): Promise<void> {
   const defaultWorkspacePath = process.env.INERTIA_WORKSPACE_DIR
     ? resolve(process.env.INERTIA_WORKSPACE_DIR)
     : join(app.getPath("home"), "Inertia");
+  credentialVault = new CredentialVault(
+    new ElectronSafeStorageBackend(safeStorage),
+    new FileCredentialVaultPersistence(
+      join(app.getPath("userData"), "backend-credentials.vault.json"),
+    ),
+  );
 
   await Promise.all([
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
@@ -580,10 +637,21 @@ async function bootstrap(): Promise<void> {
     : null;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
+    credentialBroker: {
+      resolve: (secretReference) => credentialVault!.resolve(secretReference),
+      status: (secretReference) => credentialVault!.status(secretReference),
+      clear: (secretReference) => credentialVault!.clear(secretReference),
+      forget: (secretReference) => credentialVault!.forget(secretReference),
+    },
     workerOptions: {
       dataDirectory,
       defaultWorkspacePath,
       enableProviders: process.env.NODE_ENV !== "test" || Boolean(process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED),
+      kimiClaudeProfiles: [
+        builtInKimiClaudeBackendProfile(
+          backendSecretReferenceForProfile(KIMI_CLAUDE_BUILTIN_PROFILE_ID),
+        ),
+      ],
     },
     spawn: () => utilityProcess.fork(
       fileURLToPath(new URL("./runtime-worker.js", import.meta.url)),

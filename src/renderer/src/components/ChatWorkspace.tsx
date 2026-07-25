@@ -1,24 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowRight,
-  BrainCircuit,
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  CircleDot,
-  Clock3,
   Code2,
-  Copy,
-  FileCode2,
-  Files,
   FolderPlus,
   MessageSquarePlus,
-  Paperclip,
-  RotateCcw,
   ShieldCheck,
   TerminalSquare,
-  TriangleAlert,
 } from "lucide-react";
 import clsx from "clsx";
 import type {
@@ -26,49 +14,48 @@ import type {
   AgentApprovalDecision,
   AgentApprovalRequest,
   AgentInputRequest,
+  AgentPlan,
   AgentReasoning,
+  AgentTurn,
   ChatAttachment,
   ChatMessage,
-  ChangedFile,
   CheckpointSummary,
   Conversation,
+  ModelBackendProfileView,
+  ModelSelection,
   Project,
   ProjectAction,
   ProviderId,
   ProviderInfo,
   ResponseDensity,
   ThreadUsageSnapshot,
+  TurnGitArtifact,
+  TurnRequestContext,
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
-import { formatClockTime } from "../lib/format";
-import {
-  buildResponseTimeline,
-  formatElapsed,
-  shouldFollowTimeline,
-  turnElapsedMs,
-  workSummaryLabel,
-  type ResponseTurn,
-} from "../utils/responseTimeline";
-import { ApprovalCard, InputRequestCard } from "./AgentRequestCard";
+import { shouldFollowTimeline } from "../utils/responseTimeline";
 import { Composer } from "./Composer";
-import { ResponseMarkdown } from "./ResponseMarkdown";
+import { ResponseTimeline } from "./ResponseTimeline";
 import { LoadingMark } from "./ui";
 
 type ChatWorkspaceProps = {
   project: Project | null;
   conversation: Conversation | null;
+  turns: AgentTurn[];
   messages: ChatMessage[];
   activities: AgentActivity[];
   reasonings: AgentReasoning[];
+  plans: AgentPlan[];
   checkpoints: CheckpointSummary[];
-  changedFiles: ChangedFile[];
+  turnGitArtifacts: TurnGitArtifact[];
   streamingText: string;
   streamingReasoning: string;
   usage: ThreadUsageSnapshot | null;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   providers: ProviderInfo[];
+  backendProfiles: ModelBackendProfileView[];
   actions: ProjectAction[];
   mentionResults: WorkspaceEntry[];
   showTimestamps: boolean;
@@ -83,10 +70,11 @@ type ChatWorkspaceProps = {
   sending: boolean;
   onAddProject: () => void;
   onCreateConversation: () => void;
-  onSendMessage: (content: string, attachments: ChatAttachment[]) => Promise<void>;
+  onSendMessage: (content: string, attachments: ChatAttachment[], context?: TurnRequestContext) => Promise<void>;
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
-  onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => void;
+  onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => void;
+  onCreateConversationForSelection: (selection: ModelSelection) => Promise<void>;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
   onRunAction: (action: ProjectAction) => void;
@@ -96,261 +84,30 @@ type ChatWorkspaceProps = {
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   onStop: () => void;
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
+  onOpenTurnDiff: (turnId: string, path?: string) => void;
+  onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
+  onOpenTurnFile: (path: string) => void;
   onClearPromptContext?: () => void;
+  onLatestContentVisibilityChange?: (visible: boolean) => void;
 };
-
-function useCopyAction(): [boolean, (content: string) => Promise<void>] {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<number | null>(null);
-  useEffect(() => () => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
-  }, []);
-  const copy = async (content: string): Promise<void> => {
-    if (!navigator.clipboard || !content) return;
-    try {
-      await navigator.clipboard.writeText(content);
-    } catch {
-      return;
-    }
-    setCopied(true);
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setCopied(false), 1_500);
-  };
-  return [copied, copy];
-}
-
-function CopyAnswerButton({ content }: { content: string }): React.JSX.Element {
-  const [copied, copy] = useCopyAction();
-  return (
-    <button type="button" className="turn-action" title="Copy answer" onClick={() => void copy(content)}>
-      {copied ? <Check size={12} /> : <Copy size={12} />}
-      <span>{copied ? "Copied" : "Copy answer"}</span>
-    </button>
-  );
-}
-
-function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Element {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)))}</span>;
-}
-
-function ActivityRow({ activity }: { activity: AgentActivity }): React.JSX.Element {
-  const Icon = activity.status === "failed" ? TriangleAlert : activity.status === "completed" ? CheckCircle2 : CircleDot;
-  return (
-    <div className={clsx("agent-activity", `is-${activity.status}`, activity.kind === "error" && "is-important")}>
-      <Icon size={14} aria-hidden="true" />
-      <span><strong>{activity.title}</strong>{activity.detail && <small>{activity.detail}</small>}</span>
-    </div>
-  );
-}
-
-function LiveReasoning({ content }: { content: string }): React.JSX.Element {
-  return (
-    <details className="thinking-summary is-live" open>
-      <summary><BrainCircuit size={14} aria-hidden="true" /><span>Reasoning summary</span><small>Live</small></summary>
-      <div>{content}<span className="streaming-caret" aria-hidden="true" /></div>
-    </details>
-  );
-}
-
-function WorkLog({
-  turn,
-  autoCollapse,
-  reasoningContent,
-  showThinking,
-}: {
-  turn: ResponseTurn;
-  autoCollapse: boolean;
-  reasoningContent: string;
-  showThinking: boolean;
-}): React.JSX.Element | null {
-  const [expanded, setExpanded] = useState(!autoCollapse);
-  useEffect(() => setExpanded(!autoCollapse), [autoCollapse]);
-  if (turn.isActive) {
-    if (turn.activities.length === 0) return null;
-    return <div className="turn-work-log is-live">{turn.activities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}</div>;
-  }
-
-  const includesReasoning = showThinking && Boolean(reasoningContent);
-  const hasFoldableDetails = includesReasoning || turn.foldableActivities.length > 0;
-  if (!hasFoldableDetails && turn.importantActivities.length === 0) return null;
-
-  return (
-    <div className="turn-work-log is-settled">
-      {hasFoldableDetails && (
-        <details open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
-          <summary>
-            <CheckCircle2 size={14} aria-hidden="true" />
-            <span>{workSummaryLabel(turn)}</span>
-            <small>{expanded ? "Hide" : "Details"}</small>
-            <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
-          </summary>
-          <div className="turn-work-details">
-            {includesReasoning && (
-              <div className="turn-reasoning-detail">
-                <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
-                <p>{reasoningContent}</p>
-              </div>
-            )}
-            {turn.foldableActivities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
-          </div>
-        </details>
-      )}
-      {turn.importantActivities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
-    </div>
-  );
-}
-
-function ChangedFilesSummary({ files }: { files: ChangedFile[] }): React.JSX.Element | null {
-  if (files.length === 0) return null;
-  return (
-    <details className="turn-changed-files">
-      <summary><Files size={14} /><span>{files.length} changed {files.length === 1 ? "file" : "files"} in the workspace</span><small>Current</small></summary>
-      <div>
-        {files.slice(0, 12).map((file) => (
-          <span key={file.path} title={file.path}>
-            <FileCode2 size={13} />
-            <code>{file.path}</code>
-            <small>{file.status}</small>
-          </span>
-        ))}
-        {files.length > 12 && <p>And {files.length - 12} more.</p>}
-      </div>
-    </details>
-  );
-}
-
-function TurnTimeline({
-  turn,
-  projectRoot,
-  provider,
-  streamingText,
-  streamingReasoning,
-  approvals,
-  inputRequests,
-  showTimestamps,
-  showThinking,
-  defaultCodeWrap,
-  autoCollapseWorkLog,
-  changedFiles,
-  showChangedFileSummaries,
-  checkpointRestoreDisabled,
-  onRespondToApproval,
-  onRespondToInput,
-  onRevertCheckpoint,
-}: {
-  turn: ResponseTurn;
-  projectRoot: string;
-  provider: ProviderInfo | undefined;
-  streamingText: string;
-  streamingReasoning: string;
-  approvals: AgentApprovalRequest[];
-  inputRequests: AgentInputRequest[];
-  showTimestamps: boolean;
-  showThinking: boolean;
-  defaultCodeWrap: boolean;
-  autoCollapseWorkLog: boolean;
-  changedFiles: ChangedFile[];
-  showChangedFileSummaries: boolean;
-  checkpointRestoreDisabled: boolean;
-  onRespondToApproval: ChatWorkspaceProps["onRespondToApproval"];
-  onRespondToInput: ChatWorkspaceProps["onRespondToInput"];
-  onRevertCheckpoint: ChatWorkspaceProps["onRevertCheckpoint"];
-}): React.JSX.Element {
-  const persistedLast = turn.assistantMessages.at(-1);
-  const liveContent = turn.isActive ? streamingText || persistedLast?.content || "" : "";
-  const settledAssistantMessages = turn.isActive && persistedLast
-    ? turn.assistantMessages.slice(0, -1)
-    : turn.assistantMessages;
-  const reasoningContent = turn.isActive ? streamingReasoning || turn.reasoning?.content || "" : turn.reasoning?.content || "";
-  const providerLabel = provider?.label ?? "Agent";
-  const hasRunFlow = turn.isActive
-    || turn.activities.length > 0
-    || (showThinking && Boolean(reasoningContent))
-    || approvals.length > 0
-    || inputRequests.length > 0;
-
-  return (
-    <section className={clsx("response-turn", turn.isActive && "is-active")} aria-label={`Turn ${turn.index}`}>
-      <article className="message is-user">
-        <div className="message-meta">
-          <span>You</span>
-          {showTimestamps && <time dateTime={turn.userMessage.createdAt}>{formatClockTime(turn.userMessage.createdAt)}</time>}
-          {turn.checkpoint && <button type="button" className="message-revert" title={checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={checkpointRestoreDisabled} onClick={() => onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={11} />Revert</button>}
-        </div>
-        <div className="message-body">{turn.userMessage.content}</div>
-        {turn.userMessage.attachments.length > 0 && (
-          <div className="message-attachments">
-            {turn.userMessage.attachments.map((attachment) => <span key={attachment.id}><Paperclip size={12} />{attachment.name}</span>)}
-          </div>
-        )}
-      </article>
-
-      {hasRunFlow && (
-        <section className="agent-run-flow" aria-label={`${providerLabel} activity`}>
-          {turn.isActive && (
-            <header className="turn-working-state">
-              <span className="turn-working-pulse"><CircleDot size={14} aria-hidden="true" /></span>
-              <strong>{providerLabel} working</strong>
-              <span aria-live="off"><Clock3 size={12} aria-hidden="true" /><LiveElapsed startedAt={turn.startedAt} /></span>
-            </header>
-          )}
-          {turn.isActive && showThinking && reasoningContent && <LiveReasoning content={reasoningContent} />}
-          <WorkLog turn={turn} autoCollapse={autoCollapseWorkLog} reasoningContent={reasoningContent} showThinking={showThinking} />
-          {approvals.map((request) => <ApprovalCard key={request.id} request={request} onRespond={onRespondToApproval} />)}
-          {inputRequests.map((request) => <InputRequestCard key={request.id} request={request} onRespond={onRespondToInput} />)}
-        </section>
-      )}
-
-      {turn.systemMessages.map((message) => (
-        <article className="message is-system" key={message.id}>
-          <div className="message-meta"><span>System</span>{showTimestamps && <time dateTime={message.createdAt}>{formatClockTime(message.createdAt)}</time>}</div>
-          <div className="message-body">{message.content}</div>
-        </article>
-      ))}
-
-      {settledAssistantMessages.map((message, index) => (
-        <article className={clsx("message is-assistant", index === settledAssistantMessages.length - 1 && "is-final-answer")} key={message.id}>
-          <div className="message-meta"><span>{providerLabel}</span>{showTimestamps && <time dateTime={message.createdAt}>{formatClockTime(message.createdAt)}</time>}</div>
-          <ResponseMarkdown content={message.content} projectRoot={projectRoot} defaultCodeWrap={defaultCodeWrap} />
-          <footer className="turn-meta">
-            {!hasRunFlow && <span><Clock3 size={11} />{formatElapsed(turnElapsedMs(turn))}</span>}
-            <CopyAnswerButton content={message.content} />
-          </footer>
-        </article>
-      ))}
-
-      {turn.isActive && liveContent && (
-        <article className="message is-assistant is-streaming" aria-label="Streaming assistant answer">
-          <div className="message-meta"><span>{providerLabel}</span><span className="live-label">Live</span></div>
-          <ResponseMarkdown content={liveContent} projectRoot={projectRoot} defaultCodeWrap={defaultCodeWrap} streaming />
-          <span className="streaming-caret" aria-hidden="true" />
-        </article>
-      )}
-
-      {!turn.isActive && showChangedFileSummaries && <ChangedFilesSummary files={changedFiles} />}
-    </section>
-  );
-}
 
 export function ChatWorkspace({
   project,
   conversation,
+  turns,
   messages,
   activities,
   reasonings,
+  plans,
   checkpoints,
-  changedFiles,
+  turnGitArtifacts,
   streamingText,
   streamingReasoning,
   usage,
   approvals,
   inputRequests,
   providers,
+  backendProfiles,
   actions,
   mentionResults,
   showTimestamps,
@@ -369,6 +126,7 @@ export function ChatWorkspace({
   onRespondToApproval,
   onRespondToInput,
   onUpdateConversation,
+  onCreateConversationForSelection,
   onChooseAttachments,
   onImportAttachments,
   onRunAction,
@@ -378,25 +136,19 @@ export function ChatWorkspace({
   onUsageDisplayModeChange,
   onStop,
   onRevertCheckpoint,
+  onOpenTurnDiff,
+  onCompareTurnArtifacts,
+  onOpenTurnFile,
   onClearPromptContext,
+  onLatestContentVisibilityChange,
 }: ChatWorkspaceProps): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
-  const timeline = useMemo(() => conversation ? buildResponseTimeline({
-    messages,
-    activities,
-    reasonings,
-    checkpoints,
-    status: conversation.status,
-    conversationUpdatedAt: conversation.updatedAt,
-  }) : [], [activities, checkpoints, conversation, messages, reasonings]);
-  const latestTurnId = [...timeline].reverse().find(({ kind }) => kind === "turn")?.id;
-  const activeProvider = providers.find(({ id }) => id === conversation?.providerId);
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
-  const contentSignal = `${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
+  const contentSignal = `${turns.length}:${turns.at(-1)?.updatedAt ?? ""}:${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${plans.length}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
 
   const scrollToLatest = (behavior: ScrollBehavior = "smooth"): void => {
     const element = scrollRef.current;
@@ -404,11 +156,17 @@ export function ChatWorkspace({
     followingRef.current = true;
     setShowJump(false);
     element.scrollTo({ top: element.scrollHeight, behavior });
+    onLatestContentVisibilityChange?.(true);
   };
 
   useLayoutEffect(() => {
     scrollToLatest("auto");
   }, [conversation?.id]);
+
+  useEffect(
+    () => () => onLatestContentVisibilityChange?.(false),
+    [onLatestContentVisibilityChange],
+  );
 
   useEffect(() => {
     if (!followingRef.current) return;
@@ -442,6 +200,7 @@ export function ChatWorkspace({
     const follows = shouldFollowTimeline(element.scrollTop, element.clientHeight, element.scrollHeight);
     followingRef.current = follows;
     setShowJump(!follows);
+    onLatestContentVisibilityChange?.(follows);
   };
 
   if (loading) {
@@ -485,48 +244,59 @@ export function ChatWorkspace({
 
   return (
     <main className={clsx("chat-workspace", `response-density-${responseDensity}`)}>
-      <div ref={scrollRef} className="message-scroll" aria-label="Thread transcript" onScroll={onTranscriptScroll}>
+      <div
+        ref={scrollRef}
+        className="message-scroll"
+        aria-label="Thread transcript"
+        aria-describedby="transcript-keyboard-help"
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+Home Alt+End Alt+G"
+        tabIndex={0}
+        onScroll={onTranscriptScroll}
+      >
+        <span id="transcript-keyboard-help" className="visually-hidden">
+          Use Alt plus Up or Down to move between turns, Alt plus Home for the request,
+          Alt plus End for the final answer, and Alt plus G for the turn artifact.
+        </span>
         <div ref={timelineRef} className="response-timeline" aria-live="polite">
-          {messages.length === 0 && (
+          {messages.length === 0 && turns.length === 0 && (
             <div className="empty-thread"><span className="empty-thread-icon"><Code2 size={20} /></span><h3>What should we work on?</h3><p>Describe the outcome you want. The details can take shape together.</p></div>
           )}
-          {timeline.map((item) => {
-            if (item.kind === "message") {
-              return (
-                <article className={clsx("message", `is-${item.message.role}`)} key={item.id}>
-                  <div className="message-meta"><span>{item.message.role === "assistant" ? "Agent" : "System"}</span>{showTimestamps && <time dateTime={item.message.createdAt}>{formatClockTime(item.message.createdAt)}</time>}</div>
-                  {item.message.role === "assistant"
-                    ? <ResponseMarkdown content={item.message.content} projectRoot={projectRoot} defaultCodeWrap={defaultCodeWrap} />
-                    : <div className="message-body">{item.message.content}</div>}
-                </article>
-              );
-            }
-            if (item.kind === "activity") {
-              return <section className="agent-run-flow orphan-run-flow" aria-label="Agent activity" key={item.id}><div className="turn-work-log">{item.activities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}</div></section>;
-            }
-            return (
-              <TurnTimeline
-                key={item.id}
-                turn={item.turn}
-                projectRoot={projectRoot}
-                provider={activeProvider}
-                streamingText={item.turn.isActive ? streamingText : ""}
-                streamingReasoning={item.turn.isActive ? streamingReasoning : ""}
-                approvals={item.turn.isActive ? approvals : []}
-                inputRequests={item.turn.isActive ? inputRequests : []}
-                showTimestamps={showTimestamps}
-                showThinking={showThinking}
-                defaultCodeWrap={defaultCodeWrap}
-                autoCollapseWorkLog={autoCollapseWorkLog}
-                changedFiles={item.id === latestTurnId ? changedFiles : []}
-                showChangedFileSummaries={showChangedFileSummaries}
-                checkpointRestoreDisabled={conversation.status === "running" || conversation.status === "needs-input"}
-                onRespondToApproval={onRespondToApproval}
-                onRespondToInput={onRespondToInput}
-                onRevertCheckpoint={onRevertCheckpoint}
-              />
-            );
-          })}
+          <ResponseTimeline
+            turns={turns}
+            messages={messages}
+            activities={activities}
+            reasonings={reasonings}
+            plans={plans}
+            checkpoints={checkpoints}
+            gitArtifacts={turnGitArtifacts}
+            projectRoot={projectRoot}
+            projectId={project.id}
+            conversationId={conversation.id}
+            providers={providers}
+            streamingText={streamingText}
+            streamingReasoning={streamingReasoning}
+            approvals={approvals}
+            inputRequests={inputRequests}
+            showTimestamps={showTimestamps}
+            showThinking={showThinking}
+            defaultCodeWrap={defaultCodeWrap}
+            autoCollapseWorkLog={autoCollapseWorkLog}
+            showChangedFileSummaries={showChangedFileSummaries}
+            scrollElementRef={scrollRef}
+            timelineElementRef={timelineRef}
+            checkpointRestoreDisabled={turns.some(({ status }) =>
+              status === "queued"
+              || status === "starting"
+              || status === "running"
+              || status === "waiting-for-approval"
+              || status === "waiting-for-input")}
+            onRespondToApproval={onRespondToApproval}
+            onRespondToInput={onRespondToInput}
+            onRevertCheckpoint={onRevertCheckpoint}
+            onOpenTurnDiff={onOpenTurnDiff}
+            onCompareTurnArtifacts={onCompareTurnArtifacts}
+            onOpenTurnFile={onOpenTurnFile}
+          />
         </div>
       </div>
 
@@ -544,9 +314,11 @@ export function ChatWorkspace({
           disabled={!conversation}
           sending={sending}
           running={conversation.status === "running" || conversation.status === "needs-input"}
-          providerLocked={messages.length > 0}
+          backendProfiles={backendProfiles}
+          latestTurn={turns.at(-1) ?? null}
           onSend={onSendMessage}
           onUpdateConversation={onUpdateConversation}
+          onCreateConversationForSelection={onCreateConversationForSelection}
           onChooseAttachments={onChooseAttachments}
           onImportAttachments={onImportAttachments}
           onRunAction={onRunAction}

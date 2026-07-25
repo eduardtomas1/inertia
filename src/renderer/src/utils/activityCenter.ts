@@ -1,4 +1,5 @@
 import type { Conversation, WorkspaceRun } from "@shared/contracts";
+import { workspaceRunAttentionView } from "../../../shared/attention";
 
 export type ActivityWaitingKind = "approval" | "input" | "generic";
 
@@ -9,6 +10,7 @@ export interface ActivityRunActions {
   openPreview: boolean;
   stop: boolean;
   rerun: boolean;
+  acknowledge: boolean;
   dismiss: boolean;
   failureDetails: boolean;
 }
@@ -26,31 +28,26 @@ export interface ActivityRunSummary {
   activeCount: number;
 }
 
-const FAILED_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1_000;
-
 function compareStartedAtDescending(a: WorkspaceRun, b: WorkspaceRun): number {
   return b.startedAt.localeCompare(a.startedAt);
 }
 
-export function activityRunNeedsAttention(run: WorkspaceRun, now = Date.now()): boolean {
-  if (run.status === "waiting") return true;
-  if (run.status !== "failed") return false;
-  const failureTime = Date.parse(run.finishedAt ?? run.startedAt);
-  return Number.isFinite(failureTime) && now - failureTime <= FAILED_ATTENTION_WINDOW_MS;
+export function activityRunNeedsAttention(run: WorkspaceRun, _now = Date.now()): boolean {
+  return workspaceRunAttentionView(run).needsAttention;
 }
 
-export function activityRunSections(runs: readonly WorkspaceRun[], now = Date.now()): ActivityRunSection[] {
+export function activityRunSections(runs: readonly WorkspaceRun[], _now = Date.now()): ActivityRunSection[] {
   const attention = runs
-    .filter((run) => activityRunNeedsAttention(run, now))
+    .filter((run) => workspaceRunAttentionView(run).bucket === "attention")
     .sort((a, b) => {
       const waitingFirst = Number(b.status === "waiting") - Number(a.status === "waiting");
       return waitingFirst || compareStartedAtDescending(a, b);
     });
   const active = runs
-    .filter((run) => run.finishedAt === null && !activityRunNeedsAttention(run, now))
+    .filter((run) => workspaceRunAttentionView(run).bucket === "active")
     .sort(compareStartedAtDescending);
   const recent = runs
-    .filter((run) => run.finishedAt !== null && !activityRunNeedsAttention(run, now))
+    .filter((run) => workspaceRunAttentionView(run).bucket === "recent")
     .sort(compareStartedAtDescending);
 
   const sections: ActivityRunSection[] = [
@@ -61,10 +58,10 @@ export function activityRunSections(runs: readonly WorkspaceRun[], now = Date.no
   return sections.filter(({ runs: sectionRuns }) => sectionRuns.length > 0);
 }
 
-export function activityRunSummary(runs: readonly WorkspaceRun[], now = Date.now()): ActivityRunSummary {
+export function activityRunSummary(runs: readonly WorkspaceRun[], _now = Date.now()): ActivityRunSummary {
   return {
-    attentionCount: runs.filter((run) => activityRunNeedsAttention(run, now)).length,
-    activeCount: runs.filter(({ finishedAt }) => finishedAt === null).length,
+    attentionCount: runs.filter((run) => workspaceRunAttentionView(run).needsAttention).length,
+    activeCount: runs.filter(({ status }) => status === "running" || status === "waiting").length,
   };
 }
 
@@ -78,9 +75,8 @@ export function activityWaitingKind(
 }
 
 export function activityRunActions(run: WorkspaceRun): ActivityRunActions {
-  const finished = run.finishedAt !== null
-    && run.status !== "running"
-    && run.status !== "waiting";
+  const attention = workspaceRunAttentionView(run);
+  const finished = run.status !== "running" && run.status !== "waiting";
   return {
     openThread: run.conversationId !== null,
     openLocation: true,
@@ -90,9 +86,10 @@ export function activityRunActions(run: WorkspaceRun): ActivityRunActions {
     rerun: Boolean(
       run.actionId
       && (run.kind === "check" || run.kind === "service")
-      && (run.status === "failed" || run.status === "succeeded" || run.status === "cancelled"),
+        && (run.status === "failed" || run.status === "succeeded" || run.status === "cancelled"),
     ),
-    dismiss: finished,
+    acknowledge: attention.needsAttention && attention.canAcknowledge,
+    dismiss: attention.canDismiss,
     failureDetails: run.status === "failed" && Boolean(run.detail),
   };
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  Check,
   CheckCircle2,
   ChevronDown,
   CircleDot,
@@ -37,6 +38,8 @@ type ActivityCenterProps = {
   onOpenPreview: (run: WorkspaceRun) => void;
   onStop: (run: WorkspaceRun) => void;
   onRerun: (run: WorkspaceRun) => void;
+  onMarkSeen: (run: WorkspaceRun) => void;
+  onAcknowledge: (run: WorkspaceRun) => void;
   onDismiss: (run: WorkspaceRun) => void;
 };
 
@@ -70,6 +73,8 @@ export function ActivityCenter({
   onOpenPreview,
   onStop,
   onRerun,
+  onMarkSeen,
+  onAcknowledge,
   onDismiss,
 }: ActivityCenterProps): React.JSX.Element | null {
   const [expandedFailure, setExpandedFailure] = useState<string | null>(null);
@@ -171,6 +176,10 @@ export function ActivityCenter({
                   const waitingKind = activityWaitingKind(run, conversations);
                   const waitingClass = waitingKind ? ` is-waiting-${waitingKind}` : "";
                   const detailOpen = expandedFailure === run.id;
+                  const toggleFailureDetails = () => {
+                    if (!detailOpen && run.attentionState === "unseen") onMarkSeen(run);
+                    setExpandedFailure(detailOpen ? null : run.id);
+                  };
                   const primaryAction: PrimaryRunAction | null = waitingKind && conversation
                     ? {
                         kind: "open-thread",
@@ -187,19 +196,22 @@ export function ActivityCenter({
                         ? {
                             kind: "failure-details",
                             label: detailOpen ? "Hide details" : "View details",
-                            run: () => setExpandedFailure(detailOpen ? null : run.id),
+                            run: toggleFailureDetails,
                           }
                         : null;
                   const context = [conversation?.title, project?.name].filter(Boolean).join(" · ")
                     || run.detail
                     || "Workspace";
                   return (
-                    <article className={`activity-run is-${run.status}${waitingClass}`} key={run.id}>
+                    <article className={`activity-run is-${run.status}${waitingClass}${run.attentionState === "unseen" ? " is-unseen" : ""}`} key={run.id}>
                       <div className="activity-run-summary">
                         <RunState run={run} />
                         <span>
                           <strong>{run.label}</strong>
-                          <small>{runKindLabel(run.kind)} · {context}</small>
+                          <small>
+                            {runKindLabel(run.kind)} · {context}
+                            {run.attentionState === "unseen" && <span className="activity-unread-state">New</span>}
+                          </small>
                         </span>
                         <time dateTime={run.startedAt}>{activityStatusLabel(run, now, waitingKind)}</time>
                       </div>
@@ -244,9 +256,14 @@ export function ActivityCenter({
                             <IconButton
                               label={`${detailOpen ? "Hide" : "Reveal"} failure details for ${run.label}`}
                               aria-expanded={detailOpen}
-                              onClick={() => setExpandedFailure(detailOpen ? null : run.id)}
+                              onClick={toggleFailureDetails}
                             >
                               <ChevronDown size={13} />
+                            </IconButton>
+                          )}
+                          {actions.acknowledge && (
+                            <IconButton label={`Acknowledge ${run.label}`} onClick={() => onAcknowledge(run)}>
+                              <Check size={13} />
                             </IconButton>
                           )}
                           {actions.dismiss && (

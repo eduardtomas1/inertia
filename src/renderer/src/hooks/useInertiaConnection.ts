@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AppSnapshot, ClientCommand, ServerEvent } from "@shared/contracts";
+import type {
+  AppSnapshot,
+  ClientCommand,
+  RuntimeSyncCursor,
+  ServerEvent,
+} from "@shared/contracts";
+import {
+  runtimeResumeUrl,
+  RuntimeProjectionSequence,
+} from "../utils/runtimeSequencing";
 
 export type ConnectionStatus = "connecting" | "online" | "offline";
 
@@ -13,6 +22,7 @@ type EventListener = (event: ServerEvent) => void;
 
 export interface InertiaConnection {
   snapshot: AppSnapshot | null;
+  runtimeGeneration: string | null;
   status: ConnectionStatus;
   error: string | null;
   clearError: () => void;
@@ -48,7 +58,10 @@ export function useInertiaConnection(): InertiaConnection {
   const socketRef = useRef<WebSocket | null>(null);
   const pendingRef = useRef(new Map<string, PendingRequest>());
   const listenersRef = useRef(new Set<EventListener>());
+  const projectionRef = useRef(new RuntimeProjectionSequence());
+  const detailConversationRef = useRef<string | null>(null);
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
+  const [runtimeGeneration, setRuntimeGeneration] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +77,7 @@ export function useInertiaConnection(): InertiaConnection {
     let disposed = false;
     let reconnectTimer: number | undefined;
     let attempt = 0;
+    let forceSnapshot = false;
 
     const connect = async () => {
       if (disposed) return;
@@ -77,24 +91,81 @@ export function useInertiaConnection(): InertiaConnection {
         const { websocketUrl } = await window.inertia.getRuntimeConnection();
         if (disposed) return;
 
-        const socket = new WebSocket(websocketUrl);
+        const projection = projectionRef.current.current();
+        const resumeCursor: RuntimeSyncCursor | null = forceSnapshot || !projection
+          ? null
+          : {
+              runtimeGeneration: projection.runtimeGeneration,
+              latestSequence: projection.latestSequence,
+            };
+        forceSnapshot = false;
+        const socket = new WebSocket(runtimeResumeUrl(
+          websocketUrl,
+          resumeCursor,
+          detailConversationRef.current,
+        ));
         socketRef.current = socket;
 
         socket.addEventListener("open", () => {
           if (disposed || socketRef.current !== socket) return;
-          attempt = 0;
-          setStatus("online");
-          setError(null);
+          setStatus("connecting");
         });
 
         socket.addEventListener("message", (message) => {
           if (disposed || socketRef.current !== socket) return;
 
           try {
-            const event: unknown = JSON.parse(String(message.data));
-            if (!isServerEvent(event)) throw new Error("Malformed server event");
+            const received: unknown = JSON.parse(String(message.data));
+            if (!isServerEvent(received)) throw new Error("Malformed server event");
+            let event: ServerEvent = received;
 
-            if (event.type === "server.welcome" || event.type === "snapshot.updated") {
+            const requireAuthoritativeRefresh = (): void => {
+              forceSnapshot = true;
+              projectionRef.current.reset();
+              if (socket.readyState === WebSocket.OPEN) socket.close();
+            };
+
+            if (event.type === "server.welcome") {
+              const sync = event.sync ?? event.snapshot.sync;
+              if (sync) {
+                projectionRef.current.replaceFromSnapshot(sync);
+                setRuntimeGeneration(sync.runtimeGeneration);
+              }
+              else {
+                // Compatibility with pre-sequencing local runtimes.
+                projectionRef.current.reset();
+                setRuntimeGeneration(null);
+                setStatus("online");
+              }
+              setSnapshot(event.snapshot);
+            } else if (event.type === "runtime.resumed") {
+              if (projectionRef.current.beginResume(event.sync) !== "resume") {
+                requireAuthoritativeRefresh();
+                return;
+              }
+              setRuntimeGeneration(event.sync.runtimeGeneration);
+            } else if (event.type === "runtime.event" || event.type === "runtime.cursor") {
+              const decision = projectionRef.current.classifyFrame(event.sync);
+              if (decision === "generation-mismatch" || decision === "gap") {
+                requireAuthoritativeRefresh();
+                return;
+              }
+              if (decision === "ignore") return;
+              if (event.type === "runtime.cursor") return;
+              event = event.event;
+              if (event.type === "snapshot.updated") setSnapshot(event.snapshot);
+            } else if (event.type === "runtime.sync.completed") {
+              const decision = projectionRef.current.complete(event.sync);
+              if (decision === "generation-mismatch" || decision === "gap") {
+                requireAuthoritativeRefresh();
+                return;
+              }
+              if (decision === "completed") {
+                attempt = 0;
+                setStatus("online");
+                setError(null);
+              }
+            } else if (event.type === "snapshot.updated") {
               setSnapshot(event.snapshot);
             }
 
@@ -127,9 +198,12 @@ export function useInertiaConnection(): InertiaConnection {
         socket.addEventListener("close", () => {
           if (disposed || socketRef.current !== socket) return;
           socketRef.current = null;
+          projectionRef.current.disconnect();
           setStatus("offline");
           rejectPending("The local service disconnected before finishing the request.");
-          const delay = Math.min(8_000, 600 * 2 ** attempt) + Math.round(Math.random() * 250);
+          const delay = forceSnapshot
+            ? 0
+            : Math.min(8_000, 600 * 2 ** attempt) + Math.round(Math.random() * 250);
           attempt += 1;
           reconnectTimer = window.setTimeout(connect, delay);
         });
@@ -174,6 +248,9 @@ export function useInertiaConnection(): InertiaConnection {
       pendingRef.current.set(command.requestId, { resolve, reject, timeout });
       try {
         socket.send(JSON.stringify(command));
+        if (command.type === "conversation.detail.load") {
+          detailConversationRef.current = command.payload.conversationId;
+        }
       } catch (sendError) {
         window.clearTimeout(timeout);
         pendingRef.current.delete(command.requestId);
@@ -189,6 +266,7 @@ export function useInertiaConnection(): InertiaConnection {
 
   return {
     snapshot,
+    runtimeGeneration,
     status,
     error,
     clearError: useCallback(() => setError(null), []),

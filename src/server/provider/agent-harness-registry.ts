@@ -8,6 +8,7 @@ import type {
   AgentHarnessId,
 } from "./agent-harness";
 import { ProviderRuntimeError, type ProviderId, type ProviderRunInput } from "./contracts";
+import { legacyProviderIdForHarness } from "../../shared/model-routing";
 
 const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "codex-app-server": "codex",
@@ -39,12 +40,55 @@ export class AgentHarnessRegistry {
   }
 
   resolve(input: ProviderRunInput): AgentHarness {
-    const matches = this.harnesses.filter((harness) => harness.providerId === input.providerId && harness.supports(input));
+    if (
+      input.modelSelection.harnessId !== input.harnessId
+      || input.modelSelection.backendProfileId !== input.backendProfile.id
+      || input.backendCompatibility.harnessId !== input.harnessId
+      || input.backendCompatibility.backendProfileId !== input.backendProfile.id
+      || input.backendCompatibility.backendProtocol !== input.backendProfile.protocol
+    ) {
+      throw new ProviderRuntimeError("invalid_input", "The harness and backend route is internally inconsistent.");
+    }
+    const projectedProvider = legacyProviderIdForHarness(input.harnessId);
+    if (!projectedProvider || projectedProvider !== input.providerId) {
+      throw new ProviderRuntimeError("invalid_input", "The harness does not match its provider compatibility projection.");
+    }
+    if (
+      input.backendCompatibility.state === "unknown"
+      || input.backendCompatibility.state === "unavailable"
+    ) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        `Backend '${input.backendProfile.displayName}' is not verified for '${input.harnessId}'.`,
+      );
+    }
+    if (!input.backendProfile.enabled) {
+      throw new ProviderRuntimeError("invalid_input", `Backend '${input.backendProfile.displayName}' is disabled.`);
+    }
+    if (input.backendProfile.source === "custom") {
+      if (input.providerId === "cursor" || input.providerId === "opencode") {
+        throw new ProviderRuntimeError(
+          "invalid_input",
+          input.providerId === "cursor"
+            ? "Cursor controls its backend; external backend profiles cannot be injected."
+            : "OpenCode backends must come from OpenCode's native provider catalog.",
+        );
+      }
+      if (input.backendCompatibility.provenance !== "probe") {
+        throw new ProviderRuntimeError(
+          "invalid_input",
+          `Backend '${input.backendProfile.displayName}' requires current compatibility evidence.`,
+        );
+      }
+    }
+    const matches = this.harnesses.filter(
+      (harness) => harness.id === input.harnessId && harness.supports(input),
+    );
     if (matches.length === 1) return matches[0]!;
     if (matches.length === 0) {
-      throw new ProviderRuntimeError("invalid_input", `No agent harness can run ${input.providerId} with the selected options.`);
+      throw new ProviderRuntimeError("invalid_input", `Agent harness '${input.harnessId}' is unavailable.`);
     }
-    throw new ProviderRuntimeError("invalid_input", `Multiple agent harnesses matched ${input.providerId} with the selected options.`);
+    throw new ProviderRuntimeError("invalid_input", `Multiple agent harnesses matched '${input.harnessId}'.`);
   }
 
   capabilities(providerId?: ProviderId): readonly AgentHarnessCapabilities[] {

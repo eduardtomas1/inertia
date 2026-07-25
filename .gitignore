@@ -17,6 +17,7 @@ test-results/
 *.sqlite
 *.sqlite3
 .inertia/
+!tests/fixtures/database/v0.0.*.sqlite
 
 # Local configuration and secrets
 .env

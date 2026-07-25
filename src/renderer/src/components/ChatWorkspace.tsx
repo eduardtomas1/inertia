@@ -300,7 +300,7 @@ export function ChatWorkspace({
         </div>
       </div>
 
-      {showJump && <div className="timeline-follow-controls"><button type="button" onClick={() => scrollToLatest()}><ArrowDown size={14} />Jump to latest</button></div>}
+      {showJump && <div className="timeline-follow-controls"><button type="button" onClick={() => scrollToLatest("auto")}><ArrowDown size={14} />Jump to latest</button></div>}
 
       <div ref={composerRegionRef} className="composer-region">
         <Composer

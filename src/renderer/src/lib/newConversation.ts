@@ -110,7 +110,10 @@ export function withNewConversationModelSelection(
 }
 
 function normalizedPath(path: string): string {
-  return path.replaceAll("\\", "/").replace(/\/+$/u, "");
+  const normalized = path.replaceAll("\\", "/").replace(/\/+$/u, "");
+  return /^[a-z]:\//iu.test(normalized) || normalized.startsWith("//")
+    ? normalized.toLocaleLowerCase("en-US")
+    : normalized;
 }
 
 export function conversationContextMismatch(

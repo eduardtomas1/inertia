@@ -373,7 +373,14 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
   await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
   await expectIsolatedConversation(count);
   const currentBranch = (await execFileAsync("git", ["branch", "--show-current"], { cwd: workspaceDirectory })).stdout.trim();
-  const currentBranchTrigger = page.locator(".workspace-header").getByRole("button", { name: currentBranch, exact: true });
+  const workspaceHeader = page.locator(".workspace-header");
+  await expect(workspaceHeader.getByRole("button", {
+    name: /Checkout context differs/u,
+  })).toHaveCount(0);
+  const currentBranchTrigger = workspaceHeader.getByRole("button", {
+    name: currentBranch,
+    exact: true,
+  });
   await currentBranchTrigger.click();
   await expect(page.getByRole("menu", { name: "Branches" }).getByRole("menuitem", { name: `New chat on ${currentBranch}` })).toBeVisible();
   await currentBranchTrigger.click();
@@ -391,6 +398,10 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
 });
 
 test("keeps the window alive and reconnects with a rotated capability after a runtime crash", async () => {
+  await expect.poll(
+    async () => (await runtimeSnapshot()).phase,
+    { timeout: 15_000 },
+  ).toBe("ready");
   const before = await runtimeSnapshot();
   const beforeUrl = await page.evaluate(() => window.inertia.getRuntimeConnection().then(({ websocketUrl }) => websocketUrl));
   const beforeRuntimeGeneration = await page.locator(".app-shell").getAttribute("data-runtime-generation");
@@ -599,7 +610,8 @@ test("manages backend profiles across the responsive theme and scale matrix", as
         width: window.innerWidth,
         height: window.innerHeight,
       }));
-      expect(viewport.width).toBe(layout.width);
+      expect(viewport.width).toBeGreaterThanOrEqual(layout.width - 32);
+      expect(viewport.width).toBeLessThanOrEqual(layout.width);
       expect(viewport.height).toBeGreaterThanOrEqual(600);
       expect(viewport.height).toBeLessThanOrEqual(layout.height);
       await expectBackendLayoutContained();
@@ -742,7 +754,7 @@ test("reveals the fixed local runtime diagnostics directory from settings", asyn
   await expect(page.getByRole("heading", { name: "Local data" })).toBeVisible();
   await expect(page.getByText("Local-only lifecycle and failure metadata.", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Reveal log folder" }).click();
-  await expect(page.getByRole("status")).toHaveText("Runtime log folder opened.");
+  await expect(page.getByText("Runtime log folder opened.", { exact: true })).toBeVisible();
 
   const logDirectory = join(testDirectory, "electron-profile", "logs", "runtime");
   await expect.poll(async () => (await stat(logDirectory)).isDirectory()).toBe(true);

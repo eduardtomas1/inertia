@@ -182,4 +182,23 @@ describe("conversation checkout mismatch", () => {
       isRepository: false,
     })).toBeNull();
   });
+
+  it("does not report Windows checkout paths that differ only by casing and separators", () => {
+    const windowsProject = {
+      ...project,
+      path: "C:\\Users\\Runner\\Project",
+      normalizedPath: "c:/users/runner/project",
+      repositoryRoot: "c:/users/runner/project",
+    };
+    const windowsConversation = {
+      ...viewedConversation,
+      branch: null,
+      worktreePath: null,
+    };
+    expect(conversationContextMismatch(windowsProject, windowsConversation, {
+      ...gitStatus,
+      root: "C:\\Users\\RUNNER\\Project\\",
+      branch: "main",
+    })).toBeNull();
+  });
 });

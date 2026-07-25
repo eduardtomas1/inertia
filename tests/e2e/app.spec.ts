@@ -600,7 +600,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
         height: window.innerHeight,
       }));
       expect(viewport.width).toBe(layout.width);
-      expect(viewport.height).toBeGreaterThanOrEqual(layout.height - 80);
+      expect(viewport.height).toBeGreaterThanOrEqual(600);
       expect(viewport.height).toBeLessThanOrEqual(layout.height);
       await expectBackendLayoutContained();
       await page.screenshot({

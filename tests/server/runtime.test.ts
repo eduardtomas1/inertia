@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -670,7 +671,7 @@ process.exit(child.status ?? 1);
 
     const isolatedWorktree = await createConversation("Isolated worktree", { useWorktree: true });
     expect(isolatedWorktree.branch).toMatch(/^inertia\/[0-9a-f]{8}$/u);
-    expect(isolatedWorktree.worktreePath).toBe(realpathSync(join(data, "worktrees", isolatedWorktree.id)));
+    expect(isolatedWorktree.worktreePath).toBe(await realpath(join(data, "worktrees", isolatedWorktree.id)));
     expect(isolatedWorktree.providerSessionId).toBeNull();
 
     const afterViewedWorktree = await createConversation("After viewed worktree");

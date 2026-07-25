@@ -1,10 +1,10 @@
 import {
   mkdir,
   mkdtemp,
-  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -185,7 +185,7 @@ describe("bounded structured turn request context", () => {
       }],
     });
 
-    expect(result.imagePaths).toEqual([await realpath(imagePath)]);
+    expect(result.imagePaths).toEqual([realpathSync(imagePath)]);
     expect(result.persistence.manifest).toMatchObject({
       imageCount: 1,
       imageBytes: 4,

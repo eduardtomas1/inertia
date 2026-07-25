@@ -50,9 +50,10 @@ describe("RuntimeStore conversation lifecycle", () => {
     const first = store.snapshot().conversations[0]!;
     const second = store.createConversation(first.projectId, "Second chat");
     const shellSizeBefore = JSON.stringify(store.shellSnapshot()).length;
-    const payload = "x".repeat(2_048);
+    const messageCount = 100;
+    const payload = "x".repeat(4_096);
 
-    for (let index = 0; index < 300; index += 1) {
+    for (let index = 0; index < messageCount; index += 1) {
       store.createMessage(first.id, `first:${index}:${payload}`);
       store.createMessage(second.id, `second:${index}:${payload}`);
     }
@@ -66,7 +67,7 @@ describe("RuntimeStore conversation lifecycle", () => {
 
     const firstDetail = store.conversationDetail(first.id);
     expect(firstDetail?.conversation.id).toBe(first.id);
-    expect(firstDetail?.messages).toHaveLength(300);
+    expect(firstDetail?.messages).toHaveLength(messageCount);
     expect(firstDetail?.messages.every(({ conversationId }) => conversationId === first.id)).toBe(true);
     expect(firstDetail?.messages.some(({ content }) => content.startsWith("second:"))).toBe(false);
     expect(JSON.stringify(firstDetail).length).toBeGreaterThan(shellSizeAfter * 100);

@@ -4433,7 +4433,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .provider-popover {
   width: min(390px, calc(100vw - 28px));
-  max-height: min(560px, calc(100vh - 155px));
+  max-height: min(560px, calc(100dvh - 220px));
   overflow-y: auto;
 }
 

@@ -951,6 +951,7 @@ test("dismisses Composer menus and enforces authoritative route boundaries", asy
   await composer.fill("/p");
   await expect(page.getByRole("listbox", { name: "Composer commands" }).getByRole("option", { name: /plan/i })).toHaveAttribute("aria-selected", "false");
   await composer.fill("");
+  await resizeWindow(1440, 720);
 
   const providerTrigger = page.getByRole("button", { name: "Choose provider and model" });
   const providerMenu = page.getByRole("menu", { name: "Provider and model" });
@@ -960,6 +961,13 @@ test("dismisses Composer menus and enforces authoritative route boundaries", asy
   await expect(providerTrigger).toHaveAttribute("aria-controls", "composer-provider-menu");
   await expect(providerMenu).toBeVisible();
   await expect(providerMenu.getByRole("group", { name: "Claude harness" })).toBeVisible();
+  const [headerBounds, providerMenuBounds] = await Promise.all([
+    workspaceHeader.boundingBox(),
+    providerMenu.boundingBox(),
+  ]);
+  expect(providerMenuBounds?.y ?? 0).toBeGreaterThanOrEqual(
+    (headerBounds?.y ?? 0) + (headerBounds?.height ?? 0),
+  );
 
   await providerMenu.getByText("Harness · backend · model", { exact: true }).click();
   await expect(providerMenu).toBeVisible();

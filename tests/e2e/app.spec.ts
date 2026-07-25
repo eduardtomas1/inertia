@@ -2130,7 +2130,8 @@ for (const size of [
       // Persisted usage, backend status, and split-terminal state may all be
       // visible at once. Keep multiple readable transcript lines reachable
       // without forcing those controls or the tool panel out of the viewport.
-      expect(transcriptHeight).toBeGreaterThanOrEqual(72);
+      // Windows can report a quarter-pixel less at fractional display scales.
+      expect(transcriptHeight).toBeGreaterThanOrEqual(71.5);
     }
 
     expect(rendererErrors).toEqual([]);

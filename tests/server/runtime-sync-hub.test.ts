@@ -119,6 +119,25 @@ describe("runtime sync hub", () => {
     expect(runtime.hub.connectionCount).toBe(1);
   });
 
+  it("owns a fresh socket before sending welcome so an immediate disconnect is not leaked", () => {
+    let hub: RuntimeSyncHub<string>;
+    const events: ServerEvent[] = [];
+    hub = new RuntimeSyncHub((socket, event) => {
+      events.push(event);
+      if (event.type === "server.welcome") hub.disconnect(socket);
+    });
+
+    hub.connect("immediate", { kind: "none" }, {
+      snapshot,
+      approvals: [],
+      inputs: [],
+      plans: [],
+    });
+
+    expect(events[0]?.type).toBe("server.welcome");
+    expect(hub.connectionCount).toBe(0);
+  });
+
   it("projects detail events to subscriptions while advancing every client cursor", () => {
     const runtime = fixture();
     for (const [socket, conversationId] of [

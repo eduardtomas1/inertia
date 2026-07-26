@@ -1586,12 +1586,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   webSockets.on("connection", (socket, request) => {
     let inFlightCommands = 0;
     const resumeRequest = parseRuntimeResumeRequest(request.url, websocketPath);
-    runtimeSync.connect(socket, resumeRequest, {
-      snapshot: currentSnapshot,
-      approvals: pendingApprovals.values(),
-      inputs: pendingInputs.values(),
-      plans: agentPlans.values(),
-    });
     socket.on("message", (data, isBinary) => {
       const parsed = parseCommand(data, isBinary);
       if (parsed.error) send(socket, parsed.error);
@@ -1610,6 +1604,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       isolatedRuns.stopOwned(socket);
     });
     socket.on("error", () => { /* Connection failures are isolated and cleaned up by close. */ });
+    // A client may answer server.welcome immediately from another process.
+    // Install every handler before hydration so that first command is owned.
+    runtimeSync.connect(socket, resumeRequest, {
+      snapshot: currentSnapshot,
+      approvals: pendingApprovals.values(),
+      inputs: pendingInputs.values(),
+      plans: agentPlans.values(),
+    });
   });
 
   server.on("error", () => { /* Listen errors are surfaced below; later socket errors are isolated. */ });

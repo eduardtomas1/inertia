@@ -44,6 +44,18 @@ describe("cross-platform packaged behavior contract", () => {
     );
   });
 
+  it("registers runtime socket handlers before sending the first hydration frame", async () => {
+    const runtime = await source("src/server/index.ts");
+    const start = runtime.indexOf('webSockets.on("connection"');
+    const end = runtime.indexOf('server.on("error"', start);
+    const connectionHandler = runtime.slice(start, end);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(connectionHandler.indexOf('socket.on("message"')).toBeLessThan(
+      connectionHandler.indexOf("runtimeSync.connect("),
+    );
+  });
+
   it("keeps exact-tag release packages and smoke validation aligned across every platform", async () => {
     const workflow = await source(".github/workflows/release-platforms.yml");
     for (const expected of [

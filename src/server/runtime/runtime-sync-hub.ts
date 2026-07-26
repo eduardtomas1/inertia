@@ -61,6 +61,9 @@ export class RuntimeSyncHub<Socket> {
         )
       : null;
 
+    // Own the socket before the first frame is sent. A synchronous close or
+    // response to server.welcome must observe an already registered client.
+    this.clients.set(socket, subscription);
     if (replay?.kind === "replay") {
       this.send(socket, {
         type: "runtime.resumed",
@@ -91,7 +94,6 @@ export class RuntimeSyncHub<Socket> {
       type: "runtime.sync.completed",
       sync: this.sequencer.cursor(),
     });
-    this.clients.set(socket, subscription);
   }
 
   setConversationSubscription(socket: Socket, conversationId: string): void {

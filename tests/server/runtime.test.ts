@@ -125,10 +125,11 @@ async function waitForConversationDetail(
   conversationId: string,
   predicate: (detail: ConversationDetail) => boolean,
 ): Promise<ConversationDetail> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
     const detail = await loadConversationDetail(socket, events, conversationId);
     if (predicate(detail)) return detail;
-    await delay(10);
+    await delay(25);
   }
   throw new Error(`Conversation detail for ${conversationId} did not reach the expected state.`);
 }

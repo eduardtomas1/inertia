@@ -4,6 +4,7 @@ import type {
   AgentInputRequest,
   AgentPlanStep,
 } from "./interactions";
+import type { KnownHarnessId } from "../../shared/model-routing";
 import type {
   ProviderActivityEvent,
   ProviderId,
@@ -14,17 +15,11 @@ import type {
   ProviderStatusEvent,
   ProviderTextEvent,
   ProviderUsageEvent,
+  ProviderHarnessLaunchConfiguration,
 } from "./contracts";
 
-export type AgentHarnessId =
-  | "codex-app-server"
-  | "codex-cli"
-  | "claude-cli"
-  | "cursor-cli"
-  | "opencode-cli"
-  | "claude-agent-sdk"
-  | "cursor-acp"
-  | "opencode-sdk";
+/** @deprecated Prefer the shared harness identity contract. */
+export type AgentHarnessId = KnownHarnessId;
 
 export interface AgentHarnessCoreCapabilities {
   lifecycle: {
@@ -189,7 +184,7 @@ export type AgentInteractiveHarnessEvent =
   | { type: "plan"; explanation: string | null; steps: AgentPlanStep[] }
   | { type: "reasoning-summary"; text: string }
   | { type: "usage"; usage: ProviderUsageEvent["usage"] }
-  | Omit<ProviderMetadataEvent, "providerId" | "conversationId">;
+  | Omit<ProviderMetadataEvent, "providerId" | "conversationId" | "runId" | "turnId">;
 
 /** Canonical interactive event surface shared by rich provider transports. */
 export type ProviderInteractiveHarnessEvent = AgentInteractiveHarnessEvent;
@@ -197,6 +192,8 @@ export type ProviderInteractiveHarnessEvent = AgentInteractiveHarnessEvent;
 export interface CodexAppServerHarnessExtensionEvent {
   providerId: "codex";
   conversationId: string;
+  runId: string;
+  turnId: string | null;
   type: "extension";
   extension: "codex-app-server";
   event: AgentInteractiveHarnessEvent;
@@ -204,6 +201,8 @@ export interface CodexAppServerHarnessExtensionEvent {
 
 interface ProviderInteractiveHarnessExtensionEventBase {
   conversationId: string;
+  runId: string;
+  turnId: string | null;
   type: "extension";
   event: ProviderInteractiveHarnessEvent;
 }
@@ -226,6 +225,7 @@ export interface AgentHarnessStartOptions {
   input: ProviderRunInput;
   executable: string;
   environment: NodeJS.ProcessEnv;
+  harnessConfiguration?: ProviderHarnessLaunchConfiguration;
   callbacks?: AgentHarnessCallbacks;
 }
 
@@ -280,6 +280,8 @@ export function createAgentHarnessEmitter(
   providerId: ProviderId,
   conversationId: string,
   callbacks: AgentHarnessCallbacks = {},
+  runId = conversationId,
+  turnId: string | null = null,
 ): AgentHarnessEmitter {
   const emit = (event: AgentHarnessEvent): void => {
     try {
@@ -288,7 +290,7 @@ export function createAgentHarnessEmitter(
       // A UI callback must not interrupt provider execution.
     }
   };
-  const base = { providerId, conversationId };
+  const base = { providerId, conversationId, runId, turnId };
   return {
     text: (text) => emit({ ...base, type: "text", text }),
     activity: (kind, phase, label) => emit({ ...base, type: "activity", kind, phase, label }),
@@ -296,12 +298,20 @@ export function createAgentHarnessEmitter(
     session: (sessionId) => emit({ ...base, type: "session", sessionId }),
     codex: (event) => {
       if (providerId !== "codex") return;
-      emit({ providerId, conversationId, type: "extension", extension: "codex-app-server", event });
+      emit({
+        providerId: "codex",
+        conversationId,
+        runId,
+        turnId,
+        type: "extension",
+        extension: "codex-app-server",
+        event,
+      });
     },
     rich: (event) => {
-      if (providerId === "claude") emit({ providerId, conversationId, type: "extension", extension: "claude-agent-sdk", event });
-      else if (providerId === "cursor") emit({ providerId, conversationId, type: "extension", extension: "cursor-acp", event });
-      else if (providerId === "opencode") emit({ providerId, conversationId, type: "extension", extension: "opencode-sdk", event });
+      if (providerId === "claude") emit({ ...base, providerId, type: "extension", extension: "claude-agent-sdk", event });
+      else if (providerId === "cursor") emit({ ...base, providerId, type: "extension", extension: "cursor-acp", event });
+      else if (providerId === "opencode") emit({ ...base, providerId, type: "extension", extension: "opencode-sdk", event });
     },
   };
 }

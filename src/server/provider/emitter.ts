@@ -2,6 +2,7 @@ import type {
   ProviderActivityKind,
   ProviderActivityPhase,
   ProviderEvent,
+  ProviderEventBase,
   ProviderId,
   ProviderMetadataEvent,
   ProviderRunCallbacks,
@@ -26,6 +27,8 @@ function safeCallback(callback: (() => void) | undefined): void {
 }
 
 export interface ProviderEmitter {
+  close: () => void;
+  matches: (identity: ProviderEventBase) => boolean;
   event: (event: ProviderEvent) => void;
   text: (text: string) => void;
   activity: (kind: ProviderActivityKind, phase: ProviderActivityPhase, label: string) => void;
@@ -45,8 +48,18 @@ export function createProviderEmitter(
   providerId: ProviderId,
   conversationId: string,
   callbacks: ProviderRunCallbacks,
+  runId = conversationId,
+  turnId: string | null = null,
 ): ProviderEmitter {
+  const base = { providerId, conversationId, runId, turnId };
+  let accepting = true;
+  const matches = (identity: ProviderEventBase): boolean =>
+    identity.providerId === providerId
+    && identity.conversationId === conversationId
+    && identity.runId === runId
+    && identity.turnId === turnId;
   const event = (providerEvent: ProviderEvent): void => {
+    if (!accepting || !matches(providerEvent)) return;
     safeCallback(() => callbacks.onEvent?.(providerEvent));
     switch (providerEvent.type) {
       case "text":
@@ -88,8 +101,9 @@ export function createProviderEmitter(
     }
   };
 
-  const base = { providerId, conversationId };
   return {
+    close: () => { accepting = false; },
+    matches,
     event,
     text: (text) => event({ ...base, type: "text", text }),
     activity: (kind, phase, label) => event({ ...base, type: "activity", kind, phase, label }),
@@ -119,6 +133,7 @@ export function providerCallbacksFromHarness(emitter: ProviderEmitter): AgentHar
         emitter.event(event);
         return;
       }
+      if (!emitter.matches(event)) return;
       emitInteractiveExtension(emitter, event);
     },
   };

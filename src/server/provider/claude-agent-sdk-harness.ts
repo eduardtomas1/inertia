@@ -12,6 +12,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
+import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import type { ProviderModel, ProviderRateLimit } from "../../shared/contracts";
 import { CappedProviderBuffer } from "./io";
 import {
@@ -27,6 +28,7 @@ import type {
   AgentInputRequest,
   AgentPlanStep,
 } from "./interactions";
+import { providerFailureMessage } from "./adapters";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
@@ -183,7 +185,13 @@ export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOption
 
 function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQueryFactory): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
-  const emitter = createAgentHarnessEmitter("claude", conversationId, options.callbacks);
+  const emitter = createAgentHarnessEmitter(
+    "claude",
+    conversationId,
+    options.callbacks,
+    options.input.runId ?? conversationId,
+    options.input.turnId ?? null,
+  );
   const text = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
@@ -275,6 +283,17 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
   };
 
   emitter.status("starting");
+  const usesNativeAnthropic = options.input.backendProfile.id
+    === NATIVE_ANTHROPIC_PROFILE_ID;
+  const routeFailure = (error: string): string => usesNativeAnthropic
+    ? error
+    : providerFailureMessage(
+        "claude",
+        undefined,
+        error,
+        "",
+        options.input.backendProfile,
+      );
   const result = (async (): Promise<ProviderRunResult> => {
     try {
       const prompt = await claudePrompt(options.input.prompt, options.input.imagePaths ?? []);
@@ -300,7 +319,9 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
           ...(claudeEffort(options.input.reasoningEffort) ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
         },
       });
-      await emitClaudeModelMetadata(query, emitter.rich);
+      if (usesNativeAnthropic) {
+        await emitClaudeModelMetadata(query, emitter.rich);
+      }
       emitter.status("running");
       let sawStreamText = false;
       let failure: string | undefined;
@@ -348,7 +369,9 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
         if (message.type === "result") {
           const contextUsage = await readClaudeContextUsage(query);
           emitClaudeUsage(record, contextUsage, emitter.rich);
-          await emitClaudeRateLimitMetadata(query, emitter.rich);
+          if (usesNativeAnthropic) {
+            await emitClaudeRateLimitMetadata(query, emitter.rich);
+          }
           if (message.subtype === "success") {
             if (!sawStreamText && typeof message.result === "string") emitText(message.result, text, emitter.text);
           } else {
@@ -358,11 +381,14 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
         }
       }
       if (cancelRequested) return finishResult("cancelled");
-      if (failure) return finishResult("failed", failure);
+      if (failure) return finishResult("failed", routeFailure(failure));
       return finishResult("completed");
     } catch (error) {
       if (cancelRequested || abortController.signal.aborted) return finishResult("cancelled");
-      return finishResult("failed", safeError(error, "Claude Agent SDK stopped unexpectedly."));
+      return finishResult(
+        "failed",
+        routeFailure(safeError(error, "Claude Agent SDK stopped unexpectedly.")),
+      );
     } finally {
       cancelPending();
       try { query?.close(); } catch { /* The SDK process may already be closed. */ }

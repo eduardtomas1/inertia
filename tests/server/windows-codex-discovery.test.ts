@@ -10,6 +10,7 @@ import {
   removePortableFixture,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
+import { nativeProviderRunInput } from "./model-route-fixture";
 
 const WINDOWS_ENVIRONMENT_KEYS = [
   "APPDATA",
@@ -134,14 +135,14 @@ process.stdin.resume();
     const manager = new ProviderManager();
     const detection = await manager.detect("codex", { cwd: home, refreshEnvironment: true });
     expect(detection).toMatchObject({ executable, version: "9.4.1", canRun: true });
-    await expect(manager.run({
+    await expect(manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "windows-shim",
       cwd: home,
       prompt: "Reply safely",
       interactionMode: "build",
       access: "supervised",
-    })).resolves.toMatchObject({ status: "completed", text: "Safe shim response" });
+    }))).resolves.toMatchObject({ status: "completed", text: "Safe shim response" });
     await manager.disposeAll();
   });
 

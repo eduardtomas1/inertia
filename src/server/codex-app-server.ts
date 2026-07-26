@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 import { INERTIA_VERSION } from "../shared/version";
+import { staleProviderSessionDecision } from "../shared/continuation-policy";
 import { parseCodexApprovalRequest } from "./codex/approvals";
 import { parseCodexPlan } from "./codex/plans";
 import {
@@ -117,12 +118,58 @@ function isUnsupportedFullAccessError(error: unknown): boolean {
   return new RegExp(`${unsupported}.{0,160}${fullAccess}|${fullAccess}.{0,160}${unsupported}`, "iu").test(message);
 }
 
-function isRecoverableResumeError(error: unknown): boolean {
+function isStaleResumeError(error: unknown): boolean {
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
   return message.includes("thread") && ["not found", "missing", "unknown", "does not exist", "no such"].some((part) => message.includes(part));
 }
 
+function validateCodexModelProvider(
+  options: Pick<CodexAppServerOptions, "environment" | "modelProvider">,
+): CodexAppServerOptions["modelProvider"] {
+  const provider = options.modelProvider;
+  if (!provider) return undefined;
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(provider.baseUrl);
+  } catch {
+    throw new Error("The Codex Responses backend configuration is invalid.");
+  }
+  const literalLoopback = baseUrl.hostname === "localhost"
+    || baseUrl.hostname === "[::1]"
+    || (
+      baseUrl.hostname.split(".").length === 4
+      && baseUrl.hostname.split(".")[0] === "127"
+      && baseUrl.hostname.split(".").every((part) =>
+        /^\d{1,3}$/u.test(part) && Number(part) <= 255)
+    );
+  if (
+    !/^[A-Za-z0-9_-]{1,64}$/u.test(provider.providerId)
+    || provider.displayName.length < 1
+    || provider.displayName.length > 120
+    || /[\0\r\n]/u.test(provider.displayName)
+    || (
+      baseUrl.protocol !== "https:"
+      && !(baseUrl.protocol === "http:" && literalLoopback)
+    )
+    || Boolean(baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash)
+    || provider.baseUrl.length > 2_048
+  ) {
+    throw new Error("The Codex Responses backend configuration is invalid.");
+  }
+  if (
+    provider.credentialEnvironmentKey !== null
+    && (
+      !/^[A-Z_][A-Z0-9_]{0,127}$/u.test(provider.credentialEnvironmentKey)
+      || !options.environment[provider.credentialEnvironmentKey]
+    )
+  ) {
+    throw new Error("The Codex Responses backend credential is unavailable.");
+  }
+  return provider;
+}
+
 export function startCodexAppServerRun(options: CodexAppServerOptions): CodexAppServerRun {
+  const modelProvider = validateCodexModelProvider(options);
   const invocation = providerProcessInvocation(options.executable, ["app-server"], options.environment);
   const child = spawn(invocation.command, invocation.args, {
     cwd: options.cwd,
@@ -150,6 +197,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
   let phase: CodexRunPhase = "opening";
   let lastError: string | undefined;
   let compatibilityError: CodexAppServerResult["compatibilityError"];
+  let continuationError: CodexAppServerResult["continuationError"];
   let resolveResult!: (result: CodexAppServerResult) => void;
 
   const result = new Promise<CodexAppServerResult>((resolve) => {
@@ -213,6 +261,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
       signal,
       ...((lastError || diagnostic.toString()) ? { diagnostic: lastError ?? diagnostic.toString() } : {}),
       ...(compatibilityError ? { compatibilityError } : {}),
+      ...(continuationError ? { continuationError } : {}),
     });
     if (child.exitCode === null && child.signalCode === null) terminateProcessTree(child, false);
   };
@@ -475,14 +524,29 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
           sandbox: accessPolicy.threadSandbox,
           ...(options.model ? { model: options.model } : {}),
           ...(options.reasoningEffort ? { effort: options.reasoningEffort } : {}),
+          ...(modelProvider ? {
+            modelProvider: modelProvider.providerId,
+            config: {
+              [`model_providers.${modelProvider.providerId}`]: {
+                name: modelProvider.displayName,
+                base_url: modelProvider.baseUrl,
+                wire_api: "responses",
+                requires_openai_auth: false,
+                ...(modelProvider.credentialEnvironmentKey
+                  ? { env_key: modelProvider.credentialEnvironmentKey }
+                  : {}),
+              },
+            },
+          } : {}),
         };
         let opened: JsonObject;
         if (options.sessionId) {
           try {
             opened = await request("thread/resume", { threadId: options.sessionId, excludeTurns: true, ...threadConfig });
           } catch (error) {
-            if (!isRecoverableResumeError(error)) throw error;
-            opened = await request("thread/start", threadConfig);
+            if (!isStaleResumeError(error)) throw error;
+            continuationError = "stale-provider-session";
+            throw new Error(staleProviderSessionDecision().reason);
           }
         } else {
           opened = await request("thread/start", threadConfig);

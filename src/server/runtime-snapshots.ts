@@ -75,6 +75,7 @@ export function changedFiles(status: GitRepositoryStatus): ChangedFile[] {
 export function gitStatusSnapshot(status: GitRepositoryStatus): GitStatusSnapshot {
   return {
     isRepository: true,
+    root: status.root,
     branch: status.branch,
     upstream: status.upstream,
     ahead: status.ahead,
@@ -87,7 +88,7 @@ export function gitStatusSnapshot(status: GitRepositoryStatus): GitStatusSnapsho
 }
 
 export function emptyGitStatusSnapshot(): GitStatusSnapshot {
-  return { isRepository: false, branch: null, upstream: null, ahead: 0, behind: 0, hasRemote: false, files: [], insertions: 0, deletions: 0 };
+  return { isRepository: false, root: null, branch: null, upstream: null, ahead: 0, behind: 0, hasRemote: false, files: [], insertions: 0, deletions: 0 };
 }
 
 export function agentActivityKind(event: ProviderActivityEvent): AgentActivity["kind"] {

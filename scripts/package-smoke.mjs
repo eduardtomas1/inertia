@@ -1,8 +1,9 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import WebSocket from "ws";
 
 const STARTUP_TIMEOUT_MS = 30_000;
@@ -119,46 +120,93 @@ function parseReadiness(value, expectedMainPid) {
   return { mainPid, runtimePid, generation, websocketUrl };
 }
 
-async function createWindowsCodexFixture(root) {
+async function createWindowsCodexFixture(root, workspace) {
   if (process.platform !== "win32") return null;
-  const directory = join(root, "Packaged Codex Ω (npm shim)");
-  const program = join(directory, "codex-package-smoke.cjs");
-  const command = join(directory, "codex.cmd");
+  const profile = join(root, "Packaged Codex Ω (profile)");
+  // Native executable relocation and Unicode npm shims are covered
+  // independently. Keep the synthetic native binary in an ASCII path so this
+  // smoke isolates the packaged utility-process and provider boundaries.
+  const directory = join(root, "codex-bin");
+  const command = join(directory, "codex.exe");
+  const login = join(workspace, "login");
+  const appServer = join(workspace, "app-server");
   await mkdir(directory, { recursive: true });
-  await writeFile(program, `
+  await copyFile(process.execPath, command);
+  await writeFile(login, `
 const args = process.argv.slice(2);
-if (args[0] === "--version") { console.log("codex 99.1.0"); process.exit(0); }
-if (args[0] === "login" && args[1] === "status") { console.log("Logged in using ChatGPT"); process.exit(0); }
-if (args[0] === "app-server" && args[1] === "--help") { console.log("codex app-server - Run the app server"); process.exit(0); }
+if (args[0] === "status") { console.log("Logged in using ChatGPT"); process.exit(0); }
 process.exit(2);
 `.trimStart(), "utf8");
-  // Match npm's relative shim layout so Unicode paths are resolved by cmd.exe
-  // instead of being decoded from the batch file through a legacy code page.
-  await writeFile(command, `@echo off\r\n"${process.execPath}" "%~dp0codex-package-smoke.cjs" %*\r\n`, "utf8");
-  return { command, directory };
+  await writeFile(appServer, `
+const readline = require("node:readline");
+const args = process.argv.slice(2);
+if (args[0] === "--help") { console.log("codex app-server - Run the app server"); process.exit(0); }
+if (args.length !== 0) process.exit(2);
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "package-smoke" } });
+  if (message.method === "initialized") return;
+  if (message.method === "model/list") return send({ id: message.id, result: { data: [], nextCursor: null } });
+  if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: null } });
+  return send({ id: message.id, error: { code: -32601, message: "Unsupported package-smoke method" } });
+});
+`.trimStart(), "utf8");
+  return { command, directory, profile };
 }
 
 async function requirePackagedCodex(websocketUrl, expectedExecutable) {
   const canonicalExpectedExecutable = await realpath(expectedExecutable);
   await new Promise((resolveCodex, rejectCodex) => {
     const socket = new WebSocket(websocketUrl, { headers: { Origin: "http://127.0.0.1" } });
-    const timer = setTimeout(() => {
-      socket.close();
-      rejectCodex(new Error("Packaged runtime did not discover the Windows Codex shim."));
-    }, 8_000);
+    const refreshRequestId = randomUUID();
+    let refreshRequested = false;
+    let refreshAcknowledged = false;
+    let lastProviderState = "no provider snapshot";
+    let settled = false;
     const finish = (error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       socket.close();
       if (error) rejectCodex(error);
       else resolveCodex();
     };
+    const timer = setTimeout(() => {
+      finish(new Error(`Packaged runtime did not discover the Windows Codex shim (${lastProviderState}; refresh requested: ${refreshRequested}; acknowledged: ${refreshAcknowledged}).`));
+    }, 8_000);
     socket.once("error", finish);
+    socket.once("close", () => {
+      if (!settled) finish(new Error("Packaged runtime closed before Codex discovery completed."));
+    });
     socket.on("message", (data) => {
-      let event;
-      try { event = JSON.parse(data.toString("utf8")); } catch { return; }
+      let frame;
+      try { frame = JSON.parse(data.toString("utf8")); } catch { return; }
+      const event = frame?.type === "runtime.event" ? frame.event : frame;
+      if (event?.type === "request.ok" && event.requestId === refreshRequestId) {
+        refreshAcknowledged = true;
+        return;
+      }
+      if (event?.type === "request.error" && event.requestId === refreshRequestId) {
+        finish(new Error(`Packaged Codex refresh failed: ${event.message || "unknown error"}.`));
+        return;
+      }
       if (event?.type !== "server.welcome" && event?.type !== "snapshot.updated") return;
       const provider = event.snapshot?.providers?.find(({ id }) => id === "codex");
-      if (!provider || provider.installState === "checking") return;
+      lastProviderState = provider
+        ? `${provider.installState}/${provider.authState}/canRun=${provider.canRun}`
+        : "Codex missing from snapshot";
+      if (!provider || provider.installState === "checking") {
+        if (!refreshRequested) {
+          refreshRequested = true;
+          socket.send(JSON.stringify({
+            type: "provider.refresh",
+            requestId: refreshRequestId,
+            payload: { providerId: "codex" },
+          }));
+        }
+        return;
+      }
       if (provider.installState !== "installed" || provider.canRun !== true) {
         finish(new Error(`Packaged Codex discovery reported ${provider.statusMessage || provider.installState}.`));
         return;
@@ -203,7 +251,7 @@ try {
     mkdir(workspaceDirectory, { recursive: true }),
     mkdir(profileDirectory, { recursive: true }),
   ]);
-  const packagedCodex = await createWindowsCodexFixture(temporaryRoot);
+  const packagedCodex = await createWindowsCodexFixture(temporaryRoot, workspaceDirectory);
   const launchArguments = [
     `--user-data-dir=${profileDirectory}`,
     ...(process.platform === "linux" && process.env.INERTIA_PACKAGE_SMOKE_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
@@ -218,8 +266,16 @@ try {
       INERTIA_PACKAGE_SMOKE_FILE: markerPath,
       ...(packagedCodex ? {
         INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: packagedCodex.command,
-        APPDATA: packagedCodex.directory,
-        PATH: [packagedCodex.directory, process.env.PATH || ""].filter(Boolean).join(delimiter),
+        APPDATA: packagedCodex.profile,
+        LOCALAPPDATA: join(packagedCodex.profile, "Local"),
+        USERPROFILE: packagedCodex.profile,
+        CODEX_HOME: "",
+        CODEX_INSTALL_DIR: "",
+        PNPM_HOME: "",
+        BUN_INSTALL: "",
+        VOLTA_HOME: "",
+        PATH: packagedCodex.directory,
+        PATHEXT: ".EXE;.CMD;.BAT",
       } : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],

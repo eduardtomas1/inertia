@@ -7,10 +7,15 @@ import type { ProviderModel, ProviderRateLimit } from "../../src/shared/contract
 import { ProviderManager } from "../../src/server/providers";
 import {
   ProviderMetadataCache,
+  providerMetadataScopeKey,
   type PersistedProviderMetadata,
   validateProviderModels,
   validateProviderRateLimits,
 } from "../../src/server/provider/metadata";
+import {
+  modelSelectionSchema,
+  type ModelBackendProfile,
+} from "../../src/shared/model-routing";
 import {
   portableFixtureRoot,
   portableNodeExecutable,
@@ -19,6 +24,7 @@ import {
 } from "../helpers/portable-provider-fixture";
 
 const codexExecutable = resolve("provider metadata fixture", "codex");
+const claudeExecutable = resolve("provider metadata fixture", "claude");
 const cursorExecutable = resolve("provider metadata fixture", "cursor-agent");
 const openCodeExecutableOne = resolve("provider metadata fixture", "one", "opencode");
 const openCodeExecutableTwo = resolve("provider metadata fixture", "two", "opencode");
@@ -241,6 +247,110 @@ describe("provider metadata cache", () => {
       models: { freshness: "stale", provenance: "persistent-cache" },
       rateLimits: { freshness: "stale", provenance: "persistent-cache" },
     });
+  });
+
+  it("partitions custom backend metadata by harness, profile, model, revision, executable version, and auth state", async () => {
+    const cache = new ProviderMetadataCache({
+      read: async () => {
+        throw new Error("custom backend temporarily unavailable");
+      },
+    });
+    cache.correlate("claude", {
+      executable: claudeExecutable,
+      version: "2.1.0",
+      authState: "authenticated",
+    });
+    cache.learn(
+      "claude",
+      claudeExecutable,
+      {
+        models: [model("claude-native")],
+        rateLimits: [rateLimit("anthropic-native")],
+      },
+      "provider",
+    );
+
+    const kimiProfile: ModelBackendProfile = {
+      id: "builtin:kimi-code",
+      displayName: "Kimi",
+      protocol: "anthropic-messages",
+      authenticationMode: "api-key",
+      source: "built-in",
+      enabled: true,
+      configurationRevision: 7,
+      endpointIdentity: "kimi-code:anthropic-messages-v1",
+    };
+    const kimiSelection = modelSelectionSchema.parse({
+      harnessId: "claude-agent-sdk",
+      backendProfileId: kimiProfile.id,
+      backendProfileDisplayName: kimiProfile.displayName,
+      modelId: "k3",
+      alias: null,
+      reasoningEffort: "xhigh",
+      contextWindowOverride: 1_048_576,
+      providerOptions: {},
+      capabilities: [],
+      backendConfigurationRevision: kimiProfile.configurationRevision,
+    });
+    const kimiScope = cache.scopeForSelection(
+      kimiSelection,
+      kimiProfile,
+      claudeExecutable,
+    );
+    expect(kimiScope).toMatchObject({
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "builtin:kimi-code",
+      modelId: "k3",
+      executable: claudeExecutable,
+      version: "2.1.0",
+      backendConfigurationRevision: 7,
+      authState: "configured",
+    });
+    cache.learnScoped(kimiScope, { models: [model("k3")] }, "session");
+
+    expect(cache.current("claude")).toMatchObject({
+      models: [expect.objectContaining({ id: "claude-native" })],
+      rateLimits: [expect.objectContaining({ id: "anthropic-native" })],
+    });
+    expect(cache.currentScoped(kimiScope)).toMatchObject({
+      models: [expect.objectContaining({ id: "k3" })],
+      rateLimits: [],
+      metadataState: { rateLimits: { freshness: "unavailable" } },
+    });
+
+    const otherModelScope = {
+      ...kimiScope,
+      modelId: "kimi-for-coding",
+    };
+    const revisedScope = {
+      ...kimiScope,
+      backendConfigurationRevision: 8,
+    };
+    const unauthenticatedScope = {
+      ...kimiScope,
+      authState: "unauthenticated" as const,
+    };
+    expect(cache.currentScoped(otherModelScope).models).toEqual([]);
+    expect(cache.currentScoped(revisedScope).models).toEqual([]);
+    expect(cache.currentScoped(unauthenticatedScope).models).toEqual([]);
+    expect(new Set([
+      providerMetadataScopeKey(kimiScope),
+      providerMetadataScopeKey(otherModelScope),
+      providerMetadataScopeKey(revisedScope),
+      providerMetadataScopeKey(unauthenticatedScope),
+    ]).size).toBe(4);
+
+    await cache.metadataScoped(
+      kimiScope,
+      {},
+      workspacePath,
+      { force: true },
+    );
+    expect(cache.currentScoped(kimiScope)).toMatchObject({
+      models: [expect.objectContaining({ id: "k3" })],
+      metadataState: { models: { freshness: "stale" } },
+    });
+    expect(cache.current("claude").models[0]?.id).toBe("claude-native");
   });
 });
 

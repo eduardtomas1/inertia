@@ -1,4 +1,14 @@
-import type { ProviderModel, ProviderRateLimit, ThreadUsageSnapshot } from "../../shared/contracts";
+import type {
+  ContinuationIdentity,
+  HarnessBackendCompatibility,
+  KnownHarnessId,
+  ModelBackendProfile,
+  ModelSelection,
+  ProviderModel,
+  ProviderRateLimit,
+  ThreadUsageSnapshot,
+} from "../../shared/contracts";
+import type { BackendCompatibilityProbeResult } from "../../shared/backend-probe";
 import type {
   AgentApprovalDecision,
   AgentApprovalRequest,
@@ -39,9 +49,20 @@ export interface ProviderDetectionOptions {
 }
 
 interface ProviderRunRequest {
+  /** Native discovery/event compatibility projection; never used for routing. */
   providerId: ProviderId;
+  harnessId: KnownHarnessId;
+  backendProfile: ModelBackendProfile;
+  backendCompatibility: HarnessBackendCompatibility;
+  modelSelection: ModelSelection;
+  continuationIdentity: ContinuationIdentity;
+  /** Caller-owned run identity. Omitted only by legacy direct harness consumers. */
+  runId?: string;
+  /** Durable authoritative turn identity. Omitted only by legacy direct harness consumers. */
+  turnId?: string;
   cwd: string;
   prompt: string;
+  /** @deprecated Compatibility projections of modelSelection. */
   model?: string;
   reasoningEffort?: string;
   interactionMode: ProviderInteractionMode;
@@ -64,10 +85,14 @@ export type ProviderRunStatus =
   | "failed"
   | "cancelled";
 
-interface ProviderEventBase {
+export interface ProviderEventBase {
   providerId: ProviderId;
   /** The caller's thread or conversation identifier, normalized to one key. */
   conversationId: string;
+  /** Always present on callbacks; legacy direct runs fall back to conversationId. */
+  runId: string;
+  /** Null only for legacy direct runs that do not own a durable turn. */
+  turnId: string | null;
 }
 
 export interface ProviderTextEvent extends ProviderEventBase {
@@ -130,7 +155,7 @@ export interface ProviderReasoningEvent extends ProviderEventBase {
 
 export interface ProviderUsageEvent extends ProviderEventBase {
   type: "usage";
-  usage: Omit<ThreadUsageSnapshot, "conversationId" | "updatedAt">;
+  usage: Omit<ThreadUsageSnapshot, "conversationId" | "turnId" | "updatedAt">;
 }
 
 export interface ProviderMetadataEvent extends ProviderEventBase {
@@ -201,7 +226,54 @@ export class ProviderRuntimeError extends Error {
 export interface ProviderManagerOptions {
   commands?: Partial<Record<ProviderId, string>>;
   cancelGraceMs?: number;
+  backendProfiles?: readonly ModelBackendProfile[];
+  backendCompatibilities?: readonly HarnessBackendCompatibility[];
+  /** Latest safe compatibility evidence, keyed to an exact profile revision and model. */
+  backendProbeResults?: readonly BackendCompatibilityProbeResult[];
+  /**
+   * Privileged, process-local launch boundary for backend-specific routing.
+   * Implementations may materialize a secret into the owned child environment,
+   * but must never add it to ProviderRunInput or another shared contract.
+   */
+  resolveBackendLaunchOptions?: (
+    input: ProviderRunInput,
+    baseEnvironment: NodeJS.ProcessEnv,
+    context: ProviderBackendLaunchContext,
+  ) => ProviderBackendLaunchOptions | Promise<ProviderBackendLaunchOptions>;
 }
+
+export interface ProviderBackendLaunchContext {
+  signal: AbortSignal;
+}
+
+export interface ProviderBackendLaunchOptions {
+  /** Complete environment owned by this launch; never mutate process.env. */
+  environment: NodeJS.ProcessEnv;
+  /** Optional harness-specific spelling of the already selected model. */
+  modelArgument?: string | null;
+  /** Safe provider configuration consumed only by the matching owned harness. */
+  harnessConfiguration?: ProviderHarnessLaunchConfiguration;
+  /**
+   * Clears credential material from the resolver-owned temporary object after
+   * the harness has synchronously copied its launch configuration.
+   */
+  releaseAfterStart?: () => void;
+  /** Releases any remaining non-secret resources after the run has stopped. */
+  dispose?: () => void;
+}
+
+export interface CodexResponsesHarnessConfiguration {
+  kind: "codex-responses";
+  /** Codex config key, not a user-facing backend profile id. */
+  providerId: string;
+  displayName: string;
+  baseUrl: string;
+  /** Name of an environment variable present only in the owned App Server. */
+  credentialEnvironmentKey: string | null;
+}
+
+export type ProviderHarnessLaunchConfiguration =
+  | CodexResponsesHarnessConfiguration;
 
 export interface ProviderAuthLaunch {
   executable: string;

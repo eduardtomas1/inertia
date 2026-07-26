@@ -1,0 +1,53 @@
+{
+  "format": 1,
+  "fixtures": [
+    {
+      "tag": "v0.0.1",
+      "commit": "77fae5a5e3726edf8ebba7b8e875dc176d207e25",
+      "schemaVersion": 2,
+      "file": "v0.0.1.sqlite",
+      "bytes": 69632,
+      "sha256": "be198c5cb2e9d696f8490c4b8d6f46150494f01e034f4be039a7cde3546bb0e6"
+    },
+    {
+      "tag": "v0.0.2",
+      "commit": "2e78ebec30a12efe514b6d0719a8e94c487b815f",
+      "schemaVersion": 3,
+      "file": "v0.0.2.sqlite",
+      "bytes": 86016,
+      "sha256": "237e2e111d773d6769abe99a760e57c86da71acad00e0cb3520b55a20e2d24a4"
+    },
+    {
+      "tag": "v0.0.3",
+      "commit": "05a492537abd7f57b453453727824b922dd81706",
+      "schemaVersion": 4,
+      "file": "v0.0.3.sqlite",
+      "bytes": 106496,
+      "sha256": "5e6cfb11a5ce8e988f9c800c5097c549f4c0f11a939430fa168d5c88ae934522"
+    },
+    {
+      "tag": "v0.0.4",
+      "commit": "84b797baa209235caf8290524a49ac6feb8e30cc",
+      "schemaVersion": 6,
+      "file": "v0.0.4.sqlite",
+      "bytes": 114688,
+      "sha256": "d9327e4eabd5c9d1fb900f207b3bba75465caae974e08ed1a87d3648a9be71c6"
+    },
+    {
+      "tag": "v0.0.5",
+      "commit": "523e1770c7c4f21a5737afd5520a56d83bc164b2",
+      "schemaVersion": 15,
+      "file": "v0.0.5.sqlite",
+      "bytes": 184320,
+      "sha256": "dfe46475a388af775d874b39e66f1095701f47afffeb3d1d8f38adf1e9053d40"
+    },
+    {
+      "tag": "v0.0.6",
+      "commit": "b79232057d6165c2ec77ec75e48e9ffbea1f8a72",
+      "schemaVersion": 15,
+      "file": "v0.0.6.sqlite",
+      "bytes": 184320,
+      "sha256": "181c308061928a08e656f3720f8d788db3c930a39e5ed3a068e26afbcc7c9a04"
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import {
   waitFor,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
+import { nativeProviderRunInput } from "./model-route-fixture";
 
 describe.sequential("Cursor ACP harness", () => {
   const roots: string[] = [];
@@ -76,7 +77,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: string[][] = [];
 
-    const result = await manager.run({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-rich",
       cwd: root,
@@ -86,7 +87,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       model: "model-a",
       reasoningEffort: "high",
       imagePaths: [imagePath],
-    }, {
+    }), {
       onApproval: (event) => {
         approvals.push(event.request.title);
         expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
@@ -157,7 +158,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const command = portableNodeExecutable(root, "cursor-agent");
     writeNodeSubcommand(root, "acp", `process.stdout.write("not-json\\n"); setTimeout(() => {}, 1000);`);
     const manager = new ProviderManager({ commands: { cursor: command } }, new AgentHarnessRegistry([createCursorAcpHarness()]));
-    await expect(manager.run({ providerId: "cursor", conversationId: "cursor-invalid", cwd: root, prompt: "Hi", interactionMode: "build", access: "supervised" })).resolves.toMatchObject({ status: "failed" });
+    await expect(manager.run(nativeProviderRunInput({ providerId: "cursor", conversationId: "cursor-invalid", cwd: root, prompt: "Hi", interactionMode: "build", access: "supervised" }))).resolves.toMatchObject({ status: "failed" });
   });
 
   it("loads a resumable ACP session instead of creating a replacement", async () => {
@@ -187,7 +188,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
 
-    await expect(manager.run({
+    await expect(manager.run(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-resume",
       cwd: root,
@@ -195,7 +196,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       interactionMode: "build",
       access: "supervised",
       sessionId: "cursor-existing-session",
-    })).resolves.toMatchObject({ status: "completed", sessionId: "cursor-existing-session", text: "Resumed response" });
+    }))).resolves.toMatchObject({ status: "completed", sessionId: "cursor-existing-session", text: "Resumed response" });
     const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{ method?: string }>;
     expect(messages.some(({ method }) => method === "session/load")).toBe(true);
     expect(messages.some(({ method }) => method === "session/new")).toBe(false);
@@ -231,14 +232,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     );
     let markRunning!: () => void;
     const running = new Promise<void>((resolve) => { markRunning = resolve; });
-    const result = manager.run({
+    const result = manager.run(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-cancel",
       cwd: root,
       prompt: "Wait",
       interactionMode: "build",
       access: "supervised",
-    }, { onStatus: ({ status }) => { if (status === "running") markRunning(); } });
+    }), { onStatus: ({ status }) => { if (status === "running") markRunning(); } });
 
     await running;
     await waitFor("Cursor fixture capture", () => {
@@ -261,14 +262,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       { commands: { cursor: oversizedCommand } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
-    await expect(oversizedManager.run({
+    await expect(oversizedManager.run(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-oversized",
       cwd: oversizedRoot,
       prompt: "Start",
       interactionMode: "build",
       access: "supervised",
-    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("oversized") });
+    }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("oversized") });
 
     const capabilityRoot = portableFixtureRoot("cursor ACP capabilities");
     roots.push(capabilityRoot);
@@ -288,7 +289,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       { commands: { cursor: capabilityCommand } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
-    await expect(capabilityManager.run({
+    await expect(capabilityManager.run(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-no-resume",
       cwd: capabilityRoot,
@@ -296,8 +297,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       interactionMode: "build",
       access: "supervised",
       sessionId: "existing",
-    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("resume support") });
-    await expect(capabilityManager.run({
+    }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("resume support") });
+    await expect(capabilityManager.run(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-no-image",
       cwd: capabilityRoot,
@@ -305,7 +306,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       interactionMode: "build",
       access: "supervised",
       imagePaths: [imagePath],
-    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("image prompt support") });
+    }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("image prompt support") });
   });
 
   it("settles startup failure when the ACP executable is missing", async () => {
@@ -316,14 +317,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       { commands: { cursor: missing } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
-    await expect(manager.run({
+    await expect(manager.run(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-missing",
       cwd: root,
       prompt: "Start",
       interactionMode: "build",
       access: "supervised",
-    })).resolves.toMatchObject({ status: "failed" });
+    }))).resolves.toMatchObject({ status: "failed" });
     expect(manager.activeConversationIds()).toEqual([]);
   });
 });

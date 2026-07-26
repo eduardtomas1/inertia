@@ -11,9 +11,21 @@ import type {
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
+import {
+  claudeHarnessBackendCompatibility,
+  createKimiClaudeBackendProfile,
+  createKimiClaudeModelSelection,
+  modelBackendProfileForClaudeProfile,
+} from "../../src/shared/claude-backend-profiles";
+import { continuationIdentityForSelection } from "../../src/shared/model-routing";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { createClaudeAgentSdkHarness, readClaudeAgentSdkModels } from "../../src/server/provider/claude-agent-sdk-harness";
+import {
+  claudeBackendProfileRegistrations,
+  createClaudeBackendLaunchResolver,
+} from "../../src/server/runtime/backends/claude-compatible-adapter";
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
+import { nativeProviderRunInput } from "./model-route-fixture";
 
 describe("Claude Agent SDK harness", () => {
   const roots: string[] = [];
@@ -103,7 +115,7 @@ describe("Claude Agent SDK harness", () => {
     const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: Array<{ models: string[]; rateLimits: string[] }> = [];
 
-    const result = await manager.run({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-rich",
       cwd: root,
@@ -113,7 +125,7 @@ describe("Claude Agent SDK harness", () => {
       model: "sonnet",
       reasoningEffort: "high",
       imagePaths: [imagePath],
-    }, {
+    }), {
       onApproval: (event) => {
         approvals.push(event.request.title);
         expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
@@ -214,6 +226,168 @@ describe("Claude Agent SDK harness", () => {
     })]);
   });
 
+  it("preserves local Claude interactions for Kimi without reading native Claude metadata", async () => {
+    const root = portableFixtureRoot("Kimi through Claude SDK");
+    roots.push(root);
+    const profile = createKimiClaudeBackendProfile({
+      id: "kimi:sdk-local-mechanics",
+      secretReference: "secret:kimi-sdk-local-mechanics",
+      primaryModelId: "k3",
+      contextWindowTokens: 1_048_576,
+    });
+    const backendProfile = modelBackendProfileForClaudeProfile(profile);
+    const modelSelection = createKimiClaudeModelSelection({
+      profile,
+      reasoningEffort: "xhigh",
+    });
+    let capturedOptions: ClaudeOptions | undefined;
+    let supportedModelsCalls = 0;
+    let nativeQuotaCalls = 0;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        capturedOptions = options;
+        const stream = (async function* (): AsyncGenerator<SDKMessage> {
+          const canUseTool = options?.canUseTool as CanUseTool;
+          await canUseTool("Bash", { command: "npm test" }, {
+            signal: new AbortController().signal,
+            title: "Run tests",
+            description: "Run the focused suite",
+            toolUseID: "kimi-tool",
+            requestId: "kimi-permission",
+          });
+          await canUseTool("AskUserQuestion", {
+            questions: [{
+              header: "Scope",
+              question: "Which scope?",
+              options: [{ label: "Focused", description: "Only this package" }],
+            }],
+          }, {
+            signal: new AbortController().signal,
+            toolUseID: "kimi-question",
+            requestId: "kimi-question-permission",
+          });
+          yield {
+            type: "stream_event",
+            session_id: "77777777-7777-4777-8777-777777777777",
+            event: {
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "text_delta", text: "Kimi response" },
+            },
+          } as unknown as SDKMessage;
+          yield {
+            type: "result",
+            subtype: "success",
+            session_id: "77777777-7777-4777-8777-777777777777",
+            result: "Kimi response",
+            usage: { input_tokens: 50, output_tokens: 10 },
+            modelUsage: { k3: { contextWindow: 1_048_576 } },
+          } as unknown as SDKMessage;
+        })();
+        return Object.assign(stream, {
+          supportedModels: async () => {
+            supportedModelsCalls += 1;
+            return [];
+          },
+          usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => {
+            nativeQuotaCalls += 1;
+            return { rate_limits_available: true, rate_limits: {} };
+          },
+          getContextUsage: async () => ({
+            totalTokens: 60,
+            maxTokens: 1_048_576,
+            isAutoCompactEnabled: true,
+          }) as never,
+          interrupt: async () => undefined,
+          close: () => undefined,
+        }) as unknown as Query;
+      },
+    });
+    const registrations = claudeBackendProfileRegistrations([profile]);
+    const manager = new ProviderManager({
+      commands: { claude: "/fake/claude" },
+      ...registrations,
+      resolveBackendLaunchOptions: createClaudeBackendLaunchResolver({
+        profiles: [profile],
+        resolveSecret: async () => "kimi-sdk-secret",
+      }),
+    }, new AgentHarnessRegistry([harness]));
+    const approvals: string[] = [];
+    const questions: string[] = [];
+    const usages: Array<number | null> = [];
+    const metadata: unknown[] = [];
+
+    const result = await manager.run({
+      providerId: "claude",
+      harnessId: "claude-agent-sdk",
+      backendProfile,
+      backendCompatibility: claudeHarnessBackendCompatibility(profile),
+      modelSelection,
+      continuationIdentity: continuationIdentityForSelection(
+        modelSelection,
+        backendProfile.endpointIdentity,
+        true,
+      ),
+      conversationId: "kimi-sdk-local",
+      runId: "kimi-sdk-local-run",
+      turnId: "kimi-sdk-local-turn",
+      cwd: root,
+      prompt: "Use the local Claude harness",
+      model: modelSelection.modelId,
+      reasoningEffort: modelSelection.reasoningEffort ?? undefined,
+      interactionMode: "build",
+      access: "supervised",
+    }, {
+      onApproval: (event) => {
+        approvals.push(event.request.title);
+        manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+        );
+      },
+      onInput: (event) => {
+        const question = event.request.questions[0]!;
+        questions.push(question.question);
+        manager.respondToInput(event.conversationId, event.request.requestId, {
+          [question.id]: [question.options[0]!.id],
+        });
+      },
+      onUsage: (event) => usages.push(event.usage.usedTokens),
+      onMetadata: (event) => metadata.push(event),
+    });
+
+    expect(result).toMatchObject({
+      status: "completed",
+      text: "Kimi response",
+      sessionId: "77777777-7777-4777-8777-777777777777",
+    });
+    expect(capturedOptions).toMatchObject({
+      model: "k3[1m]",
+      effort: "xhigh",
+      env: expect.objectContaining({
+        ANTHROPIC_BASE_URL: "https://api.kimi.com/coding/",
+        ANTHROPIC_MODEL: "k3[1m]",
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "k3[1m]",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "k3[1m]",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "k3[1m]",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "k3[1m]",
+        CLAUDE_CODE_SUBAGENT_MODEL: "k3[1m]",
+        CLAUDE_CODE_EFFORT_LEVEL: "max",
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1048576",
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576",
+      }),
+    });
+    expect(approvals).toEqual(["Run tests"]);
+    expect(questions).toEqual(["Which scope?"]);
+    expect(usages).toEqual([60]);
+    expect(supportedModelsCalls).toBe(0);
+    expect(nativeQuotaCalls).toBe(0);
+    expect(metadata).toEqual([]);
+    expect(manager.cachedMetadata("claude").models).toEqual([]);
+    expect(manager.cachedMetadata("claude").rateLimits).toEqual([]);
+  });
+
   it("resumes through the SDK contract and interrupts without leaving an active run", async () => {
     const root = portableFixtureRoot("Claude SDK cancellation");
     roots.push(root);
@@ -249,7 +423,7 @@ describe("Claude Agent SDK harness", () => {
     let running!: () => void;
     const started = new Promise<void>((resolve) => { running = resolve; });
     const statuses: string[] = [];
-    const result = manager.run({
+    const result = manager.run(nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-cancel",
       cwd: root,
@@ -257,7 +431,7 @@ describe("Claude Agent SDK harness", () => {
       interactionMode: "build",
       access: "supervised",
       sessionId: "resume-session",
-    }, {
+    }), {
       onStatus: ({ status }) => { statuses.push(status); if (status === "running") running(); },
     });
 
@@ -295,15 +469,15 @@ describe("Claude Agent SDK harness", () => {
       new AgentHarnessRegistry([harness]),
     );
 
-    await expect(manager.run({
+    await expect(manager.run(nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-sdk-error",
       cwd: root,
       prompt: "Start",
       interactionMode: "build",
       access: "supervised",
-    })).resolves.toMatchObject({ status: "failed", error: "SDK transport unavailable" });
-    await expect(manager.run({
+    }))).resolves.toMatchObject({ status: "failed", error: "SDK transport unavailable" });
+    await expect(manager.run(nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-bad-image",
       cwd: root,
@@ -311,8 +485,72 @@ describe("Claude Agent SDK harness", () => {
       interactionMode: "build",
       access: "supervised",
       imagePaths: [unsupportedImage],
-    })).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("image type") });
+    }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("image type") });
     expect(queryCalls).toBe(1);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("attributes custom-backend authentication failures without exposing diagnostics", async () => {
+    const root = portableFixtureRoot("Claude SDK custom auth failure");
+    roots.push(root);
+    const profile = createKimiClaudeBackendProfile({
+      id: "kimi:auth-failure",
+      secretReference: "secret:kimi-auth-failure",
+      primaryModelId: "k3",
+    });
+    const selection = createKimiClaudeModelSelection({ profile });
+    const backendProfile = modelBackendProfileForClaudeProfile(profile);
+    const compatibility = claudeHarnessBackendCompatibility(profile);
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => {
+        const stream = (async function* (): AsyncGenerator<SDKMessage> {
+          throw new Error(
+            "401 Unauthorized from https://api.kimi.com/coding/ Authorization: Bearer raw-secret",
+          );
+        })();
+        return Object.assign(stream, {
+          supportedModels: async () => [],
+          interrupt: async () => undefined,
+          close: () => undefined,
+        }) as unknown as Query;
+      },
+    });
+    const registrations = claudeBackendProfileRegistrations([profile]);
+    const manager = new ProviderManager({
+      commands: { claude: process.execPath },
+      ...registrations,
+      resolveBackendLaunchOptions: createClaudeBackendLaunchResolver({
+        profiles: [profile],
+        resolveSecret: () => "owned-kimi-secret",
+      }),
+    }, new AgentHarnessRegistry([harness]));
+
+    const result = await manager.run({
+      providerId: "claude",
+      harnessId: "claude-agent-sdk",
+      backendProfile,
+      backendCompatibility: compatibility,
+      modelSelection: selection,
+      continuationIdentity: continuationIdentityForSelection(
+        selection,
+        backendProfile.endpointIdentity,
+        true,
+      ),
+      conversationId: "kimi-auth-failure",
+      runId: "run-kimi-auth-failure",
+      turnId: "turn-kimi-auth-failure",
+      cwd: root,
+      prompt: "Inspect",
+      model: selection.modelId,
+      interactionMode: "build",
+      access: "supervised",
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      error: "Authentication failed for Kimi. Check this model backend's credential and try again.",
+    });
+    expect(result.error).not.toMatch(/api\.kimi|authorization|raw-secret|owned-kimi-secret/iu);
     expect(manager.activeConversationIds()).toEqual([]);
   });
 });

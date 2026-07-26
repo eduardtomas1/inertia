@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,7 +10,12 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { startRuntime, type RunningRuntime } from "../../src/server";
-import type { AppSnapshot, ProviderInfo, ServerEvent } from "../../src/shared/contracts";
+import type {
+  AppSnapshot,
+  ConversationDetail,
+  ProviderInfo,
+  ServerEvent,
+} from "../../src/shared/contracts";
 import { diffFileFingerprint, parseUnifiedDiff } from "../../src/shared/diff-review";
 import { RuntimeStore } from "../../src/server/database";
 import { getUnifiedDiff } from "../../src/server/git";
@@ -21,7 +27,10 @@ class EventQueue {
 
   constructor(socket: WebSocket) {
     socket.on("message", (data) => {
-      this.events.push(JSON.parse(data.toString()) as ServerEvent);
+      const event = JSON.parse(data.toString()) as ServerEvent;
+      // Most runtime tests assert domain behavior. The transport-specific
+      // sequencing tests below use raw sockets and keep the envelope intact.
+      this.events.push(event.type === "runtime.event" ? event.event : event);
       for (const listener of this.listeners) listener();
     });
   }
@@ -43,7 +52,11 @@ class EventQueue {
         const providers = latestSnapshot?.type === "snapshot.updated"
           ? latestSnapshot.snapshot.providers.map(({ id, installState, authState, canRun }) => ({ id, installState, authState, canRun }))
           : [];
-        reject(new Error(`Timed out waiting for a server event. Pending event types: ${pending}. Providers: ${JSON.stringify(providers)}.`));
+        const turns = latestSnapshot?.type === "snapshot.updated"
+          ? latestSnapshot.snapshot.conversations.flatMap(({ latestTurn }) =>
+            latestTurn ? [{ id: latestTurn.id, status: latestTurn.status }] : [])
+          : [];
+        reject(new Error(`Timed out waiting for a server event. Pending event types: ${pending}. Providers: ${JSON.stringify(providers)}. Turns: ${JSON.stringify(turns)}.`));
       }, 6_000);
       const check = (): void => {
         const event = take();
@@ -69,6 +82,55 @@ async function connect(url: string): Promise<{ socket: WebSocket; events: EventQ
 
 function send(socket: WebSocket, command: object): void {
   socket.send(JSON.stringify(command));
+}
+
+async function loadConversationDetailResult(
+  socket: WebSocket,
+  events: EventQueue,
+  conversationId: string,
+): Promise<Extract<Extract<ServerEvent, { type: "request.result" }>["result"], { kind: "conversation.detail" }>> {
+  const requestId = randomUUID();
+  send(socket, {
+    type: "conversation.detail.load",
+    requestId,
+    payload: { conversationId },
+  });
+  const event = await events.next(
+    (candidate): candidate is Extract<ServerEvent, { type: "request.result" }> =>
+      candidate.type === "request.result"
+      && candidate.requestId === requestId
+      && candidate.result.kind === "conversation.detail",
+  );
+  if (event.result.kind !== "conversation.detail") {
+    throw new Error(`Expected a conversation detail result for ${conversationId}.`);
+  }
+  return event.result;
+}
+
+async function loadConversationDetail(
+  socket: WebSocket,
+  events: EventQueue,
+  conversationId: string,
+): Promise<ConversationDetail> {
+  const result = await loadConversationDetailResult(socket, events, conversationId);
+  if (result.state !== "ready") {
+    throw new Error(`Expected ready conversation detail for ${conversationId}.`);
+  }
+  return result.detail;
+}
+
+async function waitForConversationDetail(
+  socket: WebSocket,
+  events: EventQueue,
+  conversationId: string,
+  predicate: (detail: ConversationDetail) => boolean,
+): Promise<ConversationDetail> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const detail = await loadConversationDetail(socket, events, conversationId);
+    if (predicate(detail)) return detail;
+    await delay(10);
+  }
+  throw new Error(`Conversation detail for ${conversationId} did not reach the expected state.`);
 }
 
 function waitForRejectedUpgrade(url: string, origin: string): Promise<number> {
@@ -136,7 +198,7 @@ describe("local runtime", () => {
     return { root, data, workspace };
   }
 
-  function fakeCodex(root: string, runEvents: readonly object[] = []): { authFile: string } {
+  function fakeCodex(root: string, runEvents: readonly object[] = []): { authFile: string; executable: string } {
     const executableDirectory = join(root, "provider-bin");
     const commandCwd = join(root, "workspace");
     const authFile = join(root, "codex-authenticated");
@@ -250,7 +312,7 @@ process.exit(child.status ?? 1);
       else process.env.PATH = previousPath;
     });
 
-    return { authFile };
+    return { authFile, executable };
   }
 
   async function providerSnapshot(
@@ -308,7 +370,7 @@ process.exit(child.status ?? 1);
     expect(welcome.snapshot.projects).toEqual([]);
     expect(welcome.snapshot.conversations).toEqual([]);
     expect(welcome.snapshot.settings.defaultAccessMode).toBe("supervised");
-    expect(welcome.snapshot.messages).toEqual([]);
+    expect(welcome.snapshot).not.toHaveProperty("messages");
 
     const settingsRequestId = randomUUID();
     send(client.socket, {
@@ -386,20 +448,28 @@ process.exit(child.status ?? 1);
     const messageSnapshot = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated",
     );
-    expect(messageSnapshot.snapshot.messages.some(({ content }) => content === "Keep the runtime calm.")).toBe(true);
+    const messageDetail = await loadConversationDetail(client.socket, client.events, conversation!.id);
+    expect(messageDetail.messages.some(({ content }) => content === "Keep the runtime calm.")).toBe(true);
     expect(messageSnapshot.snapshot.conversations.find(({ id }) => id === conversation?.id)?.providerId).toBe("claude");
 
-    const lockedProviderRequestId = randomUUID();
+    const unsentProviderRequestId = randomUUID();
     send(client.socket, {
       type: "conversation.update",
-      requestId: lockedProviderRequestId,
+      requestId: unsentProviderRequestId,
       payload: { conversationId: conversation?.id, providerId: "codex" },
     });
-    const lockedProvider = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
-        event.type === "request.error" && event.requestId === lockedProviderRequestId,
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === unsentProviderRequestId,
     );
-    expect(lockedProvider.message).toBe("Start a new chat to use a different agent. Existing chats keep their original agent context.");
+    const switchedProvider = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.conversations.some(({ id, providerId }) =>
+          id === conversation?.id && providerId === "codex"),
+    );
+    expect(switchedProvider.snapshot.conversations.find(({ id }) =>
+      id === conversation?.id)?.providerId).toBe("codex");
 
     client.socket.close();
     await runtime.close();
@@ -413,7 +483,249 @@ process.exit(child.status ?? 1);
     );
     expect(persisted.snapshot.projects).toHaveLength(1);
     expect(persisted.snapshot.settings.theme).toBe("dark");
-    expect(persisted.snapshot.messages.some(({ content }) => content === "Keep the runtime calm.")).toBe(true);
+    const persistedDetail = await loadConversationDetail(
+      persistedClient.socket,
+      persistedClient.events,
+      persisted.snapshot.activeConversationId!,
+    );
+    expect(persistedDetail.messages.some(({ content }) => content === "Keep the runtime calm.")).toBe(true);
+  });
+
+  it("loads settled chats directly and reports missing or deleted detail authoritatively", async () => {
+    const { root, data, workspace } = temporaryWorkspace();
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: false,
+    });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
+    );
+    const firstId = welcome.snapshot.activeConversationId!;
+    const firstProjectId = welcome.snapshot.activeProjectId!;
+    expect(welcome.snapshot).not.toHaveProperty("messages");
+
+    const settleRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.settle",
+      requestId: settleRequestId,
+      payload: { conversationId: firstId },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === settleRequestId,
+    );
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.conversations.some(({ id, settledAt }) => id === firstId && settledAt !== null),
+    );
+
+    const createRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.create",
+      requestId: createRequestId,
+      payload: { projectId: firstProjectId, title: "Another chat" },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === createRequestId,
+    );
+    const created = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.conversations.some(({ title }) => title === "Another chat"),
+    );
+    const secondId = created.snapshot.conversations.find(({ title }) => title === "Another chat")!.id;
+
+    const secondWorkspace = join(root, "second-workspace");
+    mkdirSync(secondWorkspace);
+    const projectRequestId = randomUUID();
+    send(client.socket, {
+      type: "project.create",
+      requestId: projectRequestId,
+      payload: { name: "Second project", path: secondWorkspace },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === projectRequestId,
+    );
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.projects.some(({ name }) => name === "Second project"),
+    );
+
+    const directSelectRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.select",
+      requestId: directSelectRequestId,
+      payload: { conversationId: firstId },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === directSelectRequestId,
+    );
+    const selected = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.activeConversationId === firstId,
+    );
+    expect(selected.snapshot.activeProjectId).toBe(firstProjectId);
+    expect(selected.snapshot.conversations.find(({ id }) => id === firstId)?.settledAt).not.toBeNull();
+    expect((await loadConversationDetail(client.socket, client.events, firstId)).conversation.id).toBe(firstId);
+
+    const missingId = randomUUID();
+    expect(await loadConversationDetailResult(client.socket, client.events, missingId))
+      .toMatchObject({ kind: "conversation.detail", conversationId: missingId, state: "missing" });
+
+    const deleteRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.delete",
+      requestId: deleteRequestId,
+      payload: { conversationId: secondId },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === deleteRequestId,
+    );
+    expect(await loadConversationDetailResult(client.socket, client.events, secondId))
+      .toMatchObject({ kind: "conversation.detail", conversationId: secondId, state: "deleted" });
+  });
+
+  it("creates isolated chats by default and reuses checkout context only when explicitly requested", async () => {
+    const { data, workspace } = temporaryWorkspace();
+    initializeChangedRepository(workspace);
+    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> => event.type === "server.welcome",
+    );
+    const project = welcome.snapshot.projects[0]!;
+
+    const createConversation = async (
+      title: string,
+      extra: { useWorktree?: boolean; branch?: string | null; worktreePath?: string | null } = {},
+    ) => {
+      const requestId = randomUUID();
+      send(client.socket, {
+        type: "conversation.create",
+        requestId,
+        payload: {
+          projectId: project.id,
+          title,
+          providerId: "codex",
+          model: "global-default-model",
+          reasoningEffort: "high",
+          interactionMode: "build",
+          accessMode: "supervised",
+          ...extra,
+        },
+      });
+      await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+          event.type === "request.ok" && event.requestId === requestId,
+      );
+      const snapshot = await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+          event.type === "snapshot.updated"
+          && event.snapshot.conversations.some((conversation) => (
+            conversation.title === title
+            && (!extra.useWorktree || conversation.worktreePath !== null)
+          )),
+      );
+      return snapshot.snapshot.conversations.find((conversation) => conversation.title === title)!;
+    };
+
+    const ordinary = await createConversation("Ordinary");
+    expect(ordinary).toMatchObject({
+      branch: "main",
+      worktreePath: null,
+      providerSessionId: null,
+      providerId: "codex",
+      model: "global-default-model",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+    });
+
+    const wrongBranchRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.create",
+      requestId: wrongBranchRequestId,
+      payload: {
+        projectId: project.id,
+        title: "Wrong branch",
+        branch: "viewed/branch",
+      },
+    });
+    const wrongBranch = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+        event.type === "request.error" && event.requestId === wrongBranchRequestId,
+    );
+    expect(wrongBranch.message).toBe("The project checkout is currently on main, not viewed/branch.");
+
+    const isolatedWorktree = await createConversation("Isolated worktree", { useWorktree: true });
+    expect(isolatedWorktree.branch).toMatch(/^inertia\/[0-9a-f]{8}$/u);
+    expect(isolatedWorktree.worktreePath).toBe(await realpath(join(data, "worktrees", isolatedWorktree.id)));
+    expect(isolatedWorktree.providerSessionId).toBeNull();
+
+    const afterViewedWorktree = await createConversation("After viewed worktree");
+    expect(afterViewedWorktree).toMatchObject({
+      branch: "main",
+      worktreePath: null,
+      providerSessionId: null,
+    });
+
+    const reusedWorktree = await createConversation("Explicitly reused worktree", {
+      branch: isolatedWorktree.branch,
+      worktreePath: isolatedWorktree.worktreePath,
+    });
+    expect(reusedWorktree).toMatchObject({
+      branch: isolatedWorktree.branch,
+      worktreePath: isolatedWorktree.worktreePath,
+      providerSessionId: null,
+    });
+
+    const deleteConversation = async (conversationId: string): Promise<void> => {
+      const requestId = randomUUID();
+      send(client.socket, {
+        type: "conversation.delete",
+        requestId,
+        payload: { conversationId },
+      });
+      await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+          event.type === "request.ok" && event.requestId === requestId,
+      );
+    };
+    await deleteConversation(isolatedWorktree.id);
+    expect(existsSync(isolatedWorktree.worktreePath!)).toBe(true);
+    await deleteConversation(reusedWorktree.id);
+    expect(existsSync(isolatedWorktree.worktreePath!)).toBe(false);
+
+    const rejectedRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.create",
+      requestId: rejectedRequestId,
+      payload: {
+        projectId: project.id,
+        title: "Untrusted checkout",
+        branch: "main",
+        worktreePath: join(data, "not-a-chat-worktree"),
+      },
+    });
+    const rejected = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+        event.type === "request.error" && event.requestId === rejectedRequestId,
+    );
+    expect(rejected.message).toBe("That worktree is not attached to a chat in this project.");
+
+    client.socket.close();
   });
 
   it("rejects unknown paths and remote web origins", async () => {
@@ -615,13 +927,19 @@ process.exit(child.status ?? 1);
     );
     const dismissed = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-        event.type === "snapshot.updated" && !event.snapshot.runs.some((run) => run.id === activity.id),
+        event.type === "snapshot.updated"
+        && event.snapshot.runs.some((run) =>
+          run.id === activity.id && run.attentionState === "dismissed"),
     );
-    expect(dismissed.snapshot.runs.some((run) => run.id === activity.id)).toBe(false);
+    expect(dismissed.snapshot.runs.find((run) => run.id === activity.id)).toMatchObject({
+      status: "cancelled",
+      attentionState: "dismissed",
+    });
   });
 
   it("updates a matching provider activity instead of persisting duplicate lifecycle rows", async () => {
     const { root, data, workspace } = temporaryWorkspace();
+    initializeChangedRepository(workspace);
     const { authFile } = fakeCodex(root, [
       { type: "item.started", item: { type: "command_execution", command: "npm test" } },
       { type: "item.completed", item: { type: "command_execution", command: "npm test" } },
@@ -643,6 +961,7 @@ process.exit(child.status ?? 1);
     );
     const conversationId = ready.activeConversationId;
     expect(conversationId).toBeTruthy();
+    await loadConversationDetail(client.socket, client.events, conversationId!);
 
     const updateRequestId = randomUUID();
     send(client.socket, {
@@ -708,11 +1027,68 @@ process.exit(child.status ?? 1);
     const persisted = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"
-        && event.snapshot.activities.some((activity) => activity.id === started.activity.id && activity.status === "completed"),
+        && event.snapshot.conversations.some((thread) =>
+          thread.id === conversationId
+          && thread.latestTurn?.runId === started.activity.runId
+          && thread.latestTurn.status === "completed"),
     );
-    expect(persisted.snapshot.activities.filter((activity) => activity.runId === started.activity.runId && activity.kind === "command")).toEqual([
-      expect.objectContaining({ id: started.activity.id, status: "completed" }),
+    expect(persisted.snapshot).not.toHaveProperty("messages");
+    const persistedDetail = await waitForConversationDetail(
+      client.socket,
+      client.events,
+      conversationId!,
+      (detail) => detail.turnGitArtifacts.some((artifact) =>
+        artifact.turnId === started.activity.turnId
+        && artifact.status === "ready"
+        && artifact.completeness === "complete"),
+    );
+    expect(persistedDetail.activities.filter((activity) => activity.runId === started.activity.runId && activity.kind === "command")).toEqual([
+      expect.objectContaining({ id: started.activity.id, status: "completed", turnId: started.activity.turnId }),
     ]);
+    const turn = persistedDetail.agentTurns.find(({ runId }) => runId === started.activity.runId);
+    expect(turn).toMatchObject({
+      id: started.activity.turnId,
+      conversationId,
+      association: "authoritative",
+      userMessageId: expect.any(String),
+    });
+    expect(persistedDetail.messages.filter(({ turnId }) => turnId === turn?.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: turn?.userMessageId, role: "user" }),
+      expect.objectContaining({ role: "assistant" }),
+    ]));
+    const turnArtifact = persistedDetail.turnGitArtifacts.find(({ turnId }) => turnId === turn?.id);
+    expect(turnArtifact).toMatchObject({
+      conversationId,
+      runId: turn?.runId,
+      status: "ready",
+      patchState: "available",
+      files: [],
+    });
+    const turnDiffRequestId = randomUUID();
+    send(client.socket, {
+      type: "git.turn.diff",
+      requestId: turnDiffRequestId,
+      payload: {
+        projectId: ready.activeProjectId,
+        conversationId,
+        turnId: turn!.id,
+      },
+    });
+    const historicalDiff = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === turnDiffRequestId
+        && event.result.kind === "git.turn.diff",
+    );
+    expect(historicalDiff.result).toMatchObject({
+      kind: "git.turn.diff",
+      diff: {
+        turnId: turn?.id,
+        completeness: "complete",
+        patch: "",
+        files: [],
+      },
+    });
     expect(persisted.snapshot.runs).toContainEqual(expect.objectContaining({
       id: commandRun?.id,
       kind: "check",
@@ -720,6 +1096,26 @@ process.exit(child.status ?? 1);
       status: "succeeded",
       canStop: false,
     }));
+
+    const crossHarnessRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.update",
+      requestId: crossHarnessRequestId,
+      payload: { conversationId, providerId: "claude" },
+    });
+    const rejectedSwitch = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+        event.type === "request.error"
+        && event.requestId === crossHarnessRequestId,
+    );
+    expect(rejectedSwitch.message).toBe(
+      "Start a new chat to use a different agent harness. Existing chats keep their original agent context.",
+    );
+    expect((await loadConversationDetail(
+      client.socket,
+      client.events,
+      conversationId!,
+    )).conversation.providerId).toBe("codex");
   });
 
   it("invalidates reviewed targets and notes immediately after committing their change", async () => {
@@ -754,12 +1150,13 @@ process.exit(child.status ?? 1);
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
         event.type === "request.ok" && event.requestId === stateRequestId,
     );
-    await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-        event.type === "snapshot.updated"
-        && event.snapshot.reviewStates.some((state) =>
-          state.conversationId === conversationId && state.path === file.path && state.reviewed && !state.stale),
-    );
+    expect((await loadConversationDetail(client.socket, client.events, conversationId)).reviewStates)
+      .toContainEqual(expect.objectContaining({
+        conversationId,
+        path: file.path,
+        reviewed: true,
+        stale: false,
+      }));
 
     const noteRequestId = randomUUID();
     send(client.socket, {
@@ -778,12 +1175,12 @@ process.exit(child.status ?? 1);
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
         event.type === "request.ok" && event.requestId === noteRequestId,
     );
-    await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-        event.type === "snapshot.updated"
-        && event.snapshot.reviewNotes.some((note) =>
-          note.conversationId === conversationId && note.path === file.path && !note.stale),
-    );
+    expect((await loadConversationDetail(client.socket, client.events, conversationId)).reviewNotes)
+      .toContainEqual(expect.objectContaining({
+        conversationId,
+        path: file.path,
+        stale: false,
+      }));
 
     const commitRequestId = randomUUID();
     send(client.socket, {
@@ -802,22 +1199,14 @@ process.exit(child.status ?? 1);
         && event.requestId === commitRequestId
         && event.result.kind === "git.action",
     );
-    const invalidated = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-        event.type === "snapshot.updated"
-        && event.snapshot.reviewStates.some((state) =>
-          state.conversationId === conversationId && state.path === file.path && !state.reviewed && state.stale)
-        && event.snapshot.reviewNotes.some((note) =>
-          note.conversationId === conversationId && note.path === file.path && note.stale),
-    );
-
-    expect(invalidated.snapshot.reviewStates).toContainEqual(expect.objectContaining({
+    const invalidated = await loadConversationDetail(client.socket, client.events, conversationId);
+    expect(invalidated.reviewStates).toContainEqual(expect.objectContaining({
       conversationId,
       path: file.path,
       reviewed: false,
       stale: true,
     }));
-    expect(invalidated.snapshot.reviewNotes).toContainEqual(expect.objectContaining({
+    expect(invalidated.reviewNotes).toContainEqual(expect.objectContaining({
       conversationId,
       path: file.path,
       body: "Keep this review checkpoint after the commit.",
@@ -827,8 +1216,13 @@ process.exit(child.status ?? 1);
 
   it("rejects a known-unready provider before persisting a turn, then refreshes its state", async () => {
     const { root, data, workspace } = temporaryWorkspace();
-    const { authFile } = fakeCodex(root);
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: true });
+    const { authFile, executable } = fakeCodex(root);
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: true,
+      codexBinaryPath: executable,
+    });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next(
@@ -840,10 +1234,11 @@ process.exit(child.status ?? 1);
       "codex",
       (provider) => provider.installState === "installed" && provider.authState === "unauthenticated" && !provider.canRun,
     );
-    const initialMessageCount = signedOut.messages.length;
-    const initialCheckpointCount = signedOut.checkpoints.length;
     const conversationId = signedOut.activeConversationId;
     expect(conversationId).toBeTruthy();
+    const initialDetail = await loadConversationDetail(client.socket, client.events, conversationId!);
+    const initialMessageCount = initialDetail.messages.length;
+    const initialCheckpointCount = initialDetail.checkpoints.length;
 
     const messageRequestId = randomUUID();
     send(client.socket, {
@@ -863,12 +1258,13 @@ process.exit(child.status ?? 1);
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
         event.type === "request.ok" && event.requestId === snapshotRequestId,
     );
-    const unchanged = await client.events.next(
+    await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated",
     );
-    expect(unchanged.snapshot.messages).toHaveLength(initialMessageCount);
-    expect(unchanged.snapshot.messages.some(({ content }) => content === "This turn must not be stored.")).toBe(false);
-    expect(unchanged.snapshot.checkpoints).toHaveLength(initialCheckpointCount);
+    const unchanged = await loadConversationDetail(client.socket, client.events, conversationId!);
+    expect(unchanged.messages).toHaveLength(initialMessageCount);
+    expect(unchanged.messages.some(({ content }) => content === "This turn must not be stored.")).toBe(false);
+    expect(unchanged.checkpoints).toHaveLength(initialCheckpointCount);
 
     writeFileSync(authFile, "connected");
     const refreshRequestId = randomUUID();
@@ -940,6 +1336,140 @@ process.exit(child.status ?? 1);
     expect(existsSync(join(root, "codex-authenticated"))).toBe(true);
   });
 
+  summaryRuntimeIt("returns selection Ask as an isolated contextual result without creating transcript records", async () => {
+    const { root, data, workspace } = temporaryWorkspace();
+    initializeChangedRepository(workspace);
+    const diff = await getUnifiedDiff(workspace);
+    const structured = parseUnifiedDiff(diff.text);
+    const file = structured.files[0]!;
+    const hunk = file.hunks[0]!;
+    const lineIds = hunk.lines
+      .filter(({ kind }) => kind === "addition" || kind === "deletion")
+      .map(({ id }) => id);
+    const { authFile } = fakeCodex(root, [
+      { type: "item.completed", item: { type: "agent_message", text: "This changes the exported behavior while keeping the review task isolated." } },
+      { type: "turn.completed" },
+    ]);
+    writeFileSync(authFile, "connected");
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: true,
+    });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
+    );
+    const ready = await providerSnapshot(
+      client.events,
+      welcome.snapshot,
+      "codex",
+      (provider) => provider.canRun,
+    );
+    const conversationId = ready.activeConversationId!;
+    const requestId = randomUUID();
+    send(client.socket, {
+      type: "review.selection.ask",
+      requestId,
+      payload: {
+        projectId: ready.activeProjectId!,
+        conversationId,
+        fingerprint: structured.fingerprint,
+        filePath: file.path,
+        hunkId: hunk.id,
+        lineIds,
+        comment: "Why does this change matter?",
+      },
+    });
+
+    const result = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === requestId
+        && event.result.kind === "review.selection.answer",
+    );
+    expect(result.result).toMatchObject({
+      kind: "review.selection.answer",
+      answer: {
+        conversationId,
+        fingerprint: structured.fingerprint,
+        filePath: file.path,
+        hunkId: hunk.id,
+        selectedLineCount: lineIds.length,
+        question: "Why does this change matter?",
+        providerId: "codex",
+        modelSelection: {
+          harnessId: "codex-app-server",
+          backendProfileId: "builtin:openai",
+          modelId: "provider-default",
+        },
+      },
+    });
+    if (result.result.kind === "review.selection.answer") {
+      expect(result.result.answer.answer).toContain("keeping the review task isolated");
+      expect(result.result.answer).not.toHaveProperty("executionPrompt");
+      expect(result.result.answer).not.toHaveProperty("providerSessionId");
+    }
+    const detail = await loadConversationDetail(client.socket, client.events, conversationId);
+    expect(detail.messages).toEqual([]);
+    expect(detail.agentTurns).toEqual([]);
+    expect(detail.conversation.providerSessionId).toBeNull();
+  });
+
+  summaryRuntimeIt("leaves no phantom selection question when isolated Ask fails closed", async () => {
+    const { root, data, workspace } = temporaryWorkspace();
+    initializeChangedRepository(workspace);
+    const diff = await getUnifiedDiff(workspace);
+    const structured = parseUnifiedDiff(diff.text);
+    const file = structured.files[0]!;
+    const hunk = file.hunks[0]!;
+    const { authFile } = fakeCodex(root, [{ type: "approval.request" }]);
+    writeFileSync(authFile, "connected");
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: true,
+    });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
+    );
+    const ready = await providerSnapshot(
+      client.events,
+      welcome.snapshot,
+      "codex",
+      (provider) => provider.canRun,
+    );
+    const conversationId = ready.activeConversationId!;
+    const requestId = randomUUID();
+    send(client.socket, {
+      type: "review.selection.ask",
+      requestId,
+      payload: {
+        projectId: ready.activeProjectId!,
+        conversationId,
+        fingerprint: structured.fingerprint,
+        filePath: file.path,
+        hunkId: hunk.id,
+        lineIds: [hunk.lines.find(({ kind }) => kind !== "meta")!.id],
+        comment: "Can you check this?",
+      },
+    });
+
+    const failed = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+        event.type === "request.error" && event.requestId === requestId,
+    );
+    expect(failed.message).toMatch(/unsupported interaction/u);
+    const detail = await loadConversationDetail(client.socket, client.events, conversationId);
+    expect(detail.messages).toEqual([]);
+    expect(detail.agentTurns).toEqual([]);
+  });
+
   summaryRuntimeIt("runs diff summaries in an isolated session, exposes Activity status, and cleans up without contaminating the thread", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
@@ -981,6 +1511,9 @@ process.exit(child.status ?? 1);
     expect(result.result.kind === "review.summary" && result.result.summary).toMatchObject({
       fingerprint,
       providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: null,
       classifications: [{ classification: "behavior-change" }],
     });
     const completed = await client.events.next(
@@ -989,7 +1522,9 @@ process.exit(child.status ?? 1);
         && event.snapshot.runs.some((run) => run.conversationId === conversationId && run.label.includes("read-only diff summary") && run.status === "succeeded"),
     );
     expect(completed.snapshot.conversations.find(({ id }) => id === conversationId)?.providerSessionId).toBeNull();
-    expect(completed.snapshot.reviewSummaries).toHaveLength(1);
+    expect((await loadConversationDetail(client.socket, client.events, conversationId)).reviewSummaries).toEqual([
+      result.result.kind === "review.summary" ? result.result.summary : null,
+    ]);
     expect(readFileSync(join(workspace, "review.ts"), "utf8")).toBe("export const enabled = true;\n");
 
     for (let attempt = 0; attempt < 20 && readdirSync(data).some((name) => name.startsWith("read-only-summary-")); attempt += 1) {
@@ -1088,7 +1623,7 @@ process.exit(child.status ?? 1);
         event.type === "snapshot.updated"
         && event.snapshot.runs.some((run) => run.conversationId === conversationId && run.label.includes("read-only diff summary") && run.status === "cancelled"),
     );
-    expect(settled.snapshot.reviewSummaries).toEqual([]);
+    expect((await loadConversationDetail(client.socket, client.events, conversationId)).reviewSummaries).toEqual([]);
     for (let attempt = 0; attempt < 20 && readdirSync(data).some((name) => name.startsWith("read-only-summary-")); attempt += 1) {
       await delay(10);
     }
@@ -1139,7 +1674,7 @@ process.exit(child.status ?? 1);
           event.type === "snapshot.updated"
           && event.snapshot.runs.some((run) => run.conversationId === conversationId && run.label.includes("read-only diff summary") && run.status === "failed"),
       );
-      expect(settled.snapshot.reviewSummaries).toEqual([]);
+      expect((await loadConversationDetail(client.socket, client.events, conversationId)).reviewSummaries).toEqual([]);
       expect(existsSync(join(workspace, "should-not-run"))).toBe(false);
       client.socket.close();
       await runtime.close();
@@ -1185,7 +1720,11 @@ process.exit(child.status ?? 1);
         event.type === "snapshot.updated"
         && event.snapshot.runs.some((run) => run.label.includes("read-only diff summary") && run.status === "failed"),
     );
-    expect(settled.snapshot.reviewSummaries).toEqual([]);
+    expect((await loadConversationDetail(
+      client.socket,
+      client.events,
+      ready.activeConversationId!,
+    )).reviewSummaries).toEqual([]);
     expect(readdirSync(data).filter((name) => name.startsWith("read-only-summary-"))).toEqual([]);
   });
 });

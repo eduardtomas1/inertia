@@ -140,6 +140,22 @@ function isContained(root: string, target: string): boolean {
   return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
 }
 
+function validateOpenRelativePath(path: string): string {
+  if (
+    typeof path !== "string" ||
+    path.length === 0 ||
+    path.length > MAX_PATH_LENGTH ||
+    /[\0\r\n]/u.test(path) ||
+    isAbsolute(path) ||
+    /^[\\/]/u.test(path) ||
+    /^[A-Za-z]:/u.test(path) ||
+    path.split(/[\\/]/u).some((segment) => segment === "..")
+  ) {
+    throw new WorkspaceError("invalid-input", "The project path is invalid.");
+  }
+  return path;
+}
+
 function validateRelativePath(path: string, allowRoot: boolean): string {
   if (
     typeof path !== "string" ||
@@ -171,6 +187,41 @@ async function workspaceRoot(workspacePath: string): Promise<string> {
   } catch (error) {
     if (error instanceof WorkspaceError) throw error;
     throw new WorkspaceError("not-found", "The workspace folder could not be found.");
+  }
+}
+
+export interface ResolvedWorkspacePath {
+  absolute: string;
+  relativePath: string;
+  kind: "file" | "directory";
+}
+
+export async function resolveWorkspacePathForOpen(
+  workspacePath: string,
+  relativePath: string,
+): Promise<ResolvedWorkspacePath> {
+  const root = await workspaceRoot(workspacePath);
+  const normalized = validateOpenRelativePath(relativePath);
+  const candidate = resolve(root, normalized);
+  if (!isContained(root, candidate)) {
+    throw new WorkspaceError("outside-workspace", "The requested path is outside the project.");
+  }
+  try {
+    const canonical = await realpath(candidate);
+    if (!isContained(root, canonical)) {
+      throw new WorkspaceError("outside-workspace", "The requested path resolves outside the project.");
+    }
+    const info = await lstat(canonical);
+    const kind = info.isFile() ? "file" : info.isDirectory() ? "directory" : null;
+    if (!kind) throw new WorkspaceError("invalid-input", "Only project files and folders can be opened.");
+    return {
+      absolute: canonical,
+      relativePath: slashPath(relative(root, canonical)) || ".",
+      kind,
+    };
+  } catch (error) {
+    if (error instanceof WorkspaceError) throw error;
+    throw new WorkspaceError("not-found", "The requested project path could not be found.");
   }
 }
 

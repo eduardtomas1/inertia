@@ -7,10 +7,11 @@ import {
   type ProviderParserState,
 } from "../../src/server/provider/adapters";
 import type { ProviderId, ProviderRunInput } from "../../src/server/provider/contracts";
+import { nativeProviderRunFields } from "./model-route-fixture";
 
 function input(providerId: ProviderId, overrides: Partial<ProviderRunInput> = {}): ProviderRunInput {
   return {
-    providerId,
+    ...nativeProviderRunFields(providerId),
     conversationId: "conversation-1",
     cwd: "/workspace",
     prompt: "Inspect this project",

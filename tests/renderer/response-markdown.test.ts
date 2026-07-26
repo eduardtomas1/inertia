@@ -14,6 +14,8 @@ function render(content: string, streaming = false): string {
   return renderToStaticMarkup(createElement(ResponseMarkdown, {
     content,
     projectRoot: "/work/project",
+    projectId: "11111111-1111-4111-8111-111111111111",
+    conversationId: "22222222-2222-4222-8222-222222222222",
     defaultCodeWrap: false,
     streaming,
   }));
@@ -53,8 +55,10 @@ describe("response Markdown", () => {
     expect(html).not.toContain("<script");
     expect(html).not.toContain("onerror");
     expect(html).not.toContain("<iframe");
-    expect(resolveResponseLink("/work/project", "src/app.ts#L4")).toEqual({ kind: "project", path: "/work/project/src/app.ts" });
+    expect(resolveResponseLink("/work/project", "src/app.ts#L4")).toEqual({ kind: "project", relativePath: "src/app.ts", action: "reveal" });
+    expect(resolveResponseLink("/work/project", "/work/project/src/app.ts#L4")).toEqual({ kind: "project", relativePath: "src/app.ts", action: "reveal" });
     expect(resolveResponseLink("/work/project", "../secret.txt")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("/work/project", "src/%00secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "file:///etc/passwd")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "javascript:alert(1)")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "https://example.com/docs")).toMatchObject({ kind: "external" });
@@ -88,7 +92,7 @@ describe("response Markdown", () => {
   });
 
   it("normalizes Windows paths case-insensitively without allowing traversal", () => {
-    expect(resolveResponseLink("C:\\Work Space\\Project", "src\\index.ts")).toEqual({ kind: "project", path: "C:/Work Space/Project/src/index.ts" });
+    expect(resolveResponseLink("C:\\Work Space\\Project", "src\\index.ts")).toEqual({ kind: "project", relativePath: "src/index.ts", action: "reveal" });
     expect(resolveResponseLink("C:\\Work Space\\Project", "..\\Elsewhere\\secret.ts")).toEqual({ kind: "unsafe" });
   });
 });

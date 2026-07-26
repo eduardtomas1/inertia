@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { ProviderManager } from "../../src/server/providers";
+import { nativeProviderRunInput } from "./model-route-fixture";
 
 const enabled = process.env.INERTIA_REAL_CODEX_SMOKE === "1";
 const executable = process.env.INERTIA_CODEX_EXECUTABLE
@@ -39,14 +40,14 @@ describe("real Codex App Server smoke", () => {
         expect(metadata.models.length).toBeGreaterThan(0);
         expect(metadata.models.some((model) => model.reasoningOptions.length > 0)).toBe(true);
         breadcrumb(`metadata:${metadata.models.length}-models:${metadata.rateLimits.length}-limits`);
-        const run = manager.run({
+        const run = manager.run(nativeProviderRunInput({
           providerId: "codex",
           conversationId: "real-codex-smoke",
           cwd: root,
           prompt: "Create a file named approval-smoke.txt containing the word denied. Use a shell command, do not use another tool, and do nothing else.",
           interactionMode: "build",
           access: "supervised",
-        }, {
+        }), {
           onStatus: (event) => breadcrumb(`status:${event.status}`),
           onActivity: (event) => breadcrumb(`activity:${event.kind}:${event.phase}`),
           onReasoning: (event) => {

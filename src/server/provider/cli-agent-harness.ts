@@ -140,7 +140,13 @@ function startCliRun(
   prefixArgs: readonly string[],
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
-  const emitter = createAgentHarnessEmitter(providerId, conversationId, options.callbacks);
+  const emitter = createAgentHarnessEmitter(
+    providerId,
+    conversationId,
+    options.callbacks,
+    options.input.runId ?? conversationId,
+    options.input.turnId ?? null,
+  );
   const parserState: ProviderParserState = {
     sessionId: options.input.sessionId,
     sawText: false,
@@ -193,7 +199,13 @@ function startCliRun(
     });
   } catch (error) {
     spawnError = error instanceof Error ? (error as NodeJS.ErrnoException) : undefined;
-    const message = providerFailureMessage(providerId, spawnError, "");
+    const message = providerFailureMessage(
+      providerId,
+      spawnError,
+      "",
+      "",
+      options.input.backendProfile,
+    );
     emitter.status("failed", message);
     return settledCliRun(harnessId, providerId, conversationId, parserState.sessionId, message);
   }
@@ -225,7 +237,13 @@ function startCliRun(
     }
 
     if (spawnError || exitCode !== 0 || parserState.hadErrorEvent) {
-      const message = providerFailureMessage(providerId, spawnError, stderr.toString(), parserState.failureText);
+      const message = providerFailureMessage(
+        providerId,
+        spawnError,
+        stderr.toString(),
+        parserState.failureText,
+        options.input.backendProfile,
+      );
       emitter.status("failed", message);
       resolveResult({
         providerId,

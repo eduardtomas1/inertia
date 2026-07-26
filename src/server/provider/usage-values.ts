@@ -47,7 +47,7 @@ export function providerTimestamp(value: unknown): string | null {
   return Number.isNaN(date.valueOf()) ? null : date.toISOString();
 }
 
-type ProviderUsage = Omit<ThreadUsageSnapshot, "conversationId" | "updatedAt">;
+type ProviderUsage = Omit<ThreadUsageSnapshot, "conversationId" | "turnId" | "updatedAt">;
 
 const MAX_TOKEN_COUNT = 1_000_000_000_000;
 const TOTAL_SCOPES: ReadonlyArray<NonNullable<ProviderUsage["totalProcessedScope"]>> = ["thread", "session", "run"];

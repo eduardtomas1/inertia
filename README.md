@@ -29,7 +29,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 ### Review changes without losing context
 
 - Read every file and hunk in a focused diff view, then mark progress as you review.
-- Select a line range to ask a read-only question, request a focused revision, save a note, or carry the exact context into the next prompt.
+- Select a line range to ask a read-only question beside the matching hunk, request a focused revision, save a note, or carry the exact context into the next prompt.
 - Generate a concise agent summary for every current file and hunk, including evidence-backed hints for areas worth extra attention.
 - Revert only selected changed lines across staged, unstaged, and mixed files with current-state validation, a recovery backup, and Undo.
 - Commit only the paths you choose while leaving unrelated staged work alone and seeing which selected hunks remain unreviewed.
@@ -38,7 +38,9 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 
 - Responses render polished Markdown with safe project links, highlighted code, copy and wrap controls, and tables that can be copied as Markdown or CSV.
 - Reasoning summaries, tool activity, approvals, questions, warnings, final answers, and turn checkpoints stay together in one chronological response.
+- Each completed request keeps its original agent, model backend, and model attribution together with a turn-specific before-and-after Git record, when available, that remains useful after the workspace moves on.
 - Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
+- Long transcripts keep stable rows and load their heavier detail separately, while incremental runtime updates resume safely after a restart.
 - The transcript follows live work only while you are near the bottom, so reading earlier context is not interrupted.
 
 ### Keep the workspace moving
@@ -58,19 +60,23 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 
 ![Inertia settings in dark mode](docs/screenshots/inertia-settings.png)
 
+- Create, test, enable, and choose model backend profiles without mixing them into the agent harness that runs the conversation.
+- Use the built-in Kimi coding profile through the Claude harness, or define a compatible custom endpoint with explicit models and routing.
+- Existing conversations keep their original execution route. Supported same-backend model changes can continue in place; changing the harness or backend opens a clearly separated new chat.
+
 ### Provider-native, local by default
 
 Inertia uses the coding tools and accounts already installed on your computer. Codex, Claude, Cursor, and OpenCode keep their own sessions, authentication, models, approvals, plans, reasoning, usage, and cancellation behavior; when a provider does not expose something, Inertia says so instead of imitating it.
 
-Provider credentials remain in each provider's own storage. Inertia stores workspace history and preferences locally, and its optional runtime diagnostics exclude prompts, source, token values, credentials, and connection capabilities.
+Provider account credentials remain in each provider's own storage. Credentials added for custom model backends are encrypted through the operating system's secure credential storage; only non-secret profile settings live in Inertia's local database. Inertia stores workspace history and preferences locally, and its optional runtime diagnostics exclude prompts, source, token values, credentials, and connection capabilities.
 
-### Version 0.0.6
+### Version 0.0.7
 
-This release makes the workspace easier to enter and easier to read. New installs open directly on the project picker instead of creating a demo, project navigation has one clear New chat path, and the Projects and Work views separate browsing from activity that needs attention.
+This release makes conversation history more trustworthy and model routing more explicit. Every agent request now carries durable execution identity and a historical Git change record, while long conversations recover incrementally and remain responsive after restarts.
 
-Agent activity, completed work, final answers, usage, and recent runs now have a calmer hierarchy. Each conversation also keeps its original provider once work begins, while first-paint theme handling reduces visual flashing across Windows and macOS.
+Model backend profiles add safe custom endpoints and a built-in Kimi-through-Claude route without implying that agent context transfers between harnesses or backends. Backend secrets stay in operating-system secure storage, and profile changes that alter execution require a new chat.
 
-Download [Inertia v0.0.6](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.6):
+Download [Inertia v0.0.7](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.7):
 
 | Platform | Download |
 | --- | --- |

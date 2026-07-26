@@ -1,0 +1,202 @@
+import { describe, expect, it } from "vitest";
+
+import type { BackendCompatibilityProbeResult } from "../src/shared/backend-probe";
+import {
+  MODEL_CAPABILITY_IDS,
+  nativeBackendProfile,
+  resolveHarnessBackendCompatibility,
+  type KnownHarnessId,
+  type ModelBackendProfile,
+} from "../src/shared/model-routing";
+
+const checkedAt = "2026-07-25T08:00:00.000Z";
+
+function customProfile(
+  protocol: ModelBackendProfile["protocol"],
+  id = `custom:${protocol}`,
+): ModelBackendProfile {
+  return {
+    id,
+    displayName: "Private gateway",
+    protocol,
+    authenticationMode: "api-key",
+    source: "custom",
+    enabled: true,
+    configurationRevision: 3,
+    endpointIdentity: `endpoint:${protocol}:3`,
+  };
+}
+
+function successfulProbe(
+  profile: ModelBackendProfile,
+  modelId: string,
+  overrides: Partial<BackendCompatibilityProbeResult> = {},
+): BackendCompatibilityProbeResult {
+  return {
+    profileId: profile.id,
+    backendConfigurationRevision: profile.configurationRevision,
+    endpointIdentity: profile.endpointIdentity,
+    protocol: profile.protocol,
+    modelId,
+    compatibility: "protocol-compatible",
+    protocolVerified: true,
+    modelVerified: true,
+    capabilities: MODEL_CAPABILITY_IDS.map((id) => ({
+      id,
+      state: id === "streaming" ? "verified" : "unknown",
+      provenance: id === "streaming" ? "probe" : "unknown",
+      detail: null,
+      checkedAt,
+    })),
+    contextWindow: {
+      tokens: null,
+      state: "unknown",
+      provenance: "unknown",
+      detail: null,
+      checkedAt,
+    },
+    failure: null,
+    checkedAt,
+    ...overrides,
+  };
+}
+
+describe("harness-specific backend compatibility", () => {
+  it("keeps all native harnesses available without claiming Cursor owns model selection", () => {
+    const matrix: Array<[KnownHarnessId, Parameters<typeof nativeBackendProfile>[0], string]> = [
+      ["codex-app-server", "codex", "native-backend"],
+      ["claude-agent-sdk", "claude", "native-backend"],
+      ["cursor-acp", "cursor", "cursor-managed"],
+      ["opencode-sdk", "opencode", "opencode-native-catalog"],
+    ];
+    for (const [harnessId, providerId, reasonCode] of matrix) {
+      expect(resolveHarnessBackendCompatibility(
+        harnessId,
+        nativeBackendProfile(providerId),
+      )).toMatchObject({
+        state: "verified",
+        provenance: "built-in",
+        reasonCode,
+      });
+    }
+    expect(resolveHarnessBackendCompatibility(
+      "cursor-acp",
+      nativeBackendProfile("cursor"),
+    ).allowsModelSwitchWithinSession).toBe(false);
+  });
+
+  it("enables only the exact probed Responses model for Codex", () => {
+    const profile = customProfile("openai-responses");
+    const modelId = "gpt-compatible";
+    expect(resolveHarnessBackendCompatibility("codex-app-server", profile, {
+      modelId,
+    })).toMatchObject({
+      state: "unknown",
+      reasonCode: "probe-required",
+    });
+
+    const probe = successfulProbe(profile, modelId);
+    expect(resolveHarnessBackendCompatibility("codex-app-server", profile, {
+      modelId,
+      probe,
+    })).toMatchObject({
+      state: "partially-compatible",
+      provenance: "probe",
+      reasonCode: "responses-probe-verified",
+    });
+    expect(resolveHarnessBackendCompatibility("codex-app-server", {
+      ...profile,
+      configurationRevision: 4,
+    }, {
+      modelId,
+      probe,
+    })).toMatchObject({
+      state: "unknown",
+      reasonCode: "probe-stale",
+    });
+    expect(resolveHarnessBackendCompatibility("codex-app-server", profile, {
+      modelId: "another-model",
+      probe,
+    }).reasonCode).toBe("probe-stale");
+  });
+
+  it("enables only exact Anthropic Messages evidence for custom Claude profiles", () => {
+    const profile = customProfile("anthropic-messages");
+    const modelId = "claude-compatible";
+    const probe = successfulProbe(profile, modelId);
+    expect(resolveHarnessBackendCompatibility("claude-agent-sdk", profile, {
+      modelId,
+      probe,
+    })).toMatchObject({
+      state: "partially-compatible",
+      provenance: "probe",
+      reasonCode: "anthropic-probe-verified",
+    });
+    expect(resolveHarnessBackendCompatibility("claude-agent-sdk", profile, {
+      modelId,
+      probe: successfulProbe(profile, modelId, {
+        protocolVerified: false,
+        compatibility: "partially-compatible",
+      }),
+    })).toMatchObject({
+      state: "unavailable",
+      reasonCode: "probe-unverified",
+    });
+  });
+
+  it("does not route Chat Completions-shaped profiles through Codex", () => {
+    const ordinaryChatProfile = customProfile(
+      "anthropic-messages",
+      "custom:ordinary-chat-completions",
+    );
+    expect(resolveHarnessBackendCompatibility(
+      "codex-app-server",
+      ordinaryChatProfile,
+      {
+        modelId: "chat-model",
+        probe: successfulProbe(ordinaryChatProfile, "chat-model"),
+      },
+    )).toMatchObject({
+      state: "unavailable",
+      reasonCode: "protocol-mismatch",
+    });
+  });
+
+  it("keeps Cursor and OpenCode backend ownership native", () => {
+    const cursor = customProfile("cursor-managed", "custom:cursor");
+    const openCode = customProfile("opencode-native", "custom:opencode");
+    expect(resolveHarnessBackendCompatibility("cursor-acp", cursor, {
+      modelId: "cursor-model",
+      probe: successfulProbe(cursor, "cursor-model"),
+    })).toMatchObject({
+      state: "unavailable",
+      reasonCode: "cursor-managed",
+    });
+    expect(resolveHarnessBackendCompatibility("opencode-sdk", openCode, {
+      modelId: "provider/model",
+      probe: successfulProbe(openCode, "provider/model"),
+    })).toMatchObject({
+      state: "unavailable",
+      reasonCode: "opencode-native-catalog",
+    });
+  });
+
+  it("uses sanitized fixed failure reasons instead of provider diagnostics", () => {
+    const profile = customProfile("openai-responses");
+    const result = resolveHarnessBackendCompatibility("codex-app-server", profile, {
+      modelId: "model",
+      probe: successfulProbe(profile, "model", {
+        compatibility: "unavailable",
+        protocolVerified: false,
+        modelVerified: false,
+        failure: {
+          code: "invalid-credentials",
+          message: "Authorization secret-should-not-render",
+          retryAfterSeconds: null,
+        },
+      }),
+    });
+    expect(result.reasonCode).toBe("probe-failed");
+    expect(result.reason).not.toContain("secret-should-not-render");
+  });
+});

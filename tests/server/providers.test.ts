@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { providerEnvironment } from "../../src/server/environment";
 import { AgentHarnessRegistry, detectProvider, ProviderManager, type ProviderId } from "../../src/server/providers";
+import { providerFailureMessage } from "../../src/server/provider/adapters";
 import { createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
 import {
   portableFixtureRoot,
@@ -11,6 +12,7 @@ import {
   removePortableFixture,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
+import { nativeProviderRunInput } from "./model-route-fixture";
 
 const MUTATED_ENVIRONMENT_KEYS = ["HOME", "PATH", "SHELL", "ZDOTDIR", "INERTIA_CAPTURE_PATH", "INERTIA_DISCOVERY_MARKER"] as const;
 
@@ -120,7 +122,7 @@ process.exit(2);
     const text: string[] = [];
     const sessions: string[] = [];
     const result = await manager.run(
-      { providerId: "codex", conversationId: "conversation", cwd: fake.root, prompt: "Do the work", interactionMode: "build", access: "full" },
+      nativeProviderRunInput({ providerId: "codex", conversationId: "conversation", cwd: fake.root, prompt: "Do the work", interactionMode: "build", access: "full" }),
       { onText: (event) => text.push(event.text), onSession: (event) => sessions.push(event.sessionId) },
     );
     expect(result).toMatchObject({ status: "completed", text: "A calm result.", sessionId: "11111111-1111-4111-8111-111111111111" });
@@ -205,7 +207,7 @@ process.exit(2);
 
     process.env.PATH = root;
     process.env.INERTIA_DISCOVERY_MARKER = "after-discovery";
-    const result = await manager.run({
+    const result = await manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "resume-conversation",
       cwd: root,
@@ -215,7 +217,7 @@ process.exit(2);
       sessionId: "22222222-2222-4222-8222-222222222222",
       model: "test-model",
       imagePaths: [join(root, "reference.png")],
-    });
+    }));
 
     expect(result).toMatchObject({ status: "completed", text: "selected:from-discovery" });
     const invocation = JSON.parse(readFileSync(capturePath, "utf8")) as { args: string[]; messages: Array<Record<string, unknown>> };
@@ -370,7 +372,7 @@ process.exit(2);
         { commands: { [fixture.providerId]: command } },
         new AgentHarnessRegistry([createCliAgentHarness(fixture.providerId, { prefixArgs: [program] })]),
       );
-      const result = await manager.run({ providerId: fixture.providerId, conversationId: `${fixture.providerId}-conversation`, cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" });
+      const result = await manager.run(nativeProviderRunInput({ providerId: fixture.providerId, harnessId: `${fixture.providerId}-cli`, conversationId: `${fixture.providerId}-conversation`, cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" }));
       expect(result).toMatchObject({ status: "completed", text: fixture.expectedText, sessionId: fixture.sessionId });
       await manager.disposeAll();
     }
@@ -393,7 +395,7 @@ console.log(JSON.stringify({ type: "result", is_error: false }));
       new AgentHarnessRegistry([createCliAgentHarness("claude", { prefixArgs: [program] })]),
     );
 
-    const result = await manager.run({ providerId: "claude", conversationId: "claude-partial", cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" });
+    const result = await manager.run(nativeProviderRunInput({ providerId: "claude", harnessId: "claude-cli", conversationId: "claude-partial", cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" }));
 
     expect(result).toMatchObject({ status: "completed", text: "Partial reply" });
     expect(JSON.parse(readFileSync(capturePath, "utf8"))).toContain("--include-partial-messages");
@@ -411,10 +413,29 @@ process.exit(1);
       new AgentHarnessRegistry([createCliAgentHarness("codex", { prefixArgs: [program] })]),
     );
 
-    const result = await manager.run({ providerId: "codex", conversationId: "failed-conversation", cwd: root, prompt: "Respond", interactionMode: "build", access: "full" });
+    const result = await manager.run(nativeProviderRunInput({ providerId: "codex", harnessId: "codex-cli", conversationId: "failed-conversation", cwd: root, prompt: "Respond", interactionMode: "build", access: "full" }));
 
     expect(result).toMatchObject({ status: "failed", exitCode: 1, error: "Codex is not authenticated. Sign in with its CLI and try again." });
     await manager.disposeAll();
+  });
+
+  it("attributes custom backend failures without echoing raw provider diagnostics", () => {
+    const error = providerFailureMessage(
+      "codex",
+      undefined,
+      "HTTP 401 from https://gateway.example.test/v1 Authorization: Bearer raw-secret",
+      "",
+      {
+        id: "custom:team-responses",
+        displayName: "Team Responses\nGateway",
+        authenticationMode: "bearer-token",
+      },
+    );
+
+    expect(error).toBe(
+      "Authentication failed for Team Responses Gateway. Check this model backend's credential and try again.",
+    );
+    expect(error).not.toMatch(/gateway\.example|authorization|raw-secret/iu);
   });
 
   it("cancels a running provider and settles its run exactly once", async () => {
@@ -425,7 +446,7 @@ process.exit(1);
     const running = new Promise<void>((resolve) => { markRunning = resolve; });
     const statuses: string[] = [];
     const run = manager.run(
-      { providerId: "codex", conversationId: "cancel-conversation", cwd: root, prompt: "Wait", interactionMode: "build", access: "full" },
+      nativeProviderRunInput({ providerId: "codex", conversationId: "cancel-conversation", cwd: root, prompt: "Wait", interactionMode: "build", access: "full" }),
       { onStatus: ({ status }) => { statuses.push(status); if (status === "running") markRunning(); } },
     );
     await running;

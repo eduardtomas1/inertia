@@ -8,6 +8,7 @@ import {
   activityWaitingKind,
 } from "../../src/renderer/src/utils/activityCenter";
 import type { Conversation, WorkspaceRun } from "../../src/shared/contracts";
+import { nativeModelSelection } from "../../src/shared/model-routing";
 
 function run(overrides: Partial<WorkspaceRun> = {}): WorkspaceRun {
   return {
@@ -19,6 +20,7 @@ function run(overrides: Partial<WorkspaceRun> = {}): WorkspaceRun {
     label: "typecheck",
     detail: "npm run typecheck",
     status: "running",
+    attentionState: "acknowledged",
     canStop: true,
     port: null,
     startedAt: "2026-07-23T10:00:00.000Z",
@@ -32,6 +34,8 @@ function conversation(attentionKind: Conversation["attentionKind"]): Conversatio
     id: "33333333-3333-4333-8333-333333333333",
     projectId: "22222222-2222-4222-8222-222222222222",
     title: "Review",
+    modelSelection: nativeModelSelection({ providerId: "claude" }),
+    continuationIdentity: null,
     providerId: "claude",
     model: "",
     reasoningEffort: "",
@@ -68,6 +72,7 @@ describe("Runs control model", () => {
       run({
         id: "11111111-1111-4111-8111-111111111103",
         status: "failed",
+        attentionState: "unseen",
         finishedAt: "2026-07-23T10:02:05.000Z",
         startedAt: "2026-07-23T10:02:00.000Z",
       }),
@@ -75,6 +80,7 @@ describe("Runs control model", () => {
         id: "11111111-1111-4111-8111-111111111104",
         kind: "agent",
         status: "waiting",
+        attentionState: "unseen",
         startedAt: "2026-07-23T10:03:00.000Z",
       }),
     ], Date.parse("2026-07-23T10:04:00.000Z"));
@@ -105,22 +111,45 @@ describe("Runs control model", () => {
       run({
         id: "11111111-1111-4111-8111-111111111103",
         status: "failed",
+        attentionState: "seen",
         canStop: false,
         finishedAt: "2026-07-23T10:00:05.000Z",
       }),
     ], Date.parse("2026-07-23T10:01:00.000Z"))).toEqual({ attentionCount: 2, activeCount: 1 });
   });
 
-  it("moves historical failures into recent history instead of leaving a permanent badge", () => {
-    const staleFailure = run({
+  it("keeps historical failures visible until explicit acknowledgement", () => {
+    const historicalFailure = run({
       status: "failed",
+      attentionState: "seen",
       canStop: false,
       startedAt: "2026-07-20T10:00:00.000Z",
       finishedAt: "2026-07-20T10:00:05.000Z",
     });
     const now = Date.parse("2026-07-23T10:00:00.000Z");
-    expect(activityRunSections([staleFailure], now).map(({ id }) => id)).toEqual(["recent"]);
-    expect(activityRunSummary([staleFailure], now)).toEqual({ attentionCount: 0, activeCount: 0 });
+    expect(activityRunSections([historicalFailure], now).map(({ id }) => id)).toEqual(["attention"]);
+    expect(activityRunSummary([historicalFailure], now)).toEqual({ attentionCount: 1, activeCount: 0 });
+
+    const acknowledged = { ...historicalFailure, attentionState: "acknowledged" as const };
+    expect(activityRunSections([acknowledged], now).map(({ id }) => id)).toEqual(["recent"]);
+    expect(activityRunSummary([acknowledged], now)).toEqual({ attentionCount: 0, activeCount: 0 });
+    expect(activityRunSections([{ ...historicalFailure, attentionState: "dismissed" }], now)).toEqual([]);
+  });
+
+  it("keeps unseen successful agent work unread in recent without raising attention", () => {
+    const completed = run({
+      kind: "agent",
+      status: "succeeded",
+      attentionState: "unseen",
+      canStop: false,
+      finishedAt: "2026-07-23T10:00:05.000Z",
+    });
+    expect(activityRunSections([completed]).map(({ id }) => id)).toEqual(["recent"]);
+    expect(activityRunSummary([completed])).toEqual({ attentionCount: 0, activeCount: 0 });
+    expect(activityRunSummary([{ ...completed, finishedAt: null }])).toEqual({
+      attentionCount: 0,
+      activeCount: 0,
+    });
   });
 
   it("shows only controls backed by the run's real capabilities", () => {
@@ -135,11 +164,13 @@ describe("Runs control model", () => {
     });
     expect(activityRunActions(run({
       status: "failed",
+      attentionState: "seen",
       canStop: false,
       finishedAt: "2026-07-23T10:00:05.000Z",
     }))).toMatchObject({
       stop: false,
       rerun: true,
+      acknowledge: true,
       dismiss: true,
       failureDetails: true,
     });
@@ -147,6 +178,7 @@ describe("Runs control model", () => {
       kind: "source-control",
       actionId: null,
       status: "failed",
+      attentionState: "seen",
       canStop: false,
       finishedAt: "2026-07-23T10:00:05.000Z",
     }))).toMatchObject({
@@ -169,7 +201,8 @@ describe("Runs control model", () => {
   });
 
   it("distinguishes approval and input waits using the emitting conversation state", () => {
-    const waiting = run({ kind: "agent", status: "waiting" });
+    const waiting = run({ kind: "agent", status: "waiting", attentionState: "seen" });
+    expect(activityRunActions(waiting)).toMatchObject({ acknowledge: false, dismiss: false });
     expect(activityWaitingKind(waiting, [conversation("approval")])).toBe("approval");
     expect(activityStatusLabel(waiting, Date.parse("2026-07-23T10:00:08.000Z"), "approval"))
       .toBe("Waiting for approval · 8s");

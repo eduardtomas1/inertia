@@ -1,5 +1,3 @@
-import { setTimeout as delay } from "node:timers/promises";
-
 import { z } from "zod";
 
 import type {
@@ -24,8 +22,10 @@ export const DIFF_REVIEW_CLASSIFICATIONS = [
 export const MAX_REVIEW_PATCH_CHARS = 180_000;
 export const MAX_REVIEW_PROMPT_CHARS = 240_000;
 export const MAX_REVIEW_RESULT_CHARS = 512_000;
+export const MAX_PERSISTED_REVIEW_SUMMARY_CHARS = 524_288;
 export const DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS = 120_000;
 const MAX_PERSISTED_REVIEW_FILES_CHARS = 250_000;
+const PROVIDER_IDS = ["codex", "claude", "cursor", "opencode"] as const;
 
 const classificationSchema = z.object({
   classification: z.enum(DIFF_REVIEW_CLASSIFICATIONS),
@@ -51,17 +51,81 @@ const reviewSummarySchema = z.object({
   files: z.array(fileSummarySchema).min(1).max(100),
 }).strict();
 
+const exactNonBlankString = (maximum: number) =>
+  z.string().min(1).max(maximum).refine((value) => value.trim().length > 0);
+
+const persistedClassificationHintsSchema = z.array(z.object({
+  classification: z.enum(DIFF_REVIEW_CLASSIFICATIONS),
+  evidence: exactNonBlankString(500),
+}).strict()).max(DIFF_REVIEW_CLASSIFICATIONS.length).superRefine((hints, context) => {
+  const seen = new Set<DiffReviewClassification>();
+  for (const [index, hint] of hints.entries()) {
+    if (seen.has(hint.classification)) {
+      context.addIssue({
+        code: "custom",
+        message: "Classification hints must be unique within one target.",
+        path: [index, "classification"],
+      });
+    }
+    seen.add(hint.classification);
+  }
+});
+
+const persistedHunkSummarySchema = z.object({
+  hunkId: exactNonBlankString(128),
+  summary: exactNonBlankString(800),
+  classifications: persistedClassificationHintsSchema,
+}).strict();
+
+const persistedFileSummarySchema = z.object({
+  path: exactNonBlankString(4_096),
+  summary: exactNonBlankString(1_000),
+  classifications: persistedClassificationHintsSchema,
+  hunks: z.array(persistedHunkSummarySchema).max(2_000),
+}).strict();
+
+const persistedReviewSummarySchema = z.object({
+  conversationId: exactNonBlankString(200),
+  fingerprint: z.string().regex(/^(?:[0-9a-f]{8}|[0-9a-f]{64})$/u),
+  providerId: z.enum(PROVIDER_IDS),
+  harnessId: exactNonBlankString(200).nullable(),
+  backendProfileId: exactNonBlankString(200).nullable(),
+  model: exactNonBlankString(300).nullable(),
+  overall: exactNonBlankString(2_000),
+  classifications: persistedClassificationHintsSchema,
+  files: z.array(persistedFileSummarySchema).max(100),
+  generatedAt: z.iso.datetime({ offset: true }),
+}).strict();
+
+const legacyPersistedHunkSummarySchema = persistedHunkSummarySchema.extend({
+  classifications: persistedClassificationHintsSchema.optional().default([]),
+}).strict();
+
+const legacyPersistedFileSummarySchema = persistedFileSummarySchema.extend({
+  classifications: persistedClassificationHintsSchema.optional().default([]),
+  hunks: z.array(legacyPersistedHunkSummarySchema).max(2_000),
+}).strict();
+
+const legacyPersistedReviewSummarySchema = z.object({
+  conversationId: exactNonBlankString(200),
+  fingerprint: z.string().regex(/^(?:[0-9a-f]{8}|[0-9a-f]{64})$/u),
+  providerId: z.enum(PROVIDER_IDS),
+  overall: exactNonBlankString(4_000),
+  files: z.array(legacyPersistedFileSummarySchema).max(100),
+  generatedAt: z.iso.datetime({ offset: true }),
+}).strict();
+
+export interface ReviewSummaryAttribution {
+  providerId: ProviderId;
+  harnessId: string;
+  backendProfileId: string;
+  model: string | null;
+}
+
 export class ReviewSummaryError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ReviewSummaryError";
-  }
-}
-
-export class ReviewSummaryTimeoutError extends ReviewSummaryError {
-  constructor() {
-    super("The agent summary timed out and was stopped. No summary was saved.");
-    this.name = "ReviewSummaryTimeoutError";
   }
 }
 
@@ -88,6 +152,47 @@ function parsedJson(text: string): unknown {
     return JSON.parse(text.trim()) as unknown;
   } catch {
     throw new ReviewSummaryError("The review agent did not return one valid JSON object. No summary was saved.");
+  }
+}
+
+function serializedLength(value: unknown): number {
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    throw new ReviewSummaryError("The review summary is not valid bounded data.");
+  }
+}
+
+export function validatePersistedReviewSummary(value: unknown): DiffReviewSummary {
+  const result = persistedReviewSummarySchema.safeParse(value);
+  if (!result.success || serializedLength(result.data) > MAX_PERSISTED_REVIEW_SUMMARY_CHARS) {
+    throw new ReviewSummaryError("The review summary is not valid bounded data.");
+  }
+  return result.data;
+}
+
+export function parsePersistedReviewSummaryJson(text: string): DiffReviewSummary | null {
+  if (text.length > MAX_PERSISTED_REVIEW_SUMMARY_CHARS) return null;
+  try {
+    return validatePersistedReviewSummary(JSON.parse(text) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+export function upgradeLegacyPersistedReviewSummary(value: unknown): DiffReviewSummary | null {
+  const result = legacyPersistedReviewSummarySchema.safeParse(value);
+  if (!result.success) return null;
+  try {
+    return validatePersistedReviewSummary({
+      ...result.data,
+      harnessId: null,
+      backendProfileId: null,
+      model: null,
+      classifications: [],
+    });
+  } catch {
+    return null;
   }
 }
 
@@ -118,7 +223,7 @@ export function buildReviewSummaryPrompt(patch: string, files: readonly DiffFile
 
 export function parseReviewSummaryResult(
   conversationId: string,
-  providerId: ProviderId,
+  attribution: ReviewSummaryAttribution,
   fingerprint: string,
   expectedFiles: readonly DiffFile[],
   text: string,
@@ -180,15 +285,15 @@ export function parseReviewSummaryResult(
     throw new ReviewSummaryError("The review agent returned too much structured detail. No summary was saved.");
   }
 
-  return {
+  return validatePersistedReviewSummary({
     conversationId,
     fingerprint,
-    providerId,
+    ...attribution,
     overall: compactText(result.data.overall),
     classifications: validatedHints(result.data.classifications, "the overall summary"),
     files,
     generatedAt,
-  };
+  });
 }
 
 export function requireCurrentReviewSummaryFingerprint(
@@ -199,102 +304,4 @@ export function requireCurrentReviewSummaryFingerprint(
   if (truncated || sha256(currentPatch) !== expectedFingerprint) {
     throw new ReviewSummaryError("The diff changed while it was being summarized. The stale summary was discarded.");
   }
-}
-
-export type ReviewSummaryStopReason = "cancelled" | "disconnected" | "unsupported-interaction" | "timeout";
-
-interface ActiveReviewSummary<Owner> {
-  conversationId: string;
-  temporaryConversationId: string;
-  owner: Owner;
-  stopReason: ReviewSummaryStopReason | null;
-  cancel: (() => void) | null;
-}
-
-export class ActiveReviewSummaryRegistry<Owner> {
-  private readonly active = new Map<string, ActiveReviewSummary<Owner>>();
-
-  reserve(conversationId: string, temporaryConversationId: string, owner: Owner): void {
-    if (this.active.has(conversationId)) {
-      throw new ReviewSummaryError("A change summary is already running for this thread.");
-    }
-    this.active.set(conversationId, {
-      conversationId,
-      temporaryConversationId,
-      owner,
-      stopReason: null,
-      cancel: null,
-    });
-  }
-
-  has(conversationId: string): boolean {
-    return this.active.has(conversationId);
-  }
-
-  attachCancel(conversationId: string, temporaryConversationId: string, cancel: () => void): void {
-    const active = this.active.get(conversationId);
-    if (!active || active.temporaryConversationId !== temporaryConversationId) return;
-    active.cancel = cancel;
-    if (active.stopReason) cancel();
-  }
-
-  stop(conversationId: string, reason: ReviewSummaryStopReason): boolean {
-    const active = this.active.get(conversationId);
-    if (!active) return false;
-    active.stopReason ??= reason;
-    try {
-      active.cancel?.();
-    } catch {
-      // Cancellation is best effort; the provider manager still owns force-kill cleanup.
-    }
-    return true;
-  }
-
-  stopOwned(owner: Owner, reason: ReviewSummaryStopReason): string[] {
-    const stopped: string[] = [];
-    for (const active of this.active.values()) {
-      if (active.owner !== owner) continue;
-      this.stop(active.conversationId, reason);
-      stopped.push(active.conversationId);
-    }
-    return stopped;
-  }
-
-  stopReason(conversationId: string, temporaryConversationId: string): ReviewSummaryStopReason | null {
-    const active = this.active.get(conversationId);
-    return active?.temporaryConversationId === temporaryConversationId ? active.stopReason : null;
-  }
-
-  finish(conversationId: string, temporaryConversationId: string): void {
-    const active = this.active.get(conversationId);
-    if (active?.temporaryConversationId === temporaryConversationId) this.active.delete(conversationId);
-  }
-}
-
-export async function withReviewSummaryTimeout<T>(
-  run: Promise<T>,
-  timeoutMs: number,
-  onTimeout: () => void,
-  settleGraceMs = 5_000,
-): Promise<T> {
-  const timeout = Math.max(1, Math.min(timeoutMs, 10 * 60_000));
-  let timer: NodeJS.Timeout | undefined;
-  const outcome = await Promise.race([
-    run.then((value) => ({ kind: "result" as const, value })),
-    new Promise<{ kind: "timeout" }>((resolve) => {
-      timer = setTimeout(() => resolve({ kind: "timeout" }), timeout);
-      timer.unref();
-    }),
-  ]);
-  if (timer) clearTimeout(timer);
-  if (outcome.kind === "result") return outcome.value;
-
-  onTimeout();
-  if (settleGraceMs > 0) {
-    await Promise.race([
-      run.then(() => undefined, () => undefined),
-      delay(settleGraceMs, undefined, { ref: false }),
-    ]);
-  }
-  throw new ReviewSummaryTimeoutError();
 }

@@ -1,10 +1,44 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, Command, MessageSquarePlus, Paperclip, Send, ShieldCheck, SlidersHorizontal, Sparkles, Square, Wrench, X } from "lucide-react";
+import { ArrowLeft, Bot, ChevronDown, ChevronRight, Command, MessageSquarePlus, Paperclip, Send, ShieldCheck, SlidersHorizontal, Sparkles, Square, Wrench, X } from "lucide-react";
 import clsx from "clsx";
-import type { AccessMode, ChatAttachment, Conversation, InteractionMode, ProjectAction, ProviderId, ProviderInfo, ThreadUsageSnapshot, UsageDisplayMode, WorkspaceEntry } from "@shared/contracts";
-import { MAX_CHAT_MESSAGE_CHARS } from "@shared/diff-review";
+import type {
+  AccessMode,
+  AgentTurn,
+  ChatAttachment,
+  Conversation,
+  InteractionMode,
+  ModelBackendProfileView,
+  ModelSelection,
+  ProjectAction,
+  ProviderId,
+  ProviderInfo,
+  ProviderMetadataFieldState,
+  ThreadUsageSnapshot,
+  TurnRequestContext,
+  UsageDisplayMode,
+  WorkspaceEntry,
+} from "@shared/contracts";
+import {
+  isKimiThroughClaudeSelection,
+  KIMI_CLAUDE_REASONING_OPTIONS,
+  kimiCodingModelDisplayName,
+  modelSelectionIdentityLabel,
+} from "../../../shared/claude-backend-profiles";
+import { MAX_CHAT_MESSAGE_CHARS } from "../../../shared/diff-review";
+import {
+  continuationIdentityForSelection,
+  legacyProviderIdForHarness,
+  modelSelectionSchema,
+  nativeModelSelection,
+} from "../../../shared/model-routing";
+import { resolveContinuationDecision } from "../../../shared/continuation-policy";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
+import { composerProviderReady } from "../utils/composerReadiness";
 import { chooseHorizontalSubmenuSide, type HorizontalSubmenuSide } from "../utils/dismissibleMenu";
+import {
+  buildComposerTurnRequest,
+  promptContextDetail,
+} from "../utils/requestContext";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { IconButton, LoadingMark } from "./ui";
 import { UsageIndicator } from "./UsageIndicator";
@@ -16,13 +50,15 @@ type ComposerProps = {
   disabled: boolean;
   sending: boolean;
   running: boolean;
-  providerLocked: boolean;
+  backendProfiles?: ModelBackendProfileView[];
+  latestTurn?: AgentTurn | null;
   mentionResults: WorkspaceEntry[];
   usage: ThreadUsageSnapshot | null;
   usageDisplayMode: UsageDisplayMode;
   promptContext?: string | null;
-  onSend: (message: string, attachments: ChatAttachment[]) => Promise<void>;
-  onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => void;
+  onSend: (message: string, attachments: ChatAttachment[], context?: TurnRequestContext) => Promise<void>;
+  onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => void;
+  onCreateConversationForSelection?: (selection: ModelSelection) => Promise<void>;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
   onRunAction: (action: ProjectAction) => void;
@@ -40,6 +76,14 @@ const accessOptions: Array<{ value: AccessMode; label: string; description: stri
   { value: "full", label: "Full access", description: "Run commands and edit without prompts" },
 ];
 
+const unavailableMetadataField: ProviderMetadataFieldState = {
+  freshness: "unavailable",
+  provenance: null,
+  updatedAt: null,
+  lastAttemptedAt: null,
+  refreshing: false,
+};
+
 type ComposerMenu = "provider" | "reasoning" | "mode" | "access" | "action" | "more";
 type MoreSection = "actions" | "provider" | "model" | "reasoning" | "mode" | "access";
 
@@ -47,9 +91,14 @@ function menuId(menu: ComposerMenu): string {
   return `composer-${menu}-menu`;
 }
 
-function diffContextDetail(context: string): string {
-  const target = /^Target file:\s*(.+)$/mu.exec(context)?.[1]?.trim();
-  return target ? `in ${target}` : context.split("\n")[0] ?? "";
+function composerHarnessLabel(harnessId: string): string {
+  return harnessId.startsWith("claude")
+    ? "Claude harness"
+    : harnessId.startsWith("codex")
+      ? "Codex harness"
+      : harnessId.startsWith("cursor")
+        ? "Cursor"
+        : "OpenCode";
 }
 
 export function Composer({
@@ -59,13 +108,15 @@ export function Composer({
   disabled,
   sending,
   running,
-  providerLocked,
+  backendProfiles = [],
+  latestTurn = null,
   mentionResults,
   usage,
   usageDisplayMode,
   promptContext,
   onSend,
   onUpdateConversation,
+  onCreateConversationForSelection,
   onChooseAttachments,
   onImportAttachments,
   onRunAction,
@@ -78,6 +129,13 @@ export function Composer({
 }: ComposerProps): React.JSX.Element {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [fileReferences, setFileReferences] = useState<string[]>([]);
+  const [pendingRoute, setPendingRoute] = useState<{
+    selection: ModelSelection;
+    label: string;
+    reason: string;
+  } | null>(null);
+  const [creatingRouteConversation, setCreatingRouteConversation] = useState(false);
   const [moreSection, setMoreSection] = useState<MoreSection | null>(null);
   const [moreSubmenuSide, setMoreSubmenuSide] = useState<HorizontalSubmenuSide | null>(null);
   const [morePopoverMaxHeight, setMorePopoverMaxHeight] = useState<number | null>(null);
@@ -92,6 +150,9 @@ export function Composer({
   useEffect(() => {
     setMessage(window.localStorage.getItem(`inertia:draft:${conversation.id}`) ?? "");
     setAttachments([]);
+    setFileReferences([]);
+    setPendingRoute(null);
+    setCreatingRouteConversation(false);
     dismissMenu("context-change");
   }, [conversation.id, dismissMenu]);
 
@@ -146,13 +207,18 @@ export function Composer({
   }, [message]);
 
   const submit = async () => {
-    const typedContent = message.trim() || (attachments.length > 0 ? "Please inspect the attached image." : "Please review the selected diff context.");
-    const content = promptContext ? `${typedContent}\n\nSelected diff context:\n${promptContext}` : typedContent;
+    const request = buildComposerTurnRequest(
+      message,
+      attachments,
+      promptContext,
+      fileReferences,
+    );
     if (!canSend) return;
     try {
-      await onSend(content, attachments);
+      await onSend(request.visibleContent, attachments, request.context);
       setMessage("");
       setAttachments([]);
+      setFileReferences([]);
       onClearPromptContext?.();
       textareaRef.current?.focus();
     } catch {
@@ -173,19 +239,196 @@ export function Composer({
   };
 
   const selectedProvider = providers.find((provider) => provider.id === conversation.providerId);
-  const selectedModel = selectedProvider?.models.find(({ id }) => id === conversation.model)
-    ?? selectedProvider?.models.find(({ isDefault }) => isDefault)
-    ?? selectedProvider?.models[0];
+  const selectedBackendProfile = backendProfiles.find(
+    ({ id }) => id === conversation.modelSelection.backendProfileId,
+  );
+  const selectedBackendModel = selectedBackendProfile?.models.find(
+    ({ id }) => id === conversation.modelSelection.modelId,
+  );
+  const kimiSelection = isKimiThroughClaudeSelection(conversation.modelSelection);
+  const selectedModel = selectedBackendModel
+    ? {
+        id: selectedBackendModel.id,
+        label: selectedBackendModel.displayName,
+        description: `${selectedBackendProfile?.displayName ?? "Backend"} model through ${selectedBackendProfile?.harnessId ?? "the selected harness"}`,
+        isDefault: selectedBackendProfile?.routing.primaryModelId === selectedBackendModel.id,
+        inputModalities: ["text"] as const,
+        reasoningOptions: selectedBackendModel.reasoningOptions,
+        defaultReasoningEffort: selectedBackendModel.reasoningOptions.find(({ value }) =>
+          value === conversation.modelSelection.reasoningEffort)?.value
+          ?? selectedBackendModel.reasoningOptions[0]?.value
+          ?? "",
+      }
+    : kimiSelection
+    ? {
+        id: conversation.modelSelection.modelId,
+        label: kimiCodingModelDisplayName(conversation.modelSelection.modelId),
+        description: "Kimi coding model through the Claude harness",
+        isDefault: true,
+        inputModalities: ["text"] as const,
+        reasoningOptions: KIMI_CLAUDE_REASONING_OPTIONS,
+        defaultReasoningEffort: "high",
+      }
+    : selectedProvider?.models.find(({ id }) => id === conversation.model)
+      ?? selectedProvider?.models.find(({ isDefault }) => isDefault)
+      ?? selectedProvider?.models[0];
   const selectedReasoning = conversation.reasoningEffort || selectedModel?.defaultReasoningEffort || "";
-  const selectedProviderReady = selectedProvider?.canRun === true;
+  const selectedProviderReady = composerProviderReady(
+    selectedProvider,
+    selectedBackendProfile,
+  );
   const selectedProviderAction = selectedProvider ? providerSetupAction(selectedProvider) : "refresh";
-  const contextSuffix = promptContext ? `\n\nSelected diff context:\n${promptContext}` : "";
-  const composedLength = (message.trim() || (attachments.length > 0 ? "Please inspect the attached image." : "Please review the selected diff context.")).length + contextSuffix.length;
-  const typedMessageLimit = Math.max(0, MAX_CHAT_MESSAGE_CHARS - contextSuffix.length);
+  const selectedIdentityLabel = selectedBackendProfile
+    ? `${composerHarnessLabel(selectedBackendProfile.harnessId)} · ${selectedBackendProfile.displayName} · ${selectedBackendModel?.displayName ?? conversation.modelSelection.modelId}`
+    : kimiSelection
+    ? modelSelectionIdentityLabel(conversation.modelSelection)
+    : selectedProvider?.label ?? conversation.providerId;
+  const composedLength = (message.trim() || (attachments.length > 0 ? "Please inspect the attached image." : "Please review the selected diff context.")).length;
+  const typedMessageLimit = MAX_CHAT_MESSAGE_CHARS;
   const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
   const canSend = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext)) && messageFits && selectedProviderReady && !disabled && !sending && !running;
   const access = accessOptions.find((item) => item.value === conversation.accessMode) ?? accessOptions[2];
   const reasoningLabel = selectedModel?.reasoningOptions.find(({ value }) => value === selectedReasoning)?.label ?? "Provider default";
+  const updateReasoningEffort = (reasoningEffort: string): void => {
+    onUpdateConversation(kimiSelection
+      ? {
+          modelSelection: {
+            ...conversation.modelSelection,
+            reasoningEffort,
+          },
+        }
+      : { reasoningEffort });
+  };
+  const hasAuthoritativeTurns = latestTurn !== null;
+  const selectionForProfileModel = (
+    profile: ModelBackendProfileView,
+    modelId: string,
+  ): ModelSelection => {
+    const model = profile.models.find((candidate) => candidate.id === modelId);
+    if (!model) throw new Error("The selected backend model is unavailable.");
+    return modelSelectionSchema.parse({
+      harnessId: profile.harnessId,
+      backendProfileId: profile.id,
+      backendProfileDisplayName: profile.displayName,
+      modelId: model.id,
+      alias: profile.preset === "kimi-code"
+        ? null
+        : model.displayName === model.id ? null : model.displayName,
+      reasoningEffort: profile.preset === "kimi-code"
+        ? "high"
+        : model.reasoningOptions[0]?.value ?? null,
+      contextWindowOverride: model.contextWindowTokens,
+      providerOptions: {},
+      capabilities: model.capabilities,
+      backendConfigurationRevision: profile.configurationRevision,
+    });
+  };
+  const chooseModelSelection = (
+    profile: ModelBackendProfileView,
+    selection: ModelSelection,
+  ): void => {
+    const nextIdentity = continuationIdentityForSelection(
+      selection,
+      profile.endpointIdentity,
+      !profile.compatibility.allowsModelSwitchWithinSession,
+    );
+    const decision = resolveContinuationDecision({
+      previousIdentity: latestTurn?.continuationIdentity
+        ?? conversation.continuationIdentity
+        ?? null,
+      nextIdentity,
+      previousModelId: latestTurn?.modelSelection.modelId
+        ?? conversation.modelSelection.modelId,
+      nextModelId: selection.modelId,
+      hasProviderSession: Boolean(conversation.providerSessionId),
+      hasTurns: hasAuthoritativeTurns,
+      allowsModelSwitchWithinSession:
+        profile.compatibility.allowsModelSwitchWithinSession,
+    });
+    if (decision.action === "new-conversation-required") {
+      setPendingRoute({
+        selection,
+        label: `${profile.displayName} · ${
+          profile.models.find(({ id }) => id === selection.modelId)?.displayName
+            ?? selection.modelId
+        }`,
+        reason: decision.reason,
+      });
+      dismissMenu("selection");
+      return;
+    }
+    const providerId = legacyProviderIdForHarness(selection.harnessId);
+    onUpdateConversation({
+      ...(providerId ? { providerId } : {}),
+      modelSelection: selection,
+    });
+    dismissMenu("selection");
+  };
+  const chooseBackendModel = (
+    profile: ModelBackendProfileView,
+    modelId: string,
+  ): void => {
+    chooseModelSelection(profile, selectionForProfileModel(profile, modelId));
+  };
+  const chooseNativeModel = (
+    provider: ProviderInfo,
+    modelId: string,
+    reasoningEffort: string | null,
+  ): void => {
+    const selection = nativeModelSelection({
+      providerId: provider.id,
+      modelId: modelId || "provider-default",
+      alias: modelId || null,
+      reasoningEffort,
+    });
+    const allowsModelSwitchWithinSession = provider.id === "codex"
+      || provider.id === "claude"
+      || provider.id === "opencode";
+    const decision = resolveContinuationDecision({
+      previousIdentity: latestTurn?.continuationIdentity
+        ?? conversation.continuationIdentity
+        ?? null,
+      nextIdentity: continuationIdentityForSelection(
+        selection,
+        null,
+        !allowsModelSwitchWithinSession,
+      ),
+      previousModelId: latestTurn?.modelSelection.modelId
+        ?? conversation.modelSelection.modelId,
+      nextModelId: selection.modelId,
+      hasProviderSession: Boolean(conversation.providerSessionId),
+      hasTurns: hasAuthoritativeTurns,
+      allowsModelSwitchWithinSession,
+    });
+    if (decision.action === "new-conversation-required") {
+      const model = provider.models.find(({ id }) => id === modelId);
+      setPendingRoute({
+        selection,
+        label: `${provider.label} · ${model?.label ?? "Provider default"}`,
+        reason: decision.reason,
+      });
+      dismissMenu("selection");
+      return;
+    }
+    onUpdateConversation({
+      providerId: provider.id,
+      modelSelection: selection,
+    });
+    dismissMenu("selection");
+  };
+  const profileIsSelectable = (profile: ModelBackendProfileView): boolean =>
+    profile.enabled
+    && profile.compatibility.state !== "unknown"
+    && profile.compatibility.state !== "unavailable";
+  const backendProfilesByHarness = backendProfiles.reduce(
+    (groups, profile) => {
+      const existing = groups.get(profile.harnessId) ?? [];
+      existing.push(profile);
+      groups.set(profile.harnessId, existing);
+      return groups;
+    },
+    new Map<string, ModelBackendProfileView[]>(),
+  );
 
   const clearMoreHoverTimer = () => {
     if (moreHoverTimerRef.current === null) return;
@@ -259,12 +502,80 @@ export function Composer({
 
   const moreSectionLabel = (section: MoreSection): string => ({
     actions: "Actions",
-    provider: "Provider",
+    provider: "Backend",
     model: "Model",
     reasoning: "Reasoning",
     mode: "Mode",
     access: "Access",
   })[section];
+  const harnessLabel = composerHarnessLabel;
+  const renderBackendRouteOptions = () => {
+    if (backendProfiles.length === 0) {
+      return providers.map((provider) => (
+        <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={conversation.providerId === provider.id}
+          key={provider.id}
+          onClick={() => {
+            const model = provider.models.find(({ isDefault }) => isDefault)
+              ?? provider.models[0];
+            chooseNativeModel(
+              provider,
+              model?.id ?? "provider-default",
+              model?.defaultReasoningEffort ?? null,
+            );
+          }}
+        >
+          <span><strong>{provider.label}</strong><small>{providerStateLabel(provider)} · {providerStateDetail(provider)}</small></span>
+          {conversation.providerId === provider.id && <span className="option-check" />}
+        </button>
+      ));
+    }
+    return [...backendProfilesByHarness.entries()].map(([harnessId, profilesForHarness]) => (
+      <div className="composer-backend-group" role="group" aria-label={harnessLabel(harnessId)} key={harnessId}>
+        <div className="composer-backend-group-heading"><Bot size={13} /><span>{harnessLabel(harnessId)}</span></div>
+        {profilesForHarness.map((profile) => (
+          <div className="composer-backend-profile" key={profile.id}>
+            <div className="composer-backend-profile-heading">
+              <span>
+                <strong>{profile.displayName}</strong>
+                {profile.source === "custom" && <em>Custom</em>}
+              </span>
+              <small>{profile.endpointHost ?? (
+                profile.preset === "native" ? "Harness managed" : "Endpoint unavailable"
+              )}</small>
+            </div>
+            {profile.models.map((model) => {
+              const selected = conversation.modelSelection.backendProfileId === profile.id
+                && conversation.modelSelection.modelId === model.id;
+              return (
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={selected}
+                  disabled={!profileIsSelectable(profile)}
+                  title={!profileIsSelectable(profile)
+                    ? profile.compatibility.reason
+                    : `${harnessLabel(profile.harnessId)} · ${profile.displayName} · ${model.displayName}`}
+                  key={model.id}
+                  onClick={() => chooseBackendModel(profile, model.id)}
+                >
+                  <span>
+                    <strong>{model.displayName}{profile.routing.primaryModelId === model.id ? " · Default" : ""}</strong>
+                    <small>{profileIsSelectable(profile)
+                      ? `${model.id}${model.contextWindowTokens ? ` · ${Math.round(model.contextWindowTokens / 1_000)}K context` : ""}`
+                      : profile.compatibility.reason}</small>
+                  </span>
+                  {selected && <span className="option-check" />}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    ));
+  };
 
   const renderMoreSectionOptions = (section: MoreSection) => {
     if (section === "actions") {
@@ -276,29 +587,32 @@ export function Composer({
       ));
     }
     if (section === "provider") {
-      return (
-        <>
-          {providerLocked && <p className="popover-empty">This chat keeps its original agent. Start a new chat to use another.</p>}
-          {providers.map((provider) => (
-            <button
-              type="button"
-              role="menuitemradio"
-              aria-checked={conversation.providerId === provider.id}
-              disabled={providerLocked && conversation.providerId !== provider.id}
-              key={provider.id}
-              onClick={() => {
-                onUpdateConversation({ providerId: provider.id as ProviderId, model: "", reasoningEffort: "" });
-                dismissMenu("selection");
-              }}
-            >
-              <span><strong>{provider.label}</strong><small>{providerStateLabel(provider)} · {providerStateDetail(provider)}</small></span>
-              {conversation.providerId === provider.id && <span className="option-check" />}
-            </button>
-          ))}
-        </>
-      );
+      return renderBackendRouteOptions();
     }
     if (section === "model") {
+      if (selectedBackendProfile) {
+        return selectedBackendProfile.models.map((model) => (
+          <button
+            type="button"
+            role="menuitemradio"
+            aria-checked={conversation.modelSelection.modelId === model.id}
+            disabled={!profileIsSelectable(selectedBackendProfile)}
+            key={model.id}
+            onClick={() => chooseBackendModel(selectedBackendProfile, model.id)}
+          >
+            <span><strong>{model.displayName}</strong><small>{model.id}</small></span>
+            {conversation.modelSelection.modelId === model.id && <span className="option-check" />}
+          </button>
+        ));
+      }
+      if (kimiSelection) {
+        return (
+          <button type="button" role="menuitemradio" aria-checked="true" disabled>
+            <span><strong>{selectedModel?.label ?? "Kimi"}</strong><small>{selectedModel?.description ?? "Kimi coding model through the Claude harness"}</small></span>
+            <span className="option-check" />
+          </button>
+        );
+      }
       if (!selectedProvider?.models.length) return <p className="popover-empty">This provider uses its default model.</p>;
       return selectedProvider.models.map((model) => (
         <button
@@ -307,8 +621,11 @@ export function Composer({
           aria-checked={selectedModel?.id === model.id}
           key={model.id}
           onClick={() => {
-            onUpdateConversation({ model: model.id, reasoningEffort: model.defaultReasoningEffort });
-            dismissMenu("selection");
+            chooseNativeModel(
+              selectedProvider,
+              model.id,
+              model.defaultReasoningEffort,
+            );
           }}
         >
           <span><strong>{model.label}{model.isDefault ? " · Default" : ""}</strong><small>{model.description}</small></span>
@@ -325,7 +642,7 @@ export function Composer({
           aria-checked={selectedReasoning === option.value}
           key={option.value}
           onClick={() => {
-            onUpdateConversation({ reasoningEffort: option.value });
+            updateReasoningEffort(option.value);
             dismissMenu("selection");
           }}
         >
@@ -370,8 +687,8 @@ export function Composer({
 
   const moreRootItems: Array<{ section: MoreSection; label: string; value: string; disabled?: boolean }> = [
     ...(actions.length > 0 ? [{ section: "actions" as const, label: "Actions", value: `${actions.length} available` }] : []),
-    { section: "provider", label: "Provider", value: selectedProvider?.label ?? conversation.providerId },
-    { section: "model", label: "Model", value: selectedModel?.label ?? "Provider default", disabled: !selectedProvider?.models.length },
+    { section: "provider", label: "Backend", value: selectedIdentityLabel },
+    { section: "model", label: "Model", value: selectedModel?.label ?? "Provider default", disabled: !kimiSelection && !selectedProvider?.models.length },
     { section: "reasoning", label: "Reasoning", value: reasoningLabel, disabled: !selectedModel?.reasoningOptions.length },
     { section: "mode", label: "Mode", value: conversation.interactionMode === "build" ? "Build" : "Plan" },
     { section: "access", label: "Access", value: access.label },
@@ -383,8 +700,8 @@ export function Composer({
         <div className="provider-readiness" role="status">
           <ProviderStatus provider={selectedProvider} />
           <span className="provider-readiness-copy">
-            <strong>{selectedProvider.label} needs attention</strong>
-            <small>{providerStateDetail(selectedProvider)}</small>
+            <strong>{kimiSelection ? "Claude harness needs attention" : `${selectedProvider.label} needs attention`}</strong>
+            <small>{kimiSelection ? "Install or refresh Claude Code to use the selected Kimi backend." : providerStateDetail(selectedProvider)}</small>
           </span>
           {selectedProviderAction && (
             <button
@@ -402,10 +719,10 @@ export function Composer({
       )}
       <div className={clsx("composer", menu && "has-open-menu")} data-disabled={disabled} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}>
         {promptContext && (
-          <div className="composer-context" aria-label="Selected diff context">
+          <div className="composer-context" aria-label={promptContext.startsWith("Local review note for ") ? "Selected review note context" : "Selected diff context"}>
             <MessageSquarePlus size={13} />
-            <span><strong>Diff selection </strong><small>{diffContextDetail(promptContext)}</small></span>
-            <button type="button" aria-label="Remove selected diff context" onClick={onClearPromptContext}><X size={12} /></button>
+            <span><strong>{promptContext.startsWith("Local review note for ") ? "Review note " : "Diff selection "}</strong><small>{promptContextDetail(promptContext)}</small></span>
+            <button type="button" aria-label={promptContext.startsWith("Local review note for ") ? "Remove selected review note context" : "Remove selected diff context"} onClick={onClearPromptContext}><X size={12} /></button>
           </div>
         )}
         {attachments.length > 0 && (
@@ -419,6 +736,24 @@ export function Composer({
                 </button>
               </span>
             ))}
+          </div>
+        )}
+        {pendingRoute && (
+          <div className="composer-route-confirmation" role="alertdialog" aria-labelledby="route-confirmation-title" aria-describedby="route-confirmation-reason">
+            <ShieldCheck size={16} />
+            <span>
+              <strong id="route-confirmation-title">Open a new chat for {pendingRoute.label}?</strong>
+              <small id="route-confirmation-reason">{pendingRoute.reason}</small>
+            </span>
+            <button type="button" className="secondary-button" disabled={creatingRouteConversation} onClick={() => setPendingRoute(null)}>Cancel</button>
+            <button type="button" className="primary-button" disabled={!onCreateConversationForSelection || creatingRouteConversation} onClick={() => {
+              if (!onCreateConversationForSelection) return;
+              setCreatingRouteConversation(true);
+              void onCreateConversationForSelection(pendingRoute.selection).then(
+                () => setPendingRoute(null),
+                () => undefined,
+              ).finally(() => setCreatingRouteConversation(false));
+            }}>{creatingRouteConversation ? "Creating…" : "New chat"}</button>
           </div>
         )}
 
@@ -436,12 +771,15 @@ export function Composer({
           aria-label="Message"
           placeholder={running ? "The agent is working…" : "Ask Inertia to work with this project…"}
         />
-        {!messageFits && <p className="composer-limit-warning" role="alert">This message and diff context exceed the {MAX_CHAT_MESSAGE_CHARS.toLocaleString()} character limit. Shorten the message or selected context.</p>}
+        {!messageFits && <p className="composer-limit-warning" role="alert">This message exceeds the {MAX_CHAT_MESSAGE_CHARS.toLocaleString()} character limit.</p>}
 
         {mentionMatch && mentionResults.length > 0 && (
           <div className="composer-suggestion-menu" role="listbox" aria-label="Project files">
             <div className="popover-title">Reference a file</div>
-            {mentionResults.slice(0, 8).map((entry) => <button type="button" role="option" aria-selected="false" key={entry.path} onClick={() => setMessage((current) => current.replace(/@[^\s@]*$/u, `@${entry.path}${entry.kind === "directory" ? "/" : " "}`))}><span>{entry.path}</span><small>{entry.kind}</small></button>)}
+            {mentionResults.slice(0, 8).map((entry) => <button type="button" role="option" aria-selected="false" key={entry.path} onClick={() => {
+              setMessage((current) => current.replace(/@[^\s@]*$/u, `@${entry.path}${entry.kind === "directory" ? "/" : " "}`));
+              if (entry.kind === "file") setFileReferences((current) => [...new Set([...current, entry.path])]);
+            }}><span>{entry.path}</span><small>{entry.kind}</small></button>)}
           </div>
         )}
         {slashMatch && (
@@ -477,26 +815,18 @@ export function Composer({
 
           <div className="composer-options">
             <div className="popover-anchor composer-provider-control">
-              <button ref={(node) => setMenuTrigger("provider", node)} type="button" className={clsx("composer-pill", menu === "provider" && "is-active")} aria-label="Choose provider and model" aria-haspopup="menu" aria-controls={menuId("provider")} aria-expanded={menu === "provider"} disabled={disabled || running} onClick={() => toggleMenu("provider")}>
-                <Sparkles size={14} /><span>{selectedModel?.label ?? selectedProvider?.label ?? conversation.providerId}</span><ChevronDown size={12} />
+              <button ref={(node) => setMenuTrigger("provider", node)} type="button" className={clsx("composer-pill", menu === "provider" && "is-active")} title={selectedIdentityLabel} aria-label="Choose provider and model" aria-haspopup="menu" aria-controls={menuId("provider")} aria-expanded={menu === "provider"} disabled={disabled || running} onClick={() => toggleMenu("provider")}>
+                <Sparkles size={14} /><span>{selectedBackendProfile || kimiSelection ? selectedIdentityLabel : selectedModel?.label ?? selectedProvider?.label ?? conversation.providerId}</span><ChevronDown size={12} />
               </button>
               {menu === "provider" && (
                 <div ref={(node) => setMenuPopover("provider", node)} id={menuId("provider")} className="composer-popover provider-popover" role="menu" aria-label="Provider and model">
-                  <div className="popover-title">Provider</div>
-                  {providerLocked && <p className="popover-empty">This chat keeps its original agent. Start a new chat to use another.</p>}
-                  {providers.map((provider) => (
-                    <button type="button" role="menuitemradio" aria-checked={conversation.providerId === provider.id} disabled={providerLocked && conversation.providerId !== provider.id} key={provider.id} onClick={() => { onUpdateConversation({ providerId: provider.id as ProviderId, model: "", reasoningEffort: "" }); }}>
-                      <span><strong>{provider.label}</strong><small>{providerStateLabel(provider)} · {providerStateDetail(provider)}</small></span>
-                      {conversation.providerId === provider.id && <span className="option-check" />}
-                    </button>
-                  ))}
-                  <div className="popover-title model-popover-title">Model</div>
-                  {selectedProvider?.models.length ? selectedProvider.models.map((model) => (
-                    <button type="button" role="menuitemradio" aria-checked={selectedModel?.id === model.id} key={model.id} onClick={() => { onUpdateConversation({ model: model.id, reasoningEffort: model.defaultReasoningEffort }); dismissMenu("selection"); }}>
-                      <span><strong>{model.label}{model.isDefault ? " · Default" : ""}</strong><small>{model.description}</small></span>
-                      {selectedModel?.id === model.id && <span className="option-check" />}
-                    </button>
-                  )) : <p className="popover-empty">Model choices are not exposed by this provider yet. Its default will be used.</p>}
+                  <div className="popover-title">Harness · backend · model</div>
+                  {hasAuthoritativeTurns && (
+                    <p className="popover-empty composer-continuation-note">
+                      This chat has an agent turn. Supported same-backend model changes continue here; other route changes open a new chat.
+                    </p>
+                  )}
+                  {renderBackendRouteOptions()}
                 </div>
               )}
             </div>
@@ -510,7 +840,7 @@ export function Composer({
                   <div ref={(node) => setMenuPopover("reasoning", node)} id={menuId("reasoning")} className="composer-popover option-popover reasoning-popover" role="menu" aria-label="Reasoning level">
                     <div className="popover-title">Reasoning</div>
                     {selectedModel.reasoningOptions.map((option) => (
-                      <button type="button" role="menuitemradio" aria-checked={selectedReasoning === option.value} key={option.value} onClick={() => { onUpdateConversation({ reasoningEffort: option.value }); dismissMenu("selection"); }}>
+                      <button type="button" role="menuitemradio" aria-checked={selectedReasoning === option.value} key={option.value} onClick={() => { updateReasoningEffort(option.value); dismissMenu("selection"); }}>
                         <span><strong>{option.label}{option.value === selectedModel.defaultReasoningEffort ? " · Default" : ""}</strong><small>{option.description}</small></span>
                         {selectedReasoning === option.value && <span className="option-check" />}
                       </button>
@@ -672,10 +1002,10 @@ export function Composer({
       {selectedProvider && (
         <UsageIndicator
           usage={usage}
-          rateLimits={selectedProvider.rateLimits}
-          rateLimitState={selectedProvider.metadataState.rateLimits}
+          rateLimits={selectedBackendProfile && selectedBackendProfile.preset !== "native" ? [] : selectedProvider.rateLimits}
+          rateLimitState={selectedBackendProfile && selectedBackendProfile.preset !== "native" ? unavailableMetadataField : selectedProvider.metadataState.rateLimits}
           mode={usageDisplayMode}
-          providerLabel={selectedProvider.label}
+          providerLabel={selectedIdentityLabel}
           onModeChange={onUsageDisplayModeChange}
         />
       )}

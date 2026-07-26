@@ -2,6 +2,36 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.7 — 2026-07-25
+
+### Trustworthy history for every agent request
+
+- Every request now has a durable turn record with its original agent harness, model backend, model, lifecycle, and terminal result instead of reconstructing identity from the latest conversation state.
+- Read-only answers about selected diff lines stay beside the matching hunk with their exact backend and model attribution instead of becoming ordinary conversation history.
+- Legacy and interrupted work is recovered honestly. Missing attribution or incomplete repository history remains visibly unavailable or partial rather than being guessed.
+- In Git workspaces, Inertia records before-and-after repository snapshots for each turn and stores a bounded, content-addressed patch. Historical changes can be opened and compared after later edits or a restart without reading the current working tree as if it were the past.
+- Repository and worktree identity are checked across capture. Truncated patches, missing snapshots, moved worktrees, and failed captures preserve their real completeness state.
+- Conversation lists now load authoritative lightweight metadata separately from heavier message, activity, plan, checkpoint, and Git-artifact detail. Stale detail responses cannot replace the conversation currently being viewed.
+- Runtime mutations carry an ordered sequence cursor. Reconnects replay only committed updates after that cursor, while generation changes fall back to a complete snapshot without duplicating work.
+- Stable transcript rows and incremental projection keep histories with hundreds of turns and thousands of messages responsive, including after runtime restart and recovery.
+
+### Explicit model backends without hidden context transfer
+
+- Agent harness, model backend, and model selection are now separate parts of one authoritative execution route. Native providers continue to use their own backend unless an explicitly compatible profile is selected.
+- Settings can create, validate, probe, enable, disable, and choose custom backend profiles with explicit endpoints, authentication, model catalogs, context windows, and Claude tier routing.
+- Plain HTTP is rejected except for exact loopback development endpoints. Unsafe URLs, malformed models, incompatible harness and protocol pairs, stale probes, and ambiguous defaults are rejected before launch.
+- Custom backend credentials are encrypted through macOS Keychain, Windows DPAPI, or Linux Secret Service and never stored in the application database. Credential generations prevent a replaced or deleted secret from being confused with an earlier execution route.
+- The built-in Kimi coding profile runs only through the verified Claude harness route and accepts only its supported endpoint, model IDs, and documented context choices.
+- Existing conversations retain their original route even if a profile is edited or removed. Supported model changes on the same backend may continue in place; changing harnesses, backends, endpoint identity, configuration revision, or credential generation requires a clearly separated new chat.
+- Backend launch environments are scoped per run so concurrent native and custom sessions do not inherit one another's endpoints, models, or credentials.
+
+### Restart, migration, and release confidence
+
+- Database migrations now preserve authoritative turns, execution identity, runtime sequencing, backend profiles, and historical Git artifacts while retaining the full fixture chain from earlier releases.
+- SQLite write failures do not consume sequence numbers or expose partial runtime mutations, and credential failures stay contained to the affected backend.
+- Coverage now includes long-history projection, restart and replay, turn-artifact persistence, profile deletion history, credential isolation, route boundaries, custom Codex backends, Kimi through Claude, and concurrent backend launch isolation.
+- Cross-platform contracts continue to validate Windows Codex discovery, Linux package identity and resources, hardened Electron fuses, packaged-app startup, and exact-tag release assets without adding another agent provider or changing application identity.
+
 ## 0.0.6 — 2026-07-23
 
 ### A clearer way into every project

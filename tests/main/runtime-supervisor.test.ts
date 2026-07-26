@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   RuntimeSupervisor,
   runtimeRestartDelayMs,
+  type RuntimeCredentialBroker,
 } from "../../src/main/runtime-supervisor";
 import type { RuntimeWorkerCommand } from "../../src/main/runtime-process-protocol";
 
@@ -14,6 +15,12 @@ const firstUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
 const secondUrl = `ws://127.0.0.1:41002/runtime/${"b".repeat(43)}`;
 const dataDirectory = resolve(tmpdir(), "inertia data");
 const workspaceDirectory = resolve(tmpdir(), "inertia workspace");
+const projectPathRequest = {
+  projectId: "11111111-1111-4111-8111-111111111111",
+  conversationId: "22222222-2222-4222-8222-222222222222",
+  relativePath: "src/index.ts",
+  action: "open-externally" as const,
+};
 
 class FakeUtilityProcess extends EventEmitter {
   pid: number | undefined;
@@ -42,7 +49,13 @@ class FakeUtilityProcess extends EventEmitter {
   }
 }
 
-function createHarness(options: { stableUptimeMs?: number; shutdownGraceMs?: number; forceKillWaitMs?: number } = {}) {
+function createHarness(options: {
+  stableUptimeMs?: number;
+  shutdownGraceMs?: number;
+  forceKillWaitMs?: number;
+  credentialBroker?: RuntimeCredentialBroker;
+  credentialRequestTimeoutMs?: number;
+} = {}) {
   const children: FakeUtilityProcess[] = [];
   const forceKill = vi.fn();
   const supervisor = new RuntimeSupervisor({
@@ -61,6 +74,8 @@ function createHarness(options: { stableUptimeMs?: number; shutdownGraceMs?: num
     shutdownGraceMs: options.shutdownGraceMs ?? 1_000,
     forceKillWaitMs: options.forceKillWaitMs ?? 500,
     forceKill,
+    credentialBroker: options.credentialBroker,
+    credentialRequestTimeoutMs: options.credentialRequestTimeoutMs,
   });
   return { children, forceKill, supervisor };
 }
@@ -91,6 +106,185 @@ describe("RuntimeSupervisor", () => {
 
     expect(supervisor.connection()).toEqual({ websocketUrl: firstUrl });
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 1, pid: 10_000 });
+  });
+
+  it("brokers credentials only for the current ready runtime generation", async () => {
+    const credentialBroker: RuntimeCredentialBroker = {
+      resolve: vi.fn(async () => "ephemeral-secret"),
+      status: vi.fn(async () => ({
+        hasSecret: true,
+        credentialGeneration: "generation:test",
+      })),
+      clear: vi.fn(async () => false),
+      forget: vi.fn(async () => false),
+    };
+    const { children, supervisor } = createHarness({ credentialBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const requestId = crypto.randomUUID();
+    const secretReference = `secret:backend:${"a".repeat(64)}`;
+
+    children[0].message({
+      type: "runtime.credential-request",
+      requestId,
+      operation: "resolve",
+      secretReference,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(credentialBroker.resolve).toHaveBeenCalledWith(
+      secretReference,
+      expect.any(AbortSignal),
+    );
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.credential-result",
+      requestId,
+      operation: "resolve",
+      ok: true,
+      secret: "ephemeral-secret",
+    });
+
+    const statusRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.credential-request",
+      requestId: statusRequestId,
+      operation: "status",
+      secretReference,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.credential-result",
+      requestId: statusRequestId,
+      operation: "status",
+      ok: true,
+      hasSecret: true,
+      credentialGeneration: "generation:test",
+    });
+
+    const forgetRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.credential-request",
+      requestId: forgetRequestId,
+      operation: "forget",
+      secretReference,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(credentialBroker.forget).toHaveBeenCalledWith(
+      secretReference,
+      expect.any(AbortSignal),
+    );
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.credential-result",
+      requestId: forgetRequestId,
+      operation: "forget",
+      ok: true,
+      removed: false,
+    });
+  });
+
+  it("times out credential requests and ignores late results from stale generations", async () => {
+    let resolveCredential: ((value: string | null) => void) | undefined;
+    const credentialBroker: RuntimeCredentialBroker = {
+      resolve: () => new Promise((resolveCredentialPromise) => {
+        resolveCredential = resolveCredentialPromise;
+      }),
+      status: vi.fn(async () => ({
+        hasSecret: false,
+        credentialGeneration: null,
+      })),
+      clear: vi.fn(async () => false),
+      forget: vi.fn(async () => false),
+    };
+    const { children, supervisor } = createHarness({
+      credentialBroker,
+      credentialRequestTimeoutMs: 25,
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const requestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.credential-request",
+      requestId,
+      operation: "resolve",
+      secretReference: `secret:backend:${"b".repeat(64)}`,
+    });
+    await vi.advanceTimersByTimeAsync(25);
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.credential-result",
+      requestId,
+      ok: false,
+      code: "unavailable",
+    });
+
+    children[0].exit(1);
+    resolveCredential?.("late-secret");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children[0].messages).not.toContainEqual(expect.objectContaining({
+      type: "runtime.credential-result",
+      secret: "late-secret",
+    }));
+  });
+
+  it("turns synchronous broker failures into fixed unavailable results", async () => {
+    const credentialBroker: RuntimeCredentialBroker = {
+      resolve: (() => {
+        throw new Error("secret-bearing system detail");
+      }) as RuntimeCredentialBroker["resolve"],
+      status: vi.fn(async () => ({
+        hasSecret: false,
+        credentialGeneration: null,
+      })),
+      clear: vi.fn(async () => false),
+      forget: vi.fn(async () => false),
+    };
+    const { children, supervisor } = createHarness({ credentialBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const requestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.credential-request",
+      requestId,
+      operation: "resolve",
+      secretReference: `secret:backend:${"c".repeat(64)}`,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.credential-result",
+      requestId,
+      operation: "resolve",
+      ok: false,
+      code: "unavailable",
+      message: "Secure credential storage is unavailable.",
+    });
+  });
+
+  it("correlates authoritative project-path resolutions and rejects them on worker exit", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const resolved = supervisor.resolveProjectPath(projectPathRequest);
+    const resolveCommand = children[0].messages.at(-1);
+    expect(resolveCommand).toMatchObject({
+      type: "runtime.resolve-project-path",
+      request: projectPathRequest,
+    });
+    if (resolveCommand?.type !== "runtime.resolve-project-path") throw new Error("Missing project path command");
+    const canonical = resolve(workspaceDirectory, "src/index.ts");
+    children[0].message({
+      type: "runtime.project-path-resolved",
+      requestId: resolveCommand.requestId,
+      path: canonical,
+    });
+    await expect(resolved).resolves.toBe(canonical);
+
+    const interrupted = supervisor.resolveProjectPath(projectPathRequest);
+    children[0].exit(9);
+    await expect(interrupted).rejects.toThrow("stopped before the project path was resolved");
   });
 
   it("reports startup failure and retries only after the failed child exits", () => {

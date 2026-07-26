@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FilePenLine, ShieldAlert, TerminalSquare } from "lucide-react";
 import type { AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest } from "@shared/contracts";
-import { buildAgentInputAnswers, inputRequestTitle } from "@/utils/agentInput";
+import { buildAgentInputAnswers, inputRequestTitle } from "../utils/agentInput";
 
 type ApprovalCardProps = {
   request: AgentApprovalRequest;

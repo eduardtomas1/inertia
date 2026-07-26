@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { Check, ChevronDown, ChevronUp, CircleHelp, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Sparkles, Square, StickyNote, Trash2, WandSparkles, X } from "lucide-react";
-import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, GitDiffSnapshot } from "@shared/contracts";
+import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, DiffSelectionReviewAnswer, GitDiffSnapshot } from "@shared/contracts";
 import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, parseUnifiedDiff, selectedLineFingerprint } from "@shared/diff-review";
 import { IconButton, LoadingMark } from "./ui";
+import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
 
 export type DiffSelection = {
   fingerprint: string;
@@ -18,6 +19,7 @@ export type ChangesPanelProps = {
   diff: GitDiffSnapshot | null;
   selectedPath: string | null;
   summary: DiffReviewSummary | null;
+  selectionAnswer?: DiffSelectionReviewAnswer | null;
   reviewStates?: DiffReviewState[];
   notes?: DiffReviewNote[];
   loading?: boolean;
@@ -32,6 +34,7 @@ export type ChangesPanelProps = {
   onRequestRevision: (selection: DiffSelection, comment: string) => Promise<void>;
   onRevert: (selection: DiffSelection, comment: string) => Promise<void>;
   onUndoReversal?: () => Promise<void>;
+  onDismissSelectionAnswer?: () => void;
   onSetReviewState: (state: Omit<DiffReviewState, "conversationId" | "stale" | "updatedAt">) => Promise<void>;
   onCreateNote: (note: Omit<DiffReviewNote, "id" | "conversationId" | "stale" | "createdAt" | "updatedAt">) => Promise<void>;
   onUpdateNote: (noteId: string, body: string) => Promise<void>;
@@ -103,6 +106,7 @@ export function ChangesPanel({
   diff,
   selectedPath,
   summary,
+  selectionAnswer = null,
   reviewStates = [],
   notes = [],
   loading = false,
@@ -117,6 +121,7 @@ export function ChangesPanel({
   onRequestRevision,
   onRevert,
   onUndoReversal,
+  onDismissSelectionAnswer,
   onSetReviewState,
   onCreateNote,
   onUpdateNote,
@@ -373,6 +378,12 @@ export function ChangesPanel({
                   const lastSelectedId = selected ? hunk.lines.filter((line) => selected.lineIds.includes(line.id)).at(-1)?.id : null;
                   const changedSelection = selected ? hunk.lines.some((line) => selected.lineIds.includes(line.id) && (line.kind === "addition" || line.kind === "deletion")) : false;
                   const hunkNotes = notes.filter((note) => note.path === selectedFile.path && note.hunkId === hunk.id);
+                  const hunkAnswer = selectionAnswer
+                    && selectionAnswer.fingerprint === structured.fingerprint
+                    && selectionAnswer.filePath === selectedFile.path
+                    && selectionAnswer.hunkId === hunk.id
+                    ? selectionAnswer
+                    : null;
                   return <section className="diff-hunk" id={`review-${hunk.id}`} key={hunk.id}>
                     <div className="diff-hunk-header">
                       <code>{hunk.header}</code>{hunkSummary && <span><Sparkles size={12} />{hunkSummary}<ClassificationHints hints={fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.classifications} /></span>}
@@ -381,6 +392,7 @@ export function ChangesPanel({
                         <button type="button" onClick={() => void createScopedNote(selectedFile, hunk)}><StickyNote size={11} />Note</button>
                       </span>
                     </div>
+                    {hunkAnswer && <SelectionReviewAnswerCard answer={hunkAnswer} onDismiss={onDismissSelectionAnswer} />}
                     {hunkNotes.map((note) => (
                       <div className={clsx("diff-review-note", note.stale && "is-stale")} key={note.id}>
                         <span><StickyNote size={12} /><strong>{note.lineIds.length > 0 ? `${note.lineIds.length}-line note` : "Hunk note"}{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>

@@ -1,8 +1,11 @@
+import { randomUUID } from "node:crypto";
 import type { UtilityProcess } from "electron";
+import type { BackendCredentialStatus } from "../shared/backend-credentials";
 
-import type { RuntimeConnection } from "../shared/desktop.js";
+import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
 import {
   parseRuntimeWorkerEvent,
+  type RuntimeCredentialOperation,
   type RuntimeWorkerCommand,
   type RuntimeWorkerOptions,
 } from "./runtime-process-protocol.js";
@@ -11,6 +14,8 @@ const DEFAULT_STARTUP_TIMEOUT_MS = 20_000;
 const DEFAULT_STABLE_UPTIME_MS = 30_000;
 const DEFAULT_SHUTDOWN_GRACE_MS = 3_000;
 const DEFAULT_FORCE_KILL_WAIT_MS = 1_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_CREDENTIAL_REQUEST_TIMEOUT_MS = 10_000;
 const INITIAL_RESTART_DELAY_MS = 500;
 const MAX_RESTART_DELAY_MS = 8_000;
 
@@ -22,6 +27,28 @@ interface RuntimeProcessRecord {
   ready: boolean;
   acceptingReady: boolean;
   reportedFailure: string | null;
+  credentialRequestIds: Set<string>;
+}
+
+interface PendingProjectPath {
+  record: RuntimeProcessRecord;
+  timer: Timer;
+  resolve: (path: string) => void;
+  reject: (error: Error) => void;
+}
+
+interface PendingCredentialRequest {
+  record: RuntimeProcessRecord;
+  operation: RuntimeCredentialOperation;
+  timer: Timer;
+  controller: AbortController;
+}
+
+export interface RuntimeCredentialBroker {
+  resolve(secretReference: string, signal?: AbortSignal): Promise<string | null>;
+  status(secretReference: string, signal?: AbortSignal): Promise<BackendCredentialStatus>;
+  clear(secretReference: string, signal?: AbortSignal): Promise<boolean>;
+  forget(secretReference: string, signal?: AbortSignal): Promise<boolean>;
 }
 
 export type RuntimeSupervisorPhase =
@@ -52,6 +79,8 @@ export interface RuntimeSupervisorOptions {
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;
   forceKill?: (pid: number) => void;
+  credentialBroker?: RuntimeCredentialBroker;
+  credentialRequestTimeoutMs?: number;
   onStateChange?: (snapshot: RuntimeSupervisorSnapshot) => void;
 }
 
@@ -70,6 +99,8 @@ export class RuntimeSupervisor {
   private readonly setTimer: typeof setTimeout;
   private readonly clearTimer: typeof clearTimeout;
   private readonly forceKill: (pid: number) => void;
+  private readonly credentialBroker?: RuntimeCredentialBroker;
+  private readonly credentialRequestTimeoutMs: number;
   private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
   private phase: RuntimeSupervisorPhase = "idle";
@@ -84,6 +115,8 @@ export class RuntimeSupervisor {
   private shutdownTimer: Timer | null = null;
   private forceKillTimer: Timer | null = null;
   private shutdownDeadlineTimer: Timer | null = null;
+  private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
+  private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
   private stopPromise: Promise<void> | null = null;
   private resolveStop: (() => void) | null = null;
 
@@ -103,6 +136,11 @@ export class RuntimeSupervisor {
         // The utility process may have exited between the timeout and signal.
       }
     });
+    this.credentialBroker = options.credentialBroker;
+    this.credentialRequestTimeoutMs = boundedDuration(
+      options.credentialRequestTimeoutMs,
+      DEFAULT_CREDENTIAL_REQUEST_TIMEOUT_MS,
+    );
     this.onStateChange = options.onStateChange;
   }
 
@@ -117,6 +155,24 @@ export class RuntimeSupervisor {
     if (this.phase === "ready" && this.websocketUrl) return { websocketUrl: this.websocketUrl };
     if (this.lastError) throw new Error(`The local service is restarting. ${this.lastError}`);
     throw new Error("The local service is starting. Try again in a moment.");
+  }
+
+  resolveProjectPath(request: OpenProjectPathRequest): Promise<string> {
+    const record = this.current;
+    if (this.phase !== "ready" || !record?.ready) {
+      return Promise.reject(new Error(this.lastError
+        ? `The local service is restarting. ${this.lastError}`
+        : "The local service is starting. Try again in a moment."));
+    }
+    const requestId = randomUUID();
+    return new Promise<string>((resolve, reject) => {
+      const timer = this.setTimer(() => {
+        this.pendingProjectPaths.delete(requestId);
+        reject(new Error("The project path request timed out."));
+      }, DEFAULT_REQUEST_TIMEOUT_MS);
+      this.pendingProjectPaths.set(requestId, { record, timer, resolve, reject });
+      this.post(record.child, { type: "runtime.resolve-project-path", requestId, request });
+    });
   }
 
   snapshot(): RuntimeSupervisorSnapshot {
@@ -138,6 +194,8 @@ export class RuntimeSupervisor {
     this.clearTimerValue("startupTimer");
     this.clearTimerValue("stableTimer");
     this.websocketUrl = null;
+    this.rejectProjectPaths(this.current, "The local service is stopping.");
+    this.clearCredentialRequests(this.current);
 
     if (!this.current) {
       this.phase = "stopped";
@@ -196,6 +254,7 @@ export class RuntimeSupervisor {
       ready: false,
       acceptingReady: true,
       reportedFailure: null,
+      credentialRequestIds: new Set(),
     };
     this.current = record;
     child.once("spawn", () => {
@@ -233,6 +292,19 @@ export class RuntimeSupervisor {
       this.emitState();
       return;
     }
+    if (event.type === "runtime.credential-request") {
+      this.handleCredentialRequest(record, event);
+      return;
+    }
+    if (event.type === "runtime.project-path-resolved" || event.type === "runtime.project-path-rejected") {
+      const pending = this.pendingProjectPaths.get(event.requestId);
+      if (!pending || pending.record !== record) return;
+      this.pendingProjectPaths.delete(event.requestId);
+      this.clearTimer(pending.timer);
+      if (event.type === "runtime.project-path-resolved") pending.resolve(event.path);
+      else pending.reject(new Error(event.message));
+      return;
+    }
     if (event.type === "runtime.startup-failed") {
       record.reportedFailure = event.message;
       record.acceptingReady = false;
@@ -265,6 +337,8 @@ export class RuntimeSupervisor {
     if (this.current !== record) return;
     this.clearTimerValue("startupTimer");
     this.clearTimerValue("stableTimer");
+    this.rejectProjectPaths(record, "The local service stopped before the project path was resolved.");
+    this.clearCredentialRequests(record);
 
     if (!this.desiredRunning) {
       this.settleStopped(record);
@@ -306,6 +380,155 @@ export class RuntimeSupervisor {
     this.clearTimerValue("shutdownTimer");
     this.clearTimerValue("forceKillTimer");
     this.clearTimerValue("shutdownDeadlineTimer");
+  }
+
+  private rejectProjectPaths(record: RuntimeProcessRecord | null, message: string): void {
+    if (!record) return;
+    for (const [requestId, pending] of this.pendingProjectPaths) {
+      if (pending.record !== record) continue;
+      this.pendingProjectPaths.delete(requestId);
+      this.clearTimer(pending.timer);
+      pending.reject(new Error(message));
+    }
+  }
+
+  private handleCredentialRequest(
+    record: RuntimeProcessRecord,
+    event: Extract<
+      ReturnType<typeof parseRuntimeWorkerEvent>,
+      { type: "runtime.credential-request" }
+    >,
+  ): void {
+    if (!event) return;
+    if (!record.ready || !this.credentialBroker) {
+      this.post(record.child, {
+        type: "runtime.credential-result",
+        requestId: event.requestId,
+        operation: event.operation,
+        ok: false,
+        code: "unavailable",
+        message: "Secure credential storage is unavailable.",
+      });
+      return;
+    }
+    if (record.credentialRequestIds.has(event.requestId)) {
+      this.post(record.child, {
+        type: "runtime.credential-result",
+        requestId: event.requestId,
+        operation: event.operation,
+        ok: false,
+        code: "invalid",
+        message: "The credential request identifier was already used.",
+      });
+      return;
+    }
+    record.credentialRequestIds.add(event.requestId);
+    if (record.credentialRequestIds.size > 512) {
+      const oldest = record.credentialRequestIds.values().next().value;
+      if (typeof oldest === "string") record.credentialRequestIds.delete(oldest);
+    }
+    const controller = new AbortController();
+    const pending: PendingCredentialRequest = {
+      record,
+      operation: event.operation,
+      controller,
+      timer: this.setTimer(() => {
+        if (this.pendingCredentialRequests.get(event.requestId) !== pending) return;
+        this.pendingCredentialRequests.delete(event.requestId);
+        pending.controller.abort();
+        if (this.current !== record) return;
+        this.post(record.child, {
+          type: "runtime.credential-result",
+          requestId: event.requestId,
+          operation: event.operation,
+          ok: false,
+          code: "unavailable",
+          message: "Secure credential storage did not respond in time.",
+        });
+      }, this.credentialRequestTimeoutMs),
+    };
+    this.pendingCredentialRequests.set(event.requestId, pending);
+    const operation = Promise.resolve().then<string | null | boolean | BackendCredentialStatus>(() => event.operation === "resolve"
+      ? this.credentialBroker!.resolve(event.secretReference, controller.signal)
+      : event.operation === "status"
+        ? this.credentialBroker!.status(event.secretReference, controller.signal)
+        : event.operation === "clear"
+          ? this.credentialBroker!.clear(event.secretReference, controller.signal)
+          : this.credentialBroker!.forget(event.secretReference, controller.signal));
+    void operation.then(
+      (value) => {
+        if (this.pendingCredentialRequests.get(event.requestId) !== pending) return;
+        this.pendingCredentialRequests.delete(event.requestId);
+        this.clearTimer(pending.timer);
+        if (this.current !== record || !record.ready) return;
+        if (event.operation === "resolve") {
+          if (typeof value !== "string") {
+            this.post(record.child, {
+              type: "runtime.credential-result",
+              requestId: event.requestId,
+              operation: "resolve",
+              ok: false,
+              code: "not-found",
+              message: "The backend credential is unavailable.",
+            });
+            return;
+          }
+          this.post(record.child, {
+            type: "runtime.credential-result",
+            requestId: event.requestId,
+            operation: "resolve",
+            ok: true,
+            secret: value,
+          });
+          return;
+        }
+        if (event.operation === "status") {
+          const status = typeof value === "object" && value !== null
+            ? value as BackendCredentialStatus
+            : { hasSecret: false, credentialGeneration: null };
+          this.post(record.child, {
+              type: "runtime.credential-result",
+              requestId: event.requestId,
+              operation: "status",
+              ok: true,
+              hasSecret: status.hasSecret,
+              credentialGeneration: status.credentialGeneration,
+            });
+          return;
+        }
+        this.post(record.child, {
+              type: "runtime.credential-result",
+              requestId: event.requestId,
+              operation: event.operation,
+              ok: true,
+              removed: value === true,
+            });
+      },
+      () => {
+        if (this.pendingCredentialRequests.get(event.requestId) !== pending) return;
+        this.pendingCredentialRequests.delete(event.requestId);
+        this.clearTimer(pending.timer);
+        if (this.current !== record || !record.ready) return;
+        this.post(record.child, {
+          type: "runtime.credential-result",
+          requestId: event.requestId,
+          operation: event.operation,
+          ok: false,
+          code: "unavailable",
+          message: "Secure credential storage is unavailable.",
+        });
+      },
+    );
+  }
+
+  private clearCredentialRequests(record: RuntimeProcessRecord | null): void {
+    if (!record) return;
+    for (const [requestId, pending] of this.pendingCredentialRequests) {
+      if (pending.record !== record) continue;
+      this.pendingCredentialRequests.delete(requestId);
+      this.clearTimer(pending.timer);
+      pending.controller.abort();
+    }
   }
 
   private settleStopped(record: RuntimeProcessRecord): void {

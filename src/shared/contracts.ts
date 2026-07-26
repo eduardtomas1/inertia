@@ -1,5 +1,27 @@
 import { z } from "zod";
 
+import {
+  modelBackendProfileIdSchema,
+  modelSelectionSchema,
+  type ContinuationIdentity,
+  type HarnessId,
+  type ModelBackendProfileId,
+  type ModelSelection,
+} from "./model-routing";
+import {
+  modelBackendCredentialRevisionSchema,
+  modelBackendDefaultInputSchema,
+  modelBackendProfileDraftSchema,
+  modelBackendProfileProbeSchema,
+  modelBackendProfileUpdateSchema,
+  type ModelBackendDefault,
+  type ModelBackendProfileDetail,
+  type ModelBackendProfileView,
+} from "./backend-profile-settings";
+
+export * from "./model-routing";
+export * from "./backend-profile-settings";
+
 export const PROTOCOL_VERSION = 1 as const;
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -18,6 +40,60 @@ export type UsageDisplayMode = "expanded" | "compact" | "hidden";
 export type SidebarMode = "classic" | "activity";
 export type ProjectGroupingMode = "repository" | "repository-path" | "separate";
 export type ThreadAttentionKind = "approval" | "input";
+export type AttentionState = "unseen" | "seen" | "acknowledged" | "dismissed";
+
+export const AGENT_TURN_STATUSES = [
+  "queued",
+  "starting",
+  "running",
+  "waiting-for-approval",
+  "waiting-for-input",
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+] as const;
+
+export type AgentTurnStatus = (typeof AGENT_TURN_STATUSES)[number];
+export type AgentTurnTerminalStatus = Extract<
+  AgentTurnStatus,
+  "completed" | "failed" | "cancelled" | "interrupted"
+>;
+export type AgentTurnAssociation = "authoritative" | "inferred";
+
+export const agentTurnStatusSchema = z.enum(AGENT_TURN_STATUSES);
+export const agentTurnAssociationSchema = z.enum(["authoritative", "inferred"]);
+
+const AGENT_TURN_TERMINAL_STATUSES: ReadonlySet<AgentTurnStatus> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+]);
+
+const AGENT_TURN_STATUS_TRANSITIONS: Readonly<Record<AgentTurnStatus, ReadonlySet<AgentTurnStatus>>> = {
+  queued: new Set(["starting", "running", "completed", "failed", "cancelled", "interrupted"]),
+  starting: new Set(["running", "waiting-for-approval", "waiting-for-input", "completed", "failed", "cancelled", "interrupted"]),
+  running: new Set(["waiting-for-approval", "waiting-for-input", "completed", "failed", "cancelled", "interrupted"]),
+  "waiting-for-approval": new Set(["running", "waiting-for-input", "completed", "failed", "cancelled", "interrupted"]),
+  "waiting-for-input": new Set(["running", "waiting-for-approval", "completed", "failed", "cancelled", "interrupted"]),
+  completed: new Set(),
+  failed: new Set(),
+  cancelled: new Set(),
+  interrupted: new Set(),
+};
+
+export function isAgentTurnTerminalStatus(status: AgentTurnStatus): status is AgentTurnTerminalStatus {
+  return AGENT_TURN_TERMINAL_STATUSES.has(status);
+}
+
+/**
+ * Lifecycle writes may be replayed with the same state, but terminal states
+ * cannot be replaced by a different outcome.
+ */
+export function canTransitionAgentTurnStatus(from: AgentTurnStatus, to: AgentTurnStatus): boolean {
+  return from === to || AGENT_TURN_STATUS_TRANSITIONS[from].has(to);
+}
 
 export interface ProviderReasoningOption {
   value: string;
@@ -85,6 +161,61 @@ export interface ChatAttachment {
   size: number;
 }
 
+export interface TurnFileReference {
+  path: string;
+  lineStart?: number;
+  lineEnd?: number;
+}
+
+export interface TurnDiffSelectionContext {
+  path: string;
+  hunkHeader: string;
+  content: string;
+  selectedLineCount: number;
+  truncated?: boolean;
+}
+
+export interface TurnTerminalContext {
+  terminalId: string;
+  terminalLabel: string;
+  lineStart: number;
+  lineEnd: number;
+  content: string;
+}
+
+export interface TurnPreviewContext {
+  url: string;
+  title?: string;
+  selector?: string;
+  componentName?: string;
+  sourcePath?: string;
+  sourceLine?: number;
+  html?: string;
+  styles?: string;
+}
+
+export interface TurnReviewNoteContext {
+  noteId?: string;
+  path: string;
+  hunkId?: string;
+  lineIds?: string[];
+  body: string;
+  stale?: boolean;
+}
+
+/**
+ * Context selected by the user for provider execution. None of these fields
+ * are user-authored chat prose; renderers must keep them separate from the
+ * visible message content and present them as attachment metadata instead.
+ */
+export interface TurnRequestContext {
+  fileReferences?: TurnFileReference[];
+  diffSelections?: TurnDiffSelectionContext[];
+  terminalContexts?: TurnTerminalContext[];
+  previewContexts?: TurnPreviewContext[];
+  reviewNotes?: TurnReviewNoteContext[];
+}
+
 export interface AppSettings {
   theme: ThemePreference;
   compactSidebar: boolean;
@@ -133,6 +264,10 @@ export interface Conversation {
   projectId: string;
   title: string;
   providerId: ProviderId;
+  /** Canonical harness/backend/model configuration for the next turn. */
+  modelSelection: ModelSelection;
+  continuationIdentity: ContinuationIdentity | null;
+  /** @deprecated Read-only compatibility projection of modelSelection.modelId. */
   model: string;
   reasoningEffort: string;
   interactionMode: InteractionMode;
@@ -150,8 +285,39 @@ export interface Conversation {
   updatedAt: string;
 }
 
+/**
+ * Lightweight navigation metadata. Shells are safe to keep for every
+ * conversation because they never contain transcript, reasoning, plan, or
+ * artifact payloads.
+ */
+export interface ConversationLatestTurnSummary {
+  id: string;
+  runId: string;
+  status: AgentTurnStatus;
+  providerId: ProviderId;
+  harnessId: HarnessId;
+  backendProfileId: ModelBackendProfileId;
+  modelSelection: ModelSelection;
+  continuationIdentity: ContinuationIdentity;
+  model: string;
+  reasoningEffort: string;
+  requestedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  terminalReason: string | null;
+  updatedAt: string;
+}
+
+export type ConversationShell = Conversation & {
+  latestTurn: ConversationLatestTurnSummary | null;
+  pendingApproval: boolean;
+  pendingInput: boolean;
+};
+
 export interface ThreadUsageSnapshot {
   conversationId: string;
+  /** Null only for legacy snapshots that predate authoritative turn ownership. */
+  turnId: string | null;
   /** Current context occupancy. Null means the provider did not report it. */
   usedTokens: number | null;
   /** Processed-token total at the provider-defined scope below. */
@@ -169,10 +335,68 @@ export interface ThreadUsageSnapshot {
   updatedAt: string;
 }
 
+/** Point-in-time provider usage captured at a turn boundary. */
+export interface AgentTurnUsageSnapshot {
+  usedTokens: number | null;
+  totalProcessedTokens: number | null;
+  totalProcessedScope: ThreadUsageSnapshot["totalProcessedScope"];
+  maxTokens: number | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  cacheWriteInputTokens: number | null;
+  outputTokens: number | null;
+  reasoningOutputTokens: number | null;
+  compactsAutomatically: boolean | null;
+  capturedAt: string;
+}
+
+/**
+ * A durable, immutable unit of requested agent work. Conversation settings
+ * remain mutable, so every turn captures the exact execution configuration
+ * that was selected when the request was queued.
+ */
+export interface AgentTurn {
+  id: string;
+  conversationId: string;
+  runId: string;
+  userMessageId: string;
+  terminalAssistantMessageId: string | null;
+  providerId: ProviderId;
+  /** Canonical immutable execution selection captured when this turn queued. */
+  modelSelection: ModelSelection;
+  continuationIdentity: ContinuationIdentity;
+  /** @deprecated Read-only compatibility projections of modelSelection. */
+  harnessId: HarnessId;
+  backendProfileId: ModelBackendProfileId;
+  /** Exact provider model identifier used for this turn. */
+  model: string;
+  /** User-facing or provider alias requested before exact model resolution. */
+  modelAlias: string | null;
+  reasoningEffort: string;
+  interactionMode: InteractionMode;
+  accessMode: AccessMode;
+  providerSessionBefore: string | null;
+  providerSessionAfter: string | null;
+  requestedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  status: AgentTurnStatus;
+  terminalReason: string | null;
+  checkpointId: string | null;
+  usageAtStart: AgentTurnUsageSnapshot | null;
+  usageAtCompletion: AgentTurnUsageSnapshot | null;
+  configurationRevision: number;
+  association: AgentTurnAssociation;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AgentReasoning {
   id: string;
   conversationId: string;
   runId: string;
+  /** Null only for legacy reasoning records. */
+  turnId: string | null;
   content: string;
   status: "running" | "completed" | "failed";
   createdAt: string;
@@ -181,6 +405,8 @@ export interface AgentReasoning {
 export interface ChatMessage {
   id: string;
   conversationId: string;
+  /** System messages may be conversation-scoped; user/assistant turn messages are explicit. */
+  turnId: string | null;
   role: MessageRole;
   content: string;
   attachments: ChatAttachment[];
@@ -191,6 +417,8 @@ export interface AgentActivity {
   id: string;
   conversationId: string;
   runId: string;
+  /** Null only for legacy or conversation-scoped system activity. */
+  turnId: string | null;
   kind: "status" | "tool" | "command" | "file" | "reasoning" | "error";
   title: string;
   detail: string | null;
@@ -204,6 +432,7 @@ export interface AgentApprovalRequest {
   providerId: ProviderId;
   conversationId: string;
   runId: string;
+  turnId: string;
   kind: "command" | "file-change" | "permissions";
   title: string;
   detail: string | null;
@@ -244,6 +473,7 @@ export interface AgentInputRequest {
   providerId: ProviderId;
   conversationId: string;
   runId: string;
+  turnId: string;
   questions: AgentInputQuestion[];
   autoResolutionMs: number | null;
 }
@@ -256,6 +486,8 @@ export interface AgentPlanStep {
 export interface AgentPlan {
   conversationId: string;
   runId: string;
+  /** Null only for legacy plans. */
+  turnId: string | null;
   explanation: string | null;
   steps: AgentPlanStep[];
 }
@@ -263,6 +495,8 @@ export interface AgentPlan {
 export interface CheckpointSummary {
   id: string;
   conversationId: string;
+  /** Null only for legacy or manually-created conversation checkpoints. */
+  turnId: string | null;
   ref: string;
   label: string;
   turnIndex: number;
@@ -272,9 +506,39 @@ export interface CheckpointSummary {
   createdAt: string;
 }
 
+/**
+ * Identifies one runtime-process projection and the latest authoritative
+ * mutation incorporated into it. Runtime generations are deliberately opaque:
+ * clients may compare them for equality but must not derive ordering from them.
+ */
+export interface RuntimeSyncCursor {
+  runtimeGeneration: string;
+  latestSequence: number;
+}
+
 export interface AppSnapshot {
   projects: Project[];
-  conversations: Conversation[];
+  conversations: ConversationShell[];
+  runs: WorkspaceRun[];
+  providers: ProviderInfo[];
+  /** Safe backend configuration only; credential values and references are forbidden. */
+  backendProfiles?: ModelBackendProfileView[];
+  backendDefaults?: ModelBackendDefault[];
+  settings: AppSettings;
+  activeProjectId: string | null;
+  activeConversationId: string | null;
+  /** Present on authoritative runtime snapshots; optional for legacy fixtures. */
+  sync?: RuntimeSyncCursor;
+}
+
+/**
+ * Heavy state for one conversation. This is loaded independently from the
+ * app shell so transcript growth does not inflate navigation snapshots.
+ */
+export interface ConversationDetail {
+  conversation: Conversation;
+  agentTurns: AgentTurn[];
+  turnGitArtifacts: TurnGitArtifact[];
   messages: ChatMessage[];
   activities: AgentActivity[];
   reasonings: AgentReasoning[];
@@ -284,12 +548,17 @@ export interface AppSnapshot {
   reviewSummaries: DiffReviewSummary[];
   reviewStates: DiffReviewState[];
   reviewNotes: DiffReviewNote[];
-  runs: WorkspaceRun[];
-  providers: ProviderInfo[];
-  settings: AppSettings;
-  activeProjectId: string | null;
-  activeConversationId: string | null;
 }
+
+export type ConversationDetailResult =
+  | { kind: "conversation.detail"; conversationId: string; state: "ready"; detail: ConversationDetail; sync?: RuntimeSyncCursor }
+  | { kind: "conversation.detail"; conversationId: string; state: "missing"; sync?: RuntimeSyncCursor }
+  | { kind: "conversation.detail"; conversationId: string; state: "deleted"; sync?: RuntimeSyncCursor }
+  | { kind: "conversation.detail"; conversationId: string; state: "failed"; message: string; sync?: RuntimeSyncCursor };
+
+export type ConversationDetailViewState =
+  | { conversationId: string; state: "loading" }
+  | ConversationDetailResult;
 
 export interface ChangedFile {
   path: string;
@@ -305,6 +574,8 @@ export interface ChangedFile {
 
 export interface GitStatusSnapshot {
   isRepository: boolean;
+  /** Canonical Git toplevel actually inspected for this status snapshot. */
+  root: string | null;
   branch: string | null;
   upstream: string | null;
   ahead: number;
@@ -319,6 +590,51 @@ export interface GitDiffSnapshot {
   patch: string;
   truncated: boolean;
   files: ChangedFile[];
+}
+
+export type TurnGitArtifactStatus = "pending" | "ready" | "partial" | "unavailable" | "failed";
+export type TurnGitArtifactCompleteness = "complete" | "truncated" | "partial" | "unavailable";
+export type TurnGitPatchState = "none" | "available" | "truncated" | "expired" | "failed";
+
+export interface TurnGitArtifactFile extends ChangedFile {
+  previousPath: string | null;
+  binary: boolean;
+}
+
+/**
+ * Immutable historical Git metadata captured for one authoritative agent turn.
+ * Raw patches live in bounded content-addressed storage and are fetched only
+ * through an explicit request; ordinary snapshots contain metadata only.
+ */
+export interface TurnGitArtifact {
+  id: string;
+  turnId: string;
+  conversationId: string;
+  runId: string;
+  repositoryIdentity: string | null;
+  worktreeIdentity: string | null;
+  branch: string | null;
+  beforeCheckpointId: string | null;
+  beforeFingerprint: string | null;
+  afterFingerprint: string | null;
+  files: TurnGitArtifactFile[];
+  insertions: number;
+  deletions: number;
+  status: TurnGitArtifactStatus;
+  completeness: TurnGitArtifactCompleteness;
+  patchState: TurnGitPatchState;
+  patchDigest: string | null;
+  capturedAt: string | null;
+  terminalAssistantMessageId: string | null;
+  failureReason: string | null;
+}
+
+export interface TurnGitDiffSnapshot extends GitDiffSnapshot {
+  artifactId: string;
+  turnId: string;
+  title: string;
+  completeness: TurnGitArtifactCompleteness;
+  patchState: TurnGitPatchState;
 }
 
 export interface DiffLine {
@@ -387,18 +703,42 @@ export interface DiffReviewSummary {
   conversationId: string;
   fingerprint: string;
   providerId: ProviderId;
+  /** Null only when a pre-v0.0.7 row did not record execution attribution. */
+  harnessId: string | null;
+  /** Null only when a pre-v0.0.7 row did not record execution attribution. */
+  backendProfileId: string | null;
+  /** Exact provider model ID, or null when the provider did not expose it. */
+  model: string | null;
   overall: string;
-  classifications?: DiffReviewClassificationHint[];
+  classifications: DiffReviewClassificationHint[];
   files: Array<{
     path: string;
     summary: string;
-    classifications?: DiffReviewClassificationHint[];
+    classifications: DiffReviewClassificationHint[];
     hunks: Array<{
       hunkId: string;
       summary: string;
-      classifications?: DiffReviewClassificationHint[];
+      classifications: DiffReviewClassificationHint[];
     }>;
   }>;
+  generatedAt: string;
+}
+
+/**
+ * Ephemeral result of an isolated read-only question about one exact diff
+ * selection. It is intentionally not part of the conversation transcript or
+ * AgentTurn ledger.
+ */
+export interface DiffSelectionReviewAnswer {
+  conversationId: string;
+  fingerprint: string;
+  filePath: string;
+  hunkId: string;
+  selectedLineCount: number;
+  question: string;
+  answer: string;
+  providerId: ProviderId;
+  modelSelection: ModelSelection;
   generatedAt: string;
 }
 
@@ -452,6 +792,8 @@ export interface WorkspaceRun {
   label: string;
   detail: string | null;
   status: "running" | "waiting" | "succeeded" | "failed" | "cancelled";
+  /** Durable user disposition; independent from the run lifecycle and thread settlement. */
+  attentionState: AttentionState;
   /** Ephemeral runtime capability. False after a restart or when no owned process exists. */
   canStop: boolean;
   port: number | null;
@@ -499,6 +841,47 @@ const attachmentSchema = z
     path: z.string().min(1).max(4096),
     mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
     size: z.number().int().min(1).max(10 * 1024 * 1024),
+  })
+  .strict();
+const turnRequestContextSchema = z
+  .object({
+    fileReferences: z.array(z.object({
+      path: z.string().trim().min(1).max(4096),
+      lineStart: z.number().int().min(1).max(10_000_000).optional(),
+      lineEnd: z.number().int().min(1).max(10_000_000).optional(),
+    }).strict()).max(16).optional(),
+    diffSelections: z.array(z.object({
+      path: z.string().trim().min(1).max(4096),
+      hunkHeader: z.string().trim().min(1).max(2_000),
+      content: z.string().min(1).max(64 * 1024),
+      selectedLineCount: z.number().int().min(1).max(500),
+      truncated: z.boolean().optional(),
+    }).strict()).max(8).optional(),
+    terminalContexts: z.array(z.object({
+      terminalId: z.string().trim().min(1).max(200),
+      terminalLabel: z.string().trim().min(1).max(200),
+      lineStart: z.number().int().min(1).max(10_000_000),
+      lineEnd: z.number().int().min(1).max(10_000_000),
+      content: z.string().min(1).max(64 * 1024),
+    }).strict()).max(8).optional(),
+    previewContexts: z.array(z.object({
+      url: z.string().trim().min(1).max(8_192),
+      title: z.string().trim().min(1).max(1_000).optional(),
+      selector: z.string().trim().min(1).max(4_000).optional(),
+      componentName: z.string().trim().min(1).max(500).optional(),
+      sourcePath: z.string().trim().min(1).max(4_096).optional(),
+      sourceLine: z.number().int().min(1).max(10_000_000).optional(),
+      html: z.string().max(16 * 1024).optional(),
+      styles: z.string().max(16 * 1024).optional(),
+    }).strict()).max(8).optional(),
+    reviewNotes: z.array(z.object({
+      noteId: z.string().uuid().optional(),
+      path: z.string().trim().min(1).max(4_096),
+      hunkId: z.string().trim().min(1).max(128).optional(),
+      lineIds: z.array(z.string().min(1).max(160)).max(500).optional(),
+      body: z.string().trim().min(1).max(8_000),
+      stale: z.boolean().optional(),
+    }).strict()).max(16).optional(),
   })
   .strict();
 const diffReviewSelectionSchema = z.object({
@@ -573,6 +956,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
           projectId: z.string().uuid(),
           title: z.string().trim().min(1).max(120),
           providerId: providerIdSchema.optional(),
+          modelSelection: modelSelectionSchema.optional(),
           model: z.string().trim().max(160).optional(),
           reasoningEffort: z.string().trim().max(40).optional(),
           interactionMode: interactionModeSchema.optional(),
@@ -594,12 +978,20 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...requestBase,
+      type: z.literal("conversation.detail.load"),
+      payload: z.object({ conversationId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("conversation.update"),
       payload: z
         .object({
           conversationId: z.string().uuid(),
           title: z.string().trim().min(1).max(120).optional(),
           providerId: providerIdSchema.optional(),
+          modelSelection: modelSelectionSchema.optional(),
           model: z.string().trim().max(160).optional(),
           reasoningEffort: z.string().trim().max(40).optional(),
           interactionMode: interactionModeSchema.optional(),
@@ -624,6 +1016,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
           conversationId: z.string().uuid(),
           content: z.string().trim().min(1).max(20_000),
           attachments: z.array(attachmentSchema).max(8).default([]),
+          context: turnRequestContextSchema.optional(),
         })
         .strict(),
     })
@@ -646,6 +1039,13 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     .object({
       ...requestBase,
       type: z.literal("activity.dismiss"),
+      payload: z.object({ runId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.enum(["activity.mark-seen", "activity.acknowledge"]),
       payload: z.object({ runId: z.string().uuid() }).strict(),
     })
     .strict(),
@@ -711,6 +1111,65 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...requestBase,
+      type: z.literal("backend.profile.get"),
+      payload: z.object({ profileId: modelBackendProfileIdSchema }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("backend.profile.create"),
+      payload: modelBackendProfileDraftSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("backend.profile.update"),
+      payload: z.object({
+        profileId: modelBackendProfileIdSchema,
+        update: modelBackendProfileUpdateSchema,
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("backend.profile.credential-revision"),
+      payload: modelBackendCredentialRevisionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("backend.profile.probe"),
+      payload: modelBackendProfileProbeSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("backend.profile.delete"),
+      payload: z.object({ profileId: modelBackendProfileIdSchema }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("backend.default.set"),
+      payload: modelBackendDefaultInputSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("backend.default.clear"),
+      payload: z.object({ projectId: z.string().uuid().nullable() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("git.refresh"),
       payload: z.object({ projectId: z.string().uuid(), conversationId: z.string().uuid().optional() }).strict(),
     })
@@ -722,6 +1181,31 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       payload: z
         .object({ projectId: z.string().uuid(), conversationId: z.string().uuid().optional(), path: z.string().max(512).optional(), ignoreWhitespace: z.boolean().optional() })
         .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.turn.diff"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid(),
+        turnId: z.string().min(1).max(200),
+        path: z.string().min(1).max(4096).optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.turn.compare"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid(),
+        earlierTurnId: z.string().min(1).max(200),
+        laterTurnId: z.string().min(1).max(200),
+        path: z.string().min(1).max(4096).optional(),
+      }).strict(),
     })
     .strict(),
   z
@@ -1002,8 +1486,49 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
 
+export type RuntimeEventScope =
+  | { kind: "shell" }
+  | { kind: "conversation-detail"; conversationId: string };
+
+/**
+ * Renderer-safe authoritative mutations. The runtime transports these inside
+ * `runtime.event` frames so reconnect replay and live delivery share the same
+ * sequence semantics. They remain valid listener events after the connection
+ * layer unwraps a frame.
+ */
+export type RuntimeMutationEvent =
+  | { type: "snapshot.updated"; snapshot: AppSnapshot }
+  | { type: "agent.started"; conversationId: string; runId: string; turnId: string }
+  | { type: "agent.text"; conversationId: string; runId: string; turnId: string; text: string }
+  | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string }
+  | { type: "agent.usage"; usage: ThreadUsageSnapshot }
+  | { type: "agent.activity"; activity: AgentActivity }
+  | { type: "agent.approval.requested"; request: AgentApprovalRequest }
+  | { type: "agent.approval.resolved"; conversationId: string; runId: string; turnId: string; requestId: string; decision: "approve" | "deny" | "cancel" | "cancelled" }
+  | { type: "agent.input.requested"; request: AgentInputRequest }
+  | { type: "agent.input.resolved"; conversationId: string; runId: string; turnId: string; requestId: string }
+  | { type: "agent.plan.updated"; plan: AgentPlan }
+  | { type: "agent.completed"; conversationId: string; runId: string; turnId: string }
+  | { type: "agent.failed"; conversationId: string; runId: string; turnId: string; message: string };
+
+export type RuntimeSequencedFrame =
+  | {
+      type: "runtime.event";
+      sync: RuntimeSyncCursor;
+      scope: RuntimeEventScope;
+      event: RuntimeMutationEvent;
+    }
+  | {
+      /** Advances a filtered subscription without exposing another detail. */
+      type: "runtime.cursor";
+      sync: RuntimeSyncCursor;
+    };
+
 export type ServerEvent =
-  | { type: "server.welcome"; protocolVersion: typeof PROTOCOL_VERSION; snapshot: AppSnapshot }
+  | { type: "server.welcome"; protocolVersion: typeof PROTOCOL_VERSION; snapshot: AppSnapshot; sync?: RuntimeSyncCursor }
+  | { type: "runtime.resumed"; protocolVersion: typeof PROTOCOL_VERSION; sync: RuntimeSyncCursor }
+  | RuntimeSequencedFrame
+  | { type: "runtime.sync.completed"; sync: RuntimeSyncCursor }
   | { type: "request.ok"; requestId: string }
   | { type: "request.error"; requestId: string; message: string }
   | {
@@ -1012,30 +1537,24 @@ export type ServerEvent =
       result:
         | { kind: "git.status"; status: GitStatusSnapshot }
         | { kind: "git.diff"; diff: GitDiffSnapshot }
+        | { kind: "git.turn.diff"; diff: TurnGitDiffSnapshot }
         | { kind: "git.reversal.plan"; plan: DiffReversalPlan }
         | { kind: "git.reversal"; diff: GitDiffSnapshot; operation: DiffReversalOperation }
+        | { kind: "review.selection.answer"; answer: DiffSelectionReviewAnswer }
         | { kind: "review.summary"; summary: DiffReviewSummary }
         | { kind: "git.branches"; branches: GitBranchInfo[] }
         | { kind: "workspace.entries"; entries: WorkspaceEntry[]; truncated: boolean }
         | { kind: "workspace.file"; file: WorkspaceFilePreview }
         | { kind: "project.actions"; actions: ProjectAction[] }
+        | { kind: "backend.profile"; profile: ModelBackendProfileDetail }
+        | { kind: "backend.profile.probe"; profile: ModelBackendProfileDetail }
+        | { kind: "backend.default"; value: ModelBackendDefault | null }
         | { kind: "worktree.created"; path: string; branch: string }
         | { kind: "git.action"; message: string }
-        | { kind: "external.url"; url: string; label: string };
+        | { kind: "external.url"; url: string; label: string }
+        | ConversationDetailResult;
     }
-  | { type: "snapshot.updated"; snapshot: AppSnapshot }
-  | { type: "agent.started"; conversationId: string; runId: string }
-  | { type: "agent.text"; conversationId: string; runId: string; text: string }
-  | { type: "agent.reasoning"; conversationId: string; runId: string; text: string }
-  | { type: "agent.usage"; usage: ThreadUsageSnapshot }
-  | { type: "agent.activity"; activity: AgentActivity }
-  | { type: "agent.approval.requested"; request: AgentApprovalRequest }
-  | { type: "agent.approval.resolved"; conversationId: string; requestId: string; decision: "approve" | "deny" | "cancel" | "cancelled" }
-  | { type: "agent.input.requested"; request: AgentInputRequest }
-  | { type: "agent.input.resolved"; conversationId: string; requestId: string }
-  | { type: "agent.plan.updated"; plan: AgentPlan }
-  | { type: "agent.completed"; conversationId: string; runId: string }
-  | { type: "agent.failed"; conversationId: string; runId: string; message: string }
+  | RuntimeMutationEvent
   | { type: "terminal.created"; requestId: string; terminalId: string }
   | { type: "terminal.output"; terminalId: string; data: string }
   | { type: "terminal.exit"; terminalId: string; exitCode: number };

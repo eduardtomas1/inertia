@@ -45,6 +45,596 @@ describe("RuntimeStore conversation lifecycle", () => {
     reopened.close();
   });
 
+  it("keeps navigation shells bounded and loads heavy records for only one conversation", async () => {
+    const { store } = await createStore();
+    const first = store.snapshot().conversations[0]!;
+    const second = store.createConversation(first.projectId, "Second chat");
+    const shellSizeBefore = JSON.stringify(store.shellSnapshot()).length;
+    const messageCount = 100;
+    const payload = "x".repeat(4_096);
+
+    for (let index = 0; index < messageCount; index += 1) {
+      store.createMessage(first.id, `first:${index}:${payload}`);
+      store.createMessage(second.id, `second:${index}:${payload}`);
+    }
+
+    const shell = store.shellSnapshot();
+    const shellSizeAfter = JSON.stringify(shell).length;
+    expect(shellSizeAfter).toBe(shellSizeBefore);
+    expect(shell).not.toHaveProperty("messages");
+    expect(shell.conversations).toHaveLength(2);
+    expect(shell.conversations.every(({ latestTurn }) => latestTurn === null)).toBe(true);
+
+    const firstDetail = store.conversationDetail(first.id);
+    expect(firstDetail?.conversation.id).toBe(first.id);
+    expect(firstDetail?.messages).toHaveLength(messageCount);
+    expect(firstDetail?.messages.every(({ conversationId }) => conversationId === first.id)).toBe(true);
+    expect(firstDetail?.messages.some(({ content }) => content.startsWith("second:"))).toBe(false);
+    expect(JSON.stringify(firstDetail).length).toBeGreaterThan(shellSizeAfter * 100);
+    expect(store.conversationDetail("missing-conversation")).toBeNull();
+    store.close();
+  });
+
+  it("persists authoritative turns with an immutable execution configuration and boundary usage", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const userMessage = store.createMessage(conversation.id, "Implement the durable turn model.");
+    const requestedAt = userMessage.createdAt;
+    const at = (offsetMs: number): string =>
+      new Date(Date.parse(requestedAt) + offsetMs).toISOString();
+    const usageAtStart = {
+      usedTokens: 120,
+      totalProcessedTokens: 1_000,
+      totalProcessedScope: "thread" as const,
+      maxTokens: 200_000,
+      inputTokens: 100,
+      cachedInputTokens: 20,
+      cacheWriteInputTokens: 0,
+      outputTokens: 0,
+      reasoningOutputTokens: 0,
+      compactsAutomatically: true,
+      capturedAt: requestedAt,
+    };
+    const turn = store.createAgentTurn({
+      id: "turn-authoritative-1",
+      conversationId: conversation.id,
+      runId: "run-authoritative-1",
+      userMessageId: userMessage.id,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "codex-local",
+      model: "gpt-5.6",
+      modelAlias: "latest",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      providerSessionBefore: "session-before",
+      requestedAt,
+      usageAtStart,
+      configurationRevision: 7,
+      association: "authoritative",
+    });
+    expect(turn).toMatchObject({
+      status: "queued",
+      startedAt: null,
+      completedAt: null,
+      terminalAssistantMessageId: null,
+      providerSessionBefore: "session-before",
+      providerSessionAfter: null,
+      usageAtStart,
+      usageAtCompletion: null,
+      association: "authoritative",
+    });
+
+    store.updateAgentTurnLifecycle(turn.id, { status: "starting", updatedAt: at(1_000) });
+    store.updateAgentTurnLifecycle(turn.id, { status: "running", updatedAt: at(2_000) });
+    store.updateAgentTurnLifecycle(turn.id, { status: "waiting-for-approval", updatedAt: at(3_000) });
+    store.updateAgentTurnLifecycle(turn.id, { status: "running", updatedAt: at(4_000) });
+    store.updateAgentTurnLifecycle(turn.id, { status: "waiting-for-input", updatedAt: at(5_000) });
+    const assistantMessage = store.createMessage(conversation.id, "The durable turn model is ready.", "assistant");
+    const usageAtCompletion = {
+      ...usageAtStart,
+      usedTokens: 180,
+      totalProcessedTokens: 1_450,
+      inputTokens: 350,
+      outputTokens: 80,
+      reasoningOutputTokens: 20,
+      capturedAt: at(6_000),
+    };
+    const completed = store.updateAgentTurnLifecycle(turn.id, {
+      status: "completed",
+      terminalAssistantMessageId: assistantMessage.id,
+      providerSessionAfter: "session-after",
+      terminalReason: "provider-completed",
+      checkpointId: "checkpoint-1",
+      usageAtCompletion,
+      completedAt: at(6_000),
+      updatedAt: at(6_000),
+    });
+    expect(completed).toMatchObject({
+      status: "completed",
+      requestedAt,
+      startedAt: at(1_000),
+      completedAt: at(6_000),
+      terminalAssistantMessageId: assistantMessage.id,
+      providerSessionAfter: "session-after",
+      checkpointId: "checkpoint-1",
+      usageAtCompletion,
+    });
+    expect(store.shellSnapshot().conversations.find(({ id }) => id === conversation.id)?.latestTurn)
+      .toEqual(expect.objectContaining({
+        id: turn.id,
+        runId: turn.runId,
+        status: "completed",
+        model: "gpt-5.6",
+        reasoningEffort: "high",
+      }));
+    expect(store.shellSnapshot().conversations[0]?.latestTurn)
+      .not.toHaveProperty("terminalAssistantMessageId");
+
+    store.updateConversation(conversation.id, {
+      model: "a-later-conversation-default",
+      reasoningEffort: "low",
+      interactionMode: "plan",
+      accessMode: "full",
+    });
+    expect(store.agentTurn(turn.id)).toMatchObject({
+      model: "gpt-5.6",
+      modelAlias: "latest",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 7,
+      requestedAt,
+    });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.agentTurnForRun("run-authoritative-1")).toEqual(
+      expect.objectContaining({ id: turn.id, conversationId: conversation.id }),
+    );
+    expect(reopened.agentTurnForRun("missing-run")).toBeNull();
+    expect(reopened.agentTurnsForConversation(conversation.id)).toEqual([
+      expect.objectContaining({
+        id: turn.id,
+        runId: "run-authoritative-1",
+        userMessageId: userMessage.id,
+        terminalAssistantMessageId: assistantMessage.id,
+        status: "completed",
+        requestedAt,
+        startedAt: at(1_000),
+        completedAt: at(6_000),
+        harnessId: "codex-app-server",
+        backendProfileId: "codex-local",
+        providerSessionBefore: "session-before",
+        providerSessionAfter: "session-after",
+        association: "authoritative",
+        usageAtStart,
+        usageAtCompletion,
+      }),
+    ]);
+    expect(reopened.snapshot().agentTurns).toEqual([
+      expect.objectContaining({ id: turn.id, status: "completed" }),
+    ]);
+    reopened.close();
+  });
+
+  it("guards turn lifecycle order, write-once boundaries, and terminal metadata", async () => {
+    const { store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const userMessage = store.createMessage(conversation.id, "Exercise lifecycle guards.");
+    const requestedAt = userMessage.createdAt;
+    const at = (offsetMs: number): string =>
+      new Date(Date.parse(requestedAt) + offsetMs).toISOString();
+    const turn = store.createAgentTurn({
+      conversationId: conversation.id,
+      runId: "run-lifecycle-guards",
+      userMessageId: userMessage.id,
+      providerId: "claude",
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "claude-local",
+      model: "claude-opus",
+      reasoningEffort: "",
+      interactionMode: "plan",
+      accessMode: "auto-edit",
+      requestedAt,
+      configurationRevision: 0,
+      association: "inferred",
+    });
+
+    expect(() => store.updateAgentTurnLifecycle(turn.id, {
+      status: "running",
+      terminalReason: "too early",
+      updatedAt: at(1_000),
+    })).toThrow(/terminal turn metadata/iu);
+    expect(() => store.updateAgentTurnLifecycle(turn.id, {
+      status: "starting",
+      startedAt: at(-1_000),
+      updatedAt: at(1_000),
+    })).toThrow(/precede its request/iu);
+
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "starting",
+      startedAt: at(1_000),
+      updatedAt: at(1_000),
+    });
+    expect(() => store.updateAgentTurnLifecycle(turn.id, {
+      status: "queued",
+      updatedAt: at(2_000),
+    })).toThrow(/cannot transition/iu);
+    const failed = store.updateAgentTurnLifecycle(turn.id, {
+      status: "failed",
+      terminalReason: "provider-exit",
+      completedAt: at(3_000),
+      updatedAt: at(3_000),
+    });
+    expect(failed).toMatchObject({
+      status: "failed",
+      startedAt: at(1_000),
+      completedAt: at(3_000),
+      terminalReason: "provider-exit",
+    });
+    expect(() => store.updateAgentTurnLifecycle(turn.id, {
+      status: "running",
+      updatedAt: at(4_000),
+    })).toThrow(/cannot transition/iu);
+    expect(() => store.updateAgentTurnLifecycle(turn.id, {
+      status: "failed",
+      terminalReason: "different-reason",
+      updatedAt: at(4_000),
+    })).toThrow(/write-once/iu);
+    expect(() => store.createAgentTurn({
+      conversationId: conversation.id,
+      runId: "run-invalid-revision",
+      userMessageId: userMessage.id,
+      providerId: "claude",
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "claude-local",
+      model: "claude-opus",
+      reasoningEffort: "",
+      interactionMode: "build",
+      accessMode: "full",
+      configurationRevision: -1,
+      association: "authoritative",
+    })).toThrow(/configuration revision/iu);
+    store.close();
+  });
+
+  it("associates every persisted turn-owned record and permits multiple assistant messages in one turn", async () => {
+    const { store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const userMessage = store.createMessage(conversation.id, "Inspect, implement, and verify.");
+    const turn = store.createAgentTurn({
+      id: "turn-owned-records",
+      conversationId: conversation.id,
+      runId: "run-owned-records",
+      userMessageId: userMessage.id,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "legacy:codex:codex-app-server",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    const assistantOne = store.createMessage(conversation.id, "First segment.", "assistant", [], turn.id);
+    const assistantTwo = store.createMessage(conversation.id, "Second segment.", "assistant", [], turn.id);
+    const activity = store.addActivity({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      kind: "command",
+      title: "Run focused tests",
+      detail: null,
+      status: "completed",
+    });
+    const reasoning = store.createReasoning(conversation.id, turn.runId, turn.id);
+    store.upsertAgentPlan({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      explanation: "Keep each record on the emitter turn.",
+      steps: [{ step: "Verify ownership", status: "completed" }],
+    });
+    const usage = store.upsertUsage({
+      conversationId: conversation.id,
+      turnId: turn.id,
+      usedTokens: 40,
+      totalProcessedTokens: 60,
+      totalProcessedScope: "run",
+      maxTokens: 1_000,
+      inputTokens: 30,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      outputTokens: 10,
+      reasoningOutputTokens: 2,
+      compactsAutomatically: false,
+    });
+    const checkpoint = store.addCheckpoint({
+      conversationId: conversation.id,
+      turnId: turn.id,
+      ref: "refs/inertia/checkpoints/owned",
+      label: "Before owned turn",
+      turnIndex: 99,
+      filesChanged: 1,
+      insertions: 2,
+      deletions: 0,
+    });
+
+    const snapshot = store.snapshot();
+    expect(snapshot.messages.filter(({ id }) => [userMessage.id, assistantOne.id, assistantTwo.id].includes(id)))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: userMessage.id, turnId: turn.id }),
+        expect.objectContaining({ id: assistantOne.id, turnId: turn.id }),
+        expect.objectContaining({ id: assistantTwo.id, turnId: turn.id }),
+      ]));
+    expect(snapshot.activities).toContainEqual(expect.objectContaining({ id: activity.id, turnId: turn.id }));
+    expect(snapshot.reasonings).toContainEqual(expect.objectContaining({ id: reasoning.id, turnId: turn.id }));
+    expect(snapshot.plans).toContainEqual(expect.objectContaining({ runId: turn.runId, turnId: turn.id }));
+    expect(usage.turnId).toBe(turn.id);
+    expect(checkpoint.turnId).toBe(turn.id);
+
+    const other = store.createConversation(conversation.projectId, "Other conversation");
+    expect(() => store.addActivity({
+      conversationId: other.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      kind: "error",
+      title: "Wrong conversation",
+      detail: null,
+      status: "failed",
+    })).toThrow(/identities do not match/iu);
+    store.close();
+  });
+
+  it("keeps the latest native plan for each authoritative turn", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const firstUser = store.createMessage(conversation.id, "Plan the first change.");
+    const firstTurn = store.createAgentTurn({
+      id: "turn-plan-first",
+      conversationId: conversation.id,
+      runId: "run-plan-first",
+      userMessageId: firstUser.id,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "codex-local",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "plan",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    store.upsertAgentPlan({
+      conversationId: conversation.id,
+      runId: firstTurn.runId,
+      turnId: firstTurn.id,
+      explanation: "Initial first-turn plan.",
+      steps: [{ step: "Inspect", status: "inProgress" }],
+    });
+    store.upsertAgentPlan({
+      conversationId: conversation.id,
+      runId: firstTurn.runId,
+      turnId: firstTurn.id,
+      explanation: "Updated first-turn plan.",
+      steps: [{ step: "Inspect", status: "completed" }],
+    });
+
+    const secondUser = store.createMessage(conversation.id, "Plan the second change.");
+    const secondTurn = store.createAgentTurn({
+      id: "turn-plan-second",
+      conversationId: conversation.id,
+      runId: "run-plan-second",
+      userMessageId: secondUser.id,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "codex-local",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "plan",
+      accessMode: "supervised",
+      configurationRevision: 1,
+      association: "authoritative",
+    });
+    store.upsertAgentPlan({
+      conversationId: conversation.id,
+      runId: secondTurn.runId,
+      turnId: secondTurn.id,
+      explanation: "Second-turn plan.",
+      steps: [{ step: "Verify", status: "pending" }],
+    });
+
+    const otherConversation = store.createConversation(conversation.projectId, "Other plans");
+    expect(() => store.upsertAgentPlan({
+      conversationId: conversation.id,
+      runId: secondTurn.runId,
+      turnId: firstTurn.id,
+      explanation: null,
+      steps: [],
+    })).toThrow(/identities do not match/iu);
+    expect(() => store.upsertAgentPlan({
+      conversationId: otherConversation.id,
+      runId: firstTurn.runId,
+      turnId: firstTurn.id,
+      explanation: null,
+      steps: [],
+    })).toThrow(/identities do not match/iu);
+    expect(() => store.upsertAgentPlan({
+      conversationId: conversation.id,
+      runId: "missing-plan-run",
+      turnId: "missing-plan-turn",
+      explanation: null,
+      steps: [],
+    })).toThrow(/turn not found/iu);
+
+    expect(store.snapshot().plans.filter(({ conversationId }) =>
+      conversationId === conversation.id,
+    )).toEqual([
+      {
+        conversationId: conversation.id,
+        runId: firstTurn.runId,
+        turnId: firstTurn.id,
+        explanation: "Updated first-turn plan.",
+        steps: [{ step: "Inspect", status: "completed" }],
+      },
+      {
+        conversationId: conversation.id,
+        runId: secondTurn.runId,
+        turnId: secondTurn.id,
+        explanation: "Second-turn plan.",
+        steps: [{ step: "Verify", status: "pending" }],
+      },
+    ]);
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.snapshot().plans.filter(({ conversationId }) =>
+      conversationId === conversation.id,
+    )).toEqual([
+      expect.objectContaining({
+        runId: firstTurn.runId,
+        turnId: firstTurn.id,
+        explanation: "Updated first-turn plan.",
+      }),
+      expect.objectContaining({
+        runId: secondTurn.runId,
+        turnId: secondTurn.id,
+        explanation: "Second-turn plan.",
+      }),
+    ]);
+    reopened.close();
+  });
+
+  it("recovers only the explicitly interrupted turn instead of rewriting older turn records", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const oldUser = store.createMessage(conversation.id, "Older work");
+    const oldTurn = store.createAgentTurn({
+      id: "turn-before-interruption",
+      conversationId: conversation.id,
+      runId: "run-before-interruption",
+      userMessageId: oldUser.id,
+      providerId: "claude",
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "legacy:claude:claude-agent-sdk",
+      model: "claude-test",
+      reasoningEffort: "",
+      interactionMode: "build",
+      accessMode: "auto-edit",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    const oldActivity = store.addActivity({
+      conversationId: conversation.id,
+      runId: oldTurn.runId,
+      turnId: oldTurn.id,
+      kind: "command",
+      title: "Historical activity",
+      detail: null,
+      status: "running",
+    });
+    store.updateAgentTurnLifecycle(oldTurn.id, {
+      status: "completed",
+      updatedAt: new Date(Date.parse(oldTurn.requestedAt) + 1_000).toISOString(),
+    });
+
+    const currentUser = store.createMessage(conversation.id, "Current work");
+    const currentTurn = store.createAgentTurn({
+      id: "turn-interrupted",
+      conversationId: conversation.id,
+      runId: "run-interrupted",
+      userMessageId: currentUser.id,
+      providerId: "claude",
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "legacy:claude:claude-agent-sdk",
+      model: "claude-test",
+      reasoningEffort: "",
+      interactionMode: "build",
+      accessMode: "auto-edit",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    const currentActivity = store.addActivity({
+      conversationId: conversation.id,
+      runId: currentTurn.runId,
+      turnId: currentTurn.id,
+      kind: "command",
+      title: "Interrupted activity",
+      detail: null,
+      status: "running",
+    });
+    const currentReasoning = store.createReasoning(conversation.id, currentTurn.runId, currentTurn.id);
+    store.updateConversation(conversation.id, { status: "running" });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    const snapshot = reopened.snapshot();
+    expect(snapshot.agentTurns.find(({ id }) => id === oldTurn.id)?.status).toBe("completed");
+    expect(snapshot.activities.find(({ id }) => id === oldActivity.id)?.status).toBe("running");
+    expect(snapshot.agentTurns.find(({ id }) => id === currentTurn.id)).toMatchObject({
+      status: "interrupted",
+      terminalReason: "runtime-restart",
+    });
+    expect(snapshot.activities.find(({ id }) => id === currentActivity.id)?.status).toBe("failed");
+    expect(snapshot.reasonings.find(({ id }) => id === currentReasoning.id)?.status).toBe("failed");
+    expect(snapshot.activities).toContainEqual(expect.objectContaining({
+      runId: currentTurn.runId,
+      turnId: currentTurn.id,
+      kind: "error",
+    }));
+    reopened.close();
+  });
+
+  it("adds the empty turn ledger to an existing V0.0.6 database without rebuilding conversations", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const conversationId = store.snapshot().conversations[0]!.id;
+    store.close();
+
+    const legacy = new Database(databasePath);
+    legacy.exec("DROP TABLE agent_turns");
+    legacy.prepare("DELETE FROM schema_migrations WHERE version = 16").run();
+    legacy.close();
+
+    const migrated = new RuntimeStore(databasePath, workspacePath);
+    expect(migrated.conversation(conversationId).id).toBe(conversationId);
+    expect(migrated.snapshot().agentTurns).toEqual([]);
+    const inspection = new Database(databasePath, { readonly: true });
+    const columns = inspection.prepare("PRAGMA table_info(agent_turns)").all() as Array<{ name: string }>;
+    inspection.close();
+    expect(columns.map(({ name }) => name)).toEqual(expect.arrayContaining([
+      "id",
+      "conversation_id",
+      "run_id",
+      "user_message_id",
+      "terminal_assistant_message_id",
+      "harness_id",
+      "backend_profile_id",
+      "model",
+      "model_alias",
+      "reasoning_effort",
+      "interaction_mode",
+      "access_mode",
+      "provider_session_before",
+      "provider_session_after",
+      "requested_at",
+      "started_at",
+      "completed_at",
+      "status",
+      "terminal_reason",
+      "checkpoint_id",
+      "usage_start_json",
+      "usage_completion_json",
+      "configuration_revision",
+      "association",
+      "created_at",
+      "updated_at",
+    ]));
+    migrated.close();
+  });
+
   it("persists sidebar mode, canonical grouping metadata, and per-project overrides", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     store.updateSettings({
@@ -169,10 +759,9 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.close();
 
     const beforeInterfaceScale = new Database(databasePath);
-    const latestMigration = beforeInterfaceScale.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number };
     beforeInterfaceScale.exec("ALTER TABLE app_state DROP COLUMN usage_display_mode");
     beforeInterfaceScale.exec("ALTER TABLE app_state DROP COLUMN interface_scale");
-    beforeInterfaceScale.prepare("DELETE FROM schema_migrations WHERE version >= ?").run(latestMigration.version - 1);
+    beforeInterfaceScale.prepare("DELETE FROM schema_migrations WHERE version >= 14").run();
     beforeInterfaceScale.close();
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
@@ -192,10 +781,9 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.close();
 
     const legacy = new Database(databasePath);
-    const latestMigration = legacy.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number };
     expect((legacy.prepare("SELECT show_usage FROM app_state WHERE id = 1").get() as { show_usage: number }).show_usage).toBe(0);
     legacy.exec("ALTER TABLE app_state DROP COLUMN usage_display_mode");
-    legacy.prepare("DELETE FROM schema_migrations WHERE version = ?").run(latestMigration.version);
+    legacy.prepare("DELETE FROM schema_migrations WHERE version = 15").run();
     legacy.close();
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
@@ -216,6 +804,96 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.updateConversation(conversation.id, { providerSessionId: "codex-session" });
     expect(store.updateConversation(conversation.id, { model: "gpt-test" }).providerSessionId).toBe("codex-session");
     expect(store.updateConversation(conversation.id, { providerId: "claude" }).providerSessionId).toBeNull();
+    store.close();
+  });
+
+  it("persists only provider-supported model flexibility in continuation identities", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const project = store.snapshot().projects[0];
+    const codex = store.createConversation(project.id, "Flexible model", {
+      providerId: "codex",
+      model: "gpt-test",
+    });
+    const cursor = store.createConversation(project.id, "Fixed model", {
+      providerId: "cursor",
+      model: "cursor-test",
+    });
+
+    expect(store.updateConversation(codex.id, {
+      providerSessionId: "codex-session",
+    }).continuationIdentity?.modelIdentity).toBeNull();
+    expect(store.updateConversation(cursor.id, {
+      providerSessionId: "cursor-session",
+    }).continuationIdentity?.modelIdentity).toBe("cursor-test");
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.conversation(codex.id).continuationIdentity?.modelIdentity)
+      .toBeNull();
+    expect(reopened.conversation(cursor.id).continuationIdentity?.modelIdentity)
+      .toBe("cursor-test");
+    reopened.close();
+  });
+
+  it("fails closed instead of guessing a malformed persisted continuation identity", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    store.updateConversation(conversation.id, {
+      providerSessionId: "bound-provider-session",
+    });
+    store.close();
+
+    const database = new Database(databasePath);
+    database.prepare(`
+      UPDATE conversations
+      SET continuation_identity_json = ?
+      WHERE id = ?
+    `).run("{not-valid-json", conversation.id);
+    database.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.conversation(conversation.id)).toMatchObject({
+      providerSessionId: "bound-provider-session",
+      continuationIdentity: null,
+    });
+    reopened.close();
+  });
+
+  it("starts every newly created conversation without provider or per-turn identity", async () => {
+    const { store, workspacePath } = await createStore();
+    const project = store.snapshot().projects[0];
+    const viewed = store.createConversation(project.id, "Viewed context", {
+      providerId: "claude",
+      model: "viewed-model",
+      reasoningEffort: "viewed-effort",
+      interactionMode: "plan",
+      accessMode: "full",
+      branch: "viewed/branch",
+      worktreePath: workspacePath,
+    });
+    store.updateConversation(viewed.id, {
+      providerSessionId: "viewed-provider-session",
+      status: "completed",
+      attentionKind: null,
+    });
+    store.createMessage(viewed.id, "Viewed turn");
+
+    const created = store.createConversation(project.id, "Isolated");
+
+    expect(created).toMatchObject({
+      providerId: store.snapshot().settings.defaultProvider,
+      model: store.snapshot().settings.defaultModel,
+      reasoningEffort: store.snapshot().settings.defaultReasoningEffort,
+      interactionMode: store.snapshot().settings.defaultInteractionMode,
+      accessMode: store.snapshot().settings.defaultAccessMode,
+      branch: null,
+      worktreePath: null,
+      providerSessionId: null,
+      status: "idle",
+      attentionKind: null,
+    });
+    expect(store.hasConversationMessages(created.id)).toBe(false);
+    expect(store.snapshot().agentTurns.filter(({ conversationId }) => conversationId === created.id)).toEqual([]);
     store.close();
   });
 
@@ -256,6 +934,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     expect(snapshot.runs.find(({ id }) => id === workspaceRun.id)).toMatchObject({
       actionId: "test:focused",
       status: "failed",
+      attentionState: "unseen",
       canStop: false,
       finishedAt: expect.any(String),
       detail: expect.stringContaining("Interrupted when the local runtime stopped"),
@@ -264,7 +943,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     reopened.close();
   });
 
-  it("persists one streaming assistant message and the latest native plan across restart", async () => {
+  it("preserves a nullable legacy plan across restart", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     const project = store.snapshot().projects[0];
     const conversation = store.createConversation(project.id, "Streaming lifecycle");
@@ -273,6 +952,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.upsertAgentPlan({
       conversationId: conversation.id,
       runId: "run-plan",
+      turnId: null,
       explanation: "A native plan",
       steps: [
         { step: "Inspect", status: "completed" },
@@ -289,6 +969,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     expect(snapshot.plans).toContainEqual({
       conversationId: conversation.id,
       runId: "run-plan",
+      turnId: null,
       explanation: "A native plan",
       steps: [
         { step: "Inspect", status: "completed" },
@@ -325,14 +1006,37 @@ describe("RuntimeStore conversation lifecycle", () => {
     const { databasePath, workspacePath, store } = await createStore();
     const project = store.snapshot().projects[0]!;
     const conversation = store.snapshot().conversations[0]!;
-    store.upsertReviewSummary({
+    const summary = {
       conversationId: conversation.id,
-      fingerprint: "1234abcd",
-      providerId: "codex",
-      overall: "Updates the review workflow.",
-      files: [{ path: "src/review.ts", summary: "Adds review context.", hunks: [{ hunkId: "hunk-test", summary: "Connects the selected lines to the composer." }] }],
+      fingerprint: "1".repeat(64),
+      providerId: "codex" as const,
+      harnessId: "codex-app-server",
+      backendProfileId: "legacy:codex:codex-app-server",
+      model: "gpt-5.6-codex",
+      overall: "Updates the review workflow exactly.",
+      classifications: [{
+        classification: "behavior-change" as const,
+        evidence: "The review workflow now retains complete summaries.",
+      }],
+      files: [{
+        path: "src/review.ts",
+        summary: "Adds complete persisted review context.",
+        classifications: [{
+          classification: "migration" as const,
+          evidence: "The database gains an additive summary payload.",
+        }],
+        hunks: [{
+          hunkId: "hunk-test",
+          summary: "Connects validated review metadata to persistence.",
+          classifications: [{
+            classification: "test-impact" as const,
+            evidence: "Reopen coverage compares the complete value.",
+          }],
+        }],
+      }],
       generatedAt: "2026-07-22T10:00:00.000Z",
-    });
+    };
+    expect(store.upsertReviewSummary(summary)).toEqual(summary);
     const run = store.createWorkspaceRun({
       kind: "check",
       projectId: project.id,
@@ -347,7 +1051,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.close();
 
     const reopened = new RuntimeStore(databasePath, workspacePath);
-    expect(reopened.snapshot().reviewSummaries).toEqual([expect.objectContaining({ conversationId: conversation.id, fingerprint: "1234abcd" })]);
+    expect(reopened.snapshot().reviewSummaries).toEqual([summary]);
     expect(reopened.snapshot().runs).toEqual([expect.objectContaining({
       id: run.id,
       kind: "check",
@@ -357,7 +1061,143 @@ describe("RuntimeStore conversation lifecycle", () => {
       finishedAt: expect.any(String),
     })]);
     reopened.dismissWorkspaceRun(run.id);
-    expect(reopened.snapshot().runs).toEqual([]);
+    expect(reopened.snapshot().runs).toEqual([
+      expect.objectContaining({
+        id: run.id,
+        status: "succeeded",
+        attentionState: "dismissed",
+      }),
+    ]);
+    reopened.close();
+  });
+
+  it("persists explicit run attention transitions and keeps waiting requests actionable", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const project = store.snapshot().projects[0]!;
+    const conversation = store.snapshot().conversations[0]!;
+    const failure = store.createWorkspaceRun({
+      kind: "source-control",
+      projectId: project.id,
+      conversationId: conversation.id,
+      label: "Push",
+      detail: "Remote rejected the push.",
+      status: "running",
+      port: null,
+    });
+    expect(store.updateWorkspaceRun(failure.id, { status: "failed" })).toMatchObject({
+      attentionState: "unseen",
+    });
+    expect(store.markWorkspaceRunSeen(failure.id)).toMatchObject({ attentionState: "seen" });
+    expect(store.markWorkspaceRunSeen(failure.id)).toMatchObject({ attentionState: "seen" });
+
+    const waiting = store.createWorkspaceRun({
+      kind: "agent",
+      projectId: project.id,
+      conversationId: conversation.id,
+      label: "Approval",
+      detail: "Approve command",
+      status: "waiting",
+      port: null,
+    });
+    expect(waiting.attentionState).toBe("unseen");
+    expect(store.markWorkspaceRunSeen(waiting.id).attentionState).toBe("seen");
+    expect(() => store.acknowledgeWorkspaceRun(waiting.id)).toThrow(/waiting/iu);
+    expect(() => store.dismissWorkspaceRun(waiting.id)).toThrow(/active/iu);
+
+    const importedCompletion = store.createWorkspaceRun({
+      kind: "agent",
+      projectId: project.id,
+      conversationId: conversation.id,
+      label: "Imported completion",
+      detail: "Created already complete.",
+      status: "succeeded",
+      port: null,
+    });
+    expect(importedCompletion.finishedAt).toBeNull();
+    expect(store.acknowledgeWorkspaceRun(importedCompletion.id).attentionState).toBe("acknowledged");
+    store.dismissWorkspaceRun(importedCompletion.id);
+    expect(store.workspaceRun(importedCompletion.id).attentionState).toBe("dismissed");
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath, { recoverInterruptedRuns: false });
+    expect(reopened.workspaceRun(failure.id).attentionState).toBe("seen");
+    expect(reopened.acknowledgeWorkspaceRun(failure.id).attentionState).toBe("acknowledged");
+    reopened.dismissWorkspaceRun(failure.id);
+    expect(reopened.workspaceRun(failure.id)).toMatchObject({
+      status: "failed",
+      attentionState: "dismissed",
+      detail: "Remote rejected the push.",
+    });
+    reopened.close();
+
+    const reopenedAgain = new RuntimeStore(databasePath, workspacePath, { recoverInterruptedRuns: false });
+    expect(reopenedAgain.workspaceRun(failure.id).attentionState).toBe("dismissed");
+    reopenedAgain.close();
+  });
+
+  it("does not let a background assistant stream steal selection or fabricate a view", async () => {
+    const { store } = await createStore();
+    const project = store.snapshot().projects[0]!;
+    const background = store.createConversation(project.id, "Background");
+    const backgroundViewedAt = background.lastViewedAt;
+    const foreground = store.createConversation(project.id, "Foreground");
+
+    store.createMessage(background.id, "Partial response", "assistant");
+    store.createMessage(background.id, "Provider note", "system");
+    expect(store.snapshot().activeConversationId).toBe(foreground.id);
+    expect(store.conversation(background.id).lastViewedAt).toBe(backgroundViewedAt);
+
+    store.createMessage(background.id, "Follow up", "user");
+    expect(store.snapshot().activeConversationId).toBe(background.id);
+    expect(store.conversation(background.id).lastViewedAt).toEqual(expect.any(String));
+    store.close();
+  });
+
+  it("does not mark a selected conversation viewed merely because its run completed", async () => {
+    const { store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const viewedAt = conversation.lastViewedAt;
+    store.updateConversation(conversation.id, { status: "running" });
+    store.updateConversation(conversation.id, { status: "completed" });
+    expect(store.snapshot().activeConversationId).toBe(conversation.id);
+    expect(store.conversation(conversation.id).lastViewedAt).toBe(viewedAt);
+    store.close();
+  });
+
+  it("omits malformed complete review payloads instead of partially casting legacy columns", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const summary = {
+      conversationId: conversation.id,
+      fingerprint: "2".repeat(64),
+      providerId: "claude" as const,
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "legacy:claude:claude-agent-sdk",
+      model: "claude-sonnet-4-5",
+      overall: "A valid complete summary.",
+      classifications: [],
+      files: [{
+        path: "src/a.ts",
+        summary: "Updates a value.",
+        classifications: [],
+        hunks: [{
+          hunkId: "hunk-a",
+          summary: "Changes the value.",
+          classifications: [],
+        }],
+      }],
+      generatedAt: "2026-07-22T11:00:00.000Z",
+    };
+    store.upsertReviewSummary(summary);
+    store.close();
+
+    const database = new Database(databasePath);
+    database.prepare("UPDATE diff_review_summaries SET summary_json = ? WHERE conversation_id = ?")
+      .run(JSON.stringify({ ...summary, classifications: undefined }), conversation.id);
+    database.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.snapshot().reviewSummaries).toEqual([]);
     reopened.close();
   });
 
@@ -505,10 +1345,16 @@ describe("RuntimeStore conversation lifecycle", () => {
   it("persists bounded provider metadata independently of conversation state", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     store.saveProviderMetadata({
-      providerId: "codex",
-      executable: "/usr/local/bin/codex",
-      version: "1.2.3",
-      authState: "authenticated",
+      scope: {
+        providerId: "codex",
+        harnessId: "codex-app-server",
+        backendProfileId: "builtin:openai",
+        modelId: "provider-catalog",
+        executable: "/usr/local/bin/codex",
+        version: "1.2.3",
+        backendConfigurationRevision: 0,
+        authState: "authenticated",
+      },
       models: [{
         id: "gpt-test",
         label: "GPT Test",
@@ -532,12 +1378,164 @@ describe("RuntimeStore conversation lifecycle", () => {
 
     const reopened = new RuntimeStore(databasePath, workspacePath);
     expect(reopened.loadProviderMetadata()).toEqual([expect.objectContaining({
-      providerId: "codex",
-      executable: "/usr/local/bin/codex",
+      scope: expect.objectContaining({
+        providerId: "codex",
+        backendProfileId: "builtin:openai",
+        executable: "/usr/local/bin/codex",
+      }),
       models: [expect.objectContaining({ id: "gpt-test" })],
       rateLimits: [expect.objectContaining({ id: "five-hour", usedPercent: 25 })],
     })]);
     reopened.close();
+  });
+
+  it("persists multiple exact metadata scopes for one harness provider without collisions", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const base = {
+      modelsUpdatedAt: "2026-07-25T10:00:00.000Z",
+      modelsLastAttemptedAt: "2026-07-25T10:00:00.000Z",
+      modelsProvenance: "provider" as const,
+      modelsStale: false,
+      rateLimits: [],
+      rateLimitsUpdatedAt: null,
+      rateLimitsLastAttemptedAt: null,
+      rateLimitsProvenance: null,
+      rateLimitsStale: false,
+    };
+    store.saveProviderMetadata({
+      ...base,
+      scope: {
+        providerId: "claude",
+        harnessId: "claude-agent-sdk",
+        backendProfileId: "builtin:anthropic",
+        modelId: "provider-catalog",
+        executable: "/usr/local/bin/claude",
+        version: "2.1.0",
+        backendConfigurationRevision: 0,
+        authState: "authenticated",
+      },
+      models: [{
+        id: "claude-native",
+        label: "Claude native",
+        description: "Native Anthropic model",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+      }],
+    });
+    store.saveProviderMetadata({
+      ...base,
+      scope: {
+        providerId: "claude",
+        harnessId: "claude-agent-sdk",
+        backendProfileId: "builtin:kimi-code",
+        modelId: "k3",
+        executable: "/usr/local/bin/claude",
+        version: "2.1.0",
+        backendConfigurationRevision: 4,
+        authState: "configured",
+      },
+      models: [{
+        id: "k3",
+        label: "K3",
+        description: "Kimi coding model",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+      }],
+    });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    const records = reopened.loadProviderMetadata();
+    expect(records).toHaveLength(2);
+    expect(records).toContainEqual(expect.objectContaining({
+      scope: expect.objectContaining({
+        backendProfileId: "builtin:anthropic",
+        modelId: "provider-catalog",
+        authState: "authenticated",
+      }),
+      models: [expect.objectContaining({ id: "claude-native" })],
+    }));
+    expect(records).toContainEqual(expect.objectContaining({
+      scope: expect.objectContaining({
+        backendProfileId: "builtin:kimi-code",
+        modelId: "k3",
+        backendConfigurationRevision: 4,
+        authState: "configured",
+      }),
+      models: [expect.objectContaining({ id: "k3" })],
+      rateLimits: [],
+    }));
+    reopened.close();
+  });
+
+  it("migrates the legacy provider metadata cache into the canonical native scope", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    store.close();
+    const legacy = new Database(databasePath);
+    legacy.exec("DROP TABLE provider_metadata_scoped_cache");
+    legacy.prepare("DELETE FROM schema_migrations WHERE version = 26").run();
+    legacy.prepare(`
+      INSERT INTO provider_metadata_cache (
+        provider_id, executable, version, auth_state,
+        models_json, models_updated_at, models_last_attempted_at,
+        models_provenance, models_stale, rate_limits_json,
+        rate_limits_updated_at, rate_limits_last_attempted_at,
+        rate_limits_provenance, rate_limits_stale
+      ) VALUES (
+        @providerId, @executable, @version, @authState,
+        @modelsJson, @updatedAt, @updatedAt,
+        'provider', 0, @rateLimitsJson,
+        @updatedAt, @updatedAt, 'provider', 0
+      )
+    `).run({
+      providerId: "claude",
+      executable: "/usr/local/bin/claude",
+      version: "2.1.0",
+      authState: "authenticated",
+      modelsJson: JSON.stringify([{
+        id: "claude-native",
+        label: "Claude native",
+        description: "Native Anthropic model",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+      }]),
+      rateLimitsJson: JSON.stringify([{
+        id: "five-hour",
+        label: "Claude · 5 hour",
+        usedPercent: 20,
+        remainingPercent: 80,
+        windowMinutes: 300,
+        resetsAt: "2026-07-25T15:00:00.000Z",
+      }]),
+      updatedAt: "2026-07-25T10:00:00.000Z",
+    });
+    legacy.close();
+
+    const migrated = new RuntimeStore(databasePath, workspacePath);
+    expect(migrated.loadProviderMetadata()).toEqual([expect.objectContaining({
+      scope: {
+        providerId: "claude",
+        harnessId: "claude-agent-sdk",
+        backendProfileId: "builtin:anthropic",
+        modelId: "provider-catalog",
+        executable: "/usr/local/bin/claude",
+        version: "2.1.0",
+        backendConfigurationRevision: 0,
+        authState: "authenticated",
+      },
+      models: [expect.objectContaining({ id: "claude-native" })],
+      rateLimits: [expect.objectContaining({
+        id: "five-hour",
+        resetsAt: "2026-07-25T15:00:00.000Z",
+      })],
+    })]);
+    migrated.close();
   });
 
   it("migrates an existing version-four database without rebuilding user data", async () => {

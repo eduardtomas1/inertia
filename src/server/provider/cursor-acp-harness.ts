@@ -75,7 +75,13 @@ export function createCursorAcpHarness(): AgentHarness {
 
 function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
-  const emitter = createAgentHarnessEmitter("cursor", conversationId, options.callbacks);
+  const emitter = createAgentHarnessEmitter(
+    "cursor",
+    conversationId,
+    options.callbacks,
+    options.input.runId ?? conversationId,
+    options.input.turnId ?? null,
+  );
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
   const approvals = new Map<string, PendingApproval>();
@@ -399,7 +405,7 @@ async function configureCursorSession(
 ): Promise<void> {
   const wantedMode = interactionMode === "plan" ? /plan|architect/iu : /build|agent|code/iu;
   const nativeMode = modes?.availableModes.find((mode) => wantedMode.test(`${mode.id} ${mode.name}`));
-  const configMode = findConfigValue(configOptions, "mode", interactionMode === "plan" ? "plan" : "build", wantedMode);
+  const configMode = findCursorAdvertisedConfigValue(configOptions, "mode", interactionMode === "plan" ? "plan" : "build", wantedMode);
   if (nativeMode && modes?.currentModeId !== nativeMode.id) {
     await context.request(acp.methods.agent.session.setMode, { sessionId, modeId: nativeMode.id });
   } else if (!nativeMode && configMode) {
@@ -408,18 +414,18 @@ async function configureCursorSession(
     throw new Error("This Cursor ACP server does not advertise a plan mode.");
   }
   if (model) {
-    const selected = findConfigValue(configOptions, "model", model);
+    const selected = findCursorAdvertisedConfigValue(configOptions, "model", model);
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected model '${model}'.`);
     await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value });
   }
   if (effort) {
-    const selected = findConfigValue(configOptions, "thought_level", effort);
+    const selected = findCursorAdvertisedConfigValue(configOptions, "thought_level", effort);
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected reasoning effort '${effort}'.`);
     await context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value });
   }
 }
 
-function findConfigValue(
+export function findCursorAdvertisedConfigValue(
   configOptions: SessionConfigOption[],
   category: string,
   wanted: string,

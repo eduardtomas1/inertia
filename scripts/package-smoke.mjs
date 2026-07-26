@@ -156,9 +156,10 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
     const socket = new WebSocket(websocketUrl, { headers: { Origin: "http://127.0.0.1" } });
     const refreshRequestId = randomUUID();
     let refreshRequested = false;
+    let lastProviderState = "no provider snapshot";
     const timer = setTimeout(() => {
       socket.close();
-      rejectCodex(new Error("Packaged runtime did not discover the Windows Codex shim."));
+      rejectCodex(new Error(`Packaged runtime did not discover the Windows Codex shim (${lastProviderState}; refresh requested: ${refreshRequested}).`));
     }, 8_000);
     const finish = (error) => {
       clearTimeout(timer);
@@ -176,6 +177,9 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
       }
       if (event?.type !== "server.welcome" && event?.type !== "snapshot.updated") return;
       const provider = event.snapshot?.providers?.find(({ id }) => id === "codex");
+      lastProviderState = provider
+        ? `${provider.installState}/${provider.authState}/canRun=${provider.canRun}`
+        : "Codex missing from snapshot";
       if (!provider || provider.installState === "checking") {
         if (!refreshRequested) {
           refreshRequested = true;

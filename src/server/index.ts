@@ -334,6 +334,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         timeoutMs: 4_000,
         refreshEnvironment,
       });
+      const detected = providerSnapshot(
+        detection,
+        providers.cachedMetadata(detection.provider.id),
+      );
+      providerInfo = providerInfo.map((current) => current.id === providerId ? detected : current);
+      if (!closed) broadcastSnapshot();
+      if (!detection.canRun) return;
       const next = await enrichedSnapshot(detection);
       providerInfo = providerInfo.map((current) => current.id === providerId ? next : current);
     } else {

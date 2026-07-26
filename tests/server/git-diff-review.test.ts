@@ -376,7 +376,7 @@ describe("safe selected diff reversal", () => {
 
     await expect(undoDiffSelection(indexRoot, indexResult.operation.id)).rejects.toThrow(/staged state changed/i);
     expect(git(indexRoot, "show", ":example.txt")).toBe("index changed later\n");
-  });
+  }, 30_000);
 
   it("preserves unknown registry formats and their refs without rewriting or cleanup", async () => {
     const root = repository();

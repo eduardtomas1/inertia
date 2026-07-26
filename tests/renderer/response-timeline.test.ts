@@ -115,7 +115,12 @@ function timelineTurn(items: ReturnType<typeof buildResponseTimeline>, id: strin
   return item.turn;
 }
 
-function artifact(id: string, turnId: string, path: string): TurnGitArtifactSummary {
+function artifact(
+  id: string,
+  turnId: string,
+  path: string,
+  update: Partial<TurnGitArtifactSummary> = {},
+): TurnGitArtifactSummary {
   return {
     id,
     turnId,
@@ -149,6 +154,7 @@ function artifact(id: string, turnId: string, path: string): TurnGitArtifactSumm
       indexStatus: " ",
       worktreeStatus: "M",
     }],
+    ...update,
   };
 }
 
@@ -270,6 +276,74 @@ describe("authoritative response timeline", () => {
     expect(html).toContain("Open exact turn diff");
     expect(html).toContain("src/history.ts");
     expect(html.indexOf("Terminal answer stays visible")).toBeGreaterThan(html.indexOf("Working note"));
+  });
+
+  it("hides expected non-Git artifacts while preserving real capture failures", () => {
+    const turn = agentTurn("turn-no-git", "user-no-git", {
+      terminalAssistantMessageId: "assistant-no-git",
+    });
+    const renderArtifact = (gitArtifact: TurnGitArtifactSummary) => renderToStaticMarkup(
+      createElement(ResponseTimeline, {
+        turns: [turn],
+        messages: [
+          message("user-no-git", turn.id, "user", "Answer this", turn.requestedAt),
+          message("assistant-no-git", turn.id, "assistant", "Done", turn.completedAt!),
+        ],
+        activities: [],
+        reasonings: [],
+        plans: [],
+        checkpoints: [],
+        gitArtifacts: [gitArtifact],
+        projectRoot: "/workspace",
+        projectId: "project-1",
+        conversationId,
+        providers: [],
+        streamingText: "",
+        streamingReasoning: "",
+        approvals: [],
+        inputRequests: [],
+        showTimestamps: false,
+        showThinking: false,
+        defaultCodeWrap: false,
+        autoCollapseWorkLog: true,
+        showChangedFileSummaries: true,
+        checkpointRestoreDisabled: false,
+        onRespondToApproval: async () => undefined,
+        onRespondToInput: async () => undefined,
+        onRevertCheckpoint: () => undefined,
+        onOpenTurnDiff: () => undefined,
+        onCompareTurnArtifacts: () => undefined,
+        onOpenTurnFile: () => undefined,
+      }),
+    );
+    const unavailable = {
+      status: "unavailable" as const,
+      completeness: "unavailable" as const,
+      repositoryIdentity: null,
+      worktreeIdentity: null,
+      branch: null,
+      patchState: "none" as const,
+      patchDigest: null,
+      capturedAt: null,
+      files: [],
+      insertions: 0,
+      deletions: 0,
+    };
+
+    const nonGitHtml = renderArtifact(artifact("artifact-no-git", turn.id, "", {
+      ...unavailable,
+      failureReason: "This workspace is not a Git repository.",
+    }));
+    expect(nonGitHtml).toContain('aria-label="Historical turn details"');
+    expect(nonGitHtml).not.toContain("Turn changes unavailable");
+    expect(nonGitHtml).not.toContain("This workspace is not a Git repository.");
+
+    const failedCaptureHtml = renderArtifact(artifact("artifact-failed", turn.id, "", {
+      ...unavailable,
+      failureReason: "The repository snapshot could not be captured.",
+    }));
+    expect(failedCaptureHtml).toContain("Turn changes unavailable");
+    expect(failedCaptureHtml).toContain("The repository snapshot could not be captured.");
   });
 
   it("labels a historical Kimi turn from its persisted selection", () => {

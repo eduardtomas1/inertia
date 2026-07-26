@@ -437,6 +437,19 @@ function ChangedFilesSummary({
   );
 }
 
+const EXPECTED_NON_GIT_ARTIFACT_FAILURES = new Set([
+  "This workspace is not a Git repository.",
+  "The selected folder is not a Git repository.",
+]);
+
+function shouldShowChangedFilesSummary(artifact: TurnGitArtifactSummary): boolean {
+  return !(
+    artifact.status === "unavailable"
+    && artifact.completeness === "unavailable"
+    && EXPECTED_NON_GIT_ARTIFACT_FAILURES.has(artifact.failureReason ?? "")
+  );
+}
+
 function exactConfigurationLabel(turn: ResponseTurn): string {
   const { agentTurn } = turn;
   return [
@@ -611,15 +624,17 @@ function TurnTimelineComponent({
       )}
 
       <TurnMetadata turn={turn} terminalAnswer={turn.terminalAssistantMessage} />
-      {props.showChangedFileSummaries && turn.gitArtifact && (
-        <ChangedFilesSummary
-          artifact={turn.gitArtifact}
-          previousTurnId={previousArtifactTurnId}
-          props={props}
-          onBeforeToggle={() => onBeforeToggle?.(turn.id)}
-          onAfterToggle={() => onAfterToggle?.(turn.id)}
-        />
-      )}
+      {props.showChangedFileSummaries
+        && turn.gitArtifact
+        && shouldShowChangedFilesSummary(turn.gitArtifact) && (
+          <ChangedFilesSummary
+            artifact={turn.gitArtifact}
+            previousTurnId={previousArtifactTurnId}
+            props={props}
+            onBeforeToggle={() => onBeforeToggle?.(turn.id)}
+            onAfterToggle={() => onAfterToggle?.(turn.id)}
+          />
+        )}
     </section>
   );
 }

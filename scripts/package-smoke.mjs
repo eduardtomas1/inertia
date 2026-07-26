@@ -180,8 +180,9 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
       if (!settled) finish(new Error("Packaged runtime closed before Codex discovery completed."));
     });
     socket.on("message", (data) => {
-      let event;
-      try { event = JSON.parse(data.toString("utf8")); } catch { return; }
+      let frame;
+      try { frame = JSON.parse(data.toString("utf8")); } catch { return; }
+      const event = frame?.type === "runtime.event" ? frame.event : frame;
       if (event?.type === "request.ok" && event.requestId === refreshRequestId) {
         refreshAcknowledged = true;
         return;

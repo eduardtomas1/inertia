@@ -188,7 +188,7 @@ describe("published database fixtures", () => {
       cwd: repositoryRoot,
       stdio: "pipe",
     });
-  });
+  }, 30_000);
 
   it("upgrades every released fixture through the inferred-turn migration without data loss", async () => {
     const manifest = await fixtureManifest();

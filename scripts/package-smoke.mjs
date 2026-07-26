@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -142,6 +143,8 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
   const canonicalExpectedExecutable = await realpath(expectedExecutable);
   await new Promise((resolveCodex, rejectCodex) => {
     const socket = new WebSocket(websocketUrl, { headers: { Origin: "http://127.0.0.1" } });
+    const refreshRequestId = randomUUID();
+    let refreshRequested = false;
     const timer = setTimeout(() => {
       socket.close();
       rejectCodex(new Error("Packaged runtime did not discover the Windows Codex shim."));
@@ -156,9 +159,23 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
     socket.on("message", (data) => {
       let event;
       try { event = JSON.parse(data.toString("utf8")); } catch { return; }
+      if (event?.type === "request.error" && event.requestId === refreshRequestId) {
+        finish(new Error(`Packaged Codex refresh failed: ${event.message || "unknown error"}.`));
+        return;
+      }
       if (event?.type !== "server.welcome" && event?.type !== "snapshot.updated") return;
       const provider = event.snapshot?.providers?.find(({ id }) => id === "codex");
-      if (!provider || provider.installState === "checking") return;
+      if (!provider || provider.installState === "checking") {
+        if (!refreshRequested) {
+          refreshRequested = true;
+          socket.send(JSON.stringify({
+            type: "provider.refresh",
+            requestId: refreshRequestId,
+            payload: { providerId: "codex" },
+          }));
+        }
+        return;
+      }
       if (provider.installState !== "installed" || provider.canRun !== true) {
         finish(new Error(`Packaged Codex discovery reported ${provider.statusMessage || provider.installState}.`));
         return;

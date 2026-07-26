@@ -38,6 +38,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain("runtime-stopped");
     expect(smoke).toContain("process-group cleanup");
     expect(smoke).toContain("Packaged Codex Ω (npm shim)");
+    expect(smoke).toContain('type: "provider.refresh"');
   });
 
   it("keeps exact-tag release packages and smoke validation aligned across every platform", async () => {

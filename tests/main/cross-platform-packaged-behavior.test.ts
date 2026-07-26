@@ -37,7 +37,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain("runtimePid === mainPid");
     expect(smoke).toContain("runtime-stopped");
     expect(smoke).toContain("process-group cleanup");
-    expect(smoke).toContain("Packaged Codex Ω (npm shim)");
+    expect(smoke).toContain("Packaged Codex Ω (profile)");
     expect(smoke).toContain('type: "provider.refresh"');
   });
 

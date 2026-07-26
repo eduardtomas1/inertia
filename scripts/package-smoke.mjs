@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import WebSocket from "ws";
 
 const STARTUP_TIMEOUT_MS = 30_000;
@@ -122,21 +122,32 @@ function parseReadiness(value, expectedMainPid) {
 
 async function createWindowsCodexFixture(root) {
   if (process.platform !== "win32") return null;
-  const directory = join(root, "Packaged Codex Ω (npm shim)");
+  const profile = join(root, "Packaged Codex Ω (profile)");
+  const directory = join(profile, "npm");
   const program = join(directory, "codex-package-smoke.cjs");
   const command = join(directory, "codex.cmd");
   await mkdir(directory, { recursive: true });
   await writeFile(program, `
+const readline = require("node:readline");
 const args = process.argv.slice(2);
 if (args[0] === "--version") { console.log("codex 99.1.0"); process.exit(0); }
 if (args[0] === "login" && args[1] === "status") { console.log("Logged in using ChatGPT"); process.exit(0); }
 if (args[0] === "app-server" && args[1] === "--help") { console.log("codex app-server - Run the app server"); process.exit(0); }
-process.exit(2);
+if (args.length !== 1 || args[0] !== "app-server") process.exit(2);
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "package-smoke" } });
+  if (message.method === "initialized") return;
+  if (message.method === "model/list") return send({ id: message.id, result: { data: [], nextCursor: null } });
+  if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: null } });
+  return send({ id: message.id, error: { code: -32601, message: "Unsupported package-smoke method" } });
+});
 `.trimStart(), "utf8");
   // Match npm's relative shim layout so Unicode paths are resolved by cmd.exe
   // instead of being decoded from the batch file through a legacy code page.
   await writeFile(command, `@echo off\r\n"${process.execPath}" "%~dp0codex-package-smoke.cjs" %*\r\n`, "utf8");
-  return { command, directory };
+  return { command, directory, profile };
 }
 
 async function requirePackagedCodex(websocketUrl, expectedExecutable) {
@@ -235,8 +246,16 @@ try {
       INERTIA_PACKAGE_SMOKE_FILE: markerPath,
       ...(packagedCodex ? {
         INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: packagedCodex.command,
-        APPDATA: packagedCodex.directory,
-        PATH: [packagedCodex.directory, process.env.PATH || ""].filter(Boolean).join(delimiter),
+        APPDATA: packagedCodex.profile,
+        LOCALAPPDATA: join(packagedCodex.profile, "Local"),
+        USERPROFILE: packagedCodex.profile,
+        CODEX_HOME: "",
+        CODEX_INSTALL_DIR: "",
+        PNPM_HOME: "",
+        BUN_INSTALL: "",
+        VOLTA_HOME: "",
+        PATH: packagedCodex.directory,
+        PATHEXT: ".EXE;.CMD;.BAT",
       } : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],

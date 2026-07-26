@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { FilePenLine, ShieldAlert, TerminalSquare } from "lucide-react";
+import { FilePenLine, MessageCircleQuestion, ShieldAlert, TerminalSquare } from "lucide-react";
 import type { AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest } from "@shared/contracts";
-import { buildAgentInputAnswers, inputRequestTitle } from "../utils/agentInput";
+import { agentRequestProviderName, buildAgentInputAnswers, inputRequestTitle } from "../utils/agentInput";
 
 type ApprovalCardProps = {
   request: AgentApprovalRequest;
@@ -10,6 +10,11 @@ type ApprovalCardProps = {
 
 export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.JSX.Element {
   const [busy, setBusy] = useState(false);
+  const RequestIcon = request.kind === "command"
+    ? TerminalSquare
+    : request.kind === "permissions"
+      ? ShieldAlert
+      : FilePenLine;
   const respond = async (decision: AgentApprovalDecision) => {
     if (busy) return;
     setBusy(true);
@@ -21,12 +26,19 @@ export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.J
   };
 
   return (
-    <section className="agent-request-card" role="region" aria-live="polite" aria-labelledby={`approval-${request.id}`}>
+    <section
+      className="agent-request-card is-approval"
+      role="region"
+      aria-live="polite"
+      aria-busy={busy}
+      aria-labelledby={`approval-${request.id}`}
+      data-agent-request-kind={request.kind}
+    >
       <div className="agent-request-heading">
-        <span className="agent-request-icon">{request.kind === "command" ? <TerminalSquare size={16} /> : request.kind === "permissions" ? <ShieldAlert size={16} /> : <FilePenLine size={16} />}</span>
+        <span className="agent-request-icon" aria-hidden="true"><RequestIcon size={15} /></span>
         <span>
           <strong id={`approval-${request.id}`}>{request.title}</strong>
-          <small>The agent paused for your review.</small>
+          <small>{agentRequestProviderName(request.providerId)} paused for your review.</small>
         </span>
       </div>
       {request.command && <code className="agent-request-command">{request.command}</code>}
@@ -82,9 +94,15 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
   };
 
   return (
-    <section className="agent-request-card agent-input-card" role="region" aria-live="polite" aria-labelledby={`input-${request.id}`}>
+    <section
+      className="agent-request-card agent-input-card is-question"
+      role="region"
+      aria-live="polite"
+      aria-busy={busy}
+      aria-labelledby={`input-${request.id}`}
+    >
       <div className="agent-request-heading">
-        <span className="agent-request-icon"><ShieldAlert size={16} /></span>
+        <span className="agent-request-icon" aria-hidden="true"><MessageCircleQuestion size={15} /></span>
         <span>
           <strong id={`input-${request.id}`}>{inputRequestTitle(request.providerId)}</strong>
           <small>The turn will continue after every question is answered.</small>
@@ -156,7 +174,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
       </div>
       {request.autoResolutionMs !== null && <p className="agent-request-note">This question may resolve automatically if left unanswered.</p>}
       <div className="agent-request-actions">
-        <button type="button" className="primary-button" disabled={!complete || busy} onClick={() => void submit()}>Continue</button>
+        <button type="button" className="primary-button" aria-label="Submit answers and continue" disabled={!complete || busy} onClick={() => void submit()}>Continue</button>
       </div>
     </section>
   );

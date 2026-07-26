@@ -13,6 +13,10 @@ import { RuntimeStore } from "../../src/server/database";
 import { nativeProviderMetadataScope } from "../../src/server/provider/metadata";
 import type { DiffSelectionReviewAnswer } from "../../src/shared/contracts";
 import {
+  createKimiClaudeBackendProfile,
+  createKimiClaudeModelSelection,
+} from "../../src/shared/claude-backend-profiles";
+import {
   continuationIdentityForSelection,
   nativeModelSelection,
 } from "../../src/shared/model-routing";
@@ -2005,6 +2009,468 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await page.emulateMedia({ colorScheme: "no-preference" });
     await page.reload();
     await resizeWindow(1440, 920);
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible({
+      timeout: 10_000,
+    });
+    const navigation = page.getByRole("complementary", { name: "Project navigation", exact: true });
+    if (!await navigation.isVisible()) {
+      await page.getByRole("button", { name: "Toggle project navigation" }).click();
+      await expect(navigation).toBeVisible();
+    }
+    if (!await page.locator(".workspace-panel").isVisible()) {
+      await page.getByRole("button", { name: "Open workspace tools" }).click();
+      await expect(page.locator(".workspace-panel")).toBeVisible();
+    }
+  }
+});
+
+test("presents the Quiet Ledger states as one calm, responsive conversation", async ({}, testInfo) => {
+  await resizeWindow(1440, 920);
+  const databasePath = join(testDirectory, "data", "inertia.sqlite");
+  const store = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
+  let snapshot = store.shellSnapshot();
+  if (!snapshot.activeProjectId || !snapshot.activeConversationId) {
+    const project = store.createProject("Inertia", workspaceDirectory);
+    store.createConversation(project.id, "E2E base conversation");
+    snapshot = store.shellSnapshot();
+  }
+  if (!snapshot.activeProjectId || !snapshot.activeConversationId) {
+    throw new Error("Quiet Ledger fixture setup failed.");
+  }
+  const previousConversationId = snapshot.activeConversationId;
+  const originalSettings = snapshot.settings;
+  const conversation = store.createConversation(snapshot.activeProjectId, "Quiet Ledger visual fixture");
+  store.updateSettings({
+    theme: "dark",
+    interfaceScale: "default",
+    responseDensity: "default",
+    autoCollapseWorkLog: true,
+    showChangedFileSummaries: true,
+    showTimestamps: true,
+  });
+
+  const fixturePrefix = `quiet-ledger-e2e-${randomUUID()}`;
+  const fixtureBaseTime = Date.now() - 12 * 60_000;
+  const codexSelection = nativeModelSelection({
+    providerId: "codex",
+    modelId: "gpt-5.6",
+    alias: "GPT-5.6",
+    reasoningEffort: "xhigh",
+  });
+  const kimiProfile = createKimiClaudeBackendProfile({
+    id: `${fixturePrefix}:kimi`,
+    secretReference: "secret:quiet-ledger-e2e",
+    primaryModelId: "k3",
+    contextWindowTokens: 1_048_576,
+  });
+  const kimiSelection = createKimiClaudeModelSelection({ profile: kimiProfile });
+
+  const beginTurn = (
+    suffix: string,
+    index: number,
+    content: string,
+    selection = codexSelection,
+    providerId: "codex" | "claude" = "codex",
+  ) => {
+    const requestedAt = new Date(fixtureBaseTime + index * 90_000).toISOString();
+    const startedAt = new Date(Date.parse(requestedAt) + 3_000).toISOString();
+    const result = store.beginAgentTurn({
+      id: `${fixturePrefix}-${suffix}`,
+      conversationId: conversation.id,
+      runId: `${fixturePrefix}-${suffix}-run`,
+      content,
+      providerId,
+      modelSelection: selection,
+      reasoningEffort: selection.reasoningEffort ?? "",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: selection.backendConfigurationRevision,
+      association: "authoritative",
+      requestedAt,
+    });
+    store.updateAgentTurnLifecycle(result.turn.id, {
+      status: "running",
+      startedAt,
+      updatedAt: startedAt,
+    });
+    return { ...result, requestedAt, startedAt };
+  };
+
+  const settleTurn = (
+    fixture: ReturnType<typeof beginTurn>,
+    answerContent: string,
+    status: "completed" | "failed" = "completed",
+  ) => {
+    const completedAt = new Date(Date.parse(fixture.startedAt) + 42_000).toISOString();
+    const answer = store.createMessage(
+      conversation.id,
+      answerContent,
+      "assistant",
+      [],
+      fixture.turn.id,
+      completedAt,
+    );
+    store.updateAgentTurnLifecycle(fixture.turn.id, {
+      status,
+      completedAt,
+      updatedAt: completedAt,
+      terminalAssistantMessageId: answer.id,
+      terminalReason: status === "completed" ? "provider-completed" : "provider-failed",
+    });
+    return answer;
+  };
+
+  const completed = beginTurn(
+    "completed",
+    0,
+    "Explain the provider routing issue and leave a concise implementation summary.",
+  );
+  for (let index = 0; index < 8; index += 1) {
+    store.addActivity({
+      conversationId: conversation.id,
+      runId: completed.turn.runId,
+      turnId: completed.turn.id,
+      kind: index % 3 === 0 ? "file" : index % 3 === 1 ? "tool" : "command",
+      title: `Verified implementation step ${index + 1}`,
+      detail: index === 7 ? "The focused renderer checks are green." : null,
+      status: "completed",
+    });
+  }
+  const completedAnswer = settleTurn(completed, [
+    "## Result",
+    "",
+    "The provider route now keeps its historical model identity while the operational work stays in a compact ledger.",
+    "",
+    "- The answer remains outside the execution rail.",
+    "- Queue and execution timings use the persisted turn lifecycle.",
+    "- Changed files stay available as a quiet disclosure.",
+    "",
+    "```ts",
+    "const routeIdentity = \"authoritative\";",
+    "```",
+  ].join("\n"));
+  store.createTurnGitArtifact({
+    id: `${fixturePrefix}-completed-artifact`,
+    turnId: completed.turn.id,
+    branch: "main",
+    createdAt: completedAnswer.createdAt,
+  });
+  store.completeTurnGitArtifact(completed.turn.id, {
+    files: [
+      {
+        path: "src/renderer/src/components/ResponseTimeline.tsx",
+        previousPath: null,
+        status: "M",
+        insertions: 84,
+        deletions: 21,
+        untracked: false,
+        staged: false,
+        unstaged: true,
+        indexStatus: " ",
+        worktreeStatus: "M",
+        binary: false,
+      },
+      {
+        path: "src/renderer/src/styles.css",
+        previousPath: null,
+        status: "M",
+        insertions: 36,
+        deletions: 8,
+        untracked: false,
+        staged: false,
+        unstaged: true,
+        indexStatus: " ",
+        worktreeStatus: "M",
+        binary: false,
+      },
+      {
+        path: "tests/e2e/app.spec.ts",
+        previousPath: null,
+        status: "M",
+        insertions: 42,
+        deletions: 0,
+        untracked: false,
+        staged: false,
+        unstaged: true,
+        indexStatus: " ",
+        worktreeStatus: "M",
+        binary: false,
+      },
+    ],
+    insertions: 162,
+    deletions: 29,
+    status: "ready",
+    completeness: "complete",
+    patchState: "none",
+    capturedAt: completedAnswer.createdAt,
+    terminalAssistantMessageId: completedAnswer.id,
+    updatedAt: completedAnswer.createdAt,
+  });
+
+  const detailed = beginTurn(
+    "details",
+    1,
+    "Show completed operational details only when I ask for them.",
+  );
+  for (const [index, title] of [
+    "Inspected the current response lifecycle",
+    "Measured the transcript column",
+    "Refined the execution rail",
+    "Validated scroll anchoring",
+    "Ran the focused renderer suite",
+  ].entries()) {
+    store.addActivity({
+      conversationId: conversation.id,
+      runId: detailed.turn.runId,
+      turnId: detailed.turn.id,
+      kind: index === 4 ? "command" : index === 1 ? "file" : "tool",
+      title,
+      detail: index === 3 ? "The visible row stays fixed while disclosure height changes." : null,
+      status: "completed",
+    });
+  }
+  settleTurn(
+    detailed,
+    "The completed work is collapsed by default and remains available through the keyboard-accessible Details row.",
+  );
+
+  const kimi = beginTurn(
+    "kimi",
+    2,
+    "Keep this Kimi-through-Claude answer historically accurate.",
+    kimiSelection,
+    "claude",
+  );
+  store.addActivity({
+    conversationId: conversation.id,
+    runId: kimi.turn.runId,
+    turnId: kimi.turn.id,
+    kind: "tool",
+    title: "Resolved the persisted backend route",
+    detail: null,
+    status: "completed",
+  });
+  settleTurn(
+    kimi,
+    "This answer is attributed from the persisted model selection: Claude harness, Kimi backend, K3 model.",
+  );
+
+  const failed = beginTurn(
+    "failed",
+    3,
+    "Run the verification and keep any actionable failure visible.",
+  );
+  store.addActivity({
+    conversationId: conversation.id,
+    runId: failed.turn.runId,
+    turnId: failed.turn.id,
+    kind: "tool",
+    title: "Prepared the verification environment",
+    detail: null,
+    status: "completed",
+  });
+  store.addActivity({
+    conversationId: conversation.id,
+    runId: failed.turn.runId,
+    turnId: failed.turn.id,
+    kind: "command",
+    title: "Renderer verification failed",
+    detail: "One actionable assertion needs attention.",
+    status: "failed",
+  });
+  settleTurn(
+    failed,
+    "The verification stopped at one actionable renderer failure. The failed command remains visible above this answer.",
+    "failed",
+  );
+
+  const active = beginTurn(
+    "active",
+    4,
+    "Refine the response experience and keep me oriented while the work is running.",
+  );
+  const activeAt = (seconds: number) =>
+    new Date(Date.parse(active.startedAt) + seconds * 1_000).toISOString();
+  store.addActivity({
+    conversationId: conversation.id,
+    runId: active.turn.runId,
+    turnId: active.turn.id,
+    kind: "status",
+    title: "Connected to the local runtime",
+    detail: null,
+    status: "completed",
+    createdAt: activeAt(2),
+  });
+  store.createMessage(
+    conversation.id,
+    "I’m tracing the current response path before changing the presentation.",
+    "assistant",
+    [],
+    active.turn.id,
+    activeAt(4),
+  );
+  for (const [seconds, kind, title, status] of [
+    [6, "command", "Inspected the repository", "completed"],
+    [8, "tool", "Reading provider routing", "completed"],
+  ] as const) {
+    store.addActivity({
+      conversationId: conversation.id,
+      runId: active.turn.runId,
+      turnId: active.turn.id,
+      kind,
+      title,
+      detail: null,
+      status,
+      createdAt: activeAt(seconds),
+    });
+  }
+  store.createMessage(
+    conversation.id,
+    "The event order is sound; I’m applying the focused UI change and validating it now.",
+    "assistant",
+    [],
+    active.turn.id,
+    activeAt(10),
+  );
+  for (const [seconds, kind, title, status] of [
+    [12, "file", "Editing backend adapter", "running"],
+    [14, "command", "Running focused tests", "running"],
+  ] as const) {
+    store.addActivity({
+      conversationId: conversation.id,
+      runId: active.turn.runId,
+      turnId: active.turn.id,
+      kind,
+      title,
+      detail: null,
+      status,
+      createdAt: activeAt(seconds),
+    });
+  }
+  store.close();
+
+  const captureScenario = async (name: string): Promise<void> => {
+    const screenshotPath = testInfo.outputPath(`quiet-ledger-${name}.png`);
+    await page.screenshot({ animations: "disabled", path: screenshotPath });
+    await testInfo.attach(`quiet-ledger-${name}`, {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+  };
+
+  try {
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Quiet Ledger visual fixture", level: 1 })).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+    const navigation = page.getByRole("complementary", { name: "Project navigation", exact: true });
+    if (!await navigation.isVisible()) {
+      await page.getByRole("button", { name: "Toggle project navigation" }).click();
+      await expect(navigation).toBeVisible();
+    }
+    const workspacePanel = page.locator(".workspace-panel");
+    if (await workspacePanel.isVisible()) {
+      await page.getByRole("button", { name: "Close workspace tools" }).first().click();
+      await expect(workspacePanel).toBeHidden();
+    }
+
+    const activeTurn = page.locator(`[data-turn-id="${active.turn.id}"]`);
+    await activeTurn.scrollIntoViewIfNeeded();
+    await expect(activeTurn.locator(".turn-execution-rail.is-live")).toBeVisible();
+    await expect(activeTurn.locator(".turn-commentary-row")).toHaveCount(2);
+    await expect(activeTurn.locator(".turn-activity-group")).toHaveCount(2);
+    await expect(activeTurn.locator('[data-activity-visibility="recent"]')).toHaveCount(2);
+    await expect(activeTurn.getByRole("button", { name: "1 earlier call" })).toHaveCount(2);
+    await expect(activeTurn.getByRole("button", { name: "Stop Codex run" })).toBeVisible();
+    await expect(activeTurn.locator(".turn-working-elapsed")).toHaveAttribute("aria-live", "off");
+    await captureScenario("active-turn");
+
+    const completedTurn = page.locator(`[data-turn-id="${completed.turn.id}"]`);
+    await completedTurn.scrollIntoViewIfNeeded();
+    await expect(completedTurn.locator(".turn-settled-summary")).toContainText("Worked for 42s · 8 actions");
+    const completedLayers = await completedTurn.locator("[data-turn-layer]").evaluateAll(
+      (elements) => elements.map((element) => element.getAttribute("data-turn-layer")),
+    );
+    expect(completedLayers).toEqual(["user-request", "agent-execution", "final-answer"]);
+    await expect(completedTurn.locator('[data-turn-layer="agent-execution"] [data-turn-layer="final-answer"]')).toHaveCount(0);
+    await expect(completedTurn.locator('[data-turn-layer="final-answer"]')).toContainText("The provider route now");
+    await expect(completedTurn.locator('[data-final-answer-identity="historical-model-selection"]'))
+      .toHaveText("Codex · OpenAI · GPT-5.6");
+    await expect(completedTurn.getByLabel("Changed by this turn")).toContainText("3 files changed");
+    await captureScenario("completed-answer");
+
+    const detailedTurn = page.locator(`[data-turn-id="${detailed.turn.id}"]`);
+    await detailedTurn.scrollIntoViewIfNeeded();
+    const detailsSummary = detailedTurn.locator(".turn-settled-summary");
+    await expect(detailsSummary).toHaveAttribute("aria-expanded", "false");
+    const followingKimiTurn = page.locator(`[data-turn-id="${kimi.turn.id}"]`);
+    const beforeFollowingTurnTop = await followingKimiTurn.evaluate(
+      (element) => element.getBoundingClientRect().top,
+    );
+    await detailsSummary.click();
+    await expect(detailsSummary).toHaveAttribute("aria-expanded", "true");
+    await expect(detailedTurn.locator(".turn-work-details")).toBeVisible();
+    await expect.poll(() => followingKimiTurn.evaluate(
+      (element, top) => Math.abs(element.getBoundingClientRect().top - top),
+      beforeFollowingTurnTop,
+    )).toBeLessThanOrEqual(2);
+    await captureScenario("expanded-details");
+
+    const kimiTurn = page.locator(`[data-turn-id="${kimi.turn.id}"]`);
+    await kimiTurn.scrollIntoViewIfNeeded();
+    await expect(kimiTurn.locator('[data-final-answer-identity="historical-model-selection"]'))
+      .toHaveText("Claude · Kimi · K3");
+    await captureScenario("kimi-through-claude");
+
+    const failedTurn = page.locator(`[data-turn-id="${failed.turn.id}"]`);
+    await failedTurn.scrollIntoViewIfNeeded();
+    await expect(failedTurn.locator(".turn-settled-summary")).toContainText("Failed after 42s · 2 actions");
+    await expect(failedTurn.locator(".agent-activity.is-failed")).toContainText("Renderer verification failed");
+    await expect(failedTurn.locator(".agent-activity.is-failed")).toBeVisible();
+    await captureScenario("failed-tool");
+
+    await resizeWindow(760, 680);
+    if (await navigation.isVisible()) {
+      await page.getByRole("button", { name: "Toggle project navigation" }).click();
+      await expect(navigation).toBeHidden();
+    }
+    await activeTurn.scrollIntoViewIfNeeded();
+    await expect(activeTurn.getByRole("button", { name: "Stop Codex run" })).toBeVisible();
+    await expectNoViewportOverflow();
+    const narrowGeometry = await activeTurn.evaluate((element) => {
+      const turn = element.getBoundingClientRect();
+      const request = element.querySelector<HTMLElement>(".turn-user-request")?.getBoundingClientRect();
+      const execution = element.querySelector<HTMLElement>(".turn-execution-rail")?.getBoundingClientRect();
+      return {
+        turnWidth: turn.width,
+        requestInside: request
+          ? request.left >= turn.left - 1 && request.right <= turn.right + 1
+          : false,
+        executionInside: execution
+          ? execution.left >= turn.left - 1 && execution.right <= turn.right + 1
+          : false,
+      };
+    });
+    expect(narrowGeometry.turnWidth).toBeGreaterThan(0);
+    expect(narrowGeometry.requestInside).toBe(true);
+    expect(narrowGeometry.executionInside).toBe(true);
+    await captureScenario("narrow-workspace");
+    expect(rendererErrors).toEqual([]);
+  } finally {
+    const cleanup = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
+    cleanup.updateSettings({
+      theme: originalSettings.theme,
+      interfaceScale: originalSettings.interfaceScale,
+      responseDensity: originalSettings.responseDensity,
+      autoCollapseWorkLog: originalSettings.autoCollapseWorkLog,
+      showChangedFileSummaries: originalSettings.showChangedFileSummaries,
+      showTimestamps: originalSettings.showTimestamps,
+    });
+    cleanup.selectConversation(previousConversationId);
+    cleanup.deleteConversation(conversation.id);
+    cleanup.close();
+    await resizeWindow(1440, 920);
+    await page.reload();
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible({
       timeout: 10_000,
     });

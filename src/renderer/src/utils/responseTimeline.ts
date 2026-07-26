@@ -87,6 +87,124 @@ export function activityNeedsAttention(activity: AgentActivity): boolean {
   return /\b(?:warning|warned|unsupported|skipped|cancelled|canceled|blocked)\b/iu.test(`${activity.title} ${activity.detail ?? ""}`);
 }
 
+export function isTranscriptActivity(activity: AgentActivity): boolean {
+  return activity.kind === "tool"
+    || activity.kind === "command"
+    || activity.kind === "file"
+    || activityNeedsAttention(activity);
+}
+
+export type TurnExecutionStreamEntry =
+  | {
+      kind: "commentary";
+      id: string;
+      createdAt: string;
+      message: ChatMessage | null;
+      content: string;
+      streaming: boolean;
+    }
+  | {
+      kind: "activity-group";
+      id: string;
+      createdAt: string;
+      activities: AgentActivity[];
+    };
+
+interface BuildTurnExecutionStreamOptions {
+  liveContent?: string;
+  includeImportantActivities?: boolean;
+}
+
+/**
+ * Builds the visible provider transcript in event order. Only adjacent work
+ * entries are grouped; assistant commentary always breaks a group.
+ */
+export function buildTurnExecutionStream(
+  turn: Pick<ResponseTurn, "id" | "agentTurn" | "commentaryMessages" | "activities">,
+  options: BuildTurnExecutionStreamOptions = {},
+): TurnExecutionStreamEntry[] {
+  const includeImportant = options.includeImportantActivities ?? true;
+  const items: Array<
+    | {
+        kind: "commentary";
+        id: string;
+        createdAt: string;
+        message: ChatMessage | null;
+        content: string;
+        streaming: boolean;
+        order: number;
+      }
+    | {
+        kind: "activity";
+        id: string;
+        createdAt: string;
+        activity: AgentActivity;
+        order: number;
+      }
+  > = [];
+
+  for (const message of turn.commentaryMessages) {
+    items.push({
+      kind: "commentary",
+      id: message.id,
+      createdAt: message.createdAt,
+      message,
+      content: message.content,
+      streaming: false,
+      order: 0,
+    });
+  }
+  for (const activity of turn.activities) {
+    if (!isTranscriptActivity(activity)) continue;
+    if (!includeImportant && activityNeedsAttention(activity)) continue;
+    items.push({
+      kind: "activity",
+      id: activity.id,
+      createdAt: activity.createdAt,
+      activity,
+      order: 1,
+    });
+  }
+  if (options.liveContent) {
+    items.push({
+      kind: "commentary",
+      id: `live-commentary:${turn.id}`,
+      createdAt: turn.agentTurn.updatedAt,
+      message: null,
+      content: options.liveContent,
+      streaming: true,
+      order: 2,
+    });
+  }
+  items.sort((left, right) =>
+    Number(left.kind === "commentary" && left.streaming)
+      - Number(right.kind === "commentary" && right.streaming)
+    ||
+    timestamp(left.createdAt) - timestamp(right.createdAt)
+    || left.order - right.order
+    || left.id.localeCompare(right.id));
+
+  const stream: TurnExecutionStreamEntry[] = [];
+  for (const item of items) {
+    if (item.kind === "commentary") {
+      stream.push(item);
+      continue;
+    }
+    const previous = stream.at(-1);
+    if (previous?.kind === "activity-group") {
+      previous.activities.push(item.activity);
+      continue;
+    }
+    stream.push({
+      kind: "activity-group",
+      id: `activity-group:${item.id}`,
+      createdAt: item.createdAt,
+      activities: [item.activity],
+    });
+  }
+  return stream;
+}
+
 export function formatElapsed(milliseconds: number): string {
   const seconds = Math.max(0, Math.round(milliseconds / 1_000));
   if (seconds < 60) return `${seconds}s`;
@@ -461,18 +579,274 @@ export function shouldShowTimelineMinimap(rowCount: number, sideGutter: number):
     && sideGutter >= TIMELINE_MINIMAP_MIN_GUTTER;
 }
 
-export function estimateTimelineRowSize(item: ResponseTimelineItem): number {
-  if (item.kind === "compatibility") return 560;
-  const turn = item.turn;
-  const textLength = turn.userMessage.content.length
-    + turn.assistantMessages.reduce((total, message) => total + message.content.length, 0)
-    + turn.systemMessages.reduce((total, message) => total + message.content.length, 0);
-  const textHeight = Math.min(760, Math.ceil(textLength / 90) * 20);
-  const workHeight = Math.min(
-    360,
-    (turn.activities.length + turn.plans.length + turn.approvals.length + turn.inputRequests.length) * 28,
+export interface TimelineRowEstimateOptions {
+  /** Current transcript width in CSS pixels. Narrow/zoomed layouts wrap sooner. */
+  availableWidth?: number;
+  /** Matches the persisted "Collapse completed work logs" presentation setting. */
+  workDetailsExpanded?: boolean;
+  /** Mirrors whether reasoning summaries are visible inside work details. */
+  showThinking?: boolean;
+  /** Mirrors whether the changed-file disclosure is enabled and renderable. */
+  showChangedFiles?: boolean;
+  /** Used when an already-expanded metadata disclosure must be re-estimated. */
+  runDetailsExpanded?: boolean;
+  /** Used when an already-expanded changed-file disclosure must be re-estimated. */
+  changedFilesExpanded?: boolean;
+}
+
+function boundedEstimateWidth(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return 880;
+  return Math.max(320, Math.min(880, value));
+}
+
+function estimatedTextColumns(width: number, maximum: number): number {
+  return Math.max(30, Math.min(maximum, Math.floor(width / 7.6)));
+}
+
+function estimatedColumnLength(value: string): number {
+  let columns = 0;
+  for (const character of value) {
+    if (character === "\t") {
+      columns += 4;
+      continue;
+    }
+    const codePoint = character.codePointAt(0) ?? 0;
+    columns += codePoint > 0x2e7f ? 2 : 1;
+  }
+  return columns;
+}
+
+function estimatedWrappedLines(value: string, columns: number): number {
+  if (!value) return 0;
+  return value.replace(/\r/gu, "").split("\n").reduce((total, line) =>
+    total + Math.max(1, Math.ceil(estimatedColumnLength(line) / columns)), 0);
+}
+
+function estimateMarkdownHeight(content: string, columns: number): number {
+  if (!content.trim()) return 0;
+  const blocks: number[] = [];
+  const paragraph: string[] = [];
+  let codeLines = 0;
+  let inFence = false;
+  const flushParagraph = (): void => {
+    if (paragraph.length === 0) return;
+    const lines = estimatedWrappedLines(paragraph.join(" "), columns);
+    blocks.push(Math.max(25, lines * 25));
+    paragraph.length = 0;
+  };
+  const flushCode = (): void => {
+    if (codeLines === 0) return;
+    blocks.push(Math.min(4_800, 18 + codeLines * 20));
+    codeLines = 0;
+  };
+
+  for (const rawLine of content.replace(/\r/gu, "").split("\n")) {
+    const line = rawLine.trimEnd();
+    const trimmed = line.trim();
+    if (/^(?:```|~~~)/u.test(trimmed)) {
+      flushParagraph();
+      codeLines += 1;
+      inFence = !inFence;
+      if (!inFence) flushCode();
+      continue;
+    }
+    if (inFence) {
+      codeLines += 1;
+      continue;
+    }
+    if (!trimmed) {
+      flushParagraph();
+      continue;
+    }
+    if (/^#{1,6}\s/u.test(trimmed)) {
+      flushParagraph();
+      blocks.push(Math.max(30, estimatedWrappedLines(trimmed.replace(/^#{1,6}\s+/u, ""), columns) * 30));
+      continue;
+    }
+    if (/^(?:[-+*]|\d+[.)])\s/u.test(trimmed)) {
+      flushParagraph();
+      blocks.push(Math.max(25, estimatedWrappedLines(trimmed.replace(/^(?:[-+*]|\d+[.)])\s+/u, ""), columns - 4) * 25));
+      continue;
+    }
+    if (/^>/u.test(trimmed)) {
+      flushParagraph();
+      blocks.push(18 + estimatedWrappedLines(trimmed.replace(/^>\s?/u, ""), columns - 4) * 25);
+      continue;
+    }
+    if (/^\|.*\|$/u.test(trimmed)) {
+      flushParagraph();
+      blocks.push(Math.max(28, estimatedWrappedLines(trimmed, columns) * 28));
+      continue;
+    }
+    paragraph.push(trimmed);
+  }
+  flushParagraph();
+  flushCode();
+  const contentHeight = blocks.reduce((total, height) => total + height, 0);
+  return Math.min(12_000, contentHeight + Math.max(0, blocks.length - 1) * 12);
+}
+
+function estimateApprovalHeight(
+  approval: AgentApprovalRequest,
+  columns: number,
+): number {
+  const commandHeight = approval.command
+    ? Math.min(136, 16 + estimatedWrappedLines(approval.command, Math.max(24, columns - 8)) * 14)
+    : approval.detail
+      ? estimatedWrappedLines(approval.detail, columns) * 14
+      : 0;
+  const detailRows = Number(Boolean(approval.reason))
+    + Number(Boolean(approval.cwd))
+    + Number(Boolean(approval.networkScope))
+    + Number(approval.permissionRoots.length > 0);
+  return 82 + commandHeight + detailRows * 15;
+}
+
+function estimateInputRequestHeight(
+  request: AgentInputRequest,
+  columns: number,
+): number {
+  const questionsHeight = request.questions.reduce((total, question) => {
+    const legendLines = estimatedWrappedLines(`${question.header} ${question.question}`, columns);
+    const optionsHeight = question.options.reduce((optionTotal, option) =>
+      optionTotal + 30 + Math.max(0, estimatedWrappedLines(option.description, columns - 8) - 1) * 12, 0);
+    const inputHeight = question.options.length === 0 || question.isOther ? 38 : 0;
+    return total + 20 + legendLines * 14 + optionsHeight + inputHeight;
+  }, 0);
+  return 82 + questionsHeight + (request.autoResolutionMs === null ? 0 : 20);
+}
+
+function estimateExpandedWorkHeight(
+  turn: ResponseTurn,
+  columns: number,
+  includeReasoning: boolean,
+): number {
+  const activityHeight = turn.activities.filter((activity) =>
+    isTranscriptActivity(activity) && !activityNeedsAttention(activity)).length * 27;
+  const commentaryHeight = turn.commentaryMessages.reduce((total, message) =>
+    total + 10 + estimatedWrappedLines(message.content, columns) * 18, 0);
+  const reasoningHeight = includeReasoning && turn.reasoning
+    ? 22 + estimatedWrappedLines(turn.reasoning.content, columns) * 18
+    : 0;
+  const planHeight = turn.plans.reduce((total, plan) =>
+    total + 26
+      + estimatedWrappedLines(plan.explanation ?? "", columns) * 17
+      + plan.steps.length * 24, 0);
+  return Math.min(6_000, activityHeight + commentaryHeight + reasoningHeight + planHeight);
+}
+
+function estimateTurnRowSize(
+  turn: ResponseTurn,
+  options: TimelineRowEstimateOptions,
+): number {
+  const availableWidth = boundedEstimateWidth(options.availableWidth);
+  const answerWidth = Math.max(280, Math.min(760, availableWidth - 40));
+  const answerColumns = estimatedTextColumns(answerWidth, 96);
+  const requestWidth = Math.max(240, Math.min(680, availableWidth * 0.8));
+  const requestColumns = estimatedTextColumns(requestWidth - 28, 86);
+
+  const requestLines = Math.max(1, estimatedWrappedLines(turn.userMessage.content, requestColumns));
+  const attachmentRows = Math.ceil(turn.userMessage.attachments.length / Math.max(1, Math.floor(requestWidth / 180)));
+  const requestHeight = 42 + requestLines * 22 + attachmentRows * 25;
+
+  const transcriptActivities = turn.activities.filter(isTranscriptActivity);
+  const estimatedActivityGroups = Math.min(
+    transcriptActivities.length,
+    turn.commentaryMessages.length + 1,
   );
-  return Math.max(300, 250 + textHeight + workHeight + (turn.gitArtifact ? 48 : 0));
+  const activeCommentaryHeight = turn.commentaryMessages.reduce((total, message) =>
+    total + 12 + estimatedWrappedLines(message.content, answerColumns) * 18, 0);
+  const includesReasoning = options.showThinking !== false && Boolean(turn.reasoning);
+  const hasSupplementalWork = turn.plans.length > 0 || includesReasoning;
+  const importantHeight = turn.importantActivities.reduce((total, activity) => {
+    const titleLines = Math.max(1, estimatedWrappedLines(activity.title, answerColumns));
+    const detailLines = activity.detail
+      ? Math.max(1, estimatedWrappedLines(activity.detail, answerColumns))
+      : 0;
+    return total + 36 + titleLines * 16 + detailLines * 15;
+  }, 0);
+  const executionHeight = turn.isActive
+    ? 43
+      + activeCommentaryHeight
+      + estimatedActivityGroups * 27
+      + (transcriptActivities.length > estimatedActivityGroups ? estimatedActivityGroups * 23 : 0)
+      + (hasSupplementalWork ? 27 : 0)
+    : 30 + importantHeight;
+  const expandedWorkHeight = options.workDetailsExpanded
+    && (transcriptActivities.length > 0
+      || turn.commentaryMessages.length > 0
+      || hasSupplementalWork)
+    ? estimateExpandedWorkHeight(turn, answerColumns, includesReasoning)
+    : 0;
+  const exceptionalHeight = turn.approvals.reduce((total, approval) =>
+    total + estimateApprovalHeight(approval, answerColumns), 0)
+    + turn.inputRequests.reduce((total, request) =>
+      total + estimateInputRequestHeight(request, answerColumns), 0);
+
+  const systemHeight = turn.systemMessages.reduce((total, message) =>
+    total + 35 + estimatedWrappedLines(message.content, answerColumns) * 20, 0);
+  const answerContent = turn.terminalAssistantMessage?.content ?? "";
+  const answerHeight = answerContent
+    ? 26 + estimateMarkdownHeight(answerContent, answerColumns)
+    : 0;
+  const metadataHeight = turn.terminalAssistantMessage
+    ? 47 + (options.runDetailsExpanded
+      ? (availableWidth <= 620 ? 230 : 126)
+      : 0)
+    : 0;
+
+  const showsArtifact = options.showChangedFiles !== false && Boolean(turn.gitArtifact);
+  const changedFilesHeight = showsArtifact
+    ? 35 + (options.changedFilesExpanded && turn.gitArtifact
+      ? Math.min(12, turn.gitArtifact.files.length) * 28
+        + (turn.gitArtifact.completeness === "complete" ? 0 : 35)
+        + 38
+      : 0)
+    : 0;
+  const visibleSections = 2
+    + Number(systemHeight > 0)
+    + Number(answerHeight > 0)
+    + Number(metadataHeight > 0)
+    + Number(changedFilesHeight > 0);
+  const sectionSpacing = Math.max(0, visibleSections - 1) * 18;
+  const virtualRowGap = 36;
+
+  return Math.max(190, Math.ceil(
+    requestHeight
+    + executionHeight
+    + expandedWorkHeight
+    + exceptionalHeight
+    + systemHeight
+    + answerHeight
+    + metadataHeight
+    + changedFilesHeight
+    + sectionSpacing
+    + virtualRowGap,
+  ));
+}
+
+export function estimateTimelineRowSize(
+  item: ResponseTimelineItem,
+  options: TimelineRowEstimateOptions = {},
+): number {
+  if (item.kind === "compatibility") {
+    const availableWidth = boundedEstimateWidth(options.availableWidth);
+    const columns = estimatedTextColumns(Math.min(760, availableWidth - 40), 96);
+    const inferredHeight = item.compatibility.inferredTurns.reduce((total, turn) =>
+      total + estimateTurnRowSize(turn, options), 0);
+    const messageHeight = item.compatibility.messages.reduce((total, message) =>
+      total + 30 + estimatedWrappedLines(message.content, columns) * 20, 0);
+    const recordHeight = (
+      item.compatibility.malformedTurns.length
+      + item.compatibility.activities.length
+      + item.compatibility.reasonings.length
+      + item.compatibility.plans.length
+      + item.compatibility.checkpoints.length
+    ) * 30;
+    return Math.max(240, Math.ceil(Math.min(12_000, 100 + inferredHeight + messageHeight + recordHeight)));
+  }
+  const turn = item.turn;
+  return estimateTurnRowSize(turn, options);
 }
 
 export interface TimelineMinimapMarker {
@@ -551,6 +925,9 @@ export function turnStatusLabel(status: AgentTurnStatus): string {
 export function workSummaryLabel(turn: ResponseTurn, now = Date.now()): string {
   const execution = turnExecutionElapsedMs(turn, now);
   const duration = execution === null ? null : formatElapsed(execution);
+  if (turn.agentTurn.status === "completed" && turn.toolCallCount === 0) {
+    return "Completed without tool activity";
+  }
   const prefix = turn.agentTurn.status === "failed"
     ? duration ? `Failed after ${duration}` : "Failed before starting"
     : turn.agentTurn.status === "cancelled" || turn.agentTurn.status === "interrupted"
@@ -560,7 +937,7 @@ export function workSummaryLabel(turn: ResponseTurn, now = Date.now()): string {
         : duration
           ? `${turn.isActive ? "Working" : "Worked"} for ${duration}`
           : turnStatusLabel(turn.agentTurn.status);
-  const actions = turn.activities.length;
+  const actions = turn.toolCallCount;
   return actions > 0
     ? `${prefix} · ${actions} ${actions === 1 ? "action" : "actions"}`
     : prefix;

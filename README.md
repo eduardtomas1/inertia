@@ -37,7 +37,8 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 ### Conversations that explain the work
 
 - Responses render polished Markdown with safe project links, highlighted code, copy and wrap controls, and tables that can be copied as Markdown or CSV.
-- Reasoning summaries, tool activity, approvals, questions, warnings, final answers, and turn checkpoints stay together in one chronological response.
+- Provider updates and tool activity appear in the order they happened. Only adjacent calls fold together, so a new update naturally starts the next stretch of work.
+- Reasoning summaries, approvals, questions, warnings, final answers, and turn checkpoints stay together in the same chronological turn.
 - Each completed request keeps its original agent, model backend, and model attribution together with a turn-specific before-and-after Git record, when available, that remains useful after the workspace moves on.
 - Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
 - Long transcripts keep stable rows and load their heavier detail separately, while incremental runtime updates resume safely after a restart.
@@ -70,13 +71,13 @@ Inertia uses the coding tools and accounts already installed on your computer. C
 
 Provider account credentials remain in each provider's own storage. Credentials added for custom model backends are encrypted through the operating system's secure credential storage; only non-secret profile settings live in Inertia's local database. Inertia stores workspace history and preferences locally, and its optional runtime diagnostics exclude prompts, source, token values, credentials, and connection capabilities.
 
-### Version 0.0.7
+### Version 0.0.8
 
-This release makes conversation history more trustworthy and model routing more explicit. Every agent request now carries durable execution identity and a historical Git change record, while long conversations recover incrementally and remain responsive after restarts.
+This release makes agent work read like the work itself. Provider updates and tool calls are interleaved in their real order, only adjacent calls group together, and the final answer becomes final only when the turn actually settles.
 
-Model backend profiles add safe custom endpoints and a built-in Kimi-through-Claude route without implying that agent context transfers between harnesses or backends. Backend secrets stay in operating-system secure storage, and profile changes that alter execution require a new chat.
+The result is quieter without hiding what matters: completed work folds into a light summary, failures stay visible, and long or narrow transcripts remain stable, accessible, and easy to follow.
 
-Download [Inertia v0.0.7](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.7):
+Download [Inertia v0.0.8](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.8):
 
 | Platform | Download |
 | --- | --- |

@@ -2806,12 +2806,20 @@ export class RuntimeStore {
   }
 
   addActivity(
-    activity: Omit<AgentActivity, "id" | "createdAt" | "turnId"> & { turnId?: string | null },
+    activity: Omit<AgentActivity, "id" | "createdAt" | "turnId"> & {
+      turnId?: string | null;
+      createdAt?: string;
+    },
   ): AgentActivity {
     this.requireConversation(activity.conversationId);
     const turnId = activity.turnId ?? null;
     if (turnId) this.assertAgentTurnIdentity(activity.conversationId, activity.runId, turnId);
-    const record: AgentActivity = { ...activity, turnId, id: randomUUID(), createdAt: new Date().toISOString() };
+    const record: AgentActivity = {
+      ...activity,
+      turnId,
+      id: randomUUID(),
+      createdAt: activity.createdAt ?? new Date().toISOString(),
+    };
     this.database.prepare(`INSERT INTO activities (id, conversation_id, run_id, turn_id, kind, title, detail, status, created_at) VALUES (@id, @conversationId, @runId, @turnId, @kind, @title, @detail, @status, @createdAt)`).run(record);
     return record;
   }

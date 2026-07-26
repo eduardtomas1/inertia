@@ -2,6 +2,29 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.8 — 2026-07-26
+
+### A conversation that follows the work
+
+- Provider commentary and tool activity now appear in the order they actually happened, so the transcript can show an update, the calls it led to, the next update, and the final answer as one understandable sequence.
+- Only adjacent calls are grouped. Commentary naturally separates one stretch of work from the next, while failed, cancelled, waiting, or important actions stay visible.
+- Streaming prose remains visibly in progress and is promoted to the final answer only when the turn settles, preventing an early update from being mistaken for the completed response.
+- Completed work folds into a lighter elapsed-time and action summary without turning the conversation into a stack of panels.
+- Requests, approvals, provider questions, plans, reasoning summaries, execution details, checkpoints, and Git artifacts keep their established place in the turn.
+
+### Calmer at every transcript size
+
+- Long conversations use more accurate virtual row estimates for Markdown, code, tables, activity groups, narrow layouts, and expanded details.
+- Scroll anchoring, jump-to-latest behavior, keyboard turn navigation, reduced-motion preferences, and live-region announcements remain stable while streamed content changes height.
+- Responsive coverage now validates wide, stacked, and compact workspaces as well as long transcripts, streaming answers, grouped activity, settled work, motion preferences, and accessible labels.
+- The main workspace, light theme, search palette, and README screenshots received a fresh visual validation pass.
+
+### Release confidence
+
+- The complete typecheck, unit, provider protocol, end-to-end, packaged-app, Electron-fuse, and macOS signature checks run against the release candidate.
+- A repository-wide threat model and framework-specific security review found no critical or high-severity implementation defect. Security reports remain outside the repository.
+- Production dependencies audit clean. A transitive advisory remains limited to the build-only packaging toolchain while the project waits for a compatible upstream fix rather than forcing an unsafe downgrade or override.
+
 ## 0.0.7 — 2026-07-26
 
 ### Trustworthy history for every agent request

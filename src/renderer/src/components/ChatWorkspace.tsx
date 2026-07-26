@@ -257,7 +257,7 @@ export function ChatWorkspace({
           Use Alt plus Up or Down to move between turns, Alt plus Home for the request,
           Alt plus End for the final answer, and Alt plus G for the turn artifact.
         </span>
-        <div ref={timelineRef} className="response-timeline" aria-live="polite">
+        <div ref={timelineRef} className="response-timeline">
           {messages.length === 0 && turns.length === 0 && (
             <div className="empty-thread"><span className="empty-thread-icon"><Code2 size={20} /></span><h3>What should we work on?</h3><p>Describe the outcome you want. The details can take shape together.</p></div>
           )}
@@ -296,6 +296,7 @@ export function ChatWorkspace({
             onOpenTurnDiff={onOpenTurnDiff}
             onCompareTurnArtifacts={onCompareTurnArtifacts}
             onOpenTurnFile={onOpenTurnFile}
+            onStop={onStop}
           />
         </div>
       </div>

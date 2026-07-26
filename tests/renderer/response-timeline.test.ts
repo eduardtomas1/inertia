@@ -13,6 +13,7 @@ import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTime
 import {
   activityNeedsAttention,
   buildResponseTimeline,
+  buildTurnExecutionStream,
   buildTimelineMinimapMarkers,
   estimateTimelineRowSize,
   formatElapsed,
@@ -218,6 +219,50 @@ describe("authoritative response timeline", () => {
     expect(response.terminalAssistantMessage?.id).toBe("assistant-final");
   });
 
+  it("groups only adjacent calls and preserves commentary between work phases", () => {
+    const turn = agentTurn("turn-interleaved", "user-interleaved", {
+      status: "running",
+      completedAt: null,
+    });
+    const response = timelineTurn(buildResponseTimeline({
+      turns: [turn],
+      messages: [
+        message("user-interleaved", turn.id, "user", "Investigate", "2026-07-23T10:00:00.000Z"),
+        message("commentary-one", turn.id, "assistant", "I found the entry point.", "2026-07-23T10:00:02.000Z"),
+        message("commentary-two", turn.id, "assistant", "The first check passed.", "2026-07-23T10:00:05.000Z"),
+      ],
+      activities: [
+        activity("call-one", turn.id, { createdAt: "2026-07-23T10:00:03.000Z" }),
+        activity("call-two", turn.id, { createdAt: "2026-07-23T10:00:04.000Z" }),
+        activity("call-three", turn.id, { createdAt: "2026-07-23T10:00:06.000Z" }),
+      ],
+      reasonings: [],
+      checkpoints: [],
+    }), turn.id);
+
+    const stream = buildTurnExecutionStream(response, { liveContent: "Preparing the answer." });
+    expect(stream.map(({ kind }) => kind)).toEqual([
+      "commentary",
+      "activity-group",
+      "commentary",
+      "activity-group",
+      "commentary",
+    ]);
+    expect(stream[1]).toMatchObject({
+      kind: "activity-group",
+      activities: [{ id: "call-one" }, { id: "call-two" }],
+    });
+    expect(stream[3]).toMatchObject({
+      kind: "activity-group",
+      activities: [{ id: "call-three" }],
+    });
+    expect(stream.at(-1)).toMatchObject({
+      kind: "commentary",
+      content: "Preparing the answer.",
+      streaming: true,
+    });
+  });
+
   it("renders the terminal answer outside collapsed work while preserving exact historical configuration", () => {
     const turn = agentTurn("turn-1", "user-1", { terminalAssistantMessageId: "assistant-final" });
     const html = renderToStaticMarkup(createElement(ResponseTimeline, {
@@ -261,21 +306,189 @@ describe("authoritative response timeline", () => {
       onOpenTurnDiff: () => undefined,
       onCompareTurnArtifacts: () => undefined,
       onOpenTurnFile: () => undefined,
+      onStop: () => undefined,
     }));
 
     expect(html).toContain('data-terminal-answer-id="assistant-final"');
     expect(html).toContain('data-turn-request-context="turn-1"');
+    expect(html).toContain('data-turn-layer="user-request"');
+    expect(html).toContain('data-turn-layer="agent-execution"');
+    expect(html).toContain('data-turn-layer="final-answer"');
+    expect(html).toContain('data-answer-phase="persisted"');
     expect(html).toContain("reference.png");
-    expect(html).toContain("<details><summary>");
+    expect(html).toContain("Run details");
     expect(html).toContain("Terminal answer stays visible");
     expect(html).toContain("Working note");
-    expect(html).toContain("<strong>Harness</strong><code>codex-app-server</code>");
-    expect(html).toContain("<strong>Backend</strong><code>native:codex:app-server</code>");
-    expect(html).toContain("<strong>Model</strong><code>gpt-5.6</code>");
+    expect(html).toContain("<dt>Harness ID</dt><dd><code>codex-app-server</code>");
+    expect(html).toContain("<dt>Backend profile ID</dt><dd><code>native:codex:app-server</code>");
+    expect(html).toContain("<dt>Exact model ID</dt><dd><code>gpt-5.6</code>");
     expect(html).toContain("Changed by this turn");
     expect(html).toContain("Open exact turn diff");
     expect(html).toContain("src/history.ts");
+    expect(html.indexOf('data-turn-layer="agent-execution"'))
+      .toBeGreaterThan(html.indexOf('data-turn-layer="user-request"'));
+    expect(html.indexOf('data-turn-layer="final-answer"'))
+      .toBeGreaterThan(html.indexOf('data-turn-layer="agent-execution"'));
     expect(html.indexOf("Terminal answer stays visible")).toBeGreaterThan(html.indexOf("Working note"));
+  });
+
+  it("keeps active commentary in the execution stream and reserves the answer document for persistence", () => {
+    const renderTurn = (
+      turn: AgentTurn,
+      messages: ChatMessage[],
+      streamingText: string,
+    ) => renderToStaticMarkup(createElement(ResponseTimeline, {
+      turns: [turn],
+      messages,
+      activities: [],
+      reasonings: [],
+      plans: [],
+      checkpoints: [],
+      projectRoot: "/workspace",
+      projectId: "project-1",
+      conversationId,
+      providers: [],
+      streamingText,
+      streamingReasoning: "",
+      approvals: [],
+      inputRequests: [],
+      showTimestamps: false,
+      showThinking: false,
+      defaultCodeWrap: false,
+      autoCollapseWorkLog: true,
+      showChangedFileSummaries: false,
+      checkpointRestoreDisabled: false,
+      onRespondToApproval: async () => undefined,
+      onRespondToInput: async () => undefined,
+      onRevertCheckpoint: () => undefined,
+      onOpenTurnDiff: () => undefined,
+      onCompareTurnArtifacts: () => undefined,
+      onOpenTurnFile: () => undefined,
+      onStop: () => undefined,
+    }));
+    const active = agentTurn("turn-active", "user-active", {
+      status: "running",
+      completedAt: null,
+    });
+    const activeHtml = renderTurn(
+      active,
+      [message("user-active", active.id, "user", "Stream it", active.requestedAt)],
+      "Answer in progress",
+    );
+    const settled = agentTurn("turn-settled", "user-settled", {
+      terminalAssistantMessageId: "assistant-settled",
+    });
+    const settledHtml = renderTurn(
+      settled,
+      [
+        message("user-settled", settled.id, "user", "Finish it", settled.requestedAt),
+        message("assistant-settled", settled.id, "assistant", "Persisted answer", settled.completedAt!),
+      ],
+      "",
+    );
+
+    expect(activeHtml).not.toContain("turn-final-answer-document");
+    expect(activeHtml).toContain("turn-commentary-row is-streaming");
+    expect(activeHtml).toContain('data-turn-layer="agent-execution"');
+    expect(activeHtml).toContain("Answer in progress");
+    expect(activeHtml).not.toContain('aria-label="Final answer actions and run metadata"');
+    expect(settledHtml).toContain("turn-final-answer-document");
+    expect(settledHtml).toContain('data-turn-layer="final-answer"');
+    expect(settledHtml.indexOf('data-turn-layer="final-answer"'))
+      .toBeGreaterThan(settledHtml.indexOf('data-turn-layer="user-request"'));
+    expect(settledHtml).toContain('data-answer-phase="persisted"');
+    expect(settledHtml).toContain('data-terminal-answer-id="assistant-settled"');
+  });
+
+  it("interleaves commentary with adjacent compact call groups and keeps secondary work in Details", () => {
+    const turn = agentTurn("turn-active-rail", "user-active-rail", {
+      status: "running",
+      completedAt: null,
+    });
+    const at = (seconds: number) => `2026-07-23T10:00:${String(seconds).padStart(2, "0")}.000Z`;
+    const html = renderToStaticMarkup(createElement(ResponseTimeline, {
+      turns: [turn],
+      messages: [
+        message("user-active-rail", turn.id, "user", "Build the rail", turn.requestedAt),
+        message("commentary-active-rail", turn.id, "assistant", "Checking the existing presentation.", at(2)),
+      ],
+      activities: [
+        activity("old-running", turn.id, { title: "Inspect package", status: "running", createdAt: at(1) }),
+        activity("recent-read", turn.id, { title: "Read source", status: "running", createdAt: at(2) }),
+        activity("older-duplicate", turn.id, { kind: "command", title: "Run tests", status: "running", createdAt: at(3) }),
+        activity("recent-edit", turn.id, { kind: "file", title: "Edit layer", status: "running", createdAt: at(4) }),
+        activity("completed-command", turn.id, { kind: "command", title: "Completed command", createdAt: at(5) }),
+        activity("neutral-status", turn.id, { kind: "status", title: "Provider heartbeat", status: "running", createdAt: at(6) }),
+        activity("failed-command", turn.id, { kind: "command", title: "Build failed", status: "failed", createdAt: at(7) }),
+        activity("warning", turn.id, { kind: "status", title: "Unsupported option skipped", createdAt: at(8) }),
+        activity("recent-command", turn.id, { kind: "command", title: "Run tests", status: "running", createdAt: at(9) }),
+      ],
+      reasonings: [{
+        id: "reasoning-active-rail",
+        conversationId,
+        runId: turn.runId,
+        turnId: turn.id,
+        content: "Private working summary",
+        status: "running",
+        createdAt: at(2),
+      }],
+      plans: [{
+        conversationId,
+        runId: turn.runId,
+        turnId: turn.id,
+        explanation: "Keep the live surface quiet",
+        steps: [{ step: "Render recent work", status: "inProgress" }],
+      }],
+      checkpoints: [],
+      projectRoot: "/workspace",
+      projectId: "project-1",
+      conversationId,
+      providers: [],
+      streamingText: "",
+      streamingReasoning: "",
+      approvals: [],
+      inputRequests: [],
+      showTimestamps: false,
+      showThinking: true,
+      defaultCodeWrap: false,
+      autoCollapseWorkLog: true,
+      showChangedFileSummaries: false,
+      checkpointRestoreDisabled: true,
+      onRespondToApproval: async () => undefined,
+      onRespondToInput: async () => undefined,
+      onRevertCheckpoint: () => undefined,
+      onOpenTurnDiff: () => undefined,
+      onCompareTurnArtifacts: () => undefined,
+      onOpenTurnFile: () => undefined,
+      onStop: () => undefined,
+    }));
+
+    expect(html).toContain("turn-execution-rail is-live");
+    expect(html).toContain("codex is working");
+    expect(html.match(/codex is working/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="Stop codex run"');
+    expect(html).toContain(">Stop</span></button>");
+    expect(html.match(/data-activity-group=/g)).toHaveLength(2);
+    expect(html).toContain("earlier calls");
+    expect(html).toContain("Inspect package");
+    expect(html).toContain("Checking the existing presentation.");
+    expect(html.indexOf("Inspect package")).toBeLessThan(html.indexOf("Checking the existing presentation."));
+    expect(html.indexOf("Checking the existing presentation.")).toBeLessThan(html.indexOf("Build failed"));
+
+    const detailsStart = html.indexOf('class="turn-work-details"');
+    const detailsEnd = html.indexOf("</details>", detailsStart);
+    const details = html.slice(detailsStart, detailsEnd);
+    expect(html).toContain('aria-expanded="false"');
+    expect(details).not.toContain("Provider heartbeat");
+    expect(details).toContain("Private working summary");
+    expect(details).toContain("Keep the live surface quiet");
+    expect(details).not.toContain("Checking the existing presentation.");
+
+    const failedIndex = html.indexOf("Build failed");
+    const warningIndex = html.indexOf("Unsupported option skipped");
+    expect(failedIndex).toBeLessThan(detailsStart);
+    expect(warningIndex).toBeLessThan(detailsStart);
+    expect(html.match(/data-activity-visibility="important"/g)).toHaveLength(2);
   });
 
   it("hides expected non-Git artifacts while preserving real capture failures", () => {
@@ -314,6 +527,7 @@ describe("authoritative response timeline", () => {
         onOpenTurnDiff: () => undefined,
         onCompareTurnArtifacts: () => undefined,
         onOpenTurnFile: () => undefined,
+        onStop: () => undefined,
       }),
     );
     const unavailable = {
@@ -334,7 +548,7 @@ describe("authoritative response timeline", () => {
       ...unavailable,
       failureReason: "This workspace is not a Git repository.",
     }));
-    expect(nonGitHtml).toContain('aria-label="Historical turn details"');
+    expect(nonGitHtml).toContain('aria-label="Final answer actions and run metadata"');
     expect(nonGitHtml).not.toContain("Turn changes unavailable");
     expect(nonGitHtml).not.toContain("This workspace is not a Git repository.");
 
@@ -344,6 +558,130 @@ describe("authoritative response timeline", () => {
     }));
     expect(failedCaptureHtml).toContain("Turn changes unavailable");
     expect(failedCaptureHtml).toContain("The repository snapshot could not be captured.");
+  });
+
+  it("renders changed files as a quiet disclosure with exact actions and completeness context", () => {
+    const turn = agentTurn("turn-files", "user-files", {
+      terminalAssistantMessageId: "assistant-files",
+    });
+    const firstFile = artifact("artifact-files", turn.id, "src/history.ts").files[0]!;
+    const gitArtifact = artifact("artifact-files", turn.id, firstFile.path, {
+      status: "partial",
+      completeness: "truncated",
+      patchState: "truncated",
+      failureReason: "The complete file summary is retained, but the stored patch reached its size limit.",
+      insertions: 84,
+      deletions: 21,
+      files: [
+        { ...firstFile, status: "modified", insertions: 64, deletions: 9 },
+        {
+          ...firstFile,
+          path: "src/new-file.ts",
+          status: "added",
+          insertions: 20,
+          deletions: 12,
+        },
+      ],
+    });
+    const html = renderToStaticMarkup(createElement(ResponseTimeline, {
+      turns: [turn],
+      messages: [
+        message("user-files", turn.id, "user", "Change the files", turn.requestedAt),
+        message("assistant-files", turn.id, "assistant", "Changed.", turn.completedAt!),
+      ],
+      activities: [],
+      reasonings: [],
+      plans: [],
+      checkpoints: [],
+      gitArtifacts: [gitArtifact],
+      projectRoot: "/workspace",
+      projectId: "project-1",
+      conversationId,
+      providers: [],
+      streamingText: "",
+      streamingReasoning: "",
+      approvals: [],
+      inputRequests: [],
+      showTimestamps: false,
+      showThinking: false,
+      defaultCodeWrap: false,
+      autoCollapseWorkLog: true,
+      showChangedFileSummaries: true,
+      checkpointRestoreDisabled: false,
+      onRespondToApproval: async () => undefined,
+      onRespondToInput: async () => undefined,
+      onRevertCheckpoint: () => undefined,
+      onOpenTurnDiff: () => undefined,
+      onCompareTurnArtifacts: () => undefined,
+      onOpenTurnFile: () => undefined,
+      onStop: () => undefined,
+    }));
+
+    expect(html).toContain('class="turn-changed-files"');
+    expect(html).toContain('aria-label="Changed by this turn"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("<strong>2 files changed</strong><small>· +84 −21 · main · incomplete</small>");
+    expect(html).toContain("View");
+    expect(html).toContain('class="turn-changed-files-list"');
+    expect(html).toContain("modified · +64 −9");
+    expect(html).toContain("added · +20 −12");
+    expect(html).toContain("Open exact turn diff");
+    expect(html).toContain('aria-label="Open src/history.ts"');
+    expect(html).toContain("The complete file summary is retained, but the stored patch reached its size limit.");
+    expect(html.indexOf("2 files changed")).toBeGreaterThan(html.indexOf('aria-label="Final answer actions and run metadata"'));
+  });
+
+  it("offers comparison with the nearest earlier compatible worktree", () => {
+    const turns = [
+      agentTurn("turn-1", "user-1"),
+      agentTurn("turn-2", "user-2"),
+      agentTurn("turn-3", "user-3"),
+    ];
+    const first = artifact("artifact-1", turns[0]!.id, "src/first.ts");
+    const unrelated = artifact("artifact-2", turns[1]!.id, "src/unrelated.ts", {
+      repositoryIdentity: "f".repeat(64),
+      worktreeIdentity: "e".repeat(64),
+    });
+    const compatible = artifact("artifact-3", turns[2]!.id, "src/latest.ts");
+    const html = renderToStaticMarkup(createElement(ResponseTimeline, {
+      turns,
+      messages: turns.map((turn, index) => message(
+        `user-${index + 1}`,
+        turn.id,
+        "user",
+        `Request ${index + 1}`,
+        turn.requestedAt,
+      )),
+      activities: [],
+      reasonings: [],
+      plans: [],
+      checkpoints: [],
+      gitArtifacts: [first, unrelated, compatible],
+      projectRoot: "/workspace",
+      projectId: "project-1",
+      conversationId,
+      providers: [],
+      streamingText: "",
+      streamingReasoning: "",
+      approvals: [],
+      inputRequests: [],
+      showTimestamps: false,
+      showThinking: false,
+      defaultCodeWrap: false,
+      autoCollapseWorkLog: true,
+      showChangedFileSummaries: true,
+      checkpointRestoreDisabled: false,
+      onRespondToApproval: async () => undefined,
+      onRespondToInput: async () => undefined,
+      onRevertCheckpoint: () => undefined,
+      onOpenTurnDiff: () => undefined,
+      onCompareTurnArtifacts: () => undefined,
+      onOpenTurnFile: () => undefined,
+      onStop: () => undefined,
+    }));
+
+    expect(html.match(/Compare with previous turn/gu)).toHaveLength(1);
+    expect(html.indexOf("Compare with previous turn")).toBeGreaterThan(html.indexOf("src/latest.ts"));
   });
 
   it("labels a historical Kimi turn from its persisted selection", () => {
@@ -406,10 +744,109 @@ describe("authoritative response timeline", () => {
       onOpenTurnDiff: () => undefined,
       onCompareTurnArtifacts: () => undefined,
       onOpenTurnFile: () => undefined,
+      onStop: () => undefined,
     }));
 
-    expect(html).toContain("Claude harness · Kimi · K3");
-    expect(html).not.toContain("Claude harness · Anthropic");
+    expect(html).toContain('data-final-answer-identity="historical-model-selection">Claude · Kimi · K3</span>');
+    expect(html).toContain("<span>Run details</span>");
+    expect(html).not.toContain("Claude harness ·");
+  });
+
+  it("keeps answer actions quiet and exposes persisted technical metadata through an accessible Run details disclosure", () => {
+    const turn = agentTurn("turn-footer", "user-footer", {
+      harnessId: "legacy-harness-projection",
+      backendProfileId: "legacy-backend-projection",
+      model: "legacy-model-projection",
+      reasoningEffort: "legacy-reasoning-projection",
+      providerSessionBefore: "provider-session-before-secret",
+      providerSessionAfter: "provider-session-after-secret",
+      configurationRevision: 987,
+      terminalAssistantMessageId: "assistant-footer",
+      modelSelection: {
+        harnessId: "vendor-harness-v2",
+        backendProfileId: "custom:acme",
+        backendProfileDisplayName: "Acme Gateway",
+        modelId: "acme/code-pro",
+        alias: "Code Pro",
+        reasoningEffort: "medium",
+        contextWindowOverride: null,
+        providerOptions: {},
+        capabilities: [],
+        backendConfigurationRevision: 42,
+      },
+    });
+    const gitArtifact = artifact("artifact-footer", turn.id, "src/footer.ts", {
+      status: "partial",
+      completeness: "partial",
+      patchState: "available",
+    });
+    const html = renderToStaticMarkup(createElement(ResponseTimeline, {
+      turns: [turn],
+      messages: [
+        message("user-footer", turn.id, "user", "Polish the footer", turn.requestedAt),
+        message("assistant-footer", turn.id, "assistant", "Footer complete.", turn.completedAt!),
+      ],
+      activities: [],
+      reasonings: [],
+      plans: [],
+      checkpoints: [],
+      gitArtifacts: [gitArtifact],
+      projectRoot: "/workspace",
+      projectId: "project-1",
+      conversationId,
+      providers: [],
+      streamingText: "",
+      streamingReasoning: "",
+      approvals: [],
+      inputRequests: [],
+      showTimestamps: true,
+      showThinking: false,
+      defaultCodeWrap: false,
+      autoCollapseWorkLog: true,
+      showChangedFileSummaries: true,
+      checkpointRestoreDisabled: false,
+      onRespondToApproval: async () => undefined,
+      onRespondToInput: async () => undefined,
+      onRevertCheckpoint: () => undefined,
+      onOpenTurnDiff: () => undefined,
+      onCompareTurnArtifacts: () => undefined,
+      onOpenTurnFile: () => undefined,
+      onStop: () => undefined,
+    }));
+
+    const footerStart = html.indexOf('aria-label="Final answer actions and run metadata"');
+    const primaryEnd = html.indexOf("</div>", footerStart);
+    const detailsEnd = html.indexOf("</dl>", primaryEnd);
+    const footerPrimary = html.slice(footerStart, primaryEnd);
+    const runDetails = html.slice(primaryEnd, detailsEnd);
+
+    expect(footerStart).toBeGreaterThan(html.indexOf("Footer complete."));
+    expect(html.indexOf("1 file changed")).toBeGreaterThan(footerStart);
+    expect(footerPrimary).toContain('aria-label="Copy final answer"');
+    expect(footerPrimary).toContain(`dateTime="${turn.completedAt}"`);
+    expect(footerPrimary).toContain('data-turn-status="completed">Completed</span>');
+    expect(footerPrimary).toContain('class="turn-duration">Worked 7s</span>');
+    expect(footerPrimary).toContain('aria-expanded="false"');
+    expect(footerPrimary).toContain('aria-controls="turn-run-details-turn-footer"');
+    expect(footerPrimary).toContain("<span>Run details</span>");
+    expect(footerPrimary).not.toContain("vendor-harness-v2");
+    expect(runDetails).toContain('id="turn-run-details-turn-footer" hidden=""');
+    expect(runDetails).toContain("<dt>Harness ID</dt><dd><code>vendor-harness-v2</code>");
+    expect(runDetails).toContain("<dt>Backend profile ID</dt><dd><code>custom:acme</code>");
+    expect(runDetails).toContain("<dt>Exact model ID</dt><dd><code>acme/code-pro</code>");
+    expect(runDetails).toContain("<dt>Reasoning level</dt><dd><code>medium</code>");
+    expect(runDetails).toContain("<dt>Queue duration</dt><dd>5s</dd>");
+    expect(runDetails).toContain("<dt>Execution duration</dt><dd>7s</dd>");
+    expect(runDetails).toContain("<dt>Historical association</dt><dd>Authoritative</dd>");
+    expect(runDetails).toContain("<dt>Artifact completeness</dt><dd>Partial</dd>");
+    expect(html).not.toContain("provider-session-before-secret");
+    expect(html).not.toContain("provider-session-after-secret");
+    expect(html).not.toContain("legacy-harness-projection");
+    expect(html).not.toContain("legacy-backend-projection");
+    expect(html).not.toContain("legacy-model-projection");
+    expect(html).not.toContain("legacy-reasoning-projection");
+    expect(html).not.toContain(">987<");
+    expect(html).not.toContain(">42<");
   });
 
   it("keeps completed timing and configuration immutable after unrelated conversation mutation and activity", () => {
@@ -452,7 +889,7 @@ describe("authoritative response timeline", () => {
     expect(turnQueueElapsedMs(response)).toBe(5_000);
     expect(turnExecutionElapsedMs(response)).toBe(7_000);
     expect(turnTimingLabels(response)).toEqual(["Queued 5s", "Worked 7s"]);
-    expect(workSummaryLabel(response)).toBe("Worked for 7s");
+    expect(workSummaryLabel(response)).toBe("Completed without tool activity");
   });
 
   it("renders plans only for their explicit owning turn and quarantines nullable legacy plans", () => {
@@ -734,7 +1171,7 @@ describe("authoritative response timeline", () => {
     expect(timeline).toHaveLength(count);
     expect(timeline[0]?.id).toBe("turn-0000");
     expect(timeline.at(-1)?.id).toBe("turn-2999");
-    expect(estimateTimelineRowSize(timeline[0]!)).toBeGreaterThanOrEqual(300);
+    expect(estimateTimelineRowSize(timeline[0]!)).toBeGreaterThanOrEqual(190);
     expect(elapsed).toBeLessThan(2_000);
   });
 

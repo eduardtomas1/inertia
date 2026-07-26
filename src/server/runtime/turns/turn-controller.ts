@@ -180,7 +180,9 @@ interface ActiveTurn {
   sessionAfter: string | null;
   lastUsage: AgentTurnUsageSnapshot | null;
   assistantText: string;
+  assistantSegmentText: string;
   assistantMessageId: string | null;
+  latestAssistantMessageId: string | null;
   assistantStream: TurnStreamCoalescer;
   reasoningText: string;
   reasoningId: string | null;
@@ -409,7 +411,9 @@ export class TurnController {
       sessionAfter: canResume ? conversation.providerSessionId : null,
       lastUsage: null,
       assistantText: "",
+      assistantSegmentText: "",
       assistantMessageId: null,
+      latestAssistantMessageId: null,
       assistantStream,
       reasoningText: "",
       reasoningId: null,
@@ -677,6 +681,7 @@ export class TurnController {
           });
           break;
         case "activity": {
+          this.closeAssistantSegment(active);
           const activity = this.recordProviderActivity(active, event);
           this.hooks.broadcast({ type: "agent.activity", activity });
           this.hooks.broadcastSnapshot();
@@ -703,6 +708,7 @@ export class TurnController {
           this.resolveInput(active, event.requestId);
           break;
         case "plan": {
+          if (this.closeAssistantSegment(active)) this.hooks.broadcastSnapshot();
           const plan: AgentPlan = {
             conversationId: active.conversation.id,
             runId: active.turn.runId,
@@ -804,7 +810,22 @@ export class TurnController {
     const accepted = text.slice(0, Math.max(0, MAX_ASSISTANT_TEXT - active.assistantText.length));
     if (!accepted) return;
     active.assistantText += accepted;
+    active.assistantSegmentText += accepted;
     active.assistantStream.append(accepted);
+  }
+
+  /**
+   * Assistant prose is persisted as one message per uninterrupted stretch.
+   * A visible provider event closes that stretch so the transcript can retain
+   * the real commentary → work → commentary order instead of flattening every
+   * assistant item into one terminal message.
+   */
+  private closeAssistantSegment(active: ActiveTurn): boolean {
+    if (!active.assistantSegmentText) return false;
+    active.assistantStream.flush();
+    active.assistantSegmentText = "";
+    active.assistantMessageId = null;
+    return true;
   }
 
   private appendReasoning(active: ActiveTurn, text: string): void {
@@ -822,8 +843,20 @@ export class TurnController {
       return;
     }
     if (result.textTruncated && active.assistantText.startsWith(finalText)) return;
-    active.assistantText = finalText;
-    active.assistantStream.replacePending(finalText);
+    const completedPrefix = active.assistantText.slice(
+      0,
+      active.assistantText.length - active.assistantSegmentText.length,
+    );
+    if (completedPrefix && !active.assistantSegmentText && !finalText.startsWith(completedPrefix)) {
+      this.appendAssistantText(active, finalText);
+      return;
+    }
+    const correctedSegment = finalText.startsWith(completedPrefix)
+      ? finalText.slice(completedPrefix.length)
+      : finalText;
+    active.assistantText = `${completedPrefix}${correctedSegment}`;
+    active.assistantSegmentText = correctedSegment;
+    active.assistantStream.replacePending(correctedSegment);
   }
 
   private createStreamCoalescer(
@@ -855,16 +888,17 @@ export class TurnController {
     let recordId: string;
     if (kind === "assistant") {
       if (active.assistantMessageId) {
-        this.store.updateMessageContent(active.assistantMessageId, active.assistantText);
+        this.store.updateMessageContent(active.assistantMessageId, active.assistantSegmentText);
       } else {
         active.assistantMessageId = this.store.createMessage(
           active.conversation.id,
-          active.assistantText,
+          active.assistantSegmentText,
           "assistant",
           [],
           active.turn.id,
           this.now(),
         ).id;
+        active.latestAssistantMessageId = active.assistantMessageId;
       }
       recordId = active.assistantMessageId;
     } else {
@@ -902,11 +936,6 @@ export class TurnController {
     });
   }
 
-  private flushStreaming(active: ActiveTurn): void {
-    active.assistantStream.flush();
-    active.reasoningStream.flush();
-  }
-
   private recordProviderActivity(
     active: ActiveTurn,
     event: ProviderActivityEvent,
@@ -936,6 +965,7 @@ export class TurnController {
       title: event.label,
       detail: null,
       status,
+      createdAt: this.now(),
     });
     this.syncProviderCommandRun(active, activity, event.phase);
     if (event.phase === "started") {
@@ -980,7 +1010,8 @@ export class TurnController {
     active: ActiveTurn,
     request: Extract<ProviderEvent, { type: "approval" }>["request"],
   ): void {
-    this.flushStreaming(active);
+    this.closeAssistantSegment(active);
+    active.reasoningStream.flush();
     const pending: AgentApprovalRequest = {
       id: request.requestId,
       providerId: active.turn.providerId,
@@ -1034,7 +1065,8 @@ export class TurnController {
     active: ActiveTurn,
     request: Extract<ProviderEvent, { type: "input" }>["request"],
   ): void {
-    this.flushStreaming(active);
+    this.closeAssistantSegment(active);
+    active.reasoningStream.flush();
     const pending: AgentInputRequest = {
       id: request.requestId,
       providerId: active.turn.providerId,
@@ -1181,7 +1213,7 @@ export class TurnController {
       const captureAfter = () => this.hooks.captureGitArtifacts?.({
           turn: active.turn,
           checkpointId: active.checkpointId,
-          terminalAssistantMessageId: active.assistantMessageId,
+          terminalAssistantMessageId: active.latestAssistantMessageId,
         });
       artifactCapture = active.gitBeforeCapture
         ? active.gitBeforeCapture.then(captureAfter)
@@ -1218,7 +1250,7 @@ export class TurnController {
           ? latest
           : this.store.settleAgentTurn(active.turn.id, {
               status: "failed",
-              terminalAssistantMessageId: active.assistantMessageId,
+              terminalAssistantMessageId: active.latestAssistantMessageId,
               providerSessionAfter: active.sessionAfter,
               terminalReason: "stream-persistence-failed",
               checkpointId: active.checkpointId,
@@ -1268,7 +1300,7 @@ export class TurnController {
   ): boolean {
     const settlement = this.store.settleAgentTurn(active.turn.id, {
       status,
-      terminalAssistantMessageId: active.assistantMessageId,
+      terminalAssistantMessageId: active.latestAssistantMessageId,
       providerSessionAfter: active.sessionAfter,
       terminalReason,
       checkpointId: active.checkpointId,

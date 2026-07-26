@@ -305,6 +305,56 @@ describe("TurnStreamCoalescer", () => {
 });
 
 describe("TurnController coalesced streaming", () => {
+  it("persists assistant prose on both sides of provider work as separate ordered messages", async () => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Inspect, then explain.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+
+    runtime.provider.emit({ ...identity, type: "text", text: "I’m checking the implementation." });
+    runtime.provider.emit({
+      ...identity,
+      type: "activity",
+      kind: "tool",
+      phase: "started",
+      label: "Read source",
+    });
+    runtime.provider.emit({
+      ...identity,
+      type: "activity",
+      kind: "tool",
+      phase: "completed",
+      label: "Read source",
+    });
+    runtime.provider.emit({ ...identity, type: "text", text: "The source confirms the fix." });
+    runtime.provider.resolve({
+      status: "completed",
+      text: "I’m checking the implementation.The source confirms the fix.",
+    });
+    await flushPromises();
+
+    const turn = runtime.store.agentTurn(queued.turn.id);
+    const assistantMessages = runtime.store.snapshot().messages
+      .filter((message) => message.turnId === turn.id && message.role === "assistant");
+    expect(assistantMessages.map(({ content }) => content)).toEqual([
+      "I’m checking the implementation.",
+      "The source confirms the fix.",
+    ]);
+    expect(turn.terminalAssistantMessageId).toBe(assistantMessages[1]?.id);
+    const activity = runtime.store.snapshot().activities.find(({ turnId }) => turnId === turn.id);
+    expect(activity).toMatchObject({
+      turnId: turn.id,
+      title: "Read source",
+      status: "completed",
+    });
+    expect(Date.parse(assistantMessages[0]!.createdAt)).toBeLessThan(Date.parse(activity!.createdAt));
+    expect(Date.parse(activity!.createdAt)).toBeLessThan(Date.parse(assistantMessages[1]!.createdAt));
+    runtime.store.close();
+  });
+
   it("coalesces hundreds of interleaved deltas and drains both channels before approval", async () => {
     const runtime = await controllerRuntime();
     const queued = runtime.controller.queue({

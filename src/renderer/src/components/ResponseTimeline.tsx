@@ -25,6 +25,7 @@ import {
   ListChecks,
   Paperclip,
   RotateCcw,
+  Square,
   TriangleAlert,
 } from "lucide-react";
 import clsx from "clsx";
@@ -40,12 +41,11 @@ import type {
   CheckpointSummary,
   ProviderInfo,
 } from "@shared/contracts";
-import {
-  isKimiThroughClaudeSelection,
-  modelSelectionIdentityLabel,
-} from "../../../shared/claude-backend-profiles";
 import { formatClockTime } from "../lib/format";
+import { finalAnswerIdentityLabel } from "../utils/finalAnswerIdentity";
 import {
+  activityNeedsAttention,
+  buildTurnExecutionStream,
   buildResponseTimeline,
   buildTimelineMinimapMarkers,
   estimateTimelineRowSize,
@@ -54,12 +54,14 @@ import {
   shouldShowTimelineMinimap,
   shouldVirtualizeTimeline,
   stabilizeResponseTimeline,
+  turnExecutionElapsedMs,
+  turnQueueElapsedMs,
   turnStatusLabel,
-  turnTimingLabels,
   workSummaryLabel,
   type ResponseTimelineItem,
   type ResponseTimelineCompatibility,
   type ResponseTurn,
+  type TurnExecutionStreamEntry,
   type TurnGitArtifactSummary,
 } from "../utils/responseTimeline";
 import { ApprovalCard, InputRequestCard } from "./AgentRequestCard";
@@ -101,6 +103,7 @@ export interface ResponseTimelineProps {
   onOpenTurnDiff: (turnId: string, path?: string) => void;
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
   onOpenTurnFile: (path: string) => void;
+  onStop: () => void;
 }
 
 function useCopyAction(): [boolean, (content: string) => Promise<void>] {
@@ -123,11 +126,24 @@ function useCopyAction(): [boolean, (content: string) => Promise<void>] {
   return [copied, copy];
 }
 
-function CopyAnswerButton({ content }: { content: string }): React.JSX.Element {
+function CopyAnswerButton({
+  content,
+  ariaLabel = "Copy answer",
+}: {
+  content: string;
+  ariaLabel?: string;
+}): React.JSX.Element {
   const [copied, copy] = useCopyAction();
+  const copiedAriaLabel = `${ariaLabel.replace(/^Copy\s+/u, "")} copied`;
   return (
-    <button type="button" className="turn-action" title="Copy answer" onClick={() => void copy(content)}>
-      {copied ? <Check size={12} /> : <Copy size={12} />}
+    <button
+      type="button"
+      className="turn-action"
+      title={copied ? "Answer copied" : ariaLabel}
+      aria-label={copied ? copiedAriaLabel : ariaLabel}
+      onClick={() => void copy(content)}
+    >
+      {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
       <span>{copied ? "Copied" : "Copy answer"}</span>
     </button>
   );
@@ -142,22 +158,26 @@ function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Element {
   return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)))}</span>;
 }
 
-function ActivityRow({ activity }: { activity: AgentActivity }): React.JSX.Element {
+function ActivityRow({
+  activity,
+  visibility,
+}: {
+  activity: AgentActivity;
+  visibility?: "recent" | "details" | "important";
+}): React.JSX.Element {
   const Icon = activity.status === "failed" ? TriangleAlert : activity.status === "completed" ? CheckCircle2 : CircleDot;
   return (
-    <div className={clsx("agent-activity", `is-${activity.status}`, activity.kind === "error" && "is-important")}>
+    <div
+      className={clsx("agent-activity", `is-${activity.status}`, activityNeedsAttention(activity) && "is-important")}
+      data-activity-visibility={visibility}
+    >
       <Icon size={14} aria-hidden="true" />
-      <span><strong>{activity.title}</strong>{activity.detail && <small>{activity.detail}</small>}</span>
+      <span>
+        <span className="visually-hidden">{turnStatusLabel(activity.status === "running" ? "running" : activity.status)}: </span>
+        <strong>{activity.title}</strong>
+        {activity.detail && <small>{activity.detail}</small>}
+      </span>
     </div>
-  );
-}
-
-function LiveReasoning({ content }: { content: string }): React.JSX.Element {
-  return (
-    <details className="thinking-summary is-live" open>
-      <summary><BrainCircuit size={14} aria-hidden="true" /><span>Reasoning summary</span><small>Live</small></summary>
-      <div>{content}<span className="streaming-caret" aria-hidden="true" /></div>
-    </details>
   );
 }
 
@@ -173,31 +193,35 @@ function PlanDetail({ plan }: { plan: AgentPlan }): React.JSX.Element {
   );
 }
 
-function CommentaryDetail({
-  message,
+function CommentaryRow({
+  entry,
   projectRoot,
   projectId,
   conversationId,
   defaultCodeWrap,
 }: {
-  message: ChatMessage;
+  entry: Extract<TurnExecutionStreamEntry, { kind: "commentary" }>;
   projectRoot: string;
   projectId: string;
   conversationId: string;
   defaultCodeWrap: boolean;
 }): React.JSX.Element {
   return (
-    <div className="turn-reasoning-detail" data-assistant-commentary-id={message.id}>
-      <span>Commentary</span>
+    <article
+      className={clsx("turn-commentary-row", entry.streaming && "is-streaming")}
+      aria-label={entry.streaming ? "Live agent update" : "Agent update"}
+      data-assistant-commentary-id={entry.message?.id ?? entry.id}
+    >
       <ResponseMarkdown
-        content={message.content}
+        content={entry.content}
         projectRoot={projectRoot}
         projectId={projectId}
         conversationId={conversationId}
         defaultCodeWrap={defaultCodeWrap}
+        streaming={entry.streaming}
       />
-      <CopyAnswerButton content={message.content} />
-    </div>
+      {entry.streaming && <span className="streaming-caret" aria-hidden="true" />}
+    </article>
   );
 }
 
@@ -235,10 +259,109 @@ function useAnchoredDetailsToggle(
   };
 }
 
+function ActivityGroup({
+  entry,
+  onBeforeToggle,
+  onAfterToggle,
+}: {
+  entry: Extract<TurnExecutionStreamEntry, { kind: "activity-group" }>;
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const latest = entry.activities.at(-1)!;
+  const alwaysVisible = new Set(entry.activities
+    .filter((activity) =>
+      activity.id === latest.id
+      || activityNeedsAttention(activity))
+    .map(({ id }) => id));
+  const hiddenCount = entry.activities.filter(({ id }) => !alwaysVisible.has(id)).length;
+  const visibleActivities = expanded
+    ? entry.activities
+    : entry.activities.filter(({ id }) => alwaysVisible.has(id));
+  const toggle = (): void => {
+    onBeforeToggle?.();
+    setExpanded((current) => !current);
+    window.requestAnimationFrame(() => onAfterToggle?.());
+  };
+  return (
+    <div className="turn-activity-group" data-activity-group={entry.id}>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          className="turn-activity-group-toggle"
+          aria-expanded={expanded}
+          onClick={toggle}
+        >
+          <ChevronDown size={12} aria-hidden="true" />
+          <span>
+            {expanded
+              ? "Show fewer calls"
+              : `${hiddenCount} earlier ${hiddenCount === 1 ? "call" : "calls"}`}
+          </span>
+        </button>
+      )}
+      {visibleActivities.map((activity) => (
+        <ActivityRow
+          activity={activity}
+          visibility={activityNeedsAttention(activity) ? "important" : "recent"}
+          key={activity.id}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ExecutionStream({
+  entries,
+  projectRoot,
+  projectId,
+  conversationId,
+  defaultCodeWrap,
+  onBeforeToggle,
+  onAfterToggle,
+}: {
+  entries: TurnExecutionStreamEntry[];
+  projectRoot: string;
+  projectId: string;
+  conversationId: string;
+  defaultCodeWrap: boolean;
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
+}): React.JSX.Element | null {
+  if (entries.length === 0) return null;
+  return (
+    <div className="turn-execution-stream" role="list" aria-label="Agent work transcript">
+      {entries.map((entry) => entry.kind === "commentary"
+        ? (
+            <div role="listitem" key={entry.id}>
+              <CommentaryRow
+                entry={entry}
+                projectRoot={projectRoot}
+                projectId={projectId}
+                conversationId={conversationId}
+                defaultCodeWrap={defaultCodeWrap}
+              />
+            </div>
+          )
+        : (
+            <div role="listitem" key={entry.id}>
+              <ActivityGroup
+                entry={entry}
+                onBeforeToggle={onBeforeToggle}
+                onAfterToggle={onAfterToggle}
+              />
+            </div>
+          ))}
+    </div>
+  );
+}
+
 function WorkLog({
   turn,
   autoCollapse,
   reasoningContent,
+  liveContent,
   showThinking,
   projectRoot,
   projectId,
@@ -250,6 +373,7 @@ function WorkLog({
   turn: ResponseTurn;
   autoCollapse: boolean;
   reasoningContent: string;
+  liveContent: string;
   showThinking: boolean;
   projectRoot: string;
   projectId: string;
@@ -260,44 +384,111 @@ function WorkLog({
 }): React.JSX.Element | null {
   const [expanded, setExpanded] = useState(!autoCollapse);
   const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
+  const detailsId = `turn-work-details-${turn.id}`;
   useEffect(() => setExpanded(!autoCollapse), [autoCollapse]);
+
+  const includesReasoning = showThinking && Boolean(reasoningContent);
+  // Provider lifecycle pings ("thinking", "turn completed", heartbeats) are
+  // durable diagnostics, not useful transcript rows. Plans and reasoning have
+  // dedicated presentations; warnings are already part of the work stream.
+  const supplementalActivities: AgentActivity[] = [];
+  const stream = buildTurnExecutionStream(turn, {
+    liveContent: turn.isActive ? liveContent : "",
+    includeImportantActivities: turn.isActive,
+  });
+  const supplementalCount = supplementalActivities.length
+    + turn.plans.length
+    + (includesReasoning ? 1 : 0);
+
   if (turn.isActive) {
-    if (turn.activities.length === 0 && turn.plans.length === 0) return null;
+    if (stream.length === 0 && supplementalCount === 0) return null;
     return (
       <div className="turn-work-log is-live">
-        {turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
-        {turn.activities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
+        <ExecutionStream
+          entries={stream}
+          projectRoot={projectRoot}
+          projectId={projectId}
+          conversationId={conversationId}
+          defaultCodeWrap={defaultCodeWrap}
+          onBeforeToggle={onBeforeToggle}
+          onAfterToggle={onAfterToggle}
+        />
+        {supplementalCount > 0 && (
+          <details
+            open={expanded}
+            onToggle={(event) => setExpanded(event.currentTarget.open)}
+          >
+            <summary
+              aria-expanded={expanded}
+              aria-controls={detailsId}
+              {...anchorToggleHandlers}
+            >
+              <span>More run details</span>
+              <small>{supplementalCount}</small>
+              <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
+            </summary>
+            <div className="turn-work-details" id={detailsId}>
+              {includesReasoning && (
+                <div className="turn-reasoning-detail">
+                  <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
+                  <p>{reasoningContent}<span className="streaming-caret" aria-hidden="true" /></p>
+                </div>
+              )}
+              {turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
+              {supplementalActivities.map((activity) => (
+                <ActivityRow activity={activity} visibility="details" key={activity.id} />
+              ))}
+            </div>
+          </details>
+        )}
       </div>
     );
   }
 
-  const includesReasoning = showThinking && Boolean(reasoningContent);
-  const hasFoldableDetails = includesReasoning
-    || turn.foldableActivities.length > 0
-    || turn.commentaryMessages.length > 0
-    || turn.plans.length > 0;
-  if (!hasFoldableDetails && turn.importantActivities.length === 0) return null;
+  const hasFoldableDetails = stream.length > 0 || supplementalCount > 0;
+  const status = turn.agentTurn.status === "failed"
+    ? "failed"
+    : turn.agentTurn.status === "cancelled" || turn.agentTurn.status === "interrupted"
+      ? "stopped"
+      : "completed";
+  const summaryContent = (
+    <>
+      {status === "failed"
+        ? <TriangleAlert size={13} aria-hidden="true" />
+        : status === "stopped"
+          ? <CircleDot size={13} aria-hidden="true" />
+          : <CheckCircle2 size={13} aria-hidden="true" />}
+      <span>{workSummaryLabel(turn)}</span>
+    </>
+  );
 
   return (
-    <div className="turn-work-log is-settled">
+    <div className="turn-work-log is-settled" data-settled-work-status={status}>
       {hasFoldableDetails && (
         <details
           open={expanded}
-          onToggle={(event) => {
-            setExpanded(event.currentTarget.open);
-          }}
+          onToggle={(event) => setExpanded(event.currentTarget.open)}
         >
-          <summary {...anchorToggleHandlers}>
-            {turn.agentTurn.status === "failed"
-              ? <TriangleAlert size={14} aria-hidden="true" />
-              : turn.agentTurn.status === "cancelled" || turn.agentTurn.status === "interrupted"
-                ? <CircleDot size={14} aria-hidden="true" />
-                : <CheckCircle2 size={14} aria-hidden="true" />}
-            <span>{workSummaryLabel(turn)}</span>
-            <small>{expanded ? "Hide" : "Details"}</small>
+          <summary
+            className="turn-settled-summary"
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            {...anchorToggleHandlers}
+          >
+            {summaryContent}
+            <small>{expanded ? "Hide details" : "Details"}</small>
             <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
           </summary>
-          <div className="turn-work-details">
+          <div className="turn-work-details" id={detailsId}>
+            <ExecutionStream
+              entries={stream}
+              projectRoot={projectRoot}
+              projectId={projectId}
+              conversationId={conversationId}
+              defaultCodeWrap={defaultCodeWrap}
+              onBeforeToggle={onBeforeToggle}
+              onAfterToggle={onAfterToggle}
+            />
             {includesReasoning && (
               <div className="turn-reasoning-detail">
                 <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
@@ -305,19 +496,14 @@ function WorkLog({
               </div>
             )}
             {turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
-            {turn.commentaryMessages.map((message) => (
-              <CommentaryDetail
-                key={message.id}
-                message={message}
-                projectRoot={projectRoot}
-                projectId={projectId}
-                conversationId={conversationId}
-                defaultCodeWrap={defaultCodeWrap}
-              />
-            ))}
-            {turn.foldableActivities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
+            {supplementalActivities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
           </div>
         </details>
+      )}
+      {!hasFoldableDetails && (
+        <div className="turn-settled-summary" data-settled-work-summary="static">
+          {summaryContent}
+        </div>
       )}
       {turn.importantActivities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
     </div>
@@ -337,7 +523,9 @@ function ChangedFilesSummary({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false);
   const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
+  const detailsId = `turn-changed-files-details-${artifact.id}`;
   if (artifact.status === "pending") {
     return (
       <div
@@ -346,7 +534,7 @@ function ChangedFilesSummary({
         data-turn-jump-target="artifact"
         tabIndex={-1}
       >
-        <Files size={14} />
+        <Files size={13} aria-hidden="true" />
         <span><strong>Changed by this turn</strong><small>Capturing the historical Git state…</small></span>
       </div>
     );
@@ -363,7 +551,7 @@ function ChangedFilesSummary({
         data-turn-jump-target="artifact"
         tabIndex={-1}
       >
-        <TriangleAlert size={14} />
+        <TriangleAlert size={13} aria-hidden="true" />
         <span>
           <strong>Turn changes unavailable</strong>
           <small>{artifact.failureReason ?? "No authoritative Git snapshot was captured for this turn."}</small>
@@ -372,63 +560,88 @@ function ChangedFilesSummary({
     );
   }
   const patchAvailable = artifact.patchState === "available" || artifact.patchState === "truncated";
-  const scopes = [...artifact.files.reduce((result, file) => {
-    const [first, second] = file.path.split("/");
-    const scope = second ? first! : "root";
-    result.set(scope, (result.get(scope) ?? 0) + 1);
-    return result;
-  }, new Map<string, number>())].sort(([left], [right]) => left.localeCompare(right));
+  const completenessWarning = artifact.failureReason
+    ?? (artifact.completeness === "truncated"
+      ? "The complete file summary is retained, but the stored patch was truncated."
+      : artifact.completeness === "partial"
+        ? "Only a partial historical Git capture is available for this turn."
+        : artifact.patchState === "expired"
+          ? "The stored patch has expired; the historical file summary is still available."
+          : artifact.patchState === "failed"
+            ? "The historical file summary is available, but its stored patch could not be read."
+            : artifact.patchState === "none"
+              ? "The historical file summary is available without a stored patch."
+              : null);
   return (
     <details
       className="turn-changed-files"
+      open={expanded}
+      aria-label="Changed by this turn"
       data-turn-git-artifact-id={artifact.id}
       data-turn-jump-target="artifact"
       tabIndex={-1}
+      onToggle={(event) => {
+        setExpanded(event.currentTarget.open);
+      }}
     >
-      <summary {...anchorToggleHandlers}>
-        <Files size={14} />
-        <span>
-          <strong>Changed by this turn</strong>
+      <summary
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        {...anchorToggleHandlers}
+      >
+        <Files size={13} aria-hidden="true" />
+        <span className="turn-changed-files-summary-copy">
+          <strong>{artifact.files.length} {artifact.files.length === 1 ? "file" : "files"} changed</strong>
           <small>
-            {artifact.files.length} {artifact.files.length === 1 ? "file" : "files"}
-            {artifact.insertions > 0 && ` · +${artifact.insertions}`}
-            {artifact.deletions > 0 && ` · −${artifact.deletions}`}
+            · +{artifact.insertions} −{artifact.deletions}
             {artifact.branch && ` · ${artifact.branch}`}
-            {artifact.completeness !== "complete" && " · partial capture"}
+            {artifact.completeness !== "complete" && " · incomplete"}
           </small>
         </span>
+        <span className="turn-changed-files-toggle">
+          {expanded ? "Hide" : "View"}
+          <ChevronDown size={13} aria-hidden="true" />
+        </span>
       </summary>
-      <div>
-        {scopes.length > 0 && (
-          <p className="turn-changed-file-scopes">
-            {scopes.slice(0, 6).map(([scope, count]) => `${scope} · ${count}`).join("   ")}
+      <div className="turn-changed-files-body" id={detailsId}>
+        {completenessWarning && (
+          <p className="turn-changed-files-warning">
+            <TriangleAlert size={12} aria-hidden="true" />
+            <span>{completenessWarning}</span>
           </p>
         )}
-        {artifact.files.slice(0, 12).map((file) => (
-          <span key={file.path} title={file.path}>
-            <button
-              type="button"
-              disabled={!patchAvailable}
-              title={patchAvailable ? `Open this turn's diff for ${file.path}` : "The stored patch is unavailable"}
-              onClick={() => props.onOpenTurnDiff(artifact.turnId, file.path)}
-            >
-              <FileCode2 size={13} />
-              <code>{file.path}</code>
-              <small>{file.status} · +{file.insertions} −{file.deletions}</small>
-            </button>
-            <button type="button" title={`Open ${file.path}`} onClick={() => props.onOpenTurnFile(file.path)}>
-              <ExternalLink size={12} />
-            </button>
-          </span>
-        ))}
-        {artifact.files.length > 12 && <p>And {artifact.files.length - 12} more.</p>}
+        <div className="turn-changed-files-list" role="list">
+          {artifact.files.slice(0, 12).map((file) => (
+            <span key={file.path} title={file.path} role="listitem">
+              <button
+                type="button"
+                disabled={!patchAvailable}
+                title={patchAvailable ? `Open this turn's diff for ${file.path}` : "The stored patch is unavailable"}
+                onClick={() => props.onOpenTurnDiff(artifact.turnId, file.path)}
+              >
+                <FileCode2 size={13} aria-hidden="true" />
+                <code>{file.path}</code>
+                <small>{file.status} · +{file.insertions} −{file.deletions}</small>
+              </button>
+              <button
+                type="button"
+                title={`Open ${file.path}`}
+                aria-label={`Open ${file.path}`}
+                onClick={() => props.onOpenTurnFile(file.path)}
+              >
+                <ExternalLink size={12} aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+        </div>
+        {artifact.files.length > 12 && <p className="turn-changed-files-overflow">And {artifact.files.length - 12} more files.</p>}
         <div className="turn-changed-files-actions">
           <button type="button" disabled={!patchAvailable} onClick={() => props.onOpenTurnDiff(artifact.turnId)}>
-            <GitCompareArrows size={12} />Open exact turn diff
+            <GitCompareArrows size={12} aria-hidden="true" />Open exact turn diff
           </button>
           {previousTurnId && (
             <button type="button" onClick={() => props.onCompareTurnArtifacts(previousTurnId, artifact.turnId)}>
-              <GitCompareArrows size={12} />Compare with previous turn
+              <GitCompareArrows size={12} aria-hidden="true" />Compare with previous turn
             </button>
           )}
         </div>
@@ -450,49 +663,327 @@ function shouldShowChangedFilesSummary(artifact: TurnGitArtifactSummary): boolea
   );
 }
 
-function exactConfigurationLabel(turn: ResponseTurn): string {
-  const { agentTurn } = turn;
-  return [
-    modelSelectionIdentityLabel(agentTurn.modelSelection),
-    `Provider ${agentTurn.providerId}`,
-    `Harness ${agentTurn.harnessId}`,
-    `Backend ${agentTurn.backendProfileId}`,
-    `Model ${agentTurn.model}`,
-    ...(agentTurn.modelAlias === null ? [] : [`Requested ${agentTurn.modelAlias}`]),
-    `Reasoning ${agentTurn.reasoningEffort || "default"}`,
-    `Mode ${agentTurn.interactionMode}`,
-    `Access ${agentTurn.accessMode}`,
-  ].join(" · ");
+function defaultTurnDurationLabel(turn: ResponseTurn): string {
+  const execution = turnExecutionElapsedMs(turn);
+  if (execution === null) {
+    return turn.isActive
+      ? `Queued ${formatElapsed(turnQueueElapsedMs(turn))}`
+      : "Not started";
+  }
+  const duration = formatElapsed(execution);
+  if (turn.isActive) return `Working ${duration}`;
+  if (turn.agentTurn.status === "completed") return `Worked ${duration}`;
+  return `Ran ${duration}`;
+}
+
+export function turnCompletionAnnouncement(
+  wasActive: boolean,
+  turn: ResponseTurn,
+  providerLabel: string,
+): string {
+  if (!wasActive || turn.isActive) return "";
+  return `${providerLabel}: ${workSummaryLabel(turn)}.`;
+}
+
+function artifactCompletenessLabel(artifact: TurnGitArtifactSummary | null): string {
+  if (artifact === null) return "Not captured";
+  switch (artifact.completeness) {
+    case "complete": return "Complete";
+    case "truncated": return "Truncated";
+    case "partial": return "Partial";
+    case "unavailable": return "Unavailable";
+  }
 }
 
 function TurnMetadata({
   turn,
   terminalAnswer,
+  showTimestamp,
+  onBeforeToggle,
+  onAfterToggle,
 }: {
   turn: ResponseTurn;
   terminalAnswer: ChatMessage | null;
+  showTimestamp: boolean;
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
 }): React.JSX.Element {
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const { agentTurn } = turn;
+  const selection = agentTurn.modelSelection;
+  const queueDuration = formatElapsed(turnQueueElapsedMs(turn));
+  const execution = turnExecutionElapsedMs(turn);
+  const detailsId = `turn-run-details-${turn.id}`;
+  const toggleDetails = (): void => {
+    onBeforeToggle?.();
+    setDetailsExpanded((current) => !current);
+    window.requestAnimationFrame(() => onAfterToggle?.());
+  };
   return (
-    <footer className="turn-meta" aria-label="Historical turn details">
-      <span data-turn-status={agentTurn.status}>{turnStatusLabel(agentTurn.status)}</span>
-      <span>{turnTimingLabels(turn).join(" · ")}</span>
-      <details className="turn-configuration" title={exactConfigurationLabel(turn)}>
-        <summary>{modelSelectionIdentityLabel(agentTurn.modelSelection)}</summary>
-        <div>
-          <span><strong>Provider</strong><code>{agentTurn.providerId}</code></span>
-          <span><strong>Harness</strong><code>{agentTurn.harnessId}</code></span>
-          <span><strong>Backend</strong><code>{agentTurn.backendProfileId}</code></span>
-          <span><strong>Model</strong><code>{agentTurn.model}</code></span>
-          {agentTurn.modelAlias !== null && <span><strong>Requested model</strong><code>{agentTurn.modelAlias}</code></span>}
-          <span><strong>Reasoning</strong><code>{agentTurn.reasoningEffort || "(default)"}</code></span>
-          <span><strong>Mode</strong><code>{agentTurn.interactionMode}</code></span>
-          <span><strong>Access</strong><code>{agentTurn.accessMode}</code></span>
-        </div>
-      </details>
-      {agentTurn.association === "inferred" && <span>Recovered legacy metadata</span>}
-      {terminalAnswer && <CopyAnswerButton content={terminalAnswer.content} />}
+    <footer className="turn-meta" aria-label="Final answer actions and run metadata">
+      <div className="turn-meta-primary">
+        {terminalAnswer && (
+          <CopyAnswerButton content={terminalAnswer.content} ariaLabel="Copy final answer" />
+        )}
+        {showTimestamp && terminalAnswer && (
+          <time dateTime={terminalAnswer.createdAt}>{formatClockTime(terminalAnswer.createdAt)}</time>
+        )}
+        <span data-turn-status={agentTurn.status}>{turnStatusLabel(agentTurn.status)}</span>
+        <span className="turn-duration">{defaultTurnDurationLabel(turn)}</span>
+        <button
+          type="button"
+          className="turn-run-details-toggle"
+          aria-expanded={detailsExpanded}
+          aria-controls={detailsId}
+          onClick={toggleDetails}
+        >
+          <span>Run details</span>
+          <ChevronDown size={12} aria-hidden="true" />
+        </button>
+      </div>
+      <dl className="turn-run-details" id={detailsId} hidden={!detailsExpanded}>
+        <div><dt>Harness ID</dt><dd><code>{selection.harnessId}</code></dd></div>
+        <div><dt>Backend profile ID</dt><dd><code>{selection.backendProfileId}</code></dd></div>
+        <div><dt>Exact model ID</dt><dd><code>{selection.modelId}</code></dd></div>
+        <div><dt>Reasoning level</dt><dd><code>{selection.reasoningEffort ?? "(default)"}</code></dd></div>
+        <div><dt>Mode</dt><dd><code>{agentTurn.interactionMode}</code></dd></div>
+        <div><dt>Access</dt><dd><code>{agentTurn.accessMode}</code></dd></div>
+        <div><dt>Queue duration</dt><dd>{queueDuration}</dd></div>
+        <div><dt>Execution duration</dt><dd>{execution === null ? "Not started" : formatElapsed(execution)}</dd></div>
+        <div><dt>Historical association</dt><dd>{agentTurn.association === "authoritative" ? "Authoritative" : "Inferred"}</dd></div>
+        <div><dt>Artifact completeness</dt><dd>{artifactCompletenessLabel(turn.gitArtifact)}</dd></div>
+      </dl>
     </footer>
+  );
+}
+
+function UserRequestLayer({
+  turn,
+  props,
+}: {
+  turn: ResponseTurn;
+  props: ResponseTimelineProps;
+}): React.JSX.Element {
+  const isDocumentLike = turn.userMessage.content.length >= 280;
+  return (
+    <article
+      className={clsx("message is-user turn-user-request", isDocumentLike && "is-document-like")}
+      aria-label="Your request"
+      data-request-layout={isDocumentLike ? "document" : "content"}
+      data-turn-layer="user-request"
+      data-turn-request-context={turn.id}
+      data-turn-jump-target="request"
+      tabIndex={-1}
+    >
+      <div className="message-meta">
+        <span>You</span>
+        {props.showTimestamps && <time dateTime={turn.userMessage.createdAt}>{formatClockTime(turn.userMessage.createdAt)}</time>}
+        {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={11} />Revert</button>}
+      </div>
+      <div className="message-body">{turn.userMessage.content}</div>
+      {turn.userMessage.attachments.length > 0 && (
+        <div className="message-attachments turn-user-request-attachments" aria-label="Request attachments">
+          {turn.userMessage.attachments.map((attachment) => (
+            <span key={attachment.id}>
+              <Paperclip size={12} aria-hidden="true" />
+              <span>Image · {attachment.name}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function AgentExecutionLayer({
+  turn,
+  props,
+  providerLabel,
+  reasoningContent,
+  liveContent,
+  timerStart,
+  completionAnnouncement,
+  onBeforeToggle,
+  onAfterToggle,
+}: {
+  turn: ResponseTurn;
+  props: ResponseTimelineProps;
+  providerLabel: string;
+  reasoningContent: string;
+  liveContent: string;
+  timerStart: string;
+  completionAnnouncement: string;
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
+}): React.JSX.Element {
+  const statusLabel = turn.agentTurn.status === "queued"
+    ? `${providerLabel} is queued`
+    : turn.agentTurn.status === "starting"
+      ? `${providerLabel} is starting`
+      : turn.agentTurn.status === "waiting-for-approval"
+        ? `${providerLabel} needs approval`
+        : turn.agentTurn.status === "waiting-for-input"
+          ? `${providerLabel} has a question`
+          : `${providerLabel} is working`;
+  return (
+    <section
+      className="agent-run-flow turn-agent-execution"
+      aria-label={`${providerLabel} activity`}
+      data-turn-layer="agent-execution"
+    >
+      {turn.isActive ? (
+        <div className="turn-execution-rail is-live">
+          <header className="turn-working-state">
+            <span className="turn-working-status" role="status" aria-live="polite" aria-atomic="true">
+              <span className="turn-working-pulse"><CircleDot size={14} aria-hidden="true" /></span>
+              <strong>{statusLabel}</strong>
+            </span>
+            <span className="turn-working-elapsed" aria-live="off">
+              <span className="turn-working-separator" aria-hidden="true">·</span>
+              <Clock3 size={12} aria-hidden="true" />
+              <LiveElapsed startedAt={timerStart} />
+            </span>
+            <button
+              type="button"
+              className="turn-stop-action"
+              aria-label={`Stop ${providerLabel} run`}
+              onClick={props.onStop}
+            >
+              <Square size={11} fill="currentColor" aria-hidden="true" />
+              <span>Stop</span>
+            </button>
+          </header>
+          <WorkLog
+            turn={turn}
+            autoCollapse={props.autoCollapseWorkLog}
+            reasoningContent={reasoningContent}
+            liveContent={liveContent}
+            showThinking={props.showThinking}
+            projectRoot={props.projectRoot}
+            projectId={props.projectId}
+            conversationId={props.conversationId}
+            defaultCodeWrap={props.defaultCodeWrap}
+            onBeforeToggle={onBeforeToggle}
+            onAfterToggle={onAfterToggle}
+          />
+        </div>
+      ) : (
+        <div className="turn-execution-rail is-settled">
+          <WorkLog
+            turn={turn}
+            autoCollapse={props.autoCollapseWorkLog}
+            reasoningContent={reasoningContent}
+            liveContent=""
+            showThinking={props.showThinking}
+            projectRoot={props.projectRoot}
+            projectId={props.projectId}
+            conversationId={props.conversationId}
+            defaultCodeWrap={props.defaultCodeWrap}
+            onBeforeToggle={onBeforeToggle}
+            onAfterToggle={onAfterToggle}
+          />
+        </div>
+      )}
+      <span
+        className="visually-hidden"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-turn-completion-announcement=""
+      >
+        {completionAnnouncement}
+      </span>
+      {turn.approvals.map((request) => <ApprovalCard key={request.id} request={request} onRespond={props.onRespondToApproval} />)}
+      {turn.inputRequests.map((request) => <InputRequestCard key={request.id} request={request} onRespond={props.onRespondToInput} />)}
+    </section>
+  );
+}
+
+export interface FinalAnswerPresentation {
+  content: string;
+  phase: "streaming" | "settling" | "persisted";
+  markdownStreaming: boolean;
+  showCaret: boolean;
+  terminalAnswer: ChatMessage | null;
+}
+
+export function resolveFinalAnswerPresentation(
+  turn: Pick<ResponseTurn, "isActive" | "terminalAssistantMessage">,
+  liveContent: string,
+  retainedLiveContent: string,
+): FinalAnswerPresentation | null {
+  const terminalAnswer = turn.terminalAssistantMessage;
+  if (terminalAnswer) {
+    if (!terminalAnswer.content) return null;
+    return {
+      content: terminalAnswer.content,
+      phase: "persisted",
+      markdownStreaming: false,
+      showCaret: false,
+      terminalAnswer,
+    };
+  }
+
+  if (turn.isActive) return null;
+  const content = liveContent || retainedLiveContent;
+  if (!content) return null;
+  return {
+    content,
+    phase: "settling",
+    markdownStreaming: true,
+    showCaret: false,
+    terminalAnswer: null,
+  };
+}
+
+function FinalAnswerDocument({
+  turn,
+  props,
+  liveContent,
+}: {
+  turn: ResponseTurn;
+  props: ResponseTimelineProps;
+  liveContent: string;
+}): React.JSX.Element | null {
+  const retainedLiveContent = useRef(liveContent);
+  if (turn.isActive && liveContent) retainedLiveContent.current = liveContent;
+  const presentation = resolveFinalAnswerPresentation(
+    turn,
+    liveContent,
+    retainedLiveContent.current,
+  );
+  if (!presentation) return null;
+  const isStreaming = presentation.phase === "streaming";
+
+  return (
+    <article
+      className={clsx(
+        "message is-assistant turn-final-answer-document",
+        isStreaming ? "is-streaming" : "is-final-answer",
+      )}
+      aria-label={isStreaming ? "Streaming assistant answer" : "Final assistant answer"}
+      data-answer-phase={presentation.phase}
+      data-terminal-answer-id={presentation.terminalAnswer?.id}
+      data-turn-jump-target="final"
+      data-turn-layer="final-answer"
+      tabIndex={-1}
+    >
+      <header className="final-answer-identity">
+        <span data-final-answer-identity="historical-model-selection">
+          {finalAnswerIdentityLabel(turn.agentTurn.modelSelection)}
+        </span>
+        {presentation.showCaret && <span className="live-label">Live</span>}
+      </header>
+      <ResponseMarkdown
+        content={presentation.content}
+        projectRoot={props.projectRoot}
+        projectId={props.projectId}
+        conversationId={props.conversationId}
+        defaultCodeWrap={props.defaultCodeWrap}
+        streaming={presentation.markdownStreaming}
+      />
+      {presentation.showCaret && <span className="streaming-caret" aria-hidden="true" />}
+    </article>
   );
 }
 
@@ -509,27 +1000,57 @@ function TurnTimelineComponent({
   onBeforeToggle?: (turnId: string) => void;
   onAfterToggle?: (turnId: string) => void;
 }): React.JSX.Element {
-  const persistedLast = turn.assistantMessages.at(-1);
-  const liveContent = turn.isActive ? props.streamingText || persistedLast?.content || "" : "";
+  const liveContent = turn.isActive && !turn.terminalAssistantMessage
+    ? props.streamingText
+    : "";
   const reasoningContent = turn.isActive
     ? props.streamingReasoning || turn.reasoning?.content || ""
     : turn.reasoning?.content || "";
-  const providerLabel = isKimiThroughClaudeSelection(turn.agentTurn.modelSelection)
-    ? modelSelectionIdentityLabel(turn.agentTurn.modelSelection)
-    : props.providers.find(({ id }) => id === turn.agentTurn.providerId)?.label
-      ?? turn.agentTurn.providerId;
-  const hasRunFlow = turn.isActive
-    || turn.activities.length > 0
-    || turn.commentaryMessages.length > 0
-    || turn.plans.length > 0
-    || (props.showThinking && Boolean(reasoningContent))
-    || turn.approvals.length > 0
-    || turn.inputRequests.length > 0;
+  const providerLabel = props.providers.find(({ id }) => id === turn.agentTurn.providerId)?.label
+    ?? turn.agentTurn.providerId;
   const timerStart = turn.startedAt ?? turn.requestedAt;
+  const wasActive = useRef(turn.isActive);
+  const [completionAnnouncement, setCompletionAnnouncement] = useState("");
+  const renderedAnswerWhileActive = useRef(
+    turn.isActive && Boolean(turn.terminalAssistantMessage?.content),
+  );
+  const [settlingTransition, setSettlingTransition] = useState<{
+    revealAnswer: boolean;
+  } | null>(null);
+  if (turn.isActive && turn.terminalAssistantMessage?.content) {
+    renderedAnswerWhileActive.current = true;
+  }
+  const isSettling = settlingTransition !== null;
+  const isRevealingSettledAnswer = settlingTransition?.revealAnswer ?? false;
+
+  useLayoutEffect(() => {
+    const announcement = turnCompletionAnnouncement(wasActive.current, turn, providerLabel);
+    if (announcement) {
+      setCompletionAnnouncement(announcement);
+      setSettlingTransition({
+        revealAnswer: !renderedAnswerWhileActive.current,
+      });
+    }
+    wasActive.current = turn.isActive;
+  }, [
+    providerLabel,
+    turn,
+    turn.isActive,
+  ]);
+  useEffect(() => {
+    if (!settlingTransition) return;
+    const timer = window.setTimeout(() => setSettlingTransition(null), 220);
+    return () => window.clearTimeout(timer);
+  }, [settlingTransition]);
 
   return (
     <section
-      className={clsx("response-turn", turn.isActive && "is-active")}
+      className={clsx(
+        "response-turn",
+        turn.isActive && "is-active",
+        isSettling && "is-settling",
+        isRevealingSettledAnswer && "is-revealing-settled-answer",
+      )}
       aria-label={`Turn ${turn.index}`}
       data-response-row-id={turn.id}
       data-turn-id={turn.id}
@@ -537,93 +1058,47 @@ function TurnTimelineComponent({
       data-turn-git-artifact-slot={turn.id}
       tabIndex={-1}
     >
-      <article
-        className="message is-user"
-        data-turn-request-context={turn.id}
-        data-turn-jump-target="request"
-        tabIndex={-1}
-      >
-        <div className="message-meta">
-          <span>You</span>
-          {props.showTimestamps && <time dateTime={turn.userMessage.createdAt}>{formatClockTime(turn.userMessage.createdAt)}</time>}
-          {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={11} />Revert</button>}
-        </div>
-        <div className="message-body">{turn.userMessage.content}</div>
-        {turn.userMessage.attachments.length > 0 && (
-          <div className="message-attachments">
-            {turn.userMessage.attachments.map((attachment) => <span key={attachment.id}><Paperclip size={12} />{attachment.name}</span>)}
-          </div>
-        )}
-      </article>
+      <UserRequestLayer turn={turn} props={props} />
 
-      {hasRunFlow && (
-        <section className="agent-run-flow" aria-label={`${providerLabel} activity`}>
-          {turn.isActive && (
-            <header className="turn-working-state">
-              <span className="turn-working-pulse"><CircleDot size={14} aria-hidden="true" /></span>
-              <strong>{turn.agentTurn.status === "queued" ? `${providerLabel} queued` : `${providerLabel} working`}</strong>
-              <span aria-live="off"><Clock3 size={12} aria-hidden="true" /><LiveElapsed startedAt={timerStart} /></span>
-            </header>
-          )}
-          {turn.isActive && props.showThinking && reasoningContent && <LiveReasoning content={reasoningContent} />}
-          <WorkLog
-            turn={turn}
-            autoCollapse={props.autoCollapseWorkLog}
-            reasoningContent={reasoningContent}
-            showThinking={props.showThinking}
-            projectRoot={props.projectRoot}
-            projectId={props.projectId}
-            conversationId={props.conversationId}
-            defaultCodeWrap={props.defaultCodeWrap}
-            onBeforeToggle={() => onBeforeToggle?.(turn.id)}
-            onAfterToggle={() => onAfterToggle?.(turn.id)}
-          />
-          {turn.approvals.map((request) => <ApprovalCard key={request.id} request={request} onRespond={props.onRespondToApproval} />)}
-          {turn.inputRequests.map((request) => <InputRequestCard key={request.id} request={request} onRespond={props.onRespondToInput} />)}
-        </section>
-      )}
+      <AgentExecutionLayer
+        turn={turn}
+        props={props}
+        providerLabel={providerLabel}
+        reasoningContent={reasoningContent}
+        liveContent={liveContent}
+        timerStart={timerStart}
+        completionAnnouncement={completionAnnouncement}
+        onBeforeToggle={() => onBeforeToggle?.(turn.id)}
+        onAfterToggle={() => onAfterToggle?.(turn.id)}
+      />
 
       {turn.systemMessages.map((message) => (
-        <article className="message is-system" key={message.id}>
+        <article
+          className="message is-system"
+          aria-label="Agent system notice"
+          data-turn-work-notice=""
+          key={message.id}
+        >
           <div className="message-meta"><span>System</span>{props.showTimestamps && <time dateTime={message.createdAt}>{formatClockTime(message.createdAt)}</time>}</div>
           <div className="message-body">{message.content}</div>
         </article>
       ))}
 
+      <FinalAnswerDocument
+        turn={turn}
+        props={props}
+        liveContent={liveContent}
+      />
+
       {turn.terminalAssistantMessage && (
-        <article
-          className="message is-assistant is-final-answer"
-          data-terminal-answer-id={turn.terminalAssistantMessage.id}
-          data-turn-jump-target="final"
-          tabIndex={-1}
-        >
-          <div className="message-meta"><span>{providerLabel}</span>{props.showTimestamps && <time dateTime={turn.terminalAssistantMessage.createdAt}>{formatClockTime(turn.terminalAssistantMessage.createdAt)}</time>}</div>
-          <ResponseMarkdown
-            content={turn.terminalAssistantMessage.content}
-            projectRoot={props.projectRoot}
-            projectId={props.projectId}
-            conversationId={props.conversationId}
-            defaultCodeWrap={props.defaultCodeWrap}
-          />
-        </article>
+        <TurnMetadata
+          turn={turn}
+          terminalAnswer={turn.terminalAssistantMessage}
+          showTimestamp={props.showTimestamps}
+          onBeforeToggle={() => onBeforeToggle?.(turn.id)}
+          onAfterToggle={() => onAfterToggle?.(turn.id)}
+        />
       )}
-
-      {turn.isActive && liveContent && (
-        <article className="message is-assistant is-streaming" aria-label="Streaming assistant answer">
-          <div className="message-meta"><span>{providerLabel}</span><span className="live-label">Live</span></div>
-          <ResponseMarkdown
-            content={liveContent}
-            projectRoot={props.projectRoot}
-            projectId={props.projectId}
-            conversationId={props.conversationId}
-            defaultCodeWrap={props.defaultCodeWrap}
-            streaming
-          />
-          <span className="streaming-caret" aria-hidden="true" />
-        </article>
-      )}
-
-      <TurnMetadata turn={turn} terminalAnswer={turn.terminalAssistantMessage} />
       {props.showChangedFileSummaries
         && turn.gitArtifact
         && shouldShowChangedFilesSummary(turn.gitArtifact) && (
@@ -677,6 +1152,7 @@ function sameTurnTimelineProps(
     && left.onOpenTurnDiff === right.onOpenTurnDiff
     && left.onCompareTurnArtifacts === right.onCompareTurnArtifacts
     && left.onOpenTurnFile === right.onOpenTurnFile
+    && left.onStop === right.onStop
     && (!next.turn.isActive || (
       left.streamingText === right.streamingText
       && left.streamingReasoning === right.streamingReasoning
@@ -904,7 +1380,7 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
   }, [builtTimeline]);
   const previousComparableTurn = useMemo(() => {
     const result = new Map<string, string>();
-    let previous: TurnGitArtifactSummary | null = null;
+    const previousByWorktree = new Map<string, string>();
     for (const item of timeline) {
       if (item.kind !== "turn") continue;
       const artifact = item.turn.gitArtifact;
@@ -913,13 +1389,12 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
         || artifact.status === "pending"
         || artifact.repositoryIdentity === null
         || artifact.worktreeIdentity === null
+        || artifact.afterFingerprint === null
       ) continue;
-      if (
-        previous
-        && previous.repositoryIdentity === artifact.repositoryIdentity
-        && previous.worktreeIdentity === artifact.worktreeIdentity
-      ) result.set(artifact.turnId, previous.turnId);
-      previous = artifact;
+      const key = `${artifact.repositoryIdentity}\u0000${artifact.worktreeIdentity}`;
+      const previousTurnId = previousByWorktree.get(key);
+      if (previousTurnId) result.set(artifact.turnId, previousTurnId);
+      previousByWorktree.set(key, artifact.turnId);
     }
     return result;
   }, [timeline]);
@@ -928,10 +1403,25 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     (index: number) => timeline[index]?.id ?? `missing-${index}`,
     [timeline],
   );
-  const estimateSize = useCallback(
-    (index: number) => timeline[index] ? estimateTimelineRowSize(timeline[index]) : 320,
-    [timeline],
-  );
+  const estimateSize = useCallback((index: number) => {
+    const item = timeline[index];
+    if (!item) return 280;
+    const artifact = item.kind === "turn" ? item.turn.gitArtifact : null;
+    return estimateTimelineRowSize(item, {
+      availableWidth: props.scrollElementRef?.current?.clientWidth,
+      workDetailsExpanded: !props.autoCollapseWorkLog,
+      showThinking: props.showThinking,
+      showChangedFiles: props.showChangedFileSummaries
+        && artifact !== null
+        && shouldShowChangedFilesSummary(artifact),
+    });
+  }, [
+    props.autoCollapseWorkLog,
+    props.scrollElementRef,
+    props.showChangedFileSummaries,
+    props.showThinking,
+    timeline,
+  ]);
   const virtualizer = useVirtualizer({
     count: timeline.length,
     enabled: virtualized,

@@ -583,6 +583,7 @@ export default function App(): React.JSX.Element {
     }
     if (event.type === "agent.approval.requested") {
       setPendingApprovals((current) => [...current.filter(({ id }) => id !== event.request.id), event.request]);
+      if (event.request.conversationId === conversation?.id) setStreamingText("");
       return;
     }
     if (event.type === "agent.approval.resolved") {
@@ -591,6 +592,7 @@ export default function App(): React.JSX.Element {
     }
     if (event.type === "agent.input.requested") {
       setPendingInputs((current) => [...current.filter(({ id }) => id !== event.request.id), event.request]);
+      if (event.request.conversationId === conversation?.id) setStreamingText("");
       return;
     }
     if (event.type === "agent.input.resolved") {
@@ -599,6 +601,7 @@ export default function App(): React.JSX.Element {
     }
     if (event.type === "agent.plan.updated") {
       setNativePlans((current) => ({ ...current, [event.plan.conversationId]: event.plan }));
+      if (event.plan.conversationId === conversation?.id) setStreamingText("");
       if (settings.autoOpenPlan && event.plan.conversationId === conversation?.id) setActiveTool("plan");
       return;
     }
@@ -614,12 +617,15 @@ export default function App(): React.JSX.Element {
           [event.activity.conversationId]: [...existing.filter(({ id }) => id !== event.activity.id), event.activity].slice(-100),
         };
       });
+      if (event.activity.conversationId === conversation?.id) setStreamingText("");
       return;
     }
     if (!conversation || !("conversationId" in event) || event.conversationId !== conversation.id) return;
     if (event.type === "agent.started") { setStreamingText(""); setStreamingReasoning(""); }
     if (event.type === "agent.text") setStreamingText((current) => `${current}${event.text}`.slice(-500_000));
-    if (event.type === "agent.reasoning") setStreamingReasoning((current) => `${current}${event.text}`.slice(-500_000));
+    if (event.type === "agent.reasoning") {
+      setStreamingReasoning((current) => `${current}${event.text}`.slice(-500_000));
+    }
     if (event.type === "agent.completed" || event.type === "agent.failed") {
       setStreamingText("");
       setStreamingReasoning("");

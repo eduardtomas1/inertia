@@ -198,7 +198,7 @@ describe("local runtime", () => {
     return { root, data, workspace };
   }
 
-  function fakeCodex(root: string, runEvents: readonly object[] = []): { authFile: string } {
+  function fakeCodex(root: string, runEvents: readonly object[] = []): { authFile: string; executable: string } {
     const executableDirectory = join(root, "provider-bin");
     const commandCwd = join(root, "workspace");
     const authFile = join(root, "codex-authenticated");
@@ -312,7 +312,7 @@ process.exit(child.status ?? 1);
       else process.env.PATH = previousPath;
     });
 
-    return { authFile };
+    return { authFile, executable };
   }
 
   async function providerSnapshot(
@@ -1216,8 +1216,13 @@ process.exit(child.status ?? 1);
 
   it("rejects a known-unready provider before persisting a turn, then refreshes its state", async () => {
     const { root, data, workspace } = temporaryWorkspace();
-    const { authFile } = fakeCodex(root);
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: true });
+    const { authFile, executable } = fakeCodex(root);
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: true,
+      codexBinaryPath: executable,
+    });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next(

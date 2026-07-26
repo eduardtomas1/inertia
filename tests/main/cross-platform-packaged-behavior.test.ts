@@ -38,6 +38,8 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain("runtime-stopped");
     expect(smoke).toContain("process-group cleanup");
     expect(smoke).toContain("Packaged Codex Ω (profile)");
+    expect(smoke).toContain('join(root, "codex-bin")');
+    expect(smoke).toContain("acknowledged:");
     expect(smoke).toContain('type: "provider.refresh"');
     expect(await source("src/main/index.ts")).toContain(
       "codexBinaryPath: packageSmokeCodexExecutable",

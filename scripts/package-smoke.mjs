@@ -123,7 +123,10 @@ function parseReadiness(value, expectedMainPid) {
 async function createWindowsCodexFixture(root, workspace) {
   if (process.platform !== "win32") return null;
   const profile = join(root, "Packaged Codex Ω (profile)");
-  const directory = join(profile, "bin");
+  // Native executable relocation and Unicode npm shims are covered
+  // independently. Keep the synthetic native binary in an ASCII path so this
+  // smoke isolates the packaged utility-process and provider boundaries.
+  const directory = join(root, "codex-bin");
   const command = join(directory, "codex.exe");
   const login = join(workspace, "login");
   const appServer = join(workspace, "app-server");
@@ -158,21 +161,31 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
     const socket = new WebSocket(websocketUrl, { headers: { Origin: "http://127.0.0.1" } });
     const refreshRequestId = randomUUID();
     let refreshRequested = false;
+    let refreshAcknowledged = false;
     let lastProviderState = "no provider snapshot";
-    const timer = setTimeout(() => {
-      socket.close();
-      rejectCodex(new Error(`Packaged runtime did not discover the Windows Codex shim (${lastProviderState}; refresh requested: ${refreshRequested}).`));
-    }, 8_000);
+    let settled = false;
     const finish = (error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       socket.close();
       if (error) rejectCodex(error);
       else resolveCodex();
     };
+    const timer = setTimeout(() => {
+      finish(new Error(`Packaged runtime did not discover the Windows Codex shim (${lastProviderState}; refresh requested: ${refreshRequested}; acknowledged: ${refreshAcknowledged}).`));
+    }, 8_000);
     socket.once("error", finish);
+    socket.once("close", () => {
+      if (!settled) finish(new Error("Packaged runtime closed before Codex discovery completed."));
+    });
     socket.on("message", (data) => {
       let event;
       try { event = JSON.parse(data.toString("utf8")); } catch { return; }
+      if (event?.type === "request.ok" && event.requestId === refreshRequestId) {
+        refreshAcknowledged = true;
+        return;
+      }
       if (event?.type === "request.error" && event.requestId === refreshRequestId) {
         finish(new Error(`Packaged Codex refresh failed: ${event.message || "unknown error"}.`));
         return;

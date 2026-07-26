@@ -350,11 +350,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       const next = await enrichedSnapshot(detection);
       providerInfo = providerInfo.map((current) => current.id === providerId ? next : current);
     } else {
-      providerInfo = await Promise.all((await providers.detectAll({
+      const detections = await providers.detectAll({
         cwd: options.defaultWorkspacePath,
         timeoutMs: 4_000,
         refreshEnvironment,
-      })).map(enrichedSnapshot));
+      });
+      providerInfo = detections.map((detection) =>
+        providerSnapshot(detection, providers.cachedMetadata(detection.provider.id)));
+      if (!closed) broadcastSnapshot();
+      providerInfo = await Promise.all(detections.map(enrichedSnapshot));
     }
     if (!closed) broadcastSnapshot();
   };

@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import WebSocket from "ws";
@@ -120,20 +120,25 @@ function parseReadiness(value, expectedMainPid) {
   return { mainPid, runtimePid, generation, websocketUrl };
 }
 
-async function createWindowsCodexFixture(root) {
+async function createWindowsCodexFixture(root, workspace) {
   if (process.platform !== "win32") return null;
   const profile = join(root, "Packaged Codex Ω (profile)");
-  const directory = join(profile, "npm");
-  const program = join(directory, "codex-package-smoke.cjs");
-  const command = join(directory, "codex.cmd");
+  const directory = join(profile, "bin");
+  const command = join(directory, "codex.exe");
+  const login = join(workspace, "login");
+  const appServer = join(workspace, "app-server");
   await mkdir(directory, { recursive: true });
-  await writeFile(program, `
+  await copyFile(process.execPath, command);
+  await writeFile(login, `
+const args = process.argv.slice(2);
+if (args[0] === "status") { console.log("Logged in using ChatGPT"); process.exit(0); }
+process.exit(2);
+`.trimStart(), "utf8");
+  await writeFile(appServer, `
 const readline = require("node:readline");
 const args = process.argv.slice(2);
-if (args[0] === "--version") { console.log("codex 99.1.0"); process.exit(0); }
-if (args[0] === "login" && args[1] === "status") { console.log("Logged in using ChatGPT"); process.exit(0); }
-if (args[0] === "app-server" && args[1] === "--help") { console.log("codex app-server - Run the app server"); process.exit(0); }
-if (args.length !== 1 || args[0] !== "app-server") process.exit(2);
+if (args[0] === "--help") { console.log("codex app-server - Run the app server"); process.exit(0); }
+if (args.length !== 0) process.exit(2);
 const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
@@ -144,9 +149,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   return send({ id: message.id, error: { code: -32601, message: "Unsupported package-smoke method" } });
 });
 `.trimStart(), "utf8");
-  // Match npm's relative shim layout so Unicode paths are resolved by cmd.exe
-  // instead of being decoded from the batch file through a legacy code page.
-  await writeFile(command, `@echo off\r\n"${process.execPath}" "%~dp0codex-package-smoke.cjs" %*\r\n`, "utf8");
   return { command, directory, profile };
 }
 
@@ -235,7 +237,7 @@ try {
     mkdir(workspaceDirectory, { recursive: true }),
     mkdir(profileDirectory, { recursive: true }),
   ]);
-  const packagedCodex = await createWindowsCodexFixture(temporaryRoot);
+  const packagedCodex = await createWindowsCodexFixture(temporaryRoot, workspaceDirectory);
   const launchArguments = [
     `--user-data-dir=${profileDirectory}`,
     ...(process.platform === "linux" && process.env.INERTIA_PACKAGE_SMOKE_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),

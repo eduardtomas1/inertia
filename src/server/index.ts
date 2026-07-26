@@ -157,6 +157,8 @@ export interface RuntimeOptions {
   dataDirectory: string;
   defaultWorkspacePath: string;
   enableProviders?: boolean;
+  /** Trusted host override used before persisted settings are available. */
+  codexBinaryPath?: string;
   reviewSummaryTimeoutMs?: number;
   /** Full profiles remain in the privileged runtime and never enter snapshots. */
   kimiClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
@@ -214,7 +216,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   const providers = new ProviderManager({
     metadataCache,
-    commands: savedSettings.codexBinaryPath ? { codex: savedSettings.codexBinaryPath } : undefined,
+    commands: options.codexBinaryPath
+      ? { codex: options.codexBinaryPath }
+      : savedSettings.codexBinaryPath
+        ? { codex: savedSettings.codexBinaryPath }
+        : undefined,
     ...backendProfileController.providerManagerOptions(),
   }, options.agentHarnessRegistry);
   backendProfileController.attachProviderManager(providers);

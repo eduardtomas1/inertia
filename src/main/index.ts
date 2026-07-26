@@ -635,6 +635,13 @@ async function bootstrap(): Promise<void> {
     && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_FILE)
     ? process.env.INERTIA_PACKAGE_SMOKE_FILE
     : null;
+  const packageSmokeCodexExecutable = process.env.NODE_ENV === "test"
+    && typeof process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED === "string"
+    && process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED.length <= 4096
+    && !process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED.includes("\0")
+    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED)
+    ? process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED
+    : null;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
     credentialBroker: {
@@ -646,7 +653,8 @@ async function bootstrap(): Promise<void> {
     workerOptions: {
       dataDirectory,
       defaultWorkspacePath,
-      enableProviders: process.env.NODE_ENV !== "test" || Boolean(process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED),
+      enableProviders: process.env.NODE_ENV !== "test" || Boolean(packageSmokeCodexExecutable),
+      ...(packageSmokeCodexExecutable ? { codexBinaryPath: packageSmokeCodexExecutable } : {}),
       kimiClaudeProfiles: [
         builtInKimiClaudeBackendProfile(
           backendSecretReferenceForProfile(KIMI_CLAUDE_BUILTIN_PROFILE_ID),
@@ -676,7 +684,7 @@ async function bootstrap(): Promise<void> {
           { encoding: "utf8", mode: 0o600, flag: "wx" },
         ).finally(() => setTimeout(
           () => app.quit(),
-          process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED ? 10_000 : 100,
+          packageSmokeCodexExecutable ? 10_000 : 100,
         ));
       }
     },

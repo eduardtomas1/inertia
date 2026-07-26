@@ -39,6 +39,9 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain("process-group cleanup");
     expect(smoke).toContain("Packaged Codex Ω (profile)");
     expect(smoke).toContain('type: "provider.refresh"');
+    expect(await source("src/main/index.ts")).toContain(
+      "codexBinaryPath: packageSmokeCodexExecutable",
+    );
   });
 
   it("keeps exact-tag release packages and smoke validation aligned across every platform", async () => {

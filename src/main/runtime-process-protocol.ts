@@ -17,6 +17,8 @@ export interface RuntimeWorkerOptions {
   dataDirectory: string;
   defaultWorkspacePath: string;
   enableProviders: boolean;
+  /** Optional trusted desktop override; never accepted from the renderer. */
+  codexBinaryPath?: string;
   /** Safe configuration only; credential values remain in the main-process vault. */
   kimiClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
 }
@@ -104,11 +106,13 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const options = value.options;
   const optionKeys = Object.keys(options);
   const hasKimiProfiles = Object.hasOwn(options, "kimiClaudeProfiles");
+  const hasCodexBinaryPath = Object.hasOwn(options, "codexBinaryPath");
   if (
-    optionKeys.length !== (hasKimiProfiles ? 4 : 3)
+    optionKeys.length !== 3 + Number(hasKimiProfiles) + Number(hasCodexBinaryPath)
     || !runtimePath(options.dataDirectory)
     || !runtimePath(options.defaultWorkspacePath)
     || typeof options.enableProviders !== "boolean"
+    || (hasCodexBinaryPath && !runtimePath(options.codexBinaryPath))
   ) return null;
   const kimiClaudeProfiles: ClaudeCompatibleBackendProfile[] = [];
   if (hasKimiProfiles) {
@@ -128,6 +132,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       dataDirectory: options.dataDirectory,
       defaultWorkspacePath: options.defaultWorkspacePath,
       enableProviders: options.enableProviders,
+      ...(hasCodexBinaryPath ? { codexBinaryPath: options.codexBinaryPath as string } : {}),
       ...(hasKimiProfiles ? { kimiClaudeProfiles } : {}),
     },
   };

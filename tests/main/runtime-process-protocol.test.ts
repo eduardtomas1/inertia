@@ -37,6 +37,32 @@ describe("runtime process protocol", () => {
       },
     });
     expect(parseRuntimeWorkerCommand({ type: "runtime.start", options: { dataDirectory: "relative", defaultWorkspacePath: workspaceDirectory, enableProviders: false } })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.start",
+      options: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: true,
+        codexBinaryPath: resolve(tmpdir(), "Codex Ω", "codex.cmd"),
+      },
+    })).toEqual({
+      type: "runtime.start",
+      options: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: true,
+        codexBinaryPath: resolve(tmpdir(), "Codex Ω", "codex.cmd"),
+      },
+    });
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.start",
+      options: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: true,
+        codexBinaryPath: "codex.cmd",
+      },
+    })).toBeNull();
     expect(parseRuntimeWorkerCommand({ type: "runtime.shutdown", unexpected: true })).toBeNull();
   });
 
@@ -50,6 +76,7 @@ describe("runtime process protocol", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: true,
+        codexBinaryPath: resolve(tmpdir(), "Codex Ω", "codex.cmd"),
         kimiClaudeProfiles: [profile],
       },
     };

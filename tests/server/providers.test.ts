@@ -272,10 +272,17 @@ process.exit(2);
     const authenticated = codexExecutable(authenticatedRoot, "connected-codex", { authenticated: true });
     const unauthenticated = codexExecutable(unauthenticatedRoot, "signed-out-codex", { authenticated: false });
 
-    const [connected, signedOut] = await Promise.all([
-      detectProvider("codex", { command: authenticated, cwd: authenticatedRoot }),
-      detectProvider("codex", { command: unauthenticated, cwd: unauthenticatedRoot }),
-    ]);
+    // Probe the freshly copied Windows executables independently. Running
+    // both copies at once can race host scanning and turn a valid fixture
+    // into an unrelated launch error.
+    const connected = await detectProvider("codex", {
+      command: authenticated,
+      cwd: authenticatedRoot,
+    });
+    const signedOut = await detectProvider("codex", {
+      command: unauthenticated,
+      cwd: unauthenticatedRoot,
+    });
 
     expect(connected).toMatchObject({ installState: "installed", authState: "authenticated", canRun: true, statusMessage: "Connected" });
     expect(signedOut).toMatchObject({ installState: "installed", authState: "unauthenticated", canRun: false, statusMessage: "Sign in required" });

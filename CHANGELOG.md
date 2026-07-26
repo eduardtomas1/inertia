@@ -2,7 +2,7 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.7 — 2026-07-25
+## 0.0.7 — 2026-07-26
 
 ### Trustworthy history for every agent request
 

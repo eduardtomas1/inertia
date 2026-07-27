@@ -8,6 +8,7 @@ import {
   type BackendCompatibilityProbeRequest,
 } from "../../src/shared/backend-probe";
 import type { ModelBackendProtocol, ModelCapability } from "../../src/shared/model-routing";
+import * as compatibilityProbeEntryPoint from "../../src/server/runtime/backends/backend-compatibility-probe";
 import {
   nativeModelCatalogProbeAdapter,
   probeBackendCompatibility,
@@ -18,6 +19,15 @@ const SECRET_REFERENCE = "secret:probe-profile";
 const SECRET = "never-return-this-probe-secret";
 const FIXED_NOW = new Date("2026-07-25T10:00:00.000Z");
 const servers: ReturnType<typeof createServer>[] = [];
+
+describe("backend compatibility probe entrypoint", () => {
+  it("preserves the public runtime export surface", () => {
+    expect(Object.keys(compatibilityProbeEntryPoint).sort()).toEqual([
+      "nativeModelCatalogProbeAdapter",
+      "probeBackendCompatibility",
+    ]);
+  });
+});
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map(async (server) => {

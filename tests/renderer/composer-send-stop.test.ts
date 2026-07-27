@@ -25,8 +25,11 @@ const chatWorkspaceSource = readFileSync(
   new URL("../../src/renderer/src/components/ChatWorkspace.tsx", import.meta.url),
   "utf8",
 );
-const appSource = readFileSync(
-  new URL("../../src/renderer/src/App.tsx", import.meta.url),
+const workspaceSceneModelSource = readFileSync(
+  new URL(
+    "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts",
+    import.meta.url,
+  ),
   "utf8",
 );
 const css = readFileSync(
@@ -149,9 +152,11 @@ describe("composer Send and Stop", () => {
   });
 
   it("shows distinct pending feedback for initial messages and follow-ups", () => {
-    expect(appSource).toContain('sending={busyAction === "message.send"}');
-    expect(appSource).not.toContain(
-      'sending={busyAction === "message.send" || busyAction === "review.summary.generate"}',
+    expect(workspaceSceneModelSource).toContain(
+      'sending: busyAction === "message.send"',
+    );
+    expect(workspaceSceneModelSource).not.toContain(
+      'sending: busyAction === "message.send" || busyAction === "review.summary.generate"',
     );
     expect(toolbarSource.match(/<LoadingMark\b/gu)).toHaveLength(2);
     expect(toolbarSource).toContain('<LoadingMark label="Sending follow-up" />');

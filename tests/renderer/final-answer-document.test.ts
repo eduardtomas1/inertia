@@ -6,8 +6,8 @@ const css = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
 );
-const timelineSource = readFileSync(
-  new URL("../../src/renderer/src/components/ResponseTimeline.tsx", import.meta.url),
+const finalAnswerSource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url),
   "utf8",
 );
 const identitySource = readFileSync(
@@ -48,14 +48,14 @@ describe("final answer document presentation", () => {
     expect(css).toMatch(
       /\.final-answer-identity\s*\{[^}]*color:\s*var\(--metadata-text\);[^}]*font-size:\s*var\(--metadata-font-size\);/su,
     );
-    expect(timelineSource).toContain(
+    expect(finalAnswerSource).toContain(
       "finalAnswerIdentityLabel(turn.agentTurn.modelSelection)",
     );
-    expect(timelineSource).toContain('aria-label="Historical answer identity"');
-    expect(timelineSource).toContain(
+    expect(finalAnswerSource).toContain('aria-label="Historical answer identity"');
+    expect(finalAnswerSource).toContain(
       'data-identity-source="persisted-model-selection"',
     );
-    expect(timelineSource).not.toContain("isKimiThroughClaudeSelection");
+    expect(finalAnswerSource).not.toContain("isKimiThroughClaudeSelection");
     expect(identitySource).toContain("STRUCTURAL_BACKEND_LABELS");
     expect(identitySource).not.toMatch(
       /backendProfileDisplayName\s*===\s*["']Kimi["']/u,

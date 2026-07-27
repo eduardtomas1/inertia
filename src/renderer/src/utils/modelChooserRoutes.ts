@@ -16,7 +16,7 @@ import {
   resolveHarnessBackendCompatibility,
 } from "../../../shared/model-routing";
 import type { ModelChooserSelectionCompatibility } from "../components/ModelChooserRow";
-import { modelFavoriteKey } from "./modelFavorites";
+import { modelRouteIdentityKey } from "./modelFavorites";
 import type { ModelSearchRoute } from "./modelSearch";
 
 type RouteCompatibility = Pick<
@@ -30,6 +30,8 @@ export interface ComposerModelRoute extends ModelSearchRoute {
   compatibility: RouteCompatibility;
   rowCompatibility: ModelChooserSelectionCompatibility | null;
   providerId: ProviderId | null;
+  reasoningEffort: string | null;
+  reasoningOptions: readonly string[];
 }
 
 const harnessLabels: Readonly<Record<ProviderId, string>> = {
@@ -115,7 +117,7 @@ function profileRoute(
     && profile.compatibility.state !== "unknown"
     && profile.compatibility.state !== "unavailable";
   return {
-    key: modelFavoriteKey(selection),
+    key: modelRouteIdentityKey(selection),
     displayName: model.displayName,
     modelId: model.id,
     alias: selection.alias,
@@ -130,6 +132,11 @@ function profileRoute(
       profile.protocol,
       ...(providerId ? [providerId] : []),
     ],
+    reasoningEffort: selection.reasoningEffort,
+    reasoningOptions: Array.from(new Set([
+      ...(selection.reasoningEffort ? [selection.reasoningEffort] : []),
+      ...model.reasoningOptions.map(({ value }) => value),
+    ])),
     selectable,
     unavailableReason: selectable ? null : profile.compatibility.reason,
     selection,
@@ -154,7 +161,8 @@ function fallbackNativeRoutes(
       : [{
           id: "provider-default",
           label: "Provider default",
-          defaultReasoningEffort: "",
+        defaultReasoningEffort: "",
+        reasoningOptions: [],
         }];
     const backend = nativeBackendProfile(provider.id);
     const harnessId = nativeHarnessId(provider.id);
@@ -173,7 +181,7 @@ function fallbackNativeRoutes(
         ? currentSelection
         : generatedSelection;
       return {
-        key: modelFavoriteKey(selection),
+        key: modelRouteIdentityKey(selection),
         displayName: model.label,
         modelId: model.id,
         alias: selection.alias,
@@ -184,6 +192,11 @@ function fallbackNativeRoutes(
         providerLabel: provider.label,
         source: "built-in" as const,
         routeTerms: [provider.id],
+        reasoningEffort: selection.reasoningEffort,
+        reasoningOptions: Array.from(new Set([
+          ...(selection.reasoningEffort ? [selection.reasoningEffort] : []),
+          ...model.reasoningOptions.map(({ value }) => value),
+        ])),
         selectable: true,
         unavailableReason: null,
         selection,
@@ -225,7 +238,7 @@ export function selectedModelSearchRoute(
   if (selected) return selected;
   const providerId = legacyProviderIdForHarness(selection.harnessId);
   return {
-    key: modelFavoriteKey(selection),
+    key: modelRouteIdentityKey(selection),
     displayName: selection.alias ?? selection.modelId,
     modelId: selection.modelId,
     alias: selection.alias,
@@ -238,6 +251,8 @@ export function selectedModelSearchRoute(
       ? "built-in"
       : "custom",
     routeTerms: [],
+    reasoningEffort: selection.reasoningEffort,
+    reasoningOptions: [],
     selectable: false,
     unavailableReason: "This saved model route is no longer available.",
   };

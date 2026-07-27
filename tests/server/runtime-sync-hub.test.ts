@@ -5,6 +5,7 @@ import type {
   AgentInputRequest,
   AgentPlan,
   AppSnapshot,
+  ProviderMaintenanceOperation,
   ServerEvent,
 } from "../../src/shared/contracts";
 import { RuntimeSequencer } from "../../src/server/runtime-sequencing";
@@ -75,6 +76,22 @@ function plan(): AgentPlan {
     turnId: "turn",
     explanation: null,
     steps: [{ step: "Inspect", status: "inProgress" }],
+  };
+}
+
+function maintenanceOperation(): ProviderMaintenanceOperation {
+  return {
+    id: "00000000-0000-4000-8000-000000000001",
+    providerId: "claude",
+    status: "running",
+    startedAt: "2026-07-27T10:00:00.000Z",
+    finishedAt: null,
+    beforeVersion: "1.0.0",
+    afterVersion: null,
+    targetVersion: "2.0.0",
+    message: "Updating provider.",
+    output: null,
+    outputTruncated: false,
   };
 }
 
@@ -232,5 +249,30 @@ describe("runtime sync hub", () => {
     runtime.hub.terminateAll((socket) => terminated.push(socket));
     expect(terminated).toEqual(["resumed", "reset"]);
     expect(runtime.hub.connectionCount).toBe(0);
+  });
+
+  it("includes active provider maintenance in an authoritative full sync", () => {
+    const runtime = fixture();
+    runtime.hub.connect("maintenance", { kind: "none" }, {
+      snapshot: (sync) => ({
+        ...snapshot(sync),
+        maintenanceOperations: [maintenanceOperation()],
+      }),
+      approvals: [],
+      inputs: [],
+      plans: [],
+    });
+
+    const welcome = runtime.events.get("maintenance")?.[0] as Extract<
+      ServerEvent,
+      { type: "server.welcome" }
+    >;
+    expect(welcome.snapshot.maintenanceOperations).toEqual([
+      expect.objectContaining({
+        providerId: "claude",
+        status: "running",
+        output: null,
+      }),
+    ]);
   });
 });

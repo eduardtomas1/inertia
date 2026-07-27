@@ -21,8 +21,12 @@ const requestCardSource = readFileSync(
   new URL("../../src/renderer/src/components/AgentRequestCard.tsx", import.meta.url),
   "utf8",
 );
-const timelineSource = readFileSync(
-  new URL("../../src/renderer/src/components/ResponseTimeline.tsx", import.meta.url),
+const activitySource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
+  "utf8",
+);
+const layersSource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url),
   "utf8",
 );
 const styles = readFileSync(
@@ -257,15 +261,15 @@ describe("agent input answers", () => {
       activities: [{ id: activity.id }],
     });
 
-    const executionStreamSource = timelineSource.slice(
-      timelineSource.indexOf("function ExecutionStream"),
-      timelineSource.indexOf("function WorkLog"),
+    const executionStreamSource = activitySource.slice(
+      activitySource.indexOf("function ExecutionStream"),
+      activitySource.indexOf("export function WorkLog"),
     );
-    const approvalsIndex = timelineSource.indexOf("{turn.approvals.map");
-    const questionsIndex = timelineSource.indexOf("{turn.inputRequests.map");
+    const approvalsIndex = layersSource.indexOf("{turn.approvals.map");
+    const questionsIndex = layersSource.indexOf("{turn.inputRequests.map");
     expect(executionStreamSource).not.toContain("ApprovalCard");
     expect(executionStreamSource).not.toContain("InputRequestCard");
-    expect(approvalsIndex).toBeGreaterThan(timelineSource.indexOf("<WorkLog"));
+    expect(approvalsIndex).toBeGreaterThan(layersSource.indexOf("<WorkLog"));
     expect(questionsIndex).toBeGreaterThan(approvalsIndex);
   });
 });

@@ -1,5 +1,6 @@
 import { Search, Star } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -92,6 +93,42 @@ function initialFavorites(): ModelFavoriteReference[] {
     : readModelFavorites(window.localStorage);
 }
 
+function favoriteKeyForRoute(
+  route: Pick<
+    ComposerModelRoute,
+    "harnessId" | "backendProfileId" | "modelId" | "reasoningEffort"
+  >,
+): string {
+  return modelFavoriteKey(route);
+}
+
+/**
+ * Search operates across discovered routes and saved favorite variants. A
+ * favorite keeps its full reasoning identity while an exact discovered
+ * duplicate is removed, so selecting a searched favorite cannot silently fall
+ * back to the discovered route's default effort.
+ */
+export function searchableModelChooserRoutes(
+  routes: readonly ComposerModelRoute[],
+  favoriteRoutes: readonly ComposerModelRoute[],
+): ComposerModelRoute[] {
+  const seen = new Set<string>();
+  return [...favoriteRoutes, ...routes].filter((route) => {
+    const key = favoriteKeyForRoute(route);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function preferredModelChooserSource(
+  items: readonly { filter: ModelSourceFilter }[],
+): ModelSourceFilter {
+  return items.find(({ filter }) => filter.kind === "favorites")?.filter
+    ?? items[0]?.filter
+    ?? { kind: "all" };
+}
+
 export function ModelChooser({
   routes,
   selectedRoute,
@@ -124,16 +161,34 @@ export function ModelChooser({
     () => resolveModelFavorites(favorites, routes),
     [favorites, routes],
   );
+  const resolvedFavoriteRoutes = useMemo(
+    () => resolvedFavorites.flatMap(({ route }) => route ? [route] : []),
+    [resolvedFavorites],
+  );
   const railItems = useMemo(
     () => deriveModelSourceRailItems(routes, {
-      favoriteRouteKeys: favoriteKeys,
+      favoriteRoutes: resolvedFavoriteRoutes,
     }),
-    [favoriteKeys, routes],
+    [resolvedFavoriteRoutes, routes],
   );
   const selectedSourceId = modelSourceFilterId(sourceFilter);
+  const searchableRoutes = useMemo(
+    () => searchableModelChooserRoutes(routes, resolvedFavoriteRoutes),
+    [resolvedFavoriteRoutes, routes],
+  );
   const sourceRoutes = useMemo(
-    () => filterModelRoutesBySource(routes, sourceFilter, favoriteKeys),
-    [favoriteKeys, routes, sourceFilter],
+    () => query.trim()
+      ? searchableRoutes
+      : sourceFilter.kind === "favorites"
+        ? resolvedFavoriteRoutes
+        : filterModelRoutesBySource(routes, sourceFilter),
+    [
+      query,
+      resolvedFavoriteRoutes,
+      routes,
+      searchableRoutes,
+      sourceFilter,
+    ],
   );
   const results = useMemo(
     () => searchModelRoutes(sourceRoutes, query),
@@ -154,17 +209,21 @@ export function ModelChooser({
     () => new Map(shortcuts.map((binding) => [binding.routeKey, binding])),
     [shortcuts],
   );
-  const selectedKey = selectedRoute.key;
+  const selectedKey = modelFavoriteKey({
+    harnessId: selectedRoute.harnessId,
+    backendProfileId: selectedRoute.backendProfileId,
+    modelId: selectedRoute.modelId,
+    reasoningEffort: selectedRoute.reasoningEffort ?? null,
+  });
 
-  const close = (restoreFocus = true): void => {
+  const close = useCallback((restoreFocus = true): void => {
     setOpen(false);
     setQuery("");
-    setSourceFilter({ kind: "all" });
     onOpenChange?.(false);
     if (restoreFocus) {
       window.requestAnimationFrame(() => triggerRef.current?.focus());
     }
-  };
+  }, [onOpenChange]);
 
   useEffect(() => {
     if (!open) return;
@@ -176,8 +235,8 @@ export function ModelChooser({
 
   useEffect(() => {
     if (!open) return;
-    const selectedIndex = results.items.findIndex(({ key }) =>
-      key === selectedKey);
+    const selectedIndex = results.items.findIndex((route) =>
+      favoriteKeyForRoute(route) === selectedKey);
     setActiveIndex(selectedIndex >= 0 && results.items[selectedIndex]?.selectable
       ? selectedIndex
       : nextModelChooserIndex(results.items, -1, "Home"));
@@ -186,7 +245,7 @@ export function ModelChooser({
   useEffect(() => {
     if (!open) return;
     if (railItems.some(({ id }) => id === selectedSourceId)) return;
-    setSourceFilter({ kind: "all" });
+    setSourceFilter(preferredModelChooserSource(railItems));
   }, [open, railItems, selectedSourceId]);
 
   useEffect(() => {
@@ -200,18 +259,24 @@ export function ModelChooser({
       }
       close(outsidePointerShouldRestoreFocus(event.target));
     };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+    };
     document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => document.removeEventListener(
-      "pointerdown",
-      handlePointerDown,
-      true,
-    );
-  }, [open]);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [close, open]);
 
   useEffect(() => {
     if (!open || (!disabled && closeSignal === null)) return;
     close(false);
-  }, [closeSignal, disabled, open]);
+  }, [close, closeSignal, disabled, open]);
 
   const select = (route: ComposerModelRoute): void => {
     if (!route.selectable) return;
@@ -230,11 +295,6 @@ export function ModelChooser({
   const handleNavigation = (
     event: ReactKeyboardEvent<HTMLDivElement>,
   ): void => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close(true);
-      return;
-    }
     const shortcut = shortcuts.find((binding) =>
       matchesModelShortcut(event.nativeEvent, binding));
     if (shortcut) {
@@ -274,8 +334,8 @@ export function ModelChooser({
     : undefined;
   const chooserRows = results.items.map((route) =>
     modelChooserRowFromRoute(route, {
-      active: route.key === selectedKey,
-      favorite: favoriteKeys.includes(route.key),
+      active: favoriteKeyForRoute(route) === selectedKey,
+      favorite: favoriteKeys.includes(favoriteKeyForRoute(route)),
       shortcut: shortcutsByRoute.get(route.key) ?? null,
       compatibility: route.rowCompatibility,
     }));
@@ -296,6 +356,7 @@ export function ModelChooser({
             close(true);
             return;
           }
+          setSourceFilter(preferredModelChooserSource(railItems));
           setOpen(true);
           onOpenChange?.(true);
         }}
@@ -355,6 +416,7 @@ export function ModelChooser({
                         ? "model-chooser-result is-navigated"
                         : "model-chooser-result"}
                       role="presentation"
+                      style={{ gridRow: index + 1 }}
                       onPointerMove={() => {
                         if (route.selectable) setActiveIndex(index);
                       }}
@@ -378,6 +440,7 @@ export function ModelChooser({
                         key={row.key}
                         className="model-chooser-favorite-slot"
                         role="presentation"
+                        style={{ gridRow: index + 1 }}
                         onPointerMove={() => {
                           if (row.selectable) setActiveIndex(index);
                         }}

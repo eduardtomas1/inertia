@@ -2,263 +2,57 @@ import { randomUUID } from "node:crypto";
 
 import {
   isAgentTurnTerminalStatus,
-  type AgentActivity,
   type AgentApprovalDecision,
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AgentPlan,
-  type AgentTurn,
   type AgentTurnStatus,
   type AgentTurnTerminalStatus,
-  type AgentTurnUsageSnapshot,
-  type ChatAttachment,
   type ChatMessage,
-  type Conversation,
-  type ContinuationIdentity,
-  type HarnessBackendCompatibility,
-  type KnownHarnessId,
-  type ModelBackendProfile,
-  type ModelSelection,
-  type ProviderInfo,
-  type ProviderId,
-  type RuntimeMutationEvent,
   type SubagentTrace,
-  type ThreadUsageSnapshot,
-  type TurnRequestContext,
 } from "../../../shared/contracts";
-import {
-  modelSelectionSchema,
-} from "../../../shared/model-routing";
-import { resolveContinuationDecision } from "../../../shared/continuation-policy";
 import { RuntimeStore } from "../../database";
-import {
-  agentActivityKind,
-  agentActivityStatus,
-} from "../../runtime-snapshots";
 import type {
-  ProviderActivityEvent,
   ProviderEvent,
-  ProviderMetadataEvent,
-  ProviderRunCallbacks,
   ProviderRunFailure,
-  ProviderRunInput,
   ProviderRunResult,
 } from "../../provider/contracts";
+import type {
+  ActiveTurn,
+  QueuedTurn,
+  QueueTurnRequest,
+  TurnControllerHooks,
+  TurnProviderRuntime,
+  TurnTerminalCause,
+  TurnTimerScheduler,
+} from "./turn-controller-types";
 import {
-  mergeProviderActivityDetailWithinTurnBudget,
-  sanitizeProviderActivityDetail,
-} from "../../provider/activity-detail";
-import {
-  assembleTurnRequest,
-  type HiddenProviderInstruction,
-  type SanitizedTurnExecutionManifest,
-} from "./request-context";
-import {
-  TurnStreamCoalescer,
-  type DeltaTimerScheduler,
-  type StreamDeltaFlush,
-} from "./turn-stream-coalescer";
+  defaultTurnScheduler,
+  DEFAULT_TURN_TIMEOUT_MS,
+  providerLabel,
+  providerPromiseFailure,
+  publicTurnError,
+} from "./turn-controller-support";
+import { prepareTurnRequest } from "./turn-request-preparation";
+import { TurnStreamProjection } from "./turn-stream-projection";
+import { TurnActivityProjection } from "./turn-activity-projection";
+import { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
+import { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
+import { TurnProviderEventProjector } from "./turn-provider-event-projector";
+import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 
-const MAX_ASSISTANT_TEXT = 4 * 1024 * 1024;
-const MAX_REASONING_TEXT = 512 * 1024;
-const DEFAULT_TURN_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
-
-export interface TurnTimerScheduler extends DeltaTimerScheduler {}
-
-export interface TurnProviderRuntime {
-  resolveModelRoute(selection: ModelSelection): {
-    providerId: ProviderId;
-    harnessId: KnownHarnessId;
-    backendProfile: ModelBackendProfile;
-    compatibility: HarnessBackendCompatibility;
-    continuationIdentity: ContinuationIdentity;
-  };
-  harnessIdFor(input: ProviderRunInput): string;
-  run(input: ProviderRunInput, callbacks: ProviderRunCallbacks): Promise<ProviderRunResult>;
-  cancel(conversationId: string): boolean;
-  isRunning(conversationId: string): boolean;
-  respondToApproval(
-    conversationId: string,
-    requestId: string,
-    decision: AgentApprovalDecision,
-    identity: { runId: string; turnId: string },
-  ): boolean;
-  respondToInput(
-    conversationId: string,
-    requestId: string,
-    answers: Record<string, string[]>,
-    identity: { runId: string; turnId: string },
-  ): boolean;
-  steer?(
-    conversationId: string,
-    content: string,
-    identity: { runId: string; turnId: string },
-  ): Promise<boolean>;
-  stopSubagent?(
-    conversationId: string,
-    providerTaskId: string,
-    identity: { runId: string; turnId: string },
-  ): Promise<boolean>;
-  disposeAll(): Promise<void>;
-}
-
-export interface TurnStructuredContextCapture {
-  conversation: Conversation;
-  content: string;
-  attachments: readonly ChatAttachment[];
-  executionManifest: SanitizedTurnExecutionManifest;
-}
-
-export interface TurnStructuredContextRecord {
-  turn: AgentTurn;
-  context: unknown;
-}
-
-export interface TurnGitArtifactHookInput {
-  turn: AgentTurn;
-  checkpointId: string | null;
-  terminalAssistantMessageId: string | null;
-}
-
-export interface TurnMetadataRefreshHookInput {
-  providerId: ProviderId;
-  conversationId: string;
-  turnId: string;
-  runStartedAt: number;
-  status: AgentTurnTerminalStatus;
-}
-
-export interface TurnControllerHooks {
-  broadcast(event: RuntimeMutationEvent): void;
-  broadcastSnapshot(): void;
-  providerInfo(): readonly ProviderInfo[];
-  applyProviderMetadata?(event: ProviderMetadataEvent): void;
-  captureStructuredContext?(input: TurnStructuredContextCapture): unknown;
-  onStructuredContextCaptured?(record: TurnStructuredContextRecord): void | Promise<void>;
-  onStreamingPersisted?(input: {
-    turnId: string;
-    kind: "assistant" | "reasoning";
-    recordId: string;
-  }): void;
-  captureGitBefore?(input: TurnGitArtifactHookInput): void | Promise<void>;
-  captureGitArtifacts?(input: TurnGitArtifactHookInput): void | Promise<void>;
-  refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;
-  onTurnSettled?(turn: AgentTurn): void | Promise<void>;
-}
-
-export interface QueueTurnRequest {
-  conversationId: string;
-  content: string;
-  attachments?: readonly ChatAttachment[];
-  imagePaths?: readonly string[];
-  context?: TurnRequestContext;
-  /** Server-constructed only. Renderer command schemas never accept this. */
-  internalInstructions?: readonly HiddenProviderInstruction[];
-  checkpointId?: string | null;
-  rendererOwnerId?: string | null;
-  onSettled?: (status: AgentTurnTerminalStatus, turnId: string) => void | Promise<void>;
-}
-
-export interface QueuedTurn {
-  message: ChatMessage;
-  turn: AgentTurn;
-}
-
-export type TurnTerminalCause =
-  | "provider-completed"
-  | "provider-error"
-  | "provider-process-exit"
-  | "provider-process-crash"
-  | "user-cancelled"
-  | "approval-cancelled"
-  | "unsupported-interaction"
-  | "runtime-shutdown"
-  | "runtime-crash"
-  | "runtime-restart"
-  | "turn-timeout"
-  | "renderer-disconnected"
-  | "turn-start-failed"
-  | "stream-persistence-failed"
-  | "checkpoint-association-failed";
-
-interface ActiveTurn {
-  turn: AgentTurn;
-  conversation: Conversation;
-  providerInput: ProviderRunInput;
-  checkpointId: string | null;
-  rendererOwnerId: string | null;
-  structuredContext: unknown;
-  gitBeforeCapture: Promise<void> | null;
-  runStartedAt: number;
-  workspaceRunCreated: boolean;
-  acceptingProviderEvents: boolean;
-  settled: boolean;
-  sessionAfter: string | null;
-  lastUsage: AgentTurnUsageSnapshot | null;
-  assistantText: string;
-  assistantSegmentText: string;
-  assistantMessageId: string | null;
-  latestAssistantMessageId: string | null;
-  assistantStream: TurnStreamCoalescer;
-  reasoningText: string;
-  reasoningId: string | null;
-  reasoningStream: TurnStreamCoalescer;
-  timeoutTimer: unknown;
-  runningActivities: Map<ProviderActivityEvent["kind"], AgentActivity[]>;
-  providerActivitiesById: Map<string, AgentActivity>;
-  providerActivityDetailChars: number;
-  providerCommandRuns: Map<string, string>;
-  approvalIds: Set<string>;
-  inputIds: Set<string>;
-  onSettled?: QueueTurnRequest["onSettled"];
-}
-
-function defaultScheduler(): TurnTimerScheduler {
-  return {
-    setTimeout: (callback, delayMs) => {
-      const timer = setTimeout(callback, delayMs);
-      timer.unref();
-      return timer;
-    },
-    clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
-  };
-}
-
-function providerLabel(providerId: ProviderId): string {
-  return providerId === "codex"
-    ? "Codex"
-    : providerId === "claude"
-      ? "Claude"
-      : providerId === "cursor"
-        ? "Cursor"
-        : "OpenCode";
-}
-
-function projectActionKind(name: string): "check" | "service" {
-  return /(?:^|[:\s-])(dev|serve|server|start|watch|preview)(?:$|[:\s-])/iu.test(name)
-    ? "service"
-    : "check";
-}
-
-function boundaryUsage(
-  usage: ThreadUsageSnapshot | undefined,
-  capturedAt: string,
-): AgentTurnUsageSnapshot | null {
-  if (!usage) return null;
-  return {
-    usedTokens: usage.usedTokens,
-    totalProcessedTokens: usage.totalProcessedTokens,
-    totalProcessedScope: usage.totalProcessedScope,
-    maxTokens: usage.maxTokens,
-    inputTokens: usage.inputTokens,
-    cachedInputTokens: usage.cachedInputTokens,
-    cacheWriteInputTokens: usage.cacheWriteInputTokens,
-    outputTokens: usage.outputTokens,
-    reasoningOutputTokens: usage.reasoningOutputTokens,
-    compactsAutomatically: usage.compactsAutomatically,
-    capturedAt,
-  };
-}
+export type {
+  QueuedTurn,
+  QueueTurnRequest,
+  TurnControllerHooks,
+  TurnGitArtifactHookInput,
+  TurnMetadataRefreshHookInput,
+  TurnProviderRuntime,
+  TurnStructuredContextCapture,
+  TurnStructuredContextRecord,
+  TurnTerminalCause,
+  TurnTimerScheduler,
+} from "./turn-controller-types";
 
 /**
  * Server-authoritative owner for every live agent-turn lifecycle. Provider
@@ -272,6 +66,12 @@ export class TurnController {
   private readonly clock: () => Date;
   private readonly id: () => string;
   private readonly turnTimeoutMs: number;
+  private readonly streams: TurnStreamProjection;
+  private readonly activities: TurnActivityProjection;
+  private readonly artifacts: TurnArtifactSequencer;
+  private readonly interactions: TurnInteractionCoordinator;
+  private readonly settlement: TurnSettlementCoordinator;
+  private readonly providerEvents: TurnProviderEventProjector;
   private readonly settlementTasks = new Set<Promise<unknown>>();
   private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
   private closing = false;
@@ -290,10 +90,71 @@ export class TurnController {
       turnTimeoutMs?: number;
     } = {},
   ) {
-    this.scheduler = options.scheduler ?? defaultScheduler();
+    this.scheduler = options.scheduler ?? defaultTurnScheduler();
     this.clock = options.clock ?? (() => new Date());
     this.id = options.id ?? randomUUID;
     this.turnTimeoutMs = Math.max(1, options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS);
+    this.activities = new TurnActivityProjection({
+      store: this.store,
+      hooks: this.hooks,
+      now: () => this.now(),
+    });
+    this.artifacts = new TurnArtifactSequencer({
+      hooks: this.hooks,
+      barriers: this.gitArtifactBarriers,
+      track: (value) => this.track(value),
+    });
+    this.settlement = new TurnSettlementCoordinator({
+      store: this.store,
+      hooks: this.hooks,
+      scheduler: this.scheduler,
+      activities: this.activities,
+      artifacts: this.artifacts,
+      now: () => this.now(),
+      cleanup: (active) => this.cleanup(active),
+      track: (value) => this.track(value),
+    });
+    this.streams = new TurnStreamProjection({
+      store: this.store,
+      hooks: this.hooks,
+      scheduler: this.scheduler,
+      now: () => this.now(),
+      onPersistenceFailure: (active, error) => {
+        this.providers.cancel(active.conversation.id);
+        this.settle(
+          active,
+          "failed",
+          "stream-persistence-failed",
+          this.publicError(error),
+        );
+      },
+    });
+    this.interactions = new TurnInteractionCoordinator({
+      store: this.store,
+      providers: this.providers,
+      pendingApprovals: this.pendingApprovals,
+      pendingInputs: this.pendingInputs,
+      hooks: this.hooks,
+      streams: this.streams,
+      now: () => this.now(),
+      transition: (active, status) => this.transition(active, status),
+      settle: (active, status, cause, message) => this.settle(
+        active,
+        status,
+        cause,
+        message,
+      ),
+    });
+    this.providerEvents = new TurnProviderEventProjector({
+      store: this.store,
+      hooks: this.hooks,
+      agentPlans: this.agentPlans,
+      streams: this.streams,
+      activities: this.activities,
+      interactions: this.interactions,
+      now: () => this.now(),
+      transition: (active, status) => this.transition(active, status),
+    });
   }
 
   isActive(conversationId: string): boolean {
@@ -310,154 +171,40 @@ export class TurnController {
       throw new Error("This conversation already has an active turn.");
     }
 
-    const conversation = this.store.conversation(request.conversationId);
-    const attachments = [...(request.attachments ?? [])];
-    const assembled = assembleTurnRequest({
-      cwd: this.store.conversationPath(conversation.id),
-      visibleContent: request.content,
-      interactionMode: conversation.interactionMode,
-      attachments,
-      imagePaths: request.imagePaths,
-      context: request.context,
-      internalInstructions: request.internalInstructions,
-    });
-    const runId = this.id();
-    const turnId = this.id();
-    const selectedProvider = this.hooks.providerInfo().find(({ id }) => id === conversation.providerId);
-    const requestedModelId = conversation.modelSelection.modelId;
-    const selectedModel = requestedModelId !== "provider-default"
-      ? selectedProvider?.models.find(({ id }) => id === requestedModelId)
-      : selectedProvider?.models.find(({ isDefault }) => isDefault) ?? selectedProvider?.models[0];
-    const modelSelection = modelSelectionSchema.parse({
-      ...conversation.modelSelection,
-      modelId: selectedModel?.id ?? requestedModelId,
-    });
-    const route = this.providers.resolveModelRoute(modelSelection);
-    const latestTurn = this.store.latestAgentTurnForConversation(conversation.id);
-    const continuation = resolveContinuationDecision({
-      previousIdentity: latestTurn?.continuationIdentity
-        ?? conversation.continuationIdentity
-        ?? null,
-      nextIdentity: route.continuationIdentity,
-      previousModelId: latestTurn?.modelSelection.modelId
-        ?? (conversation.continuationIdentity ? conversation.modelSelection.modelId : null),
-      nextModelId: modelSelection.modelId,
-      hasProviderSession: conversation.providerSessionId !== null,
-      hasTurns: latestTurn !== null,
-      allowsModelSwitchWithinSession:
-        route.compatibility.allowsModelSwitchWithinSession,
-    });
-    if (continuation.action === "new-conversation-required") {
-      throw new Error(continuation.reason);
-    }
-    const canResume = continuation.action === "resume-session";
-    const providerInput: ProviderRunInput = {
-      providerId: route.providerId,
-      harnessId: route.harnessId,
-      backendProfile: route.backendProfile,
-      backendCompatibility: route.compatibility,
-      modelSelection,
-      continuationIdentity: route.continuationIdentity,
-      conversationId: conversation.id,
-      runId,
-      turnId,
-      cwd: this.store.conversationPath(conversation.id),
-      prompt: assembled.executionPrompt,
-      model: modelSelection.modelId === "provider-default"
-        ? undefined
-        : modelSelection.modelId,
-      reasoningEffort: modelSelection.reasoningEffort || undefined,
-      interactionMode: conversation.interactionMode,
-      access: conversation.accessMode,
-      sessionId: canResume ? conversation.providerSessionId! : undefined,
-      imagePaths: assembled.imagePaths,
-    };
-    const harnessId = this.providers.harnessIdFor(providerInput);
-    if (harnessId !== route.harnessId) {
-      throw new Error("The resolved model route changed before the turn could start.");
-    }
-    const requestedAt = this.now();
-    const context = this.hooks.captureStructuredContext?.({
-      conversation,
-      content: assembled.visibleContent,
-      attachments,
-      executionManifest: assembled.persistence.manifest,
-    });
-    const currentUsage = this.store.usageForConversation(conversation.id);
-    const queued = this.store.beginAgentTurn({
-      id: turnId,
-      conversationId: conversation.id,
-      runId,
-      content: assembled.visibleContent,
-      attachments,
-      executionContext: assembled.persistence,
-      providerId: route.providerId,
-      modelSelection,
-      continuationIdentity: route.continuationIdentity,
-      harnessId,
-      backendProfileId: modelSelection.backendProfileId,
-      model: modelSelection.modelId,
-      modelAlias: modelSelection.alias,
-      reasoningEffort: modelSelection.reasoningEffort ?? "",
-      interactionMode: conversation.interactionMode,
-      accessMode: conversation.accessMode,
-      providerSessionBefore: canResume ? conversation.providerSessionId : null,
-      requestedAt,
-      usageAtStart: boundaryUsage(currentUsage ?? undefined, requestedAt),
-      configurationRevision: modelSelection.backendConfigurationRevision,
-      association: "authoritative",
-    });
+    const prepared = prepareTurnRequest({
+      store: this.store,
+      providers: this.providers,
+      hooks: this.hooks,
+      id: this.id,
+      now: () => this.now(),
+      clock: this.clock,
+    }, request);
+    const { queued } = prepared;
     let active: ActiveTurn;
-    const assistantStream = this.createStreamCoalescer(
+    const assistantStream = this.streams.create(
       () => active,
       "assistant",
     );
-    const reasoningStream = this.createStreamCoalescer(
+    const reasoningStream = this.streams.create(
       () => active,
       "reasoning",
     );
     active = {
-      turn: queued.turn,
-      conversation,
-      providerInput,
-      checkpointId: request.checkpointId ?? null,
-      rendererOwnerId: request.rendererOwnerId ?? null,
-      structuredContext: context,
-      gitBeforeCapture: null,
-      runStartedAt: this.clock().getTime(),
-      workspaceRunCreated: false,
-      acceptingProviderEvents: true,
-      settled: false,
-      sessionAfter: canResume ? conversation.providerSessionId : null,
-      lastUsage: null,
-      assistantText: "",
-      assistantSegmentText: "",
-      assistantMessageId: null,
-      latestAssistantMessageId: null,
+      ...prepared.active,
       assistantStream,
-      reasoningText: "",
-      reasoningId: null,
       reasoningStream,
-      timeoutTimer: null,
-      runningActivities: new Map(),
-      providerActivitiesById: new Map(),
-      providerActivityDetailChars: 0,
-      providerCommandRuns: new Map(),
-      approvalIds: new Set(),
-      inputIds: new Set(),
-      onSettled: request.onSettled,
     };
-    this.activeByConversation.set(conversation.id, active);
+    this.activeByConversation.set(active.conversation.id, active);
     this.activeByTurn.set(queued.turn.id, active);
-    this.agentPlans.delete(conversation.id);
+    this.agentPlans.delete(active.conversation.id);
 
     try {
       if (active.checkpointId) {
         this.store.associateCheckpointWithTurn(
           active.checkpointId,
-          conversation.id,
-          runId,
-          turnId,
+          active.conversation.id,
+          active.turn.runId,
+          active.turn.id,
         );
       }
     } catch (error) {
@@ -465,8 +212,11 @@ export class TurnController {
       throw error;
     }
 
-    if (context !== undefined) {
-      this.track(this.hooks.onStructuredContextCaptured?.({ turn: queued.turn, context }));
+    if (active.structuredContext !== undefined) {
+      this.track(this.hooks.onStructuredContextCaptured?.({
+        turn: queued.turn,
+        context: active.structuredContext,
+      }));
     }
     return queued;
   }
@@ -493,7 +243,7 @@ export class TurnController {
       port: null,
     });
     active.workspaceRunCreated = true;
-    this.projectConversation(active, "running");
+    this.interactions.projectConversation(active, "running");
     this.hooks.broadcast({
       type: "agent.started",
       conversationId: active.conversation.id,
@@ -507,22 +257,9 @@ export class TurnController {
       this.settle(active, "failed", "turn-timeout", "The agent turn timed out.");
     }, this.turnTimeoutMs);
 
-    let preCapture: void | Promise<void>;
-    try {
-      const captureBefore = () => this.hooks.captureGitBefore?.({
-          turn: active.turn,
-          checkpointId: active.checkpointId,
-          terminalAssistantMessageId: null,
-        });
-      const priorArtifact = this.gitArtifactBarriers.get(active.conversation.id);
-      preCapture = priorArtifact
-        ? priorArtifact.catch(() => undefined).then(captureBefore)
-        : captureBefore();
-    } catch {
-      preCapture = undefined;
-    }
-    if (preCapture && typeof (preCapture as Promise<void>).then === "function") {
-      active.gitBeforeCapture = Promise.resolve(preCapture).catch(() => undefined);
+    const preCapture = this.artifacts.captureBefore(active);
+    if (preCapture) {
+      active.gitBeforeCapture = preCapture;
       this.track(active.gitBeforeCapture
         .then(() => {
           this.startProvider(active);
@@ -534,34 +271,37 @@ export class TurnController {
 
   private startProvider(active: ActiveTurn): boolean {
     if (active.settled || this.closing) return false;
-    let result: Promise<ProviderRunResult>;
     try {
-      result = this.providers.run(active.providerInput, {
+      const result = this.providers.run(active.providerInput, {
         onEvent: (event) => {
           this.handleProviderEvent(event);
         },
       });
+      active.providerRunStarted = true;
+      void result.then(
+        (providerResult) => this.handleProviderResult(active, providerResult),
+        (error: unknown) => {
+          const failure = providerPromiseFailure(active, error);
+          this.settle(
+            active,
+            "failed",
+            "provider-process-crash",
+            failure.message,
+            failure,
+          );
+        },
+      ).finally(() => this.releaseTurnAttachments(active))
+        .catch(() => undefined);
       if (this.store.agentTurn(active.turn.id).status === "starting") {
         if (this.transition(active, "running")) this.hooks.broadcastSnapshot();
       }
     } catch (error) {
+      if (active.providerRunStarted) {
+        this.providers.cancel(active.conversation.id);
+      }
       this.settle(active, "failed", "turn-start-failed", this.publicError(error));
       return false;
     }
-
-    void result.then(
-      (providerResult) => this.handleProviderResult(active, providerResult),
-      (error: unknown) => {
-        const failure = this.providerPromiseFailure(active, error);
-        this.settle(
-          active,
-          "failed",
-          "provider-process-crash",
-          failure.message,
-          failure,
-        );
-      },
-    );
     return true;
   }
 
@@ -570,6 +310,13 @@ export class TurnController {
     if (!active || active.settled) return false;
     this.providers.cancel(conversationId);
     return this.settle(active, "cancelled", cause, "Stopped");
+  }
+
+  failBeforeStart(conversationId: string, message: string): boolean {
+    const active = this.activeByConversation.get(conversationId);
+    if (!active || active.settled) return false;
+    this.providers.cancel(conversationId);
+    return this.settle(active, "failed", "turn-start-failed", message);
   }
 
   async steer(
@@ -637,35 +384,13 @@ export class TurnController {
     requestId: string,
     decision: AgentApprovalDecision,
   ): boolean {
-    const pending = this.pendingApprovals.get(requestId);
     const active = this.activeByConversation.get(conversationId);
-    if (
-      !pending
-      || !active
-      || active.settled
-      || pending.conversationId !== conversationId
-      || pending.runId !== active.turn.runId
-      || pending.turnId !== active.turn.id
-      || !pending.availableDecisions.includes(decision)
-    ) return false;
-    const responded = this.providers.respondToApproval(
+    return this.interactions.respondToApproval(
+      active,
       conversationId,
       requestId,
       decision,
-      { runId: active.turn.runId, turnId: active.turn.id },
     );
-    if (!responded) {
-      this.settle(
-        active,
-        "failed",
-        "unsupported-interaction",
-        "The selected provider cannot answer this approval request.",
-      );
-    } else if (decision === "cancel") {
-      this.providers.cancel(conversationId);
-      this.settle(active, "cancelled", "approval-cancelled", "The approval was cancelled.");
-    }
-    return responded;
   }
 
   respondToInput(
@@ -673,36 +398,18 @@ export class TurnController {
     requestId: string,
     answers: Record<string, string[]>,
   ): boolean {
-    const pending = this.pendingInputs.get(requestId);
     const active = this.activeByConversation.get(conversationId);
-    if (
-      !pending
-      || !active
-      || active.settled
-      || pending.conversationId !== conversationId
-      || pending.runId !== active.turn.runId
-      || pending.turnId !== active.turn.id
-    ) return false;
-    const responded = this.providers.respondToInput(
+    return this.interactions.respondToInput(
+      active,
       conversationId,
       requestId,
       answers,
-      { runId: active.turn.runId, turnId: active.turn.id },
     );
-    if (!responded) {
-      this.settle(
-        active,
-        "failed",
-        "unsupported-interaction",
-        "The selected provider cannot answer this input request.",
-      );
-    }
-    return responded;
   }
 
   rendererDisconnected(ownerId: string): number {
     let settled = 0;
-    for (const active of [...this.activeByConversation.values()]) {
+    for (const active of this.activeByConversation.values()) {
       if (active.rendererOwnerId !== ownerId) continue;
       this.providers.cancel(active.conversation.id);
       if (this.settle(
@@ -726,7 +433,7 @@ export class TurnController {
   async dispose(cause: "runtime-shutdown" | "runtime-crash" = "runtime-shutdown"): Promise<void> {
     if (this.closing) return;
     this.closing = true;
-    for (const active of [...this.activeByConversation.values()]) {
+    for (const active of this.activeByConversation.values()) {
       this.providers.cancel(active.conversation.id);
       this.settle(
         active,
@@ -738,7 +445,7 @@ export class TurnController {
       );
     }
     await this.providers.disposeAll();
-    await Promise.allSettled([...this.settlementTasks]);
+    await Promise.allSettled(this.settlementTasks);
   }
 
   /**
@@ -749,108 +456,7 @@ export class TurnController {
     const active = this.activeByConversation.get(event.conversationId);
     if (!active || !this.accepts(active, event)) return false;
     try {
-      switch (event.type) {
-        case "text":
-          this.appendAssistantText(active, event.text);
-          break;
-        case "reasoning-summary":
-          this.appendReasoning(active, event.text);
-          break;
-        case "usage": {
-          const usage = this.store.upsertUsage({
-            conversationId: active.conversation.id,
-            turnId: active.turn.id,
-            ...event.usage,
-          });
-          active.lastUsage = boundaryUsage(usage, this.now());
-          this.hooks.broadcast({ type: "agent.usage", usage });
-          break;
-        }
-        case "session":
-          active.sessionAfter = event.sessionId;
-          this.store.updateConversation(active.conversation.id, {
-            providerSessionId: event.sessionId,
-            continuationIdentity: active.turn.continuationIdentity,
-          });
-          break;
-        case "activity": {
-          this.closeAssistantSegment(active);
-          const activity = this.recordProviderActivity(active, event);
-          this.hooks.broadcast({ type: "agent.activity", activity });
-          this.hooks.broadcastSnapshot();
-          break;
-        }
-        case "status":
-          if (
-            (event.status === "starting" && this.transition(active, "starting"))
-            || (event.status === "running" && this.transition(active, "running"))
-          ) {
-            this.hooks.broadcastSnapshot();
-          }
-          break;
-        case "approval":
-          this.openApproval(active, event.request);
-          break;
-        case "approval-resolved":
-          this.resolveApproval(active, event.requestId, event.decision);
-          break;
-        case "input":
-          this.openInput(active, event.request);
-          break;
-        case "input-resolved":
-          this.resolveInput(active, event.requestId);
-          break;
-        case "plan": {
-          if (this.closeAssistantSegment(active)) this.hooks.broadcastSnapshot();
-          const plan: AgentPlan = {
-            conversationId: active.conversation.id,
-            runId: active.turn.runId,
-            turnId: active.turn.id,
-            explanation: event.explanation,
-            steps: event.steps,
-          };
-          this.agentPlans.set(active.conversation.id, plan);
-          this.store.upsertAgentPlan(plan);
-          this.hooks.broadcast({ type: "agent.plan.updated", plan });
-          break;
-        }
-        case "metadata":
-          try {
-            this.hooks.applyProviderMetadata?.(event);
-          } catch {
-            // Metadata projection failures do not change the turn outcome.
-          }
-          this.hooks.broadcastSnapshot();
-          break;
-        case "subagent": {
-          const persisted = this.store.upsertSubagentTrace({
-            conversationId: active.conversation.id,
-            runId: active.turn.runId,
-            turnId: active.turn.id,
-            providerId: active.turn.providerId,
-            providerTaskId: event.providerTaskId,
-            providerAgentId: event.providerAgentId,
-            parentProviderAgentId: event.parentProviderAgentId,
-            parentProviderToolUseId: event.parentProviderToolUseId,
-            providerToolUseId: event.providerToolUseId,
-            providerRole: event.providerRole,
-            providerName: event.providerName,
-            status: event.status,
-            description: event.description,
-            progress: event.progress,
-            result: event.result,
-            sequence: event.sequence,
-            updatedAt: this.now(),
-          });
-          if (persisted?.changed) {
-            this.hooks.broadcast({
-              type: "agent.subagent.updated",
-              trace: persisted.trace,
-            });
-          }
-          break;
-        }
-      }
+      this.providerEvents.project(active, event);
       return true;
     } catch (error) {
       this.providers.cancel(active.conversation.id);
@@ -892,7 +498,7 @@ export class TurnController {
         continuationIdentity: active.turn.continuationIdentity,
       });
     }
-    this.reconcileAssistantResult(active, result);
+    this.streams.reconcileAssistant(active, result);
     if (result.status === "completed") {
       this.settle(active, "completed", "provider-completed");
     } else if (result.status === "cancelled") {
@@ -931,406 +537,6 @@ export class TurnController {
     return true;
   }
 
-  private appendAssistantText(active: ActiveTurn, text: string): void {
-    const accepted = text.slice(0, Math.max(0, MAX_ASSISTANT_TEXT - active.assistantText.length));
-    if (!accepted) return;
-    active.assistantText += accepted;
-    active.assistantSegmentText += accepted;
-    active.assistantStream.append(accepted);
-  }
-
-  /**
-   * Assistant prose is persisted as one message per uninterrupted stretch.
-   * A visible provider event closes that stretch so the transcript can retain
-   * the real commentary → work → commentary order instead of flattening every
-   * assistant item into one terminal message.
-   */
-  private closeAssistantSegment(active: ActiveTurn): boolean {
-    if (!active.assistantSegmentText) return false;
-    active.assistantStream.flush();
-    active.assistantSegmentText = "";
-    active.assistantMessageId = null;
-    return true;
-  }
-
-  private appendReasoning(active: ActiveTurn, text: string): void {
-    const accepted = text.slice(0, Math.max(0, MAX_REASONING_TEXT - active.reasoningText.length));
-    if (!accepted) return;
-    active.reasoningText += accepted;
-    active.reasoningStream.append(accepted);
-  }
-
-  private reconcileAssistantResult(active: ActiveTurn, result: ProviderRunResult): void {
-    if (!result.text || result.text === active.assistantText) return;
-    const finalText = result.text.slice(0, MAX_ASSISTANT_TEXT);
-    if (finalText.startsWith(active.assistantText)) {
-      this.appendAssistantText(active, finalText.slice(active.assistantText.length));
-      return;
-    }
-    if (result.textTruncated && active.assistantText.startsWith(finalText)) return;
-    const completedPrefix = active.assistantText.slice(
-      0,
-      active.assistantText.length - active.assistantSegmentText.length,
-    );
-    if (completedPrefix && !active.assistantSegmentText && !finalText.startsWith(completedPrefix)) {
-      this.appendAssistantText(active, finalText);
-      return;
-    }
-    const correctedSegment = finalText.startsWith(completedPrefix)
-      ? finalText.slice(completedPrefix.length)
-      : finalText;
-    active.assistantText = `${completedPrefix}${correctedSegment}`;
-    active.assistantSegmentText = correctedSegment;
-    active.assistantStream.replacePending(correctedSegment);
-  }
-
-  private createStreamCoalescer(
-    active: () => ActiveTurn,
-    kind: "assistant" | "reasoning",
-  ): TurnStreamCoalescer {
-    return new TurnStreamCoalescer({
-      scheduler: this.scheduler,
-      onFlush: (flush) => this.persistStreamFlush(active(), kind, flush),
-      onTimerError: (error) => {
-        const current = active();
-        if (current.settled) return;
-        this.providers.cancel(current.conversation.id);
-        this.settle(
-          current,
-          "failed",
-          "stream-persistence-failed",
-          this.publicError(error),
-        );
-      },
-    });
-  }
-
-  private persistStreamFlush(
-    active: ActiveTurn,
-    kind: "assistant" | "reasoning",
-    flush: StreamDeltaFlush,
-  ): void {
-    let recordId: string;
-    if (kind === "assistant") {
-      if (active.assistantMessageId) {
-        this.store.updateMessageContent(active.assistantMessageId, active.assistantSegmentText);
-      } else {
-        active.assistantMessageId = this.store.createMessage(
-          active.conversation.id,
-          active.assistantSegmentText,
-          "assistant",
-          [],
-          active.turn.id,
-          this.now(),
-        ).id;
-        active.latestAssistantMessageId = active.assistantMessageId;
-      }
-      recordId = active.assistantMessageId;
-    } else {
-      if (!active.reasoningId) {
-        active.reasoningId = this.store.createReasoning(
-          active.conversation.id,
-          active.turn.runId,
-          active.turn.id,
-        ).id;
-      }
-      this.store.updateReasoning(active.reasoningId, { content: active.reasoningText });
-      recordId = active.reasoningId;
-    }
-
-    try {
-      this.hooks.onStreamingPersisted?.({
-        turnId: active.turn.id,
-        kind,
-        recordId,
-      });
-    } catch {
-      // Optional downstream hooks cannot invalidate durable stream storage.
-    }
-
-    // A terminal correction is persisted authoritatively. The terminal
-    // snapshot replaces renderer state; appending it as a delta would corrupt
-    // the transient view.
-    if (flush.replacement) return;
-    this.hooks.broadcast({
-      type: kind === "assistant" ? "agent.text" : "agent.reasoning",
-      conversationId: active.conversation.id,
-      runId: active.turn.runId,
-      turnId: active.turn.id,
-      text: flush.delta,
-    });
-  }
-
-  private recordProviderActivity(
-    active: ActiveTurn,
-    event: ProviderActivityEvent,
-  ): AgentActivity {
-    const status = agentActivityStatus(event);
-    const candidates = active.runningActivities.get(event.kind) ?? [];
-    const identified = event.activityId
-      ? active.providerActivitiesById.get(event.activityId)
-      : undefined;
-    if (identified) {
-      const detail = this.providerActivityDetail(
-        active,
-        identified.detail,
-        event.detail ?? null,
-      );
-      const activity = this.store.updateActivity(identified.id, {
-        title: event.label,
-        detail,
-        status,
-      });
-      active.providerActivitiesById.set(event.activityId!, activity);
-      if (event.phase !== "started") {
-        active.providerActivitiesById.delete(event.activityId!);
-        const pendingIndex = candidates.findIndex(({ id }) => id === identified.id);
-        if (pendingIndex >= 0) candidates.splice(pendingIndex, 1);
-        if (candidates.length === 0) active.runningActivities.delete(event.kind);
-      }
-      this.syncProviderCommandRun(active, activity, event.phase);
-      return activity;
-    }
-    if (event.phase !== "started" && event.phase !== "info") {
-      let matchIndex = candidates.findIndex((activity) => activity.title === event.label);
-      if (matchIndex < 0 && (candidates.length === 1 || event.label === "Tool")) matchIndex = 0;
-      if (matchIndex >= 0) {
-        const [match] = candidates.splice(matchIndex, 1);
-        if (candidates.length === 0) active.runningActivities.delete(event.kind);
-        else active.runningActivities.set(event.kind, candidates);
-        const activity = this.store.updateActivity(match.id, {
-          title: event.label,
-          detail: this.providerActivityDetail(
-            active,
-            match.detail,
-            event.detail ?? null,
-          ),
-          status,
-        });
-        this.syncProviderCommandRun(active, activity, event.phase);
-        return activity;
-      }
-    }
-    const activity = this.store.addActivity({
-      conversationId: active.conversation.id,
-      runId: active.turn.runId,
-      turnId: active.turn.id,
-      kind: agentActivityKind(event),
-      title: event.label,
-      detail: this.providerActivityDetail(active, null, event.detail ?? null),
-      status,
-      createdAt: this.now(),
-    });
-    this.syncProviderCommandRun(active, activity, event.phase);
-    if (event.phase === "started") {
-      candidates.push(activity);
-      active.runningActivities.set(event.kind, candidates);
-    }
-    if (event.activityId && event.phase === "started") {
-      active.providerActivitiesById.set(event.activityId, activity);
-    }
-    return activity;
-  }
-
-  private providerActivityDetail(
-    active: ActiveTurn,
-    previous: string | null,
-    next: string | null,
-  ): string | null {
-    const merged = mergeProviderActivityDetailWithinTurnBudget(
-      previous,
-      next,
-      active.providerActivityDetailChars,
-    );
-    active.providerActivityDetailChars = merged.totalChars;
-    return merged.detail;
-  }
-
-  private syncProviderCommandRun(
-    active: ActiveTurn,
-    activity: AgentActivity,
-    phase?: ProviderActivityEvent["phase"],
-  ): void {
-    if (activity.kind !== "command" || phase === "info") return;
-    const status = activity.status === "running"
-      ? "running"
-      : activity.status === "failed"
-        ? "failed"
-        : "succeeded";
-    const label = activity.title === "Command" ? "Agent command" : activity.title;
-    const existingId = active.providerCommandRuns.get(activity.id);
-    if (existingId) {
-      this.store.updateWorkspaceRun(existingId, { label, status });
-      if (status !== "running") active.providerCommandRuns.delete(activity.id);
-      return;
-    }
-    const workspaceRun = this.store.createWorkspaceRun({
-      kind: projectActionKind(activity.title),
-      projectId: active.conversation.projectId,
-      conversationId: active.conversation.id,
-      label,
-      detail: `${providerLabel(active.turn.providerId)} · ${active.conversation.title}`,
-      status: "running",
-      port: null,
-    });
-    if (status === "running") active.providerCommandRuns.set(activity.id, workspaceRun.id);
-    else this.store.updateWorkspaceRun(workspaceRun.id, { status });
-  }
-
-  private openApproval(
-    active: ActiveTurn,
-    request: Extract<ProviderEvent, { type: "approval" }>["request"],
-  ): void {
-    this.closeAssistantSegment(active);
-    active.reasoningStream.flush();
-    const pending: AgentApprovalRequest = {
-      id: request.requestId,
-      providerId: active.turn.providerId,
-      conversationId: active.conversation.id,
-      runId: active.turn.runId,
-      turnId: active.turn.id,
-      kind: request.kind,
-      title: request.title,
-      detail: request.detail ?? null,
-      command: request.command ?? null,
-      cwd: request.cwd ?? null,
-      reason: request.reason ?? null,
-      networkScope: request.networkScope ?? null,
-      permissionRoots: request.permissionRoots,
-      availableDecisions: request.availableDecisions,
-    };
-    active.approvalIds.add(pending.id);
-    this.pendingApprovals.set(pending.id, pending);
-    this.transition(active, "waiting-for-approval");
-    this.projectWaiting(active, "approval", pending.title);
-    this.hooks.broadcast({ type: "agent.approval.requested", request: pending });
-    this.hooks.broadcastSnapshot();
-  }
-
-  private resolveApproval(
-    active: ActiveTurn,
-    requestId: string,
-    decision: AgentApprovalDecision | "cancelled",
-  ): void {
-    const pending = this.pendingApprovals.get(requestId);
-    if (!pending || pending.turnId !== active.turn.id || pending.runId !== active.turn.runId) return;
-    this.pendingApprovals.delete(requestId);
-    active.approvalIds.delete(requestId);
-    this.hooks.broadcast({
-      type: "agent.approval.resolved",
-      conversationId: active.conversation.id,
-      runId: active.turn.runId,
-      turnId: active.turn.id,
-      requestId,
-      decision,
-    });
-    if (decision === "cancel" || decision === "cancelled") {
-      this.providers.cancel(active.conversation.id);
-      this.settle(active, "cancelled", "approval-cancelled", "The approval was cancelled.");
-      return;
-    }
-    this.refreshWaitingState(active);
-  }
-
-  private openInput(
-    active: ActiveTurn,
-    request: Extract<ProviderEvent, { type: "input" }>["request"],
-  ): void {
-    this.closeAssistantSegment(active);
-    active.reasoningStream.flush();
-    const pending: AgentInputRequest = {
-      id: request.requestId,
-      providerId: active.turn.providerId,
-      conversationId: active.conversation.id,
-      runId: active.turn.runId,
-      turnId: active.turn.id,
-      questions: request.questions,
-      autoResolutionMs: request.autoResolutionMs,
-    };
-    active.inputIds.add(pending.id);
-    this.pendingInputs.set(pending.id, pending);
-    this.transition(active, "waiting-for-input");
-    this.projectWaiting(
-      active,
-      "input",
-      pending.questions[0]?.question ?? "Waiting for an answer",
-    );
-    this.hooks.broadcast({ type: "agent.input.requested", request: pending });
-    this.hooks.broadcastSnapshot();
-  }
-
-  private resolveInput(active: ActiveTurn, requestId: string): void {
-    const pending = this.pendingInputs.get(requestId);
-    if (!pending || pending.turnId !== active.turn.id || pending.runId !== active.turn.runId) return;
-    this.pendingInputs.delete(requestId);
-    active.inputIds.delete(requestId);
-    this.hooks.broadcast({
-      type: "agent.input.resolved",
-      conversationId: active.conversation.id,
-      runId: active.turn.runId,
-      turnId: active.turn.id,
-      requestId,
-    });
-    this.refreshWaitingState(active);
-  }
-
-  private refreshWaitingState(active: ActiveTurn): void {
-    if (active.settled) return;
-    const approval = [...active.approvalIds]
-      .map((id) => this.pendingApprovals.get(id))
-      .find(Boolean);
-    if (approval) {
-      this.transition(active, "waiting-for-approval");
-      this.projectWaiting(active, "approval", approval.title);
-    } else {
-      const input = [...active.inputIds]
-        .map((id) => this.pendingInputs.get(id))
-        .find(Boolean);
-      if (input) {
-        this.transition(active, "waiting-for-input");
-        this.projectWaiting(
-          active,
-          "input",
-          input.questions[0]?.question ?? "Waiting for an answer",
-        );
-      } else {
-        this.transition(active, "running");
-        this.projectConversation(active, "running");
-      }
-    }
-    this.hooks.broadcastSnapshot();
-  }
-
-  private projectWaiting(
-    active: ActiveTurn,
-    attentionKind: "approval" | "input",
-    detail: string,
-  ): void {
-    this.store.updateConversation(active.conversation.id, {
-      status: "needs-input",
-      attentionKind,
-    });
-    if (active.workspaceRunCreated) {
-      this.store.updateWorkspaceRun(active.turn.runId, {
-        status: "waiting",
-        detail,
-      });
-    }
-  }
-
-  private projectConversation(active: ActiveTurn, status: Conversation["status"]): void {
-    this.store.updateConversation(active.conversation.id, {
-      status,
-      attentionKind: null,
-    });
-    if (active.workspaceRunCreated && (status === "running" || status === "idle")) {
-      this.store.updateWorkspaceRun(active.turn.runId, {
-        status: status === "running" ? "running" : "cancelled",
-        detail: active.conversation.title,
-      });
-    }
-  }
-
   private settle(
     active: ActiveTurn,
     status: AgentTurnTerminalStatus,
@@ -1338,287 +544,36 @@ export class TurnController {
     message?: string,
     failure?: ProviderRunFailure,
   ): boolean {
-    if (active.settled) return false;
-    active.settled = true;
-    active.acceptingProviderEvents = false;
-    if (active.timeoutTimer !== null) this.scheduler.clearTimeout(active.timeoutTimer);
-
-    let persistenceError: string | null = null;
-    const notePersistenceError = (error: unknown): void => {
-      const detail = this.publicError(error);
-      persistenceError = persistenceError ? `${persistenceError}; ${detail}` : detail;
-    };
-    try {
-      active.assistantStream.flush();
-    } catch (error) {
-      notePersistenceError(error);
-    }
-    try {
-      active.reasoningStream.flush();
-    } catch (error) {
-      notePersistenceError(error);
-    }
-    try {
-      this.settleRunningActivities(
-        active,
-        status === "failed" || status === "interrupted" ? "failed" : "completed",
-        failure && failure.reason !== "codex-error"
-          ? failure.message
-          : undefined,
-      );
-    } catch (error) {
-      notePersistenceError(error);
-    }
-    try {
-      const subagentStatus = status === "cancelled" ? "cancelled" : "lost";
-      for (const trace of this.store.settleLiveSubagents(
-        active.turn.id,
-        subagentStatus,
-        this.now(),
-      )) {
-        this.hooks.broadcast({ type: "agent.subagent.updated", trace });
-      }
-    } catch (error) {
-      notePersistenceError(error);
-    }
-    if (active.reasoningId) {
-      try {
-        this.store.updateReasoning(active.reasoningId, {
-          content: active.reasoningText,
-          status: status === "failed" || status === "interrupted" ? "failed" : "completed",
-        });
-      } catch (error) {
-        notePersistenceError(error);
-      }
-    }
-
-    const terminalReason = persistenceError
-      ? `${cause}: ${persistenceError}`.slice(0, 4_000)
-      : cause;
-    return this.finalizeSettlementGuarded(
+    const settled = this.settlement.settle(
       active,
       status,
-      terminalReason,
+      cause,
       message,
       failure,
     );
-  }
-
-  private finalizeSettlementGuarded(
-    active: ActiveTurn,
-    status: AgentTurnTerminalStatus,
-    terminalReason: string,
-    message?: string,
-    failure?: ProviderRunFailure,
-  ): boolean {
-    try {
-      return this.finalizeSettlement(
-        active,
-        status,
-        terminalReason,
-        message,
-        failure,
-      );
-    } catch {
-      try {
-        const latest = this.store.agentTurn(active.turn.id);
-        active.turn = isAgentTurnTerminalStatus(latest.status)
-          ? latest
-          : this.store.settleAgentTurn(active.turn.id, {
-              status: "failed",
-              terminalAssistantMessageId: active.latestAssistantMessageId,
-              providerSessionAfter: active.sessionAfter,
-              terminalReason: "stream-persistence-failed",
-              checkpointId: active.checkpointId,
-              usageAtCompletion: active.lastUsage,
-              completedAt: this.now(),
-              updatedAt: this.now(),
-            }).turn;
-      } catch {
-        // Runtime recovery repairs any lifecycle row that could not be settled.
-      }
-      this.cleanup(active);
-      try {
-        this.store.updateConversation(active.conversation.id, {
-          status: "failed",
-          attentionKind: null,
-        });
-        if (active.workspaceRunCreated) {
-          this.store.updateWorkspaceRun(active.turn.runId, {
-            status: "failed",
-            detail: "The turn could not be finalized cleanly.",
-          });
-        }
-      } catch {
-        // Workspace activity is a repairable projection.
-      }
-      try {
-        this.hooks.broadcast({
-          type: "agent.failed",
-          conversationId: active.conversation.id,
-          runId: active.turn.runId,
-          turnId: active.turn.id,
-          message: "The turn could not be finalized cleanly.",
-        });
-        this.hooks.broadcastSnapshot();
-      } catch {
-        // A renderer connection must not keep the controller wedged.
-      }
-      return false;
+    if (!active.providerRunStarted) {
+      this.track(this.releaseTurnAttachments(active));
     }
+    return settled;
   }
 
-  private finalizeSettlement(
-    active: ActiveTurn,
-    status: AgentTurnTerminalStatus,
-    terminalReason: string,
-    message?: string,
-    failure?: ProviderRunFailure,
-  ): boolean {
-    const settlement = this.store.settleAgentTurn(active.turn.id, {
-      status,
-      terminalAssistantMessageId: active.latestAssistantMessageId,
-      providerSessionAfter: active.sessionAfter,
-      terminalReason,
-      checkpointId: active.checkpointId,
-      usageAtCompletion: active.lastUsage,
-      completedAt: this.now(),
-      updatedAt: this.now(),
+  private async releaseTurnAttachments(active: ActiveTurn): Promise<void> {
+    if (active.attachmentsReleased || active.attachmentIds.length === 0) return;
+    if (active.attachmentRelease) return await active.attachmentRelease;
+    const release = Promise.resolve(this.hooks.releaseTurnAttachments?.({
+      turn: active.turn,
+      attachmentIds: active.attachmentIds,
+    })).then(() => {
+      active.attachmentsReleased = true;
     });
-    active.turn = settlement.turn;
-    this.cleanup(active);
-    if (!settlement.settled) return false;
-
-    const projectedStatus: Conversation["status"] = status === "completed"
-      ? "completed"
-      : status === "cancelled"
-        ? "idle"
-        : "failed";
+    active.attachmentRelease = release;
     try {
-      if (active.sessionAfter && active.sessionAfter !== active.conversation.providerSessionId) {
-        this.store.updateConversation(active.conversation.id, {
-          providerSessionId: active.sessionAfter,
-          continuationIdentity: active.turn.continuationIdentity,
-        });
-      }
-      this.store.updateConversation(active.conversation.id, {
-        status: projectedStatus,
-        attentionKind: null,
-      });
-      if (active.workspaceRunCreated) {
-        this.store.updateWorkspaceRun(active.turn.runId, {
-          status: status === "completed"
-            ? "succeeded"
-            : status === "cancelled"
-              ? "cancelled"
-              : "failed",
-          detail: message ?? active.conversation.title,
-        });
-      }
-    } catch {
-      // Projections are repairable; the guarded agent_turns row is lifecycle truth.
-    }
-    if (status === "failed" || status === "interrupted") {
-      const failureMessage = message ?? (
-        status === "interrupted"
-          ? "The agent turn was interrupted."
-          : "The provider could not complete the request."
-      );
-      try {
-        const activity = this.store.addActivity({
-          conversationId: active.conversation.id,
-          runId: active.turn.runId,
-          turnId: active.turn.id,
-          kind: "error",
-          title: failureMessage,
-          detail: failure?.technicalDetail ?? null,
-          status: "failed",
-        });
-        this.hooks.broadcast({ type: "agent.activity", activity });
-      } catch {
-        // A failed error projection cannot replace the authoritative outcome.
-      }
-      this.hooks.broadcast({
-        type: "agent.failed",
-        conversationId: active.conversation.id,
-        runId: active.turn.runId,
-        turnId: active.turn.id,
-        message: failureMessage,
-      });
-    } else {
-      this.hooks.broadcast({
-        type: "agent.completed",
-        conversationId: active.conversation.id,
-        runId: active.turn.runId,
-        turnId: active.turn.id,
-      });
-    }
-    this.hooks.broadcastSnapshot();
-
-    // Repository artifact materialization is deliberately downstream of the
-    // authoritative terminal event. A slow Git checkout/diff must never keep
-    // the provider turn active or leave Stop visible in the renderer.
-    try {
-      const artifactFinalization = this.hooks.captureGitArtifacts?.({
-        turn: active.turn,
-        checkpointId: active.checkpointId,
-        terminalAssistantMessageId: active.latestAssistantMessageId,
-      });
-      if (
-        artifactFinalization
-        && typeof (artifactFinalization as Promise<void>).then === "function"
-      ) {
-        const barrier = Promise.resolve(artifactFinalization)
-          .catch(() => undefined)
-          .finally(() => {
-            if (this.gitArtifactBarriers.get(active.conversation.id) === barrier) {
-              this.gitArtifactBarriers.delete(active.conversation.id);
-            }
-          });
-        this.gitArtifactBarriers.set(active.conversation.id, barrier);
-        this.track(barrier);
-      }
-    } catch {
-      // Restart reconciliation owns any pending artifact left by a sync hook failure.
-    }
-    this.track(this.hooks.refreshProviderMetadata?.({
-      providerId: active.turn.providerId,
-      conversationId: active.conversation.id,
-      turnId: active.turn.id,
-      runStartedAt: active.runStartedAt,
-      status,
-    }));
-    this.track(this.hooks.onTurnSettled?.(active.turn));
-    this.track(active.onSettled?.(status, active.turn.id));
-    return true;
-  }
-
-  private settleRunningActivities(
-    active: ActiveTurn,
-    status: AgentActivity["status"],
-    interruptedMessage?: string,
-  ): void {
-    for (const activities of active.runningActivities.values()) {
-      for (const pending of activities) {
-        const activity = this.store.updateActivity(pending.id, {
-          status,
-          ...(interruptedMessage
-            ? {
-                title: `Interrupted · ${pending.title}`,
-                detail: this.providerActivityDetail(
-                  active,
-                  pending.detail,
-                  `Interrupted: ${interruptedMessage}`,
-                ),
-              }
-            : {}),
-        });
-        this.syncProviderCommandRun(active, activity);
-        this.hooks.broadcast({ type: "agent.activity", activity });
+      await release;
+    } finally {
+      if (active.attachmentRelease === release) {
+        active.attachmentRelease = null;
       }
     }
-    active.runningActivities.clear();
-    active.providerActivitiesById.clear();
   }
 
   private cleanup(active: ActiveTurn): void {
@@ -1647,39 +602,7 @@ export class TurnController {
     return this.clock().toISOString();
   }
 
-  private providerPromiseFailure(
-    active: ActiveTurn,
-    error: unknown,
-  ): ProviderRunFailure {
-    let activityId: string | undefined;
-    for (const id of active.providerActivitiesById.keys()) activityId = id;
-    const isCodexAppServer =
-      active.providerInput.harnessId === "codex-app-server";
-    const message = isCodexAppServer
-      ? "The Codex App Server connection closed before the turn completed."
-      : "The provider connection closed before the turn completed.";
-    const technicalDetail = sanitizeProviderActivityDetail(
-      [
-        "Reason: transport-closed",
-        `Phase: ${active.turn.status}`,
-        "Exit code: unavailable",
-        "Signal: unavailable",
-        "Terminal event: not received",
-        `Activity: ${activityId ?? "not reported"}`,
-        `Cause: ${this.publicError(error)}`,
-      ].join("\n"),
-      { workspaceRoot: active.providerInput.cwd },
-    );
-    return {
-      reason: "transport-closed",
-      message,
-      phase: active.turn.status,
-      ...(activityId ? { activityId } : {}),
-      ...(technicalDetail ? { technicalDetail } : {}),
-    };
-  }
-
   private publicError(error: unknown): string {
-    return error instanceof Error && error.message ? error.message : "The agent turn failed.";
+    return publicTurnError(error);
   }
 }

@@ -1,4 +1,7 @@
-import type { ResolvedModelFavorite } from "./modelFavorites";
+import {
+  modelFavoriteKey,
+  type ResolvedModelFavorite,
+} from "./modelFavorites";
 import type { ModelSearchRoute } from "./modelSearch";
 
 export const MAX_MODEL_SHORTCUTS = 9;
@@ -79,6 +82,17 @@ export function resolveModelShortcutBindings<Route extends ModelSearchRoute>(
   const visibleByRouteKey = new Map(
     visibleRoutes.map((route) => [route.key, route]),
   );
+  const visibleByFavoriteKey = new Map(
+    visibleRoutes.map((route) => [
+      modelFavoriteKey({
+        harnessId: route.harnessId,
+        backendProfileId: route.backendProfileId,
+        modelId: route.modelId,
+        reasoningEffort: route.reasoningEffort ?? null,
+      }),
+      route,
+    ]),
+  );
   const slots = shortcutSlots(options.reservedPrimaryKeys ?? []);
   const primaryModifier = options.platform === "darwin" ? "Meta" : "Control";
   const labelPrefix = primaryModifier === "Meta" ? "⌘" : "Ctrl+";
@@ -89,6 +103,7 @@ export function resolveModelShortcutBindings<Route extends ModelSearchRoute>(
     if (bindings.length === slots.length) break;
     const route = favorite.route
       ? visibleByRouteKey.get(favorite.route.key)
+        ?? visibleByFavoriteKey.get(favorite.key)
       : undefined;
     if (!route?.selectable || seenRoutes.has(route.key)) continue;
 

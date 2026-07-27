@@ -8,7 +8,6 @@ import {
   Database,
   FileCode2,
   FolderOpen,
-  Gauge,
   GitCompareArrows,
   Keyboard,
   Laptop,
@@ -38,12 +37,15 @@ import {
   type Project,
   type ProviderId,
   type ProviderInfo,
+  type ProviderMaintenanceOperation,
+  type ProviderMaintenanceProviderId,
   type ThemePreference,
 } from "@shared/contracts";
 import { INERTIA_VERSION } from "@shared/version";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { Switch } from "./ui";
 import { ModelBackendsSettings } from "./ModelBackendsSettings";
+import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 
 type SettingsViewProps = {
   target?: {
@@ -60,6 +62,22 @@ type SettingsViewProps = {
   onUpdate: (settings: Partial<AppSettings>) => void;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
+  maintenanceOperations: ReadonlyMap<
+    ProviderMaintenanceProviderId,
+    ProviderMaintenanceOperation
+  >;
+  maintenanceStatuses: ReadonlyMap<
+    ProviderMaintenanceProviderId,
+    NonNullable<ProviderInfo["maintenance"]>
+  >;
+  onRefreshProviderMaintenance: (
+    providerId: ProviderMaintenanceProviderId,
+  ) => Promise<void>;
+  onUpdateProvider: (
+    providerId: ProviderMaintenanceProviderId,
+  ) => Promise<void>;
+  onCancelProviderUpdate: (operationId: string) => Promise<void>;
+  onOpenProviderUpdateInstructions: (url: string) => void;
   onChooseCodexBinary: () => void;
   onRevealRuntimeLogs: () => Promise<string>;
   onUnarchive: (conversation: Conversation) => void;
@@ -110,6 +128,12 @@ export function SettingsView({
   onUpdate,
   onConnectProvider,
   onRefreshProvider,
+  maintenanceOperations,
+  maintenanceStatuses,
+  onRefreshProviderMaintenance,
+  onUpdateProvider,
+  onCancelProviderUpdate,
+  onOpenProviderUpdateInstructions,
   onChooseCodexBinary,
   onRevealRuntimeLogs,
   onUnarchive,
@@ -245,7 +269,53 @@ export function SettingsView({
             <section className="settings-card" aria-labelledby="agents-heading">
               <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="agents-heading">Agent accounts</h3><p>Use the coding tools and accounts already installed on this computer.</p></span><button type="button" className="secondary-button provider-refresh-all" aria-label="Refresh all agents" disabled={disabled} onClick={() => onRefreshProvider()}><RefreshCw size={14} />Refresh</button></div>
               <div className="settings-rows provider-account-list">
-                {providers.map((provider) => { const action = providerSetupAction(provider); return <div className="setting-row provider-account-row" key={provider.id}><span className="setting-row-icon"><Bot size={17} /></span><span className="setting-copy provider-account-copy"><span className="provider-account-title"><strong>{provider.label}</strong><ProviderStatus provider={provider} /></span><small>{providerStateDetail(provider)}{provider.models.length > 0 ? ` · ${provider.models.length} models available` : ""}</small></span>{action && <button type="button" className="secondary-button provider-account-action" disabled={disabled} onClick={() => action === "connect" ? onConnectProvider(provider.id) : onRefreshProvider(provider.id)}><ProviderActionIcon action={action} />{action === "connect" ? provider.id === "opencode" ? "Configure" : "Connect" : "Refresh"}</button>}</div>; })}
+                {providers.map((provider) => {
+                  const action = providerSetupAction(provider);
+                  return (
+                    <div className="setting-row provider-account-row" key={provider.id}>
+                      <span className="setting-row-icon"><Bot size={17} /></span>
+                      <div className="setting-copy provider-account-copy">
+                        <span className="provider-account-title">
+                          <strong>{provider.label}</strong>
+                          <ProviderStatus provider={provider} />
+                        </span>
+                        <small>
+                          {providerStateDetail(provider)}
+                          {provider.models.length > 0
+                            ? ` · ${provider.models.length} models available`
+                            : ""}
+                        </small>
+                        <ProviderMaintenanceNotice
+                          providerLabel={provider.label}
+                          status={maintenanceStatuses.get(provider.id) ?? null}
+                          operation={maintenanceOperations.get(provider.id) ?? null}
+                          disabled={disabled}
+                          dismissible={false}
+                          showManagedUpdateAction
+                          onRefresh={() => onRefreshProviderMaintenance(provider.id)}
+                          onUpdate={() => onUpdateProvider(provider.id)}
+                          onCancel={onCancelProviderUpdate}
+                          onOpenInstructions={onOpenProviderUpdateInstructions}
+                        />
+                      </div>
+                      {action && (
+                        <button
+                          type="button"
+                          className="secondary-button provider-account-action"
+                          disabled={disabled}
+                          onClick={() => action === "connect"
+                            ? onConnectProvider(provider.id)
+                            : onRefreshProvider(provider.id)}
+                        >
+                          <ProviderActionIcon action={action} />
+                          {action === "connect"
+                            ? provider.id === "opencode" ? "Configure" : "Connect"
+                            : "Refresh"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               <p className="settings-card-note">Authentication remains with each provider. Inertia never stores account passwords or provider tokens.</p>
             </section>

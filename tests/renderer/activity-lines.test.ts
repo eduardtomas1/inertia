@@ -10,8 +10,8 @@ const css = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
 );
-const timelineSource = readFileSync(
-  new URL("../../src/renderer/src/components/ResponseTimeline.tsx", import.meta.url),
+const activitySource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
   "utf8",
 );
 const requestCardSource = readFileSync(
@@ -204,13 +204,13 @@ describe("Minimal Workstream activity lines", () => {
       css.lastIndexOf("@media (prefers-reduced-motion: reduce)"),
     );
 
-    expect(timelineSource).toContain(
+    expect(activitySource).toContain(
       '<div className="turn-execution-stream" role="list" aria-label="Agent work transcript">',
     );
-    expect(timelineSource).toContain('className="turn-activity-group"');
-    expect(timelineSource).toContain("data-activity-group={entry.id}");
-    expect(timelineSource).toContain("aria-expanded={expanded}");
-    expect(timelineSource).toContain("previous tool");
+    expect(activitySource).toContain('className="turn-activity-group"');
+    expect(activitySource).toContain("data-activity-group={entry.id}");
+    expect(activitySource).toContain("aria-expanded={expanded}");
+    expect(activitySource).toContain("previous tool");
     expect(reducedMotion).toContain(
       ".turn-work-log .agent-activity.is-running svg",
     );

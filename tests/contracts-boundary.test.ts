@@ -1,0 +1,116 @@
+import { describe, expect, it } from "vitest";
+
+import * as attachmentExports from "../src/shared/attachments";
+import * as backendProfileExports from "../src/shared/backend-profile-settings";
+import * as facadeExports from "../src/shared/contracts";
+import * as agentExports from "../src/shared/contracts/agent";
+import * as appExports from "../src/shared/contracts/app";
+import * as clientCommandExports from "../src/shared/contracts/client-command";
+import * as eventExports from "../src/shared/contracts/events";
+import * as modelRoutingExports from "../src/shared/model-routing";
+import * as providerMaintenanceExports from "../src/shared/provider-maintenance";
+import { clientCommandSchema } from "../src/shared/contracts/client-command";
+
+describe("shared contracts boundary", () => {
+  it("keeps the compatibility facade's runtime exports exact", () => {
+    const domainExports = {
+      ...modelRoutingExports,
+      ...backendProfileExports,
+      ...attachmentExports,
+      ...providerMaintenanceExports,
+      ...agentExports,
+      ...appExports,
+      ...clientCommandExports,
+      ...eventExports,
+    };
+
+    expect(Object.keys(facadeExports).sort()).toEqual(Object.keys(domainExports).sort());
+    for (const [name, value] of Object.entries(domainExports)) {
+      expect(facadeExports[name as keyof typeof facadeExports]).toBe(value);
+    }
+  });
+
+  it("retains every client command discriminant exactly once", () => {
+    const commandTypes = clientCommandSchema.options.flatMap((schema) => {
+      const typeSchema = schema.shape.type;
+      return "options" in typeSchema
+        ? [...typeSchema.options]
+        : [...typeSchema.values];
+    });
+
+    expect(commandTypes).toEqual([
+      "app.refresh",
+      "provider.refresh",
+      "provider.auth.start",
+      "provider.maintenance.refresh",
+      "provider.maintenance.update",
+      "provider.maintenance.cancel",
+      "project.create",
+      "project.select",
+      "project.remove",
+      "project.update",
+      "conversation.create",
+      "conversation.select",
+      "conversation.detail.load",
+      "conversation.update",
+      "conversation.archive",
+      "conversation.unarchive",
+      "conversation.settle",
+      "conversation.unsettle",
+      "conversation.delete",
+      "message.send",
+      "agent.stop",
+      "agent.subagent.stop",
+      "activity.stop",
+      "activity.dismiss",
+      "activity.mark-seen",
+      "activity.acknowledge",
+      "agent.approval.respond",
+      "agent.input.respond",
+      "settings.update",
+      "backend.profile.get",
+      "backend.profile.create",
+      "backend.profile.update",
+      "backend.profile.credential-revision",
+      "backend.profile.probe",
+      "backend.profile.delete",
+      "backend.default.set",
+      "backend.default.clear",
+      "git.refresh",
+      "git.diff",
+      "git.workspace.refresh",
+      "git.workspace.diff",
+      "git.turn.diff",
+      "git.turn.compare",
+      "git.selection.inspect",
+      "git.selection.revert",
+      "git.selection.undo",
+      "review.selection.ask",
+      "review.selection.revise",
+      "review.state.set",
+      "review.note.create",
+      "review.note.update",
+      "review.note.delete",
+      "review.summary.generate",
+      "review.summary.cancel",
+      "git.branches",
+      "git.branch.create",
+      "git.branch.switch",
+      "git.worktree.create",
+      "git.pull",
+      "git.commit",
+      "git.push",
+      "git.pr.open",
+      "workspace.entries",
+      "workspace.file.read",
+      "project.actions",
+      "project.action.run",
+      "checkpoint.revert",
+      "terminal.create",
+      "terminal.input",
+      "terminal.resize",
+      "terminal.close",
+    ]);
+    expect(new Set(commandTypes).size).toBe(commandTypes.length);
+  });
+});

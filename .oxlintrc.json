@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "out/**",
+    "release/**",
+    "playwright-report/**",
+    "test-results/**"
+  ],
+  "rules": {
+    "no-debugger": "error",
+    "no-control-regex": "off",
+    "no-unused-vars": "error"
+  }
+}

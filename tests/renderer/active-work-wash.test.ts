@@ -7,7 +7,7 @@ const css = readFileSync(
   "utf8",
 );
 const timelineSource = readFileSync(
-  new URL("../../src/renderer/src/components/ResponseTimeline.tsx", import.meta.url),
+  new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url),
   "utf8",
 );
 
@@ -86,10 +86,10 @@ describe("Minimal Workstream active-work wash", () => {
     expect(activeWashRule).toMatch(
       /transparent 82%,\s*transparent 100%\s*\)/su,
     );
-    expect(activeWashRule).toContain("background-size: 135% 100%");
+    expect(activeWashRule).toContain("background-size: 100% 100%");
   });
 
-  it("drifts bidirectionally on a calm cadence without progress or pulse motion", () => {
+  it("drifts on the compositor on a calm cadence without layout or paint-position animation", () => {
     const duration =
       Number(
         activeWashRule.match(
@@ -100,11 +100,13 @@ describe("Minimal Workstream active-work wash", () => {
 
     expect(duration).toBeGreaterThanOrEqual(3);
     expect(duration).toBeLessThanOrEqual(5);
-    expect(activeWashRule).toContain("var(--motion-ease)");
+    expect(activeWashRule).toContain("will-change: transform");
+    expect(activeWashRule).toContain("transform: translate3d(-8%, 0, 0)");
+    expect(activeWashRule).toContain("linear infinite alternate");
     expect(activeWashRule).toContain("infinite alternate");
-    expect(keyframes).toContain("background-position: 58% 50%");
+    expect(keyframes).toContain("transform: translate3d(8%, 0, 0)");
     expect(`${activeWashRule}\n${keyframes}`).not.toMatch(
-      /animation-delay|opacity:[^;]*\n[^}]*opacity:|scale|width:|translateX/iu,
+      /animation-delay|opacity:[^;]*\n[^}]*opacity:|scale|width:|translateX|background-position:[^;]*\n[^}]*background-position/iu,
     );
   });
 
@@ -121,6 +123,15 @@ describe("Minimal Workstream active-work wash", () => {
     expect(reducedWashRule).toContain("background-position: 50% 50%");
     expect(activeWashRule).toContain(
       "opacity: var(--active-work-gradient-opacity)",
+    );
+  });
+
+  it("scopes running glyph motion to the authoritative active region", () => {
+    expect(css).toContain(
+      "[data-active-work-region] .turn-work-log .agent-activity.is-running > svg",
+    );
+    expect(css).not.toMatch(
+      /^\.turn-work-log \.agent-activity\.is-running > svg\s*\{[^}]*animation:/mu,
     );
   });
 });

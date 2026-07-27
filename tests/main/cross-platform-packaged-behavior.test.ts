@@ -48,14 +48,48 @@ describe("cross-platform packaged behavior contract", () => {
   });
 
   it("registers runtime socket handlers before sending the first hydration frame", async () => {
-    const runtime = await source("src/server/index.ts");
-    const start = runtime.indexOf('webSockets.on("connection"');
-    const end = runtime.indexOf('server.on("error"', start);
-    const connectionHandler = runtime.slice(start, end);
+    const boundary = await source("src/server/runtime/websocket-boundary.ts");
+    const start = boundary.indexOf('webSockets.on("connection"');
+    const end = boundary.indexOf("\n  return {", start);
+    const connectionHandler = boundary.slice(start, end);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     expect(connectionHandler.indexOf('socket.on("message"')).toBeLessThan(
       connectionHandler.indexOf("runtimeSync.connect("),
+    );
+  });
+
+  it("keeps attachment cleanup behind runtime ownership and shutdown", async () => {
+    const main = await source("src/main/index.ts");
+    const closedStart = main.indexOf('window.on("closed"');
+    const closedEnd = main.indexOf("\n  });", closedStart);
+    const closedHandler = main.slice(closedStart, closedEnd);
+    expect(closedStart).toBeGreaterThanOrEqual(0);
+    expect(closedHandler).not.toContain("disposeImportedAttachments");
+
+    const releaseStart = main.indexOf("ipcMain.handle(IPC.releaseAttachment");
+    const releaseEnd = main.indexOf("\n  });", releaseStart);
+    const releaseHandler = main.slice(releaseStart, releaseEnd);
+    expect(releaseHandler.indexOf("deferAttachmentRelease")).toBeLessThan(
+      releaseHandler.indexOf("attachmentRegistry().release"),
+    );
+
+    const quitStart = main.indexOf('app.on("before-quit"');
+    const quitEnd = main.indexOf("\n  });", quitStart);
+    const quitHandler = main.slice(quitStart, quitEnd);
+    expect(quitHandler.indexOf("supervisorToStop.stop()")).toBeLessThan(
+      quitHandler.indexOf("disposeImportedAttachments()"),
+    );
+    expect(quitHandler).toContain("if (runtimeExitConfirmed)");
+    expect(quitHandler).toContain(
+      "Retaining temporary attachments because runtime process exit was not confirmed",
+    );
+    expect(main).toContain("attachmentReservation = orphanReservation");
+    expect(main).toContain(
+      "reservedRecords: attachmentReservation.records",
+    );
+    expect(main).toContain(
+      "reservedBytes: attachmentReservation.bytes",
     );
   });
 

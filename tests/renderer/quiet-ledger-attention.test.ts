@@ -15,8 +15,8 @@ const styles = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
 );
-const timelineSource = readFileSync(
-  new URL("../../src/renderer/src/components/ResponseTimeline.tsx", import.meta.url),
+const activitySource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
   "utf8",
 );
 
@@ -169,9 +169,9 @@ describe("Quiet Ledger warning and failure attention", () => {
     expect(warning).toContain("<pre>An unsupported optional capability was skipped.</pre>");
     expect(warning).not.toContain('role="alert"');
     expect(warning).not.toContain('aria-live="assertive"');
-    expect(timelineSource).toContain("<summary {...anchorToggleHandlers}>");
-    expect(timelineSource).toContain("onBeforeToggle={onBeforeToggle}");
-    expect(timelineSource).toContain("onAfterToggle={onAfterToggle}");
+    expect(activitySource).toContain("<summary {...anchorToggleHandlers}>");
+    expect(activitySource).toContain("onBeforeToggle={onBeforeToggle}");
+    expect(activitySource).toContain("onAfterToggle={onAfterToggle}");
 
     expect(neutral).toContain('data-activity-severity="neutral"');
     expect(neutral).toContain('<small class="agent-activity-detail">');

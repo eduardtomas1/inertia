@@ -16,6 +16,7 @@ import { backendSecretReferenceForProfile } from "../../src/main/credential-vaul
 const capabilityUrl = `ws://127.0.0.1:43210/runtime/${"a".repeat(43)}`;
 const dataDirectory = resolve(tmpdir(), "inertia data");
 const workspaceDirectory = resolve(tmpdir(), "inertia workspace");
+const attachmentRoot = resolve(tmpdir(), "inertia attachments");
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
 
@@ -44,6 +45,7 @@ describe("runtime process protocol", () => {
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: true,
         codexBinaryPath: resolve(tmpdir(), "Codex Ω", "codex.cmd"),
+        attachmentRoot,
       },
     })).toEqual({
       type: "runtime.start",
@@ -52,6 +54,7 @@ describe("runtime process protocol", () => {
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: true,
         codexBinaryPath: resolve(tmpdir(), "Codex Ω", "codex.cmd"),
+        attachmentRoot,
       },
     });
     expect(parseRuntimeWorkerCommand({
@@ -64,6 +67,15 @@ describe("runtime process protocol", () => {
       },
     })).toBeNull();
     expect(parseRuntimeWorkerCommand({ type: "runtime.shutdown", unexpected: true })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.start",
+      options: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: true,
+        attachmentRoot: "relative",
+      },
+    })).toBeNull();
   });
 
   it("accepts only strict safe Kimi profiles in the private startup envelope", () => {
@@ -221,5 +233,158 @@ describe("runtime process protocol", () => {
       ok: true,
       removed: true,
     })).toMatchObject({ ok: true, operation: "forget", removed: true });
+  });
+
+  it("strictly validates opaque attachment requests and trusted descriptors", () => {
+    const requestId = crypto.randomUUID();
+    const attachmentId = crypto.randomUUID();
+    const request = {
+      type: "runtime.attachment-request",
+      requestId,
+      attachmentId,
+    };
+    const attachment = {
+      id: attachmentId,
+      name: "preview.png",
+      path: resolve(attachmentRoot, `${attachmentId}.png`),
+      mimeType: "image/png",
+      size: 8,
+      digest: "a".repeat(64),
+    };
+    expect(parseRuntimeWorkerEvent(request)).toEqual(request);
+    expect(parseRuntimeWorkerEvent({
+      ...request,
+      attachmentId: "../outside.png",
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ ...request, path: "/tmp/untrusted" }))
+      .toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-result",
+      requestId,
+      ok: true,
+      attachment,
+    })).toEqual({
+      type: "runtime.attachment-result",
+      requestId,
+      ok: true,
+      attachment,
+    });
+    for (const tampered of [
+      { ...attachment, path: "relative.png" },
+      { ...attachment, mimeType: "image/svg+xml" },
+      { ...attachment, size: 0 },
+      { ...attachment, digest: "not-a-digest" },
+      { ...attachment, extra: true },
+    ]) {
+      expect(parseRuntimeWorkerCommand({
+        type: "runtime.attachment-result",
+        requestId,
+        ok: true,
+        attachment: tampered,
+      })).toBeNull();
+    }
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-result",
+      requestId,
+      ok: false,
+      code: "not-found",
+      message: "The attachment capability is unavailable.",
+    })).toMatchObject({ ok: false, code: "not-found" });
+
+    const releaseRequest = {
+      type: "runtime.attachment-release-request",
+      requestId,
+      attachmentId,
+    };
+    expect(parseRuntimeWorkerEvent(releaseRequest)).toEqual(releaseRequest);
+    expect(parseRuntimeWorkerEvent({
+      ...releaseRequest,
+      path: attachment.path,
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...releaseRequest,
+      attachmentId: "not-an-opaque-capability",
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-release-result",
+      requestId,
+      ok: true,
+      released: true,
+    })).toEqual({
+      type: "runtime.attachment-release-result",
+      requestId,
+      ok: true,
+      released: true,
+    });
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-release-result",
+      requestId,
+      ok: true,
+      released: true,
+      path: attachment.path,
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-release-result",
+      requestId,
+      ok: false,
+      code: "unavailable",
+      message: "Secure attachment storage is unavailable.",
+    })).toMatchObject({
+      type: "runtime.attachment-release-result",
+      ok: false,
+      code: "unavailable",
+    });
+
+    const cleanupRequest = {
+      type: "runtime.attachment-cleanup-request",
+      requestId,
+      attachmentId,
+    };
+    expect(parseRuntimeWorkerEvent(cleanupRequest)).toEqual(cleanupRequest);
+    expect(parseRuntimeWorkerEvent({
+      ...cleanupRequest,
+      mode: "force",
+    })).toBeNull();
+
+    const relinquishRequest = {
+      type: "runtime.attachment-relinquish-request",
+      requestId,
+      attachmentId,
+    };
+    expect(parseRuntimeWorkerEvent(relinquishRequest))
+      .toEqual(relinquishRequest);
+    expect(parseRuntimeWorkerEvent({
+      ...relinquishRequest,
+      path: attachment.path,
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-relinquish-result",
+      requestId,
+      ok: true,
+      relinquished: true,
+    })).toEqual({
+      type: "runtime.attachment-relinquish-result",
+      requestId,
+      ok: true,
+      relinquished: true,
+    });
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-relinquish-result",
+      requestId,
+      ok: true,
+      relinquished: true,
+      released: true,
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-relinquish-result",
+      requestId,
+      ok: false,
+      code: "invalid",
+      message: "The attachment request identifier was already used.",
+    })).toMatchObject({
+      type: "runtime.attachment-relinquish-result",
+      ok: false,
+      code: "invalid",
+    });
   });
 });

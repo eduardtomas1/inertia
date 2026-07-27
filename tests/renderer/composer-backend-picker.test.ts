@@ -3,7 +3,15 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const composerSource = readFileSync(
-  new URL("../../src/renderer/src/components/Composer.tsx", import.meta.url),
+  new URL("../../src/renderer/src/components/composer/Composer.tsx", import.meta.url),
+  "utf8",
+);
+const toolbarSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerToolbar.tsx", import.meta.url),
+  "utf8",
+);
+const routeConfirmationSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/RouteChangeConfirmation.tsx", import.meta.url),
   "utf8",
 );
 const chooserSource = readFileSync(
@@ -29,7 +37,7 @@ const css = readFileSync(
 
 describe("anchored composer model chooser", () => {
   it("projects exact harness/backend/model routes into one chooser", () => {
-    expect(composerSource).toContain("<ModelChooser");
+    expect(toolbarSource).toContain("<ModelChooser");
     expect(composerSource).toContain("selectedModelSearchRoute");
     expect(chooserSource).toContain("<ModelSourceRail");
     expect(chooserSource).toContain("<ModelChooserRow");
@@ -42,8 +50,8 @@ describe("anchored composer model chooser", () => {
   it("uses the latest turn identity and requires an explicit new chat at a boundary", () => {
     expect(composerSource).toContain("selection: latestTurn.modelSelection");
     expect(composerSource).toContain("resolveModelRouteTransition");
-    expect(composerSource).toContain('role="alertdialog"');
-    expect(composerSource).toContain("New chat");
+    expect(routeConfirmationSource).toContain('role="alertdialog"');
+    expect(routeConfirmationSource).toContain("New chat");
     expect(workspaceSource).not.toContain("providerLocked");
     expect(workspaceSource).not.toContain("messages.length > 0");
   });

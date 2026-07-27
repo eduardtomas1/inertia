@@ -2,8 +2,16 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-const composerSource = readFileSync(
-  new URL("../../src/renderer/src/components/Composer.tsx", import.meta.url),
+const inputSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerInputZone.tsx", import.meta.url),
+  "utf8",
+);
+const toolbarSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerToolbar.tsx", import.meta.url),
+  "utf8",
+);
+const autosizeSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/useTextareaAutosize.ts", import.meta.url),
   "utf8",
 );
 const css = readFileSync(
@@ -13,29 +21,28 @@ const css = readFileSync(
 
 describe("composer input and control zones", () => {
   it("keeps previews, readiness, route confirmation, and textarea in one input zone", () => {
-    const inputStart = composerSource.indexOf(
+    const inputStart = inputSource.indexOf(
       'className="composer-input-zone"',
     );
-    const inputEnd = composerSource.indexOf("</div>", composerSource.indexOf(
+    const inputEnd = inputSource.indexOf("</div>", inputSource.indexOf(
       "!messageFits",
       inputStart,
     ));
-    const controlsStart = composerSource.indexOf(
+    const controlsStart = toolbarSource.indexOf(
       'className="composer-toolbar"',
-      inputEnd,
     );
-    const inputZone = composerSource.slice(inputStart, inputEnd);
+    const inputZone = inputSource.slice(inputStart, inputEnd);
 
     expect(inputStart).toBeGreaterThan(-1);
     expect(inputEnd).toBeGreaterThan(inputStart);
-    expect(controlsStart).toBeGreaterThan(inputEnd);
+    expect(controlsStart).toBeGreaterThan(-1);
     expect(inputZone).toContain('data-composer-zone="input"');
     expect(inputZone).toContain('className="provider-readiness"');
     expect(inputZone).toContain('className="composer-context"');
     expect(inputZone).toContain("<ComposerAttachmentList");
-    expect(inputZone).toContain('className="composer-route-confirmation"');
+    expect(inputZone).toContain("<RouteChangeConfirmation");
     expect(inputZone).toContain('aria-label="Message"');
-    expect(composerSource.slice(controlsStart)).toContain(
+    expect(toolbarSource.slice(controlsStart)).toContain(
       'data-composer-zone="controls"',
     );
   });
@@ -76,9 +83,12 @@ describe("composer input and control zones", () => {
     expect(css).toMatch(
       /\.composer textarea\s*\{[^}]*font-size:\s*calc\(var\(--ui-font-main\) \+ var\(--platform-readability-adjustment\)\)/su,
     );
-    expect(composerSource).toContain("new ResizeObserver");
-    expect(composerSource).toContain("observer.observe(textarea)");
-    expect(composerSource).toContain("observer.disconnect()");
+    expect(css).not.toMatch(
+      /\.composer textarea\s*\{[^}]*transition:\s*height/su,
+    );
+    expect(autosizeSource).toContain("new ResizeObserver");
+    expect(autosizeSource).toContain("observer.observe(textarea)");
+    expect(autosizeSource).toContain("observer.disconnect()");
   });
 
   it("uses one quiet separator and consistent toolbar control geometry", () => {

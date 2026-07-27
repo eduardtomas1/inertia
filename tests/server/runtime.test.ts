@@ -359,6 +359,70 @@ process.exit(child.status ?? 1);
     });
   }
 
+  it("does not delay readiness while recovered attachment cleanup is stalled", async () => {
+    const { data, workspace } = temporaryWorkspace();
+    const seed = new RuntimeStore(
+      join(data, "inertia.sqlite"),
+      workspace,
+      { recoverInterruptedRuns: false },
+    );
+    const conversation = seed.shellSnapshot().conversations[0];
+    if (!conversation) throw new Error("Missing seeded conversation.");
+    const attachmentId = randomUUID();
+    seed.beginAgentTurn({
+      id: randomUUID(),
+      conversationId: conversation.id,
+      runId: randomUUID(),
+      content: "Recover without waiting for attachment cleanup.",
+      attachments: [{
+        id: attachmentId,
+        name: "recovery.png",
+        path: join(workspace, "recovery.png"),
+        mimeType: "image/png",
+        size: 8,
+      }],
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    seed.close();
+
+    let releaseStarted = false;
+    const stalledRelease = new Promise<boolean>(() => undefined);
+    const runtime = await Promise.race([
+      startRuntime({
+        dataDirectory: data,
+        defaultWorkspacePath: workspace,
+        enableProviders: false,
+        attachments: {
+          resolve: async () => null,
+          release: () => {
+            releaseStarted = true;
+            return stalledRelease;
+          },
+          cleanup: () => {
+            releaseStarted = true;
+            return stalledRelease;
+          },
+          relinquish: async () => true,
+        },
+      }),
+      delay(2_000).then(() => {
+        throw new Error("Runtime readiness waited for optional attachment cleanup.");
+      }),
+    ]);
+    runtimes.push(runtime);
+
+    expect(releaseStarted).toBe(true);
+    expect(new URL(runtime.websocketUrl).hostname).toBe("127.0.0.1");
+  });
+
   it("starts empty, mutates, and persists a deterministic app snapshot", async () => {
     const { data, workspace } = temporaryWorkspace({ withProject: false });
     const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });

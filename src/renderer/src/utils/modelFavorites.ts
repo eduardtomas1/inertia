@@ -1,15 +1,17 @@
 import type { ModelSelection } from "../../../shared/model-routing";
 import type { ModelSearchRoute } from "./modelSearch";
 
-export const MODEL_FAVORITES_STORAGE_KEY = "inertia:model-favorites:v1";
+export const MODEL_FAVORITES_STORAGE_KEY = "inertia:model-favorites:v2";
 export const MAX_MODEL_FAVORITES = 24;
 
+const LEGACY_MODEL_FAVORITES_STORAGE_KEY = "inertia:model-favorites:v1";
 const MAX_STORED_FAVORITES_BYTES = 32_768;
 const boundedIdentity = /^[A-Za-z][A-Za-z0-9._:-]{0,199}$/u;
+const boundedReasoningEffort = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/u;
 
 export type ModelFavoriteReference = Pick<
   ModelSelection,
-  "harnessId" | "backendProfileId" | "modelId"
+  "harnessId" | "backendProfileId" | "modelId" | "reasoningEffort"
 >;
 
 export interface ModelFavoriteStorage {
@@ -23,7 +25,10 @@ export interface ResolvedModelFavorite<Route extends ModelSearchRoute> {
   route: Route | null;
 }
 
-function parsedReference(value: unknown): ModelFavoriteReference | null {
+function parsedReference(
+  value: unknown,
+  legacy = false,
+): ModelFavoriteReference | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Record<string, unknown>;
   if (
@@ -35,6 +40,14 @@ function parsedReference(value: unknown): ModelFavoriteReference | null {
     || candidate.modelId.length === 0
     || candidate.modelId.length > 300
     || candidate.modelId.trim().length === 0
+    || (
+      !legacy
+      && candidate.reasoningEffort !== null
+      && (
+        typeof candidate.reasoningEffort !== "string"
+        || !boundedReasoningEffort.test(candidate.reasoningEffort)
+      )
+    )
   ) {
     return null;
   }
@@ -42,16 +55,20 @@ function parsedReference(value: unknown): ModelFavoriteReference | null {
     harnessId: candidate.harnessId,
     backendProfileId: candidate.backendProfileId,
     modelId: candidate.modelId,
+    reasoningEffort: legacy
+      ? null
+      : candidate.reasoningEffort as string | null,
   };
 }
 
 function normalizedReferences(
   values: readonly unknown[],
+  legacy = false,
 ): ModelFavoriteReference[] {
   const seen = new Set<string>();
   const references: ModelFavoriteReference[] = [];
   for (const value of values) {
-    const reference = parsedReference(value);
+    const reference = parsedReference(value, legacy);
     if (!reference) continue;
     const key = modelFavoriteKey(reference);
     if (seen.has(key)) continue;
@@ -75,6 +92,20 @@ export function modelFavoriteKey(reference: ModelFavoriteReference): string {
     reference.harnessId,
     reference.backendProfileId,
     reference.modelId,
+    reference.reasoningEffort,
+  ]);
+}
+
+export function modelRouteIdentityKey(
+  reference: Pick<
+    ModelFavoriteReference,
+    "harnessId" | "backendProfileId" | "modelId"
+  >,
+): string {
+  return JSON.stringify([
+    reference.harnessId,
+    reference.backendProfileId,
+    reference.modelId,
   ]);
 }
 
@@ -82,13 +113,21 @@ export function readModelFavorites(
   storage: Pick<ModelFavoriteStorage, "getItem">,
 ): ModelFavoriteReference[] {
   try {
-    const raw = storage.getItem(MODEL_FAVORITES_STORAGE_KEY);
+    const current = storage.getItem(MODEL_FAVORITES_STORAGE_KEY);
+    const legacy = current
+      ? false
+      : true;
+    const raw = current
+      ?? storage.getItem(LEGACY_MODEL_FAVORITES_STORAGE_KEY);
     if (!raw || raw.length > MAX_STORED_FAVORITES_BYTES) return [];
     const payload = JSON.parse(raw) as unknown;
     if (!payload || typeof payload !== "object") return [];
     const record = payload as Record<string, unknown>;
-    if (record.version !== 1 || !Array.isArray(record.favorites)) return [];
-    return normalizedReferences(record.favorites);
+    if (
+      record.version !== (legacy ? 1 : 2)
+      || !Array.isArray(record.favorites)
+    ) return [];
+    return normalizedReferences(record.favorites, legacy);
   } catch {
     return [];
   }
@@ -101,7 +140,7 @@ export function writeModelFavorites(
   try {
     const normalized = normalizedReferences(favorites);
     storage.setItem(MODEL_FAVORITES_STORAGE_KEY, JSON.stringify({
-      version: 1,
+      version: 2,
       favorites: normalized,
     }));
     return true;
@@ -132,16 +171,38 @@ export function resolveModelFavorites<Route extends ModelSearchRoute>(
 ): ResolvedModelFavorite<Route>[] {
   const routesByKey = new Map(
     routes.map((route) => [
-      modelFavoriteKey(route),
+      modelRouteIdentityKey(route),
       route,
     ]),
   );
   return normalizedReferences(favorites).map((reference) => {
     const key = modelFavoriteKey(reference);
+    const baseRoute = routesByKey.get(modelRouteIdentityKey(reference)) ?? null;
+    const reasoningOptions = baseRoute?.reasoningOptions;
+    const reasoningSupported = reference.reasoningEffort === null
+      || (
+        Array.isArray(reasoningOptions)
+        && reasoningOptions.includes(reference.reasoningEffort)
+      );
+    const route = baseRoute && reasoningSupported
+      ? {
+          ...baseRoute,
+          key,
+          reasoningEffort: reference.reasoningEffort,
+          ...("selection" in baseRoute
+            ? {
+                selection: {
+                  ...(baseRoute.selection as ModelSelection),
+                  reasoningEffort: reference.reasoningEffort,
+                },
+              }
+            : {}),
+        } as Route
+      : null;
     return {
       key,
       reference,
-      route: routesByKey.get(key) ?? null,
+      route,
     };
   });
 }

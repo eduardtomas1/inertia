@@ -7,6 +7,8 @@ import {
   ModelChooser,
   modelShortcutPlatform,
   nextModelChooserIndex,
+  preferredModelChooserSource,
+  searchableModelChooserRoutes,
 } from "../../src/renderer/src/components/ModelChooser";
 import type { ComposerModelRoute } from "../../src/renderer/src/utils/modelChooserRoutes";
 import {
@@ -17,11 +19,13 @@ import {
 function route(
   modelId: string,
   selectable = true,
+  reasoningEffort: string | null = null,
 ): ComposerModelRoute {
   const selection = nativeModelSelection({
     providerId: "codex",
     modelId,
     alias: modelId.toUpperCase(),
+    reasoningEffort,
   });
   return {
     key: JSON.stringify([
@@ -39,6 +43,8 @@ function route(
     providerLabel: "Codex",
     source: "built-in",
     routeTerms: [],
+    reasoningEffort: selection.reasoningEffort,
+    reasoningOptions: reasoningEffort ? [reasoningEffort] : [],
     selectable,
     unavailableReason: selectable ? null : "This route is unavailable.",
     selection,
@@ -57,6 +63,17 @@ function route(
 }
 
 describe("ModelChooser", () => {
+  it("opens on Favorites when available and otherwise uses a real source", () => {
+    expect(preferredModelChooserSource([
+      { filter: { kind: "favorites" } },
+      { filter: { kind: "provider", providerId: "codex" } },
+    ])).toEqual({ kind: "favorites" });
+    expect(preferredModelChooserSource([
+      { filter: { kind: "provider", providerId: "claude" } },
+    ])).toEqual({ kind: "provider", providerId: "claude" });
+    expect(preferredModelChooserSource([])).toEqual({ kind: "all" });
+  });
+
   it("renders the exact selected route as an anchored dialog trigger", () => {
     const alpha = route("alpha");
     const html = renderToStaticMarkup(createElement(ModelChooser, {
@@ -96,6 +113,42 @@ describe("ModelChooser", () => {
     expect(modelShortcutPlatform("Plan 9")).toBe("unknown");
   });
 
+  it("keeps searched favorite reasoning variants and deduplicates exact routes", () => {
+    const discoveredHigh = route("sol", true, "high");
+    discoveredHigh.reasoningOptions = ["high", "xhigh"];
+    const favoriteHigh = {
+      ...discoveredHigh,
+      key: "favorite-high",
+      selection: {
+        ...discoveredHigh.selection,
+        reasoningEffort: "high",
+      },
+    };
+    const favoriteXhigh = {
+      ...discoveredHigh,
+      key: "favorite-xhigh",
+      reasoningEffort: "xhigh",
+      selection: {
+        ...discoveredHigh.selection,
+        reasoningEffort: "xhigh",
+      },
+    };
+
+    const searchable = searchableModelChooserRoutes(
+      [discoveredHigh],
+      [favoriteHigh, favoriteXhigh],
+    );
+
+    expect(searchable.map(({ reasoningEffort, selection }) => [
+      reasoningEffort,
+      selection.reasoningEffort,
+    ])).toEqual([
+      ["high", "high"],
+      ["xhigh", "xhigh"],
+    ]);
+    expect(searchable).toHaveLength(2);
+  });
+
   it("owns labelled autofocus search, composed filters, focus restoration, and keyboard commands", () => {
     const source = readFileSync(
       new URL("../../src/renderer/src/components/ModelChooser.tsx", import.meta.url),
@@ -112,7 +165,11 @@ describe("ModelChooser", () => {
     expect(source).toContain("searchModelRoutes(sourceRoutes, query)");
     expect(source).toContain("resolveModelShortcutBindings");
     expect(source).toContain("triggerRef.current?.focus()");
-    expect(source).toContain('event.key === "Escape"');
+    expect(source).toContain('event.key !== "Escape"');
+    expect(source).toContain(
+      'document.addEventListener("keydown", handleKeyDown, true)',
+    );
+    expect(source).toContain("event.stopPropagation()");
     expect(source).toContain('"ArrowDown", "ArrowUp", "Home", "End"');
     expect(source).toContain('role="listbox"');
     expect(source).toContain("results.emptyState");

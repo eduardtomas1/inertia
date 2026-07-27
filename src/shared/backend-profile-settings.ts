@@ -149,11 +149,6 @@ const labelSchema = z.string().trim().min(1).max(200)
 const modelIdSchema = z.string().trim().min(1).max(500)
   .refine((value) => !/[\0\r\n]/u.test(value), "Model IDs cannot contain control characters.");
 const timestampSchema = z.string().datetime({ offset: true });
-const endpointIdentitySchema = z.string()
-  .min(1)
-  .max(256)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u)
-  .nullable();
 const baseUrlSchema = z.string().trim().min(1).max(2_048)
   .refine((value) => {
     try {

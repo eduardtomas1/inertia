@@ -2,8 +2,16 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-const composerSource = readFileSync(
-  new URL("../../src/renderer/src/components/Composer.tsx", import.meta.url),
+const settingsSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerSettings.tsx", import.meta.url),
+  "utf8",
+);
+const moreMenuSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerMoreMenu.tsx", import.meta.url),
+  "utf8",
+);
+const menuHookSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/useComposerMenus.ts", import.meta.url),
   "utf8",
 );
 const dismissibleMenuSource = readFileSync(
@@ -17,25 +25,22 @@ const css = readFileSync(
 
 describe("composer setting control family", () => {
   it("groups reasoning, access, and mode as compact value triggers", () => {
-    const familyStart = composerSource.indexOf(
+    const familyStart = settingsSource.indexOf(
       'className="composer-setting-family"',
     );
-    const moreStart = composerSource.indexOf(
-      'className="popover-anchor composer-more-control"',
-      familyStart,
-    );
-    const family = composerSource.slice(familyStart, moreStart);
+    const family = settingsSource.slice(familyStart);
 
     expect(familyStart).toBeGreaterThan(-1);
-    expect(moreStart).toBeGreaterThan(familyStart);
     expect(family).toContain('role="group"');
     expect(family).toContain('aria-label="Composer settings"');
     expect(family).toContain('data-composer-setting="reasoning"');
     expect(family).toContain('data-composer-setting="access"');
     expect(family).toContain('data-composer-setting="mode"');
     expect(family).toContain('className="composer-setting-value"');
-    expect(family).toContain('className="composer-setting-icon" size={13}');
-    expect(family).toContain('className="composer-setting-chevron" size={11}');
+    expect(family.match(/className="composer-setting-icon"/gu)).toHaveLength(3);
+    expect(family.match(/className="composer-setting-chevron"/gu)).toHaveLength(3);
+    expect(family.match(/size=\{13\}/gu)?.length).toBeGreaterThanOrEqual(3);
+    expect(family.match(/size=\{11\}/gu)?.length).toBeGreaterThanOrEqual(3);
     expect(family).toContain("Current level:");
     expect(family).toContain("Current access:");
     expect(family).toContain("Current mode:");
@@ -52,22 +57,21 @@ describe("composer setting control family", () => {
 
   it("keeps option detail inside three consistent radio menus", () => {
     for (const menu of ["reasoning", "access", "mode"]) {
-      expect(composerSource).toContain(
+      expect(settingsSource).toContain(
         `id={menuId("${menu}")}`,
       );
-      expect(composerSource).toContain(
+      expect(settingsSource).toContain(
         `setMenuPopover("${menu}", node)`,
       );
     }
-    expect(composerSource.match(/composer-setting-popover/gu)).toHaveLength(3);
-    expect(composerSource).toContain('<div className="popover-title">Reasoning</div>');
-    expect(composerSource).toContain('<div className="popover-title">Project access</div>');
-    expect(composerSource).toContain('<div className="popover-title">Mode</div>');
-    expect(composerSource.match(/role="menuitemradio"/gu)?.length)
-      .toBeGreaterThanOrEqual(4);
-    expect(composerSource).toContain("selectedModel.reasoningOptions.map");
-    expect(composerSource).toContain("accessOptions.map");
-    expect(composerSource).toContain('(["build", "plan"] as InteractionMode[])');
+    expect(settingsSource.match(/composer-setting-popover/gu)).toHaveLength(3);
+    expect(settingsSource).toContain('<div className="popover-title">Reasoning</div>');
+    expect(settingsSource).toContain('<div className="popover-title">Project access</div>');
+    expect(settingsSource).toContain('<div className="popover-title">Mode</div>');
+    expect(settingsSource.match(/role="menuitemradio"/gu)).toHaveLength(3);
+    expect(settingsSource).toContain("selectedModel.reasoningOptions.map");
+    expect(settingsSource).toContain("accessOptions.map");
+    expect(settingsSource).toContain('(["build", "plan"] as InteractionMode[])');
   });
 
   it("uses shared semantic states, geometry, icon scale, and restrained separators", () => {
@@ -126,22 +130,23 @@ describe("composer setting control family", () => {
     expect(compactRule).not.toContain(".model-chooser-anchor {\n    display: none");
     expect(compactRule).not.toContain(".composer-usage {\n    display: none");
     expect(compactRule).not.toContain(".send-button {\n    display: none");
-    expect(composerSource).toContain('aria-label="More composer options"');
-    expect(composerSource).toContain('aria-haspopup="menu"');
-    expect(composerSource).toContain('aria-controls={menuId("more")}');
+    expect(moreMenuSource).toContain('aria-label="More composer options"');
+    expect(moreMenuSource).toContain('aria-haspopup="menu"');
+    expect(moreMenuSource).toContain('aria-controls={menuId("more")}');
   });
 
   it("supports keyboard entry, menu navigation, outside dismissal, and focus restoration", () => {
-    expect(composerSource).toContain(
+    expect(menuHookSource).toContain(
       'if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return',
     );
-    expect(composerSource).toContain(
-      "focusComposerMenuEdge(menuName",
+    expect(menuHookSource).toContain(
+      "focusComposerMenuEdge(",
     );
-    expect(composerSource).toContain(
+    expect(menuHookSource).toContain("menuName,");
+    expect(menuHookSource).toContain(
       '["ArrowDown", "ArrowUp", "Home", "End"]',
     );
-    expect(composerSource).toContain(
+    expect(moreMenuSource).toContain(
       "openMoreSection(item.section, true)",
     );
     expect(dismissibleMenuSource).toContain(

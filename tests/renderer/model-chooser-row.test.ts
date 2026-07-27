@@ -158,11 +158,14 @@ describe("ModelChooserRow", () => {
     })).toThrow("requires a compatibility explanation");
 
     const html = render(row({
+      displayName: "A deliberately long custom model identity for layout coverage",
+      modelId: "custom/provider/model-with-a-distinct-raw-identifier",
       selectable: false,
       unavailableReason: "This harness cannot switch models in the current session.",
     }));
     expect(html).toContain('aria-disabled="true"');
     expect(html).toContain('class="model-chooser-row-disabled-reason"');
+    expect(html).toContain("custom/provider/model-with-a-distinct-raw-identifier");
     expect(html).toContain("This harness cannot switch models in the current session.");
   });
 
@@ -202,11 +205,15 @@ describe("ModelChooserRow", () => {
   });
 
   it("uses namespaced semantic, truncation, focus, disabled, scale, and narrow styles", () => {
-    const styles = readFileSync(
+const styles = readFileSync(
       new URL("../../src/renderer/src/styles.css", import.meta.url),
       "utf8",
-    );
+);
     const block = styles.slice(styles.indexOf("/* Reusable model chooser result row."));
+    const chooserLayout = styles.slice(
+      styles.indexOf(".model-chooser-results-wrap"),
+      styles.indexOf(".model-chooser-empty > span"),
+    );
 
     expect(block).toContain(".model-chooser-row-option");
     expect(block).toContain(":has(.model-chooser-row-option:focus-visible)");
@@ -217,6 +224,11 @@ describe("ModelChooserRow", () => {
     expect(block).toContain("var(--surface-hover)");
     expect(block).toContain("text-overflow: ellipsis");
     expect(block).toContain("@container (max-width: 420px)");
+    expect(chooserLayout).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(chooserLayout).toContain(".model-chooser-listbox,");
+    expect(chooserLayout).toContain(".model-chooser-favorite-actions");
+    expect(chooserLayout).toContain("display: contents");
+    expect(chooserLayout).not.toContain("position: absolute");
     expect(block).not.toContain("model-chooser-row-card");
   });
 });

@@ -27,6 +27,8 @@ import type {
   ProjectAction,
   ProviderId,
   ProviderInfo,
+  ProviderMaintenanceOperation,
+  ProviderMaintenanceStatus,
   ResponseDensity,
   SubagentTrace,
   ThreadUsageSnapshot,
@@ -39,6 +41,7 @@ import { shouldFollowTimeline } from "../utils/responseTimeline";
 import { Composer } from "./Composer";
 import { ResponseTimeline } from "./ResponseTimeline";
 import { LoadingMark } from "./ui";
+import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 
 type ChatWorkspaceProps = {
   project: Project | null;
@@ -58,6 +61,8 @@ type ChatWorkspaceProps = {
   inputRequests: AgentInputRequest[];
   providers: ProviderInfo[];
   backendProfiles: ModelBackendProfileView[];
+  maintenanceStatus: ProviderMaintenanceStatus | null;
+  maintenanceOperation: ProviderMaintenanceOperation | null;
   actions: ProjectAction[];
   mentionResults: WorkspaceEntry[];
   showTimestamps: boolean;
@@ -87,6 +92,10 @@ type ChatWorkspaceProps = {
   onOpenProviderSetup: (providerId: ProviderId) => void;
   onOpenBackendSetup: (profileId: string) => void;
   onProbeBackendProfile: (profileId: string, modelId: string) => Promise<void>;
+  onRefreshProviderMaintenance: () => Promise<void>;
+  onUpdateProvider: () => Promise<void>;
+  onCancelProviderUpdate: (operationId: string) => Promise<void>;
+  onOpenProviderUpdateInstructions: (url: string) => void;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   onStop: () => Promise<void>;
   onStopSubagent: (trace: SubagentTrace) => Promise<void>;
@@ -116,6 +125,8 @@ export function ChatWorkspace({
   inputRequests,
   providers,
   backendProfiles,
+  maintenanceStatus,
+  maintenanceOperation,
   actions,
   mentionResults,
   showTimestamps,
@@ -145,6 +156,10 @@ export function ChatWorkspace({
   onOpenProviderSetup,
   onOpenBackendSetup,
   onProbeBackendProfile,
+  onRefreshProviderMaintenance,
+  onUpdateProvider,
+  onCancelProviderUpdate,
+  onOpenProviderUpdateInstructions,
   onUsageDisplayModeChange,
   onStop,
   onStopSubagent,
@@ -319,6 +334,16 @@ export function ChatWorkspace({
       {showJump && <div className="timeline-follow-controls"><button type="button" onClick={() => scrollToLatest("auto")}><ArrowDown size={14} />Jump to latest</button></div>}
 
       <div ref={composerRegionRef} className="composer-region">
+        <ProviderMaintenanceNotice
+          providerLabel={providers.find(({ id }) =>
+            id === conversation.providerId)?.label ?? conversation.providerId}
+          status={maintenanceStatus}
+          operation={maintenanceOperation}
+          onRefresh={onRefreshProviderMaintenance}
+          onUpdate={onUpdateProvider}
+          onCancel={onCancelProviderUpdate}
+          onOpenInstructions={onOpenProviderUpdateInstructions}
+        />
         <Composer
           conversation={conversation}
           providers={providers}

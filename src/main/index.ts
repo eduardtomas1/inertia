@@ -1,6 +1,5 @@
 import { constants, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -24,9 +23,7 @@ import {
 } from "../shared/backend-credentials.js";
 import {
   MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentKind,
-  type ChatAttachmentMimeType,
 } from "../shared/attachments.js";
 import {
   builtInKimiClaudeBackendProfile,
@@ -35,10 +32,13 @@ import {
 import { parseOpenProjectPathRequest } from "../shared/desktop.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import {
-  validateAttachmentImport,
   validateSelectedAttachmentStats,
-  type ValidatedAttachmentImport,
 } from "./attachment-import.js";
+import {
+  AttachmentRegistry,
+  cleanupOrphanedAttachments,
+  type AttachmentStorageReservation,
+} from "./attachment-registry.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
   CredentialVault,
@@ -103,11 +103,12 @@ let packageSmokeFilePath: string | null = null;
 let previewView: WebContentsView | null = null;
 let previewBounds: Electron.Rectangle | null = null;
 let windowThemePreference: WindowThemePreference = "system";
-const attachmentPreviews = new Map<string, {
-  path: string;
-  mimeType: ChatAttachmentMimeType;
-  size: number;
-}>();
+let importedAttachments: AttachmentRegistry | null = null;
+let attachmentCleanup: Promise<void> = Promise.resolve();
+let attachmentReservation: AttachmentStorageReservation = {
+  records: 0,
+  bytes: 0,
+};
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -125,57 +126,23 @@ function attachmentDirectory(): string {
   return join(app.getPath("temp"), "inertia-attachments");
 }
 
-async function persistAttachment(
-  attachment: ValidatedAttachmentImport,
-): Promise<{
-  id: string;
-  name: string;
-  path: string;
-  mimeType: ChatAttachmentMimeType;
-  size: number;
-}> {
-  const directory = attachmentDirectory();
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const id = randomUUID();
-  const path = join(directory, `${id}.${attachment.extension}`);
-  await writeFile(path, attachment.bytes, { mode: 0o600, flag: "wx" });
-  attachmentPreviews.set(id, {
-    path,
-    mimeType: attachment.mimeType,
-    size: attachment.size,
+function attachmentRegistry(): AttachmentRegistry {
+  importedAttachments ??= new AttachmentRegistry(attachmentDirectory(), {
+    reservedRecords: attachmentReservation.records,
+    reservedBytes: attachmentReservation.bytes,
   });
-  return {
-    id,
-    name: attachment.displayName,
-    path,
-    mimeType: attachment.mimeType,
-    size: attachment.size,
-  };
+  return importedAttachments;
 }
 
-async function registeredAttachments(
-  values: readonly unknown[],
-): Promise<Array<Awaited<ReturnType<typeof persistAttachment>>>> {
-  const validated = values.map(validateAttachmentImport);
-  const deduplicated = validated.filter((attachment, index) =>
-    validated.findIndex(({ digest }) => digest === attachment.digest) === index);
-  const totalBytes = deduplicated.reduce((total, { size }) => total + size, 0);
-  if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
-    throw new Error("Attachments exceed the 20 MB turn limit.");
+function disposeImportedAttachments(): Promise<void> {
+  const registry = importedAttachments;
+  importedAttachments = null;
+  if (registry) {
+    attachmentCleanup = attachmentCleanup
+      .catch(() => undefined)
+      .then(() => registry.dispose());
   }
-  const registered: Array<Awaited<ReturnType<typeof persistAttachment>>> = [];
-  try {
-    for (const attachment of deduplicated) {
-      registered.push(await persistAttachment(attachment));
-    }
-    return registered;
-  } catch (error) {
-    for (const attachment of registered) {
-      attachmentPreviews.delete(attachment.id);
-      await unlink(attachment.path).catch(() => undefined);
-    }
-    throw error;
-  }
+  return attachmentCleanup;
 }
 
 function registerAppProtocol(): void {
@@ -188,7 +155,7 @@ function registerAppProtocol(): void {
       if (requestedPath.includes("\0")) throw new Error();
       const previewId = /^attachment-preview\/([0-9a-f-]{36})$/iu.exec(requestedPath)?.[1];
       if (previewId) {
-        const preview = attachmentPreviews.get(previewId);
+        const preview = attachmentRegistry().preview(previewId);
         if (!preview || chatAttachmentKind(preview.mimeType) !== "image") throw new Error();
         const info = await stat(preview.path);
         if (!info.isFile() || info.size !== preview.size) throw new Error();
@@ -234,20 +201,6 @@ function saveWindowState(window: BrowserWindow): void {
     writeFileSync(windowStatePath(), JSON.stringify({ ...bounds, maximized: window.isMaximized() }), { encoding: "utf8", mode: 0o600 });
   } catch {
     // Window-state persistence is best effort and never blocks shutdown.
-  }
-}
-
-async function cleanupImportedAttachments(): Promise<void> {
-  const directory = attachmentDirectory();
-  try {
-    const entries = await readdir(directory);
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    await Promise.all(entries.filter((name) => /^[0-9a-f-]{36}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json)$/u.test(name)).map(async (name) => {
-      const path = join(directory, name);
-      if ((await stat(path)).mtimeMs < cutoff) await unlink(path);
-    }));
-  } catch {
-    // The temporary attachment directory may not exist yet.
   }
 }
 
@@ -493,7 +446,7 @@ function registerIpcHandlers(): void {
           data,
         });
       }
-      return await registeredAttachments(values);
+      return await attachmentRegistry().import(values);
     } finally {
       await Promise.all(selectedFiles.map(({ file }) =>
         file.close().catch(() => undefined)));
@@ -506,7 +459,7 @@ function registerIpcHandlers(): void {
     if (!Array.isArray(value) || value.length > MAX_CHAT_ATTACHMENTS) {
       throw new Error("Invalid attachments.");
     }
-    return await registeredAttachments(value);
+    return await attachmentRegistry().import(value);
   });
 
   ipcMain.handle(IPC.releaseAttachment, async (event, ...args) => {
@@ -515,14 +468,8 @@ function registerIpcHandlers(): void {
     if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
       throw new Error("Invalid attachment.");
     }
-    const preview = attachmentPreviews.get(value);
-    attachmentPreviews.delete(value);
-    if (!preview) return;
-    try {
-      await unlink(preview.path);
-    } catch {
-      // A missing unsent temporary attachment is already released.
-    }
+    if (runtimeSupervisor?.deferAttachmentRelease(value)) return;
+    await attachmentRegistry().release(value);
   });
 
   ipcMain.handle(IPC.openProjectPath, async (event, ...args) => {
@@ -697,7 +644,6 @@ async function createWindow(): Promise<void> {
   window.on("close", () => saveWindowState(window));
   window.on("closed", () => {
     closePreview();
-    attachmentPreviews.clear();
     if (mainWindow === window) {
       mainWindow = null;
     }
@@ -757,11 +703,12 @@ async function bootstrap(): Promise<void> {
     ),
   );
 
-  await Promise.all([
+  const [, , orphanReservation] = await Promise.all([
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
-    cleanupImportedAttachments(),
+    cleanupOrphanedAttachments(attachmentDirectory()),
   ]);
+  attachmentReservation = orphanReservation;
 
   registerAppProtocol();
   packageSmokeFilePath = process.env.NODE_ENV === "test"
@@ -780,6 +727,12 @@ async function bootstrap(): Promise<void> {
     : null;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
+    attachmentBroker: {
+      resolve: (attachmentId, signal) =>
+        attachmentRegistry().resolve(attachmentId, signal),
+      release: (attachmentId) =>
+        attachmentRegistry().release(attachmentId),
+    },
     credentialBroker: {
       resolve: (secretReference) => credentialVault!.resolve(secretReference),
       status: (secretReference) => credentialVault!.status(secretReference),
@@ -789,6 +742,7 @@ async function bootstrap(): Promise<void> {
     workerOptions: {
       dataDirectory,
       defaultWorkspacePath,
+      attachmentRoot: attachmentDirectory(),
       enableProviders: process.env.NODE_ENV !== "test" || Boolean(packageSmokeCodexExecutable),
       ...(packageSmokeCodexExecutable ? { codexBinaryPath: packageSmokeCodexExecutable } : {}),
       kimiClaudeProfiles: [
@@ -862,28 +816,40 @@ if (!hasSingleInstanceLock) {
     }
   });
   app.on("before-quit", (event) => {
-    if (!runtimeSupervisor || stoppingRuntime) {
-      return;
-    }
+    if (stoppingRuntime) return;
 
     event.preventDefault();
     stoppingRuntime = true;
     recordPackageSmokeStage("before-quit");
     if (mainWindow) saveWindowState(mainWindow);
     const supervisorToStop = runtimeSupervisor;
-    runtimeSupervisor = null;
     runtimeDiagnostics?.record("app.stop");
 
-    void supervisorToStop
-      .stop()
-      .catch((error: unknown) => {
-        runtimeDiagnostics?.record("runtime.failure", {
-          phase: "stopping",
-          message: error instanceof Error ? error.message : "The local runtime could not stop cleanly.",
+    void (async () => {
+      let runtimeExitConfirmed = supervisorToStop === null;
+      if (supervisorToStop) {
+        runtimeExitConfirmed = await supervisorToStop.stop().catch((error: unknown) => {
+          runtimeDiagnostics?.record("runtime.failure", {
+            phase: "stopping",
+            message: error instanceof Error ? error.message : "The local runtime could not stop cleanly.",
+          });
+          console.error("Failed to stop the local runtime", error);
+          return false;
         });
-        console.error("Failed to stop the local runtime", error);
-      })
-      .finally(finishQuitAfterCleanup);
+        if (runtimeExitConfirmed && runtimeSupervisor === supervisorToStop) {
+          runtimeSupervisor = null;
+        }
+      }
+      if (runtimeExitConfirmed) {
+        await disposeImportedAttachments().catch((error: unknown) => {
+          console.error("Failed to remove temporary attachments", error);
+        });
+      } else {
+        console.warn(
+          "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
+        );
+      }
+    })().finally(finishQuitAfterCleanup);
   });
 
   void app

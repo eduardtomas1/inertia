@@ -19,6 +19,7 @@ export type SelectedModelChipRoute = Pick<
   | "harnessLabel"
   | "key"
   | "modelId"
+  | "reasoningEffort"
   | "source"
 >;
 
@@ -76,9 +77,10 @@ export function selectedModelChipIdentity(
     route.backendProfileId,
   );
   const model = labeledIdentity(label, route.modelId);
+  const reasoning = cleanLabel(route.reasoningEffort) ?? "Provider default";
   const exactIdentity = route.source === "custom"
-    ? `Custom backend ${backend} via ${harness} · Model ${model}`
-    : `${harness} · ${backend} · Model ${model}`;
+    ? `Custom backend ${backend} via ${harness} · Model ${model} · Reasoning ${reasoning}`
+    : `${harness} · ${backend} · Model ${model} · Reasoning ${reasoning}`;
 
   return {
     routeKey: route.key,

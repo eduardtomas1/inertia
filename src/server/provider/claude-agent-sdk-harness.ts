@@ -8,7 +8,6 @@ import {
   type Options as ClaudeOptions,
   type PermissionResult,
   type Query,
-  type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
@@ -135,7 +134,10 @@ export async function readClaudeAgentSdkMetadata(
   const abortController = new AbortController();
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });
-  async function* dormantPrompt(): AsyncIterable<SDKUserMessage> { await hold; }
+  async function* dormantPrompt(): AsyncIterable<SDKUserMessage> {
+    await hold;
+    yield* [] as SDKUserMessage[];
+  }
   const query = createQuery({
     prompt: dormantPrompt(),
     options: { abortController, cwd, env: environment, pathToClaudeCodeExecutable: executable },
@@ -250,7 +252,7 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
     return true;
   };
   const cancelPending = (): void => {
-    for (const requestId of [...approvals.keys()]) settleApproval(requestId, "cancel");
+    for (const requestId of approvals.keys()) settleApproval(requestId, "cancel");
     for (const [requestId, pending] of inputs) {
       pending.settled = true;
       inputs.delete(requestId);

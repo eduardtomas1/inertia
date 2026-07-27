@@ -26,6 +26,7 @@ import {
   MAC_TRAFFIC_LIGHT_POSITION,
 } from "../../src/shared/window-chrome";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../src/renderer/src/utils/interfaceScale";
+import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
 
 const execFileAsync = promisify(execFile);
 
@@ -153,8 +154,10 @@ async function expectComposerEndsAtDock(composer: Locator): Promise<void> {
 
   expect(layout.directDockOnly).toBe(true);
   expect(layout.directShellOnly).toBe(true);
-  expect(layout.bottomPadding).toBe(0);
-  expect(Math.abs(layout.bottomGap)).toBeLessThanOrEqual(1);
+  expect(layout.bottomPadding).toBeGreaterThanOrEqual(8);
+  expect(layout.bottomPadding).toBeLessThanOrEqual(14);
+  expect(Math.abs(layout.bottomGap - layout.bottomPadding))
+    .toBeLessThanOrEqual(1);
   expect(layout.detachedContextRows).toBe(0);
 }
 
@@ -1524,10 +1527,10 @@ test("applies every interface scale live and remains usable at common Linux disp
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const scaleGroup = page.getByRole("radiogroup", { name: "Interface scale" });
   const expected = [
-    ["Compact", "compact", "12.5px", "30px"],
-    ["Default", "default", "13.5px", "32px"],
-    ["Comfortable", "comfortable", "14.5px", "35px"],
-    ["Large", "large", "16px", "38px"],
+    ["Compact", "compact", "13px", "30px"],
+    ["Default", "default", "14px", "32px"],
+    ["Comfortable", "comfortable", "15px", "35px"],
+    ["Large", "large", "16.5px", "38px"],
   ] as const;
 
   for (const [label, value, fontSize, controlHeight] of expected) {
@@ -1779,7 +1782,37 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   );
   expect(modelFavoriteActionsAx).toContain('- button "Add ');
   expect(modelFavoriteActionsAx).not.toContain("- option ");
+  const firstResult = modelChooser.locator(".model-chooser-result").first();
+  await firstResult.evaluate((element) => {
+    element.style.minHeight = "92px";
+  });
+  const rowCenters = await modelChooser.locator(".model-chooser-result")
+    .evaluateAll((elements) => elements.map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.top + bounds.height / 2;
+    }));
+  const favoriteCenters = await modelFavoriteActions.getByRole("button")
+    .evaluateAll((elements) => elements.map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.top + bounds.height / 2;
+    }));
+  expect(favoriteCenters).toHaveLength(rowCenters.length);
+  for (const [index, center] of rowCenters.entries()) {
+    expect(Math.abs(center - favoriteCenters[index]!)).toBeLessThanOrEqual(1);
+  }
+  await firstResult.evaluate((element) => {
+    element.style.removeProperty("min-height");
+  });
   const searchModels = modelChooser.getByRole("searchbox", { name: "Search models" });
+  await expect(searchModels).toBeFocused();
+  const codexSource = modelChooser.getByRole("button", {
+    name: /^Codex, \d+ models?$/u,
+  });
+  await expect(codexSource).toHaveAttribute("aria-pressed", "true");
+  const claudeSource = modelChooser.getByRole("button", {
+    name: /^Claude, \d+ models?$/u,
+  });
+  await claudeSource.click();
   await expect(searchModels).toBeFocused();
   const initialActiveDescendant = await searchModels.getAttribute(
     "aria-activedescendant",
@@ -1818,9 +1851,6 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await favoritesSource.click();
   await expect(modelChooser.getByRole("option")).toHaveCount(1);
   await captureChooserScenario("model-chooser-favorites-1440x720");
-  const claudeSource = modelChooser.getByRole("button", {
-    name: /^Claude, \d+ models?$/u,
-  });
   await claudeSource.click();
   await expect(claudeSource).toHaveAttribute("aria-pressed", "true");
   await captureChooserScenario("model-chooser-claude-1440x720");
@@ -1830,12 +1860,19 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await expect(modelChooser.getByRole("option").filter({ hasText: /Codex/u }))
     .toHaveCount(0);
   await captureChooserScenario("model-chooser-search-kimi-1440x720");
-  await modelChooser.getByRole("button", { name: /^All, \d+ models?$/u }).click();
   await searchModels.fill("route-that-does-not-exist");
   await expect(modelChooser.getByText("No matching models", { exact: true })).toBeVisible();
   await searchModels.fill("");
   await page.keyboard.press(process.platform === "darwin" ? "Meta+1" : "Control+1");
   await expect(modelChooser).toBeHidden();
+  await expect(modelTrigger).toBeFocused();
+
+  await modelTrigger.click();
+  await expect(modelTrigger).toHaveAttribute("aria-expanded", "true");
+  await modelTrigger.focus();
+  await modelTrigger.press("Escape");
+  await expect(modelChooser).toBeHidden();
+  await expect(modelTrigger).toHaveAttribute("aria-expanded", "false");
   await expect(modelTrigger).toBeFocused();
 
   await modelTrigger.click();
@@ -1926,6 +1963,10 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
           value: "high",
           label: "High",
           description: "Thorough reasoning.",
+        }, {
+          value: "xhigh",
+          label: "Extra high",
+          description: "Maximum reasoning.",
         }],
         defaultReasoningEffort: "high",
       },
@@ -1999,13 +2040,61 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   });
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
 
+  await page.evaluate((storageKey) => {
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      version: 2,
+      favorites: [
+        {
+          harnessId: "codex-app-server",
+          backendProfileId: "builtin:openai",
+          modelId: "gpt-5.6-sol",
+          reasoningEffort: "high",
+        },
+        {
+          harnessId: "codex-app-server",
+          backendProfileId: "builtin:openai",
+          modelId: "gpt-5.6-sol",
+          reasoningEffort: "xhigh",
+        },
+      ],
+    }));
+  }, MODEL_FAVORITES_STORAGE_KEY);
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
   await searchModels.fill("Sol");
-  await expect(modelChooser.getByRole("option").filter({
+  const solResults = modelChooser.getByRole("option").filter({
     hasText: /^Sol/u,
-  })).toBeVisible();
+  });
+  await expect(solResults).toHaveCount(2);
+  const solXhigh = solResults.filter({ hasText: /xhigh reasoning/u });
+  await expect(solXhigh).toBeVisible();
   await captureChooserScenario("model-chooser-search-sol-1440x720");
+  await solXhigh.click();
+  await expect.poll(() => {
+    const database = new Database(databasePath, { readonly: true });
+    const row = database.prepare(`
+      SELECT model_selection_json AS selection
+      FROM conversations
+      WHERE id = ?
+    `).get(currentConversation.id) as { selection: string };
+    database.close();
+    const selection = JSON.parse(row.selection) as {
+      modelId: string;
+      reasoningEffort: string | null;
+    };
+    return {
+      modelId: selection.modelId,
+      reasoningEffort: selection.reasoningEffort,
+    };
+  }).toEqual({
+    modelId: "gpt-5.6-sol",
+    reasoningEffort: "xhigh",
+  });
+
+  await modelTrigger.click();
+  await expect(modelChooser).toBeVisible();
   await searchModels.fill("Codex Beta");
   const codexBeta = modelChooser.getByRole("option").filter({
     hasText: /^Codex Beta/u,
@@ -4024,7 +4113,15 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       element.dataset.interfaceScale = "large";
     }, INTERFACE_SCALE_WILL_CHANGE_EVENT);
     // Large type metrics land on slightly different fractional pixels across
-    // Electron renderers; keep the same row within one quiet 8px text rhythm.
+    // Electron renderers. Keep the same row within a bounded half-em rhythm
+    // derived from the active scale instead of relying on one platform's
+    // subpixel rounding.
+    const scaleAnchorTolerance = await page.locator("html").evaluate((element) => {
+      const mainFontSize = Number.parseFloat(
+        getComputedStyle(element).getPropertyValue("--ui-font-main"),
+      );
+      return Math.ceil(mainFontSize / 2) + 1;
+    });
     await expect.poll(async () => {
       const current = readerAnchor
         ? await captureReaderAnchorById(readerAnchor.id)
@@ -4032,7 +4129,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       return current && readerAnchor
         ? Math.abs(current.offset - readerAnchor.offset)
         : Number.POSITIVE_INFINITY;
-    }).toBeLessThanOrEqual(8);
+    }).toBeLessThanOrEqual(scaleAnchorTolerance);
     await page.locator("html").evaluate((element, eventName) => {
       window.dispatchEvent(new Event(eventName));
       element.dataset.interfaceScale = "default";

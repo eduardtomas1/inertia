@@ -3,7 +3,27 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const composerSource = readFileSync(
-  new URL("../../src/renderer/src/components/Composer.tsx", import.meta.url),
+  new URL("../../src/renderer/src/components/composer/Composer.tsx", import.meta.url),
+  "utf8",
+);
+const inputSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerInputZone.tsx", import.meta.url),
+  "utf8",
+);
+const toolbarSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerToolbar.tsx", import.meta.url),
+  "utf8",
+);
+const settingsSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerSettings.tsx", import.meta.url),
+  "utf8",
+);
+const routeConfirmationSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/RouteChangeConfirmation.tsx", import.meta.url),
+  "utf8",
+);
+const autosizeSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/useTextareaAutosize.ts", import.meta.url),
   "utf8",
 );
 const css = readFileSync(
@@ -22,34 +42,34 @@ describe("cohesive composer dock", () => {
     expect(composerStart).toBeGreaterThan(shellStart);
     expect(dock).toContain('aria-label="Message composer"');
     expect(dock).toContain('aria-busy={submissionPending || followUpPending || running || stopping}');
-    expect(dock).toContain('data-composer-zone="input"');
-    expect(dock).toContain('data-composer-zone="controls"');
-    expect(dock).toContain('className="provider-readiness"');
-    expect(dock).toContain("<ComposerAttachmentList");
-    expect(dock).toContain('className="composer-attachment-boundary"');
-    expect(dock).toContain('className="composer-route-confirmation"');
-    expect(dock).toContain('aria-label="Message"');
-    expect(dock).toContain('className="composer-toolbar"');
-    expect(dock.indexOf('data-composer-zone="input"'))
-      .toBeLessThan(dock.indexOf('data-composer-zone="controls"'));
-    expect(dock.indexOf('className="provider-readiness"'))
-      .toBeLessThan(dock.indexOf('aria-label="Message"'));
-    expect(dock.indexOf("<ComposerAttachmentList"))
-      .toBeLessThan(dock.indexOf('aria-label="Message"'));
+    expect(dock).toContain("<ComposerInputZone");
+    expect(dock).toContain("<ComposerToolbar");
+    expect(dock.indexOf("<ComposerInputZone"))
+      .toBeLessThan(dock.indexOf("<ComposerToolbar"));
+    expect(inputSource).toContain('data-composer-zone="input"');
+    expect(toolbarSource).toContain('data-composer-zone="controls"');
+    expect(inputSource).toContain('className="provider-readiness"');
+    expect(inputSource).toContain("<ComposerAttachmentList");
+    expect(inputSource).toContain('className="composer-attachment-boundary"');
+    expect(inputSource).toContain('aria-label="Message"');
+    expect(toolbarSource).toContain('className="composer-toolbar"');
+    expect(inputSource.indexOf('className="provider-readiness"'))
+      .toBeLessThan(inputSource.indexOf('aria-label="Message"'));
+    expect(inputSource.indexOf("<ComposerAttachmentList"))
+      .toBeLessThan(inputSource.indexOf('aria-label="Message"'));
     expect(composerSource).not.toContain("composer-footer");
     expect(composerSource).not.toContain("composer-note");
   });
 
   it("preserves the integrated control order and compact overflow priority", () => {
-    const toolbarStart = composerSource.indexOf(
+    const toolbarStart = toolbarSource.indexOf(
       '<div className="composer-toolbar"',
     );
-    const toolbar = composerSource.slice(toolbarStart);
+    const toolbar = toolbarSource.slice(toolbarStart);
     const controlOrder = [
       "<ModelChooser",
-      "composer-reasoning-control",
-      "composer-access-control",
-      "composer-mode-control",
+      "<ComposerSettings",
+      "<ComposerMoreMenu",
       "<UsageIndicator",
       'label="Send message"',
     ].map((marker) => toolbar.indexOf(marker));
@@ -57,6 +77,10 @@ describe("cohesive composer dock", () => {
     expect(toolbarStart).toBeGreaterThan(-1);
     expect(controlOrder.every((position) => position >= 0)).toBe(true);
     expect(controlOrder).toEqual([...controlOrder].sort((a, b) => a - b));
+    expect(settingsSource.indexOf("composer-reasoning-control"))
+      .toBeLessThan(settingsSource.indexOf("composer-access-control"));
+    expect(settingsSource.indexOf("composer-access-control"))
+      .toBeLessThan(settingsSource.indexOf("composer-mode-control"));
     expect(css).toMatch(
       /@container \(max-width:\s*720px\)\s*\{[\s\S]*?\.composer-action-control,[\s\S]*?\.composer-setting-family\s*\{[^}]*display:\s*none/su,
     );
@@ -105,23 +129,26 @@ describe("cohesive composer dock", () => {
 
   it("retains multiline, attachment, route, mention, slash, and keyboard behavior", () => {
     expect(css).toMatch(
-      /\.composer textarea\s*\{[^}]*min-height:\s*46px;[^}]*max-height:\s*176px;[^}]*resize:\s*none;[^}]*overflow-y:\s*auto;[^}]*transition:\s*height var\(--motion-fast\) var\(--motion-ease\)/su,
+      /\.composer textarea\s*\{[^}]*min-height:\s*46px;[^}]*max-height:\s*176px;[^}]*resize:\s*none;[^}]*overflow-y:\s*auto/su,
     );
-    expect(composerSource).toContain('textarea.style.height = "0px"');
-    expect(composerSource).toContain(
-      "Math.min(contentHeight, 176)",
+    expect(css).not.toMatch(
+      /\.composer textarea\s*\{[^}]*transition:\s*height/su,
     );
-    expect(composerSource).toContain(
-      'textarea.style.overflowY = contentHeight > 176 ? "auto" : "hidden"',
+    expect(autosizeSource).toContain('textarea.style.height = "0px"');
+    expect(autosizeSource).toContain(
+      "Math.min(contentHeight, MAX_TEXTAREA_HEIGHT_PX)",
     );
-    expect(composerSource).toContain('event.key === "Enter" && !event.shiftKey');
-    expect(composerSource).toContain('className="secondary-button composer-follow-up-button"');
-    expect(composerSource).toContain('title="This active agent route cannot accept parent follow-ups."');
+    expect(autosizeSource).toContain(
+      "textarea.style.overflowY = contentHeight > MAX_TEXTAREA_HEIGHT_PX",
+    );
+    expect(inputSource).toContain('event.key === "Enter" && !event.shiftKey');
+    expect(toolbarSource).toContain('className="secondary-button composer-follow-up-button"');
+    expect(toolbarSource).toContain('title="This active agent route cannot accept parent follow-ups."');
     expect(composerSource).toContain('event.dataTransfer.types.includes("Files")');
-    expect(composerSource).toContain("event.clipboardData.files.length > 0");
-    expect(composerSource).toContain('aria-label="Project files"');
-    expect(composerSource).toContain('aria-label="Composer commands"');
-    expect(composerSource).toContain('role="alertdialog"');
+    expect(inputSource).toContain("event.clipboardData.files.length > 0");
+    expect(inputSource).toContain('aria-label="Project files"');
+    expect(inputSource).toContain('aria-label="Composer commands"');
+    expect(routeConfirmationSource).toContain('role="alertdialog"');
     expect(composerSource).toContain("documentAttachmentSendBoundary");
   });
 });

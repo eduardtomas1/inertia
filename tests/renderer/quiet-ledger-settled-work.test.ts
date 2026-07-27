@@ -21,8 +21,12 @@ import type {
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const requestedAt = "2026-07-23T10:00:00.000Z";
-const timelineSource = readFileSync(
-  new URL("../../src/renderer/src/components/ResponseTimeline.tsx", import.meta.url),
+const activitySource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
+  "utf8",
+);
+const viewportSource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/viewport.tsx", import.meta.url),
   "utf8",
 );
 const styles = readFileSync(
@@ -393,10 +397,10 @@ describe("Quiet Ledger settled work summary", () => {
       'class="turn-run-details" id="turn-run-details-auto-collapse" aria-labelledby="turn-run-details-auto-collapse-label"',
     );
     expect(expanded).not.toContain('aria-labelledby="turn-run-details-auto-collapse-label" hidden=""');
-    expect(timelineSource).toContain("onKeyDownCapture: (event) =>");
-    expect(timelineSource).toContain('event.key === "Enter" || event.key === " "');
-    expect(timelineSource).toContain("onBeforeToggle={captureExpansionAnchor}");
-    expect(timelineSource).toContain("onAfterToggle={restoreExpansionAnchor}");
+    expect(activitySource).toContain("onKeyDownCapture: (event) =>");
+    expect(activitySource).toContain('event.key === "Enter" || event.key === " "');
+    expect(viewportSource).toContain("onBeforeToggle={captureExpansionAnchor}");
+    expect(viewportSource).toContain("onAfterToggle={restoreExpansionAnchor}");
   });
 
   it("settles three consecutive successful turns without duplicate work rows or durations", () => {

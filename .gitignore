@@ -7,7 +7,12 @@ dist/
 release/
 coverage/
 playwright-report/
+blob-report/
 test-results/
+.nyc_output/
+.vite/
+.electron-vite/
+.cache/
 *.tsbuildinfo
 
 # Local runtime state
@@ -23,7 +28,11 @@ test-results/
 .env
 .env.*
 !.env.example
+.npmrc
+.secrets/
 electron-builder.env
+*.key
+*.pem
 *.p12
 *.pfx
 *.mobileprovision
@@ -38,6 +47,8 @@ pnpm-debug.log*
 
 # Editor and operating system files
 .DS_Store
+Thumbs.db
+Desktop.ini
 .idea/
 .vscode/*
 !.vscode/extensions.json

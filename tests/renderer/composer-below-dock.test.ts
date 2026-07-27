@@ -5,7 +5,15 @@ import { describe, expect, it } from "vitest";
 import { usageDisplayBehavior } from "../../src/renderer/src/utils/usageDisplay";
 
 const composerSource = readFileSync(
-  new URL("../../src/renderer/src/components/Composer.tsx", import.meta.url),
+  new URL("../../src/renderer/src/components/composer/Composer.tsx", import.meta.url),
+  "utf8",
+).replace(/\r\n/gu, "\n");
+const inputSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerInputZone.tsx", import.meta.url),
+  "utf8",
+).replace(/\r\n/gu, "\n");
+const toolbarSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerToolbar.tsx", import.meta.url),
   "utf8",
 ).replace(/\r\n/gu, "\n");
 const chatWorkspaceSource = readFileSync(
@@ -22,10 +30,11 @@ describe("composer below-dock cleanup", () => {
     expect(composerSource).toMatch(
       /<div className="composer-shell">\s*<section[\s\S]*?<\/section>\s*<\/div>\s*\);/u,
     );
+    expect(chatWorkspaceSource).toContain("<ProviderMaintenanceNotice");
     expect(chatWorkspaceSource).toMatch(
-      /<div ref=\{composerRegionRef\} className="composer-region">\s*<Composer[\s\S]*?\/>\s*<\/div>\s*<\/main>/u,
+      /<div ref=\{composerRegionRef\} className="composer-region">[\s\S]*?<Composer[\s\S]*?\/>\s*<\/div>\s*<\/main>/u,
     );
-    expect(composerSource).not.toMatch(
+    expect(`${composerSource}\n${inputSource}\n${toolbarSource}`).not.toMatch(
       /composer-(?:footer|note|helper|usage-strip|spacer)/u,
     );
   });
@@ -36,18 +45,22 @@ describe("composer below-dock cleanup", () => {
     const dock = composerSource.slice(dockStart, dockEnd);
 
     for (const marker of [
-      'className="provider-readiness"',
-      "<ComposerAttachmentList",
-      'className="composer-attachment-boundary"',
-      'className="composer-route-confirmation"',
-      'className="composer-toolbar"',
-      "<UsageIndicator",
+      "<ComposerInputZone",
+      "<ComposerToolbar",
     ]) {
       expect(dock, marker).toContain(marker);
     }
-    expect(dock).toContain('running\n                ? "Add a follow-up while the agent works…"');
-    expect(dock).toContain('className="secondary-button composer-follow-up-button"');
-    expect(dock).toContain('className="composer-follow-up-unavailable"');
+    for (const marker of [
+      'className="provider-readiness"',
+      "<ComposerAttachmentList",
+      'className="composer-attachment-boundary"',
+    ]) {
+      expect(inputSource, marker).toContain(marker);
+    }
+    expect(inputSource).toContain('? "Add a follow-up while the agent works…"');
+    expect(toolbarSource).toContain('className="secondary-button composer-follow-up-button"');
+    expect(toolbarSource).toContain('className="composer-follow-up-unavailable"');
+    expect(toolbarSource).toContain("<UsageIndicator");
   });
 
   it("uses anchored or hidden usage modes without a permanent detail strip", () => {
@@ -59,18 +72,19 @@ describe("composer below-dock cleanup", () => {
     expect(usageDisplayBehavior("expanded").surface).toBe("circle-with-value");
   });
 
-  it("removes the obsolete lower padding at every composer-shell breakpoint", () => {
+  it("keeps only a small semantic breathing room below the dock at every breakpoint", () => {
     const shellRules = [...css.matchAll(
       /\.composer-shell\s*\{(?<body>[^}]*)\}/gu,
     )].map((match) => match.groups?.body ?? "");
 
     expect(shellRules).toHaveLength(2);
     expect(shellRules).toEqual(expect.arrayContaining([
-      expect.stringContaining("padding: 7px clamp(18px, 4vw, 54px) 0"),
-      expect.stringContaining("padding: 7px 9px 0"),
+      expect.stringContaining("padding: 7px clamp(18px, 4vw, 54px) var(--composer-bottom-breathing-room)"),
+      expect.stringContaining("padding: 7px 9px var(--composer-bottom-breathing-room)"),
     ]));
-    for (const rule of shellRules) {
-      expect(rule).not.toMatch(/padding-bottom:\s*[1-9]/u);
-    }
+    expect(css).toContain("--composer-bottom-breathing-room: 10px");
+    expect(css).toMatch(
+      /\.app-shell\.platform-(?:linux|win32)\s*\{[^}]*--composer-bottom-breathing-room:\s*12px/su,
+    );
   });
 });

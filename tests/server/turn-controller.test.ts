@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -200,6 +200,7 @@ interface TestRuntime {
   settled: string[];
   gitArtifacts: string[];
   metadataRefreshes: string[];
+  attachmentReleases: string[][];
 }
 
 interface TestRuntimeOptions {
@@ -242,6 +243,7 @@ async function testRuntime(
   const settled: string[] = [];
   const gitArtifacts: string[] = [];
   const metadataRefreshes: string[] = [];
+  const attachmentReleases: string[][] = [];
   const pendingApprovals = new Map<string, AgentApprovalRequest>();
   const pendingInputs = new Map<string, AgentInputRequest>();
   const plans = new Map<string, AgentPlan>();
@@ -267,6 +269,9 @@ async function testRuntime(
       refreshProviderMetadata: ({ turnId }) => {
         metadataRefreshes.push(turnId);
       },
+      releaseTurnAttachments: ({ attachmentIds }) => {
+        attachmentReleases.push([...attachmentIds]);
+      },
       onTurnSettled: (turn) => {
         settled.push(`${turn.status}:${turn.id}`);
       },
@@ -291,6 +296,24 @@ async function testRuntime(
     settled,
     gitArtifacts,
     metadataRefreshes,
+    attachmentReleases,
+  };
+}
+
+async function testAttachment(
+  runtime: Pick<TestRuntime, "workspace">,
+  id: string,
+  name = `${id}.png`,
+) {
+  const path = join(runtime.workspace, name);
+  const bytes = Buffer.from("89504e470d0a1a0a", "hex");
+  await writeFile(path, bytes);
+  return {
+    id,
+    name,
+    path,
+    mimeType: "image/png" as const,
+    size: bytes.byteLength,
   };
 }
 
@@ -643,6 +666,7 @@ describe("TurnController authoritative lifecycle", () => {
     let beforeCaptures = 0;
     let originalTurnId = "";
     let terminalSnapshotObserved = false;
+    let releaseObservedTerminal = false;
     let runtime!: TestRuntime;
     runtime = await testRuntime({
       broadcastSnapshot: () => {
@@ -667,10 +691,24 @@ describe("TurnController authoritative lifecycle", () => {
           resolveAfter = resolve;
         });
       },
+      releaseTurnAttachments: ({ turn }) => {
+        releaseObservedTerminal = runtime.store.agentTurn(turn.id).status === "completed"
+          && runtime.events.some((event) => (
+            event.type === "agent.completed"
+            && event.turnId === turn.id
+          ))
+          && terminalSnapshotObserved;
+      },
     });
+    const attachment = await testAttachment(
+      runtime,
+      "88888888-8888-4888-8888-888888888888",
+      "terminal-order.png",
+    );
     const queued = runtime.controller.queue({
       conversationId: runtime.conversationId,
       content: "Capture this exact turn.",
+      attachments: [attachment],
     });
     originalTurnId = queued.turn.id;
     expect(runtime.controller.start(queued.turn.id)).toBe(true);
@@ -689,6 +727,7 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
     expect(runtime.controller.cancel(runtime.conversationId)).toBe(false);
     expect(captureObservedTerminal).toBe(true);
+    expect(releaseObservedTerminal).toBe(true);
 
     const followUp = runtime.controller.queue({
       conversationId: runtime.conversationId,
@@ -707,6 +746,35 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed");
     expect(runtime.store.agentTurn(followUp.turn.id).status).toBe("completed");
     expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+    runtime.store.close();
+  });
+
+  it("does not start a provider after cancellation wins during pre-turn Git capture", async () => {
+    let resolveBefore!: () => void;
+    const runtime = await testRuntime({
+      captureGitBefore: () => new Promise<void>((resolve) => {
+        resolveBefore = resolve;
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Wait for the repository checkpoint.",
+    });
+
+    expect(runtime.controller.start(queued.turn.id)).toBe(true);
+    expect(runtime.provider.input).toBeNull();
+    expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
+    expect(runtime.store.agentTurn(queued.turn.id).status).toBe("cancelled");
+
+    resolveBefore();
+    await flushPromises();
+
+    expect(runtime.provider.input).toBeNull();
+    expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+    expect(runtime.events.filter((event) => (
+      event.type === "agent.completed"
+      && event.turnId === queued.turn.id
+    ))).toHaveLength(1);
     runtime.store.close();
   });
 
@@ -762,6 +830,183 @@ describe("TurnController authoritative lifecycle", () => {
 
     resolveArtifact();
     await flushPromises();
+    runtime.store.close();
+  });
+
+  it("retains submitted attachments until the provider settles, then releases each turn once", async () => {
+    const runtime = await testRuntime();
+    const completedAttachment = await testAttachment(
+      runtime,
+      "11111111-1111-4111-8111-111111111111",
+      "completed.png",
+    );
+    const completed = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Use the completed attachment.",
+      attachments: [completedAttachment],
+    });
+    runtime.controller.start(completed.turn.id);
+
+    expect(runtime.attachmentReleases).toEqual([]);
+    expect(runtime.provider.input?.imagePaths).toEqual([
+      expect.stringMatching(/completed\.png$/u),
+    ]);
+
+    runtime.provider.resolve({ text: "Completed with the image." });
+    await flushPromises();
+    await flushPromises();
+    expect(runtime.attachmentReleases).toEqual([[completedAttachment.id]]);
+
+    const failedAttachment = await testAttachment(
+      runtime,
+      "22222222-2222-4222-8222-222222222222",
+      "failed.png",
+    );
+    const failed = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Use the attachment before failing.",
+      attachments: [failedAttachment],
+    });
+    runtime.controller.start(failed.turn.id);
+    expect(runtime.attachmentReleases).toEqual([[completedAttachment.id]]);
+
+    runtime.provider.reject(new Error("provider transport exited"));
+    await flushPromises();
+    await flushPromises();
+    expect(runtime.attachmentReleases).toEqual([
+      [completedAttachment.id],
+      [failedAttachment.id],
+    ]);
+
+    const cancelledAttachment = await testAttachment(
+      runtime,
+      "33333333-3333-4333-8333-333333333333",
+      "cancelled.png",
+    );
+    const cancelled = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Use the attachment until cancellation.",
+      attachments: [cancelledAttachment],
+    });
+    runtime.controller.start(cancelled.turn.id);
+    expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
+    await flushPromises();
+    await flushPromises();
+
+    expect(runtime.attachmentReleases).toEqual([
+      [completedAttachment.id],
+      [failedAttachment.id],
+    ]);
+    expect(runtime.store.agentTurn(cancelled.turn.id)).toMatchObject({
+      status: "cancelled",
+      terminalReason: "user-cancelled",
+    });
+
+    runtime.provider.resolve({ status: "cancelled" });
+    await flushPromises();
+    await flushPromises();
+    expect(runtime.attachmentReleases).toEqual([
+      [completedAttachment.id],
+      [failedAttachment.id],
+      [cancelledAttachment.id],
+    ]);
+    runtime.store.close();
+  });
+
+  it("keeps an active attachment until the provider settles after runtime disposal", async () => {
+    const runtime = await testRuntime();
+    const attachment = await testAttachment(
+      runtime,
+      "44444444-4444-4444-8444-444444444444",
+      "runtime-crash.png",
+    );
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Keep this attachment until runtime settlement.",
+      attachments: [attachment],
+    });
+    runtime.controller.start(queued.turn.id);
+    expect(runtime.attachmentReleases).toEqual([]);
+
+    await runtime.controller.dispose("runtime-crash");
+
+    expect(runtime.attachmentReleases).toEqual([]);
+    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+      status: "interrupted",
+      terminalReason: "runtime-crash",
+    });
+    runtime.provider.reject(new Error("provider exited with the runtime"));
+    await flushPromises();
+    await flushPromises();
+    expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+    runtime.store.close();
+  });
+
+  it("releases a queued attachment when accepted work fails before provider start", async () => {
+    const runtime = await testRuntime();
+    const attachment = await testAttachment(
+      runtime,
+      "77777777-7777-4777-8777-777777777777",
+      "pre-start.png",
+    );
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Fail this accepted turn before provider start.",
+      attachments: [attachment],
+    });
+    expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
+    expect(runtime.store.agentTurn(queued.turn.id).status).toBe("queued");
+
+    const failedBeforeStart = runtime.controller.failBeforeStart(
+      runtime.conversationId,
+      "Renderer acknowledgement failed.",
+    );
+    expect({
+      failedBeforeStart,
+      turn: runtime.store.agentTurn(queued.turn.id),
+    }).toMatchObject({
+      failedBeforeStart: true,
+      turn: {
+        status: "failed",
+        terminalReason: "turn-start-failed",
+      },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+      status: "failed",
+      terminalReason: "turn-start-failed",
+    });
+    expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+    runtime.store.close();
+  });
+
+  it("releases an attachment when the provider throws before returning a run", async () => {
+    const runtime = await testRuntime();
+    const attachment = await testAttachment(
+      runtime,
+      "99999999-9999-4999-8999-999999999999",
+      "provider-start.png",
+    );
+    vi.spyOn(runtime.provider, "run").mockImplementationOnce(() => {
+      throw new Error("provider launch failed");
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Fail while launching the provider.",
+      attachments: [attachment],
+    });
+
+    expect(runtime.controller.start(queued.turn.id)).toBe(false);
+    await flushPromises();
+    await flushPromises();
+
+    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+      status: "failed",
+      terminalReason: "turn-start-failed",
+    });
+    expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
     runtime.store.close();
   });
 
@@ -1662,16 +1907,28 @@ describe("TurnController authoritative lifecycle", () => {
 
   it("recovers a queued or running authoritative turn as interrupted on restart", async () => {
     const runtime = await testRuntime();
+    const runningAttachment = await testAttachment(
+      runtime,
+      "55555555-5555-4555-8555-555555555555",
+      "running-recovery.png",
+    );
     const queued = runtime.controller.queue({
       conversationId: runtime.conversationId,
       content: "Recover this running turn.",
+      attachments: [runningAttachment],
     });
     runtime.controller.start(queued.turn.id);
     const projectId = runtime.store.conversation(runtime.conversationId).projectId;
     const queuedConversation = runtime.store.createConversation(projectId, "Queued recovery");
+    const queuedAttachment = await testAttachment(
+      runtime,
+      "66666666-6666-4666-8666-666666666666",
+      "queued-recovery.png",
+    );
     const neverStarted = runtime.controller.queue({
       conversationId: queuedConversation.id,
       content: "Recover this queued turn.",
+      attachments: [queuedAttachment],
     });
     const databasePath = join(runtime.directory, "inertia.sqlite");
     runtime.store.close();
@@ -1694,6 +1951,11 @@ describe("TurnController authoritative lifecycle", () => {
         terminalReason: "runtime-restart",
       }),
     ]));
+    expect(recovery.recoveredAttachmentIds).toEqual(expect.arrayContaining([
+      runningAttachment.id,
+      queuedAttachment.id,
+    ]));
+    expect(recovery.recoveredAttachmentIds).toHaveLength(2);
     expect(reopened.conversation(runtime.conversationId)).toMatchObject({
       status: "failed",
       attentionKind: null,

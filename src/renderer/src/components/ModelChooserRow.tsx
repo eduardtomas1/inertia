@@ -26,6 +26,7 @@ interface ModelChooserRowBase {
   key: string;
   displayName: string;
   modelId: string;
+  reasoningEffort: string | null;
   harnessLabel: string;
   backendProfileName: string;
   source: "built-in" | "custom";
@@ -84,6 +85,7 @@ export function modelChooserRowFromRoute(
     key: route.key,
     displayName: route.displayName,
     modelId: route.modelId,
+    reasoningEffort: route.reasoningEffort ?? null,
     harnessLabel: route.harnessLabel,
     backendProfileName: route.backendProfileName,
     source: route.source,
@@ -98,9 +100,18 @@ export function modelChooserRowFromRoute(
 }
 
 export function modelChooserSecondaryIdentity(
-  row: Pick<ModelChooserRowData, "harnessLabel" | "backendProfileName">,
+  row: Pick<
+    ModelChooserRowData,
+    "harnessLabel" | "backendProfileName" | "reasoningEffort"
+  >,
 ): string {
-  return `${row.harnessLabel} · ${row.backendProfileName}`;
+  return [
+    row.harnessLabel,
+    row.backendProfileName,
+    row.reasoningEffort
+      ? `${row.reasoningEffort} reasoning`
+      : "Provider default reasoning",
+  ].join(" · ");
 }
 
 export function modelChooserShowsRawModelId(

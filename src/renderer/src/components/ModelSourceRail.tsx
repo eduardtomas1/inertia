@@ -4,7 +4,6 @@ import {
   CloudCog,
   Code2,
   Command,
-  ListFilter,
   MousePointer2,
   Star,
   type LucideIcon,
@@ -49,7 +48,6 @@ const providerIcons: Readonly<Record<string, LucideIcon>> = {
 export function modelSourceRailItemIcon(
   item: ModelSourceRailItem,
 ): LucideIcon {
-  if (item.filter.kind === "all") return ListFilter;
   if (item.filter.kind === "favorites") return Star;
   if (item.filter.kind === "provider") {
     return providerIcons[item.filter.providerId] ?? Bot;

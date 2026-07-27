@@ -131,13 +131,13 @@ export class TerminalManager {
   }
 
   disposeOwner(owner: WebSocket): void {
-    for (const session of [...this.sessions.values()]) {
+    for (const session of this.sessions.values()) {
       if (session.owner === owner) this.dispose(session.id, true);
     }
   }
 
   disposeAll(): void {
-    for (const terminalId of [...this.sessions.keys()]) this.dispose(terminalId, true);
+    for (const terminalId of this.sessions.keys()) this.dispose(terminalId, true);
   }
 
   private ownedSession(owner: WebSocket, terminalId: string): TerminalSession {

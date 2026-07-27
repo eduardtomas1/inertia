@@ -1,0 +1,139 @@
+import { describe, expect, it, vi } from "vitest";
+
+import type { ProviderEnvironment } from "../../src/server/environment";
+import {
+  codexInstallMethodFromPath,
+  resolveProviderMaintenanceCapabilities,
+  type ProviderMaintenanceTarget,
+} from "../../src/server/provider/maintenance-capabilities";
+
+const environment: ProviderEnvironment = {
+  env: { PATH: "/tools" },
+  pathEntries: ["/tools"],
+};
+
+function target(
+  input: Partial<ProviderMaintenanceTarget> = {},
+): ProviderMaintenanceTarget {
+  return {
+    providerId: "codex",
+    executable: "/manual/codex",
+    installedVersion: "1.0.0",
+    installed: true,
+    ...input,
+  };
+}
+
+describe("provider maintenance capabilities", () => {
+  it("keeps unknown Codex paths instructions-only without guessing npm", async () => {
+    const loadEnvironment = vi.fn(async () => environment);
+    const resolveExecutable = vi.fn(async () => ["/tools/npm"]);
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({ executable: "/home/user/bin/codex" }),
+      {
+        environment: loadEnvironment,
+        executableCandidates: resolveExecutable,
+      },
+    );
+
+    expect(capabilities).toMatchObject({
+      providerId: "codex",
+      installMethod: "manual",
+      updateAvailability: "instructions-only",
+      update: null,
+    });
+    expect(loadEnvironment).not.toHaveBeenCalled();
+    expect(resolveExecutable).not.toHaveBeenCalled();
+  });
+
+  it("uses npm only when Codex has proven npm-global provenance", async () => {
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        executable: "/usr/local/lib/node_modules/@openai/codex/bin/codex",
+      }),
+      {
+        environment: async () => environment,
+        executableCandidates: async (command) => (
+          command === "npm" ? ["/tools/npm"] : []
+        ),
+      },
+    );
+
+    expect(capabilities).toMatchObject({
+      installMethod: "npm-global",
+      updateAvailability: "available",
+      update: {
+        executable: "/tools/npm",
+        args: ["install", "-g", "@openai/codex@latest"],
+        lockKey: "package-manager:npm-global",
+      },
+    });
+  });
+
+  it("recognizes the standard Windows npm shim location", () => {
+    expect(codexInstallMethodFromPath(
+      "C:\\Users\\Ada\\AppData\\Roaming\\npm\\codex.cmd",
+    )).toBe("npm-global");
+    expect(codexInstallMethodFromPath(
+      "C:\\Tools\\codex.cmd",
+    )).toBe("manual");
+  });
+
+  it("uses Homebrew only for a canonical Cellar or Caskroom path", async () => {
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        executable: "/opt/homebrew/Caskroom/codex/1.2.3/codex",
+      }),
+      {
+        environment: async () => environment,
+        executableCandidates: async (command) => (
+          command === "brew" ? ["/opt/homebrew/bin/brew"] : []
+        ),
+      },
+    );
+
+    expect(capabilities.update).toEqual({
+      executable: "/opt/homebrew/bin/brew",
+      args: ["upgrade", "--cask", "codex"],
+      lockKey: "package-manager:homebrew",
+      installMethod: "homebrew",
+      label: "Update Codex with Homebrew",
+    });
+  });
+
+  it("falls back to instructions when the proven manager is unavailable", async () => {
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        executable: "/opt/homebrew/Caskroom/codex/1.2.3/codex",
+      }),
+      {
+        environment: async () => environment,
+        executableCandidates: async () => [],
+      },
+    );
+
+    expect(capabilities).toMatchObject({
+      installMethod: "homebrew",
+      updateAvailability: "instructions-only",
+      update: null,
+    });
+  });
+
+  it.each([
+    ["claude", "/exact/claude", ["update"]],
+    ["cursor", "/exact/cursor-agent", ["update"]],
+    ["opencode", "/exact/opencode", ["upgrade"]],
+  ] as const)(
+    "uses the exact detected executable for the documented %s self-update",
+    async (providerId, executable, args) => {
+      const capabilities = await resolveProviderMaintenanceCapabilities(
+        target({ providerId, executable }),
+      );
+      expect(capabilities.update).toMatchObject({
+        executable,
+        args,
+        installMethod: "provider-managed",
+      });
+    },
+  );
+});

@@ -1,7 +1,6 @@
 import { z } from "zod";
 
-import type { ProviderId } from "./contracts";
-import type { BackendCompatibilityProbeResult } from "./backend-probe";
+import type { ProviderId } from "./provider";
 
 export const KNOWN_HARNESS_IDS = [
   "codex-app-server",
@@ -129,11 +128,23 @@ export const harnessBackendCompatibilityReasonCodeSchema = z.enum(
 
 export interface HarnessBackendCompatibilityEvidence {
   modelId?: string | null;
-  probe?: BackendCompatibilityProbeResult | null;
+  probe?: HarnessBackendProbeEvidence | null;
+}
+
+export interface HarnessBackendProbeEvidence {
+  profileId: string;
+  backendConfigurationRevision: number;
+  endpointIdentity: string | null;
+  protocol: ModelBackendProtocol;
+  modelId: string;
+  compatibility: "protocol-compatible" | "partially-compatible" | "unavailable";
+  protocolVerified: boolean;
+  modelVerified: boolean;
+  failure: unknown | null;
 }
 
 function probeMatchesBackendRoute(
-  probe: BackendCompatibilityProbeResult,
+  probe: HarnessBackendProbeEvidence,
   profile: ModelBackendProfile,
   modelId: string,
 ): boolean {

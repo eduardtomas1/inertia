@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Bot, CloudCog, Command, ListFilter, MousePointer2, Star } from "lucide-react";
+import { Bot, CloudCog, Command, MousePointer2, Star } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -94,7 +94,7 @@ const routes = [
 
 function renderRail(
   items: readonly ModelSourceRailItem[],
-  selectedId: string | null = "all",
+  selectedId: string | null = "provider:codex",
   withSetup = true,
 ): string {
   return renderToStaticMarkup(createElement(ModelSourceRail, {
@@ -118,7 +118,6 @@ describe("model source rail", () => {
     });
 
     expect(items.map(({ label }) => label)).toEqual([
-      "All",
       "Favorites",
       "Codex",
       "Claude",
@@ -129,20 +128,20 @@ describe("model source rail", () => {
       "Future harness",
     ]);
     expect(items.map(({ routeCount }) => routeCount)).toEqual([
-      8, 1, 2, 1, 1, 0, 2, 1, 1,
+      1, 2, 1, 1, 0, 2, 1, 1,
     ]);
-    expect(items[5]?.setupAction?.id).toBe("setup-opencode");
-    expect(items[6]?.filter).toEqual({
+    expect(items[4]?.setupAction?.id).toBe("setup-opencode");
+    expect(items[5]?.filter).toEqual({
       kind: "custom",
       harnessId: "claude-agent-sdk",
       backendProfileId: "custom:team-a",
     });
-    expect(items[7]?.filter).toEqual({
+    expect(items[6]?.filter).toEqual({
       kind: "custom",
       harnessId: "codex-app-server",
       backendProfileId: "custom:team-b",
     });
-    expect(items[8]?.filter).toEqual({
+    expect(items[7]?.filter).toEqual({
       kind: "harness",
       harnessId: "future-harness",
     });
@@ -154,7 +153,7 @@ describe("model source rail", () => {
     })).toEqual([]);
     expect(deriveModelSourceRailItems([routes[0]!], {
       favoriteRouteKeys: ["removed"],
-    }).map(({ label }) => label)).toEqual(["All", "Codex"]);
+    }).map(({ label }) => label)).toEqual(["Codex"]);
 
     const setupOnly = deriveModelSourceRailItems([], {
       setupActions: [{
@@ -284,7 +283,6 @@ describe("model source rail", () => {
     const items = deriveModelSourceRailItems(routes, {
       favoriteRouteKeys: ["codex-a"],
     });
-    const all = items.find(({ filter }) => filter.kind === "all")!;
     const favorites = items.find(({ filter }) => filter.kind === "favorites")!;
     const codex = items.find(({ filter }) =>
       filter.kind === "provider" && filter.providerId === "codex")!;
@@ -295,7 +293,6 @@ describe("model source rail", () => {
       && filter.backendProfileId === "custom:team-a")!;
     const unknown = items.find(({ filter }) => filter.kind === "harness")!;
 
-    expect(modelSourceRailItemIcon(all)).toBe(ListFilter);
     expect(modelSourceRailItemIcon(favorites)).toBe(Star);
     expect(modelSourceRailItemIcon(codex)).toBe(Command);
     expect(modelSourceRailItemIcon(cursor)).toBe(MousePointer2);
@@ -343,5 +340,14 @@ describe("model source rail", () => {
     expect(block).toContain("text-overflow: ellipsis");
     expect(block).toContain("@container (max-width: 520px)");
     expect(block).toContain("@media (max-width: 640px)");
+  });
+
+  it("keeps the unfiltered result set implicit instead of spending a rail row on All", () => {
+    const items = deriveModelSourceRailItems(routes, {
+      favoriteRouteKeys: ["codex-a"],
+    });
+
+    expect(items.some(({ filter }) => filter.kind === "all")).toBe(false);
+    expect(filterModelRoutesBySource(routes, { kind: "all" })).toEqual(routes);
   });
 });

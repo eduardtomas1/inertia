@@ -548,7 +548,7 @@ export class IsolatedRunController<Owner extends object> {
 
   stopOwned(owner: Owner): number {
     let stopped = 0;
-    for (const active of [...this.activeByConversation.values()]) {
+    for (const active of this.activeByConversation.values()) {
       if (active.owner !== owner) continue;
       if (this.requestStop(active, "disconnected")) stopped += 1;
     }

@@ -1,0 +1,78 @@
+import type {
+  Conversation,
+  ConversationDetail,
+  Project,
+  ServerEvent,
+} from "@shared/contracts";
+import type { WorkspacePanelTab } from "../components/WorkspacePanel";
+import type { CommandWithoutId } from "../lib/runtimeCommands";
+import { useTurnArtifacts } from "./workspace-tools/useTurnArtifacts";
+import { useWorkspaceFiles } from "./workspace-tools/useWorkspaceFiles";
+import { useWorkspaceGit } from "./workspace-tools/useWorkspaceGit";
+import { useWorkspaceReview } from "./workspace-tools/useWorkspaceReview";
+
+interface WorkspaceToolsOptions {
+  project: Project | null;
+  conversation: Conversation | null;
+  detail: ConversationDetail | null;
+  online: boolean;
+  ignoreWhitespace: boolean;
+  confirmDestructiveActions: boolean;
+  refreshVersion: number;
+  request: (command: CommandWithoutId) => Promise<ServerEvent>;
+  run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  setActionError: (message: string | null) => void;
+  setActiveTool: (tool: WorkspacePanelTab | null) => void;
+  openProjectPath: (
+    request: Parameters<typeof window.inertia.openProjectPath>[0],
+  ) => void;
+}
+
+export function useWorkspaceTools(options: WorkspaceToolsOptions) {
+  const git = useWorkspaceGit({
+    project: options.project,
+    conversation: options.conversation,
+    online: options.online,
+    ignoreWhitespace: options.ignoreWhitespace,
+    refreshVersion: options.refreshVersion,
+    request: options.request,
+    run: options.run,
+    setActionError: options.setActionError,
+  });
+  const files = useWorkspaceFiles({
+    project: options.project,
+    conversation: options.conversation,
+    online: options.online,
+    request: options.request,
+    setActionError: options.setActionError,
+  });
+  const review = useWorkspaceReview({
+    project: options.project,
+    conversation: options.conversation,
+    detail: options.detail,
+    gitDiff: git.gitDiff,
+    ignoreWhitespace: options.ignoreWhitespace,
+    confirmDestructiveActions: options.confirmDestructiveActions,
+    request: options.request,
+    run: options.run,
+    setGitDiff: git.setGitDiff,
+    loadGit: git.loadGit,
+  });
+  const artifacts = useTurnArtifacts({
+    project: options.project,
+    conversation: options.conversation,
+    request: options.request,
+    setActionError: options.setActionError,
+    setActiveTool: options.setActiveTool,
+    openProjectPath: options.openProjectPath,
+    loadGit: git.loadGit,
+  });
+
+  return {
+    ...git,
+    ...files,
+    ...review,
+    ...artifacts,
+    toolsLoading: git.loading || artifacts.loading,
+  };
+}

@@ -373,27 +373,27 @@ describe("Quiet Ledger streaming answer handoff", () => {
     expect(commentary).not.toContain('role="status"');
     expect(commentary).toContain('class="streaming-caret" aria-hidden="true"');
 
-    const timelineSource = readFileSync(
-      new URL("../../src/renderer/src/components/ResponseTimeline.tsx", import.meta.url),
+    const workstreamSource = readFileSync(
+      new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
       "utf8",
     );
     const projectionSource = readFileSync(
-      new URL("../../src/renderer/src/utils/responseTimeline.ts", import.meta.url),
+      new URL("../../src/renderer/src/utils/response-timeline/execution.ts", import.meta.url),
       "utf8",
     );
-    const appSource = readFileSync(
-      new URL("../../src/renderer/src/App.tsx", import.meta.url),
+    const projectionHookSource = readFileSync(
+      new URL("../../src/renderer/src/hooks/useConversationProjection.ts", import.meta.url),
       "utf8",
     );
-    expect(timelineSource).toContain('key={entry.id}');
-    expect(timelineSource).toContain(
+    expect(workstreamSource).toContain('key={entry.id}');
+    expect(workstreamSource).toContain(
       'data-assistant-commentary-id={entry.message?.id ?? entry.id}',
     );
     expect(projectionSource).toContain('id: `live-commentary:${turn.id}`');
-    expect(appSource).toMatch(
+    expect(projectionHookSource).toMatch(
       /event\.type === "agent\.activity"[\s\S]*?setStreamingText\(""\);[\s\S]*?event\.type === "agent\.text"/u,
     );
-    expect(appSource).toMatch(
+    expect(projectionHookSource).toMatch(
       /event\.type === "agent\.completed" \|\| event\.type === "agent\.failed"[\s\S]*?setStreamingText\(""\)/u,
     );
   });

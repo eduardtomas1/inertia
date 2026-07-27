@@ -25,8 +25,16 @@ import {
   type ValidatedAttachmentImport,
 } from "./attachment-import.js";
 
+const MAX_SESSION_ATTACHMENT_RECORDS = 256;
+const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
+
 interface AttachmentRegistryRecord extends TrustedRuntimeAttachment {
   readonly extension: string;
+}
+
+export interface AttachmentRegistryLimits {
+  readonly maxRecords?: number;
+  readonly maxBytes?: number;
 }
 
 function isContained(root: string, target: string): boolean {
@@ -39,18 +47,67 @@ function assertNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("The attachment request was cancelled.");
 }
 
+function boundedLimit(value: number | undefined, maximum: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(1, Math.min(Math.trunc(value), maximum))
+    : maximum;
+}
+
 export class AttachmentRegistry {
   private readonly records = new Map<string, AttachmentRegistryRecord>();
+  private readonly maxRecords: number;
+  private readonly maxBytes: number;
+  private importTail: Promise<void> = Promise.resolve();
 
-  constructor(private readonly directory: string) {}
+  constructor(
+    private readonly directory: string,
+    limits: AttachmentRegistryLimits = {},
+  ) {
+    this.maxRecords = boundedLimit(
+      limits.maxRecords,
+      MAX_SESSION_ATTACHMENT_RECORDS,
+    );
+    this.maxBytes = boundedLimit(
+      limits.maxBytes,
+      MAX_SESSION_ATTACHMENT_BYTES,
+    );
+  }
 
   async import(values: readonly unknown[]): Promise<ChatAttachment[]> {
+    let unlock = (): void => undefined;
+    const previous = this.importTail;
+    this.importTail = new Promise<void>((resolveImport) => {
+      unlock = resolveImport;
+    });
+    await previous;
+    try {
+      return await this.importExclusive(values);
+    } finally {
+      unlock();
+    }
+  }
+
+  private async importExclusive(
+    values: readonly unknown[],
+  ): Promise<ChatAttachment[]> {
     const validated = values.map(validateAttachmentImport);
     const deduplicated = validated.filter((attachment, index) =>
       validated.findIndex(({ digest }) => digest === attachment.digest) === index);
     const totalBytes = deduplicated.reduce((total, { size }) => total + size, 0);
     if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
       throw new Error("Attachments exceed the 20 MB turn limit.");
+    }
+    const retainedBytes = [...this.records.values()].reduce(
+      (total, { size }) => total + size,
+      0,
+    );
+    if (
+      this.records.size + deduplicated.length > this.maxRecords
+      || retainedBytes + totalBytes > this.maxBytes
+    ) {
+      throw new Error(
+        "Temporary attachment storage is full. Remove an attachment and try again.",
+      );
     }
     const registered: AttachmentRegistryRecord[] = [];
     try {

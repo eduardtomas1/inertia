@@ -6962,6 +6962,33 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   margin-left: 4px;
 }
 
+.turn-follow-up-row {
+  width: fit-content;
+  max-width: min(620px, 78%);
+  margin: 8px 0 9px auto;
+  padding: 7px 9px;
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: color-mix(in srgb, var(--user-request-tint) 74%, transparent);
+}
+
+.turn-follow-up-row > span {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--quiet-muted);
+  font-size: var(--metadata-font-size);
+  font-weight: 620;
+  line-height: 1.25;
+}
+
+.turn-follow-up-row > p {
+  margin: 0;
+  font-size: var(--response-font-size);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .turn-activity-group {
   min-width: 0;
   margin: 2px 0 6px 5px;
@@ -8397,6 +8424,10 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   .turn-user-request .message-meta {
     flex-wrap: wrap;
     row-gap: 4px;
+  }
+
+  .turn-follow-up-row {
+    max-width: 92%;
   }
 
   .turn-working-state {

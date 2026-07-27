@@ -7,15 +7,15 @@ import { usageDisplayBehavior } from "../../src/renderer/src/utils/usageDisplay"
 const composerSource = readFileSync(
   new URL("../../src/renderer/src/components/Composer.tsx", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/gu, "\n");
 const chatWorkspaceSource = readFileSync(
   new URL("../../src/renderer/src/components/ChatWorkspace.tsx", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/gu, "\n");
 const css = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/gu, "\n");
 
 describe("composer below-dock cleanup", () => {
   it("ends the Composer and workspace topology at the dock", () => {

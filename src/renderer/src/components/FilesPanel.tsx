@@ -54,9 +54,18 @@ export type FilesPanelProps = {
   onOpenFile?: (path: string) => void;
 };
 
-interface DirectoryPage {
+export interface DirectoryPage {
   entries: WorkspaceEntry[];
   truncated: boolean;
+}
+
+export function freshWorkspaceDirectoryPages(
+  entries: WorkspaceEntry[],
+  truncated: boolean,
+): Map<string, DirectoryPage> {
+  return new Map([
+    ["", { entries: sortWorkspaceEntries(entries), truncated }],
+  ]);
 }
 
 interface SearchState {
@@ -102,11 +111,10 @@ export function FilesPanel({
   onRefresh,
   onOpenFile,
 }: FilesPanelProps): React.JSX.Element {
-  const initialPages = new Map<string, DirectoryPage>([
-    ["", { entries: sortWorkspaceEntries(entries), truncated: entriesTruncated }],
-  ]);
+  const initialPages = freshWorkspaceDirectoryPages(entries, entriesTruncated);
   const [directoryPages, setDirectoryPages] = useState(initialPages);
   const directoryPagesRef = useRef(initialPages);
+  const directoryGeneration = useRef(0);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
   const [loadingDirectories, setLoadingDirectories] = useState<Set<string>>(() => new Set());
   const [directoryErrors, setDirectoryErrors] = useState<Map<string, string>>(() => new Map());
@@ -126,13 +134,13 @@ export function FilesPanel({
   }, []);
 
   useEffect(() => {
-    const next = new Map(directoryPagesRef.current);
-    next.set("", {
-      entries: sortWorkspaceEntries(entries),
-      truncated: entriesTruncated,
-    });
+    directoryGeneration.current += 1;
+    const next = freshWorkspaceDirectoryPages(entries, entriesTruncated);
     directoryPagesRef.current = next;
     setDirectoryPages(next);
+    setExpandedPaths(new Set());
+    setLoadingDirectories(new Set());
+    setDirectoryErrors(new Map());
   }, [entries, entriesTruncated]);
 
   const storePage = useCallback((path: string, page: WorkspaceEntriesPage): void => {
@@ -150,6 +158,7 @@ export function FilesPanel({
 
   const loadDirectory = useCallback(async (path: string): Promise<void> => {
     if (!isSafeWorkspaceEntryPath(path)) return;
+    const generation = directoryGeneration.current;
     setLoadingDirectories((current) => new Set(current).add(path));
     setDirectoryErrors((current) => {
       const next = new Map(current);
@@ -158,16 +167,16 @@ export function FilesPanel({
     });
     try {
       const page = await onLoadEntries({ directory: path });
-      if (!mounted.current) return;
+      if (!mounted.current || directoryGeneration.current !== generation) return;
       storePage(path, page);
     } catch (loadError) {
-      if (!mounted.current) return;
+      if (!mounted.current || directoryGeneration.current !== generation) return;
       setDirectoryErrors((current) => new Map(current).set(
         path,
         safeError(loadError, "This folder could not be loaded."),
       ));
     } finally {
-      if (mounted.current) {
+      if (mounted.current && directoryGeneration.current === generation) {
         setLoadingDirectories((current) => {
           const next = new Set(current);
           next.delete(path);

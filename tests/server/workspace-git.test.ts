@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -208,7 +208,7 @@ describe("workspace Git repository discovery", () => {
     const resolved = await resolveWorkspaceGitRepository(root, "modules/alpha");
     const alphaDiff = await getUnifiedDiff(resolved.root);
 
-    expect(resolved.root).toBe(git(alpha, "rev-parse", "--show-toplevel"));
+    expect(resolve(resolved.root)).toBe(resolve(git(alpha, "rev-parse", "--show-toplevel")));
     expect(alphaDiff.text).toContain("alpha after");
     expect(alphaDiff.text).not.toContain("beta after");
     expect(workspaceGitFilePath("modules/alpha", "src/Main.java")).toBe("modules/alpha/src/Main.java");

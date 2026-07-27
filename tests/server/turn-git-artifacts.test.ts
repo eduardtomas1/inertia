@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import {
   mkdtempSync,
   mkdirSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCheckpoint } from "../../src/server/checkpoints";
 import { RuntimeStore } from "../../src/server/database";
 import { TurnGitArtifactManager } from "../../src/server/turn-git-artifacts";
+import { removePortableFixture } from "../helpers/portable-provider-fixture";
 
 const roots: string[] = [];
 
@@ -97,8 +97,8 @@ async function checkpointFor(
   });
 }
 
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(removePortableFixture));
 });
 
 describe("turn Git artifacts", () => {

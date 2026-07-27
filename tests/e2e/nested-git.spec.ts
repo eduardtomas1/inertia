@@ -49,7 +49,7 @@ async function createDirtyModule(
 
 async function resizeWindow(width: number, height: number): Promise<void> {
   await application.evaluate(
-    ({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0]?.setSize(size.width, size.height),
+    ({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0]?.setContentSize(size.width, size.height),
     { width, height },
   );
   await page.waitForTimeout(200);

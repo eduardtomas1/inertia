@@ -926,7 +926,8 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
   );
 
   child.stdout.on("data", (chunk: Buffer) => decoder?.push(chunk));
-  child.stdout.once("end", () => {
+  const handleTransportClose = (): void => {
+    if (settled || transportCloseTimer) return;
     decoder?.end();
     if (settled) return;
     transportCloseTimer = setTimeout(() => {
@@ -939,7 +940,9 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
       finish("failed", null, null);
     }, TRANSPORT_CLOSE_GRACE_MS);
     transportCloseTimer.unref();
-  });
+  };
+  child.stdout.once("end", handleTransportClose);
+  child.stdout.once("close", handleTransportClose);
   child.stderr.on("data", (chunk: Buffer) => diagnostic.append(chunk.toString("utf8")));
   child.stdin.on("error", (error: NodeJS.ErrnoException) => {
     if (!settled) {

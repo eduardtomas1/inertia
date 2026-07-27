@@ -29,6 +29,7 @@ export interface ResponseTurn {
   index: number;
   agentTurn: AgentTurn;
   userMessage: ChatMessage;
+  followUpMessages: ChatMessage[];
   assistantMessages: ChatMessage[];
   commentaryMessages: ChatMessage[];
   terminalAssistantMessage: ChatMessage | null;
@@ -195,6 +196,12 @@ export type TurnExecutionStreamEntry =
       streaming: boolean;
     }
   | {
+      kind: "follow-up";
+      id: string;
+      createdAt: string;
+      message: ChatMessage;
+    }
+  | {
       kind: "activity-group";
       id: string;
       createdAt: string;
@@ -246,7 +253,10 @@ interface BuildTurnExecutionStreamOptions {
  * entries are grouped; commentary and attention rows always break a group.
  */
 export function buildTurnExecutionStream(
-  turn: Pick<ResponseTurn, "id" | "agentTurn" | "commentaryMessages" | "activities">,
+  turn: Pick<
+    ResponseTurn,
+    "id" | "agentTurn" | "followUpMessages" | "commentaryMessages" | "activities"
+  >,
   options: BuildTurnExecutionStreamOptions = {},
 ): TurnExecutionStreamEntry[] {
   const includeImportant = options.includeImportantActivities ?? true;
@@ -258,6 +268,13 @@ export function buildTurnExecutionStream(
         message: ChatMessage | null;
         content: string;
         streaming: boolean;
+        order: number;
+      }
+    | {
+        kind: "follow-up";
+        id: string;
+        createdAt: string;
+        message: ChatMessage;
         order: number;
       }
     | {
@@ -280,6 +297,15 @@ export function buildTurnExecutionStream(
       order: 0,
     });
   }
+  for (const message of turn.followUpMessages) {
+    items.push({
+      kind: "follow-up",
+      id: message.id,
+      createdAt: message.createdAt,
+      message,
+      order: 1,
+    });
+  }
   for (const activity of turn.activities) {
     if (!isTranscriptActivity(activity)) continue;
     if (!includeImportant && activityNeedsAttention(activity)) continue;
@@ -288,7 +314,7 @@ export function buildTurnExecutionStream(
       id: activity.id,
       createdAt: activity.createdAt,
       activity,
-      order: 1,
+      order: 2,
     });
   }
   if (options.liveContent) {
@@ -299,7 +325,7 @@ export function buildTurnExecutionStream(
       message: null,
       content: options.liveContent,
       streaming: true,
-      order: 2,
+      order: 3,
     });
   }
   items.sort((left, right) =>
@@ -312,7 +338,7 @@ export function buildTurnExecutionStream(
 
   const stream: TurnExecutionStreamEntry[] = [];
   for (const item of items) {
-    if (item.kind === "commentary") {
+    if (item.kind === "commentary" || item.kind === "follow-up") {
       stream.push(item);
       continue;
     }
@@ -466,6 +492,7 @@ function buildTurn(
       && message.id !== userMessage.id)
     .sort(compareTimestamped);
   const assistantMessages = scopedMessages.filter(({ role }) => role === "assistant");
+  const followUpMessages = scopedMessages.filter(({ role }) => role === "user");
   const terminalAssistantMessage = agentTurn.terminalAssistantMessageId === null
     ? null
     : assistantMessages.find(({ id }) => id === agentTurn.terminalAssistantMessageId) ?? null;
@@ -496,6 +523,7 @@ function buildTurn(
     index,
     agentTurn,
     userMessage,
+    followUpMessages,
     assistantMessages,
     commentaryMessages,
     terminalAssistantMessage,
@@ -571,6 +599,7 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
   const claimedCheckpointIds = new Set<string>();
   for (const turn of builtTurns.values()) {
     claimedMessageIds.add(turn.userMessage.id);
+    turn.followUpMessages.forEach(({ id }) => claimedMessageIds.add(id));
     turn.assistantMessages.forEach(({ id }) => claimedMessageIds.add(id));
     turn.systemMessages.forEach(({ id }) => claimedMessageIds.add(id));
     if (turn.checkpoint) claimedCheckpointIds.add(turn.checkpoint.id);
@@ -632,6 +661,7 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
     && left.completedAt === right.completedAt
     && left.isActive === right.isActive
     && left.toolCallCount === right.toolCallCount
+    && sameReferences(left.followUpMessages, right.followUpMessages)
     && sameReferences(left.assistantMessages, right.assistantMessages)
     && sameReferences(left.commentaryMessages, right.commentaryMessages)
     && sameReferences(left.systemMessages, right.systemMessages)
@@ -962,6 +992,9 @@ function estimateExpandedWorkHeight(
         if (entry.kind === "commentary") {
           return total + 10 + estimatedWrappedLines(entry.content, columns) * 18;
         }
+        if (entry.kind === "follow-up") {
+          return total + 27 + estimatedWrappedLines(entry.message.content, columns - 6) * 18;
+        }
         return total + estimateActivityGroupHeight(entry.activities, expandActivityGroups);
       }, 0);
   const reasoningHeight = includeReasoning && turn.reasoning
@@ -1025,6 +1058,8 @@ function estimateTurnRowSize(
     ), 0);
   const activeCommentaryHeight = turn.commentaryMessages.reduce((total, message) =>
     total + 12 + estimatedWrappedLines(message.content, answerColumns) * 18, 0);
+  const activeFollowUpHeight = turn.followUpMessages.reduce((total, message) =>
+    total + 27 + estimatedWrappedLines(message.content, answerColumns - 6) * 18, 0);
   const includesReasoning = options.showThinking !== false && Boolean(turn.reasoning);
   const hasSupplementalWork = turn.plans.length > 0 || includesReasoning;
   // Attention rows use the same bounded preview/disclosure geometry as their
@@ -1035,6 +1070,7 @@ function estimateTurnRowSize(
   const executionHeight = turn.isActive
     ? 43
       + activeCommentaryHeight
+      + activeFollowUpHeight
       + collapsedActivityHeight
       + (hasSupplementalWork ? 27 : 0)
     : consolidatesSettledWork

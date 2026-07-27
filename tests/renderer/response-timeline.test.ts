@@ -223,6 +223,42 @@ describe("authoritative response timeline", () => {
     expect(response.terminalAssistantMessage?.id).toBe("assistant-final");
   });
 
+  it("keeps parent follow-ups inside their authoritative turn and execution order", () => {
+    const turn = agentTurn("turn-follow-up", "user-primary", {
+      status: "running",
+      completedAt: null,
+    });
+    const timeline = buildResponseTimeline({
+      turns: [turn],
+      messages: [
+        message("user-primary", turn.id, "user", "Start the investigation.", "2026-07-23T10:00:00.000Z"),
+        message("commentary-before", turn.id, "assistant", "I found the relevant path.", "2026-07-23T10:00:02.000Z"),
+        message("user-follow-up", turn.id, "user", "Please include the Windows path too.", "2026-07-23T10:00:04.000Z"),
+        message("commentary-after", turn.id, "assistant", "I am checking both platforms.", "2026-07-23T10:00:06.000Z"),
+      ],
+      activities: [
+        activity("call-before", turn.id, { createdAt: "2026-07-23T10:00:03.000Z" }),
+        activity("call-after", turn.id, { createdAt: "2026-07-23T10:00:05.000Z" }),
+      ],
+      reasonings: [],
+      checkpoints: [],
+    });
+    const response = timelineTurn(timeline, turn.id);
+    const compatibility = timeline.find(({ kind }) => kind === "compatibility");
+
+    expect(response.followUpMessages.map(({ id }) => id)).toEqual(["user-follow-up"]);
+    expect(compatibility).toBeUndefined();
+    expect(buildTurnExecutionStream(response).map((entry) => (
+      entry.kind === "activity-group" ? entry.activities[0]?.id : entry.id
+    ))).toEqual([
+      "commentary-before",
+      "call-before",
+      "user-follow-up",
+      "call-after",
+      "commentary-after",
+    ]);
+  });
+
   it("groups only adjacent calls and preserves commentary between work phases", () => {
     const turn = agentTurn("turn-interleaved", "user-interleaved", {
       status: "running",

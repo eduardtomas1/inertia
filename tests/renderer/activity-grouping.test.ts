@@ -92,6 +92,7 @@ describe("Minimal Workstream adjacent call grouping", () => {
     const stream = buildTurnExecutionStream({
       id: turnId,
       agentTurn: { updatedAt: at(10) } as AgentTurn,
+      followUpMessages: [],
       commentaryMessages: [commentary("commentary", 3)],
       activities,
     });
@@ -99,7 +100,9 @@ describe("Minimal Workstream adjacent call grouping", () => {
     expect(stream.map((entry) =>
       entry.kind === "commentary"
         ? `commentary:${entry.id}`
-        : entry.activities.map(({ id }) => id).join(","))).toEqual([
+        : entry.kind === "follow-up"
+          ? `follow-up:${entry.id}`
+          : entry.activities.map(({ id }) => id).join(","))).toEqual([
       "old-success,new-success",
       "commentary:commentary",
       "after-commentary",

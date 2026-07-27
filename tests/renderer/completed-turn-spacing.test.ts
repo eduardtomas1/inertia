@@ -7,7 +7,7 @@ import { estimateCompletedTurnSpacing } from "../../src/renderer/src/utils/respo
 const css = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/gu, "\n");
 
 function cssBlock(marker: string): string {
   const markerIndex = css.indexOf(marker);

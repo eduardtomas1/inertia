@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const css = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/gu, "\n");
 
 function cssBlock(source: string, marker: string): string {
   const markerIndex = source.indexOf(marker);

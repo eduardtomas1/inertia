@@ -241,6 +241,7 @@ describe("agent input answers", () => {
     const stream = buildTurnExecutionStream({
       id: request.turnId,
       agentTurn: { updatedAt: activity.createdAt } as AgentTurn,
+      followUpMessages: [],
       commentaryMessages: [],
       activities: [activity],
       approvals: [{ id: "approval-not-a-stream-row" }],

@@ -58,6 +58,9 @@ const fs = require("node:fs");
 const readline = require("node:readline");
 const capture = (value) => fs.appendFileSync(process.env.INERTIA_APP_SERVER_CAPTURE, JSON.stringify(value) + "\\n");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+if (process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed") {
+  process.stdout.on("error", () => {});
+}
 const approvalMethod = process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "file-change"
   ? "item/fileChange/requestApproval"
   : process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "permissions"
@@ -150,10 +153,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "signal-exit") {
       return process.kill(process.pid, "SIGTERM");
     }
-    if (process.env.INERTIA_APP_SERVER_SCENARIO === "transport-close") {
-      process.stdout.end();
-      return setInterval(() => {}, 1000);
-    }
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "terminal-then-exit") {
       send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
       return setImmediate(() => process.exit(9));
@@ -166,7 +165,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       send({ method: "turn/completed", params: { threadId: "child-1", turn: { id: "child-turn-1", status: "completed", items: [], error: null } } });
       return;
     }
-    if (process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt") return;
+    if (
+      process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed"
+    ) return;
     if (message.params.approvalPolicy === "never") {
       requestInput();
       return;
@@ -787,7 +789,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it.each([
     ["malformed-frame", "malformed-protocol"],
     ["premature-exit", "process-exit"],
-    ["transport-close", "transport-closed"],
   ] as const)("classifies %s without exposing raw diagnostics", async (scenario, reason) => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
@@ -822,6 +823,42 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       });
     }
     expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("classifies a parent-observed transport close and cleans up the live process", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "transport-observed";
+    let run: ReturnType<typeof startCodexAppServerRun> | undefined;
+    let transportClosed = false;
+
+    run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Exercise the transport failure",
+      planMode: false,
+      access: "full",
+      onStatus: () => {
+        queueMicrotask(() => {
+          if (!run || transportClosed) return;
+          transportClosed = true;
+          run.child.stdout.destroy();
+        });
+      },
+    });
+    const closed = new Promise<void>((resolve) => run?.child.once("close", () => resolve()));
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "transport-closed",
+        technicalDetail: expect.any(String),
+      },
+    });
+    await closed;
+    expect(transportClosed).toBe(true);
+    expect(run.child.exitCode !== null || run.child.signalCode !== null).toBe(true);
   });
 
   it("preserves process signals and ignores a later process exit after a terminal event", async () => {

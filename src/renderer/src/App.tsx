@@ -72,6 +72,7 @@ import {
 } from "./lib/newConversation";
 import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
 import { projectNameFromPath } from "./lib/format";
+import { applyInterfaceScale } from "./utils/interfaceScale";
 
 type CommandWithoutId = ClientCommand extends infer Command
   ? Command extends { requestId: string }
@@ -304,7 +305,7 @@ export default function App(): React.JSX.Element {
   }, [connection.snapshot?.settings.theme]);
 
   useEffect(() => {
-    document.documentElement.dataset.interfaceScale = settings.interfaceScale;
+    applyInterfaceScale(settings.interfaceScale);
   }, [settings.interfaceScale]);
 
   useEffect(() => {

@@ -2,9 +2,25 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { FilesPanel } from "../../src/renderer/src/components/FilesPanel";
+import {
+  FilesPanel,
+  freshWorkspaceDirectoryPages,
+} from "../../src/renderer/src/components/FilesPanel";
 
 describe("FilesPanel", () => {
+  it("drops cached child directories when the root listing is refreshed", () => {
+    const pages = freshWorkspaceDirectoryPages([
+      { path: "src", kind: "directory" },
+      { path: "README.md", kind: "file" },
+    ], false);
+
+    expect([...pages.keys()]).toEqual([""]);
+    expect(pages.get("")?.entries.map(({ path }) => path)).toEqual([
+      "src",
+      "README.md",
+    ]);
+  });
+
   it("renders a lazy accessible tree with roving focus and a clear selection", () => {
     const html = renderToStaticMarkup(createElement(FilesPanel, {
       entries: [

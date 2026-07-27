@@ -47,6 +47,7 @@ import {
   activeWorkIdentityLabel,
   finalAnswerIdentityLabel,
 } from "../utils/finalAnswerIdentity";
+import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../utils/interfaceScale";
 import {
   activityAttentionSeverity,
   activityDetailPresentation,
@@ -378,6 +379,23 @@ function CommentaryRow({
   );
 }
 
+function FollowUpRow({
+  entry,
+}: {
+  entry: Extract<TurnExecutionStreamEntry, { kind: "follow-up" }>;
+}): React.JSX.Element {
+  return (
+    <article
+      className="turn-follow-up-row"
+      aria-label="Your follow-up"
+      data-follow-up-message-id={entry.message.id}
+    >
+      <span>You</span>
+      <p>{entry.message.content}</p>
+    </article>
+  );
+}
+
 function useAnchoredDetailsToggle(
   onBeforeToggle?: () => void,
   onAfterToggle?: () => void,
@@ -486,8 +504,9 @@ function ExecutionStream({
   if (entries.length === 0) return null;
   return (
     <div className="turn-execution-stream" role="list" aria-label="Agent work transcript">
-      {entries.map((entry) => entry.kind === "commentary"
-        ? (
+      {entries.map((entry) => {
+        if (entry.kind === "commentary") {
+          return (
             <div role="listitem" key={entry.id}>
               <CommentaryRow
                 entry={entry}
@@ -497,16 +516,25 @@ function ExecutionStream({
                 defaultCodeWrap={defaultCodeWrap}
               />
             </div>
-          )
-        : (
+          );
+        }
+        if (entry.kind === "follow-up") {
+          return (
             <div role="listitem" key={entry.id}>
-              <ActivityGroup
-                entry={entry}
-                onBeforeToggle={onBeforeToggle}
-                onAfterToggle={onAfterToggle}
-              />
+              <FollowUpRow entry={entry} />
             </div>
-          ))}
+          );
+        }
+        return (
+          <div role="listitem" key={entry.id}>
+            <ActivityGroup
+              entry={entry}
+              onBeforeToggle={onBeforeToggle}
+              onAfterToggle={onAfterToggle}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1746,6 +1774,10 @@ function useTimelineEstimateLayout(
     const mutationObserver = typeof MutationObserver === "undefined"
       ? null
       : new MutationObserver(measure);
+    window.addEventListener(
+      INTERFACE_SCALE_WILL_CHANGE_EVENT,
+      onBeforeLayoutChange,
+    );
     mutationObserver?.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["data-interface-scale"],
@@ -1759,6 +1791,10 @@ function useTimelineEstimateLayout(
     return () => {
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
+      window.removeEventListener(
+        INTERFACE_SCALE_WILL_CHANGE_EVENT,
+        onBeforeLayoutChange,
+      );
     };
   }, [conversationId, onBeforeLayoutChange, timelineElementRef]);
   return layout;
@@ -1982,6 +2018,7 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
   const pendingAnchors = useRef(new Map<string, ExpansionAnchor>());
   const activeAnchorRestorations = useRef(new Map<string, number>());
   const manuallyAdjustedRows = useRef(new Set<string>());
+  const layoutAnchorActive = useRef(false);
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
     shouldAdjustTimelineScrollPosition({
       itemStart: item.start,
@@ -1989,7 +2026,8 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
       scrollOffset: instance.scrollOffset ?? 0,
       firstMeasurement: !instance.itemSizeCache.has(item.key),
       scrollDirection: instance.scrollDirection,
-      manuallyAnchored: manuallyAdjustedRows.current.has(String(item.key)),
+      manuallyAnchored: layoutAnchorActive.current
+        || manuallyAdjustedRows.current.has(String(item.key)),
     });
   captureLayoutAnchorRef.current = () => {
     if (pendingLayoutAnchor.current) return;
@@ -2040,15 +2078,31 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     const anchorIndex = rowId === null
       ? -1
       : timeline.findIndex((item) => item.id === rowId);
+    layoutAnchorActive.current = true;
     virtualizer.measure();
 
     let cancelled = false;
     let attempts = 0;
     let stableFrames = 0;
+    const settleUntil = performance.now() + 2_000;
+    const maximumSettleFrames = 360;
+    const removeIntentListeners = (): void => {
+      scrollElement.removeEventListener("wheel", cancelForUserIntent);
+      scrollElement.removeEventListener("touchstart", cancelForUserIntent);
+      scrollElement.removeEventListener("pointerdown", cancelForUserIntent);
+      scrollElement.removeEventListener("keydown", cancelForUserIntent);
+    };
+    const finishRestoration = (): void => {
+      if (cancelled) return;
+      cancelled = true;
+      layoutAnchorActive.current = false;
+      removeIntentListeners();
+    };
     const restore = (): void => {
       if (cancelled) return;
       if (wasFollowing) {
         scrollElement.scrollTo({ top: scrollElement.scrollHeight, behavior: "auto" });
+        finishRestoration();
         return;
       }
       const row = rowId
@@ -2056,12 +2110,14 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
             .find((element) => element.dataset.responseRowId === rowId)
         : null;
       if (!row) {
-        if (anchorIndex >= 0 && attempts === 0) {
+        if (anchorIndex >= 0 && attempts % 4 === 0) {
           virtualizer.scrollToIndex(anchorIndex, { align: "start", behavior: "auto" });
         }
-        if (attempts < 8) {
-          attempts += 1;
+        attempts += 1;
+        if (attempts < maximumSettleFrames) {
           window.requestAnimationFrame(restore);
+        } else {
+          finishRestoration();
         }
         return;
       }
@@ -2070,14 +2126,26 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
       const delta = currentOffset - viewportOffset;
       if (Math.abs(delta) >= 0.5) scrollElement.scrollTop += delta;
       stableFrames = Math.abs(delta) < 0.5 ? stableFrames + 1 : 0;
-      if (attempts < 8 && stableFrames < 2) {
-        attempts += 1;
+      attempts += 1;
+      if (
+        attempts < maximumSettleFrames
+        && (performance.now() < settleUntil || stableFrames < 8)
+      ) {
         window.requestAnimationFrame(restore);
+      } else {
+        finishRestoration();
       }
     };
+    function cancelForUserIntent(): void {
+      finishRestoration();
+    }
+    scrollElement.addEventListener("wheel", cancelForUserIntent, { passive: true });
+    scrollElement.addEventListener("touchstart", cancelForUserIntent, { passive: true });
+    scrollElement.addEventListener("pointerdown", cancelForUserIntent);
+    scrollElement.addEventListener("keydown", cancelForUserIntent);
     const frame = window.requestAnimationFrame(restore);
     return () => {
-      cancelled = true;
+      finishRestoration();
       window.cancelAnimationFrame(frame);
     };
   }, [

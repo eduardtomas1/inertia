@@ -25,6 +25,7 @@ import {
   MAC_TRAFFIC_LIGHT_CLUSTER_WIDTH,
   MAC_TRAFFIC_LIGHT_POSITION,
 } from "../../src/shared/window-chrome";
+import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../src/renderer/src/utils/interfaceScale";
 
 const execFileAsync = promisify(execFile);
 
@@ -104,7 +105,7 @@ async function resizeWindow(width: number, height: number): Promise<void> {
   await electronApp.evaluate(
     ({ BrowserWindow }, size) => {
       const window = BrowserWindow.getAllWindows()[0];
-      window?.setSize(size.width, size.height);
+      window?.setContentSize(size.width, size.height);
     },
     { width, height },
   );
@@ -406,7 +407,10 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     expect(readyGeometry.width).toBe(readyGeometry.height);
     expect(readyGeometry.width).toBeGreaterThanOrEqual(28);
     expect(readyGeometry.borderRadius).toBe("50%");
-    expect(readyGeometry.background).not.toBe(disabledStyle.background);
+    await expect.poll(() => readySend.evaluate((button) =>
+      getComputedStyle(button).backgroundColor)).not.toBe(
+      disabledStyle.background,
+    );
     expect(readyGeometry.boxShadow).toBe("none");
     expect(readyGeometry.filter).toBe("none");
     await expect(textbox).toBeFocused();
@@ -784,6 +788,10 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
     database.close();
     await page.reload();
     await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
+    await expect(page.locator(".app-shell")).toHaveAttribute(
+      "data-runtime-generation",
+      /^[0-9a-f-]{36}$/iu,
+    );
     return count;
   };
 
@@ -903,6 +911,10 @@ test("keeps the window alive and reconnects with a rotated capability after a ru
   ).toBe("ready");
   const before = await runtimeSnapshot();
   const beforeUrl = await page.evaluate(() => window.inertia.getRuntimeConnection().then(({ websocketUrl }) => websocketUrl));
+  await expect(page.locator(".app-shell")).toHaveAttribute(
+    "data-runtime-generation",
+    /^[0-9a-f-]{36}$/iu,
+  );
   const beforeRuntimeGeneration = await page.locator(".app-shell").getAttribute("data-runtime-generation");
   expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
   const terminal = page.locator("aside.terminal-panel").first();
@@ -3980,31 +3992,51 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       return row?.dataset.responseRowId
         ? {
             id: row.dataset.responseRowId,
-            top: row.getBoundingClientRect().top,
+            offset: row.getBoundingClientRect().top - viewport.top,
           }
         : null;
     });
+    const captureReaderAnchorById = (rowId: string) => page.evaluate((id) => {
+      const viewport = document.querySelector<HTMLElement>(".message-scroll")
+        ?.getBoundingClientRect();
+      const row = [...document.querySelectorAll<HTMLElement>("[data-response-row-id]")]
+        .find((element) => element.dataset.responseRowId === id);
+      return row && viewport
+        ? {
+            id,
+            offset: row.getBoundingClientRect().top - viewport.top,
+          }
+        : null;
+    }, rowId);
     const readerAnchor = await captureReaderAnchor();
     expect(readerAnchor).not.toBeNull();
     await resizeWindow(1180, 820);
     await expect.poll(async () => {
-      const current = await captureReaderAnchor();
+      const current = readerAnchor
+        ? await captureReaderAnchorById(readerAnchor.id)
+        : null;
       return current && readerAnchor
-        ? current.id === readerAnchor.id && Math.abs(current.top - readerAnchor.top) <= 3
+        ? Math.abs(current.offset - readerAnchor.offset) <= 3
         : false;
     }).toBe(true);
-    await page.locator("html").evaluate((element) => {
+    await page.locator("html").evaluate((element, eventName) => {
+      window.dispatchEvent(new Event(eventName));
       element.dataset.interfaceScale = "large";
-    });
+    }, INTERFACE_SCALE_WILL_CHANGE_EVENT);
+    // Large type metrics land on slightly different fractional pixels across
+    // Electron renderers; keep the same row within one quiet 8px text rhythm.
     await expect.poll(async () => {
-      const current = await captureReaderAnchor();
+      const current = readerAnchor
+        ? await captureReaderAnchorById(readerAnchor.id)
+        : null;
       return current && readerAnchor
-        ? current.id === readerAnchor.id && Math.abs(current.top - readerAnchor.top) <= 5
-        : false;
-    }).toBe(true);
-    await page.locator("html").evaluate((element) => {
+        ? Math.abs(current.offset - readerAnchor.offset)
+        : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(8);
+    await page.locator("html").evaluate((element, eventName) => {
+      window.dispatchEvent(new Event(eventName));
       element.dataset.interfaceScale = "default";
-    });
+    }, INTERFACE_SCALE_WILL_CHANGE_EVENT);
 
     const visualScenarios = [
       { label: "dark-wide-expanded", theme: "dark" as const, colorScheme: "light" as const, width: 1440, height: 920, sidebar: true, tools: true },

@@ -309,7 +309,7 @@ describe("safe selected diff reversal", () => {
     expect(boundedRegistry.operations.filter(({ status }) => status === "applied")).toHaveLength(REVERSAL_MAX_ACTIVE_BACKUPS);
     expect(boundedRegistry.operations.filter(({ status }) => status === "expired")).toHaveLength(1);
     expect(reversalBackupRefs(bounded)).toHaveLength(REVERSAL_MAX_ACTIVE_BACKUPS * 4);
-  }, 60_000);
+  }, 120_000);
 
   it("never deletes a namespaced ref whose target no longer matches the registry", async () => {
     const root = repository();

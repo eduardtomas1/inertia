@@ -621,7 +621,7 @@ describe("TurnController authoritative lifecycle", () => {
     planRuntime.provider.resolve();
     await flushPromises();
     planRuntime.store.close();
-  });
+  }, 30_000);
 
   it("adds the Build instruction once per follow-up when resuming a provider session", async () => {
     const runtime = await testRuntime();

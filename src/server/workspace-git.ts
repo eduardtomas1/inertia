@@ -192,7 +192,7 @@ async function mapWithConcurrency<T, R>(
   concurrency: number,
   operation: (value: T) => Promise<R>,
 ): Promise<R[]> {
-  const output = new Array<R>(values.length);
+  const output = Array<R>(values.length);
   let cursor = 0;
   const workers = Array.from(
     { length: Math.min(concurrency, values.length) },

@@ -97,8 +97,6 @@ declare global {
     inertia: DesktopBridge;
   }
 }
-
-export {};
 import type {
   BackendCredentialProfileRequest,
   BackendCredentialState,

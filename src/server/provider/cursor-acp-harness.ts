@@ -118,7 +118,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     return true;
   };
   const cancelPending = (): void => {
-    for (const requestId of [...approvals.keys()]) settleApproval(requestId, "cancel");
+    for (const requestId of approvals.keys()) settleApproval(requestId, "cancel");
     for (const [requestId, pending] of inputs) {
       pending.settled = true;
       inputs.delete(requestId);

@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,11 +21,9 @@ const lineBudgets = new Map([
   ["src/renderer/src/hooks/useBackendProfiles.ts", 220],
   ["src/renderer/src/hooks/useActivityActions.ts", 200],
   ["src/renderer/src/hooks/useDesktopTools.ts", 160],
-  // These remaining compatibility seams are lowered as their current
-  // behavior is moved behind focused modules in this branch.
-  ["src/server/database.ts", 2_800],
-  ["src/server/index.ts", 2_000],
-  ["src/server/runtime/turns/turn-controller.ts", 1_750],
+  ["src/server/database.ts", 750],
+  ["src/server/index.ts", 600],
+  ["src/server/runtime/turns/turn-controller.ts", 620],
   ["src/shared/contracts.ts", 50],
 ]);
 
@@ -51,6 +49,14 @@ const forbiddenFacadeImports = [
     patterns: [/from\s+["'][^"']*\/database["']/],
   },
   {
+    directory: "src/server/runtime/turns",
+    patterns: [/from\s+["'][^"']*\/turn-controller["']/],
+  },
+  {
+    directory: "src/server/runtime/commands",
+    patterns: [/from\s+["'][^"']*\/(?:server\/)?index["']/],
+  },
+  {
     directory: "src/shared/contracts",
     patterns: [/from\s+["'][^"']*(?:^|\/)contracts["']/],
   },
@@ -61,6 +67,69 @@ function sourceFiles(directory) {
   return readdirSync(absoluteDirectory, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && [".ts", ".tsx"].includes(extname(entry.name)))
     .map((entry) => join(entry.parentPath, entry.name));
+}
+
+function resolveLocalModule(fromFile, specifier) {
+  if (!specifier.startsWith(".")) return null;
+  const base = resolve(fromFile, "..", specifier);
+  const candidates = [
+    `${base}.ts`,
+    `${base}.tsx`,
+    join(base, "index.ts"),
+    join(base, "index.tsx"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function localDependencies(file) {
+  const contents = readFileSync(file, "utf8");
+  const dependencies = [];
+  const patterns = [
+    /\b(?:import|export)\s+(?:type\s+)?[^;"']*?\s+from\s+["'](\.[^"']+)["']/gu,
+    /\bimport\s*["'](\.[^"']+)["']/gu,
+  ];
+  for (const pattern of patterns) {
+    for (const match of contents.matchAll(pattern)) {
+      const dependency = resolveLocalModule(file, match[1]);
+      if (dependency) dependencies.push(dependency);
+    }
+  }
+  return dependencies;
+}
+
+function firstModuleCycle(directory) {
+  const files = sourceFiles(directory);
+  const fileSet = new Set(files);
+  const graph = new Map(files.map((file) => [
+    file,
+    localDependencies(file).filter((dependency) => fileSet.has(dependency)),
+  ]));
+  const state = new Map();
+  const stack = [];
+
+  const visit = (file) => {
+    state.set(file, "visiting");
+    stack.push(file);
+    for (const dependency of graph.get(file) ?? []) {
+      if (state.get(dependency) === "visiting") {
+        return [...stack.slice(stack.indexOf(dependency)), dependency];
+      }
+      if (state.get(dependency) !== "visited") {
+        const cycle = visit(dependency);
+        if (cycle) return cycle;
+      }
+    }
+    stack.pop();
+    state.set(file, "visited");
+    return null;
+  };
+
+  for (const file of files) {
+    if (state.has(file)) continue;
+    const cycle = visit(file);
+    if (cycle) return cycle;
+  }
+  return null;
 }
 
 const failures = [];
@@ -83,6 +152,20 @@ for (const rule of forbiddenFacadeImports) {
         );
       }
     }
+  }
+}
+
+for (const directory of [
+  "src/shared",
+  "src/renderer/src/utils/response-timeline",
+]) {
+  const cycle = firstModuleCycle(directory);
+  if (cycle) {
+    failures.push(
+      `${directory} contains an import cycle: ${cycle
+        .map((file) => relative(workspaceRoot, file))
+        .join(" -> ")}.`,
+    );
   }
 }
 

@@ -399,7 +399,7 @@ export class TurnController {
 
   rendererDisconnected(ownerId: string): number {
     let settled = 0;
-    for (const active of [...this.activeByConversation.values()]) {
+    for (const active of this.activeByConversation.values()) {
       if (active.rendererOwnerId !== ownerId) continue;
       this.providers.cancel(active.conversation.id);
       if (this.settle(
@@ -423,7 +423,7 @@ export class TurnController {
   async dispose(cause: "runtime-shutdown" | "runtime-crash" = "runtime-shutdown"): Promise<void> {
     if (this.closing) return;
     this.closing = true;
-    for (const active of [...this.activeByConversation.values()]) {
+    for (const active of this.activeByConversation.values()) {
       this.providers.cancel(active.conversation.id);
       this.settle(
         active,
@@ -435,7 +435,7 @@ export class TurnController {
       );
     }
     await this.providers.disposeAll();
-    await Promise.allSettled([...this.settlementTasks]);
+    await Promise.allSettled(this.settlementTasks);
   }
 
   /**

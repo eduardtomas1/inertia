@@ -1,7 +1,5 @@
 import { extname, win32 } from "node:path";
 
-import type { ProviderEnvironment } from "../environment";
-
 export interface ProviderProcessInvocation {
   command: string;
   args: string[];

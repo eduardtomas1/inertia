@@ -28,10 +28,7 @@ import {
   type ClaudeCompatibleBackendProfile,
   type ClaudeModelRouting,
 } from "../../../shared/claude-backend-profiles";
-import {
-  backendProbeMatchesProfile,
-  type BackendCompatibilityProbeResult,
-} from "../../../shared/backend-probe";
+import type { BackendCompatibilityProbeResult } from "../../../shared/backend-probe";
 import {
   nativeBackendProfile,
   nativeHarnessId,
@@ -39,9 +36,7 @@ import {
   modelSelectionSchema,
   resolveHarnessBackendCompatibility,
   type HarnessBackendCompatibility,
-  type KnownHarnessId,
   type ModelBackendProfile,
-  type ModelCapability,
   type ModelSelection,
 } from "../../../shared/model-routing";
 import type { ProviderId, ProviderInfo } from "../../../shared/contracts";

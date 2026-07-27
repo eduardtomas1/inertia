@@ -10,7 +10,7 @@ import type {
   CheckpointSummary,
   TurnGitArtifact,
 } from "@shared/contracts";
-import { activityNeedsAttention } from "./execution";
+import { activityNeedsAttention } from "./activity-attention";
 
 const TERMINAL_TURN_STATUSES: ReadonlySet<AgentTurnStatus> = new Set([
   "completed",

@@ -8,7 +8,6 @@ import {
   type Options as ClaudeOptions,
   type PermissionResult,
   type Query,
-  type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 

@@ -7,14 +7,14 @@ import type {
   ModelSelection,
 } from "../model-routing";
 import type { ProviderMaintenanceStatus } from "../provider-maintenance";
-import type {
-  ConversationLatestTurnSummary,
-} from "./agent";
+import type { ProviderId } from "../provider";
+import type { AgentTurnStatus } from "../turn-lifecycle";
+
+export type { ProviderId } from "../provider";
 
 export type ThemePreference = "system" | "light" | "dark";
 export type ProjectStatus = "ready" | "working" | "attention";
 export type MessageRole = "user" | "assistant" | "system";
-export type ProviderId = "codex" | "claude" | "cursor" | "opencode";
 export type ProviderInstallState = "checking" | "installed" | "not-installed" | "error";
 export type ProviderAuthState = "checking" | "authenticated" | "unauthenticated" | "configured" | "unknown" | "error";
 export type InteractionMode = "build" | "plan";
@@ -28,6 +28,24 @@ export type SidebarMode = "classic" | "activity";
 export type ProjectGroupingMode = "repository" | "repository-path" | "separate";
 export type ThreadAttentionKind = "approval" | "input";
 export type AttentionState = "unseen" | "seen" | "acknowledged" | "dismissed";
+
+export interface ConversationLatestTurnSummary {
+  id: string;
+  runId: string;
+  status: AgentTurnStatus;
+  providerId: ProviderId;
+  harnessId: ContinuationIdentity["harnessId"];
+  backendProfileId: ModelSelection["backendProfileId"];
+  modelSelection: ModelSelection;
+  continuationIdentity: ContinuationIdentity;
+  model: string;
+  reasoningEffort: string;
+  requestedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  terminalReason: string | null;
+  updatedAt: string;
+}
 
 export interface ProviderReasoningOption {
   value: string;

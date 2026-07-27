@@ -1,9 +1,6 @@
 import type {
   AgentActivity,
   AgentApprovalDecision,
-  AgentApprovalRequest,
-  AgentInputRequest,
-  AgentPlan,
   AgentTurn,
   AgentTurnTerminalStatus,
   AgentTurnUsageSnapshot,

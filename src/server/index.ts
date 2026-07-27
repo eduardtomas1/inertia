@@ -80,6 +80,10 @@ import {
 import {
   attachRuntimeWebSocketBoundary,
 } from "./runtime/websocket-boundary";
+import {
+  TrustedAttachmentResolver,
+  type RuntimeAttachmentBroker,
+} from "./runtime/attachments/trusted-attachment-resolver";
 
 export {
   assembleReadOnlyReviewRequest,
@@ -95,6 +99,9 @@ export interface RuntimeOptions {
   /** Full profiles remain in the privileged runtime and never enter snapshots. */
   kimiClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
   backendCredentials?: RuntimeBackendCredentialBroker;
+  /** Trusted main-process import root and capability broker. */
+  attachmentRoot?: string;
+  attachments?: RuntimeAttachmentBroker;
   /** Test and embedding seam; the desktop runtime uses the default registry. */
   agentHarnessRegistry?: AgentHarnessRegistry;
 }
@@ -155,6 +162,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     ...backendProfileController.providerManagerOptions(),
   }, options.agentHarnessRegistry);
   backendProfileController.attachProviderManager(providers);
+  const attachmentResolver = options.attachmentRoot && options.attachments
+    ? new TrustedAttachmentResolver(
+        resolve(options.attachmentRoot),
+        options.attachments,
+      )
+    : null;
   const cachedProviderMetadata = Object.fromEntries(PROVIDER_IDS.map((providerId) => [providerId, providers.cachedMetadata(providerId)]));
   let turns: TurnController;
   let providerInfo = initialProviderSnapshots(enableProviders, cachedProviderMetadata);
@@ -430,6 +443,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         pendingInputs,
         dataDirectory,
         enableProviders,
+        attachmentResolver,
         providerInfo: () => providerInfo,
         broadcastSnapshot,
         send,

@@ -17,6 +17,7 @@ import type { BackendProfileController } from "../backends/backend-profile-contr
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
+import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -32,6 +33,7 @@ export interface TurnInteractionCommandDependencies {
   pendingInputs: Map<string, AgentInputRequest>;
   dataDirectory: string;
   enableProviders: boolean;
+  attachmentResolver: TrustedAttachmentResolver | null;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -86,8 +88,17 @@ export function createTurnInteractionCommandHandler(
             "Wait for the current run or read-only review to finish first.",
           );
         }
+        const attachments = command.payload.attachments.length === 0
+          ? []
+          : await dependencies.attachmentResolver?.resolveAll(
+              command.payload.attachments,
+            ) ?? (() => {
+              throw new RuntimeRequestError(
+                "The selected attachment is no longer available or could not be verified.",
+              );
+            })();
         if (
-          command.payload.attachments.some(
+          attachments.some(
             ({ mimeType }) => chatAttachmentKind(mimeType) === "document",
           )
         ) {
@@ -191,7 +202,7 @@ export function createTurnInteractionCommandHandler(
           ? dependencies.turns.queue({
               conversationId: conversation.id,
               content: command.payload.content,
-              attachments: command.payload.attachments,
+              attachments,
               context: command.payload.context,
               checkpointId,
             })
@@ -201,7 +212,7 @@ export function createTurnInteractionCommandHandler(
             conversation.id,
             command.payload.content,
             "user",
-            command.payload.attachments,
+            attachments,
           );
         }
         if (

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   RuntimeSupervisor,
   runtimeRestartDelayMs,
+  type RuntimeAttachmentBroker,
   type RuntimeCredentialBroker,
 } from "../../src/main/runtime-supervisor";
 import type { RuntimeWorkerCommand } from "../../src/main/runtime-process-protocol";
@@ -15,6 +16,15 @@ const firstUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
 const secondUrl = `ws://127.0.0.1:41002/runtime/${"b".repeat(43)}`;
 const dataDirectory = resolve(tmpdir(), "inertia data");
 const workspaceDirectory = resolve(tmpdir(), "inertia workspace");
+const attachmentId = "33333333-3333-4333-8333-333333333333";
+const trustedAttachment = {
+  id: attachmentId,
+  name: "preview.png",
+  path: resolve(tmpdir(), "inertia attachments", `${attachmentId}.png`),
+  mimeType: "image/png" as const,
+  size: 8,
+  digest: "a".repeat(64),
+};
 const projectPathRequest = {
   projectId: "11111111-1111-4111-8111-111111111111",
   conversationId: "22222222-2222-4222-8222-222222222222",
@@ -55,6 +65,8 @@ function createHarness(options: {
   forceKillWaitMs?: number;
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
+  attachmentBroker?: RuntimeAttachmentBroker;
+  attachmentRequestTimeoutMs?: number;
 } = {}) {
   const children: FakeUtilityProcess[] = [];
   const forceKill = vi.fn();
@@ -76,6 +88,8 @@ function createHarness(options: {
     forceKill,
     credentialBroker: options.credentialBroker,
     credentialRequestTimeoutMs: options.credentialRequestTimeoutMs,
+    attachmentBroker: options.attachmentBroker,
+    attachmentRequestTimeoutMs: options.attachmentRequestTimeoutMs,
   });
   return { children, forceKill, supervisor };
 }
@@ -260,6 +274,75 @@ describe("RuntimeSupervisor", () => {
       ok: false,
       code: "unavailable",
       message: "Secure credential storage is unavailable.",
+    });
+  });
+
+  it("brokers attachments only to the current generation and bounds stalled requests", async () => {
+    let resolveAttachment:
+      | ((value: typeof trustedAttachment | null) => void)
+      | undefined;
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(() => new Promise<typeof trustedAttachment | null>((resolvePromise) => {
+        resolveAttachment = resolvePromise;
+      })),
+    };
+    const { children, supervisor } = createHarness({
+      attachmentBroker,
+      attachmentRequestTimeoutMs: 25,
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const requestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-request",
+      requestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.resolve).toHaveBeenCalledWith(
+      attachmentId,
+      expect.any(AbortSignal),
+    );
+    await vi.advanceTimersByTimeAsync(25);
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.attachment-result",
+      requestId,
+      ok: false,
+      code: "unavailable",
+    });
+
+    children[0].exit(1);
+    resolveAttachment?.(trustedAttachment);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children[0].messages).not.toContainEqual(expect.objectContaining({
+      type: "runtime.attachment-result",
+      attachment: trustedAttachment,
+    }));
+  });
+
+  it("returns only the main-authorized attachment descriptor", async () => {
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(async () => trustedAttachment),
+    };
+    const { children, supervisor } = createHarness({ attachmentBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const requestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-request",
+      requestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.attachment-result",
+      requestId,
+      ok: true,
+      attachment: trustedAttachment,
     });
   });
 

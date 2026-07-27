@@ -9,6 +9,12 @@ import {
   type RuntimeWorkerCommand,
   type RuntimeWorkerOptions,
 } from "./runtime-process-protocol.js";
+import {
+  RuntimeAttachmentBrokerCoordinator,
+  type RuntimeAttachmentBroker,
+} from "./runtime-attachment-broker.js";
+
+export type { RuntimeAttachmentBroker } from "./runtime-attachment-broker.js";
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 20_000;
 const DEFAULT_STABLE_UPTIME_MS = 30_000;
@@ -28,6 +34,7 @@ interface RuntimeProcessRecord {
   acceptingReady: boolean;
   reportedFailure: string | null;
   credentialRequestIds: Set<string>;
+  attachmentRequestIds: Set<string>;
 }
 
 interface PendingProjectPath {
@@ -81,6 +88,8 @@ export interface RuntimeSupervisorOptions {
   forceKill?: (pid: number) => void;
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
+  attachmentBroker?: RuntimeAttachmentBroker;
+  attachmentRequestTimeoutMs?: number;
   onStateChange?: (snapshot: RuntimeSupervisorSnapshot) => void;
 }
 
@@ -101,6 +110,7 @@ export class RuntimeSupervisor {
   private readonly forceKill: (pid: number) => void;
   private readonly credentialBroker?: RuntimeCredentialBroker;
   private readonly credentialRequestTimeoutMs: number;
+  private readonly attachmentRequests: RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
   private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
   private phase: RuntimeSupervisorPhase = "idle";
@@ -141,6 +151,17 @@ export class RuntimeSupervisor {
       options.credentialRequestTimeoutMs,
       DEFAULT_CREDENTIAL_REQUEST_TIMEOUT_MS,
     );
+    this.attachmentRequests = new RuntimeAttachmentBrokerCoordinator({
+      broker: options.attachmentBroker,
+      timeoutMs: boundedDuration(
+        options.attachmentRequestTimeoutMs,
+        DEFAULT_REQUEST_TIMEOUT_MS,
+      ),
+      setTimer: this.setTimer,
+      clearTimer: this.clearTimer,
+      accepts: (record) => this.acceptsBrokerRequests(record),
+      post: (record, result) => this.post(record.child, result),
+    });
     this.onStateChange = options.onStateChange;
   }
 
@@ -196,6 +217,7 @@ export class RuntimeSupervisor {
     this.websocketUrl = null;
     this.rejectProjectPaths(this.current, "The local service is stopping.");
     this.clearCredentialRequests(this.current);
+    if (this.current) this.attachmentRequests.clear(this.current);
 
     if (!this.current) {
       this.phase = "stopped";
@@ -255,6 +277,7 @@ export class RuntimeSupervisor {
       acceptingReady: true,
       reportedFailure: null,
       credentialRequestIds: new Set(),
+      attachmentRequestIds: new Set(),
     };
     this.current = record;
     child.once("spawn", () => {
@@ -296,6 +319,10 @@ export class RuntimeSupervisor {
       this.handleCredentialRequest(record, event);
       return;
     }
+    if (event.type === "runtime.attachment-request") {
+      this.attachmentRequests.handle(record, event);
+      return;
+    }
     if (event.type === "runtime.project-path-resolved" || event.type === "runtime.project-path-rejected") {
       const pending = this.pendingProjectPaths.get(event.requestId);
       if (!pending || pending.record !== record) return;
@@ -311,12 +338,14 @@ export class RuntimeSupervisor {
       this.lastError = event.message;
       this.clearTimerValue("startupTimer");
       this.clearCredentialRequests(record);
+      this.attachmentRequests.clear(record);
       this.emitState();
       return;
     }
     if (event.type === "runtime.stopped") {
       record.acceptingReady = false;
       this.clearCredentialRequests(record);
+      this.attachmentRequests.clear(record);
       return;
     }
     if (!this.desiredRunning || !record.acceptingReady || record.ready) return;
@@ -341,6 +370,7 @@ export class RuntimeSupervisor {
     this.clearTimerValue("stableTimer");
     this.rejectProjectPaths(record, "The local service stopped before the project path was resolved.");
     this.clearCredentialRequests(record);
+    this.attachmentRequests.clear(record);
 
     if (!this.desiredRunning) {
       this.settleStopped(record);
@@ -402,7 +432,7 @@ export class RuntimeSupervisor {
     >,
   ): void {
     if (!event) return;
-    if (!this.acceptsCredentialRequests(record) || !this.credentialBroker) {
+    if (!this.acceptsBrokerRequests(record) || !this.credentialBroker) {
       this.post(record.child, {
         type: "runtime.credential-result",
         requestId: event.requestId,
@@ -462,7 +492,7 @@ export class RuntimeSupervisor {
         if (this.pendingCredentialRequests.get(event.requestId) !== pending) return;
         this.pendingCredentialRequests.delete(event.requestId);
         this.clearTimer(pending.timer);
-        if (!this.acceptsCredentialRequests(record)) return;
+        if (!this.acceptsBrokerRequests(record)) return;
         if (event.operation === "resolve") {
           if (typeof value !== "string") {
             this.post(record.child, {
@@ -510,7 +540,7 @@ export class RuntimeSupervisor {
         if (this.pendingCredentialRequests.get(event.requestId) !== pending) return;
         this.pendingCredentialRequests.delete(event.requestId);
         this.clearTimer(pending.timer);
-        if (!this.acceptsCredentialRequests(record)) return;
+        if (!this.acceptsBrokerRequests(record)) return;
         this.post(record.child, {
           type: "runtime.credential-result",
           requestId: event.requestId,
@@ -523,7 +553,7 @@ export class RuntimeSupervisor {
     );
   }
 
-  private acceptsCredentialRequests(record: RuntimeProcessRecord): boolean {
+  private acceptsBrokerRequests(record: RuntimeProcessRecord): boolean {
     return this.current === record
       && this.desiredRunning
       && record.acceptingReady

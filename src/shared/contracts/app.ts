@@ -1,0 +1,236 @@
+import type {
+  ModelBackendDefault,
+  ModelBackendProfileView,
+} from "../backend-profile-settings";
+import type {
+  ContinuationIdentity,
+  ModelSelection,
+} from "../model-routing";
+import type { ProviderMaintenanceStatus } from "../provider-maintenance";
+import type {
+  ConversationLatestTurnSummary,
+} from "./agent";
+
+export type ThemePreference = "system" | "light" | "dark";
+export type ProjectStatus = "ready" | "working" | "attention";
+export type MessageRole = "user" | "assistant" | "system";
+export type ProviderId = "codex" | "claude" | "cursor" | "opencode";
+export type ProviderInstallState = "checking" | "installed" | "not-installed" | "error";
+export type ProviderAuthState = "checking" | "authenticated" | "unauthenticated" | "configured" | "unknown" | "error";
+export type InteractionMode = "build" | "plan";
+export type AccessMode = "supervised" | "auto-edit" | "full";
+export type ThreadStatus = "idle" | "running" | "needs-input" | "completed" | "failed";
+export type AgentApprovalDecision = "approve" | "deny" | "cancel";
+export type ResponseDensity = "compact" | "default" | "comfortable";
+export type InterfaceScale = "compact" | "default" | "comfortable" | "large";
+export type UsageDisplayMode = "expanded" | "compact" | "hidden";
+export type SidebarMode = "classic" | "activity";
+export type ProjectGroupingMode = "repository" | "repository-path" | "separate";
+export type ThreadAttentionKind = "approval" | "input";
+export type AttentionState = "unseen" | "seen" | "acknowledged" | "dismissed";
+
+export interface ProviderReasoningOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
+export interface ProviderModel {
+  id: string;
+  label: string;
+  description: string;
+  isDefault: boolean;
+  inputModalities: Array<"text" | "image">;
+  reasoningOptions: ProviderReasoningOption[];
+  defaultReasoningEffort: string;
+}
+
+export interface ProviderRateLimit {
+  id: string;
+  label: string;
+  usedPercent: number;
+  remainingPercent: number;
+  windowMinutes: number | null;
+  resetsAt: string | null;
+}
+
+export type ProviderMetadataFreshness = "unavailable" | "fresh" | "stale";
+export type ProviderMetadataProvenance = "provider" | "session" | "persistent-cache";
+
+export interface ProviderMetadataFieldState {
+  freshness: ProviderMetadataFreshness;
+  provenance: ProviderMetadataProvenance | null;
+  updatedAt: string | null;
+  lastAttemptedAt: string | null;
+  refreshing: boolean;
+}
+
+export interface ProviderMetadataState {
+  models: ProviderMetadataFieldState;
+  rateLimits: ProviderMetadataFieldState;
+}
+
+export interface ProviderInfo {
+  id: ProviderId;
+  label: string;
+  command: string;
+  available: boolean;
+  version: string | null;
+  /** Resolved provider executable selected after discovery. */
+  executable?: string | null;
+  installState: ProviderInstallState;
+  authState: ProviderAuthState;
+  canRun: boolean;
+  statusMessage: string | null;
+  models: ProviderModel[];
+  rateLimits: ProviderRateLimit[];
+  metadataState: ProviderMetadataState;
+  /** Present after the runtime has checked this exact installed CLI. */
+  maintenance?: ProviderMaintenanceStatus;
+}
+
+export interface AppSettings {
+  theme: ThemePreference;
+  compactSidebar: boolean;
+  showTimestamps: boolean;
+  terminalFontSize: number;
+  defaultProvider: ProviderId;
+  defaultModel: string;
+  defaultAccessMode: AccessMode;
+  newThreadMode: "local" | "worktree";
+  wrapDiffs: boolean;
+  ignoreWhitespace: boolean;
+  showThinking: boolean;
+  usageDisplayMode: UsageDisplayMode;
+  interfaceScale: InterfaceScale;
+  responseDensity: ResponseDensity;
+  defaultCodeWrap: boolean;
+  autoCollapseWorkLog: boolean;
+  showChangedFileSummaries: boolean;
+  sidebarMode: SidebarMode;
+  projectGrouping: ProjectGroupingMode;
+  autoOpenPlan: boolean;
+  confirmDestructiveActions: boolean;
+  defaultReasoningEffort: string;
+  defaultInteractionMode: InteractionMode;
+  /** Empty uses automatic discovery; otherwise an explicitly validated Codex binary or shim. */
+  codexBinaryPath: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  path: string;
+  normalizedPath: string;
+  repositoryIdentity: string | null;
+  repositoryRoot: string | null;
+  repositoryRelativePath: string;
+  groupingMode: ProjectGroupingMode | null;
+  color: string;
+  status: ProjectStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Conversation {
+  id: string;
+  projectId: string;
+  title: string;
+  providerId: ProviderId;
+  /** Canonical harness/backend/model configuration for the next turn. */
+  modelSelection: ModelSelection;
+  continuationIdentity: ContinuationIdentity | null;
+  /** @deprecated Read-only compatibility projection of modelSelection.modelId. */
+  model: string;
+  reasoningEffort: string;
+  interactionMode: InteractionMode;
+  accessMode: AccessMode;
+  status: ThreadStatus;
+  attentionKind: ThreadAttentionKind | null;
+  branch: string | null;
+  worktreePath: string | null;
+  providerSessionId: string | null;
+  archivedAt: string | null;
+  settledAt: string | null;
+  completedAt: string | null;
+  lastViewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Lightweight navigation metadata. Shells are safe to keep for every
+ * conversation because they never contain transcript, reasoning, plan, or
+ * artifact payloads.
+ */
+export type ConversationShell = Conversation & {
+  latestTurn: ConversationLatestTurnSummary | null;
+  pendingApproval: boolean;
+  pendingInput: boolean;
+};
+
+export interface WorkspaceRun {
+  id: string;
+  kind: "agent" | "check" | "service" | "source-control";
+  projectId: string;
+  conversationId: string | null;
+  /** Stable package-script identity for safely validated retry/rerun actions. */
+  actionId: string | null;
+  label: string;
+  detail: string | null;
+  status: "running" | "waiting" | "succeeded" | "failed" | "cancelled";
+  /** Durable user disposition; independent from the run lifecycle and thread settlement. */
+  attentionState: AttentionState;
+  /** Ephemeral runtime capability. False after a restart or when no owned process exists. */
+  canStop: boolean;
+  port: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface RuntimeSyncCursor {
+  runtimeGeneration: string;
+  latestSequence: number;
+}
+
+export interface AppSnapshot {
+  projects: Project[];
+  conversations: ConversationShell[];
+  runs: WorkspaceRun[];
+  providers: ProviderInfo[];
+  /** Safe backend configuration only; credential values and references are forbidden. */
+  backendProfiles?: ModelBackendProfileView[];
+  backendDefaults?: ModelBackendDefault[];
+  settings: AppSettings;
+  activeProjectId: string | null;
+  activeConversationId: string | null;
+  /** Present on authoritative runtime snapshots; optional for legacy fixtures. */
+  sync?: RuntimeSyncCursor;
+}
+
+export const defaultSettings: AppSettings = {
+  theme: "system",
+  compactSidebar: false,
+  showTimestamps: true,
+  terminalFontSize: 13,
+  defaultProvider: "codex",
+  defaultModel: "",
+  defaultAccessMode: "supervised",
+  newThreadMode: "local",
+  wrapDiffs: true,
+  ignoreWhitespace: false,
+  showThinking: true,
+  usageDisplayMode: "compact",
+  interfaceScale: "default",
+  responseDensity: "default",
+  defaultCodeWrap: false,
+  autoCollapseWorkLog: true,
+  showChangedFileSummaries: true,
+  sidebarMode: "classic",
+  projectGrouping: "separate",
+  autoOpenPlan: true,
+  confirmDestructiveActions: true,
+  defaultReasoningEffort: "",
+  defaultInteractionMode: "build",
+  codexBinaryPath: "",
+};

@@ -16,7 +16,7 @@ const lineBudgets = new Map([
   ["src/server/database.ts", 2_800],
   ["src/server/index.ts", 2_000],
   ["src/server/runtime/turns/turn-controller.ts", 1_750],
-  ["src/shared/contracts.ts", 1_850],
+  ["src/shared/contracts.ts", 50],
 ]);
 
 const forbiddenFacadeImports = [
@@ -39,6 +39,10 @@ const forbiddenFacadeImports = [
   {
     directory: "src/server/persistence",
     patterns: [/from\s+["'][^"']*\/database["']/],
+  },
+  {
+    directory: "src/shared/contracts",
+    patterns: [/from\s+["'][^"']*(?:^|\/)contracts["']/],
   },
 ];
 

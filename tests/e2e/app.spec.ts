@@ -4105,7 +4105,15 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       element.dataset.interfaceScale = "large";
     }, INTERFACE_SCALE_WILL_CHANGE_EVENT);
     // Large type metrics land on slightly different fractional pixels across
-    // Electron renderers; keep the same row within one quiet 8px text rhythm.
+    // Electron renderers. Keep the same row within a bounded half-em rhythm
+    // derived from the active scale instead of relying on one platform's
+    // subpixel rounding.
+    const scaleAnchorTolerance = await page.locator("html").evaluate((element) => {
+      const mainFontSize = Number.parseFloat(
+        getComputedStyle(element).getPropertyValue("--ui-font-main"),
+      );
+      return Math.ceil(mainFontSize / 2) + 1;
+    });
     await expect.poll(async () => {
       const current = readerAnchor
         ? await captureReaderAnchorById(readerAnchor.id)
@@ -4113,7 +4121,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       return current && readerAnchor
         ? Math.abs(current.offset - readerAnchor.offset)
         : Number.POSITIVE_INFINITY;
-    }).toBeLessThanOrEqual(8);
+    }).toBeLessThanOrEqual(scaleAnchorTolerance);
     await page.locator("html").evaluate((element, eventName) => {
       window.dispatchEvent(new Event(eventName));
       element.dataset.interfaceScale = "default";

@@ -1,6 +1,10 @@
 import type WebSocket from "ws";
 
-import type { ClientCommand, ServerEvent } from "../../../shared/contracts";
+import {
+  clientCommandSchema,
+  type ClientCommand,
+  type ServerEvent,
+} from "../../../shared/contracts";
 
 export type RuntimeCommandDisposition =
   | "not-handled"
@@ -21,6 +25,19 @@ export interface RuntimeCommandRouterOptions {
   broadcastSnapshot(): void;
   publicError(error: unknown): string;
 }
+
+export const RUNTIME_COMMAND_TYPES = Object.freeze(
+  clientCommandSchema.options.flatMap((schema) => {
+    const type = schema.shape.type;
+    if ("options" in type) {
+      return [...type.options] as ClientCommand["type"][];
+    }
+    if ("values" in type) {
+      return [...type.values] as ClientCommand["type"][];
+    }
+    return [];
+  }),
+);
 
 export function defineRuntimeCommandHandler(
   commandTypes: readonly ClientCommand["type"][],
@@ -52,6 +69,11 @@ function indexCommandOwners(
       owners.set(type, { handler, index: handlerIndex });
     }
   });
+  for (const type of RUNTIME_COMMAND_TYPES) {
+    if (!owners.has(type)) {
+      throw new Error(`Runtime command ${type} does not have an owner.`);
+    }
+  }
   return new Map(
     [...owners].map(([type, owner]) => [type, owner.handler]),
   );

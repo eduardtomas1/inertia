@@ -30,6 +30,7 @@ function fakeChild(
 ): ChildProcessWithoutNullStreams {
   const child = new EventEmitter() as ChildProcessWithoutNullStreams;
   Object.assign(child, {
+    pid: 4_242,
     stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),
@@ -40,6 +41,14 @@ function fakeChild(
     }),
   });
   return child;
+}
+
+function fakeTaskkill() {
+  const taskkill = new EventEmitter() as EventEmitter & {
+    unref: ReturnType<typeof vi.fn>;
+  };
+  taskkill.unref = vi.fn();
+  return taskkill;
 }
 
 describe("provider maintenance runner", () => {
@@ -128,6 +137,7 @@ describe("provider maintenance runner", () => {
     ]);
     expect(calls[0]?.args[4]).toContain("@openai/codex@latest");
     expect(calls[0]?.options).toMatchObject({
+      detached: false,
       shell: false,
       windowsVerbatimArguments: true,
     });
@@ -144,6 +154,13 @@ describe("provider maintenance runner", () => {
       environment: { PATH: "/tools", HOME: "/home/ada" },
       signal: abort.signal,
       spawn: () => child,
+      processLifecycle: {
+        platform: "linux",
+        killProcess: vi.fn((_pid, signal) => {
+          queueMicrotask(() => child.emit("close", null, signal));
+          return true as const;
+        }),
+      },
     });
     abort.abort();
 
@@ -151,7 +168,7 @@ describe("provider maintenance runner", () => {
       status: "cancelled",
       signal: "SIGTERM",
     });
-    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(child.kill).not.toHaveBeenCalled();
   });
 
   it("escalates to SIGKILL and settles when a child ignores cancellation", async () => {
@@ -162,6 +179,10 @@ describe("provider maintenance runner", () => {
       signal: abort.signal,
       killGraceMs: 100,
       spawn: () => child,
+      processLifecycle: {
+        platform: "linux",
+        killProcess: vi.fn(() => true as const),
+      },
     });
     abort.abort();
 
@@ -169,8 +190,120 @@ describe("provider maintenance runner", () => {
       status: "cancelled",
       signal: "SIGKILL",
     });
-    expect(child.kill).toHaveBeenNthCalledWith(1, "SIGTERM");
-    expect(child.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("cancels a Windows batch updater by terminating the cmd.exe process tree", async () => {
+    const abort = new AbortController();
+    const child = fakeChild();
+    const updateSpawn = vi.fn(() => child);
+    const taskkillSpawn = vi.fn(() => {
+      const taskkill = fakeTaskkill();
+      queueMicrotask(() => {
+        taskkill.emit("close", 0);
+        child.emit("close", null, "SIGTERM");
+      });
+      return taskkill;
+    });
+    const promise = runProviderMaintenanceAction(action({
+      executable: "C:\\Users\\Ada\\AppData\\Roaming\\npm\\npm.cmd",
+      args: ["install", "-g", "@openai/codex@latest"],
+      lockKey: "package-manager:npm-global",
+      installMethod: "npm-global",
+    }), {
+      platform: "win32",
+      environment: {
+        ComSpec: "C:\\Windows\\System32\\cmd.exe",
+        SystemRoot: "C:\\Windows",
+        PATH: "C:\\Tools",
+        PATHEXT: ".EXE;.CMD",
+      },
+      signal: abort.signal,
+      spawn: updateSpawn,
+      processLifecycle: {
+        platform: "win32",
+        spawnProcess: taskkillSpawn as never,
+      },
+    });
+
+    abort.abort();
+
+    await expect(promise).resolves.toMatchObject({
+      status: "cancelled",
+      signal: "SIGTERM",
+    });
+    expect(updateSpawn).toHaveBeenCalledWith(
+      "C:\\Windows\\System32\\cmd.exe",
+      expect.any(Array),
+      expect.objectContaining({
+        detached: false,
+        shell: false,
+        windowsVerbatimArguments: true,
+      }),
+    );
+    expect(taskkillSpawn).toHaveBeenCalledWith(
+      "taskkill.exe",
+      ["/pid", "4242", "/t"],
+      {
+        shell: false,
+        windowsHide: true,
+        stdio: "ignore",
+      },
+    );
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("force-terminates Windows batch descendants after an update timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild();
+      const taskkillSpawn = vi.fn(() => {
+        const taskkill = fakeTaskkill();
+        queueMicrotask(() => taskkill.emit("close", 0));
+        return taskkill;
+      });
+      const promise = runProviderMaintenanceAction(action({
+        executable: "C:\\Tools\\update-provider.bat",
+      }), {
+        platform: "win32",
+        environment: {
+          ComSpec: "C:\\Windows\\System32\\cmd.exe",
+          SystemRoot: "C:\\Windows",
+          PATH: "C:\\Tools",
+          PATHEXT: ".EXE;.CMD;.BAT",
+        },
+        signal: new AbortController().signal,
+        timeoutMs: 1_000,
+        killGraceMs: 100,
+        spawn: () => child,
+        processLifecycle: {
+          platform: "win32",
+          spawnProcess: taskkillSpawn as never,
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(1_100);
+
+      await expect(promise).resolves.toMatchObject({
+        status: "timed-out",
+        signal: "SIGKILL",
+      });
+      expect(taskkillSpawn).toHaveBeenNthCalledWith(
+        1,
+        "taskkill.exe",
+        ["/pid", "4242", "/t"],
+        expect.objectContaining({ shell: false }),
+      );
+      expect(taskkillSpawn).toHaveBeenNthCalledWith(
+        2,
+        "taskkill.exe",
+        ["/pid", "4242", "/t", "/f"],
+        expect.objectContaining({ shell: false }),
+      );
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps only the environment required for the supervised updater", () => {

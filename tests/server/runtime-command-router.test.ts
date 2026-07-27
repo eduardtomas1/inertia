@@ -5,6 +5,7 @@ import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
 import {
   createRuntimeCommandExecutor,
   defineRuntimeCommandHandler,
+  RUNTIME_COMMAND_TYPES,
   type RuntimeCommandHandler,
 } from "../../src/server/runtime/commands/command-router";
 
@@ -20,15 +21,19 @@ function command(type: ClientCommand["type"] = "project.select"): ClientCommand 
 }
 
 describe("runtime command router", () => {
+  const allCommands = (
+    handler: RuntimeCommandHandler,
+  ): RuntimeCommandHandler => defineRuntimeCommandHandler(
+    RUNTIME_COMMAND_TYPES,
+    handler,
+  );
+
   it("publishes a mutation snapshot before settling the request", async () => {
     const order: string[] = [];
     const selected = command();
     const execute = createRuntimeCommandExecutor({
       handlers: [
-        defineRuntimeCommandHandler(
-          ["project.select"],
-          async () => "mutation",
-        ),
+        allCommands(async () => "mutation"),
       ],
       broadcastSnapshot: () => order.push("snapshot"),
       send: (_socket, event) => order.push(
@@ -47,8 +52,7 @@ describe("runtime command router", () => {
     const selected = command();
     const execute = createRuntimeCommandExecutor({
       handlers: [
-        defineRuntimeCommandHandler(
-          ["project.select"],
+        allCommands(
           async (socket, current) => {
             events.push({
               type: "request.ok",
@@ -84,7 +88,10 @@ describe("runtime command router", () => {
     const execute = createRuntimeCommandExecutor({
       handlers: [
         defineRuntimeCommandHandler(["app.refresh"], unrelated),
-        defineRuntimeCommandHandler(["project.select"], owner),
+        defineRuntimeCommandHandler(
+          RUNTIME_COMMAND_TYPES.filter((type) => type !== "app.refresh"),
+          owner,
+        ),
       ],
       broadcastSnapshot: vi.fn(),
       send: (_socket, event) => events.push(event),
@@ -103,10 +110,7 @@ describe("runtime command router", () => {
   });
 
   it("rejects overlapping command ownership before accepting requests", () => {
-    const first = defineRuntimeCommandHandler(
-      ["project.select"],
-      async () => "handled",
-    );
+    const first = allCommands(async () => "handled");
     const second = defineRuntimeCommandHandler(
       ["project.select"],
       async () => "handled",
@@ -119,6 +123,22 @@ describe("runtime command router", () => {
       publicError: () => "hidden",
     })).toThrow(
       "Runtime command project.select is owned by handlers 0 and 1.",
+    );
+  });
+
+  it("rejects missing command ownership before accepting requests", () => {
+    const incomplete = defineRuntimeCommandHandler(
+      RUNTIME_COMMAND_TYPES.filter((type) => type !== "project.select"),
+      async () => "handled",
+    );
+
+    expect(() => createRuntimeCommandExecutor({
+      handlers: [incomplete],
+      broadcastSnapshot: vi.fn(),
+      send: vi.fn(),
+      publicError: () => "hidden",
+    })).toThrow(
+      "Runtime command project.select does not have an owner.",
     );
   });
 });

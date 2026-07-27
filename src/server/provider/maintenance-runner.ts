@@ -6,6 +6,10 @@ import {
 import { homedir } from "node:os";
 
 import { environmentValue } from "../environment";
+import {
+  terminateProcessTree,
+  type ProcessLifecycleDependencies,
+} from "../process-lifecycle";
 import { sanitizeProviderActivityDetail } from "./activity-detail";
 import { providerProcessInvocation } from "./process";
 import type { ProviderMaintenanceUpdateAction } from "./maintenance-capabilities";
@@ -40,6 +44,7 @@ export interface ProviderMaintenanceRunnerOptions {
     args: readonly string[],
     options: SpawnOptionsWithoutStdio,
   ) => ChildProcessWithoutNullStreams;
+  processLifecycle?: Partial<ProcessLifecycleDependencies>;
   onProgress?: (progress: ProviderMaintenanceRunProgress) => void;
 }
 
@@ -176,13 +181,13 @@ export async function runProviderMaintenanceAction(
     const terminate = (): void => {
       if (!child || child.killed) return;
       try {
-        child.kill("SIGTERM");
+        terminateProcessTree(child, false, options.processLifecycle);
       } catch {
         // The process may already have exited between the state check and kill.
       }
       hardKill = setTimeout(() => {
         try {
-          child.kill("SIGKILL");
+          terminateProcessTree(child, true, options.processLifecycle);
         } catch {
           // The process may already have exited.
         }
@@ -209,6 +214,7 @@ export async function runProviderMaintenanceAction(
         cwd: options.cwd ?? homedir(),
         env: environment,
         shell: false,
+        detached: platform !== "win32",
         windowsHide: true,
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       });

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
-interface ProcessLifecycleDependencies {
+export interface ProcessLifecycleDependencies {
   platform: NodeJS.Platform;
   spawnProcess: typeof spawn;
   killProcess: typeof process.kill;

@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { constants, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve, join, sep } from "node:path";
+import { lstat, mkdir, open, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { basename, isAbsolute, relative, resolve, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   app,
@@ -23,11 +23,22 @@ import {
   parseSetBackendCredentialRequest,
 } from "../shared/backend-credentials.js";
 import {
+  MAX_CHAT_ATTACHMENTS,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
+  chatAttachmentKind,
+  type ChatAttachmentMimeType,
+} from "../shared/attachments.js";
+import {
   builtInKimiClaudeBackendProfile,
   KIMI_CLAUDE_BUILTIN_PROFILE_ID,
 } from "../shared/claude-backend-profiles.js";
 import { parseOpenProjectPathRequest } from "../shared/desktop.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
+import {
+  validateAttachmentImport,
+  validateSelectedAttachmentStats,
+  type ValidatedAttachmentImport,
+} from "./attachment-import.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
   CredentialVault,
@@ -53,6 +64,7 @@ const IPC = {
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
+  releaseAttachment: "inertia:release-attachment",
   openProjectPath: "inertia:open-project-path",
   openExternal: "inertia:open-external",
   previewNavigate: "inertia:preview-navigate",
@@ -91,6 +103,13 @@ let packageSmokeFilePath: string | null = null;
 let previewView: WebContentsView | null = null;
 let previewBounds: Electron.Rectangle | null = null;
 let windowThemePreference: WindowThemePreference = "system";
+const attachmentPreviews = new Map<string, {
+  path: string;
+  mimeType: ChatAttachmentMimeType;
+  size: number;
+}>();
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 interface WindowState { x?: number; y?: number; width: number; height: number; maximized: boolean }
 
@@ -102,14 +121,87 @@ function isContained(root: string, target: string): boolean {
   return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
 }
 
+function attachmentDirectory(): string {
+  return join(app.getPath("temp"), "inertia-attachments");
+}
+
+async function persistAttachment(
+  attachment: ValidatedAttachmentImport,
+): Promise<{
+  id: string;
+  name: string;
+  path: string;
+  mimeType: ChatAttachmentMimeType;
+  size: number;
+}> {
+  const directory = attachmentDirectory();
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const id = randomUUID();
+  const path = join(directory, `${id}.${attachment.extension}`);
+  await writeFile(path, attachment.bytes, { mode: 0o600, flag: "wx" });
+  attachmentPreviews.set(id, {
+    path,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+  });
+  return {
+    id,
+    name: attachment.displayName,
+    path,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+  };
+}
+
+async function registeredAttachments(
+  values: readonly unknown[],
+): Promise<Array<Awaited<ReturnType<typeof persistAttachment>>>> {
+  const validated = values.map(validateAttachmentImport);
+  const deduplicated = validated.filter((attachment, index) =>
+    validated.findIndex(({ digest }) => digest === attachment.digest) === index);
+  const totalBytes = deduplicated.reduce((total, { size }) => total + size, 0);
+  if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
+    throw new Error("Attachments exceed the 20 MB turn limit.");
+  }
+  const registered: Array<Awaited<ReturnType<typeof persistAttachment>>> = [];
+  try {
+    for (const attachment of deduplicated) {
+      registered.push(await persistAttachment(attachment));
+    }
+    return registered;
+  } catch (error) {
+    for (const attachment of registered) {
+      attachmentPreviews.delete(attachment.id);
+      await unlink(attachment.path).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
 function registerAppProtocol(): void {
   const rendererRoot = fileURLToPath(new URL("../renderer/", import.meta.url));
-  protocol.handle(APP_SCHEME, (request) => {
+  protocol.handle(APP_SCHEME, async (request) => {
     try {
       const url = new URL(request.url);
       if (url.hostname !== APP_HOST || url.username || url.password || url.search || url.hash) throw new Error();
       const requestedPath = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
       if (requestedPath.includes("\0")) throw new Error();
+      const previewId = /^attachment-preview\/([0-9a-f-]{36})$/iu.exec(requestedPath)?.[1];
+      if (previewId) {
+        const preview = attachmentPreviews.get(previewId);
+        if (!preview || chatAttachmentKind(preview.mimeType) !== "image") throw new Error();
+        const info = await stat(preview.path);
+        if (!info.isFile() || info.size !== preview.size) throw new Error();
+        return new Response(await readFile(preview.path), {
+          status: 200,
+          headers: {
+            "Content-Type": preview.mimeType,
+            "Content-Length": String(preview.size),
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+          },
+        });
+      }
       const target = resolve(rendererRoot, requestedPath);
       if (!isContained(rendererRoot, target)) throw new Error();
       return net.fetch(pathToFileURL(target).toString());
@@ -146,11 +238,11 @@ function saveWindowState(window: BrowserWindow): void {
 }
 
 async function cleanupImportedAttachments(): Promise<void> {
-  const directory = join(app.getPath("temp"), "inertia-attachments");
+  const directory = attachmentDirectory();
   try {
     const entries = await readdir(directory);
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    await Promise.all(entries.filter((name) => /^[0-9a-f-]{36}\.(?:png|jpg|webp|gif)$/u.test(name)).map(async (name) => {
+    await Promise.all(entries.filter((name) => /^[0-9a-f-]{36}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json)$/u.test(name)).map(async (name) => {
       const path = join(directory, name);
       if ((await stat(path)).mtimeMs < cutoff) await unlink(path);
     }));
@@ -174,20 +266,6 @@ function safeHttpUrl(value: unknown): URL {
   }
   return url;
 }
-
-function hasExpectedImageSignature(bytes: Buffer, mimeType: keyof typeof IMAGE_EXTENSIONS): boolean {
-  if (mimeType === "image/png") return bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  if (mimeType === "image/jpeg") return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  if (mimeType === "image/gif") return bytes.length >= 6 && (bytes.subarray(0, 6).toString("ascii") === "GIF87a" || bytes.subarray(0, 6).toString("ascii") === "GIF89a");
-  return bytes.length >= 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
-}
-
-const IMAGE_EXTENSIONS = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/webp": "webp",
-  "image/gif": "gif",
-} as const;
 
 function previewState(): { url: string; loading: boolean; canGoBack: boolean; canGoForward: boolean } {
   const contents = previewView?.webContents;
@@ -340,54 +418,111 @@ function registerIpcHandlers(): void {
     assertTrustedIpc(event, args.length);
     if (!mainWindow) return [];
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: "Attach images",
+      title: "Attach images or documents",
       buttonLabel: "Attach",
-      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+      filters: [{
+        name: "Images and safe documents",
+        extensions: [
+          "png", "jpg", "jpeg", "webp", "gif",
+          "pdf", "txt", "md", "markdown", "csv", "json",
+        ],
+      }],
       properties: ["openFile", "multiSelections"],
     });
     if (result.canceled) return [];
-    const mimeByExtension = {
-      png: "image/png",
-      jpg: "image/jpeg",
-      jpeg: "image/jpeg",
-      webp: "image/webp",
-      gif: "image/gif",
-    } as const;
-    return result.filePaths.slice(0, 8).flatMap((path) => {
-      const extension = path.split(".").pop()?.toLowerCase() as keyof typeof mimeByExtension | undefined;
-      const mimeType = extension ? mimeByExtension[extension] : undefined;
-      if (!mimeType) return [];
-      try {
-        const size = statSync(path).size;
-        if (size < 1 || size > 10 * 1024 * 1024) return [];
-        return [{ id: randomUUID(), name: path.split(/[\\/]/).pop() ?? "image", path, mimeType, size }];
-      } catch {
-        return [];
+    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+    const selectedFiles: Array<{
+      path: string;
+      size: number;
+      isFile: boolean;
+      file: Awaited<ReturnType<typeof open>>;
+    }> = [];
+    try {
+      for (const path of result.filePaths.slice(0, MAX_CHAT_ATTACHMENTS)) {
+        const pathInfo = await lstat(path);
+        if (!pathInfo.isFile() || pathInfo.isSymbolicLink()) {
+          throw new Error("The selected attachment is not a safe regular file.");
+        }
+        const file = await open(path, constants.O_RDONLY | noFollow);
+        try {
+          const info = await file.stat();
+          selectedFiles.push({
+            path,
+            size: info.size,
+            isFile: info.isFile(),
+            file,
+          });
+        } catch (error) {
+          await file.close().catch(() => undefined);
+          throw error;
+        }
       }
-    });
+      // Validate the complete selection before reading any selected bytes.
+      validateSelectedAttachmentStats(selectedFiles.map(({ size, isFile }) => ({
+        size,
+        isFile,
+        isSymbolicLink: false,
+      })));
+      const values = [];
+      for (const selected of selectedFiles) {
+        const data = Buffer.alloc(selected.size);
+        let offset = 0;
+        while (offset < data.length) {
+          const { bytesRead } = await selected.file.read(
+            data,
+            offset,
+            data.length - offset,
+            offset,
+          );
+          if (bytesRead === 0) break;
+          offset += bytesRead;
+        }
+        const extra = Buffer.alloc(1);
+        const { bytesRead: extraBytes } = await selected.file.read(
+          extra,
+          0,
+          1,
+          offset,
+        );
+        if (offset !== data.length || extraBytes !== 0) {
+          throw new Error("A selected attachment changed while it was being read.");
+        }
+        values.push({
+          name: basename(selected.path),
+          mimeType: "",
+          data,
+        });
+      }
+      return await registeredAttachments(values);
+    } finally {
+      await Promise.all(selectedFiles.map(({ file }) =>
+        file.close().catch(() => undefined)));
+    }
   });
 
   ipcMain.handle(IPC.importAttachments, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     const [value] = args;
-    if (!Array.isArray(value) || value.length > 8) throw new Error("Invalid attachments");
-    const directory = join(app.getPath("temp"), "inertia-attachments");
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    const attachments = [];
-    for (const candidate of value) {
-      if (typeof candidate !== "object" || candidate === null) throw new Error("Invalid attachment");
-      const item = candidate as { name?: unknown; mimeType?: unknown; data?: unknown };
-      const mimeType = typeof item.mimeType === "string" && item.mimeType in IMAGE_EXTENSIONS ? item.mimeType as keyof typeof IMAGE_EXTENSIONS : undefined;
-      const extension = mimeType ? IMAGE_EXTENSIONS[mimeType] : undefined;
-      const bytes = item.data instanceof ArrayBuffer ? Buffer.from(item.data) : ArrayBuffer.isView(item.data) ? Buffer.from(item.data.buffer, item.data.byteOffset, item.data.byteLength) : null;
-      if (!mimeType || !extension || !bytes || bytes.length < 1 || bytes.length > 10 * 1024 * 1024 || !hasExpectedImageSignature(bytes, mimeType)) throw new Error("Invalid attachment");
-      const id = randomUUID();
-      const path = join(directory, `${id}.${extension}`);
-      await writeFile(path, bytes, { mode: 0o600, flag: "wx" });
-      const name = typeof item.name === "string" && item.name.trim() && item.name.length <= 255 ? item.name.trim() : `image.${extension}`;
-      attachments.push({ id, name, path, mimeType, size: bytes.length });
+    if (!Array.isArray(value) || value.length > MAX_CHAT_ATTACHMENTS) {
+      throw new Error("Invalid attachments.");
     }
-    return attachments;
+    return await registeredAttachments(value);
+  });
+
+  ipcMain.handle(IPC.releaseAttachment, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const [value] = args;
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+      throw new Error("Invalid attachment.");
+    }
+    const preview = attachmentPreviews.get(value);
+    attachmentPreviews.delete(value);
+    if (!preview) return;
+    try {
+      await unlink(preview.path);
+    } catch {
+      // A missing unsent temporary attachment is already released.
+    }
   });
 
   ipcMain.handle(IPC.openProjectPath, async (event, ...args) => {
@@ -562,6 +697,7 @@ async function createWindow(): Promise<void> {
   window.on("close", () => saveWindowState(window));
   window.on("closed", () => {
     closePreview();
+    attachmentPreviews.clear();
     if (mainWindow === window) {
       mainWindow = null;
     }

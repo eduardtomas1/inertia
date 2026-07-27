@@ -108,7 +108,7 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 1, pid: 10_000 });
   });
 
-  it("brokers credentials only for the current ready runtime generation", async () => {
+  it("brokers startup credentials only for the current accepted runtime generation", async () => {
     const credentialBroker: RuntimeCredentialBroker = {
       resolve: vi.fn(async () => "ephemeral-secret"),
       status: vi.fn(async () => ({
@@ -121,30 +121,11 @@ describe("RuntimeSupervisor", () => {
     const { children, supervisor } = createHarness({ credentialBroker });
     supervisor.start();
     children[0].spawn();
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
-    const requestId = crypto.randomUUID();
     const secretReference = `secret:backend:${"a".repeat(64)}`;
 
-    children[0].message({
-      type: "runtime.credential-request",
-      requestId,
-      operation: "resolve",
-      secretReference,
-    });
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(credentialBroker.resolve).toHaveBeenCalledWith(
-      secretReference,
-      expect.any(AbortSignal),
-    );
-    expect(children[0].messages.at(-1)).toEqual({
-      type: "runtime.credential-result",
-      requestId,
-      operation: "resolve",
-      ok: true,
-      secret: "ephemeral-secret",
-    });
-
+    // Backend-profile initialization happens inside startRuntime(), before the
+    // worker can publish runtime.ready. Credential status must therefore be
+    // available to the current accepted startup generation.
     const statusRequestId = crypto.randomUUID();
     children[0].message({
       type: "runtime.credential-request",
@@ -160,6 +141,27 @@ describe("RuntimeSupervisor", () => {
       ok: true,
       hasSecret: true,
       credentialGeneration: "generation:test",
+    });
+
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const requestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.credential-request",
+      requestId,
+      operation: "resolve",
+      secretReference,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(credentialBroker.resolve).toHaveBeenCalledWith(
+      secretReference,
+      expect.any(AbortSignal),
+    );
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.credential-result",
+      requestId,
+      operation: "resolve",
+      ok: true,
+      secret: "ephemeral-secret",
     });
 
     const forgetRequestId = crypto.randomUUID();

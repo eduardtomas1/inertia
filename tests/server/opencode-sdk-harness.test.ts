@@ -194,6 +194,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     const usage: Array<number | null> = [];
     const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: string[][] = [];
+    const activities: Array<{ activityId?: string; detail?: string; phase: string }> = [];
 
     const result = await manager.run(nativeProviderRunInput({
       providerId: "opencode",
@@ -217,6 +218,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       },
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
+      onActivity: (event) => activities.push(event),
       onUsage: (event) => {
         usage.push(event.usage.usedTokens);
         usageDetails.push(event.usage);
@@ -229,6 +231,11 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     expect(questions).toEqual(["Which scope?"]);
     expect(plans).toEqual(["Inspect"]);
     expect(reasoning).toEqual(["Checking constraints"]);
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "call-1",
+      phase: "completed",
+      detail: "Command:\nnpm test\n\nOutput:\nok",
+    }));
     expect(usage).toEqual([130, 135, 30]);
     expect(usageDetails[0]).toEqual(expect.objectContaining({
       usedTokens: 130,

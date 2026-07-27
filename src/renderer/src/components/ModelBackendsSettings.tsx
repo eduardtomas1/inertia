@@ -34,6 +34,7 @@ import { Switch } from "./ui";
 
 type ModelBackendsSettingsProps = {
   profiles: ModelBackendProfileView[];
+  initialProfileId?: string;
   defaults: ModelBackendDefault[];
   projects: Project[];
   disabled: boolean;
@@ -141,6 +142,7 @@ function formattedContext(tokens: number | null): string {
 
 export function ModelBackendsSettings({
   profiles,
+  initialProfileId,
   defaults,
   projects,
   disabled,
@@ -155,7 +157,8 @@ export function ModelBackendsSettings({
   onClearDefault,
 }: ModelBackendsSettingsProps): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(
-    profiles.find(({ id }) => id === "builtin:kimi-code")?.id
+    profiles.find(({ id }) => id === initialProfileId)?.id
+      ?? profiles.find(({ id }) => id === "builtin:kimi-code")?.id
       ?? profiles[0]?.id
       ?? null,
   );
@@ -532,7 +535,7 @@ export function ModelBackendsSettings({
                   <span className="backend-profile-icon"><KeyRound size={15} /></span>
                   <span><strong>Backend credential</strong><small>{selected.authState === "configured" ? "Stored in your operating system’s secure vault." : "No usable credential is available for this profile."}</small></span>
                   {selected.authenticationMode !== "none" && (
-                    <input type="password" value={secret} autoComplete="new-password" placeholder={selected.authState === "configured" ? "Replace credential" : "Add credential"} onChange={(event) => setSecret(event.target.value)} />
+                    <input type="password" value={secret} autoComplete="new-password" autoFocus={selected.id === initialProfileId && selected.authState !== "configured"} placeholder={selected.authState === "configured" ? "Replace credential" : "Add credential"} onChange={(event) => setSecret(event.target.value)} />
                   )}
                   {selected.authenticationMode !== "none" && (
                     <button type="button" className="secondary-button" disabled={!secret.trim() || disabled || Boolean(busy)} onClick={() => { void run("credential", async () => {

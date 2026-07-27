@@ -8,6 +8,8 @@ import type {
   AgentTurnStatus,
   ChatMessage,
   CheckpointSummary,
+  InterfaceScale,
+  ResponseDensity,
   TurnGitArtifact,
 } from "@shared/contracts";
 
@@ -48,6 +50,32 @@ export interface ResponseTurn {
   foldableActivities: AgentActivity[];
 }
 
+/**
+ * Clean successful history does not need a second status row above the answer.
+ * Its authoritative status and duration live in the answer footer, while the
+ * execution transcript remains available from that footer's Run details.
+ */
+export function shouldConsolidateSettledWorkIntoRunDetails(
+  turn: Pick<
+    ResponseTurn,
+    | "isActive"
+    | "agentTurn"
+    | "terminalAssistantMessage"
+    | "importantActivities"
+    | "approvals"
+    | "inputRequests"
+    | "systemMessages"
+  >,
+): boolean {
+  return !turn.isActive
+    && turn.agentTurn.status === "completed"
+    && turn.terminalAssistantMessage !== null
+    && turn.importantActivities.length === 0
+    && turn.approvals.length === 0
+    && turn.inputRequests.length === 0
+    && turn.systemMessages.length === 0;
+}
+
 export interface ResponseTimelineCompatibility {
   inferredTurns: ResponseTurn[];
   malformedTurns: AgentTurn[];
@@ -82,9 +110,72 @@ function compareTurns(left: AgentTurn, right: AgentTurn): number {
   return timestamp(left.requestedAt) - timestamp(right.requestedAt) || left.id.localeCompare(right.id);
 }
 
+export type ActivityAttentionSeverity = "warning" | "failure";
+
+export function isInterruptedActivity(
+  activity: Pick<AgentActivity, "title" | "detail" | "status">,
+): boolean {
+  return activity.status === "failed"
+    && /\binterrupted\b/iu.test(`${activity.title} ${activity.detail ?? ""}`);
+}
+
+export function activityAttentionSeverity(
+  activity: AgentActivity,
+): ActivityAttentionSeverity | null {
+  if (isInterruptedActivity(activity)) return "warning";
+  if (activity.status === "failed" || activity.kind === "error") return "failure";
+  return /\b(?:blocked|canceled|cancelled|incomplete|partial(?:ly)?|skipped|unsupported|warned|warning)\b/iu
+    .test(`${activity.title} ${activity.detail ?? ""}`)
+    ? "warning"
+    : null;
+}
+
 export function activityNeedsAttention(activity: AgentActivity): boolean {
-  if (activity.status === "failed" || activity.kind === "error") return true;
-  return /\b(?:warning|warned|unsupported|skipped|cancelled|canceled|blocked)\b/iu.test(`${activity.title} ${activity.detail ?? ""}`);
+  return activityAttentionSeverity(activity) !== null;
+}
+
+export interface ActivityDetailPresentation {
+  preview: string | null;
+  full: string | null;
+  expandable: boolean;
+}
+
+const MAX_ACTIVITY_DETAIL_PREVIEW_LINES = 3;
+const MAX_ACTIVITY_DETAIL_PREVIEW_LINE_CHARS = 160;
+
+/**
+ * Raw provider detail remains bounded behind a disclosure. The transcript gets
+ * at most three compact lines and never measures or paints the full payload
+ * until the user intentionally expands it.
+ */
+export function activityDetailPresentation(
+  activity: Pick<AgentActivity, "detail" | "kind" | "status">,
+): ActivityDetailPresentation {
+  const full = activity.detail?.replace(/\r\n?/gu, "\n").trim() || null;
+  if (!full) return { preview: null, full: null, expandable: false };
+  const lines = full
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line, index, values) =>
+      Boolean(line.trim()) || (index > 0 && index < values.length - 1));
+  const previewLines = lines
+    .slice(0, MAX_ACTIVITY_DETAIL_PREVIEW_LINES)
+    .map((line) =>
+      line.length > MAX_ACTIVITY_DETAIL_PREVIEW_LINE_CHARS
+        ? `${line.slice(0, MAX_ACTIVITY_DETAIL_PREVIEW_LINE_CHARS - 1)}…`
+        : line);
+  const preview = previewLines.join("\n") || null;
+  const technical = activity.kind === "command"
+    || activity.kind === "tool"
+    || activity.status === "failed"
+    || full.length > MAX_ACTIVITY_DETAIL_PREVIEW_LINE_CHARS
+    || lines.length > 1
+    || /^(?:Command|Error|Output):/mu.test(full);
+  return {
+    preview,
+    full,
+    expandable: technical,
+  };
 }
 
 export function isTranscriptActivity(activity: AgentActivity): boolean {
@@ -110,6 +201,41 @@ export type TurnExecutionStreamEntry =
       activities: AgentActivity[];
     };
 
+export interface ActivityGroupPresentation {
+  visibleActivities: AgentActivity[];
+  hiddenCount: number;
+}
+
+/**
+ * Keeps attention rows and the newest meaningful call visible when collapsed.
+ * Expanded rows retain their authoritative created-time order.
+ */
+export function resolveActivityGroupPresentation(
+  activities: AgentActivity[],
+  expanded: boolean,
+): ActivityGroupPresentation {
+  let newestMeaningfulId: string | null = null;
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const candidate = activities[index]!;
+    if (!activityNeedsAttention(candidate)) {
+      newestMeaningfulId = candidate.id;
+      break;
+    }
+  }
+  const alwaysVisible = new Set(activities
+    .filter((activity) =>
+      activity.id === newestMeaningfulId
+      || activityNeedsAttention(activity))
+    .map(({ id }) => id));
+  const hiddenCount = activities.filter(({ id }) => !alwaysVisible.has(id)).length;
+  return {
+    visibleActivities: expanded
+      ? activities
+      : activities.filter(({ id }) => alwaysVisible.has(id)),
+    hiddenCount,
+  };
+}
+
 interface BuildTurnExecutionStreamOptions {
   liveContent?: string;
   includeImportantActivities?: boolean;
@@ -117,7 +243,7 @@ interface BuildTurnExecutionStreamOptions {
 
 /**
  * Builds the visible provider transcript in event order. Only adjacent work
- * entries are grouped; assistant commentary always breaks a group.
+ * entries are grouped; commentary and attention rows always break a group.
  */
 export function buildTurnExecutionStream(
   turn: Pick<ResponseTurn, "id" | "agentTurn" | "commentaryMessages" | "activities">,
@@ -191,7 +317,12 @@ export function buildTurnExecutionStream(
       continue;
     }
     const previous = stream.at(-1);
-    if (previous?.kind === "activity-group") {
+    const needsAttention = activityNeedsAttention(item.activity);
+    if (
+      !needsAttention
+      && previous?.kind === "activity-group"
+      && previous.activities.every((activity) => !activityNeedsAttention(activity))
+    ) {
       previous.activities.push(item.activity);
       continue;
     }
@@ -224,24 +355,31 @@ function boundedElapsed(startedAt: string, completedAt: string | null, now: numb
 
 /** Persisted requested → started queue time. A queued turn remains live. */
 export function turnQueueElapsedMs(
-  turn: Pick<ResponseTurn, "requestedAt" | "startedAt" | "completedAt">,
+  turn: Pick<ResponseTurn, "requestedAt" | "startedAt" | "completedAt" | "isActive">,
   now = Date.now(),
 ): number {
-  return boundedElapsed(turn.requestedAt, turn.startedAt ?? turn.completedAt, now);
+  if (turn.startedAt) return boundedElapsed(turn.requestedAt, turn.startedAt, now);
+  if (turn.completedAt) return boundedElapsed(turn.requestedAt, turn.completedAt, now);
+  return turn.isActive ? boundedElapsed(turn.requestedAt, null, now) : 0;
 }
 
-/** Persisted started → completed execution time; null means work never started. */
+/**
+ * Persisted started → completed execution time. Live work may use `now`; a
+ * terminal row without a persisted completion never acquires a drifting
+ * historical duration.
+ */
 export function turnExecutionElapsedMs(
-  turn: Pick<ResponseTurn, "startedAt" | "completedAt">,
+  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive">,
   now = Date.now(),
 ): number | null {
   if (!turn.startedAt) return null;
+  if (!turn.completedAt && !turn.isActive) return null;
   return boundedElapsed(turn.startedAt, turn.completedAt, now);
 }
 
 /** Backward-compatible alias: elapsed work never includes queue time. */
 export function turnElapsedMs(
-  turn: Pick<ResponseTurn, "startedAt" | "completedAt">,
+  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive">,
   now = Date.now(),
 ): number {
   return turnExecutionElapsedMs(turn, now) ?? 0;
@@ -579,11 +717,27 @@ export function shouldShowTimelineMinimap(rowCount: number, sideGutter: number):
     && sideGutter >= TIMELINE_MINIMAP_MIN_GUTTER;
 }
 
+export function shouldShowTurnGitArtifactSummary(
+  artifact: TurnGitArtifactSummary,
+): boolean {
+  return !(
+    artifact.status === "unavailable"
+    && artifact.completeness === "unavailable"
+    && artifact.absenceReason === "not-repository"
+  );
+}
+
 export interface TimelineRowEstimateOptions {
   /** Current transcript width in CSS pixels. Narrow/zoomed layouts wrap sooner. */
   availableWidth?: number;
+  /** Persisted interface scale controls transcript column width and typography. */
+  interfaceScale?: InterfaceScale;
+  /** Response density controls answer leading and inter-turn spacing. */
+  responseDensity?: ResponseDensity;
   /** Matches the persisted "Collapse completed work logs" presentation setting. */
   workDetailsExpanded?: boolean;
+  /** Models the additional rows revealed by expanded tool-call groups. */
+  activityGroupsExpanded?: boolean;
   /** Mirrors whether reasoning summaries are visible inside work details. */
   showThinking?: boolean;
   /** Mirrors whether the changed-file disclosure is enabled and renderable. */
@@ -597,6 +751,67 @@ export interface TimelineRowEstimateOptions {
 function boundedEstimateWidth(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 880;
   return Math.max(320, Math.min(880, value));
+}
+
+function estimateTypographyScale(options: TimelineRowEstimateOptions): number {
+  const baseFont = {
+    compact: 12.5,
+    default: 13.5,
+    comfortable: 14.5,
+    large: 16,
+  }[options.interfaceScale ?? "default"];
+  const densityAdjustment = {
+    compact: 0.5,
+    default: 1.5,
+    comfortable: 2.5,
+  }[options.responseDensity ?? "default"];
+  const lineHeight = {
+    compact: 1.6,
+    default: 1.66,
+    comfortable: 1.72,
+  }[options.responseDensity ?? "default"];
+  return Math.max(0.84, Math.min(1.28, ((baseFont + densityAdjustment) / 15) * (lineHeight / 1.66)));
+}
+
+function estimateAnswerMaxWidth(scale: InterfaceScale | undefined): number {
+  if (scale === "compact") return 720;
+  if (scale === "comfortable" || scale === "large") return 780;
+  return 760;
+}
+
+function estimateRequestMaxWidth(scale: InterfaceScale | undefined): number {
+  if (scale === "compact") return 640;
+  if (scale === "comfortable") return 700;
+  if (scale === "large") return 720;
+  return 680;
+}
+
+function estimateTurnGap(density: ResponseDensity | undefined): number {
+  if (density === "compact") return 28;
+  if (density === "comfortable") return 44;
+  return 36;
+}
+
+export function estimateCompletedTurnSpacing(
+  density: ResponseDensity | undefined,
+): {
+  layer: number;
+  footer: number;
+  artifact: number;
+} {
+  if (density === "compact") {
+    return { layer: 10, footer: 6, artifact: 1 };
+  }
+  if (density === "comfortable") {
+    return { layer: 15, footer: 10, artifact: 3 };
+  }
+  return { layer: 12, footer: 8, artifact: 2 };
+}
+
+function estimateResponseBlockGap(density: ResponseDensity | undefined): number {
+  if (density === "compact") return 13;
+  if (density === "comfortable") return 22;
+  return 18;
 }
 
 function estimatedTextColumns(width: number, maximum: number): number {
@@ -716,15 +931,39 @@ function estimateInputRequestHeight(
   return 82 + questionsHeight + (request.autoResolutionMs === null ? 0 : 20);
 }
 
+function estimateActivityGroupHeight(
+  activities: AgentActivity[],
+  expanded: boolean,
+): number {
+  const presentation = resolveActivityGroupPresentation(activities, expanded);
+  const detailHeight = presentation.visibleActivities.reduce((total, activity) => {
+    const detail = activityDetailPresentation(activity);
+    if (!detail.expandable || !detail.preview) return total;
+    const previewLines = Math.min(
+      MAX_ACTIVITY_DETAIL_PREVIEW_LINES,
+      detail.preview.split("\n").length,
+    );
+    return total + previewLines * 18 + 23;
+  }, 0);
+  return presentation.visibleActivities.length * 27
+    + (presentation.hiddenCount > 0 ? 23 : 0)
+    + detailHeight;
+}
+
 function estimateExpandedWorkHeight(
   turn: ResponseTurn,
   columns: number,
   includeReasoning: boolean,
+  expandActivityGroups: boolean,
 ): number {
-  const activityHeight = turn.activities.filter((activity) =>
-    isTranscriptActivity(activity) && !activityNeedsAttention(activity)).length * 27;
-  const commentaryHeight = turn.commentaryMessages.reduce((total, message) =>
-    total + 10 + estimatedWrappedLines(message.content, columns) * 18, 0);
+  const streamHeight = turn.isActive
+    ? 0
+    : buildTurnExecutionStream(turn).reduce((total, entry) => {
+        if (entry.kind === "commentary") {
+          return total + 10 + estimatedWrappedLines(entry.content, columns) * 18;
+        }
+        return total + estimateActivityGroupHeight(entry.activities, expandActivityGroups);
+      }, 0);
   const reasoningHeight = includeReasoning && turn.reasoning
     ? 22 + estimatedWrappedLines(turn.reasoning.content, columns) * 18
     : 0;
@@ -732,7 +971,24 @@ function estimateExpandedWorkHeight(
     total + 26
       + estimatedWrappedLines(plan.explanation ?? "", columns) * 17
       + plan.steps.length * 24, 0);
-  return Math.min(6_000, activityHeight + commentaryHeight + reasoningHeight + planHeight);
+  return Math.min(6_000, streamHeight + reasoningHeight + planHeight);
+}
+
+function estimateRunDetailsHeight(
+  turn: ResponseTurn,
+  availableWidth: number,
+): number {
+  const artifactDetailVisible = turn.gitArtifact === null
+    || shouldShowTurnGitArtifactSummary(turn.gitArtifact);
+  const detailCount = 11 + Number(artifactDetailVisible);
+  if (availableWidth <= 440) {
+    return 8 + detailCount * 38 + Math.max(0, detailCount - 1) * 8;
+  }
+  if (availableWidth <= 620) {
+    return 8 + detailCount * 18 + Math.max(0, detailCount - 1) * 8;
+  }
+  const rows = Math.ceil(detailCount / 2);
+  return 8 + rows * 18 + Math.max(0, rows - 1) * 8;
 }
 
 function estimateTurnRowSize(
@@ -740,43 +996,63 @@ function estimateTurnRowSize(
   options: TimelineRowEstimateOptions,
 ): number {
   const availableWidth = boundedEstimateWidth(options.availableWidth);
-  const answerWidth = Math.max(280, Math.min(760, availableWidth - 40));
-  const answerColumns = estimatedTextColumns(answerWidth, 96);
-  const requestWidth = Math.max(240, Math.min(680, availableWidth * 0.8));
-  const requestColumns = estimatedTextColumns(requestWidth - 28, 86);
+  const typographyScale = estimateTypographyScale(options);
+  const answerWidth = Math.max(
+    280,
+    Math.min(estimateAnswerMaxWidth(options.interfaceScale), availableWidth - 40),
+  );
+  const answerColumns = estimatedTextColumns(answerWidth / typographyScale, 96);
+  const requestWidth = Math.max(
+    240,
+    Math.min(estimateRequestMaxWidth(options.interfaceScale), availableWidth * 0.8),
+  );
+  const requestColumns = estimatedTextColumns((requestWidth - 28) / typographyScale, 86);
 
   const requestLines = Math.max(1, estimatedWrappedLines(turn.userMessage.content, requestColumns));
   const attachmentRows = Math.ceil(turn.userMessage.attachments.length / Math.max(1, Math.floor(requestWidth / 180)));
   const requestHeight = 42 + requestLines * 22 + attachmentRows * 25;
 
   const transcriptActivities = turn.activities.filter(isTranscriptActivity);
-  const estimatedActivityGroups = Math.min(
-    transcriptActivities.length,
-    turn.commentaryMessages.length + 1,
-  );
+  const activeActivityGroups = turn.isActive
+    ? buildTurnExecutionStream(turn)
+      .filter((entry): entry is Extract<TurnExecutionStreamEntry, { kind: "activity-group" }> =>
+        entry.kind === "activity-group")
+    : [];
+  const collapsedActivityHeight = activeActivityGroups.reduce((total, entry) =>
+    total + estimateActivityGroupHeight(
+      entry.activities,
+      options.activityGroupsExpanded === true,
+    ), 0);
   const activeCommentaryHeight = turn.commentaryMessages.reduce((total, message) =>
     total + 12 + estimatedWrappedLines(message.content, answerColumns) * 18, 0);
   const includesReasoning = options.showThinking !== false && Boolean(turn.reasoning);
   const hasSupplementalWork = turn.plans.length > 0 || includesReasoning;
-  const importantHeight = turn.importantActivities.reduce((total, activity) => {
-    const titleLines = Math.max(1, estimatedWrappedLines(activity.title, answerColumns));
-    const detailLines = activity.detail
-      ? Math.max(1, estimatedWrappedLines(activity.detail, answerColumns))
-      : 0;
-    return total + 36 + titleLines * 16 + detailLines * 15;
-  }, 0);
+  // Attention rows use the same bounded preview/disclosure geometry as their
+  // rendered ActivityRow instead of a generic status-row approximation.
+  const importantHeight = turn.importantActivities.reduce((total, activity) =>
+    total + estimateActivityGroupHeight([activity], true), 0);
+  const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
   const executionHeight = turn.isActive
     ? 43
       + activeCommentaryHeight
-      + estimatedActivityGroups * 27
-      + (transcriptActivities.length > estimatedActivityGroups ? estimatedActivityGroups * 23 : 0)
+      + collapsedActivityHeight
       + (hasSupplementalWork ? 27 : 0)
-    : 30 + importantHeight;
-  const expandedWorkHeight = options.workDetailsExpanded
+    : consolidatesSettledWork
+      ? 0
+      : 30 + importantHeight;
+  const expandedWorkHeight = (
+    options.workDetailsExpanded
+      || (consolidatesSettledWork && options.runDetailsExpanded)
+  )
     && (transcriptActivities.length > 0
       || turn.commentaryMessages.length > 0
       || hasSupplementalWork)
-    ? estimateExpandedWorkHeight(turn, answerColumns, includesReasoning)
+    ? estimateExpandedWorkHeight(
+        turn,
+        answerColumns,
+        includesReasoning,
+        options.activityGroupsExpanded === true,
+      )
     : 0;
   const exceptionalHeight = turn.approvals.reduce((total, approval) =>
     total + estimateApprovalHeight(approval, answerColumns), 0)
@@ -790,29 +1066,69 @@ function estimateTurnRowSize(
     ? 26 + estimateMarkdownHeight(answerContent, answerColumns)
     : 0;
   const metadataHeight = turn.terminalAssistantMessage
-    ? 47 + (options.runDetailsExpanded
-      ? (availableWidth <= 620 ? 230 : 126)
+    ? 37 + (options.runDetailsExpanded
+      ? estimateRunDetailsHeight(turn, availableWidth)
       : 0)
     : 0;
 
-  const showsArtifact = options.showChangedFiles !== false && Boolean(turn.gitArtifact);
-  const changedFilesHeight = showsArtifact
-    ? 35 + (options.changedFilesExpanded && turn.gitArtifact
-      ? Math.min(12, turn.gitArtifact.files.length) * 28
-        + (turn.gitArtifact.completeness === "complete" ? 0 : 35)
-        + 38
-      : 0)
+  const artifact = turn.gitArtifact;
+  const visibleArtifact = options.showChangedFiles !== false
+    && artifact !== null
+    && shouldShowTurnGitArtifactSummary(artifact)
+    ? artifact
+    : null;
+  const changedFilesHeight = visibleArtifact
+    ? visibleArtifact.status === "unavailable"
+      || visibleArtifact.status === "failed"
+      || visibleArtifact.completeness === "unavailable"
+      ? 32 + Math.max(
+          18,
+          estimatedWrappedLines(
+            visibleArtifact.failureReason
+              ?? "No authoritative Git snapshot was captured for this turn.",
+            answerColumns,
+          ) * 18,
+        )
+      : 33 + (options.changedFilesExpanded
+        ? Math.min(12, visibleArtifact.files.length) * 28
+          + (visibleArtifact.completeness === "complete" ? 0 : 35)
+          + 38
+        : 0)
     : 0;
-  const visibleSections = 2
-    + Number(systemHeight > 0)
-    + Number(answerHeight > 0)
-    + Number(metadataHeight > 0)
-    + Number(changedFilesHeight > 0);
-  const sectionSpacing = Math.max(0, visibleSections - 1) * 18;
-  const virtualRowGap = 36;
+  const consolidatedWorkHeight = consolidatesSettledWork
+    ? expandedWorkHeight
+    : 0;
+  const executionSectionHeight = executionHeight
+    + (consolidatesSettledWork ? 0 : expandedWorkHeight)
+    + exceptionalHeight
+    + systemHeight;
+  const orderedSections = [
+    { kind: "request", height: requestHeight },
+    { kind: "execution", height: executionSectionHeight },
+    { kind: "answer", height: answerHeight },
+    {
+      kind: "metadata",
+      height: metadataHeight + consolidatedWorkHeight,
+    },
+    { kind: "artifact", height: changedFilesHeight },
+  ].filter(({ height }) => height > 0);
+  const settledSpacing = estimateCompletedTurnSpacing(options.responseDensity);
+  const sectionSpacing = orderedSections.slice(1).reduce((total, section, index) => {
+    const previous = orderedSections[index]!;
+    if (turn.isActive) {
+      return total + estimateResponseBlockGap(options.responseDensity);
+    }
+    if (previous.kind === "answer" && section.kind === "metadata") {
+      return total + settledSpacing.footer;
+    }
+    if (previous.kind === "metadata" && section.kind === "artifact") {
+      return total + settledSpacing.artifact;
+    }
+    return total + settledSpacing.layer;
+  }, 0);
+  const virtualRowGap = estimateTurnGap(options.responseDensity);
 
-  return Math.max(190, Math.ceil(
-    requestHeight
+  const contentHeight = requestHeight
     + executionHeight
     + expandedWorkHeight
     + exceptionalHeight
@@ -820,9 +1136,11 @@ function estimateTurnRowSize(
     + answerHeight
     + metadataHeight
     + changedFilesHeight
-    + sectionSpacing
-    + virtualRowGap,
-  ));
+    + sectionSpacing;
+  return Math.max(
+    Math.ceil((190 - 36) * typographyScale + virtualRowGap),
+    Math.ceil(contentHeight * typographyScale + virtualRowGap),
+  );
 }
 
 export function estimateTimelineRowSize(
@@ -907,6 +1225,31 @@ export function shouldFollowTimeline(scrollTop: number, clientHeight: number, sc
   return Math.max(0, scrollHeight - clientHeight - scrollTop) <= threshold;
 }
 
+export interface TimelineSizeChangeAnchor {
+  itemStart: number;
+  itemSize: number;
+  scrollOffset: number;
+  firstMeasurement: boolean;
+  scrollDirection: "forward" | "backward" | null;
+  manuallyAnchored: boolean;
+}
+
+/**
+ * Mirrors the virtualizer's stable-scroll policy while allowing an explicit
+ * disclosure anchor to own one row's compensation. First measurements above
+ * the fold correct estimate error. Later growth only shifts the viewport when
+ * the entire row is above it; a streaming row spanning the fold and backward
+ * user scrolling must remain stationary.
+ */
+export function shouldAdjustTimelineScrollPosition(
+  input: TimelineSizeChangeAnchor,
+): boolean {
+  if (input.manuallyAnchored) return false;
+  if (input.firstMeasurement) return input.itemStart < input.scrollOffset;
+  return input.itemStart + input.itemSize <= input.scrollOffset
+    && input.scrollDirection !== "backward";
+}
+
 export function turnStatusLabel(status: AgentTurnStatus): string {
   switch (status) {
     case "queued": return "Queued";
@@ -929,9 +1272,17 @@ export function workSummaryLabel(turn: ResponseTurn, now = Date.now()): string {
     return "Completed without tool activity";
   }
   const prefix = turn.agentTurn.status === "failed"
-    ? duration ? `Failed after ${duration}` : "Failed before starting"
+    ? duration
+      ? `Failed after ${duration}`
+      : turn.startedAt
+        ? "Failed"
+        : "Failed before starting"
     : turn.agentTurn.status === "cancelled" || turn.agentTurn.status === "interrupted"
-      ? duration ? `Stopped after ${duration}` : "Stopped before starting"
+      ? duration
+        ? `Stopped after ${duration}`
+        : turn.startedAt
+          ? "Stopped"
+          : "Stopped before starting"
       : turn.agentTurn.status === "queued"
         ? `Queued for ${formatElapsed(turnQueueElapsedMs(turn, now))}`
         : duration
@@ -946,8 +1297,17 @@ export function workSummaryLabel(turn: ResponseTurn, now = Date.now()): string {
 export function turnTimingLabels(turn: ResponseTurn, now = Date.now()): string[] {
   const queue = `Queued ${formatElapsed(turnQueueElapsedMs(turn, now))}`;
   const execution = turnExecutionElapsedMs(turn, now);
-  if (execution === null) return [queue];
   const status = turn.agentTurn.status;
+  if (execution === null) {
+    if (turn.isActive) return [queue];
+    if (status === "failed") {
+      return [queue, turn.startedAt ? "Failed" : "Failed before starting"];
+    }
+    if (status === "cancelled" || status === "interrupted") {
+      return [queue, turn.startedAt ? "Stopped" : "Stopped before starting"];
+    }
+    return [queue, turnStatusLabel(status)];
+  }
   const work = status === "failed"
     ? `Failed after ${formatElapsed(execution)}`
     : status === "cancelled" || status === "interrupted"

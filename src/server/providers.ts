@@ -564,6 +564,56 @@ export class ProviderManager {
     return true;
   }
 
+  async steer(
+    conversationId: string,
+    content: string,
+    identity: { runId: string; turnId: string },
+  ): Promise<boolean> {
+    const active = this.activeRuns.get(conversationId);
+    if (
+      !active
+      || active.settled
+      || active.cancelRequested
+      || active.runId !== identity.runId
+      || active.turnId !== identity.turnId
+    ) return false;
+    const extension = active.harnessRun?.extension;
+    const steer = extension && "steer" in extension
+      ? extension.steer
+      : undefined;
+    if (!steer) return false;
+    try {
+      return await steer(content);
+    } catch {
+      return false;
+    }
+  }
+
+  async stopSubagent(
+    conversationId: string,
+    providerTaskId: string,
+    identity: { runId: string; turnId: string },
+  ): Promise<boolean> {
+    const active = this.activeRuns.get(conversationId);
+    if (
+      !active
+      || active.settled
+      || active.cancelRequested
+      || active.runId !== identity.runId
+      || active.turnId !== identity.turnId
+    ) return false;
+    const extension = active.harnessRun?.extension;
+    const stopSubagent = extension && "stopSubagent" in extension
+      ? extension.stopSubagent
+      : undefined;
+    if (!stopSubagent) return false;
+    try {
+      return await stopSubagent(providerTaskId);
+    } catch {
+      return false;
+    }
+  }
+
   private cancelStartedHarness(active: ActiveRun): void {
     const harnessRun = active.harnessRun;
     if (!harnessRun) return;

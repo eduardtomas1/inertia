@@ -66,6 +66,7 @@ const detail: ConversationDetail = {
     createdAt: conversation.createdAt,
   }],
   activities: [],
+  subagents: [],
   reasonings: [],
   usage: [],
   plans: [],

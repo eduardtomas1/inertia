@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  sameTurnTimelineProps,
+  type ResponseTimelineProps,
+} from "../../src/renderer/src/components/ResponseTimeline";
 import type {
   AgentActivity,
   AgentApprovalRequest,
@@ -11,7 +15,11 @@ import type {
 import {
   buildResponseTimeline,
   buildTimelineMinimapMarkers,
+  estimateCompletedTurnSpacing,
   estimateTimelineRowSize,
+  shouldAdjustTimelineScrollPosition,
+  shouldFollowTimeline,
+  shouldShowTurnGitArtifactSummary,
   shouldVirtualizeTimeline,
   stabilizeResponseTimeline,
   type ResponseTimelineItem,
@@ -201,6 +209,7 @@ function buildItem({
   answer = "Done.",
   status = "completed",
   activities = [],
+  commentary = [],
   approvals = [],
   inputRequests = [],
   gitArtifact,
@@ -210,6 +219,7 @@ function buildItem({
   answer?: string;
   status?: AgentTurn["status"];
   activities?: AgentActivity[];
+  commentary?: string[];
   approvals?: AgentApprovalRequest[];
   inputRequests?: AgentInputRequest[];
   gitArtifact?: TurnGitArtifact;
@@ -220,6 +230,8 @@ function buildItem({
     turns: [turn],
     messages: [
       message(`${id}-request`, id, "user", request),
+      ...commentary.map((content, index) =>
+        message(`${id}-commentary-${index}`, id, "assistant", content)),
       ...(answer ? [message(`${id}-answer`, id, "assistant", answer)] : []),
     ],
     activities,
@@ -263,7 +275,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(longEstimate).toBeLessThanOrEqual(12_400);
   });
 
-  it("accounts for wrapping at 100%, 125%, and 150% zoom using integer CSS-pixel estimates", () => {
+  it("accounts for wrapping, interface scale, and response density using integer CSS-pixel estimates", () => {
     const item = buildItem({
       id: "scaled",
       request: "Review the Linux fractional-pixel layout and preserve the visible anchor.",
@@ -278,26 +290,206 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimates.every(Number.isInteger)).toBe(true);
     expect(estimates[1]).toBeGreaterThan(estimates[0]!);
     expect(estimates[2]).toBeGreaterThan(estimates[1]!);
+
+    const compact = estimateTimelineRowSize(item, {
+      availableWidth: 720,
+      interfaceScale: "compact",
+      responseDensity: "compact",
+    });
+    const defaultSize = estimateTimelineRowSize(item, {
+      availableWidth: 720,
+      interfaceScale: "default",
+      responseDensity: "default",
+    });
+    const largeComfortable = estimateTimelineRowSize(item, {
+      availableWidth: 720,
+      interfaceScale: "large",
+      responseDensity: "comfortable",
+    });
+    expect(compact).toBeLessThan(defaultSize);
+    expect(largeComfortable).toBeGreaterThan(defaultSize);
   });
 
-  it("does not price collapsed history like a large panel but models expanded detail potential", () => {
+  it("prices completed layer, footer, and artifact gaps without collapsing exceptional work", () => {
+    const clean = buildItem({
+      id: "completed-spacing-clean",
+      answer: "A concise successful answer.",
+      activities: [activity("clean-tool", "completed-spacing-clean")],
+      gitArtifact: artifact("completed-spacing-clean", 1),
+    });
+    const exceptional = buildItem({
+      id: "completed-spacing-exceptional",
+      answer: "A concise answer with an actionable failure.",
+      activities: [
+        activity("exception-tool", "completed-spacing-exceptional"),
+        activity("exception-failure", "completed-spacing-exceptional", {
+          kind: "command",
+          title: "Verification failed",
+          detail: "One focused assertion failed.",
+          status: "failed",
+        }),
+      ],
+      gitArtifact: artifact("completed-spacing-exceptional", 1),
+    });
+
+    expect(estimateCompletedTurnSpacing("compact").layer)
+      .toBeLessThan(estimateCompletedTurnSpacing("default").layer);
+    expect(estimateCompletedTurnSpacing("default").layer)
+      .toBeLessThan(estimateCompletedTurnSpacing("comfortable").layer);
+    expect(estimateTimelineRowSize(exceptional))
+      .toBeGreaterThan(estimateTimelineRowSize(clean) + 40);
+    expect(estimateTimelineRowSize(clean, { responseDensity: "compact" }))
+      .toBeLessThan(estimateTimelineRowSize(clean));
+    expect(estimateTimelineRowSize(clean, { responseDensity: "comfortable" }))
+      .toBeGreaterThan(estimateTimelineRowSize(clean));
+  });
+
+  it("prices nested disclosures by their actual collapsed and expanded states", () => {
     const turnId = "details";
     const activities = Array.from({ length: 120 }, (_, index) =>
       activity(`activity-${index}`, turnId));
     const item = buildItem({ id: turnId, activities });
     const collapsed = estimateTimelineRowSize(item);
     const expandedWork = estimateTimelineRowSize(item, { workDetailsExpanded: true });
+    const expandedGroups = estimateTimelineRowSize(item, {
+      workDetailsExpanded: true,
+      activityGroupsExpanded: true,
+    });
     const expandedRun = estimateTimelineRowSize(item, { runDetailsExpanded: true });
 
     expect(collapsed).toBeLessThan(380);
-    expect(expandedWork).toBeGreaterThan(collapsed + 2_000);
+    expect(expandedWork).toBeGreaterThan(collapsed);
+    expect(expandedWork).toBeLessThan(collapsed + 200);
+    expect(expandedGroups).toBeGreaterThan(expandedWork + 2_000);
     expect(expandedRun).toBeGreaterThan(collapsed + 100);
+    const mediumRun = estimateTimelineRowSize(item, {
+      availableWidth: 600,
+      runDetailsExpanded: true,
+    });
+    const narrowRun = estimateTimelineRowSize(item, {
+      availableWidth: 400,
+      runDetailsExpanded: true,
+    });
+    expect(mediumRun).toBeGreaterThan(expandedRun + 100);
+    expect(narrowRun).toBeGreaterThan(mediumRun + 150);
 
     const oneFile = buildItem({ id: "one-file", gitArtifact: artifact("one-file", 1) });
     const manyFiles = buildItem({ id: "many-files", gitArtifact: artifact("many-files", 80) });
     expect(estimateTimelineRowSize(manyFiles)).toBe(estimateTimelineRowSize(oneFile));
     expect(estimateTimelineRowSize(manyFiles, { changedFilesExpanded: true }))
       .toBeGreaterThan(estimateTimelineRowSize(manyFiles) + 300);
+  });
+
+  it("keeps raw tool output virtualization bounded to the compact preview", () => {
+    const bounded = buildItem({
+      id: "bounded-output",
+      activities: [activity("bounded-command", "bounded-output", {
+        kind: "command",
+        title: "Run verification",
+        detail: `Command:\nnpm test\nOutput:\n${"x".repeat(32 * 1024)}`,
+      })],
+    });
+    const enormous = buildItem({
+      id: "enormous-output",
+      activities: [activity("enormous-command", "enormous-output", {
+        kind: "command",
+        title: "Run verification",
+        detail: `Command:\nnpm test\nOutput:\n${"x".repeat(1024 * 1024)}`,
+      })],
+    });
+
+    expect(estimateTimelineRowSize(enormous, { workDetailsExpanded: true }))
+      .toBe(estimateTimelineRowSize(bounded, { workDetailsExpanded: true }));
+  });
+
+  it("prices visible attention boundaries without expanding collapsed adjacent calls", () => {
+    const successActivities = Array.from({ length: 8 }, (_, index) =>
+      activity(`success-${index}`, "successes", {
+        createdAt: `2026-07-26T10:00:${String(index).padStart(2, "0")}.000Z`,
+      }));
+    const boundedActivities = successActivities.map((item, index) =>
+      index === 3
+        ? {
+            ...item,
+            id: "warning-boundary",
+            kind: "status" as const,
+            title: "Unsupported option skipped",
+          }
+        : index === 6
+          ? {
+              ...item,
+              id: "failure-boundary",
+              title: "Verification failed",
+              status: "failed" as const,
+            }
+          : item);
+    const collapsedSuccesses = buildItem({
+      id: "successes",
+      status: "running",
+      answer: "",
+      activities: successActivities,
+    });
+    const collapsedBoundaries = buildItem({
+      id: "boundaries",
+      status: "running",
+      answer: "",
+      activities: boundedActivities.map((item) => ({ ...item, turnId: "boundaries" })),
+    });
+
+    expect(estimateTimelineRowSize(collapsedSuccesses)).toBeLessThan(380);
+    expect(estimateTimelineRowSize(collapsedBoundaries))
+      .toBeGreaterThan(estimateTimelineRowSize(collapsedSuccesses) + 40);
+    expect(estimateTimelineRowSize(collapsedBoundaries, { activityGroupsExpanded: true }))
+      .toBeGreaterThan(estimateTimelineRowSize(collapsedBoundaries));
+  });
+
+  it("does not reserve a virtualized rail for quiet success but keeps exceptional history measurable", () => {
+    const quiet = buildItem({
+      id: "quiet-settled-estimate",
+      activities: [activity("quiet-read", "quiet-settled-estimate")],
+    });
+    const warning = buildItem({
+      id: "warning-settled-estimate",
+      activities: [
+        activity("warning-read", "warning-settled-estimate"),
+        activity("warning-boundary", "warning-settled-estimate", {
+          kind: "status",
+          title: "Warning: optional provider feature skipped",
+        }),
+      ],
+    });
+
+    const quietEstimate = estimateTimelineRowSize(quiet);
+    expect(estimateTimelineRowSize(warning)).toBeGreaterThanOrEqual(quietEstimate + 50);
+    expect(estimateTimelineRowSize(quiet, { runDetailsExpanded: true }))
+      .toBeGreaterThan(quietEstimate + 100);
+  });
+
+  it("models commentary growth without inflating collapsed settled history", () => {
+    const shortActive = buildItem({
+      id: "commentary-short",
+      status: "running",
+      answer: "",
+      commentary: ["Inspecting the current virtual window."],
+    });
+    const longActive = buildItem({
+      id: "commentary-long",
+      status: "running",
+      answer: "",
+      commentary: [Array.from({ length: 24 }, () =>
+        "Streaming commentary grows while the reader remains anchored.").join(" ")],
+    });
+    const settled = buildItem({
+      id: "commentary-settled",
+      commentary: Array.from({ length: 18 }, (_, index) =>
+        `Persisted commentary segment ${index + 1} with enough text to wrap.`),
+    });
+
+    expect(estimateTimelineRowSize(longActive))
+      .toBeGreaterThan(estimateTimelineRowSize(shortActive) + 250);
+    expect(estimateTimelineRowSize(settled)).toBeLessThan(380);
+    expect(estimateTimelineRowSize(settled, { workDetailsExpanded: true }))
+      .toBeGreaterThan(estimateTimelineRowSize(settled) + 500);
   });
 
   it("reserves visible space for approvals, provider questions, warnings, and failures", () => {
@@ -318,12 +510,22 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       id: "failure",
       status: "failed",
       answer: "",
-      activities: [activity("failed-command", "failure", {
-        kind: "command",
-        title: "Verification failed",
-        detail: "The renderer returned an actionable failure that must remain visible.",
-        status: "failed",
-      })],
+      activities: [
+        activity("failed-command", "failure", {
+          kind: "command",
+          title: "Verification failed",
+          detail: "The renderer returned an actionable failure that must remain visible.",
+          status: "failed",
+        }),
+        activity("warning", "failure", {
+          kind: "status",
+          title: "Unsupported option skipped",
+        }),
+        activity("blocked-command", "failure", {
+          kind: "command",
+          title: "Upload blocked",
+        }),
+      ],
     });
     const failedBase = buildItem({ id: "failed-base", status: "failed", answer: "" });
 
@@ -331,10 +533,81 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimateTimelineRowSize(base, { runDetailsExpanded: true })).toBe(baseEstimate);
     expect(estimateTimelineRowSize(approvalItem)).toBeGreaterThan(baseEstimate + 100);
     expect(estimateTimelineRowSize(questionItem)).toBeGreaterThan(baseEstimate + 180);
-    expect(estimateTimelineRowSize(failedItem)).toBeGreaterThan(estimateTimelineRowSize(failedBase) + 20);
+    const visibleFailureDelta = estimateTimelineRowSize(failedItem)
+      - estimateTimelineRowSize(failedBase);
+    expect(visibleFailureDelta).toBeGreaterThanOrEqual(50);
+    expect(visibleFailureDelta).toBeLessThanOrEqual(80);
   });
 
-  it("keeps hundreds of rows bounded, keyed, virtualizable, and memoizable", () => {
+  it("does not reserve a hidden row for an expected non-Git artifact absence", () => {
+    const unavailable = {
+      ...artifact("not-repository", 0),
+      repositoryIdentity: null,
+      worktreeIdentity: null,
+      beforeFingerprint: null,
+      afterFingerprint: null,
+      status: "unavailable" as const,
+      completeness: "unavailable" as const,
+      patchState: "none" as const,
+      patchDigest: null,
+      absenceReason: "not-repository" as const,
+      failureReason: "No Git repository was found.",
+    };
+    const item = buildItem({
+      id: "not-repository",
+      gitArtifact: unavailable,
+    });
+
+    expect(shouldShowTurnGitArtifactSummary(unavailable)).toBe(false);
+    expect(estimateTimelineRowSize(item, { showChangedFiles: true }))
+      .toBe(estimateTimelineRowSize(item, { showChangedFiles: false }));
+  });
+
+  it("preserves user-controlled scroll during streaming and resize measurement changes", () => {
+    const base = {
+      scrollOffset: 1_000,
+      scrollDirection: "forward" as const,
+      manuallyAnchored: false,
+    };
+
+    expect(shouldAdjustTimelineScrollPosition({
+      ...base,
+      itemStart: 700,
+      itemSize: 500,
+      firstMeasurement: false,
+    })).toBe(false);
+    expect(shouldAdjustTimelineScrollPosition({
+      ...base,
+      itemStart: 700,
+      itemSize: 200,
+      firstMeasurement: false,
+    })).toBe(true);
+    expect(shouldAdjustTimelineScrollPosition({
+      ...base,
+      itemStart: 700,
+      itemSize: 200,
+      firstMeasurement: false,
+      scrollDirection: "backward",
+    })).toBe(false);
+    expect(shouldAdjustTimelineScrollPosition({
+      ...base,
+      itemStart: 700,
+      itemSize: 500,
+      firstMeasurement: true,
+    })).toBe(true);
+    expect(shouldAdjustTimelineScrollPosition({
+      ...base,
+      itemStart: 700,
+      itemSize: 200,
+      firstMeasurement: true,
+      manuallyAnchored: true,
+    })).toBe(false);
+
+    expect(shouldFollowTimeline(1_380, 500, 2_000)).toBe(true);
+    expect(shouldFollowTimeline(1_200, 500, 2_000)).toBe(false);
+  });
+
+  it("keeps hundreds of rows and thousands of events bounded, keyed, and memoizable", () => {
     const count = 600;
     const turns = Array.from({ length: count }, (_, index) =>
       agentTurn(`turn-${String(index).padStart(3, "0")}`));
@@ -344,8 +617,13 @@ describe("quiet-ledger timeline virtualization estimates", () => {
         ? Array.from({ length: 80 }, () => "Long historical answer paragraph.").join("\n\n")
         : `Final answer ${index}.`),
     ]);
-    const activities = turns.map((turn, index) =>
-      activity(`activity-${index}`, turn.id));
+    const activities = turns.flatMap((turn, turnIndex) =>
+      Array.from({ length: 5 }, (_, activityIndex) =>
+        activity(`activity-${turnIndex}-${activityIndex}`, turn.id, {
+          createdAt: new Date(
+            Date.parse(startedAt) + activityIndex * 100,
+          ).toISOString(),
+        })));
     const timeline = buildResponseTimeline({
       turns,
       messages,
@@ -358,6 +636,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     }));
 
     expect(timeline).toHaveLength(count);
+    expect(activities).toHaveLength(3_000);
     expect(timeline[0]?.id).toBe("turn-000");
     expect(timeline.at(-1)?.id).toBe("turn-599");
     expect(shouldVirtualizeTimeline(timeline.length)).toBe(true);
@@ -367,5 +646,62 @@ describe("quiet-ledger timeline virtualization estimates", () => {
 
     const stable = stabilizeResponseTimeline(timeline, []);
     expect(stabilizeResponseTimeline(timeline, stable)).toBe(stable);
+
+    const changedActivities = activities.map((item) =>
+      item.id === "activity-599-4"
+        ? { ...item, detail: "Only the newest event changed." }
+        : item);
+    const advanced = stabilizeResponseTimeline(buildResponseTimeline({
+      turns,
+      messages,
+      activities: changedActivities,
+      reasonings: [],
+      checkpoints: [],
+    }), stable);
+    expect(advanced).not.toBe(stable);
+    expect(advanced.slice(0, -1).every((item, index) => item === stable[index])).toBe(true);
+    expect(advanced.at(-1)).not.toBe(stable.at(-1));
+  });
+
+  it("memoizes settled rows across provider refreshes and isolates live-stream invalidation", () => {
+    const settled = responseTurns([buildItem({ id: "memo-settled" })])[0]!;
+    const active = responseTurns([buildItem({
+      id: "memo-active",
+      status: "running",
+      answer: "",
+    })])[0]!;
+    const baseProps = {
+      providers: [],
+      streamingText: "first",
+      streamingReasoning: "reasoning",
+      showTimestamps: false,
+      showThinking: false,
+      defaultCodeWrap: false,
+      autoCollapseWorkLog: true,
+      showChangedFileSummaries: true,
+      checkpointRestoreDisabled: false,
+    } as unknown as ResponseTimelineProps;
+    const memoInput = (turn: ResponseTurn, props: ResponseTimelineProps) => ({
+      turn,
+      props,
+      previousArtifactTurnId: null,
+    });
+
+    expect(sameTurnTimelineProps(
+      memoInput(settled, baseProps),
+      memoInput(settled, { ...baseProps, providers: [...baseProps.providers] }),
+    )).toBe(true);
+    expect(sameTurnTimelineProps(
+      memoInput(settled, baseProps),
+      memoInput(settled, { ...baseProps, streamingText: "second" }),
+    )).toBe(true);
+    expect(sameTurnTimelineProps(
+      memoInput(active, baseProps),
+      memoInput(active, { ...baseProps, streamingText: "second" }),
+    )).toBe(false);
+    expect(sameTurnTimelineProps(
+      memoInput(settled, baseProps),
+      memoInput(settled, { ...baseProps, showTimestamps: true }),
+    )).toBe(false);
   });
 });

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { ModelSelection } from "../../src/shared/model-routing";
-import { finalAnswerIdentityLabel } from "../../src/renderer/src/utils/finalAnswerIdentity";
+import {
+  activeWorkIdentityLabel,
+  finalAnswerIdentityLabel,
+} from "../../src/renderer/src/utils/finalAnswerIdentity";
 
 function selection(update: Partial<ModelSelection> = {}): ModelSelection {
   return {
@@ -20,6 +23,15 @@ function selection(update: Partial<ModelSelection> = {}): ModelSelection {
 }
 
 describe("final answer identity", () => {
+  it("uses only the persisted harness and backend for active work identity", () => {
+    expect(activeWorkIdentityLabel(selection({
+      harnessId: "claude-agent-sdk",
+      backendProfileDisplayName: "Kimi",
+      modelId: "k3",
+      alias: "K3",
+    }))).toBe("Claude · Kimi");
+  });
+
   it("uses the persisted harness, backend, and friendly model identity", () => {
     expect(finalAnswerIdentityLabel(selection())).toBe(
       "Claude · Anthropic · Sonnet 4.5",
@@ -29,7 +41,7 @@ describe("final answer identity", () => {
   it("labels Kimi-through-Claude from route identity without matching its backend display name", () => {
     expect(finalAnswerIdentityLabel(selection({
       backendProfileId: "builtin:kimi-code",
-      backendProfileDisplayName: "Kimi",
+      backendProfileDisplayName: "Renamed current profile",
       modelId: "k3",
       alias: null,
     }))).toBe("Claude · Kimi · K3");
@@ -52,9 +64,28 @@ describe("final answer identity", () => {
     }))).toBe("vendor-harness-v2 · Acme Gateway · acme/code-pro");
   });
 
+  it("uses persisted structural IDs for native backends without current-profile relabeling", () => {
+    expect(finalAnswerIdentityLabel(selection({
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      backendProfileDisplayName: "A mutable catalog label",
+      modelId: "gpt-5.6",
+      alias: "GPT-5.6",
+    }))).toBe("Codex · OpenAI · GPT-5.6");
+
+    expect(finalAnswerIdentityLabel(selection({
+      harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server",
+      backendProfileDisplayName: "Legacy native label",
+      modelId: "gpt-5.6",
+      alias: null,
+    }))).toBe("Codex · OpenAI · gpt-5.6");
+  });
+
   it("does not invent a model name for provider-default selections", () => {
     expect(finalAnswerIdentityLabel(selection({
       harnessId: "opencode-sdk",
+      backendProfileId: "builtin:opencode",
       backendProfileDisplayName: "OpenCode",
       modelId: "provider-default",
       alias: null,

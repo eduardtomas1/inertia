@@ -58,7 +58,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "stale-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "stale" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Checking" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan", entries: [{ content: "Implement", priority: "high", status: "pending" }] } } });
-    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-4", title: "Run command", kind: "execute", status: "in_progress" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-4", title: "Run command", kind: "execute", status: "in_progress", rawInput: { command: "npm test" } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-4", title: "Run command", kind: "execute", status: "completed", rawOutput: "passed" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "usage_update", used: 321, size: 200000 } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Cursor response" } } } });
     return send({ jsonrpc: "2.0", id: promptRequestId, result: { stopReason: "end_turn", usage: { totalTokens: 350, inputTokens: 320, outputTokens: 30, thoughtTokens: 5, cachedReadTokens: 20 } } });
@@ -76,6 +77,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const usage: Array<number | null> = [];
     const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: string[][] = [];
+    const activities: Array<{ activityId?: string; detail?: string; phase: string }> = [];
 
     const result = await manager.run(nativeProviderRunInput({
       providerId: "cursor",
@@ -105,6 +107,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       },
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
+      onActivity: (event) => activities.push(event),
       onUsage: (event) => {
         usage.push(event.usage.usedTokens);
         usageDetails.push(event.usage);
@@ -117,6 +120,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(questions).toEqual(["Which scopes?"]);
     expect(plans).toEqual(expect.arrayContaining(["Inspect", "Implement"]));
     expect(reasoning).toEqual(["Checking"]);
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "tool-4",
+      phase: "completed",
+      detail: "Output:\npassed",
+    }));
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "tool-4",
+      phase: "started",
+      detail: "Command:\nnpm test",
+    }));
     expect(usage).toEqual([321, 321]);
     expect(usageDetails.at(-1)).toMatchObject({
       usedTokens: 321,

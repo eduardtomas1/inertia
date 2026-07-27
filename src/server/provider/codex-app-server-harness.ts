@@ -57,6 +57,7 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     options.callbacks,
     options.input.runId ?? conversationId,
     options.input.turnId ?? null,
+    options.input.cwd,
   );
   emitter.status("starting");
   let runningEmitted = false;
@@ -100,6 +101,7 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       onReasoning: (text) => emitter.codex({ type: "reasoning-summary", text }),
       onUsage: (usage) => emitter.codex({ type: "usage", usage }),
       onRateLimits: (rateLimits, complete) => emitter.codex({ type: "metadata", metadata: { rateLimits }, source: "provider", complete }),
+      onSubagent: emitter.subagent,
     });
   } catch (error) {
     const spawnError = error instanceof Error ? error as NodeJS.ErrnoException : undefined;
@@ -120,6 +122,7 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     settled = true;
     const {
       diagnostic: runtimeDiagnostic,
+      failure: runtimeFailure,
       compatibilityError,
       continuationError,
       ...publicRuntimeResult
@@ -129,19 +132,38 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       return { providerId, conversationId, ...publicRuntimeResult, status: "cancelled" };
     }
     if (runtimeResult.status === "failed") {
+      const providerMessage = providerFailureMessage(
+        providerId,
+        undefined,
+        runtimeDiagnostic ?? "",
+        "",
+        options.input.backendProfile,
+      );
       const message = continuationError === "stale-provider-session"
         ? staleProviderSessionDecision().reason
         : compatibilityError === "full-access-unsupported"
           ? "This Codex App Server version does not support Full Access. Update Codex CLI and try again."
-          : providerFailureMessage(
-              providerId,
-              undefined,
-              runtimeDiagnostic ?? "",
-              "",
-              options.input.backendProfile,
-            );
+          : runtimeFailure?.reason === "protocol-overflow"
+            ? "Codex produced a protocol message that was too large to process safely."
+            : runtimeFailure?.reason === "malformed-protocol"
+              ? "Codex returned a malformed App Server message."
+              : runtimeFailure?.reason === "rpc-timeout"
+                ? "Codex App Server stopped responding."
+                : runtimeFailure?.reason === "transport-closed"
+                  ? "The Codex App Server connection closed before the turn completed."
+                  : providerMessage;
+      const failure = runtimeFailure
+        ? { ...runtimeFailure, message }
+        : { reason: "codex-error" as const, message };
       emitter.status("failed", message);
-      return { providerId, conversationId, ...publicRuntimeResult, status: "failed", error: message };
+      return {
+        providerId,
+        conversationId,
+        ...publicRuntimeResult,
+        status: "failed",
+        error: message,
+        failure,
+      };
     }
     emitter.status("completed");
     return { providerId, conversationId, ...publicRuntimeResult, status: "completed" };
@@ -165,6 +187,10 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       kind: "codex-app-server",
       respondToApproval: (requestId, decision) => !settled && !cancelRequested && codexRun.respondToApproval(requestId, decision),
       respondToInput: (requestId, answers) => !settled && !cancelRequested && codexRun.respondToInput(requestId, answers),
+      steer: async (content) =>
+        !settled
+        && !cancelRequested
+        && Boolean(await codexRun.steer?.(content)),
     },
   };
 }
@@ -187,12 +213,17 @@ function failedCodexRun(
       exitCode: null,
       signal: null,
       error,
+      failure: {
+        reason: "codex-error",
+        message: error,
+      },
     }),
     cancel: () => undefined,
     extension: {
       kind: "codex-app-server",
       respondToApproval: () => false,
       respondToInput: () => false,
+      steer: async () => false,
     },
   };
 }

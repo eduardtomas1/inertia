@@ -6,7 +6,11 @@ import type {
   AgentInputRequest,
   AgentPlanStep,
 } from "../provider/interactions";
-import type { CodexResponsesHarnessConfiguration } from "../provider/contracts";
+import type {
+  CodexResponsesHarnessConfiguration,
+  ProviderActivityEvent,
+  ProviderRunFailure,
+} from "../provider/contracts";
 
 export interface CodexUsageSnapshot {
   usedTokens: number | null;
@@ -33,8 +37,20 @@ export interface CodexAppServerOptions {
   imagePaths?: readonly string[];
   planMode: boolean;
   access: "supervised" | "auto-edit" | "full";
+  /** Testable bound for one JSON-RPC response; defaults to 30 seconds. */
+  rpcTimeoutMs?: number;
+  /** Test-only transport bounds; production callers use the hardened defaults. */
+  protocolLimits?: {
+    maxFrameBytes: number;
+    maxProtocolBytes: number;
+  };
   onText?: (text: string) => void;
-  onActivity?: (kind: "system" | "turn" | "tool" | "command" | "reasoning", phase: "started" | "completed" | "failed" | "info", label: string) => void;
+  onActivity?: (
+    kind: "system" | "turn" | "tool" | "command" | "reasoning",
+    phase: "started" | "completed" | "failed" | "info",
+    label: string,
+    detail?: Pick<ProviderActivityEvent, "activityId" | "detail">,
+  ) => void;
   onSession?: (sessionId: string) => void;
   onStatus?: (status: "running") => void;
   onApproval?: (request: AgentApprovalRequest) => void;
@@ -45,6 +61,20 @@ export interface CodexAppServerOptions {
   onReasoning?: (text: string) => void;
   onUsage?: (usage: CodexUsageSnapshot) => void;
   onRateLimits?: (rateLimits: ProviderRateLimit[], complete: boolean) => void;
+  onSubagent?: (event: {
+    sequence: number;
+    providerTaskId: string | null;
+    providerAgentId: string | null;
+    parentProviderAgentId: string | null;
+    parentProviderToolUseId: string | null;
+    providerToolUseId: string | null;
+    providerRole: string | null;
+    providerName: string | null;
+    status: "spawned" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "lost";
+    description: string | null;
+    progress: string | null;
+    result: string | null;
+  }) => void;
 }
 
 export interface CodexAppServerResult {
@@ -55,6 +85,7 @@ export interface CodexAppServerResult {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   diagnostic?: string;
+  failure?: ProviderRunFailure;
   compatibilityError?: "full-access-unsupported";
   continuationError?: "stale-provider-session";
 }
@@ -65,4 +96,5 @@ export interface CodexAppServerRun {
   cancel: (force?: boolean) => void;
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
+  steer?: (content: string) => Promise<boolean>;
 }

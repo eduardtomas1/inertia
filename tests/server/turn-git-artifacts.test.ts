@@ -8,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCheckpoint } from "../../src/server/checkpoints";
 import { RuntimeStore } from "../../src/server/database";
@@ -286,9 +286,159 @@ describe("turn Git artifacts", () => {
       status: "unavailable",
       completeness: "unavailable",
       repositoryIdentity: null,
+      absenceReason: "not-repository",
       files: [],
     });
     store.close();
+  });
+
+  it("bounds stalled finalization, deduplicates callers, and rejects late replacement", async () => {
+    const runtime = workspace();
+    const turn = beginTurn(runtime.store, runtime.conversationId, "turn-timeout");
+    const checkpoint = await checkpointFor(
+      runtime.store,
+      runtime.repository,
+      runtime.data,
+      runtime.conversationId,
+      1,
+    );
+    runtime.store.associateCheckpointWithTurn(
+      checkpoint.id,
+      runtime.conversationId,
+      turn.runId,
+      turn.id,
+    );
+    const manager = new TurnGitArtifactManager(
+      runtime.store,
+      runtime.data,
+      () => new Date(),
+      { finalizationTimeoutMs: 5 },
+    );
+    await manager.captureBefore({ turn, checkpointId: checkpoint.id });
+    const answer = runtime.store.createMessage(
+      runtime.conversationId,
+      "The provider is already done.",
+      "assistant",
+      [],
+      turn.id,
+    );
+    const terminal = runtime.store.settleAgentTurn(turn.id, {
+      status: "completed",
+      terminalAssistantMessageId: answer.id,
+      checkpointId: checkpoint.id,
+    }).turn;
+    let resolveCapture!: () => void;
+    const capture = vi.spyOn(manager, "captureAfter").mockImplementation(
+      () => new Promise<void>((resolve) => {
+        resolveCapture = resolve;
+      }),
+    );
+
+    const first = manager.finalize({
+      turn: terminal,
+      checkpointId: checkpoint.id,
+      terminalAssistantMessageId: answer.id,
+    });
+    const second = manager.finalize({
+      turn: terminal,
+      checkpointId: checkpoint.id,
+      terminalAssistantMessageId: answer.id,
+    });
+    expect(second).toBe(first);
+    await first;
+
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(runtime.store.turnGitArtifact(turn.id)).toMatchObject({
+      status: "failed",
+      completeness: "partial",
+      patchState: "failed",
+      terminalAssistantMessageId: answer.id,
+      failureReason: "Capturing turn changes timed out.",
+    });
+
+    resolveCapture();
+    await Promise.resolve();
+    expect(runtime.store.turnGitArtifact(turn.id)?.status).toBe("failed");
+    runtime.store.close();
+  });
+
+  it("does not scan nested Openbravo module repositories when the selected root is not Git", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-openbravo-artifacts-"));
+    const data = join(root, "data");
+    const selectedRoot = join(root, "openbravo");
+    const firstModule = join(selectedRoot, "modules", "org.openbravo.client.application");
+    const secondModule = join(selectedRoot, "modules", "org.openbravo.service.integration");
+    mkdirSync(data);
+    mkdirSync(firstModule, { recursive: true });
+    mkdirSync(secondModule, { recursive: true });
+    for (const [module, filename] of [
+      [firstModule, "Application.java"],
+      [secondModule, "Integration.java"],
+    ] as const) {
+      git(module, ["init"]);
+      writeFileSync(join(module, filename), "class Before {}\n");
+      git(module, ["add", filename]);
+      git(module, [
+        "-c",
+        "user.name=Inertia Test",
+        "-c",
+        "user.email=test@inertia.local",
+        "commit",
+        "-m",
+        "Initial",
+      ]);
+      writeFileSync(join(module, filename), "class Changed {}\n");
+    }
+    roots.push(root);
+
+    const store = new RuntimeStore(join(data, "inertia.sqlite"), selectedRoot);
+    const project = store.createProject("Openbravo", selectedRoot);
+    const conversation = store.createConversation(project.id, "Nested modules");
+    const turn = beginTurn(store, conversation.id, "turn-openbravo-root");
+    const manager = new TurnGitArtifactManager(store, data);
+
+    await manager.captureBefore({ turn, checkpointId: null });
+    await manager.captureAfter({ turn, checkpointId: null });
+
+    expect(store.turnGitArtifact(turn.id)).toMatchObject({
+      status: "unavailable",
+      completeness: "unavailable",
+      repositoryIdentity: null,
+      worktreeIdentity: null,
+      absenceReason: "not-repository",
+      files: [],
+      insertions: 0,
+      deletions: 0,
+    });
+    expect(git(firstModule, ["status", "--short"])).toContain("Application.java");
+    expect(git(secondModule, ["status", "--short"])).toContain("Integration.java");
+    store.close();
+  });
+
+  it("keeps a true Git-root pre-capture failure visible instead of classifying it as absence", async () => {
+    const runtime = workspace();
+    const turn = beginTurn(runtime.store, runtime.conversationId, "turn-capture-failure");
+    const checkpoint = await checkpointFor(
+      runtime.store,
+      runtime.repository,
+      runtime.data,
+      runtime.conversationId,
+      1,
+    );
+    git(runtime.repository, ["update-ref", "-d", checkpoint.ref]);
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+
+    await manager.captureBefore({ turn, checkpointId: checkpoint.id });
+
+    expect(runtime.store.turnGitArtifact(turn.id)).toMatchObject({
+      status: "unavailable",
+      completeness: "unavailable",
+      absenceReason: null,
+      repositoryIdentity: null,
+    });
+    expect(runtime.store.turnGitArtifact(turn.id)?.failureReason)
+      .not.toBe("This workspace is not a Git repository.");
+    runtime.store.close();
   });
 
   it("bounds oversized patches and rejects tampered or out-of-artifact reads", async () => {
@@ -331,6 +481,39 @@ describe("turn Git artifacts", () => {
     await expect(manager.turnDiff(turn.id)).rejects.toThrow(
       "could not be read safely",
     );
+    runtime.store.close();
+  });
+
+  it("distinguishes a bounded file summary from a truncated stored patch", async () => {
+    const runtime = workspace();
+    const turn = beginTurn(runtime.store, runtime.conversationId, "turn-many-files");
+    const checkpoint = await checkpointFor(
+      runtime.store,
+      runtime.repository,
+      runtime.data,
+      runtime.conversationId,
+      1,
+    );
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+    await manager.captureBefore({ turn, checkpointId: checkpoint.id });
+    for (let index = 0; index < 201; index += 1) {
+      writeFileSync(
+        join(runtime.repository, `bounded-${String(index).padStart(3, "0")}.txt`),
+        `file ${index}\n`,
+      );
+    }
+
+    await manager.captureAfter({ turn, checkpointId: checkpoint.id });
+
+    expect(runtime.store.turnGitArtifact(turn.id)).toMatchObject({
+      status: "partial",
+      completeness: "truncated",
+      patchState: "available",
+      insertions: 201,
+      deletions: 0,
+      failureReason: "The historical file list or change totals reached their capture limit.",
+    });
+    expect(runtime.store.turnGitArtifact(turn.id)?.files).toHaveLength(200);
     runtime.store.close();
   });
 });

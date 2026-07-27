@@ -28,6 +28,7 @@ import type {
   ProviderId,
   ProviderInfo,
   ResponseDensity,
+  SubagentTrace,
   ThreadUsageSnapshot,
   TurnGitArtifact,
   TurnRequestContext,
@@ -45,6 +46,7 @@ type ChatWorkspaceProps = {
   turns: AgentTurn[];
   messages: ChatMessage[];
   activities: AgentActivity[];
+  subagents: SubagentTrace[];
   reasonings: AgentReasoning[];
   plans: AgentPlan[];
   checkpoints: CheckpointSummary[];
@@ -77,12 +79,17 @@ type ChatWorkspaceProps = {
   onCreateConversationForSelection: (selection: ModelSelection) => Promise<void>;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
+  onReleaseAttachment: (id: string) => Promise<void>;
   onRunAction: (action: ProjectAction) => void;
   onMentionQuery: (query: string) => void;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId: ProviderId) => void;
+  onOpenProviderSetup: (providerId: ProviderId) => void;
+  onOpenBackendSetup: (profileId: string) => void;
+  onProbeBackendProfile: (profileId: string, modelId: string) => Promise<void>;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
-  onStop: () => void;
+  onStop: () => Promise<void>;
+  onStopSubagent: (trace: SubagentTrace) => Promise<void>;
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
   onOpenTurnDiff: (turnId: string, path?: string) => void;
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
@@ -97,6 +104,7 @@ export function ChatWorkspace({
   turns,
   messages,
   activities,
+  subagents,
   reasonings,
   plans,
   checkpoints,
@@ -129,12 +137,17 @@ export function ChatWorkspace({
   onCreateConversationForSelection,
   onChooseAttachments,
   onImportAttachments,
+  onReleaseAttachment,
   onRunAction,
   onMentionQuery,
   onConnectProvider,
   onRefreshProvider,
+  onOpenProviderSetup,
+  onOpenBackendSetup,
+  onProbeBackendProfile,
   onUsageDisplayModeChange,
   onStop,
+  onStopSubagent,
   onRevertCheckpoint,
   onOpenTurnDiff,
   onCompareTurnArtifacts,
@@ -148,7 +161,7 @@ export function ChatWorkspace({
   const followingRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
-  const contentSignal = `${turns.length}:${turns.at(-1)?.updatedAt ?? ""}:${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${plans.length}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
+  const contentSignal = `${turns.length}:${turns.at(-1)?.updatedAt ?? ""}:${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${subagents.length}:${subagents.at(-1)?.updatedAt ?? ""}:${plans.length}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
 
   const scrollToLatest = (behavior: ScrollBehavior = "smooth"): void => {
     const element = scrollRef.current;
@@ -265,6 +278,7 @@ export function ChatWorkspace({
             turns={turns}
             messages={messages}
             activities={activities}
+            subagents={subagents}
             reasonings={reasonings}
             plans={plans}
             checkpoints={checkpoints}
@@ -296,7 +310,8 @@ export function ChatWorkspace({
             onOpenTurnDiff={onOpenTurnDiff}
             onCompareTurnArtifacts={onCompareTurnArtifacts}
             onOpenTurnFile={onOpenTurnFile}
-            onStop={onStop}
+            onStop={() => { void onStop().catch(() => undefined); }}
+            onStopSubagent={onStopSubagent}
           />
         </div>
       </div>
@@ -322,10 +337,14 @@ export function ChatWorkspace({
           onCreateConversationForSelection={onCreateConversationForSelection}
           onChooseAttachments={onChooseAttachments}
           onImportAttachments={onImportAttachments}
+          onReleaseAttachment={onReleaseAttachment}
           onRunAction={onRunAction}
           onMentionQuery={onMentionQuery}
           onConnectProvider={onConnectProvider}
           onRefreshProvider={onRefreshProvider}
+          onOpenProviderSetup={onOpenProviderSetup}
+          onOpenBackendSetup={onOpenBackendSetup}
+          onProbeBackendProfile={onProbeBackendProfile}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           onStop={onStop}
           onClearPromptContext={onClearPromptContext}

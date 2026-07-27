@@ -22,6 +22,7 @@ import {
   type ProviderInfo,
   type ProviderId,
   type RuntimeMutationEvent,
+  type SubagentTrace,
   type ThreadUsageSnapshot,
   type TurnRequestContext,
 } from "../../../shared/contracts";
@@ -39,9 +40,14 @@ import type {
   ProviderEvent,
   ProviderMetadataEvent,
   ProviderRunCallbacks,
+  ProviderRunFailure,
   ProviderRunInput,
   ProviderRunResult,
 } from "../../provider/contracts";
+import {
+  mergeProviderActivityDetailWithinTurnBudget,
+  sanitizeProviderActivityDetail,
+} from "../../provider/activity-detail";
 import {
   assembleTurnRequest,
   type HiddenProviderInstruction,
@@ -83,6 +89,16 @@ export interface TurnProviderRuntime {
     answers: Record<string, string[]>,
     identity: { runId: string; turnId: string },
   ): boolean;
+  steer?(
+    conversationId: string,
+    content: string,
+    identity: { runId: string; turnId: string },
+  ): Promise<boolean>;
+  stopSubagent?(
+    conversationId: string,
+    providerTaskId: string,
+    identity: { runId: string; turnId: string },
+  ): Promise<boolean>;
   disposeAll(): Promise<void>;
 }
 
@@ -189,6 +205,8 @@ interface ActiveTurn {
   reasoningStream: TurnStreamCoalescer;
   timeoutTimer: unknown;
   runningActivities: Map<ProviderActivityEvent["kind"], AgentActivity[]>;
+  providerActivitiesById: Map<string, AgentActivity>;
+  providerActivityDetailChars: number;
   providerCommandRuns: Map<string, string>;
   approvalIds: Set<string>;
   inputIds: Set<string>;
@@ -255,6 +273,7 @@ export class TurnController {
   private readonly id: () => string;
   private readonly turnTimeoutMs: number;
   private readonly settlementTasks = new Set<Promise<unknown>>();
+  private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
   private closing = false;
 
   constructor(
@@ -296,6 +315,7 @@ export class TurnController {
     const assembled = assembleTurnRequest({
       cwd: this.store.conversationPath(conversation.id),
       visibleContent: request.content,
+      interactionMode: conversation.interactionMode,
       attachments,
       imagePaths: request.imagePaths,
       context: request.context,
@@ -420,6 +440,8 @@ export class TurnController {
       reasoningStream,
       timeoutTimer: null,
       runningActivities: new Map(),
+      providerActivitiesById: new Map(),
+      providerActivityDetailChars: 0,
       providerCommandRuns: new Map(),
       approvalIds: new Set(),
       inputIds: new Set(),
@@ -487,11 +509,15 @@ export class TurnController {
 
     let preCapture: void | Promise<void>;
     try {
-      preCapture = this.hooks.captureGitBefore?.({
-        turn: active.turn,
-        checkpointId: active.checkpointId,
-        terminalAssistantMessageId: null,
-      });
+      const captureBefore = () => this.hooks.captureGitBefore?.({
+          turn: active.turn,
+          checkpointId: active.checkpointId,
+          terminalAssistantMessageId: null,
+        });
+      const priorArtifact = this.gitArtifactBarriers.get(active.conversation.id);
+      preCapture = priorArtifact
+        ? priorArtifact.catch(() => undefined).then(captureBefore)
+        : captureBefore();
     } catch {
       preCapture = undefined;
     }
@@ -526,7 +552,14 @@ export class TurnController {
     void result.then(
       (providerResult) => this.handleProviderResult(active, providerResult),
       (error: unknown) => {
-        this.settle(active, "failed", "provider-process-crash", this.publicError(error));
+        const failure = this.providerPromiseFailure(active, error);
+        this.settle(
+          active,
+          "failed",
+          "provider-process-crash",
+          failure.message,
+          failure,
+        );
       },
     );
     return true;
@@ -537,6 +570,66 @@ export class TurnController {
     if (!active || active.settled) return false;
     this.providers.cancel(conversationId);
     return this.settle(active, "cancelled", cause, "Stopped");
+  }
+
+  async steer(
+    conversationId: string,
+    content: string,
+  ): Promise<ChatMessage | null> {
+    const active = this.activeByConversation.get(conversationId);
+    const followUp = content.trim();
+    if (
+      !active
+      || active.settled
+      || !active.acceptingProviderEvents
+      || !followUp
+      || !this.providers.steer
+    ) return null;
+    const message = this.store.createFollowUpMessage(
+      conversationId,
+      active.turn.id,
+      followUp,
+      this.now(),
+    );
+    const accepted = await this.providers.steer(
+      conversationId,
+      followUp,
+      { runId: active.turn.runId, turnId: active.turn.id },
+    );
+    if (accepted) return message;
+    this.store.deleteFollowUpMessage(
+      message.id,
+      conversationId,
+      active.turn.id,
+    );
+    return null;
+  }
+
+  async stopSubagent(
+    conversationId: string,
+    traceId: string,
+  ): Promise<boolean> {
+    const active = this.activeByConversation.get(conversationId);
+    if (!active || active.settled || !this.providers.stopSubagent) return false;
+    let trace: SubagentTrace;
+    try {
+      trace = this.store.subagentTrace(traceId);
+    } catch {
+      return false;
+    }
+    if (
+      trace.conversationId !== conversationId
+      || trace.runId !== active.turn.runId
+      || trace.turnId !== active.turn.id
+      || trace.providerId !== "claude"
+      || !trace.providerTaskId
+      || !["spawned", "running", "waiting"].includes(trace.status)
+    ) return false;
+    return await this.providers.stopSubagent(
+      conversationId,
+      trace.providerTaskId,
+      { runId: active.turn.runId, turnId: active.turn.id },
+    );
   }
 
   respondToApproval(
@@ -729,6 +822,34 @@ export class TurnController {
           }
           this.hooks.broadcastSnapshot();
           break;
+        case "subagent": {
+          const persisted = this.store.upsertSubagentTrace({
+            conversationId: active.conversation.id,
+            runId: active.turn.runId,
+            turnId: active.turn.id,
+            providerId: active.turn.providerId,
+            providerTaskId: event.providerTaskId,
+            providerAgentId: event.providerAgentId,
+            parentProviderAgentId: event.parentProviderAgentId,
+            parentProviderToolUseId: event.parentProviderToolUseId,
+            providerToolUseId: event.providerToolUseId,
+            providerRole: event.providerRole,
+            providerName: event.providerName,
+            status: event.status,
+            description: event.description,
+            progress: event.progress,
+            result: event.result,
+            sequence: event.sequence,
+            updatedAt: this.now(),
+          });
+          if (persisted?.changed) {
+            this.hooks.broadcast({
+              type: "agent.subagent.updated",
+              trace: persisted.trace,
+            });
+          }
+          break;
+        }
       }
       return true;
     } catch (error) {
@@ -777,7 +898,10 @@ export class TurnController {
     } else if (result.status === "cancelled") {
       this.settle(active, "cancelled", "user-cancelled", "Stopped");
     } else {
-      const cause = result.exitCode !== null || result.signal !== null
+      const transportFailure = result.failure
+        ? result.failure.reason !== "codex-error"
+        : result.exitCode !== null || result.signal !== null;
+      const cause = transportFailure
         ? "provider-process-exit"
         : "provider-error";
       this.settle(
@@ -785,6 +909,7 @@ export class TurnController {
         "failed",
         cause,
         result.error ?? "The provider could not complete the request.",
+        result.failure,
       );
     }
   }
@@ -942,6 +1067,30 @@ export class TurnController {
   ): AgentActivity {
     const status = agentActivityStatus(event);
     const candidates = active.runningActivities.get(event.kind) ?? [];
+    const identified = event.activityId
+      ? active.providerActivitiesById.get(event.activityId)
+      : undefined;
+    if (identified) {
+      const detail = this.providerActivityDetail(
+        active,
+        identified.detail,
+        event.detail ?? null,
+      );
+      const activity = this.store.updateActivity(identified.id, {
+        title: event.label,
+        detail,
+        status,
+      });
+      active.providerActivitiesById.set(event.activityId!, activity);
+      if (event.phase !== "started") {
+        active.providerActivitiesById.delete(event.activityId!);
+        const pendingIndex = candidates.findIndex(({ id }) => id === identified.id);
+        if (pendingIndex >= 0) candidates.splice(pendingIndex, 1);
+        if (candidates.length === 0) active.runningActivities.delete(event.kind);
+      }
+      this.syncProviderCommandRun(active, activity, event.phase);
+      return activity;
+    }
     if (event.phase !== "started" && event.phase !== "info") {
       let matchIndex = candidates.findIndex((activity) => activity.title === event.label);
       if (matchIndex < 0 && (candidates.length === 1 || event.label === "Tool")) matchIndex = 0;
@@ -951,6 +1100,11 @@ export class TurnController {
         else active.runningActivities.set(event.kind, candidates);
         const activity = this.store.updateActivity(match.id, {
           title: event.label,
+          detail: this.providerActivityDetail(
+            active,
+            match.detail,
+            event.detail ?? null,
+          ),
           status,
         });
         this.syncProviderCommandRun(active, activity, event.phase);
@@ -963,7 +1117,7 @@ export class TurnController {
       turnId: active.turn.id,
       kind: agentActivityKind(event),
       title: event.label,
-      detail: null,
+      detail: this.providerActivityDetail(active, null, event.detail ?? null),
       status,
       createdAt: this.now(),
     });
@@ -972,7 +1126,24 @@ export class TurnController {
       candidates.push(activity);
       active.runningActivities.set(event.kind, candidates);
     }
+    if (event.activityId && event.phase === "started") {
+      active.providerActivitiesById.set(event.activityId, activity);
+    }
     return activity;
+  }
+
+  private providerActivityDetail(
+    active: ActiveTurn,
+    previous: string | null,
+    next: string | null,
+  ): string | null {
+    const merged = mergeProviderActivityDetailWithinTurnBudget(
+      previous,
+      next,
+      active.providerActivityDetailChars,
+    );
+    active.providerActivityDetailChars = merged.totalChars;
+    return merged.detail;
   }
 
   private syncProviderCommandRun(
@@ -1165,6 +1336,7 @@ export class TurnController {
     status: AgentTurnTerminalStatus,
     cause: TurnTerminalCause,
     message?: string,
+    failure?: ProviderRunFailure,
   ): boolean {
     if (active.settled) return false;
     active.settled = true;
@@ -1190,7 +1362,22 @@ export class TurnController {
       this.settleRunningActivities(
         active,
         status === "failed" || status === "interrupted" ? "failed" : "completed",
+        failure && failure.reason !== "codex-error"
+          ? failure.message
+          : undefined,
       );
+    } catch (error) {
+      notePersistenceError(error);
+    }
+    try {
+      const subagentStatus = status === "cancelled" ? "cancelled" : "lost";
+      for (const trace of this.store.settleLiveSubagents(
+        active.turn.id,
+        subagentStatus,
+        this.now(),
+      )) {
+        this.hooks.broadcast({ type: "agent.subagent.updated", trace });
+      }
     } catch (error) {
       notePersistenceError(error);
     }
@@ -1208,31 +1395,13 @@ export class TurnController {
     const terminalReason = persistenceError
       ? `${cause}: ${persistenceError}`.slice(0, 4_000)
       : cause;
-    let artifactCapture: void | Promise<void>;
-    try {
-      const captureAfter = () => this.hooks.captureGitArtifacts?.({
-          turn: active.turn,
-          checkpointId: active.checkpointId,
-          terminalAssistantMessageId: active.latestAssistantMessageId,
-        });
-      artifactCapture = active.gitBeforeCapture
-        ? active.gitBeforeCapture.then(captureAfter)
-        : captureAfter();
-    } catch {
-      artifactCapture = undefined;
-    }
-    if (
-      artifactCapture
-      && typeof (artifactCapture as Promise<void>).then === "function"
-    ) {
-      this.track(Promise.resolve(artifactCapture)
-        .catch(() => undefined)
-        .then(() => {
-          this.finalizeSettlementGuarded(active, status, terminalReason, message);
-        }));
-      return true;
-    }
-    return this.finalizeSettlementGuarded(active, status, terminalReason, message);
+    return this.finalizeSettlementGuarded(
+      active,
+      status,
+      terminalReason,
+      message,
+      failure,
+    );
   }
 
   private finalizeSettlementGuarded(
@@ -1240,9 +1409,16 @@ export class TurnController {
     status: AgentTurnTerminalStatus,
     terminalReason: string,
     message?: string,
+    failure?: ProviderRunFailure,
   ): boolean {
     try {
-      return this.finalizeSettlement(active, status, terminalReason, message);
+      return this.finalizeSettlement(
+        active,
+        status,
+        terminalReason,
+        message,
+        failure,
+      );
     } catch {
       try {
         const latest = this.store.agentTurn(active.turn.id);
@@ -1297,6 +1473,7 @@ export class TurnController {
     status: AgentTurnTerminalStatus,
     terminalReason: string,
     message?: string,
+    failure?: ProviderRunFailure,
   ): boolean {
     const settlement = this.store.settleAgentTurn(active.turn.id, {
       status,
@@ -1354,7 +1531,7 @@ export class TurnController {
           turnId: active.turn.id,
           kind: "error",
           title: failureMessage,
-          detail: null,
+          detail: failure?.technicalDetail ?? null,
           status: "failed",
         });
         this.hooks.broadcast({ type: "agent.activity", activity });
@@ -1378,6 +1555,32 @@ export class TurnController {
     }
     this.hooks.broadcastSnapshot();
 
+    // Repository artifact materialization is deliberately downstream of the
+    // authoritative terminal event. A slow Git checkout/diff must never keep
+    // the provider turn active or leave Stop visible in the renderer.
+    try {
+      const artifactFinalization = this.hooks.captureGitArtifacts?.({
+        turn: active.turn,
+        checkpointId: active.checkpointId,
+        terminalAssistantMessageId: active.latestAssistantMessageId,
+      });
+      if (
+        artifactFinalization
+        && typeof (artifactFinalization as Promise<void>).then === "function"
+      ) {
+        const barrier = Promise.resolve(artifactFinalization)
+          .catch(() => undefined)
+          .finally(() => {
+            if (this.gitArtifactBarriers.get(active.conversation.id) === barrier) {
+              this.gitArtifactBarriers.delete(active.conversation.id);
+            }
+          });
+        this.gitArtifactBarriers.set(active.conversation.id, barrier);
+        this.track(barrier);
+      }
+    } catch {
+      // Restart reconciliation owns any pending artifact left by a sync hook failure.
+    }
     this.track(this.hooks.refreshProviderMetadata?.({
       providerId: active.turn.providerId,
       conversationId: active.conversation.id,
@@ -1393,15 +1596,29 @@ export class TurnController {
   private settleRunningActivities(
     active: ActiveTurn,
     status: AgentActivity["status"],
+    interruptedMessage?: string,
   ): void {
     for (const activities of active.runningActivities.values()) {
       for (const pending of activities) {
-        const activity = this.store.updateActivity(pending.id, { status });
+        const activity = this.store.updateActivity(pending.id, {
+          status,
+          ...(interruptedMessage
+            ? {
+                title: `Interrupted · ${pending.title}`,
+                detail: this.providerActivityDetail(
+                  active,
+                  pending.detail,
+                  `Interrupted: ${interruptedMessage}`,
+                ),
+              }
+            : {}),
+        });
         this.syncProviderCommandRun(active, activity);
         this.hooks.broadcast({ type: "agent.activity", activity });
       }
     }
     active.runningActivities.clear();
+    active.providerActivitiesById.clear();
   }
 
   private cleanup(active: ActiveTurn): void {
@@ -1428,6 +1645,38 @@ export class TurnController {
 
   private now(): string {
     return this.clock().toISOString();
+  }
+
+  private providerPromiseFailure(
+    active: ActiveTurn,
+    error: unknown,
+  ): ProviderRunFailure {
+    let activityId: string | undefined;
+    for (const id of active.providerActivitiesById.keys()) activityId = id;
+    const isCodexAppServer =
+      active.providerInput.harnessId === "codex-app-server";
+    const message = isCodexAppServer
+      ? "The Codex App Server connection closed before the turn completed."
+      : "The provider connection closed before the turn completed.";
+    const technicalDetail = sanitizeProviderActivityDetail(
+      [
+        "Reason: transport-closed",
+        `Phase: ${active.turn.status}`,
+        "Exit code: unavailable",
+        "Signal: unavailable",
+        "Terminal event: not received",
+        `Activity: ${activityId ?? "not reported"}`,
+        `Cause: ${this.publicError(error)}`,
+      ].join("\n"),
+      { workspaceRoot: active.providerInput.cwd },
+    );
+    return {
+      reason: "transport-closed",
+      message,
+      phase: active.turn.status,
+      ...(activityId ? { activityId } : {}),
+      ...(technicalDetail ? { technicalDetail } : {}),
+    };
   }
 
   private publicError(error: unknown): string {

@@ -352,6 +352,46 @@ describe("TurnController coalesced streaming", () => {
     });
     expect(Date.parse(assistantMessages[0]!.createdAt)).toBeLessThan(Date.parse(activity!.createdAt));
     expect(Date.parse(activity!.createdAt)).toBeLessThan(Date.parse(assistantMessages[1]!.createdAt));
+    expect(runtime.events.filter(({ type }) =>
+      type === "agent.text"
+      || type === "agent.activity"
+      || type === "agent.completed")).toEqual([
+      expect.objectContaining({
+        type: "agent.text",
+        text: "I’m checking the implementation.",
+      }),
+      expect.objectContaining({
+        type: "agent.activity",
+        activity: expect.objectContaining({ status: "running" }),
+      }),
+      expect.objectContaining({
+        type: "agent.activity",
+        activity: expect.objectContaining({ status: "completed" }),
+      }),
+      expect.objectContaining({
+        type: "agent.text",
+        text: "The source confirms the fix.",
+      }),
+      expect.objectContaining({ type: "agent.completed" }),
+    ]);
+
+    const persistedAtSettlement = assistantMessages.map(({ id, content }) => ({ id, content }));
+    expect(runtime.controller.handleProviderEvent({
+      ...identity,
+      type: "text",
+      text: "late duplicate terminal text",
+    })).toBe(false);
+    expect(runtime.controller.handleProviderEvent({
+      ...identity,
+      type: "activity",
+      kind: "tool",
+      phase: "info",
+      label: "Late activity",
+    })).toBe(false);
+    expect(runtime.store.snapshot().messages
+      .filter((message) => message.turnId === turn.id && message.role === "assistant")
+      .map(({ id, content }) => ({ id, content }))).toEqual(persistedAtSettlement);
+    expect(runtime.events.filter(({ type }) => type === "agent.completed")).toHaveLength(1);
     runtime.store.close();
   });
 

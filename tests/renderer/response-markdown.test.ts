@@ -58,10 +58,28 @@ describe("response Markdown", () => {
     expect(resolveResponseLink("/work/project", "src/app.ts#L4")).toEqual({ kind: "project", relativePath: "src/app.ts", action: "reveal" });
     expect(resolveResponseLink("/work/project", "/work/project/src/app.ts#L4")).toEqual({ kind: "project", relativePath: "src/app.ts", action: "reveal" });
     expect(resolveResponseLink("/work/project", "../secret.txt")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("/work/project", "%2e%2e/%2e%2e/secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "src/%00secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "file:///etc/passwd")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "javascript:alert(1)")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "https://example.com/docs")).toMatchObject({ kind: "external" });
+  });
+
+  it("renders editorial quote, inline code, image, and long-link semantics without weakening sanitization", () => {
+    const html = render([
+      "> Persisted identity remains authoritative.",
+      "",
+      "Use `ModelSelection` and [the structural backend route](https://example.com/a/very/long/editorial/path/that/must/wrap).",
+      "",
+      "![A constrained result preview](https://example.com/result.png)",
+    ].join("\n"));
+
+    expect(html).toContain("<blockquote>");
+    expect(html).toContain("<code>ModelSelection</code>");
+    expect(html).toContain('rel="noreferrer noopener"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('alt="A constrained result preview"');
+    expect(html).not.toContain("javascript:");
   });
 
   it("keeps unfinished streaming fences structurally stable and uses plain-code fallback", () => {

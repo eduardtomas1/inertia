@@ -1,23 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { composerProviderReady } from "../../src/renderer/src/utils/composerReadiness";
+import {
+  composerProviderReady,
+  composerRouteReadiness,
+} from "../../src/renderer/src/utils/composerReadiness";
+import {
+  nativeModelSelection,
+  type ModelSelection,
+} from "../../src/shared/model-routing";
 import type {
   ModelBackendProfileView,
   ProviderInfo,
 } from "../../src/shared/contracts";
 
-function provider(canRun: boolean): ProviderInfo {
+function provider(
+  overrides: Partial<ProviderInfo> = {},
+): ProviderInfo {
   return {
     id: "codex",
     label: "Codex",
     command: "codex",
-    available: false,
-    version: null,
-    executable: null,
-    installState: "checking",
-    authState: "checking",
-    canRun,
-    statusMessage: "Checking installation and connection",
+    available: true,
+    version: "1.0.0",
+    executable: "/opt/bin/codex",
+    installState: "installed",
+    authState: "authenticated",
+    canRun: true,
+    statusMessage: "Connected",
     models: [],
     rateLimits: [],
     metadataState: {
@@ -36,62 +45,262 @@ function provider(canRun: boolean): ProviderInfo {
         refreshing: false,
       },
     },
+    ...overrides,
   };
 }
 
-type ReadinessProfile = Pick<
-  ModelBackendProfileView,
-  "authState" | "connectionState" | "enabled" | "preset"
-> & {
-  compatibility: Pick<ModelBackendProfileView["compatibility"], "state">;
-};
+function profile(
+  overrides: Partial<ModelBackendProfileView> = {},
+): ModelBackendProfileView {
+  return {
+    id: "custom:team",
+    displayName: "Team gateway",
+    harnessId: "claude-agent-sdk",
+    protocol: "anthropic-messages",
+    authenticationMode: "api-key",
+    source: "custom",
+    enabled: true,
+    configurationRevision: 1,
+    endpointIdentity: "endpoint:team",
+    preset: "custom",
+    allowInsecureLocalhost: false,
+    credentialGeneration: "generation:1",
+    models: [],
+    routing: { mode: "simple", primaryModelId: "team-model" },
+    capabilityHints: [],
+    createdAt: "2026-07-27T10:00:00.000Z",
+    updatedAt: "2026-07-27T10:00:00.000Z",
+    endpointHost: "gateway.example.test",
+    authState: "configured",
+    connectionState: "connected",
+    compatibility: {
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "custom:team",
+      backendProtocol: "anthropic-messages",
+      state: "partially-compatible",
+      provenance: "probe",
+      allowsModelSwitchWithinSession: false,
+      reasonCode: "anthropic-probe-verified",
+      reason: "The selected endpoint and model were verified.",
+    },
+    latestProbe: null,
+    canDelete: true,
+    canDisable: true,
+    ...overrides,
+  };
+}
 
-const nativeProfile: ReadinessProfile = {
-  preset: "native",
-  enabled: true,
-  authState: "harness-managed",
-  connectionState: "connected",
-  compatibility: { state: "verified" },
-};
+function customSelection(
+  overrides: Partial<ModelSelection> = {},
+): ModelSelection {
+  return {
+    harnessId: "claude-agent-sdk",
+    backendProfileId: "custom:team",
+    backendProfileDisplayName: "Team gateway",
+    modelId: "team-model",
+    alias: null,
+    reasoningEffort: null,
+    contextWindowOverride: null,
+    providerOptions: {},
+    capabilities: [],
+    backendConfigurationRevision: 1,
+    ...overrides,
+  };
+}
 
-const customProfile: ReadinessProfile = {
-  preset: "custom",
-  enabled: true,
-  authState: "configured",
-  connectionState: "connected",
-  compatibility: { state: "verified" },
-};
-
-describe("composer provider readiness", () => {
-  it("uses canRun as the authoritative native-provider readiness signal", () => {
-    expect(composerProviderReady(provider(true), nativeProfile)).toBe(true);
-    expect(composerProviderReady(provider(false), nativeProfile)).toBe(false);
-    expect(composerProviderReady(provider(true), undefined)).toBe(true);
+describe("composer route readiness", () => {
+  it("keeps a healthy native route quiet and uses native canRun as its gate", () => {
+    const selection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-5.6",
+    });
+    expect(composerRouteReadiness({
+      provider: provider(),
+      profile: undefined,
+      selection,
+    })).toEqual({ ready: true });
+    expect(composerRouteReadiness({
+      provider: provider({
+        canRun: false,
+        authState: "unauthenticated",
+        statusMessage: "Sign in required",
+      }),
+      profile: undefined,
+      selection,
+    })).toMatchObject({
+      ready: false,
+      action: "connect",
+      title: "Codex needs a connection",
+    });
   });
 
-  it("requires provider, authentication, compatibility, and connection readiness for custom backends", () => {
-    expect(composerProviderReady(provider(true), customProfile)).toBe(true);
-    expect(composerProviderReady(provider(false), customProfile)).toBe(false);
-    expect(composerProviderReady(provider(true), {
-      ...customProfile,
-      authState: "missing",
-    })).toBe(false);
-    expect(composerProviderReady(provider(true), {
-      ...customProfile,
-      compatibility: { state: "unknown" },
-    })).toBe(false);
-    expect(composerProviderReady(provider(true), {
-      ...customProfile,
-      connectionState: "not-tested",
-    })).toBe(false);
+  it("uses backend route truth for custom Claude instead of native account auth", () => {
+    const claudeHarness = provider({
+      id: "claude",
+      label: "Claude",
+      command: "claude",
+      executable: "/opt/bin/claude",
+      authState: "unauthenticated",
+      canRun: false,
+      statusMessage: "Sign in required",
+    });
+    expect(composerRouteReadiness({
+      provider: claudeHarness,
+      profile: profile(),
+      selection: customSelection(),
+    })).toEqual({ ready: true });
+    expect(composerProviderReady(claudeHarness, profile())).toBe(true);
   });
 
-  it("accepts the documented Kimi preset before an optional live probe", () => {
-    expect(composerProviderReady(provider(true), {
-      ...customProfile,
+  it("names a missing backend credential and offers only Add key", () => {
+    const readiness = composerRouteReadiness({
+      provider: provider({
+        id: "claude",
+        label: "Claude",
+        command: "claude",
+        executable: "/opt/bin/claude",
+        canRun: false,
+      }),
+      profile: profile({ authState: "missing" }),
+      selection: customSelection(),
+    });
+    expect(readiness).toMatchObject({
+      ready: false,
+      transient: false,
+      badge: "Key missing",
+      title: "Team gateway needs a key",
+      action: "add-key",
+    });
+    expect(JSON.stringify(readiness)).not.toContain("Claude needs attention");
+  });
+
+  it("distinguishes a missing harness CLI from backend configuration", () => {
+    expect(composerRouteReadiness({
+      provider: provider({
+        id: "claude",
+        label: "Claude",
+        command: "claude",
+        available: false,
+        executable: null,
+        installState: "not-installed",
+        authState: "unknown",
+        canRun: false,
+        statusMessage: "CLI not found",
+      }),
+      profile: profile({ authState: "missing" }),
+      selection: customSelection(),
+    })).toMatchObject({
+      ready: false,
+      badge: "CLI missing",
+      title: "Claude harness CLI not found",
+      action: "install",
+    });
+  });
+
+  it("offers Probe for missing, stale, or failed compatibility evidence", () => {
+    for (const [reasonCode, state] of [
+      ["probe-required", "unknown"],
+      ["probe-stale", "unknown"],
+      ["probe-failed", "unavailable"],
+    ] as const) {
+      expect(composerRouteReadiness({
+        provider: provider({
+          id: "claude",
+          label: "Claude",
+          command: "claude",
+          executable: "/opt/bin/claude",
+        }),
+        profile: profile({
+          connectionState: reasonCode === "probe-failed" ? "failed" : "not-tested",
+          compatibility: {
+            ...profile().compatibility,
+            reasonCode,
+            state,
+            reason: "Probe this exact endpoint and model.",
+          },
+        }),
+        selection: customSelection(),
+      })).toMatchObject({
+        ready: false,
+        title: "Team gateway needs a probe",
+        detail: "Probe this exact endpoint and model.",
+        action: "probe",
+      });
+    }
+  });
+
+  it("keeps checking states transient and action-free", () => {
+    expect(composerRouteReadiness({
+      provider: provider({
+        canRun: false,
+        installState: "checking",
+        authState: "checking",
+        available: false,
+        executable: null,
+      }),
+      profile: undefined,
+      selection: nativeModelSelection({ providerId: "codex" }),
+    })).toMatchObject({
+      ready: false,
+      transient: true,
+      action: null,
+    });
+    expect(composerRouteReadiness({
+      provider: provider({
+        id: "claude",
+        label: "Claude",
+        command: "claude",
+        executable: "/opt/bin/claude",
+      }),
+      profile: profile({ authState: "checking" }),
+      selection: customSelection(),
+    })).toMatchObject({
+      ready: false,
+      transient: true,
+      title: "Checking Team gateway",
+      action: null,
+    });
+  });
+
+  it("keeps Kimi probe failure optional while naming a missing Kimi key", () => {
+    const kimi = profile({
+      id: "builtin:kimi-code",
+      displayName: "Kimi Code",
       preset: "kimi-code",
-      connectionState: "not-tested",
-      compatibility: { state: "partially-compatible" },
-    })).toBe(true);
+      connectionState: "failed",
+      compatibility: {
+        ...profile().compatibility,
+        backendProfileId: "builtin:kimi-code",
+        state: "unavailable",
+        reasonCode: "probe-failed",
+        reason: "The optional live probe failed.",
+      },
+    });
+    const selection = customSelection({
+      backendProfileId: "builtin:kimi-code",
+      backendProfileDisplayName: "Kimi Code",
+    });
+    const claudeHarness = provider({
+      id: "claude",
+      label: "Claude",
+      command: "claude",
+      executable: "/opt/bin/claude",
+      authState: "unauthenticated",
+      canRun: false,
+    });
+    expect(composerRouteReadiness({
+      provider: claudeHarness,
+      profile: kimi,
+      selection,
+    })).toEqual({ ready: true });
+    expect(composerRouteReadiness({
+      provider: claudeHarness,
+      profile: { ...kimi, authState: "missing" },
+      selection,
+    })).toMatchObject({
+      ready: false,
+      title: "Kimi Code needs a key",
+      action: "add-key",
+    });
   });
 });

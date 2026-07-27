@@ -234,14 +234,14 @@ describe("published database fixtures", () => {
         }]);
       }
       expect(diagnostics).toHaveLength(1);
-      expect(diagnostics[0]).toContain(`schema=${fixture.schemaVersion}->26`);
+      expect(diagnostics[0]).toContain(`schema=${fixture.schemaVersion}->28`);
       expect(diagnostics[0]).toContain("inferredTurns=2");
       expect(diagnostics[0]).not.toMatch(/fixture:\/\/|request|response|token|secret/iu);
 
       let inspection = new Database(databasePath);
       expect(inspection.prepare(
         "SELECT version FROM schema_migrations ORDER BY version",
-      ).all()).toEqual(Array.from({ length: 26 }, (_, index) => ({ version: index + 1 })));
+      ).all()).toEqual(Array.from({ length: 28 }, (_, index) => ({ version: index + 1 })));
       expect(inspection.prepare(
         "SELECT id, role, content, created_at FROM messages ORDER BY id",
       ).all()).toEqual(messagesBefore);
@@ -272,6 +272,53 @@ describe("published database fixtures", () => {
       ).get() as { count: number }).count).toBe(2);
       inspection.close();
     }
+  });
+
+  it("backfills typed non-repository artifact absence for legacy persisted rows", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "artifact-absence.sqlite");
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+    const store = new RuntimeStore(databasePath, workspacePath);
+    const project = store.createProject("Legacy artifact", workspacePath);
+    const conversation = store.createConversation(project.id, "Legacy absence");
+    const turn = store.beginAgentTurn({
+      id: "legacy-no-git-turn",
+      conversationId: conversation.id,
+      runId: "legacy-no-git-run",
+      content: "Run outside Git",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    }).turn;
+    store.createTurnGitArtifact({
+      turnId: turn.id,
+      status: "unavailable",
+      completeness: "unavailable",
+      failureReason: "This workspace is not a Git repository.",
+      absenceReason: null,
+    });
+    store.close();
+
+    const legacy = new Database(databasePath);
+    legacy.exec("ALTER TABLE turn_git_artifacts DROP COLUMN absence_reason");
+    legacy.prepare("DELETE FROM schema_migrations WHERE version = 27").run();
+    legacy.close();
+
+    const migrated = new RuntimeStore(databasePath, workspacePath);
+    expect(migrated.turnGitArtifact(turn.id)).toMatchObject({
+      status: "unavailable",
+      completeness: "unavailable",
+      failureReason: "This workspace is not a Git repository.",
+      absenceReason: "not-repository",
+    });
+    migrated.close();
   });
 
   it("migrates v19 run attention without inventing successful-result views", async () => {
@@ -385,7 +432,7 @@ describe("published database fixtures", () => {
     const inspection = new Database(databasePath, { readonly: true });
     expect((inspection.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(26);
+    ).get() as { version: number }).version).toBe(28);
     expect(inspection.pragma("foreign_key_check")).toEqual([]);
     inspection.close();
   });
@@ -522,7 +569,7 @@ describe("published database fixtures", () => {
     )).toThrow(/unique/iu);
     expect((inspection.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(26);
+    ).get() as { version: number }).version).toBe(28);
     expect(inspection.pragma("foreign_key_check")).toEqual([]);
     inspection.close();
   });

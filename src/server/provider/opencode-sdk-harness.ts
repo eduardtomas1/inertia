@@ -30,6 +30,7 @@ import type {
   AgentInputRequest,
   AgentPlanStep,
 } from "./interactions";
+import { providerActivityDetailSections } from "./activity-detail";
 import { CappedProviderBuffer } from "./io";
 
 const MAX_EVENT_CHARS = 1024 * 1024;
@@ -125,6 +126,7 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     options.callbacks,
     options.input.runId ?? conversationId,
     options.input.turnId ?? null,
+    options.input.cwd,
   );
   const text = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const serverOutput = new CappedProviderBuffer(MAX_SERVER_OUTPUT_CHARS);
@@ -488,7 +490,25 @@ function handleOpenCodePart(
     const status = stringValue(state?.status) ?? "pending";
     const phase = status === "completed" ? "completed" : status === "error" ? "failed" : "started";
     const tool = stringValue(part.tool) ?? "OpenCode tool";
-    emitter.activity(tool === "bash" ? "command" : "tool", phase, bounded(stringValue(state?.title) ?? tool));
+    const input = objectValue(state?.input);
+    const error = objectValue(state?.error);
+    const detail = providerActivityDetailSections({
+      command: input?.command,
+      ...(phase === "failed"
+        ? { error: stringValue(error?.message) ?? state?.error }
+        : { output: state?.output }),
+    });
+    emitter.activity(
+      tool === "bash" ? "command" : "tool",
+      phase,
+      bounded(stringValue(state?.title) ?? tool),
+      {
+        ...(stringValue(part.callID) ?? stringValue(part.id)
+          ? { activityId: (stringValue(part.callID) ?? stringValue(part.id))! }
+          : {}),
+        ...(detail ? { detail } : {}),
+      },
+    );
   }
 }
 

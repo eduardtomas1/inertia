@@ -6,6 +6,14 @@ const composerSource = readFileSync(
   new URL("../../src/renderer/src/components/Composer.tsx", import.meta.url),
   "utf8",
 );
+const chooserSource = readFileSync(
+  new URL("../../src/renderer/src/components/ModelChooser.tsx", import.meta.url),
+  "utf8",
+);
+const routeSource = readFileSync(
+  new URL("../../src/renderer/src/utils/modelChooserRoutes.ts", import.meta.url),
+  "utf8",
+);
 const workspaceSource = readFileSync(
   new URL("../../src/renderer/src/components/ChatWorkspace.tsx", import.meta.url),
   "utf8",
@@ -19,17 +27,21 @@ const css = readFileSync(
   "utf8",
 );
 
-describe("grouped backend composer picker", () => {
-  it("groups models under harness and backend identities", () => {
-    expect(composerSource).toContain("composer-backend-group");
-    expect(composerSource).toContain("composer-backend-profile");
-    expect(composerSource).toContain("backendProfileDisplayName");
-    expect(composerSource).toContain("modelSelectionIdentityLabel");
+describe("anchored composer model chooser", () => {
+  it("projects exact harness/backend/model routes into one chooser", () => {
+    expect(composerSource).toContain("<ModelChooser");
+    expect(composerSource).toContain("selectedModelSearchRoute");
+    expect(chooserSource).toContain("<ModelSourceRail");
+    expect(chooserSource).toContain("<ModelChooserRow");
+    expect(routeSource).toContain("backendProfileDisplayName");
+    expect(routeSource).toContain("continuationIdentityForSelection");
+    expect(routeSource).not.toContain("endpointHost");
+    expect(routeSource).not.toContain("credentialGeneration");
   });
 
   it("uses the latest turn identity and requires an explicit new chat at a boundary", () => {
-    expect(composerSource).toContain("latestTurn?.modelSelection");
-    expect(composerSource).toContain("resolveContinuationDecision");
+    expect(composerSource).toContain("selection: latestTurn.modelSelection");
+    expect(composerSource).toContain("resolveModelRouteTransition");
     expect(composerSource).toContain('role="alertdialog"');
     expect(composerSource).toContain("New chat");
     expect(workspaceSource).not.toContain("providerLocked");
@@ -44,5 +56,7 @@ describe("grouped backend composer picker", () => {
     expect(css).toMatch(/@media \(max-width:\s*760px\)[\s\S]*?\.backend-profile-rail\s*\{[^}]*display:\s*flex;[^}]*overflow-x:\s*auto/u);
     expect(css).toMatch(/@media \(max-width:\s*560px\)[\s\S]*?\.backend-identity-card\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u);
     expect(css).toMatch(/@media \(max-width:\s*560px\)[\s\S]*?\.backend-secret-row input\s*\{[^}]*width:\s*100%/u);
+    expect(css).toMatch(/\.model-chooser-palette\s*\{[^}]*bottom:\s*calc\(100% \+ 9px\)/u);
+    expect(css).toMatch(/@container \(max-width:\s*480px\)[\s\S]*?\.model-chooser-palette\s*\{[^}]*width:\s*min\(calc\(100vw - 18px\),\s*calc\(100cqw - 14px\)\)/u);
   });
 });

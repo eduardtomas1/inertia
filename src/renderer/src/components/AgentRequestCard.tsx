@@ -10,6 +10,7 @@ type ApprovalCardProps = {
 
 export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.JSX.Element {
   const [busy, setBusy] = useState(false);
+  const descriptionId = `approval-${request.id}-description`;
   const RequestIcon = request.kind === "command"
     ? TerminalSquare
     : request.kind === "permissions"
@@ -29,20 +30,26 @@ export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.J
     <section
       className="agent-request-card is-approval"
       role="region"
-      aria-live="polite"
       aria-busy={busy}
       aria-labelledby={`approval-${request.id}`}
+      aria-describedby={descriptionId}
       data-agent-request-kind={request.kind}
+      data-agent-request-state="approval"
     >
       <div className="agent-request-heading">
         <span className="agent-request-icon" aria-hidden="true"><RequestIcon size={15} /></span>
-        <span>
+        <span className="agent-request-heading-copy">
+          <span className="agent-request-kicker">Approval required</span>
           <strong id={`approval-${request.id}`}>{request.title}</strong>
-          <small>{agentRequestProviderName(request.providerId)} paused for your review.</small>
+          <small id={descriptionId}>{agentRequestProviderName(request.providerId)} paused for your review.</small>
         </span>
       </div>
-      {request.command && <code className="agent-request-command">{request.command}</code>}
-      {!request.command && request.detail && <p>{request.detail}</p>}
+      {request.command && (
+        <code className="agent-request-command" aria-label="Command awaiting approval">
+          {request.command}
+        </code>
+      )}
+      {request.detail && <p className="agent-request-detail">{request.detail}</p>}
       {(request.reason || request.cwd || request.networkScope || request.permissionRoots.length > 0) && (
         <dl className="agent-request-details">
           {request.reason && <><dt>Reason</dt><dd>{request.reason}</dd></>}
@@ -57,9 +64,9 @@ export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.J
         </dl>
       )}
       <div className="agent-request-actions">
-        {request.availableDecisions.includes("cancel") && <button type="button" className="secondary-button" disabled={busy} onClick={() => void respond("cancel")}>Cancel turn</button>}
-        {request.availableDecisions.includes("deny") && <button type="button" className="secondary-button" disabled={busy} onClick={() => void respond("deny")}>Deny</button>}
-        {request.availableDecisions.includes("approve") && <button type="button" className="primary-button" disabled={busy} onClick={() => void respond("approve")}>Approve once</button>}
+        {request.availableDecisions.includes("cancel") && <button type="button" className="secondary-button" data-agent-request-decision="cancel" disabled={busy} onClick={() => void respond("cancel")}>Cancel turn</button>}
+        {request.availableDecisions.includes("deny") && <button type="button" className="secondary-button" data-agent-request-decision="deny" disabled={busy} onClick={() => void respond("deny")}>Deny</button>}
+        {request.availableDecisions.includes("approve") && <button type="button" className="primary-button" data-agent-request-decision="approve" disabled={busy} onClick={() => void respond("approve")}>Approve once</button>}
       </div>
     </section>
   );
@@ -73,6 +80,7 @@ type InputRequestCardProps = {
 export function InputRequestCard({ request, onRespond }: InputRequestCardProps): React.JSX.Element {
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState(false);
+  const descriptionId = `input-${request.id}-description`;
 
   useEffect(() => setAnswers({}), [request.id]);
   const complete = useMemo(
@@ -97,15 +105,18 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
     <section
       className="agent-request-card agent-input-card is-question"
       role="region"
-      aria-live="polite"
       aria-busy={busy}
       aria-labelledby={`input-${request.id}`}
+      aria-describedby={descriptionId}
+      data-agent-request-kind="input"
+      data-agent-request-state="question"
     >
       <div className="agent-request-heading">
         <span className="agent-request-icon" aria-hidden="true"><MessageCircleQuestion size={15} /></span>
-        <span>
+        <span className="agent-request-heading-copy">
+          <span className="agent-request-kicker">Input required</span>
           <strong id={`input-${request.id}`}>{inputRequestTitle(request.providerId)}</strong>
-          <small>The turn will continue after every question is answered.</small>
+          <small id={descriptionId}>{agentRequestProviderName(request.providerId)} will continue after every question is answered.</small>
         </span>
       </div>
       <div className="agent-input-questions">
@@ -138,7 +149,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
             });
           };
           return (
-            <fieldset className="agent-input-question" key={question.id}>
+            <fieldset className="agent-input-question" key={question.id} disabled={busy}>
               <legend><span>{question.header}</span>{question.question}</legend>
               {question.options.length > 0 && (
                 <div className="agent-input-options">
@@ -161,6 +172,8 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
                   className="agent-input-text"
                   type={question.isSecret ? "password" : "text"}
                   autoComplete="off"
+                  autoCapitalize={question.isSecret ? "none" : undefined}
+                  spellCheck={question.isSecret ? false : undefined}
                   value={otherValue}
                   maxLength={4_000}
                   placeholder={question.isOther && question.options.length > 0 ? "Or enter another answer" : "Your answer"}

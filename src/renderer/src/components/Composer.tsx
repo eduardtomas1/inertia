@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, Bot, ChevronDown, ChevronRight, Command, MessageSquarePlus, Paperclip, Send, ShieldCheck, SlidersHorizontal, Sparkles, Square, Wrench, X } from "lucide-react";
+import { ArrowLeft, Brain, ChevronDown, ChevronRight, Command, Download, Hammer, KeyRound, ListChecks, MessageSquarePlus, Paperclip, PlugZap, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Square, Wrench, X } from "lucide-react";
 import clsx from "clsx";
 import type {
   AccessMode,
@@ -12,12 +12,12 @@ import type {
   ProjectAction,
   ProviderId,
   ProviderInfo,
-  ProviderMetadataFieldState,
   ThreadUsageSnapshot,
   TurnRequestContext,
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import { MAX_CHAT_ATTACHMENTS } from "@shared/contracts";
 import {
   isKimiThroughClaudeSelection,
   KIMI_CLAUDE_REASONING_OPTIONS,
@@ -26,20 +26,39 @@ import {
 } from "../../../shared/claude-backend-profiles";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../shared/diff-review";
 import {
-  continuationIdentityForSelection,
   legacyProviderIdForHarness,
-  modelSelectionSchema,
-  nativeModelSelection,
 } from "../../../shared/model-routing";
-import { resolveContinuationDecision } from "../../../shared/continuation-policy";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
-import { composerProviderReady } from "../utils/composerReadiness";
+import {
+  composerRouteReadiness,
+  type ComposerRouteRepair,
+} from "../utils/composerReadiness";
 import { chooseHorizontalSubmenuSide, type HorizontalSubmenuSide } from "../utils/dismissibleMenu";
+import {
+  buildComposerModelRoutes,
+  selectedModelSearchRoute,
+  type ComposerModelRoute,
+} from "../utils/modelChooserRoutes";
+import { resolveModelRouteTransition } from "../utils/modelRouteTransition";
 import {
   buildComposerTurnRequest,
   promptContextDetail,
 } from "../utils/requestContext";
-import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
+import {
+  documentAttachmentSendBoundary,
+  mergeComposerAttachments,
+} from "../utils/composerAttachments";
+import {
+  COMPOSER_ACTION_STALE_FALLBACK_MS,
+  composerFollowUpState,
+  composerPrimaryActionState,
+} from "../utils/composerPrimaryAction";
+import {
+  contextUsageQualityForTurn,
+  usageQuotaSourceForSelection,
+} from "../utils/usageDisplay";
+import { ComposerAttachmentList } from "./ComposerAttachmentList";
+import { ModelChooser } from "./ModelChooser";
 import { IconButton, LoadingMark } from "./ui";
 import { UsageIndicator } from "./UsageIndicator";
 
@@ -61,12 +80,16 @@ type ComposerProps = {
   onCreateConversationForSelection?: (selection: ModelSelection) => Promise<void>;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
+  onReleaseAttachment: (id: string) => Promise<void>;
   onRunAction: (action: ProjectAction) => void;
   onMentionQuery: (query: string) => void;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId: ProviderId) => void;
+  onOpenProviderSetup: (providerId: ProviderId) => void;
+  onOpenBackendSetup: (profileId: string) => void;
+  onProbeBackendProfile: (profileId: string, modelId: string) => Promise<void>;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
-  onStop: () => void;
+  onStop: () => Promise<void>;
   onClearPromptContext?: () => void;
 };
 
@@ -76,16 +99,8 @@ const accessOptions: Array<{ value: AccessMode; label: string; description: stri
   { value: "full", label: "Full access", description: "Run commands and edit without prompts" },
 ];
 
-const unavailableMetadataField: ProviderMetadataFieldState = {
-  freshness: "unavailable",
-  provenance: null,
-  updatedAt: null,
-  lastAttemptedAt: null,
-  refreshing: false,
-};
-
-type ComposerMenu = "provider" | "reasoning" | "mode" | "access" | "action" | "more";
-type MoreSection = "actions" | "provider" | "model" | "reasoning" | "mode" | "access";
+type ComposerMenu = "reasoning" | "mode" | "access" | "action" | "more";
+type MoreSection = "actions" | "reasoning" | "mode" | "access";
 
 function menuId(menu: ComposerMenu): string {
   return `composer-${menu}-menu`;
@@ -99,6 +114,27 @@ function composerHarnessLabel(harnessId: string): string {
       : harnessId.startsWith("cursor")
         ? "Cursor"
         : "OpenCode";
+}
+
+function routeRepairLabel(action: ComposerRouteRepair): string {
+  if (action === "add-key") return "Add key";
+  return action[0].toUpperCase() + action.slice(1);
+}
+
+function RouteRepairIcon({
+  action,
+  pending,
+}: {
+  action: ComposerRouteRepair;
+  pending: boolean;
+}): React.JSX.Element {
+  if (pending || action === "refresh") {
+    return <RefreshCw size={13} className={pending ? "is-spinning" : undefined} />;
+  }
+  if (action === "install") return <Download size={13} />;
+  if (action === "connect") return <PlugZap size={13} />;
+  if (action === "add-key") return <KeyRound size={13} />;
+  return <Wrench size={13} />;
 }
 
 export function Composer({
@@ -119,16 +155,30 @@ export function Composer({
   onCreateConversationForSelection,
   onChooseAttachments,
   onImportAttachments,
+  onReleaseAttachment,
   onRunAction,
   onMentionQuery,
   onConnectProvider,
   onRefreshProvider,
+  onOpenProviderSetup,
+  onOpenBackendSetup,
+  onProbeBackendProfile,
   onUsageDisplayModeChange,
   onStop,
   onClearPromptContext,
 }: ComposerProps): React.JSX.Element {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const attachmentsRef = useRef<ChatAttachment[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const submissionReleaseTimerRef = useRef<number | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const stoppingRef = useRef(false);
+  const stopReleaseTimerRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
+  const conversationIdRef = useRef(conversation.id);
+  const releaseAttachmentRef = useRef(onReleaseAttachment);
   const [fileReferences, setFileReferences] = useState<string[]>([]);
   const [pendingRoute, setPendingRoute] = useState<{
     selection: ModelSelection;
@@ -136,28 +186,66 @@ export function Composer({
     reason: string;
   } | null>(null);
   const [creatingRouteConversation, setCreatingRouteConversation] = useState(false);
+  const [routeRepairing, setRouteRepairing] = useState(false);
   const [moreSection, setMoreSection] = useState<MoreSection | null>(null);
   const [moreSubmenuSide, setMoreSubmenuSide] = useState<HorizontalSubmenuSide | null>(null);
   const [morePopoverMaxHeight, setMorePopoverMaxHeight] = useState<number | null>(null);
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } = useDismissibleMenu<ComposerMenu>();
+  const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const routeCancelRef = useRef<HTMLButtonElement>(null);
   const morePopoverRef = useRef<HTMLDivElement>(null);
   const moreSectionTriggerRefs = useRef(new Map<MoreSection, HTMLButtonElement>());
   const moreHoverTimerRef = useRef<number | null>(null);
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
 
+  conversationIdRef.current = conversation.id;
+  releaseAttachmentRef.current = onReleaseAttachment;
+
   useEffect(() => {
+    if (submissionReleaseTimerRef.current !== null) {
+      window.clearTimeout(submissionReleaseTimerRef.current);
+      submissionReleaseTimerRef.current = null;
+    }
+    if (stopReleaseTimerRef.current !== null) {
+      window.clearTimeout(stopReleaseTimerRef.current);
+      stopReleaseTimerRef.current = null;
+    }
+    submittingRef.current = false;
+    stoppingRef.current = false;
+    setSubmitting(false);
+    setStopping(false);
     setMessage(window.localStorage.getItem(`inertia:draft:${conversation.id}`) ?? "");
+    for (const attachment of attachmentsRef.current) {
+      void onReleaseAttachment(attachment.id);
+    }
+    attachmentsRef.current = [];
     setAttachments([]);
     setFileReferences([]);
     setPendingRoute(null);
     setCreatingRouteConversation(false);
+    setRouteRepairing(false);
     dismissMenu("context-change");
-  }, [conversation.id, dismissMenu]);
+  }, [conversation.id, dismissMenu, onReleaseAttachment]);
 
   useEffect(() => {
-    if (running) dismissMenu("context-change");
+    if (running) {
+      dismissMenu("context-change");
+      if (submissionReleaseTimerRef.current !== null) {
+        window.clearTimeout(submissionReleaseTimerRef.current);
+        submissionReleaseTimerRef.current = null;
+      }
+      submittingRef.current = false;
+      setSubmitting(false);
+      return;
+    }
+    if (stopReleaseTimerRef.current !== null) {
+      window.clearTimeout(stopReleaseTimerRef.current);
+      stopReleaseTimerRef.current = null;
+    }
+    stoppingRef.current = false;
+    setStopping(false);
   }, [dismissMenu, running]);
 
   useEffect(() => {
@@ -167,6 +255,11 @@ export function Composer({
     setMoreSection(null);
     setMoreSubmenuSide(null);
   }, [menu]);
+
+  useEffect(() => {
+    if (!pendingRoute) return;
+    window.requestAnimationFrame(() => routeCancelRef.current?.focus());
+  }, [pendingRoute]);
 
   useLayoutEffect(() => {
     if (menu !== "more") {
@@ -187,6 +280,20 @@ export function Composer({
 
   useEffect(() => () => {
     if (moreHoverTimerRef.current !== null) window.clearTimeout(moreHoverTimerRef.current);
+    if (submissionReleaseTimerRef.current !== null) window.clearTimeout(submissionReleaseTimerRef.current);
+    if (stopReleaseTimerRef.current !== null) window.clearTimeout(stopReleaseTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const unsent = attachmentsRef.current;
+      attachmentsRef.current = [];
+      for (const attachment of unsent) {
+        void releaseAttachmentRef.current(attachment.id);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -199,43 +306,135 @@ export function Composer({
     if (mentionMatch?.[1]) onMentionQuery(mentionMatch[1]);
   }, [mentionMatch?.[1], onMentionQuery]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    textarea.style.height = "0px";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 176)}px`;
+    const syncHeight = () => {
+      textarea.style.height = "0px";
+      const contentHeight = textarea.scrollHeight;
+      textarea.style.height = `${Math.min(contentHeight, 176)}px`;
+      textarea.style.overflowY = contentHeight > 176 ? "auto" : "hidden";
+    };
+    let observedWidth = textarea.getBoundingClientRect().width;
+    const observer = new ResizeObserver(([entry]) => {
+      const nextWidth = entry?.contentRect.width ?? observedWidth;
+      if (Math.abs(nextWidth - observedWidth) < 1) return;
+      observedWidth = nextWidth;
+      syncHeight();
+    });
+    syncHeight();
+    observer.observe(textarea);
+    return () => observer.disconnect();
   }, [message]);
 
   const submit = async () => {
-    const request = buildComposerTurnRequest(
-      message,
-      attachments,
-      promptContext,
-      fileReferences,
-    );
-    if (!canSend) return;
+    const request = running
+      ? {
+          visibleContent: message.trim(),
+          context: undefined,
+        }
+      : buildComposerTurnRequest(
+          message,
+          attachments,
+          promptContext,
+          fileReferences,
+        );
+    if (
+      (!canSend && followUpState !== "ready")
+      || submittingRef.current
+    ) return;
+    const submittedAttachments = [...attachmentsRef.current];
+    const submittedConversationId = conversation.id;
+    // Submitted files must remain registered while the provider reads them.
+    // Removing them from the unsent ref prevents an unmount from releasing
+    // their temporary copies after the server has accepted the turn.
+    attachmentsRef.current = [];
+    submittingRef.current = true;
+    setSubmitting(true);
     try {
-      await onSend(request.visibleContent, attachments, request.context);
+      await onSend(request.visibleContent, submittedAttachments, request.context);
+      if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
       setMessage("");
       setAttachments([]);
       setFileReferences([]);
       onClearPromptContext?.();
       textareaRef.current?.focus();
+      submissionReleaseTimerRef.current = window.setTimeout(() => {
+        submissionReleaseTimerRef.current = null;
+        submittingRef.current = false;
+        if (mountedRef.current && conversationIdRef.current === submittedConversationId) {
+          setSubmitting(false);
+        }
+      }, COMPOSER_ACTION_STALE_FALLBACK_MS);
     } catch {
-      // The workspace-level toast presents the failure.
+      if (mountedRef.current && conversationIdRef.current === submittedConversationId) {
+        attachmentsRef.current = submittedAttachments;
+      } else {
+        for (const attachment of submittedAttachments) {
+          void onReleaseAttachment(attachment.id);
+        }
+      }
+      // The workspace-level toast presents the failure; the current composer
+      // keeps failed attachments available for retry when it is still mounted.
+      submittingRef.current = false;
+      if (mountedRef.current && conversationIdRef.current === submittedConversationId) {
+        setSubmitting(false);
+        textareaRef.current?.focus();
+      }
     }
   };
 
+  const stop = async (): Promise<void> => {
+    if (stoppingRef.current || !running) return;
+    const stoppedConversationId = conversation.id;
+    stoppingRef.current = true;
+    setStopping(true);
+    try {
+      await onStop();
+      stopReleaseTimerRef.current = window.setTimeout(() => {
+        stopReleaseTimerRef.current = null;
+        stoppingRef.current = false;
+        if (mountedRef.current && conversationIdRef.current === stoppedConversationId) {
+          setStopping(false);
+        }
+      }, COMPOSER_ACTION_STALE_FALLBACK_MS);
+    } catch {
+      stoppingRef.current = false;
+      if (mountedRef.current && conversationIdRef.current === stoppedConversationId) {
+        setStopping(false);
+      }
+    }
+  };
+
+  const addAttachments = (incoming: readonly ChatAttachment[]): void => {
+    const merged = mergeComposerAttachments(attachmentsRef.current, incoming);
+    attachmentsRef.current = merged.attachments;
+    setAttachments(merged.attachments);
+    for (const attachment of merged.rejected) {
+      void onReleaseAttachment(attachment.id);
+    }
+  };
+
+  const removeAttachment = (attachment: ChatAttachment): void => {
+    const next = attachmentsRef.current.filter(({ id }) => id !== attachment.id);
+    attachmentsRef.current = next;
+    setAttachments(next);
+    void onReleaseAttachment(attachment.id);
+  };
+
   const chooseAttachments = async () => {
+    if (submittingRef.current || disabled || sending || running) return;
     const selected = await onChooseAttachments();
-    setAttachments((current) => [...current, ...selected.filter((item) => !current.some(({ path }) => path === item.path))].slice(0, 8));
+    addAttachments(selected);
   };
 
   const importAttachments = async (files: File[]) => {
-    const images = files.filter(({ type }) => ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(type)).slice(0, 8 - attachments.length);
-    if (images.length === 0) return;
-    const selected = await onImportAttachments(images);
-    setAttachments((current) => [...current, ...selected.filter((item) => !current.some(({ path }) => path === item.path))].slice(0, 8));
+    if (submittingRef.current || disabled || sending || running) return;
+    const remaining = Math.max(0, MAX_CHAT_ATTACHMENTS - attachmentsRef.current.length);
+    const candidates = files.slice(0, remaining);
+    if (candidates.length === 0) return;
+    const selected = await onImportAttachments(candidates);
+    addAttachments(selected);
   };
 
   const selectedProvider = providers.find((provider) => provider.id === conversation.providerId);
@@ -273,20 +472,81 @@ export function Composer({
       ?? selectedProvider?.models.find(({ isDefault }) => isDefault)
       ?? selectedProvider?.models[0];
   const selectedReasoning = conversation.reasoningEffort || selectedModel?.defaultReasoningEffort || "";
-  const selectedProviderReady = composerProviderReady(
-    selectedProvider,
-    selectedBackendProfile,
-  );
-  const selectedProviderAction = selectedProvider ? providerSetupAction(selectedProvider) : "refresh";
+  const routeReadiness = composerRouteReadiness({
+    provider: selectedProvider,
+    profile: selectedBackendProfile,
+    selection: conversation.modelSelection,
+  });
   const selectedIdentityLabel = selectedBackendProfile
     ? `${composerHarnessLabel(selectedBackendProfile.harnessId)} · ${selectedBackendProfile.displayName} · ${selectedBackendModel?.displayName ?? conversation.modelSelection.modelId}`
     : kimiSelection
     ? modelSelectionIdentityLabel(conversation.modelSelection)
     : selectedProvider?.label ?? conversation.providerId;
-  const composedLength = (message.trim() || (attachments.length > 0 ? "Please inspect the attached image." : "Please review the selected diff context.")).length;
+  const composedLength = (message.trim() || (attachments.length > 0 ? "Please inspect the attached file." : "Please review the selected diff context.")).length;
   const typedMessageLimit = MAX_CHAT_MESSAGE_CHARS;
   const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
-  const canSend = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext)) && messageFits && selectedProviderReady && !disabled && !sending && !running;
+  const attachmentSendBoundary = documentAttachmentSendBoundary(attachments);
+  const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext))
+    && messageFits
+    && attachmentSendBoundary === null
+    && routeReadiness.ready
+    && !disabled;
+  const primaryAction = composerPrimaryActionState({
+    sendEligible,
+    submitting,
+    sending,
+    running,
+    stopping,
+  });
+  const canSend = primaryAction === "send-ready";
+  const followUpState = composerFollowUpState({
+    running,
+    harnessId: latestTurn?.harnessId ?? null,
+    hasDraft: Boolean(message.trim()),
+    textOnly:
+      attachments.length === 0
+      && !promptContext
+      && fileReferences.length === 0
+      && messageFits
+      && !disabled,
+    submitting,
+    sending,
+  });
+  const runRouteRepair = async (): Promise<void> => {
+    if (routeReadiness.ready || !routeReadiness.action || routeRepairing) return;
+    const action = routeReadiness.action;
+    if (action === "install") {
+      onOpenProviderSetup(conversation.providerId);
+      return;
+    }
+    if (action === "connect") {
+      onConnectProvider(conversation.providerId);
+      return;
+    }
+    if (action === "add-key") {
+      if (selectedBackendProfile) onOpenBackendSetup(selectedBackendProfile.id);
+      return;
+    }
+    if (action === "probe" && !selectedBackendProfile?.enabled) {
+      if (selectedBackendProfile) onOpenBackendSetup(selectedBackendProfile.id);
+      return;
+    }
+    setRouteRepairing(true);
+    try {
+      if (action === "probe" && selectedBackendProfile) {
+        await onProbeBackendProfile(
+          selectedBackendProfile.id,
+          conversation.modelSelection.modelId,
+        );
+      } else {
+        onRefreshProvider(conversation.providerId);
+      }
+    } finally {
+      if (mountedRef.current) setRouteRepairing(false);
+    }
+  };
+  const submissionPending = primaryAction === "submitting";
+  const followUpPending = followUpState === "pending";
   const access = accessOptions.find((item) => item.value === conversation.accessMode) ?? accessOptions[2];
   const reasoningLabel = selectedModel?.reasoningOptions.find(({ value }) => value === selectedReasoning)?.label ?? "Provider default";
   const updateReasoningEffort = (reasoningEffort: string): void => {
@@ -299,136 +559,51 @@ export function Composer({
         }
       : { reasoningEffort });
   };
-  const hasAuthoritativeTurns = latestTurn !== null;
-  const selectionForProfileModel = (
-    profile: ModelBackendProfileView,
-    modelId: string,
-  ): ModelSelection => {
-    const model = profile.models.find((candidate) => candidate.id === modelId);
-    if (!model) throw new Error("The selected backend model is unavailable.");
-    return modelSelectionSchema.parse({
-      harnessId: profile.harnessId,
-      backendProfileId: profile.id,
-      backendProfileDisplayName: profile.displayName,
-      modelId: model.id,
-      alias: profile.preset === "kimi-code"
-        ? null
-        : model.displayName === model.id ? null : model.displayName,
-      reasoningEffort: profile.preset === "kimi-code"
-        ? "high"
-        : model.reasoningOptions[0]?.value ?? null,
-      contextWindowOverride: model.contextWindowTokens,
-      providerOptions: {},
-      capabilities: model.capabilities,
-      backendConfigurationRevision: profile.configurationRevision,
-    });
-  };
-  const chooseModelSelection = (
-    profile: ModelBackendProfileView,
-    selection: ModelSelection,
-  ): void => {
-    const nextIdentity = continuationIdentityForSelection(
-      selection,
-      profile.endpointIdentity,
-      !profile.compatibility.allowsModelSwitchWithinSession,
-    );
-    const decision = resolveContinuationDecision({
-      previousIdentity: latestTurn?.continuationIdentity
-        ?? conversation.continuationIdentity
-        ?? null,
-      nextIdentity,
-      previousModelId: latestTurn?.modelSelection.modelId
-        ?? conversation.modelSelection.modelId,
-      nextModelId: selection.modelId,
+  const modelRoutes = buildComposerModelRoutes(
+    providers,
+    backendProfiles,
+    conversation.modelSelection,
+  );
+  const selectedModelRoute = selectedModelSearchRoute(
+    modelRoutes,
+    conversation.modelSelection,
+  );
+  const chooseModelRoute = (route: ComposerModelRoute): void => {
+    const transition = resolveModelRouteTransition({
+      projectId: conversation.projectId,
+      selection: conversation.modelSelection,
+      continuationIdentity: conversation.continuationIdentity,
+      latestTurn: latestTurn
+        ? {
+            selection: latestTurn.modelSelection,
+            continuationIdentity: latestTurn.continuationIdentity,
+          }
+        : null,
       hasProviderSession: Boolean(conversation.providerSessionId),
-      hasTurns: hasAuthoritativeTurns,
-      allowsModelSwitchWithinSession:
-        profile.compatibility.allowsModelSwitchWithinSession,
-    });
-    if (decision.action === "new-conversation-required") {
+    }, route);
+    if (transition.kind === "create-new-conversation") {
       setPendingRoute({
-        selection,
-        label: `${profile.displayName} · ${
-          profile.models.find(({ id }) => id === selection.modelId)?.displayName
-            ?? selection.modelId
-        }`,
-        reason: decision.reason,
+        selection: transition.selection,
+        label: `${route.backendProfileName} · ${route.displayName}`,
+        reason: transition.reason,
       });
-      dismissMenu("selection");
       return;
     }
-    const providerId = legacyProviderIdForHarness(selection.harnessId);
+    const providerId = route.providerId
+      ?? legacyProviderIdForHarness(route.selection.harnessId);
     onUpdateConversation({
       ...(providerId ? { providerId } : {}),
-      modelSelection: selection,
+      modelSelection: transition.selection,
     });
-    dismissMenu("selection");
   };
-  const chooseBackendModel = (
-    profile: ModelBackendProfileView,
-    modelId: string,
-  ): void => {
-    chooseModelSelection(profile, selectionForProfileModel(profile, modelId));
+  const dismissPendingRoute = (): void => {
+    setPendingRoute(null);
+    window.requestAnimationFrame(() => {
+      composerRef.current
+        ?.querySelector<HTMLButtonElement>(".selected-model-chip")
+        ?.focus();
+    });
   };
-  const chooseNativeModel = (
-    provider: ProviderInfo,
-    modelId: string,
-    reasoningEffort: string | null,
-  ): void => {
-    const selection = nativeModelSelection({
-      providerId: provider.id,
-      modelId: modelId || "provider-default",
-      alias: modelId || null,
-      reasoningEffort,
-    });
-    const allowsModelSwitchWithinSession = provider.id === "codex"
-      || provider.id === "claude"
-      || provider.id === "opencode";
-    const decision = resolveContinuationDecision({
-      previousIdentity: latestTurn?.continuationIdentity
-        ?? conversation.continuationIdentity
-        ?? null,
-      nextIdentity: continuationIdentityForSelection(
-        selection,
-        null,
-        !allowsModelSwitchWithinSession,
-      ),
-      previousModelId: latestTurn?.modelSelection.modelId
-        ?? conversation.modelSelection.modelId,
-      nextModelId: selection.modelId,
-      hasProviderSession: Boolean(conversation.providerSessionId),
-      hasTurns: hasAuthoritativeTurns,
-      allowsModelSwitchWithinSession,
-    });
-    if (decision.action === "new-conversation-required") {
-      const model = provider.models.find(({ id }) => id === modelId);
-      setPendingRoute({
-        selection,
-        label: `${provider.label} · ${model?.label ?? "Provider default"}`,
-        reason: decision.reason,
-      });
-      dismissMenu("selection");
-      return;
-    }
-    onUpdateConversation({
-      providerId: provider.id,
-      modelSelection: selection,
-    });
-    dismissMenu("selection");
-  };
-  const profileIsSelectable = (profile: ModelBackendProfileView): boolean =>
-    profile.enabled
-    && profile.compatibility.state !== "unknown"
-    && profile.compatibility.state !== "unavailable";
-  const backendProfilesByHarness = backendProfiles.reduce(
-    (groups, profile) => {
-      const existing = groups.get(profile.harnessId) ?? [];
-      existing.push(profile);
-      groups.set(profile.harnessId, existing);
-      return groups;
-    },
-    new Map<string, ModelBackendProfileView[]>(),
-  );
 
   const clearMoreHoverTimer = () => {
     if (moreHoverTimerRef.current === null) return;
@@ -500,82 +675,52 @@ export function Composer({
     else items[(currentIndex - 1 + items.length) % items.length]?.focus();
   };
 
+  const focusComposerMenuEdge = (
+    menuName: ComposerMenu,
+    edge: "first" | "last" = "first",
+  ): void => {
+    window.requestAnimationFrame(() => {
+      const items = [...(document.getElementById(menuId(menuName))
+        ?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
+      (edge === "first" ? items[0] : items.at(-1))?.focus();
+    });
+  };
+
+  const handleComposerMenuNavigation = (
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ): void => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+      ":scope > button:not(:disabled)",
+    )];
+    if (items.length === 0) return;
+    event.preventDefault();
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === "Home") items[0]?.focus();
+    else if (event.key === "End") items.at(-1)?.focus();
+    else if (event.key === "ArrowDown") {
+      items[(currentIndex + 1 + items.length) % items.length]?.focus();
+    } else {
+      items[(currentIndex - 1 + items.length) % items.length]?.focus();
+    }
+  };
+
+  const handleComposerMenuTriggerKeyDown = (
+    menuName: ComposerMenu,
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ): void => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    if (menu !== menuName) toggleMenu(menuName);
+    focusComposerMenuEdge(menuName, event.key === "ArrowUp" ? "last" : "first");
+  };
+
   const moreSectionLabel = (section: MoreSection): string => ({
     actions: "Actions",
-    provider: "Backend",
-    model: "Model",
     reasoning: "Reasoning",
     mode: "Mode",
     access: "Access",
   })[section];
-  const harnessLabel = composerHarnessLabel;
-  const renderBackendRouteOptions = () => {
-    if (backendProfiles.length === 0) {
-      return providers.map((provider) => (
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={conversation.providerId === provider.id}
-          key={provider.id}
-          onClick={() => {
-            const model = provider.models.find(({ isDefault }) => isDefault)
-              ?? provider.models[0];
-            chooseNativeModel(
-              provider,
-              model?.id ?? "provider-default",
-              model?.defaultReasoningEffort ?? null,
-            );
-          }}
-        >
-          <span><strong>{provider.label}</strong><small>{providerStateLabel(provider)} · {providerStateDetail(provider)}</small></span>
-          {conversation.providerId === provider.id && <span className="option-check" />}
-        </button>
-      ));
-    }
-    return [...backendProfilesByHarness.entries()].map(([harnessId, profilesForHarness]) => (
-      <div className="composer-backend-group" role="group" aria-label={harnessLabel(harnessId)} key={harnessId}>
-        <div className="composer-backend-group-heading"><Bot size={13} /><span>{harnessLabel(harnessId)}</span></div>
-        {profilesForHarness.map((profile) => (
-          <div className="composer-backend-profile" key={profile.id}>
-            <div className="composer-backend-profile-heading">
-              <span>
-                <strong>{profile.displayName}</strong>
-                {profile.source === "custom" && <em>Custom</em>}
-              </span>
-              <small>{profile.endpointHost ?? (
-                profile.preset === "native" ? "Harness managed" : "Endpoint unavailable"
-              )}</small>
-            </div>
-            {profile.models.map((model) => {
-              const selected = conversation.modelSelection.backendProfileId === profile.id
-                && conversation.modelSelection.modelId === model.id;
-              return (
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={selected}
-                  disabled={!profileIsSelectable(profile)}
-                  title={!profileIsSelectable(profile)
-                    ? profile.compatibility.reason
-                    : `${harnessLabel(profile.harnessId)} · ${profile.displayName} · ${model.displayName}`}
-                  key={model.id}
-                  onClick={() => chooseBackendModel(profile, model.id)}
-                >
-                  <span>
-                    <strong>{model.displayName}{profile.routing.primaryModelId === model.id ? " · Default" : ""}</strong>
-                    <small>{profileIsSelectable(profile)
-                      ? `${model.id}${model.contextWindowTokens ? ` · ${Math.round(model.contextWindowTokens / 1_000)}K context` : ""}`
-                      : profile.compatibility.reason}</small>
-                  </span>
-                  {selected && <span className="option-check" />}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    ));
-  };
 
   const renderMoreSectionOptions = (section: MoreSection) => {
     if (section === "actions") {
@@ -583,53 +728,6 @@ export function Composer({
         <button type="button" role="menuitem" key={action.id} onClick={() => { dismissMenu("selection"); onRunAction(action); }}>
           <Command size={14} />
           <span><strong>{action.label}</strong><small>{action.command}</small></span>
-        </button>
-      ));
-    }
-    if (section === "provider") {
-      return renderBackendRouteOptions();
-    }
-    if (section === "model") {
-      if (selectedBackendProfile) {
-        return selectedBackendProfile.models.map((model) => (
-          <button
-            type="button"
-            role="menuitemradio"
-            aria-checked={conversation.modelSelection.modelId === model.id}
-            disabled={!profileIsSelectable(selectedBackendProfile)}
-            key={model.id}
-            onClick={() => chooseBackendModel(selectedBackendProfile, model.id)}
-          >
-            <span><strong>{model.displayName}</strong><small>{model.id}</small></span>
-            {conversation.modelSelection.modelId === model.id && <span className="option-check" />}
-          </button>
-        ));
-      }
-      if (kimiSelection) {
-        return (
-          <button type="button" role="menuitemradio" aria-checked="true" disabled>
-            <span><strong>{selectedModel?.label ?? "Kimi"}</strong><small>{selectedModel?.description ?? "Kimi coding model through the Claude harness"}</small></span>
-            <span className="option-check" />
-          </button>
-        );
-      }
-      if (!selectedProvider?.models.length) return <p className="popover-empty">This provider uses its default model.</p>;
-      return selectedProvider.models.map((model) => (
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={selectedModel?.id === model.id}
-          key={model.id}
-          onClick={() => {
-            chooseNativeModel(
-              selectedProvider,
-              model.id,
-              model.defaultReasoningEffort,
-            );
-          }}
-        >
-          <span><strong>{model.label}{model.isDefault ? " · Default" : ""}</strong><small>{model.description}</small></span>
-          {selectedModel?.id === model.id && <span className="option-check" />}
         </button>
       ));
     }
@@ -687,93 +785,139 @@ export function Composer({
 
   const moreRootItems: Array<{ section: MoreSection; label: string; value: string; disabled?: boolean }> = [
     ...(actions.length > 0 ? [{ section: "actions" as const, label: "Actions", value: `${actions.length} available` }] : []),
-    { section: "provider", label: "Backend", value: selectedIdentityLabel },
-    { section: "model", label: "Model", value: selectedModel?.label ?? "Provider default", disabled: !kimiSelection && !selectedProvider?.models.length },
     { section: "reasoning", label: "Reasoning", value: reasoningLabel, disabled: !selectedModel?.reasoningOptions.length },
     { section: "mode", label: "Mode", value: conversation.interactionMode === "build" ? "Build" : "Plan" },
     { section: "access", label: "Access", value: access.label },
   ];
+  const ModeIcon = conversation.interactionMode === "build" ? Hammer : ListChecks;
 
   return (
     <div className="composer-shell">
-      {selectedProvider && !selectedProviderReady && (
-        <div className="provider-readiness" role="status">
-          <ProviderStatus provider={selectedProvider} />
-          <span className="provider-readiness-copy">
-            <strong>{kimiSelection ? "Claude harness needs attention" : `${selectedProvider.label} needs attention`}</strong>
-            <small>{kimiSelection ? "Install or refresh Claude Code to use the selected Kimi backend." : providerStateDetail(selectedProvider)}</small>
-          </span>
-          {selectedProviderAction && (
-            <button
-              type="button"
-              className="secondary-button provider-readiness-action"
-              aria-label={`${selectedProviderAction === "connect" ? selectedProvider.id === "opencode" ? "Configure" : "Connect" : "Refresh"} ${selectedProvider.label}`}
-              disabled={disabled}
-              onClick={() => selectedProviderAction === "connect" ? onConnectProvider(selectedProvider.id) : onRefreshProvider(selectedProvider.id)}
+      <section
+        ref={composerRef}
+        className={clsx("composer", menu && "has-open-menu")}
+        aria-label="Message composer"
+        aria-busy={submissionPending || followUpPending || running || stopping}
+        data-primary-action={primaryAction}
+        data-disabled={disabled}
+        onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
+        onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}
+      >
+        <div className="composer-input-zone" data-composer-zone="input">
+          {!routeReadiness.ready && (
+            <div
+              className="provider-readiness"
+              role="status"
+              aria-live="polite"
+              data-transient={routeReadiness.transient}
+              data-route-repair={routeReadiness.action ?? "none"}
             >
-              <ProviderActionIcon action={selectedProviderAction} />
-              {selectedProviderAction === "connect" ? selectedProvider.id === "opencode" ? "Configure" : "Connect" : "Refresh"}
-            </button>
-          )}
-        </div>
-      )}
-      <div className={clsx("composer", menu && "has-open-menu")} data-disabled={disabled} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}>
-        {promptContext && (
-          <div className="composer-context" aria-label={promptContext.startsWith("Local review note for ") ? "Selected review note context" : "Selected diff context"}>
-            <MessageSquarePlus size={13} />
-            <span><strong>{promptContext.startsWith("Local review note for ") ? "Review note " : "Diff selection "}</strong><small>{promptContextDetail(promptContext)}</small></span>
-            <button type="button" aria-label={promptContext.startsWith("Local review note for ") ? "Remove selected review note context" : "Remove selected diff context"} onClick={onClearPromptContext}><X size={12} /></button>
-          </div>
-        )}
-        {attachments.length > 0 && (
-          <div className="composer-attachments" aria-label="Attached images">
-            {attachments.map((attachment) => (
-              <span className="attachment-chip" key={attachment.id}>
-                <Paperclip size={12} />
-                <span>{attachment.name}</span>
-                <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((items) => items.filter(({ id }) => id !== attachment.id))}>
-                  <X size={12} />
-                </button>
+              <span className={clsx(
+                "route-readiness-badge",
+                routeReadiness.transient ? "is-checking" : "is-attention",
+              )}>
+                {routeReadiness.transient && (
+                  <RefreshCw size={11} className="is-spinning" aria-hidden="true" />
+                )}
+                {routeReadiness.badge}
               </span>
-            ))}
-          </div>
-        )}
-        {pendingRoute && (
-          <div className="composer-route-confirmation" role="alertdialog" aria-labelledby="route-confirmation-title" aria-describedby="route-confirmation-reason">
-            <ShieldCheck size={16} />
-            <span>
-              <strong id="route-confirmation-title">Open a new chat for {pendingRoute.label}?</strong>
-              <small id="route-confirmation-reason">{pendingRoute.reason}</small>
-            </span>
-            <button type="button" className="secondary-button" disabled={creatingRouteConversation} onClick={() => setPendingRoute(null)}>Cancel</button>
-            <button type="button" className="primary-button" disabled={!onCreateConversationForSelection || creatingRouteConversation} onClick={() => {
-              if (!onCreateConversationForSelection) return;
-              setCreatingRouteConversation(true);
-              void onCreateConversationForSelection(pendingRoute.selection).then(
-                () => setPendingRoute(null),
-                () => undefined,
-              ).finally(() => setCreatingRouteConversation(false));
-            }}>{creatingRouteConversation ? "Creating…" : "New chat"}</button>
-          </div>
-        )}
+              <span className="provider-readiness-copy">
+                <strong>{routeReadiness.title}</strong>
+                <small title={routeReadiness.detail}>{routeReadiness.detail}</small>
+              </span>
+              {routeReadiness.action && (
+                <button
+                  type="button"
+                  className="secondary-button provider-readiness-action"
+                  aria-label={`${routeRepairLabel(routeReadiness.action)} — ${routeReadiness.title}`}
+                  disabled={disabled || routeRepairing}
+                  onClick={() => { void runRouteRepair().catch(() => undefined); }}
+                >
+                  <RouteRepairIcon
+                    action={routeReadiness.action}
+                    pending={routeRepairing}
+                  />
+                  {routeRepairing
+                    ? routeReadiness.action === "probe" ? "Probing…" : "Refreshing…"
+                    : routeRepairLabel(routeReadiness.action)}
+                </button>
+              )}
+            </div>
+          )}
+          {promptContext && (
+            <div className="composer-context" aria-label={promptContext.startsWith("Local review note for ") ? "Selected review note context" : "Selected diff context"}>
+              <MessageSquarePlus size={13} />
+              <span><strong>{promptContext.startsWith("Local review note for ") ? "Review note " : "Diff selection "}</strong><small>{promptContextDetail(promptContext)}</small></span>
+              <button type="button" aria-label={promptContext.startsWith("Local review note for ") ? "Remove selected review note context" : "Remove selected diff context"} onClick={onClearPromptContext}><X size={12} /></button>
+            </div>
+          )}
+          <ComposerAttachmentList
+            attachments={attachments}
+            onRemove={removeAttachment}
+          />
+          {attachmentSendBoundary && (
+            <p className="composer-attachment-boundary" role="status">
+              {attachmentSendBoundary}
+            </p>
+          )}
+          {pendingRoute && (
+            <div
+              className="composer-route-confirmation"
+              role="alertdialog"
+              aria-modal="false"
+              aria-busy={creatingRouteConversation}
+              aria-labelledby="route-confirmation-title"
+              aria-describedby="route-confirmation-reason"
+              onKeyDown={(event) => {
+                if (
+                  event.key !== "Escape"
+                  || creatingRouteConversation
+                ) return;
+                event.preventDefault();
+                event.stopPropagation();
+                dismissPendingRoute();
+              }}
+            >
+              <ShieldCheck size={16} aria-hidden="true" />
+              <span>
+                <strong id="route-confirmation-title">Open a new chat for {pendingRoute.label}?</strong>
+                <small id="route-confirmation-reason">{pendingRoute.reason}</small>
+              </span>
+              <button ref={routeCancelRef} type="button" className="secondary-button" disabled={creatingRouteConversation} onClick={dismissPendingRoute}>Cancel</button>
+              <button type="button" className="primary-button" disabled={!onCreateConversationForSelection || creatingRouteConversation} onClick={() => {
+                if (!onCreateConversationForSelection) return;
+                setCreatingRouteConversation(true);
+                void onCreateConversationForSelection(pendingRoute.selection).then(
+                  () => setPendingRoute(null),
+                  () => undefined,
+                ).finally(() => setCreatingRouteConversation(false));
+              }}>{creatingRouteConversation ? "Creating…" : "New chat"}</button>
+            </div>
+          )}
 
-        <textarea
-          ref={textareaRef}
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          onPaste={(event) => { if (event.clipboardData.files.length > 0) { event.preventDefault(); void importAttachments([...event.clipboardData.files]); } }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); }
-          }}
-          rows={1}
-          maxLength={typedMessageLimit}
-          disabled={disabled || running}
-          aria-label="Message"
-          placeholder={running ? "The agent is working…" : "Ask Inertia to work with this project…"}
-        />
-        {!messageFits && <p className="composer-limit-warning" role="alert">This message exceeds the {MAX_CHAT_MESSAGE_CHARS.toLocaleString()} character limit.</p>}
+          <textarea
+            ref={textareaRef}
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            onPaste={(event) => { if (!running && event.clipboardData.files.length > 0) { event.preventDefault(); void importAttachments([...event.clipboardData.files]); } }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); }
+            }}
+            rows={1}
+            maxLength={typedMessageLimit}
+            disabled={disabled}
+            readOnly={submissionPending || followUpPending}
+            aria-label="Message"
+            placeholder={
+              running
+                ? "Add a follow-up while the agent works…"
+                : "Ask Inertia to work with this project…"
+            }
+          />
+          {!messageFits && <p className="composer-limit-warning" role="alert">This message exceeds the {MAX_CHAT_MESSAGE_CHARS.toLocaleString()} character limit.</p>}
+        </div>
 
-        {mentionMatch && mentionResults.length > 0 && (
+        {!running && mentionMatch && mentionResults.length > 0 && (
           <div className="composer-suggestion-menu" role="listbox" aria-label="Project files">
             <div className="popover-title">Reference a file</div>
             {mentionResults.slice(0, 8).map((entry) => <button type="button" role="option" aria-selected="false" key={entry.path} onClick={() => {
@@ -782,15 +926,15 @@ export function Composer({
             }}><span>{entry.path}</span><small>{entry.kind}</small></button>)}
           </div>
         )}
-        {slashMatch && (
+        {!running && slashMatch && (
           <div className="composer-suggestion-menu" role="listbox" aria-label="Composer commands">
             {[{ id: "plan", label: "Plan mode", mode: "plan" as const }, { id: "build", label: "Build mode", mode: "build" as const }].filter(({ id }) => id.startsWith(slashMatch[1].toLowerCase())).map((item) => <button type="button" role="option" aria-selected="false" disabled={disabled || running} key={item.id} onClick={() => { onUpdateConversation({ interactionMode: item.mode }); setMessage(""); }}><span>/{item.id}</span><small>{item.label}</small></button>)}
           </div>
         )}
 
-        <div className="composer-toolbar">
+        <div className="composer-toolbar" data-composer-zone="controls">
           <div className="composer-tools">
-            <IconButton label="Attach images" onClick={() => void chooseAttachments()} disabled={disabled || running || attachments.length >= 8}>
+            <IconButton label="Attach images or documents" onClick={() => void chooseAttachments()} disabled={disabled || submissionPending || running || attachments.length >= MAX_CHAT_ATTACHMENTS}>
               <Paperclip size={16} />
             </IconButton>
             {actions.length > 0 && (
@@ -814,73 +958,133 @@ export function Composer({
           </div>
 
           <div className="composer-options">
-            <div className="popover-anchor composer-provider-control">
-              <button ref={(node) => setMenuTrigger("provider", node)} type="button" className={clsx("composer-pill", menu === "provider" && "is-active")} title={selectedIdentityLabel} aria-label="Choose provider and model" aria-haspopup="menu" aria-controls={menuId("provider")} aria-expanded={menu === "provider"} disabled={disabled || running} onClick={() => toggleMenu("provider")}>
-                <Sparkles size={14} /><span>{selectedBackendProfile || kimiSelection ? selectedIdentityLabel : selectedModel?.label ?? selectedProvider?.label ?? conversation.providerId}</span><ChevronDown size={12} />
-              </button>
-              {menu === "provider" && (
-                <div ref={(node) => setMenuPopover("provider", node)} id={menuId("provider")} className="composer-popover provider-popover" role="menu" aria-label="Provider and model">
-                  <div className="popover-title">Harness · backend · model</div>
-                  {hasAuthoritativeTurns && (
-                    <p className="popover-empty composer-continuation-note">
-                      This chat has an agent turn. Supported same-backend model changes continue here; other route changes open a new chat.
-                    </p>
+            <ModelChooser
+              routes={modelRoutes}
+              selectedRoute={selectedModelRoute}
+              disabled={disabled || running}
+              closeSignal={menu}
+              onOpenChange={(open) => {
+                if (open) dismissMenu("context-change");
+              }}
+              onSelect={chooseModelRoute}
+            />
+
+            <div className="composer-setting-family" role="group" aria-label="Composer settings">
+              {selectedModel && selectedModel.reasoningOptions.length > 0 && (
+                <div className="popover-anchor composer-setting-control composer-reasoning-control">
+                  <button
+                    ref={(node) => setMenuTrigger("reasoning", node)}
+                    type="button"
+                    className={clsx("composer-pill composer-setting-trigger", menu === "reasoning" && "is-active")}
+                    aria-label={`Choose reasoning level. Current level: ${reasoningLabel}.`}
+                    aria-haspopup="menu"
+                    aria-controls={menuId("reasoning")}
+                    aria-expanded={menu === "reasoning"}
+                    disabled={disabled || running}
+                    data-composer-setting="reasoning"
+                    onClick={() => toggleMenu("reasoning")}
+                    onKeyDown={(event) => handleComposerMenuTriggerKeyDown("reasoning", event)}
+                  >
+                    <Brain className="composer-setting-icon" size={13} strokeWidth={1.8} aria-hidden="true" />
+                    <span className="composer-setting-value">{reasoningLabel}</span>
+                    <ChevronDown className="composer-setting-chevron" size={11} aria-hidden="true" />
+                  </button>
+                  {menu === "reasoning" && (
+                    <div
+                      ref={(node) => setMenuPopover("reasoning", node)}
+                      id={menuId("reasoning")}
+                      className="composer-popover composer-setting-popover option-popover reasoning-popover"
+                      role="menu"
+                      aria-label="Reasoning level"
+                      onKeyDown={handleComposerMenuNavigation}
+                    >
+                      <div className="popover-title">Reasoning</div>
+                      {selectedModel.reasoningOptions.map((option) => (
+                        <button type="button" role="menuitemradio" aria-checked={selectedReasoning === option.value} key={option.value} onClick={() => { updateReasoningEffort(option.value); dismissMenu("selection"); }}>
+                          <span><strong>{option.label}{option.value === selectedModel.defaultReasoningEffort ? " · Default" : ""}</strong><small>{option.description}</small></span>
+                          {selectedReasoning === option.value && <span className="option-check" />}
+                        </button>
+                      ))}
+                    </div>
                   )}
-                  {renderBackendRouteOptions()}
                 </div>
               )}
-            </div>
 
-            {selectedModel && selectedModel.reasoningOptions.length > 0 && (
-              <div className="popover-anchor composer-reasoning-control">
-                <button ref={(node) => setMenuTrigger("reasoning", node)} type="button" className={clsx("composer-pill reasoning-pill", menu === "reasoning" && "is-active")} aria-label="Choose reasoning level" aria-haspopup="menu" aria-controls={menuId("reasoning")} aria-expanded={menu === "reasoning"} disabled={disabled || running} onClick={() => toggleMenu("reasoning")}>
-                  <span>{selectedModel.reasoningOptions.find(({ value }) => value === selectedReasoning)?.label ?? "Reasoning"}</span><ChevronDown size={12} />
+              <div className="popover-anchor composer-setting-control access-control composer-access-control">
+                <button
+                  ref={(node) => setMenuTrigger("access", node)}
+                  type="button"
+                  className={clsx("composer-pill composer-setting-trigger", menu === "access" && "is-active")}
+                  aria-label={`Choose project access. Current access: ${access.label}.`}
+                  aria-haspopup="menu"
+                  aria-controls={menuId("access")}
+                  aria-expanded={menu === "access"}
+                  disabled={disabled || running}
+                  data-composer-setting="access"
+                  onClick={() => toggleMenu("access")}
+                  onKeyDown={(event) => handleComposerMenuTriggerKeyDown("access", event)}
+                >
+                  <ShieldCheck className="composer-setting-icon" size={13} strokeWidth={1.8} aria-hidden="true" />
+                  <span className="composer-setting-value">{access.label}</span>
+                  <ChevronDown className="composer-setting-chevron" size={11} aria-hidden="true" />
                 </button>
-                {menu === "reasoning" && (
-                  <div ref={(node) => setMenuPopover("reasoning", node)} id={menuId("reasoning")} className="composer-popover option-popover reasoning-popover" role="menu" aria-label="Reasoning level">
-                    <div className="popover-title">Reasoning</div>
-                    {selectedModel.reasoningOptions.map((option) => (
-                      <button type="button" role="menuitemradio" aria-checked={selectedReasoning === option.value} key={option.value} onClick={() => { updateReasoningEffort(option.value); dismissMenu("selection"); }}>
-                        <span><strong>{option.label}{option.value === selectedModel.defaultReasoningEffort ? " · Default" : ""}</strong><small>{option.description}</small></span>
-                        {selectedReasoning === option.value && <span className="option-check" />}
+                {menu === "access" && (
+                  <div
+                    ref={(node) => setMenuPopover("access", node)}
+                    id={menuId("access")}
+                    className="composer-popover composer-setting-popover access-popover"
+                    role="menu"
+                    aria-label="Project access"
+                    onKeyDown={handleComposerMenuNavigation}
+                  >
+                    <div className="popover-title">Project access</div>
+                    {accessOptions.map((option) => (
+                      <button type="button" role="menuitemradio" aria-checked={conversation.accessMode === option.value} key={option.value} onClick={() => { onUpdateConversation({ accessMode: option.value }); dismissMenu("selection"); }}>
+                        <span><strong>{option.label}</strong><small>{option.description}</small></span>
+                        {conversation.accessMode === option.value && <span className="option-check" />}
                       </button>
                     ))}
                   </div>
                 )}
               </div>
-            )}
 
-            <div className="popover-anchor composer-mode-control">
-              <button ref={(node) => setMenuTrigger("mode", node)} type="button" className={clsx("composer-pill", menu === "mode" && "is-active")} aria-label="Choose work mode" aria-haspopup="menu" aria-controls={menuId("mode")} aria-expanded={menu === "mode"} disabled={disabled || running} onClick={() => toggleMenu("mode")}>
-                <span>{conversation.interactionMode === "build" ? "Build" : "Plan"}</span><ChevronDown size={12} />
-              </button>
-              {menu === "mode" && (
-                <div ref={(node) => setMenuPopover("mode", node)} id={menuId("mode")} className="composer-popover option-popover" role="menu" aria-label="Work mode">
-                  {(["build", "plan"] as InteractionMode[]).map((mode) => (
-                    <button type="button" role="menuitemradio" aria-checked={conversation.interactionMode === mode} key={mode} onClick={() => { onUpdateConversation({ interactionMode: mode }); dismissMenu("selection"); }}>
-                      <span><strong>{mode === "build" ? "Build" : "Plan"}</strong><small>{mode === "build" ? "Work directly in the project" : "Inspect and propose steps first"}</small></span>
-                      {conversation.interactionMode === mode && <span className="option-check" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="popover-anchor access-control composer-access-control">
-              <button ref={(node) => setMenuTrigger("access", node)} type="button" className={clsx("composer-pill", menu === "access" && "is-active")} aria-label="Choose project access" aria-haspopup="menu" aria-controls={menuId("access")} aria-expanded={menu === "access"} disabled={disabled || running} onClick={() => toggleMenu("access")}>
-                <ShieldCheck size={14} /><span>{access.label}</span><ChevronDown size={12} />
-              </button>
-              {menu === "access" && (
-                <div ref={(node) => setMenuPopover("access", node)} id={menuId("access")} className="composer-popover access-popover" role="menu" aria-label="Project access">
-                  <div className="popover-title">Project access</div>
-                  {accessOptions.map((option) => (
-                    <button type="button" role="menuitemradio" aria-checked={conversation.accessMode === option.value} key={option.value} onClick={() => { onUpdateConversation({ accessMode: option.value }); dismissMenu("selection"); }}>
-                      <span><strong>{option.label}</strong><small>{option.description}</small></span>
-                      {conversation.accessMode === option.value && <span className="option-check" />}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <div className="popover-anchor composer-setting-control composer-mode-control">
+                <button
+                  ref={(node) => setMenuTrigger("mode", node)}
+                  type="button"
+                  className={clsx("composer-pill composer-setting-trigger", menu === "mode" && "is-active")}
+                  aria-label={`Choose work mode. Current mode: ${conversation.interactionMode === "build" ? "Build" : "Plan"}.`}
+                  aria-haspopup="menu"
+                  aria-controls={menuId("mode")}
+                  aria-expanded={menu === "mode"}
+                  disabled={disabled || running}
+                  data-composer-setting="mode"
+                  onClick={() => toggleMenu("mode")}
+                  onKeyDown={(event) => handleComposerMenuTriggerKeyDown("mode", event)}
+                >
+                  <ModeIcon className="composer-setting-icon" size={13} strokeWidth={1.8} aria-hidden="true" />
+                  <span className="composer-setting-value">{conversation.interactionMode === "build" ? "Build" : "Plan"}</span>
+                  <ChevronDown className="composer-setting-chevron" size={11} aria-hidden="true" />
+                </button>
+                {menu === "mode" && (
+                  <div
+                    ref={(node) => setMenuPopover("mode", node)}
+                    id={menuId("mode")}
+                    className="composer-popover composer-setting-popover option-popover composer-mode-popover"
+                    role="menu"
+                    aria-label="Work mode"
+                    onKeyDown={handleComposerMenuNavigation}
+                  >
+                    <div className="popover-title">Mode</div>
+                    {(["build", "plan"] as InteractionMode[]).map((mode) => (
+                      <button type="button" role="menuitemradio" aria-checked={conversation.interactionMode === mode} key={mode} onClick={() => { onUpdateConversation({ interactionMode: mode }); dismissMenu("selection"); }}>
+                        <span><strong>{mode === "build" ? "Build" : "Plan"}</strong><small>{mode === "build" ? "Work directly in the project" : "Inspect and propose steps first"}</small></span>
+                        {conversation.interactionMode === mode && <span className="option-check" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="popover-anchor composer-more-control">
@@ -897,8 +1101,9 @@ export function Composer({
                   if (menu !== "more") returnToMoreRoot();
                   toggleMenu("more");
                 }}
+                onKeyDown={(event) => handleComposerMenuTriggerKeyDown("more", event)}
               >
-                <SlidersHorizontal size={14} /><span>More</span><ChevronDown size={12} />
+                <SlidersHorizontal size={13} strokeWidth={1.8} aria-hidden="true" /><span>More</span><ChevronDown size={11} aria-hidden="true" />
               </button>
               {menu === "more" && (
                 <div
@@ -950,7 +1155,7 @@ export function Composer({
                               key={item.section}
                               onPointerEnter={() => previewMoreSection(item.section)}
                               onFocus={() => previewMoreSection(item.section)}
-                              onClick={() => openMoreSection(item.section)}
+                              onClick={() => openMoreSection(item.section, true)}
                               onKeyDown={(event) => {
                                 if (event.key !== "ArrowRight") return;
                                 event.preventDefault();
@@ -989,29 +1194,90 @@ export function Composer({
               )}
             </div>
 
-            {running ? (
-              <IconButton label="Stop agent" className="send-button stop-button" onClick={onStop}><Square size={14} fill="currentColor" /></IconButton>
+            {selectedProvider && (
+              <UsageIndicator
+                usage={usage}
+                rateLimits={selectedProvider.rateLimits}
+                rateLimitState={selectedProvider.metadataState.rateLimits}
+                quotaSource={usageQuotaSourceForSelection(
+                  conversation.modelSelection,
+                  selectedBackendProfile,
+                )}
+                mode={usageDisplayMode}
+                providerLabel={selectedIdentityLabel}
+                contextQuality={contextUsageQualityForTurn(
+                  usage,
+                  latestTurn?.id ?? null,
+                )}
+                onModeChange={onUsageDisplayModeChange}
+              />
+            )}
+
+            {followUpState === "ready" || followUpState === "pending" ? (
+              <button
+                type="button"
+                className="secondary-button composer-follow-up-button"
+                aria-label={
+                  followUpState === "pending"
+                    ? "Sending follow-up"
+                    : "Send follow-up"
+                }
+                aria-busy={followUpState === "pending"}
+                disabled={followUpState === "pending"}
+                onClick={() => void submit()}
+              >
+                {followUpState === "pending"
+                  ? <LoadingMark label="Sending follow-up" />
+                  : <Send size={13} />}
+                <span>
+                  {followUpState === "pending" ? "Sending…" : "Follow up"}
+                </span>
+              </button>
+            ) : followUpState === "unavailable" ? (
+              <small
+                className="composer-follow-up-unavailable"
+                role="status"
+                title="This active agent route cannot accept parent follow-ups."
+              >
+                Follow-up unavailable
+              </small>
+            ) : null}
+
+            {primaryAction === "stop-ready" || primaryAction === "stop-pending" ? (
+              <IconButton
+                label={primaryAction === "stop-pending" ? "Stopping agent" : "Stop agent"}
+                className="send-button stop-button"
+                data-composer-action-state={primaryAction}
+                aria-busy={primaryAction === "stop-pending"}
+                onClick={() => void stop()}
+                disabled={primaryAction === "stop-pending"}
+              >
+                <Square size={13} fill="currentColor" />
+              </IconButton>
+            ) : primaryAction === "submitting" ? (
+              <IconButton
+                label="Sending message"
+                className="send-button send-button-loading"
+                data-composer-action-state={primaryAction}
+                aria-busy="true"
+                disabled
+              >
+                <LoadingMark label="Sending message" />
+              </IconButton>
             ) : (
-              <IconButton label="Send message" className="send-button" onClick={() => void submit()} disabled={!canSend}>
-                {sending ? <LoadingMark label="Sending message" /> : <Send size={16} />}
+              <IconButton
+                label="Send message"
+                className="send-button"
+                data-composer-action-state={primaryAction}
+                onClick={() => void submit()}
+                disabled={primaryAction === "send-disabled"}
+              >
+                <Send size={16} />
               </IconButton>
             )}
           </div>
         </div>
-      </div>
-      {selectedProvider && (
-        <UsageIndicator
-          usage={usage}
-          rateLimits={selectedBackendProfile && selectedBackendProfile.preset !== "native" ? [] : selectedProvider.rateLimits}
-          rateLimitState={selectedBackendProfile && selectedBackendProfile.preset !== "native" ? unavailableMetadataField : selectedProvider.metadataState.rateLimits}
-          mode={usageDisplayMode}
-          providerLabel={selectedIdentityLabel}
-          onModeChange={onUsageDisplayModeChange}
-        />
-      )}
-      <div className="composer-footer">
-        <p className="composer-note">Use @ for project files and / for modes · review changes before committing</p>
-      </div>
+      </section>
     </div>
   );
 }

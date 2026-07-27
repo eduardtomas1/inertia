@@ -13,10 +13,12 @@ import type {
   ProviderRunResult,
   ProviderSessionEvent,
   ProviderStatusEvent,
+  ProviderSubagentEvent,
   ProviderTextEvent,
   ProviderUsageEvent,
   ProviderHarnessLaunchConfiguration,
 } from "./contracts";
+import { sanitizeProviderActivityDetail } from "./activity-detail";
 
 /** @deprecated Prefer the shared harness identity contract. */
 export type AgentHarnessId = KnownHarnessId;
@@ -174,7 +176,8 @@ export type AgentHarnessCoreEvent =
   | ProviderTextEvent
   | ProviderActivityEvent
   | ProviderStatusEvent
-  | ProviderSessionEvent;
+  | ProviderSessionEvent
+  | ProviderSubagentEvent;
 
 export type AgentInteractiveHarnessEvent =
   | { type: "approval"; request: AgentApprovalRequest }
@@ -233,12 +236,18 @@ export interface CodexAppServerRunExtension {
   kind: "codex-app-server";
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
+  /** Parent-turn steering; Codex exposes no truthful direct-child messaging. */
+  steer?: (content: string) => Promise<boolean>;
 }
 
 export interface ProviderInteractiveRunExtension {
   kind: "claude-agent-sdk" | "cursor-acp" | "opencode-sdk";
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
+  /** Present only for transports with a persistent parent-session input stream. */
+  steer?: (content: string) => Promise<boolean>;
+  /** Present only when the transport can stop an exact live delegated task. */
+  stopSubagent?: (providerTaskId: string) => Promise<boolean>;
 }
 
 export interface CliAgentHarnessRunExtension {
@@ -269,9 +278,15 @@ export interface AgentHarness {
 
 export interface AgentHarnessEmitter {
   text: (text: string) => void;
-  activity: (kind: ProviderActivityEvent["kind"], phase: ProviderActivityEvent["phase"], label: string) => void;
+  activity: (
+    kind: ProviderActivityEvent["kind"],
+    phase: ProviderActivityEvent["phase"],
+    label: string,
+    detail?: Pick<ProviderActivityEvent, "activityId" | "detail">,
+  ) => void;
   status: (status: ProviderStatusEvent["status"], message?: string) => void;
   session: (sessionId: string) => void;
+  subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type">) => void;
   codex: (event: AgentInteractiveHarnessEvent) => void;
   rich: (event: ProviderInteractiveHarnessEvent) => void;
 }
@@ -282,6 +297,7 @@ export function createAgentHarnessEmitter(
   callbacks: AgentHarnessCallbacks = {},
   runId = conversationId,
   turnId: string | null = null,
+  workspaceRoot?: string,
 ): AgentHarnessEmitter {
   const emit = (event: AgentHarnessEvent): void => {
     try {
@@ -291,11 +307,44 @@ export function createAgentHarnessEmitter(
     }
   };
   const base = { providerId, conversationId, runId, turnId };
+  let localActivitySequence = 0;
+  const localActivityIds = new Map<string, string[]>();
   return {
     text: (text) => emit({ ...base, type: "text", text }),
-    activity: (kind, phase, label) => emit({ ...base, type: "activity", kind, phase, label }),
+    activity: (kind, phase, label, detail = {}) => {
+      const safeLabel = label
+        .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
+        .replace(/\s+/gu, " ")
+        .trim()
+        .slice(0, 240) || "Activity";
+      const correlationKey = `${kind}\0${safeLabel}`;
+      let activityId = detail.activityId?.replace(/\0/gu, "").trim().slice(0, 1_000);
+      if (!activityId && phase === "started") {
+        activityId = `local:${++localActivitySequence}`;
+        const queued = localActivityIds.get(correlationKey) ?? [];
+        queued.push(activityId);
+        localActivityIds.set(correlationKey, queued);
+      } else if (!activityId && phase !== "info") {
+        const queued = localActivityIds.get(correlationKey);
+        activityId = queued?.shift();
+        if (queued?.length === 0) localActivityIds.delete(correlationKey);
+      }
+      const safeDetail = sanitizeProviderActivityDetail(detail.detail, {
+        workspaceRoot,
+      });
+      emit({
+        ...base,
+        type: "activity",
+        kind,
+        phase,
+        label: safeLabel,
+        ...(activityId ? { activityId } : {}),
+        ...(safeDetail ? { detail: safeDetail } : {}),
+      });
+    },
     status: (status, message) => emit({ ...base, type: "status", status, ...(message ? { message } : {}) }),
     session: (sessionId) => emit({ ...base, type: "session", sessionId }),
+    subagent: (event) => emit({ ...base, type: "subagent", ...event }),
     codex: (event) => {
       if (providerId !== "codex") return;
       emit({

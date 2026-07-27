@@ -14,6 +14,7 @@ import {
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import type { ProviderModel, ProviderRateLimit } from "../../shared/contracts";
+import { providerActivityDetailSections } from "./activity-detail";
 import { CappedProviderBuffer } from "./io";
 import {
   createAgentHarnessEmitter,
@@ -29,6 +30,14 @@ import type {
   AgentPlanStep,
 } from "./interactions";
 import { providerFailureMessage } from "./adapters";
+import { ClaudeDelegateLifecycle } from "./claude-delegate-lifecycle";
+import { ClaudePromptChannel } from "./claude-prompt-channel";
+import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
+import {
+  parseClaudeRateLimitEvent,
+  parseClaudeUsage,
+  readClaudeContextUsage,
+} from "./claude-usage";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
@@ -191,14 +200,36 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
     options.callbacks,
     options.input.runId ?? conversationId,
     options.input.turnId ?? null,
+    options.input.cwd,
   );
   const text = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
   const abortController = new AbortController();
+  const delegateLifecycle = new ClaudeDelegateLifecycle();
+  const promptChannel = new ClaudePromptChannel();
+  const subagentTracker = new ClaudeSubagentTraceTracker(emitter.subagent);
+  const toolActivities = new Map<
+    string,
+    { kind: "command" | "tool"; label: string }
+  >();
   let query: Query | undefined;
   let cancelRequested = false;
+  let acceptingFollowUps = false;
   let sessionId = options.input.sessionId;
+  let latestContextUsage: Awaited<ReturnType<typeof readClaudeContextUsage>>;
+  let contextUsageRequest: Promise<void> | null = null;
+
+  const refreshContextUsage = (): void => {
+    if (!query || contextUsageRequest) return;
+    contextUsageRequest = readClaudeContextUsage(query)
+      .then((usage) => {
+        if (usage) latestContextUsage = usage;
+      })
+      .finally(() => {
+        contextUsageRequest = null;
+      });
+  };
 
   const settleApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = approvals.get(requestId);
@@ -297,8 +328,11 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
   const result = (async (): Promise<ProviderRunResult> => {
     try {
       const prompt = await claudePrompt(options.input.prompt, options.input.imagePaths ?? []);
+      if (!promptChannel.push(prompt)) {
+        return finishResult("cancelled");
+      }
       query = createQuery({
-        prompt: oneMessage(prompt),
+        prompt: promptChannel,
         options: {
           abortController,
           cwd: options.input.cwd,
@@ -322,21 +356,26 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
       if (usesNativeAnthropic) {
         await emitClaudeModelMetadata(query, emitter.rich);
       }
+      acceptingFollowUps = true;
       emitter.status("running");
       let sawStreamText = false;
-      let failure: string | undefined;
+      let sawOutputText = false;
       for await (const message of query) {
         const record = message as unknown as Record<string, unknown>;
         if (typeof record.session_id === "string" && record.session_id !== sessionId) {
           sessionId = record.session_id;
           emitter.session(sessionId);
         }
+        const lifecycle = delegateLifecycle.observe(message);
+        subagentTracker.observe(message);
+        if (lifecycle.turnEnded) break;
         if (message.type === "stream_event") {
           const delta = objectValue(objectValue(record.event)?.delta);
           const deltaType = stringValue(delta?.type);
           const value = stringValue(delta?.text) ?? stringValue(delta?.thinking);
           if (value && deltaType === "text_delta") {
             sawStreamText = true;
+            sawOutputText = true;
             emitText(value, text, emitter.text);
           } else if (value && deltaType === "thinking_delta") {
             emitter.rich({ type: "reasoning-summary", text: bounded(value) });
@@ -348,40 +387,116 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
           for (const block of content) {
             const item = objectValue(block);
             if (!item) continue;
-            if (item.type === "text" && !sawStreamText && typeof item.text === "string") emitText(item.text, text, emitter.text);
+            if (item.type === "text" && !sawStreamText && typeof item.text === "string") {
+              sawOutputText = true;
+              emitText(item.text, text, emitter.text);
+            }
             if (item.type === "thinking" && typeof item.thinking === "string") emitter.rich({ type: "reasoning-summary", text: bounded(item.thinking) });
             if (item.type === "tool_use") {
               const name = stringValue(item.name) ?? "tool";
-              emitter.activity(name === "Bash" ? "command" : "tool", "started", bounded(name));
               const input = objectValue(item.input);
+              const kind = name === "Bash" ? "command" : "tool";
+              const label = bounded(name);
+              const activityId = stringValue(item.id);
+              if (activityId) toolActivities.set(activityId, { kind, label });
+              emitter.activity(kind, "started", label, {
+                ...(activityId ? { activityId } : {}),
+                ...(name === "Bash"
+                  ? {
+                      detail: providerActivityDetailSections({
+                        command: input?.command,
+                      }) ?? undefined,
+                    }
+                  : {}),
+              });
               if (name === "ExitPlanMode" && input) {
                 const plan = stringValue(input.plan) ?? stringValue(input.content);
                 if (plan) emitter.rich({ type: "plan", explanation: plan, steps: planSteps(plan) });
               }
             }
           }
+          // This control read runs alongside the provider loop. It must never
+          // delay a terminal result; result.iterations remains the exact
+          // fallback when the optional response has not arrived yet.
+          refreshContextUsage();
           continue;
         }
         if (message.type === "user") {
-          emitter.activity("tool", "completed", "Claude finished a tool call");
+          const content = Array.isArray(objectValue(record.message)?.content)
+            ? objectValue(record.message)?.content as unknown[]
+            : [];
+          for (const block of content) {
+            const result = objectValue(block);
+            if (result?.type !== "tool_result") continue;
+            const activityId = stringValue(result.tool_use_id);
+            const activity = activityId ? toolActivities.get(activityId) : undefined;
+            const failed = result.is_error === true;
+            const detail = providerActivityDetailSections({
+              [failed ? "error" : "output"]: result.content,
+            });
+            emitter.activity(
+              activity?.kind ?? "tool",
+              failed ? "failed" : "completed",
+              activity?.label ?? "Tool",
+              {
+                ...(activityId ? { activityId } : {}),
+                ...(detail ? { detail } : {}),
+              },
+            );
+            if (activityId) toolActivities.delete(activityId);
+          }
+          continue;
+        }
+        if (message.type === "rate_limit_event" && usesNativeAnthropic) {
+          const rateLimit = parseClaudeRateLimitEvent(record);
+          if (rateLimit) {
+            emitter.rich({
+              type: "metadata",
+              metadata: { rateLimits: [rateLimit] },
+              source: "session",
+              complete: false,
+            });
+          }
+          continue;
+        }
+        if (message.type === "system" && message.subtype === "compact_boundary") {
+          refreshContextUsage();
           continue;
         }
         if (message.type === "result") {
-          const contextUsage = await readClaudeContextUsage(query);
-          emitClaudeUsage(record, contextUsage, emitter.rich);
-          if (usesNativeAnthropic) {
-            await emitClaudeRateLimitMetadata(query, emitter.rich);
+          const usage = parseClaudeUsage(record, {
+            selectedModelId: options.input.modelSelection.modelId,
+            contextWindowOverride:
+              options.input.modelSelection.contextWindowOverride,
+            contextUsage: latestContextUsage,
+          });
+          if (usage) {
+            emitter.rich({ type: "usage", usage });
           }
-          if (message.subtype === "success") {
-            if (!sawStreamText && typeof message.result === "string") emitText(message.result, text, emitter.text);
-          } else {
-            failure = Array.isArray(message.errors) ? message.errors.filter((value): value is string => typeof value === "string").join("\n") : "Claude could not complete the request.";
-          }
-          break;
+          continue;
         }
       }
       if (cancelRequested) return finishResult("cancelled");
-      if (failure) return finishResult("failed", routeFailure(failure));
+      const completion = delegateLifecycle.complete();
+      if (completion.kind === "incomplete") {
+        return finishResult(
+          "failed",
+          routeFailure(claudeLifecycleFailure(completion.reason)),
+        );
+      }
+      const finalMessage = completion.result;
+      if (finalMessage.subtype !== "success") {
+        const failure = finalMessage.errors
+          .filter((value): value is string => typeof value === "string")
+          .join("\n");
+        return finishResult(
+          "failed",
+          routeFailure(failure || "Claude could not complete the request."),
+        );
+      }
+      if (!sawOutputText && typeof finalMessage.result === "string") {
+        emitText(finalMessage.result, text, emitter.text);
+      }
       return finishResult("completed");
     } catch (error) {
       if (cancelRequested || abortController.signal.aborted) return finishResult("cancelled");
@@ -390,7 +505,10 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
         routeFailure(safeError(error, "Claude Agent SDK stopped unexpectedly.")),
       );
     } finally {
+      acceptingFollowUps = false;
+      promptChannel.close();
       cancelPending();
+      delegateLifecycle.dispose();
       try { query?.close(); } catch { /* The SDK process may already be closed. */ }
     }
   })();
@@ -413,6 +531,8 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
   const cancel = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    acceptingFollowUps = false;
+    promptChannel.close();
     emitter.status("cancelling");
     cancelPending();
     if (force) {
@@ -428,31 +548,34 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
     providerId: "claude",
     result,
     cancel,
-    extension: { kind: "claude-agent-sdk", respondToApproval: settleApproval, respondToInput: settleInput },
+    extension: {
+      kind: "claude-agent-sdk",
+      respondToApproval: settleApproval,
+      respondToInput: settleInput,
+      steer: async (content) => {
+        const followUp = claudeTextFollowUp(content);
+        return Boolean(
+          acceptingFollowUps
+          && !cancelRequested
+          && followUp
+          && promptChannel.push(followUp),
+        );
+      },
+      stopSubagent: async (providerTaskId) => {
+        if (
+          !query
+          || cancelRequested
+          || !subagentTracker.isLiveTask(providerTaskId)
+        ) return false;
+        try {
+          await query.stopTask(providerTaskId);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    },
   };
-}
-
-async function emitClaudeRateLimitMetadata(
-  query: Query,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
-): Promise<void> {
-  const reader = query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
-  if (typeof reader !== "function") return;
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    const timeout = new Promise<undefined>((resolve) => {
-      timer = setTimeout(() => resolve(undefined), 2_000);
-      timer.unref();
-    });
-    const response = await Promise.race([reader.call(query), timeout]);
-    if (response === undefined) return;
-    const rateLimits = parseClaudeRateLimits(response);
-    if (rateLimits.length > 0) emit({ type: "metadata", metadata: { rateLimits }, source: "provider", complete: true });
-  } catch {
-    // Experimental usage metadata is optional and must not affect the provider run.
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 async function emitClaudeModelMetadata(
@@ -474,10 +597,6 @@ async function emitClaudeModelMetadata(
   }
 }
 
-async function* oneMessage(message: SDKUserMessage): AsyncIterable<SDKUserMessage> {
-  yield message;
-}
-
 async function claudePrompt(prompt: string, imagePaths: readonly string[]): Promise<SDKUserMessage> {
   const content: Array<Record<string, unknown>> = [];
   let imageBytes = 0;
@@ -491,6 +610,19 @@ async function claudePrompt(prompt: string, imagePaths: readonly string[]): Prom
   }
   content.push({ type: "text", text: prompt });
   return { type: "user", message: { role: "user", content } as unknown as SDKUserMessage["message"], parent_tool_use_id: null };
+}
+
+function claudeTextFollowUp(content: string): SDKUserMessage | null {
+  const text = content.replaceAll("\0", "").trim();
+  if (!text) return null;
+  return {
+    type: "user",
+    message: {
+      role: "user",
+      content: [{ type: "text", text }],
+    } as unknown as SDKUserMessage["message"],
+    parent_tool_use_id: null,
+  };
 }
 
 function imageMediaType(path: string): "image/jpeg" | "image/png" | "image/gif" | "image/webp" | undefined {
@@ -539,56 +671,16 @@ function planSteps(markdown: string): AgentPlanStep[] {
   return (steps.length > 0 ? steps : [markdown]).slice(0, 100).map((step) => ({ step: bounded(step), status: "pending" }));
 }
 
-function emitClaudeUsage(
-  record: Record<string, unknown>,
-  contextUsage: Record<string, unknown> | undefined,
-  emit: (event: Parameters<ReturnType<typeof createAgentHarnessEmitter>["rich"]>[0]) => void,
-): void {
-  const usage = objectValue(record.usage);
-  if (!usage && !contextUsage) return;
-  const input = finiteNumber(usage?.input_tokens);
-  const output = finiteNumber(usage?.output_tokens);
-  const cached = finiteNumber(usage?.cache_read_input_tokens);
-  const cacheWrite = finiteNumber(usage?.cache_creation_input_tokens);
-  const inputParts = [input, cached, cacheWrite].filter((value): value is number => value !== null);
-  const totalInput = inputParts.length > 0 ? inputParts.reduce((sum, value) => sum + value, 0) : null;
-  const modelUsage = objectValue(record.modelUsage);
-  const contextWindows = modelUsage ? Object.values(modelUsage).map((value) => finiteNumber(objectValue(value)?.contextWindow)).filter((value): value is number => value !== null) : [];
-  const uniqueContextWindows = [...new Set(contextWindows)];
-  const contextTokens = finiteNumber(contextUsage?.totalTokens);
-  const contextMax = finiteNumber(contextUsage?.maxTokens);
-  const autoCompact = typeof contextUsage?.isAutoCompactEnabled === "boolean" ? contextUsage.isAutoCompactEnabled : null;
-  emit({
-    type: "usage",
-    usage: {
-      usedTokens: contextTokens,
-      totalProcessedTokens: totalInput !== null && output !== null ? totalInput + output : null,
-      totalProcessedScope: "run",
-      maxTokens: contextMax ?? (uniqueContextWindows.length === 1 ? uniqueContextWindows[0]! : null),
-      inputTokens: totalInput,
-      cachedInputTokens: cached,
-      cacheWriteInputTokens: cacheWrite,
-      outputTokens: output,
-      reasoningOutputTokens: null,
-      compactsAutomatically: autoCompact,
-    },
-  });
-}
-
-async function readClaudeContextUsage(query: Query): Promise<Record<string, unknown> | undefined> {
-  if (typeof query.getContextUsage !== "function") return undefined;
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    const timeout = new Promise<undefined>((resolve) => {
-      timer = setTimeout(() => resolve(undefined), 2_000);
-      timer.unref();
-    });
-    const value = await Promise.race([query.getContextUsage(), timeout]);
-    return objectValue(value);
-  } catch {
-    return undefined;
-  } finally {
-    if (timer) clearTimeout(timer);
+function claudeLifecycleFailure(
+  reason: "missing-result" | "delegates-abandoned" | "parent-not-resumed",
+): string {
+  switch (reason) {
+    case "delegates-abandoned":
+      return "Claude Agent SDK exited while delegated work was still running.";
+    case "parent-not-resumed":
+      return "Claude Agent SDK exited before the parent resumed after delegated work.";
+    case "missing-result":
+      return "Claude Agent SDK exited without a final result.";
   }
 }
 
@@ -612,10 +704,6 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function finiteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function deny(message: string, interrupt = false): PermissionResult {

@@ -48,6 +48,8 @@ function detailConversationId(event: Exclude<RuntimeMutationEvent, { type: "snap
       return event.usage.conversationId;
     case "agent.activity":
       return event.activity.conversationId;
+    case "agent.subagent.updated":
+      return event.trace.conversationId;
     case "agent.approval.requested":
       return event.request.conversationId;
     case "agent.input.requested":

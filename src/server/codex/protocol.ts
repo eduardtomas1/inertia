@@ -1,5 +1,3 @@
-import { StringDecoder } from "node:string_decoder";
-
 export type JsonObject = Record<string, unknown>;
 export type RpcId = string | number;
 
@@ -41,68 +39,97 @@ export class CappedTextBuffer {
   }
 }
 
+export type JsonLineDecoderFailure =
+  | "line-overflow"
+  | "aggregate-overflow"
+  | "malformed-utf8";
+
+/**
+ * Frames JSONL by UTF-8 bytes rather than JavaScript characters. Retained
+ * memory is bounded to one frame and chunks are joined only when a complete
+ * line is ready to parse.
+ */
 export class JsonLineDecoder {
-  private readonly decoder = new StringDecoder("utf8");
-  private buffer = "";
-  private discarding = false;
+  private readonly decoder = new TextDecoder("utf-8", { fatal: true });
+  private readonly chunks: Buffer[] = [];
+  private lineBytes = 0;
+  private totalBytes = 0;
   private stopped = false;
 
   constructor(
-    private readonly maxLineChars: number,
+    private readonly maxLineBytes: number,
     private readonly onLine: (line: string) => void,
-    private readonly onOverflow: () => void,
+    private readonly onFailure: (failure: JsonLineDecoderFailure) => void,
+    private readonly maxTotalBytes = Number.MAX_SAFE_INTEGER,
   ) {}
 
   push(chunk: Buffer): void {
-    if (this.stopped) return;
-    this.consume(this.decoder.write(chunk));
+    if (this.stopped || chunk.length === 0) return;
+    let offset = 0;
+    while (!this.stopped && offset < chunk.length) {
+      const newline = chunk.indexOf(0x0a, offset);
+      const end = newline === -1 ? chunk.length : newline;
+      if (!this.append(chunk.subarray(offset, end))) return;
+      if (newline === -1) return;
+      if (!this.consumeBytes(1)) return;
+      this.emitLine();
+      offset = newline + 1;
+    }
   }
 
   end(): void {
     if (this.stopped) return;
-    this.consume(this.decoder.end());
-    if (this.stopped) return;
-    if (!this.discarding && this.buffer.trim()) this.onLine(this.buffer.trimEnd());
-    this.buffer = "";
+    if (this.lineBytes > 0) this.emitLine();
   }
 
   stop(): void {
     this.stopped = true;
-    this.buffer = "";
+    this.chunks.length = 0;
+    this.lineBytes = 0;
   }
 
-  private consume(text: string): void {
-    let offset = 0;
-    while (!this.stopped && offset < text.length) {
-      const newline = text.indexOf("\n", offset);
-      if (newline === -1) {
-        if (this.discarding) return;
-        const remainder = text.slice(offset);
-        if (this.buffer.length + remainder.length > this.maxLineChars) {
-          this.buffer = "";
-          this.discarding = true;
-          this.onOverflow();
-        } else {
-          this.buffer += remainder;
-        }
-        return;
-      }
-
-      const segment = text.slice(offset, newline);
-      offset = newline + 1;
-      if (this.discarding) {
-        this.discarding = false;
-        continue;
-      }
-      if (this.buffer.length + segment.length > this.maxLineChars) {
-        this.buffer = "";
-        this.onOverflow();
-        if (this.stopped) return;
-        continue;
-      }
-      const line = `${this.buffer}${segment}`.trimEnd();
-      this.buffer = "";
-      if (line) this.onLine(line);
+  private append(segment: Buffer): boolean {
+    if (segment.length === 0) return true;
+    if (this.lineBytes + segment.length > this.maxLineBytes) {
+      this.fail("line-overflow");
+      return false;
     }
+    if (!this.consumeBytes(segment.length)) return false;
+    // Copy so a short retained segment cannot pin a much larger stream chunk.
+    this.chunks.push(Buffer.from(segment));
+    this.lineBytes += segment.length;
+    return true;
+  }
+
+  private consumeBytes(count: number): boolean {
+    if (this.totalBytes + count > this.maxTotalBytes) {
+      this.fail("aggregate-overflow");
+      return false;
+    }
+    this.totalBytes += count;
+    return true;
+  }
+
+  private emitLine(): void {
+    if (this.stopped) return;
+    const bytes = this.chunks.length === 1
+      ? this.chunks[0]!
+      : Buffer.concat(this.chunks, this.lineBytes);
+    this.chunks.length = 0;
+    this.lineBytes = 0;
+    let line: string;
+    try {
+      line = this.decoder.decode(bytes).replace(/\r$/u, "").trimEnd();
+    } catch {
+      this.fail("malformed-utf8");
+      return;
+    }
+    if (line) this.onLine(line);
+  }
+
+  private fail(failure: JsonLineDecoderFailure): void {
+    if (this.stopped) return;
+    this.stop();
+    this.onFailure(failure);
   }
 }

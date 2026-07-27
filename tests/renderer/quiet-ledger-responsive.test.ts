@@ -35,12 +35,26 @@ describe("Quiet Ledger responsive transcript", () => {
       css,
       "@container conversation-workspace (max-width: 720px)",
     );
+    const boundedChooser = cssBlock(
+      css,
+      "@container conversation-workspace (min-height: 0px)",
+    );
+    const stackedChooser = cssBlock(
+      css,
+      "@media (max-width: 1024px) {\n  @container conversation-workspace",
+    );
 
     expect(chat).toContain("container-name: conversation-workspace");
-    expect(chat).toContain("container-type: inline-size");
+    expect(chat).toContain("container-type: size");
     expect(transcript).toContain("overflow-x: hidden");
     expect(split).toMatch(/\.message-scroll\s*\{[^}]*clamp\(20px,\s*4cqi,\s*40px\)/su);
     expect(narrowSplit).toMatch(/\.message-scroll\s*\{[^}]*clamp\(12px,\s*3cqi,\s*18px\)/su);
+    expect(boundedChooser).toMatch(
+      /\.model-chooser-palette\s*\{[^}]*height:\s*min\(430px,[^;]*100cqh - 76px[^;]*\);[^}]*min-height:\s*min\(310px,[^;]*100cqh - 76px/su,
+    );
+    expect(stackedChooser).toMatch(
+      /\.workspace-body\.has-tools \.model-chooser-palette\s*\{[^}]*height:\s*min\(390px,[^;]*100cqh - 76px[^;]*\);[^}]*min-height:\s*min\(280px,[^;]*100cqh - 76px/su,
+    );
   });
 
   it("uses the full readable column at narrow transcript widths", () => {
@@ -67,7 +81,7 @@ describe("Quiet Ledger responsive transcript", () => {
     const elapsed = cssBlock(compact, ".turn-working-elapsed");
     const stop = cssBlock(compact, ".turn-stop-action");
 
-    expect(compact).toContain("--user-message-max-width: 92%");
+    expect(compact).toContain("--user-request-max-width: 92%");
     expect(header).toContain("flex-wrap: wrap");
     expect(status).toContain("flex: 1 1 auto");
     expect(elapsed).toContain("order: 3");
@@ -82,12 +96,16 @@ describe("Quiet Ledger responsive transcript", () => {
       "@container response-transcript (max-width: 440px)",
     );
     const details = cssBlock(compact, ".turn-run-details > div");
-    const activity = cssBlock(css, ".turn-work-log .agent-activity strong,");
+    const activity = cssBlock(
+      css,
+      ".turn-work-log .agent-activity-target,",
+    );
     const requestCard = cssBlock(css, "@container (max-width: 420px)");
 
     expect(compact).toContain("grid-template-columns: minmax(0, 1fr) auto");
     expect(details).toContain("grid-template-columns: minmax(0, 1fr)");
-    expect(activity).toContain("overflow-wrap: anywhere");
+    expect(activity).toContain("text-overflow: ellipsis");
+    expect(activity).toContain("white-space: nowrap");
     expect(requestCard).toMatch(
       /\.agent-request-actions\s*\{[^}]*display:\s*grid;[^}]*minmax\(110px,\s*1fr\)/su,
     );

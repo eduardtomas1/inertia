@@ -160,9 +160,11 @@ function validateRelativePath(path: string, allowRoot: boolean): string {
   if (
     typeof path !== "string" ||
     path.length > MAX_PATH_LENGTH ||
-    path.includes("\0") ||
-    /[\r\n]/u.test(path) ||
-    isAbsolute(path)
+    /[\0\r\n]/u.test(path) ||
+    isAbsolute(path) ||
+    /^[\\/]/u.test(path) ||
+    /^[A-Za-z]:/u.test(path) ||
+    path.split(/[\\/]/u).some((segment) => segment === "..")
   ) {
     throw new WorkspaceError("invalid-input", "The workspace path is invalid.");
   }
@@ -285,7 +287,8 @@ async function describeEntry(root: string, absolute: string, name: string): Prom
 function compareEntries(left: WorkspaceEntry, right: WorkspaceEntry): number {
   if (left.kind === "directory" && right.kind !== "directory") return -1;
   if (left.kind !== "directory" && right.kind === "directory") return 1;
-  return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
+  return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" })
+    || left.path.localeCompare(right.path, undefined, { numeric: true, sensitivity: "variant" });
 }
 
 export async function listWorkspaceEntries(
@@ -298,15 +301,27 @@ export async function listWorkspaceEntries(
   const maxEntries = boundedInteger(options.maxEntries, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
   try {
     const entries: WorkspaceEntry[] = [];
+    const children: Array<{ absolute: string; name: string }> = [];
     let truncated = false;
     const directoryHandle = await opendir(target.absolute);
     for await (const child of directoryHandle) {
       if (!options.includeHidden && child.name.startsWith(".")) continue;
-      if (entries.length >= maxEntries) {
+      if (children.length >= maxEntries) {
         truncated = true;
         break;
       }
-      entries.push(await describeEntry(root, resolve(target.absolute, child.name), child.name));
+      children.push({
+        absolute: resolve(target.absolute, child.name),
+        name: child.name,
+      });
+    }
+    // Bound metadata fan-out so large directories remain responsive without
+    // opening hundreds of filesystem operations at once.
+    for (let offset = 0; offset < children.length; offset += 32) {
+      entries.push(...await Promise.all(
+        children.slice(offset, offset + 32)
+          .map(({ absolute, name }) => describeEntry(root, absolute, name)),
+      ));
     }
     entries.sort(compareEntries);
     return { directory: target.relativePath === "." ? "" : target.relativePath, entries, truncated };

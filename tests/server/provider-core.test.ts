@@ -57,6 +57,118 @@ describe("provider adapter seams", () => {
     expect(activities).toEqual([["turn", "completed", "Turn completed"]]);
   });
 
+  it("keeps every CLI provider's structured tool output in activity detail", () => {
+    const fixtures: Array<{
+      providerId: ProviderId;
+      lines: unknown[];
+      expectedId: string;
+      expectedDetail: string;
+    }> = [
+      {
+        providerId: "codex",
+        lines: [{
+          type: "item.completed",
+          item: {
+            id: "codex-call",
+            type: "command_execution",
+            command: "npm test",
+            aggregated_output: "passed",
+          },
+        }],
+        expectedId: "codex-call",
+        expectedDetail: "Command:\nnpm test\n\nOutput:\npassed",
+      },
+      {
+        providerId: "claude",
+        lines: [
+          {
+            type: "assistant",
+            message: {
+              content: [{
+                type: "tool_use",
+                id: "claude-call",
+                name: "Bash",
+                input: { command: "npm test" },
+              }],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [{
+                type: "tool_result",
+                tool_use_id: "claude-call",
+                content: [{ type: "text", text: "passed" }],
+              }],
+            },
+          },
+        ],
+        expectedId: "claude-call",
+        expectedDetail: "Output:\npassed",
+      },
+      {
+        providerId: "cursor",
+        lines: [{
+          type: "tool_call",
+          subtype: "completed",
+          tool_call: {
+            toolCallId: "cursor-call",
+            kind: "execute",
+            name: "Shell",
+            rawInput: { command: "npm test" },
+            rawOutput: "passed",
+          },
+        }],
+        expectedId: "cursor-call",
+        expectedDetail: "Command:\nnpm test\n\nOutput:\npassed",
+      },
+      {
+        providerId: "opencode",
+        lines: [{
+          type: "tool_use",
+          part: {
+            id: "part-1",
+            callID: "opencode-call",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { command: "npm test" },
+              output: "passed",
+            },
+          },
+        }],
+        expectedId: "opencode-call",
+        expectedDetail: "Command:\nnpm test\n\nOutput:\npassed",
+      },
+    ];
+
+    for (const fixture of fixtures) {
+      const state: ProviderParserState = {
+        sawText: false,
+        sawStreamingDelta: false,
+        hadErrorEvent: false,
+      };
+      const activities: Array<{
+        activityId?: string;
+        detail?: string;
+      }> = [];
+      for (const line of fixture.lines) {
+        normalizeProviderLine(
+          fixture.providerId,
+          JSON.stringify(line),
+          state,
+          () => undefined,
+          (_kind, _phase, _label, detail) => activities.push(detail ?? {}),
+          () => undefined,
+        );
+      }
+      expect(activities.at(-1)).toMatchObject({
+        activityId: fixture.expectedId,
+        detail: fixture.expectedDetail,
+      });
+    }
+  });
+
   it("validates the stable provider run contract before launching", () => {
     expect(validateProviderRunInput(input("claude"))).toBe("conversation-1");
     expect(() => validateProviderRunInput(input("claude", { prompt: "" }))).toThrow("A prompt is required.");

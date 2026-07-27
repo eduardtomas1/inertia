@@ -88,12 +88,26 @@ function renderRequest(
     attachment?: ChatAttachment;
     checkpoint?: CheckpointSummary;
     checkpointRestoreDisabled?: boolean;
+    internalInstruction?: string;
   } = {},
 ): string {
   const currentTurn = turn(options.checkpoint?.id ?? null);
   return renderToStaticMarkup(createElement(ResponseTimeline, {
     turns: [currentTurn],
-    messages: [message(content, options.attachment ? [options.attachment] : [])],
+    messages: [
+      message(content, options.attachment ? [options.attachment] : []),
+      ...(options.internalInstruction
+        ? [{
+            id: "system-1",
+            conversationId,
+            turnId: "turn-1",
+            role: "system" as const,
+            content: options.internalInstruction,
+            attachments: [],
+            createdAt: "2026-07-23T10:00:00.500Z",
+          }]
+        : []),
+    ],
     activities: [],
     reasonings: [],
     plans: [],
@@ -154,8 +168,10 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain(`<time dateTime="${requestedAt}">`);
     expect(html).toContain('class="message-revert"');
     expect(html).toContain('disabled=""');
-    expect(html).toContain('aria-label="Request attachments"');
+    expect(html).toContain('aria-label="Request context"');
+    expect(html).toContain('data-request-context-kind="image"');
     expect(html).toContain("Image · reference.png");
+    expect(html).not.toContain("/workspace/reference.png");
     expect(html.indexOf("Image · reference.png"))
       .toBeGreaterThan(html.indexOf("Please inspect this reference."));
   });
@@ -165,18 +181,30 @@ describe("Quiet Ledger user request layer", () => {
 
     expect(html).toContain("turn-user-request is-document-like");
     expect(html).toContain('data-request-layout="document"');
-    expect(html).not.toContain("turn-user-request-attachments");
+    expect(html).not.toContain("turn-user-request-context");
+  });
+
+  it("keeps internal execution instructions outside the user request layer", () => {
+    const internalInstruction = "Internal provider instructions: never attribute this to the user.";
+    const html = renderRequest("Please review the provider route.", { internalInstruction });
+    const requestStart = html.indexOf('aria-label="Your request"');
+    const requestEnd = html.indexOf("</article>", requestStart);
+    const request = html.slice(requestStart, requestEnd);
+
+    expect(request).toContain("Please review the provider route.");
+    expect(request).not.toContain(internalInstruction);
+    expect(html).toContain(internalInstruction);
   });
 
   it("uses the shared width and radius tokens with intentional narrow behavior", () => {
     expect(css).toMatch(
-      /\.response-turn\s*>\s*\.turn-user-request\s*\{[^}]*max-width:\s*var\(--user-message-max-width\);[^}]*border-radius:\s*var\(--radius-medium\);[^}]*background:\s*color-mix/su,
+      /\.response-turn\s*>\s*\.turn-user-request\s*\{[^}]*max-width:\s*var\(--user-request-max-width\);[^}]*border:\s*0;[^}]*border-radius:\s*var\(--radius-medium\);[^}]*background:\s*var\(--user-request-tint\);[^}]*box-shadow:\s*none;/su,
     );
     expect(css).toMatch(
       /\.message\.is-user\.turn-user-request\s+\.message-body\s*\{[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*font-size:\s*var\(--ui-font-main\);/su,
     );
     expect(css).toMatch(
-      /@container\s+response-transcript\s+\(max-width:\s*620px\)\s*\{[\s\S]*?--user-message-max-width:\s*92%;/u,
+      /@container\s+response-transcript\s+\(max-width:\s*620px\)\s*\{[\s\S]*?--user-request-max-width:\s*92%;/u,
     );
   });
 });

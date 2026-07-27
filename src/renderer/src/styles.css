@@ -48,9 +48,9 @@
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --surface-subtle: color-mix(in srgb, var(--surface) 72%, var(--surface-muted));
-  --ui-font-main: 13.5px;
-  --ui-font-secondary: 10.5px;
-  --ui-font-micro: 9px;
+  --ui-font-main: 14px;
+  --ui-font-secondary: 11.5px;
+  --ui-font-micro: 9.5px;
   --ui-control-height: 32px;
   --ui-diff-font: 10.5px;
   /*
@@ -79,6 +79,7 @@
   --composer-control-padding-block: 6px;
   --composer-zone-gap: 7px;
   --composer-density-spacing-adjustment: 0px;
+  --composer-bottom-breathing-room: 10px;
   --composer-zone-separator: color-mix(in srgb, var(--panel-border) 62%, transparent);
   --composer-setting-separator: color-mix(in srgb, var(--panel-border) 48%, transparent);
   --composer-setting-hover: color-mix(in srgb, var(--surface-hover) 64%, transparent);
@@ -141,9 +142,9 @@
 }
 
 :root[data-interface-scale="compact"] {
-  --ui-font-main: 12.5px;
-  --ui-font-secondary: 10px;
-  --ui-font-micro: 8.5px;
+  --ui-font-main: 13px;
+  --ui-font-secondary: 11px;
+  --ui-font-micro: 9px;
   --ui-control-height: 30px;
   --ui-diff-font: 9.5px;
   --transcript-max-width: 840px;
@@ -158,12 +159,13 @@
   --composer-input-padding-block: 9px;
   --composer-control-padding-inline: 6px;
   --composer-control-padding-block: 5px;
+  --composer-bottom-breathing-room: 8px;
 }
 
 :root[data-interface-scale="comfortable"] {
-  --ui-font-main: 14.5px;
-  --ui-font-secondary: 11.5px;
-  --ui-font-micro: 10px;
+  --ui-font-main: 15px;
+  --ui-font-secondary: 12px;
+  --ui-font-micro: 10.5px;
   --ui-control-height: 35px;
   --ui-diff-font: 12px;
   --transcript-max-width: 920px;
@@ -178,12 +180,13 @@
   --composer-input-padding-block: 12px;
   --composer-control-padding-inline: 9px;
   --composer-control-padding-block: 7px;
+  --composer-bottom-breathing-room: 12px;
 }
 
 :root[data-interface-scale="large"] {
-  --ui-font-main: 16px;
-  --ui-font-secondary: 13px;
-  --ui-font-micro: 11px;
+  --ui-font-main: 16.5px;
+  --ui-font-secondary: 13.5px;
+  --ui-font-micro: 11.5px;
   --ui-control-height: 38px;
   --ui-diff-font: 13.5px;
   --transcript-max-width: 960px;
@@ -198,6 +201,7 @@
   --composer-input-padding-block: 13px;
   --composer-control-padding-inline: 10px;
   --composer-control-padding-block: 8px;
+  --composer-bottom-breathing-room: 14px;
 }
 
 :root[data-theme="dark"] {
@@ -316,6 +320,11 @@ button:disabled {
    * the same CSS size. CSS pixels remain intact for Chromium/DPI scaling.
    */
   --platform-readability-adjustment: 0.25px;
+  --composer-bottom-breathing-room: 12px;
+}
+
+.app-shell.platform-win32 {
+  --composer-bottom-breathing-room: 12px;
 }
 
 .app-shell.is-sidebar-collapsed {
@@ -2004,7 +2013,10 @@ textarea {
   margin-top: 1px;
 }
 
-.agent-activity.is-running svg { color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.response-turn.is-active .agent-activity.is-running svg {
+  color: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
 .agent-activity.is-completed svg { color: var(--blue); }
 .agent-activity.is-failed svg { color: var(--danger); }
 
@@ -2286,10 +2298,99 @@ textarea {
   z-index: 25;
 }
 
+.provider-maintenance-notice {
+  display: flex;
+  width: min(var(--composer-max-width), calc(100% - 36px));
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  gap: 7px;
+  margin: 0 auto 2px;
+  padding: 4px 7px;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--ui-font-secondary);
+}
+
+.provider-maintenance-notice > svg {
+  flex: 0 0 auto;
+  color: var(--accent-strong);
+}
+
+.provider-maintenance-notice > span:first-of-type {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.provider-maintenance-notice strong,
+.provider-maintenance-notice small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-maintenance-notice strong {
+  flex: 0 0 auto;
+  color: var(--text-soft);
+  font-weight: 620;
+}
+
+.provider-maintenance-notice small {
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.provider-maintenance-notice.is-failed,
+.provider-maintenance-notice.is-failed > svg {
+  border-left-color: var(--failure-accent);
+  color: var(--failure-accent);
+}
+
+.provider-maintenance-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.provider-maintenance-actions > button:not(.icon-button) {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: var(--radius-small);
+  color: var(--text-soft);
+  background: transparent;
+  font-size: inherit;
+  font-weight: 620;
+}
+
+.provider-maintenance-actions > button:not(:disabled):hover {
+  color: var(--text);
+  background: var(--composer-setting-hover);
+}
+
+.provider-maintenance-actions .icon-button {
+  width: 24px;
+  height: 24px;
+}
+
+.provider-account-copy .provider-maintenance-notice {
+  width: 100%;
+  margin: 4px 0 0;
+  padding-right: 0;
+  padding-left: 7px;
+}
+
 .composer-shell {
   min-width: 0;
   flex: 0 0 auto;
-  padding: 7px clamp(18px, 4vw, 54px) 0;
+  padding: 7px clamp(18px, 4vw, 54px) var(--composer-bottom-breathing-room);
 }
 
 .composer {
@@ -2379,7 +2480,6 @@ textarea {
   background: transparent;
   font-size: calc(var(--ui-font-main) + var(--platform-readability-adjustment));
   line-height: 1.55;
-  transition: height var(--motion-fast) var(--motion-ease);
 }
 
 .composer textarea::placeholder {
@@ -6066,7 +6166,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   }
 
   .composer-shell {
-    padding: 7px 9px 0;
+    padding: 7px 9px var(--composer-bottom-breathing-room);
   }
 
   .composer textarea {
@@ -6797,7 +6897,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 [data-active-work-region][data-active-work-state="running"]::before {
   position: absolute;
   z-index: -1;
-  inset: 0;
+  inset: 0 -42%;
   pointer-events: none;
   background:
     linear-gradient(
@@ -6810,16 +6910,18 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
       transparent 82%,
       transparent 100%
     );
-  background-position: 42% 50%;
-  background-size: 135% 100%;
+  background-position: 50% 50%;
+  background-size: 100% 100%;
   opacity: var(--active-work-gradient-opacity);
-  animation: active-work-tonal-wash 4.2s var(--motion-ease) infinite alternate;
+  transform: translate3d(-8%, 0, 0);
+  will-change: transform;
+  animation: active-work-tonal-wash 4.2s linear infinite alternate;
   content: "";
 }
 
 @keyframes active-work-tonal-wash {
   to {
-    background-position: 58% 50%;
+    transform: translate3d(8%, 0, 0);
   }
 }
 
@@ -7309,7 +7411,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   white-space: pre-wrap;
 }
 
-.turn-work-log .agent-activity.is-running > svg {
+[data-active-work-region] .turn-work-log .agent-activity.is-running > svg {
   color: color-mix(in srgb, var(--active-work-accent) 68%, var(--execution-muted-text));
 }
 
@@ -8577,7 +8679,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     background-position: 50% 50%;
   }
 
-  .turn-work-log .agent-activity.is-running svg {
+  [data-active-work-region] .turn-work-log .agent-activity.is-running svg {
     animation: none;
   }
 
@@ -9421,8 +9523,13 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   min-height: 100%;
 }
 
+.model-chooser-result {
+  padding: 1px 4px;
+}
+
 .model-chooser-listbox .model-chooser-row {
   padding-right: calc(max(26px, calc(var(--ui-control-height) - 6px)) + 8px);
+  border-radius: var(--radius-small);
 }
 
 .model-chooser-favorite-actions {
@@ -9437,7 +9544,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .model-chooser-favorite-slot {
   display: grid;
-  min-height: max(44px, var(--model-row-height));
+  min-height: calc(max(44px, var(--model-row-height)) + 2px);
   place-items: center;
   pointer-events: none;
 }

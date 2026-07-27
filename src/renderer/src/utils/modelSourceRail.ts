@@ -44,8 +44,11 @@ export interface ModelSourceRailItem<Route extends ModelSearchRoute = ModelSearc
   setupAction: ModelSourceSetupAction | null;
 }
 
-export interface DeriveModelSourceRailOptions {
+export interface DeriveModelSourceRailOptions<
+  Route extends ModelSearchRoute = ModelSearchRoute,
+> {
   favoriteRouteKeys?: readonly string[];
+  favoriteRoutes?: readonly Route[];
   /**
    * Empty provider groups are omitted unless the caller can offer one of these
    * real setup actions. An action is ignored when that provider has routes.
@@ -87,7 +90,7 @@ function railItem<Route extends ModelSearchRoute>(
  */
 export function deriveModelSourceRailItems<Route extends ModelSearchRoute>(
   routes: readonly Route[],
-  options: DeriveModelSourceRailOptions = {},
+  options: DeriveModelSourceRailOptions<Route> = {},
 ): ModelSourceRailItem<Route>[] {
   const favoriteRouteKeys = new Set(options.favoriteRouteKeys ?? []);
   const setupByProvider = new Map(
@@ -147,17 +150,9 @@ export function deriveModelSourceRailItems<Route extends ModelSearchRoute>(
   }
 
   const items: ModelSourceRailItem<Route>[] = [];
-  if (routes.length > 0) {
-    items.push(railItem({
-      label: "All",
-      detail: null,
-      filter: { kind: "all" },
-      routes: [...routes],
-      setupAction: null,
-    }));
-  }
-
-  const favoriteRoutes = routes.filter(({ key }) => favoriteRouteKeys.has(key));
+  const favoriteRoutes = options.favoriteRoutes
+    ? [...options.favoriteRoutes]
+    : routes.filter(({ key }) => favoriteRouteKeys.has(key));
   if (favoriteRoutes.length > 0) {
     items.push(railItem({
       label: "Favorites",

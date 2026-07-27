@@ -92,6 +92,23 @@ function initialFavorites(): ModelFavoriteReference[] {
     : readModelFavorites(window.localStorage);
 }
 
+function favoriteKeyForRoute(
+  route: Pick<
+    ComposerModelRoute,
+    "harnessId" | "backendProfileId" | "modelId" | "reasoningEffort"
+  >,
+): string {
+  return modelFavoriteKey(route);
+}
+
+export function preferredModelChooserSource(
+  items: readonly { filter: ModelSourceFilter }[],
+): ModelSourceFilter {
+  return items.find(({ filter }) => filter.kind === "favorites")?.filter
+    ?? items[0]?.filter
+    ?? { kind: "all" };
+}
+
 export function ModelChooser({
   routes,
   selectedRoute,
@@ -124,16 +141,24 @@ export function ModelChooser({
     () => resolveModelFavorites(favorites, routes),
     [favorites, routes],
   );
+  const resolvedFavoriteRoutes = useMemo(
+    () => resolvedFavorites.flatMap(({ route }) => route ? [route] : []),
+    [resolvedFavorites],
+  );
   const railItems = useMemo(
     () => deriveModelSourceRailItems(routes, {
-      favoriteRouteKeys: favoriteKeys,
+      favoriteRoutes: resolvedFavoriteRoutes,
     }),
-    [favoriteKeys, routes],
+    [resolvedFavoriteRoutes, routes],
   );
   const selectedSourceId = modelSourceFilterId(sourceFilter);
   const sourceRoutes = useMemo(
-    () => filterModelRoutesBySource(routes, sourceFilter, favoriteKeys),
-    [favoriteKeys, routes, sourceFilter],
+    () => query.trim()
+      ? routes
+      : sourceFilter.kind === "favorites"
+        ? resolvedFavoriteRoutes
+        : filterModelRoutesBySource(routes, sourceFilter),
+    [query, resolvedFavoriteRoutes, routes, sourceFilter],
   );
   const results = useMemo(
     () => searchModelRoutes(sourceRoutes, query),
@@ -154,12 +179,16 @@ export function ModelChooser({
     () => new Map(shortcuts.map((binding) => [binding.routeKey, binding])),
     [shortcuts],
   );
-  const selectedKey = selectedRoute.key;
+  const selectedKey = modelFavoriteKey({
+    harnessId: selectedRoute.harnessId,
+    backendProfileId: selectedRoute.backendProfileId,
+    modelId: selectedRoute.modelId,
+    reasoningEffort: selectedRoute.reasoningEffort ?? null,
+  });
 
   const close = (restoreFocus = true): void => {
     setOpen(false);
     setQuery("");
-    setSourceFilter({ kind: "all" });
     onOpenChange?.(false);
     if (restoreFocus) {
       window.requestAnimationFrame(() => triggerRef.current?.focus());
@@ -176,8 +205,8 @@ export function ModelChooser({
 
   useEffect(() => {
     if (!open) return;
-    const selectedIndex = results.items.findIndex(({ key }) =>
-      key === selectedKey);
+    const selectedIndex = results.items.findIndex((route) =>
+      favoriteKeyForRoute(route) === selectedKey);
     setActiveIndex(selectedIndex >= 0 && results.items[selectedIndex]?.selectable
       ? selectedIndex
       : nextModelChooserIndex(results.items, -1, "Home"));
@@ -186,7 +215,7 @@ export function ModelChooser({
   useEffect(() => {
     if (!open) return;
     if (railItems.some(({ id }) => id === selectedSourceId)) return;
-    setSourceFilter({ kind: "all" });
+    setSourceFilter(preferredModelChooserSource(railItems));
   }, [open, railItems, selectedSourceId]);
 
   useEffect(() => {
@@ -274,8 +303,8 @@ export function ModelChooser({
     : undefined;
   const chooserRows = results.items.map((route) =>
     modelChooserRowFromRoute(route, {
-      active: route.key === selectedKey,
-      favorite: favoriteKeys.includes(route.key),
+      active: favoriteKeyForRoute(route) === selectedKey,
+      favorite: favoriteKeys.includes(favoriteKeyForRoute(route)),
       shortcut: shortcutsByRoute.get(route.key) ?? null,
       compatibility: route.rowCompatibility,
     }));
@@ -296,6 +325,7 @@ export function ModelChooser({
             close(true);
             return;
           }
+          setSourceFilter(preferredModelChooserSource(railItems));
           setOpen(true);
           onOpenChange?.(true);
         }}

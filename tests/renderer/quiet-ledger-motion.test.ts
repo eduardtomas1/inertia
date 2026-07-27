@@ -10,8 +10,20 @@ const css = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
 );
-const timelineSource = readFileSync(
-  new URL("../../src/renderer/src/components/ResponseTimeline.tsx", import.meta.url),
+const activitySource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
+  "utf8",
+);
+const layersSource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url),
+  "utf8",
+);
+const turnSource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/turn.tsx", import.meta.url),
+  "utf8",
+);
+const viewportSource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/viewport.tsx", import.meta.url),
   "utf8",
 );
 
@@ -33,13 +45,13 @@ function cssBlock(source: string, marker: string): string {
 
 describe("Quiet Ledger active-to-settled motion", () => {
   it("gates settlement motion on a turn that was active so history stays still on load", () => {
-    expect(timelineSource).toContain("const wasActive = useRef(turn.isActive)");
-    expect(timelineSource).toContain("const [settlingTransition, setSettlingTransition] = useState<");
-    expect(timelineSource).toContain("const isSettling = settlingTransition !== null");
-    expect(timelineSource).toContain("setSettlingTransition({");
-    expect(timelineSource).toContain("window.setTimeout(() => setSettlingTransition(null), 220)");
-    expect(timelineSource).toContain('isSettling && "is-settling"');
-    expect(timelineSource).toContain(
+    expect(turnSource).toContain("const wasActive = useRef(turn.isActive)");
+    expect(turnSource).toContain("const [settlingTransition, setSettlingTransition] = useState<");
+    expect(turnSource).toContain("const isSettling = settlingTransition !== null");
+    expect(turnSource).toContain("setSettlingTransition({");
+    expect(turnSource).toContain("window.setTimeout(() => setSettlingTransition(null), 220)");
+    expect(turnSource).toContain('isSettling && "is-settling"');
+    expect(turnSource).toContain(
       'data-completion-transition={isSettling ? "active-to-settled" : undefined}',
     );
     expect(css).toContain(
@@ -49,20 +61,20 @@ describe("Quiet Ledger active-to-settled motion", () => {
   });
 
   it("reveals a persisted final document even when its terminal row arrived while active", () => {
-    expect(timelineSource).not.toContain("renderedAnswerWhileActive");
-    expect(timelineSource).toContain(
+    expect(turnSource).not.toContain("renderedAnswerWhileActive");
+    expect(turnSource).toContain(
       "const isRevealingSettledAnswer = settlingTransition?.revealAnswer ?? false",
     );
-    expect(timelineSource).toContain(
+    expect(turnSource).toContain(
       "revealAnswer: Boolean(turn.terminalAssistantMessage?.content)",
     );
-    expect(timelineSource).toContain(
+    expect(turnSource).toContain(
       "settlingTransition",
     );
-    expect(timelineSource).toContain(
+    expect(turnSource).toContain(
       "&& turn.terminalAssistantMessage?.content",
     );
-    expect(timelineSource).toContain(
+    expect(turnSource).toContain(
       'isRevealingSettledAnswer && "is-revealing-settled-answer"',
     );
     expect(css).toContain(
@@ -109,7 +121,7 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(motion).not.toMatch(/translateX|translate3d|scale|height|width/iu);
     expect(`${settleRule}\n${documentRule}`).not.toContain("animation-delay");
     expect(motion).not.toMatch(/spring|bounce|overshoot/iu);
-    for (const offset of [...motion.matchAll(/translateY\((-?(?<offset>\d+))px\)/gu)]) {
+    for (const offset of motion.matchAll(/translateY\((-?(?<offset>\d+))px\)/gu)) {
       expect(Math.abs(Number(offset.groups?.offset ?? 0))).toBeLessThanOrEqual(3);
     }
   });
@@ -139,8 +151,8 @@ describe("Quiet Ledger active-to-settled motion", () => {
       status: "completed",
       autoCollapse: false,
     })).toBe(false);
-    expect(timelineSource).toContain("const workWasActive = useRef(turn.isActive)");
-    expect(timelineSource).toContain(
+    expect(activitySource).toContain("const workWasActive = useRef(turn.isActive)");
+    expect(activitySource).toContain(
       "if (shouldCollapse) setExpanded(false)",
     );
   });
@@ -152,7 +164,7 @@ describe("Quiet Ledger active-to-settled motion", () => {
     );
 
     expect(reducedMotion).toContain("animation: none");
-    expect(timelineSource).not.toContain("turn-working-pulse");
+    expect(activitySource).not.toContain("turn-working-pulse");
     expect(quietLedgerReducedMotion).toContain(
       ".turn-work-log .agent-activity.is-running svg",
     );
@@ -168,28 +180,28 @@ describe("Quiet Ledger active-to-settled motion", () => {
   });
 
   it("keeps completion on the same keyed row and leaves follow/virtualization behavior untouched", () => {
-    expect(timelineSource).toContain("data-response-row-id={turn.id}");
-    expect(timelineSource).toContain("data-turn-id={turn.id}");
-    expect(timelineSource).toContain(
+    expect(turnSource).toContain("data-response-row-id={turn.id}");
+    expect(turnSource).toContain("data-turn-id={turn.id}");
+    expect(viewportSource).toContain(
       "(index: number) => timeline[index]?.id ?? `missing-${index}`",
     );
-    expect(timelineSource).toContain("key={virtualItem.key}");
-    expect(timelineSource).toContain(
+    expect(viewportSource).toContain("key={virtualItem.key}");
+    expect(viewportSource).toContain(
       'timeline.map((item) => <div className="response-static-item" key={item.id}>',
     );
-    expect(timelineSource).toContain("anchorTo: \"end\"");
-    expect(timelineSource).toContain("followOnAppend: false");
-    expect(timelineSource).not.toMatch(
+    expect(viewportSource).toContain("anchorTo: \"end\"");
+    expect(viewportSource).toContain("followOnAppend: false");
+    expect(`${turnSource}\n${viewportSource}`).not.toMatch(
       /isSettling[\s\S]{0,500}(?:scrollIntoView|scrollToIndex|scrollTop\s*=)/u,
     );
   });
 
   it("uses one atomic completion announcement without exposing timers or tokens", () => {
-    const completionMarker = timelineSource.indexOf('data-turn-completion-announcement=""');
-    const completionStart = timelineSource.lastIndexOf("<span", completionMarker);
-    const completionRegion = timelineSource.slice(
+    const completionMarker = layersSource.indexOf('data-turn-completion-announcement=""');
+    const completionStart = layersSource.lastIndexOf("<span", completionMarker);
+    const completionRegion = layersSource.slice(
       completionStart,
-      timelineSource.indexOf("</span>", completionMarker),
+      layersSource.indexOf("</span>", completionMarker),
     );
     expect(completionRegion).toContain('role="status"');
     expect(completionRegion).toContain('aria-live="polite"');
@@ -197,7 +209,7 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(completionRegion).toContain("{completionAnnouncement}");
     expect(completionRegion).not.toContain("LiveElapsed");
     expect(completionRegion).not.toContain("streamingText");
-    expect(timelineSource).toContain(
+    expect(turnSource).toContain(
       "const announcement = turnCompletionAnnouncement(wasActive.current, turn, providerLabel)",
     );
   });

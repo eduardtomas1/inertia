@@ -22,6 +22,7 @@ function reference(
     harnessId: "codex-app-server",
     backendProfileId: "builtin:openai",
     modelId,
+    reasoningEffort: null,
     ...update,
   };
 }
@@ -64,6 +65,51 @@ function event(
 }
 
 describe("model shortcut resolution", () => {
+  it("assigns distinct shortcuts to high and xhigh favorites on one model", () => {
+    const high = reference("gpt-5.6-sol", { reasoningEffort: "high" });
+    const xhigh = reference("gpt-5.6-sol", { reasoningEffort: "xhigh" });
+    const available = route("gpt-5.6-sol", {
+      reasoningEffort: "high",
+      reasoningOptions: ["high", "xhigh"],
+    });
+    const favorites = resolveModelFavorites([high, xhigh], [available]);
+    const visible = favorites.flatMap(({ route: match }) =>
+      match ? [match] : []);
+
+    expect(resolveModelShortcutBindings(favorites, visible, {
+      platform: "linux",
+    }).map(({ favoriteKey, key, route: match }) => [
+      favoriteKey,
+      key,
+      match.reasoningEffort,
+    ])).toEqual([
+      [modelFavoriteKey(high), "1", "high"],
+      [modelFavoriteKey(xhigh), "2", "xhigh"],
+    ]);
+  });
+
+  it("matches a favorite to the ordinary stable base route shown by a source", () => {
+    const high = reference("gpt-5.6-sol", { reasoningEffort: "high" });
+    const discovered = route("gpt-5.6-sol", {
+      key: "stable-base-route",
+      reasoningEffort: "high",
+      reasoningOptions: ["high", "xhigh"],
+    });
+    const favorites = resolveModelFavorites([high], [discovered]);
+
+    expect(resolveModelShortcutBindings(favorites, [discovered], {
+      platform: "darwin",
+    }).map(({ favoriteKey, routeKey, label }) => [
+      favoriteKey,
+      routeKey,
+      label,
+    ])).toEqual([[
+      modelFavoriteKey(high),
+      "stable-base-route",
+      "⌘1",
+    ]]);
+  });
+
   it("assigns only the first bounded set of visible selectable favorites", () => {
     const routes = Array.from(
       { length: MAX_MODEL_SHORTCUTS + 3 },
@@ -78,6 +124,7 @@ describe("model shortcut resolution", () => {
         harnessId,
         backendProfileId,
         modelId,
+        reasoningEffort: null,
       })),
       routes,
     );

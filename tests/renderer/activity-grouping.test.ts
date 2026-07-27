@@ -15,8 +15,12 @@ import type {
   ChatMessage,
 } from "../../src/shared/contracts";
 
-const timelineSource = readFileSync(
-  new URL("../../src/renderer/src/components/ResponseTimeline.tsx", import.meta.url),
+const activitySource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
+  "utf8",
+);
+const viewportSource = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/viewport.tsx", import.meta.url),
   "utf8",
 );
 
@@ -181,18 +185,18 @@ describe("Minimal Workstream adjacent call grouping", () => {
   });
 
   it("keeps expansion wired through the shared scroll-anchor restoration path", () => {
-    expect(timelineSource).toContain("onBeforeToggle?.();");
-    expect(timelineSource).toContain("setExpanded((current) => !current)");
-    expect(timelineSource).toContain(
+    expect(activitySource).toContain("onBeforeToggle?.();");
+    expect(activitySource).toContain("setExpanded((current) => !current)");
+    expect(activitySource).toContain(
       "window.requestAnimationFrame(() => onAfterToggle?.())",
     );
-    expect(timelineSource).toContain(
+    expect(viewportSource).toContain(
       "onBeforeToggle={captureExpansionAnchor}",
     );
-    expect(timelineSource).toContain(
+    expect(viewportSource).toContain(
       "onAfterToggle={restoreExpansionAnchor}",
     );
-    expect(timelineSource).toContain(
+    expect(viewportSource).toContain(
       "virtualizer.shouldAdjustScrollPositionOnItemSizeChange",
     );
   });

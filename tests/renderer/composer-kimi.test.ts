@@ -18,15 +18,19 @@ describe("Kimi composer identity", () => {
     });
     const selection = createKimiClaudeModelSelection({ profile });
     const source = readFileSync(
-      new URL("../../src/renderer/src/components/Composer.tsx", import.meta.url),
+      new URL("../../src/renderer/src/components/composer/Composer.tsx", import.meta.url),
+      "utf8",
+    );
+    const toolbarSource = readFileSync(
+      new URL("../../src/renderer/src/components/composer/ComposerToolbar.tsx", import.meta.url),
       "utf8",
     );
 
     expect(modelSelectionIdentityLabel(selection)).toBe(
       "Claude harness · Kimi · K3",
     );
-    expect(source).toContain("selectedRoute={selectedModelRoute}");
-    expect(source).toContain("<ModelChooser");
+    expect(toolbarSource).toContain("selectedRoute={selectedModelRoute}");
+    expect(toolbarSource).toContain("<ModelChooser");
     expect(source).toContain("modelSelectionIdentityLabel");
     expect(source).toContain(
       "reasoningOptions: KIMI_CLAUDE_REASONING_OPTIONS",

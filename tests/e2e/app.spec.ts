@@ -1781,6 +1781,15 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   expect(modelFavoriteActionsAx).not.toContain("- option ");
   const searchModels = modelChooser.getByRole("searchbox", { name: "Search models" });
   await expect(searchModels).toBeFocused();
+  const codexSource = modelChooser.getByRole("button", {
+    name: /^Codex, \d+ models?$/u,
+  });
+  await expect(codexSource).toHaveAttribute("aria-pressed", "true");
+  const claudeSource = modelChooser.getByRole("button", {
+    name: /^Claude, \d+ models?$/u,
+  });
+  await claudeSource.click();
+  await expect(searchModels).toBeFocused();
   const initialActiveDescendant = await searchModels.getAttribute(
     "aria-activedescendant",
   );
@@ -1818,9 +1827,6 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await favoritesSource.click();
   await expect(modelChooser.getByRole("option")).toHaveCount(1);
   await captureChooserScenario("model-chooser-favorites-1440x720");
-  const claudeSource = modelChooser.getByRole("button", {
-    name: /^Claude, \d+ models?$/u,
-  });
   await claudeSource.click();
   await expect(claudeSource).toHaveAttribute("aria-pressed", "true");
   await captureChooserScenario("model-chooser-claude-1440x720");
@@ -1830,7 +1836,6 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await expect(modelChooser.getByRole("option").filter({ hasText: /Codex/u }))
     .toHaveCount(0);
   await captureChooserScenario("model-chooser-search-kimi-1440x720");
-  await modelChooser.getByRole("button", { name: /^All, \d+ models?$/u }).click();
   await searchModels.fill("route-that-does-not-exist");
   await expect(modelChooser.getByText("No matching models", { exact: true })).toBeVisible();
   await searchModels.fill("");

@@ -17,6 +17,8 @@ export interface ModelSearchRoute {
    * identity, such as "Kimi" or "OpenAI". Do not infer these from display text.
    */
   routeTerms: readonly string[];
+  reasoningEffort?: string | null;
+  reasoningOptions?: readonly string[];
   selectable: boolean;
   unavailableReason: string | null;
 }

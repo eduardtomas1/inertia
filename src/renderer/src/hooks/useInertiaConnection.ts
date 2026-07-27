@@ -181,7 +181,6 @@ export function useInertiaConnection(): InertiaConnection {
                 pendingRef.current.delete(event.requestId);
                 if (event.type === "request.error") {
                   const requestError = new Error(event.message);
-                  setError(event.message);
                   pending.reject(requestError);
                 } else {
                   pending.resolve(event);

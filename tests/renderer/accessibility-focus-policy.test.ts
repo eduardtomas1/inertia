@@ -8,7 +8,11 @@ import {
 } from "../../src/renderer/src/utils/dismissibleMenu";
 
 const composerSource = readFileSync(
-  new URL("../../src/renderer/src/components/Composer.tsx", import.meta.url),
+  new URL("../../src/renderer/src/components/composer/Composer.tsx", import.meta.url),
+  "utf8",
+);
+const routeConfirmationSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/RouteChangeConfirmation.tsx", import.meta.url),
   "utf8",
 );
 const modelChooserSource = readFileSync(
@@ -52,12 +56,12 @@ describe("accessibility focus policy", () => {
     expect(composerSource).toContain(
       "window.requestAnimationFrame(() => routeCancelRef.current?.focus())",
     );
-    expect(composerSource).toContain('role="alertdialog"');
-    expect(composerSource).toContain('aria-modal="false"');
-    expect(composerSource).toContain(
-      "aria-busy={creatingRouteConversation}",
+    expect(routeConfirmationSource).toContain('role="alertdialog"');
+    expect(routeConfirmationSource).toContain('aria-modal="false"');
+    expect(routeConfirmationSource).toContain(
+      "aria-busy={creating}",
     );
-    expect(composerSource).toContain('event.key !== "Escape"');
+    expect(routeConfirmationSource).toContain('event.key !== "Escape"');
     expect(composerSource).toContain(
       'querySelector<HTMLButtonElement>(".selected-model-chip")',
     );

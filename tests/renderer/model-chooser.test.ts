@@ -7,6 +7,7 @@ import {
   ModelChooser,
   modelShortcutPlatform,
   nextModelChooserIndex,
+  preferredModelChooserSource,
 } from "../../src/renderer/src/components/ModelChooser";
 import type { ComposerModelRoute } from "../../src/renderer/src/utils/modelChooserRoutes";
 import {
@@ -39,6 +40,8 @@ function route(
     providerLabel: "Codex",
     source: "built-in",
     routeTerms: [],
+    reasoningEffort: selection.reasoningEffort,
+    reasoningOptions: [],
     selectable,
     unavailableReason: selectable ? null : "This route is unavailable.",
     selection,
@@ -57,6 +60,17 @@ function route(
 }
 
 describe("ModelChooser", () => {
+  it("opens on Favorites when available and otherwise uses a real source", () => {
+    expect(preferredModelChooserSource([
+      { filter: { kind: "favorites" } },
+      { filter: { kind: "provider", providerId: "codex" } },
+    ])).toEqual({ kind: "favorites" });
+    expect(preferredModelChooserSource([
+      { filter: { kind: "provider", providerId: "claude" } },
+    ])).toEqual({ kind: "provider", providerId: "claude" });
+    expect(preferredModelChooserSource([])).toEqual({ kind: "all" });
+  });
+
   it("renders the exact selected route as an anchored dialog trigger", () => {
     const alpha = route("alpha");
     const html = renderToStaticMarkup(createElement(ModelChooser, {

@@ -50,10 +50,10 @@ describe("selected model chip", () => {
     expect(identity.label).toBe("GPT-5.6-Sol");
     expect(identity.glyph).toBe("codex");
     expect(identity.title).toBe(
-      "Current model: Codex (codex-app-server) · OpenAI (builtin:openai) · Model GPT-5.6-Sol (gpt-5.6-sol)",
+      "Current model: Codex (codex-app-server) · OpenAI (builtin:openai) · Model GPT-5.6-Sol (gpt-5.6-sol) · Reasoning Provider default",
     );
     expect(identity.accessibleName).toBe(
-      "Choose model. Current selection: Codex (codex-app-server) · OpenAI (builtin:openai) · Model GPT-5.6-Sol (gpt-5.6-sol).",
+      "Choose model. Current selection: Codex (codex-app-server) · OpenAI (builtin:openai) · Model GPT-5.6-Sol (gpt-5.6-sol) · Reasoning Provider default.",
     );
 
     const html = render();

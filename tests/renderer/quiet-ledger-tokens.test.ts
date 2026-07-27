@@ -23,6 +23,7 @@ describe("Minimal Workstream tokens", () => {
       "--composer-surface",
       "--composer-border",
       "--composer-shadow",
+      "--composer-bottom-breathing-room",
       "--execution-text",
       "--execution-muted-text",
       "--execution-separator",
@@ -81,6 +82,8 @@ describe("Minimal Workstream tokens", () => {
     expect(root).toMatch(/--motion-fast:\s*140ms/u);
     expect(root).toMatch(/--motion-base:\s*180ms/u);
     expect(root).toMatch(/--motion-slow:\s*220ms/u);
+    expect(root).toMatch(/--ui-font-main:\s*14px/u);
+    expect(root).toMatch(/--ui-font-secondary:\s*11\.5px/u);
   });
 
   it("adapts layout and controls through interface scale", () => {

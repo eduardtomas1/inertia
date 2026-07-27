@@ -21,6 +21,7 @@ function favorite(
     harnessId: "codex-app-server",
     backendProfileId: "builtin:openai",
     modelId,
+    reasoningEffort: null,
     ...update,
   };
 }
@@ -46,9 +47,12 @@ function route(
   };
 }
 
-function memoryStorage(initial: string | null = null) {
+function memoryStorage(
+  initial: string | null = null,
+  key = MODEL_FAVORITES_STORAGE_KEY,
+) {
   const values = new Map<string, string>();
-  if (initial !== null) values.set(MODEL_FAVORITES_STORAGE_KEY, initial);
+  if (initial !== null) values.set(key, initial);
   return {
     values,
     getItem: (key: string) => values.get(key) ?? null,
@@ -75,11 +79,12 @@ describe("model favorites", () => {
     expect(writeModelFavorites(storage, [modelFavoriteReference(selection)])).toBe(true);
     expect(JSON.parse(storage.values.get(MODEL_FAVORITES_STORAGE_KEY) ?? "{}"))
       .toEqual({
-        version: 1,
+        version: 2,
         favorites: [{
           harnessId: "codex-app-server",
           backendProfileId: "builtin:openai",
           modelId: "gpt-5.6-sol",
+          reasoningEffort: "high",
         }],
       });
   });
@@ -126,7 +131,7 @@ describe("model favorites", () => {
   it("keeps valid references while dropping invalid, duplicate, and unversioned entries", () => {
     const valid = favorite("valid");
     const storage = memoryStorage(JSON.stringify({
-      version: 1,
+      version: 2,
       favorites: [
         valid,
         valid,
@@ -184,5 +189,48 @@ describe("model favorites", () => {
 
     expect(resolved.map(({ route: match }) => match?.backendProfileId))
       .toEqual(["builtin:openai", "custom:team"]);
+  });
+
+  it("migrates v1 favorites to an explicit provider-default reasoning identity", () => {
+    const legacy = {
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      modelId: "gpt-5.6-sol",
+    };
+    const storage = memoryStorage(JSON.stringify({
+      version: 1,
+      favorites: [legacy],
+    }), "inertia:model-favorites:v1");
+
+    expect(readModelFavorites(storage)).toEqual([{
+      ...legacy,
+      reasoningEffort: null,
+    }]);
+  });
+
+  it("keeps high and xhigh favorites distinct and disables unsupported efforts", () => {
+    const high = favorite("gpt-5.6-sol", { reasoningEffort: "high" });
+    const xhigh = favorite("gpt-5.6-sol", { reasoningEffort: "xhigh" });
+    const unsupported = favorite("gpt-5.6-sol", {
+      reasoningEffort: "ultra",
+    });
+    const availableRoute = route("gpt-5.6-sol", {
+      reasoningEffort: "high",
+      reasoningOptions: ["high", "xhigh"],
+    });
+
+    const resolved = resolveModelFavorites(
+      [high, xhigh, unsupported],
+      [availableRoute],
+    );
+
+    expect(resolved.slice(0, 2).map(({ key, route: match }) => [
+      key,
+      match?.reasoningEffort,
+    ])).toEqual([
+      [modelFavoriteKey(high), "high"],
+      [modelFavoriteKey(xhigh), "xhigh"],
+    ]);
+    expect(resolved[2]?.route).toBeNull();
   });
 });

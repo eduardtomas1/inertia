@@ -76,6 +76,82 @@ describe("RuntimeAttachmentBrokerClient", () => {
     await expect(unavailable).rejects.toThrow(/could not be verified/u);
   });
 
+  it("releases one opaque capability without sending attachment metadata", async () => {
+    const posted: RuntimeWorkerEvent[] = [];
+    const client = new RuntimeAttachmentBrokerClient(
+      (event) => posted.push(event),
+    );
+    const released = client.release(attachmentId);
+    const request = posted[0];
+    expect(request).toMatchObject({
+      type: "runtime.attachment-release-request",
+      attachmentId,
+    });
+    expect(JSON.stringify(request)).not.toContain(attachment.path);
+    if (request?.type !== "runtime.attachment-release-request") {
+      throw new Error("missing release request");
+    }
+
+    expect(client.handleRelease({
+      type: "runtime.attachment-release-result",
+      requestId: request.requestId,
+      ok: true,
+      released: true,
+    })).toBe(true);
+    await expect(released).resolves.toBe(true);
+    expect(client.pendingCount()).toBe(0);
+  });
+
+  it("uses an explicit cleanup request for restart recovery", async () => {
+    const posted: RuntimeWorkerEvent[] = [];
+    const client = new RuntimeAttachmentBrokerClient(
+      (event) => posted.push(event),
+    );
+    const cleaned = client.cleanup(attachmentId);
+    const request = posted[0];
+    expect(request).toMatchObject({
+      type: "runtime.attachment-cleanup-request",
+      attachmentId,
+    });
+    if (request?.type !== "runtime.attachment-cleanup-request") {
+      throw new Error("missing cleanup request");
+    }
+
+    client.handleRelease({
+      type: "runtime.attachment-release-result",
+      requestId: request.requestId,
+      ok: true,
+      released: true,
+    });
+    await expect(cleaned).resolves.toBe(true);
+  });
+
+  it("relinquishes ownership without requesting file deletion", async () => {
+    const posted: RuntimeWorkerEvent[] = [];
+    const client = new RuntimeAttachmentBrokerClient(
+      (event) => posted.push(event),
+    );
+    const relinquished = client.relinquish(attachmentId);
+    const request = posted[0];
+    expect(request).toMatchObject({
+      type: "runtime.attachment-relinquish-request",
+      attachmentId,
+    });
+    expect(JSON.stringify(request)).not.toContain(attachment.path);
+    if (request?.type !== "runtime.attachment-relinquish-request") {
+      throw new Error("missing relinquish request");
+    }
+
+    expect(client.handleRelinquish({
+      type: "runtime.attachment-relinquish-result",
+      requestId: request.requestId,
+      ok: true,
+      relinquished: true,
+    })).toBe(true);
+    await expect(relinquished).resolves.toBe(true);
+    expect(client.pendingCount()).toBe(0);
+  });
+
   it("times out, cancels, and closes pending requests", async () => {
     const client = new RuntimeAttachmentBrokerClient(() => undefined, 25);
     const timedOut = client.resolve(attachmentId);
@@ -91,11 +167,111 @@ describe("RuntimeAttachmentBrokerClient", () => {
     await expect(cancelled).rejects.toThrow(/could not be verified/u);
 
     const pending = client.resolve(attachmentId);
+    const pendingRelease = client.release(attachmentId);
+    const pendingRelinquish = client.relinquish(attachmentId);
     client.close();
     await expect(pending).rejects.toThrow(/could not be verified/u);
+    await expect(pendingRelease).rejects.toThrow(/could not be verified/u);
+    await expect(pendingRelinquish).rejects.toThrow(/could not be verified/u);
     await expect(client.resolve(attachmentId)).rejects.toThrow(
       /could not be verified/u,
     );
+    await expect(client.release(attachmentId)).rejects.toThrow(
+      /could not be verified/u,
+    );
+    await expect(client.relinquish(attachmentId)).rejects.toThrow(
+      /could not be verified/u,
+    );
+    expect(client.pendingCount()).toBe(0);
+  });
+
+  it("relinquishes exactly once when a timed-out resolve later succeeds", async () => {
+    const posted: RuntimeWorkerEvent[] = [];
+    const client = new RuntimeAttachmentBrokerClient(
+      (event) => posted.push(event),
+      25,
+    );
+    const resolved = client.resolve(attachmentId);
+    const resolveRequest = posted[0];
+    if (resolveRequest?.type !== "runtime.attachment-request") {
+      throw new Error("missing resolve request");
+    }
+    const rejection = expect(resolved).rejects.toThrow(/could not be verified/u);
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+    expect(client.pendingCount()).toBe(1);
+
+    expect(client.handle({
+      type: "runtime.attachment-result",
+      requestId: resolveRequest.requestId,
+      ok: true,
+      attachment,
+    })).toBe(true);
+    const relinquishRequest = posted.at(-1);
+    expect(relinquishRequest).toMatchObject({
+      type: "runtime.attachment-relinquish-request",
+      attachmentId,
+    });
+    if (relinquishRequest?.type !== "runtime.attachment-relinquish-request") {
+      throw new Error("missing late-success relinquish");
+    }
+    expect(client.handle({
+      type: "runtime.attachment-result",
+      requestId: resolveRequest.requestId,
+      ok: true,
+      attachment,
+    })).toBe(false);
+    client.handleRelinquish({
+      type: "runtime.attachment-relinquish-result",
+      requestId: relinquishRequest.requestId,
+      ok: true,
+      relinquished: true,
+    });
+    expect(client.pendingCount()).toBe(0);
+  });
+
+  it("clears a timed-out resolve tombstone on late failure without relinquishing", async () => {
+    const posted: RuntimeWorkerEvent[] = [];
+    const client = new RuntimeAttachmentBrokerClient(
+      (event) => posted.push(event),
+      25,
+    );
+    const resolved = client.resolve(attachmentId);
+    const resolveRequest = posted[0];
+    if (resolveRequest?.type !== "runtime.attachment-request") {
+      throw new Error("missing resolve request");
+    }
+    const rejection = expect(resolved).rejects.toThrow(/could not be verified/u);
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+
+    expect(client.handle({
+      type: "runtime.attachment-result",
+      requestId: resolveRequest.requestId,
+      ok: false,
+      code: "unavailable",
+      message: "main request timed out",
+    })).toBe(true);
+    expect(posted).toHaveLength(1);
+    expect(client.pendingCount()).toBe(0);
+  });
+
+  it("fails closed before posting beyond the bounded resolve correlation set", async () => {
+    const posted: RuntimeWorkerEvent[] = [];
+    const client = new RuntimeAttachmentBrokerClient(
+      (event) => posted.push(event),
+    );
+    const pending = Array.from({ length: 512 }, () =>
+      client.resolve(attachmentId).catch(() => null));
+
+    await expect(client.resolve(attachmentId)).rejects.toThrow(
+      /could not be verified/u,
+    );
+    expect(posted).toHaveLength(512);
+    expect(client.pendingCount()).toBe(512);
+
+    client.close();
+    await Promise.all(pending);
     expect(client.pendingCount()).toBe(0);
   });
 });

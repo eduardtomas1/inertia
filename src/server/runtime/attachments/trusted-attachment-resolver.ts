@@ -26,6 +26,18 @@ export interface RuntimeAttachmentBroker {
     attachmentId: string,
     signal?: AbortSignal,
   ): Promise<TrustedRuntimeAttachment | null>;
+  release(
+    attachmentId: string,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
+  cleanup(
+    attachmentId: string,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
+  relinquish(
+    attachmentId: string,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
 }
 
 function isContained(root: string, target: string): boolean {
@@ -72,24 +84,36 @@ export class TrustedAttachmentResolver {
     } catch {
       throw publicAttachmentError();
     }
-    const seenIds = new Set<string>();
-    const seenPaths = new Set<string>();
-    const resolved: ChatAttachment[] = [];
-    let totalBytes = 0;
-    for (const untrusted of requested) {
-      if (signal?.aborted) throw publicAttachmentError();
-      if (seenIds.has(untrusted.id)) throw publicAttachmentError();
-      seenIds.add(untrusted.id);
-      const trusted = await this.broker.resolve(untrusted.id, signal);
-      if (!trusted || trusted.id !== untrusted.id) throw publicAttachmentError();
-      const attachment = await this.revalidate(canonicalRoot, trusted, signal);
-      if (seenPaths.has(attachment.path)) throw publicAttachmentError();
-      seenPaths.add(attachment.path);
-      totalBytes += attachment.size;
-      if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) throw publicAttachmentError();
-      resolved.push(attachment);
+    const claimedIds: string[] = [];
+    try {
+      const seenIds = new Set<string>();
+      const seenPaths = new Set<string>();
+      const resolved: ChatAttachment[] = [];
+      let totalBytes = 0;
+      for (const untrusted of requested) {
+        if (signal?.aborted) throw publicAttachmentError();
+        if (seenIds.has(untrusted.id)) throw publicAttachmentError();
+        seenIds.add(untrusted.id);
+        const trusted = await this.broker.resolve(untrusted.id, signal);
+        if (!trusted || trusted.id !== untrusted.id) throw publicAttachmentError();
+        claimedIds.push(untrusted.id);
+        const attachment = await this.revalidate(canonicalRoot, trusted, signal);
+        if (seenPaths.has(attachment.path)) throw publicAttachmentError();
+        seenPaths.add(attachment.path);
+        totalBytes += attachment.size;
+        if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) throw publicAttachmentError();
+        resolved.push(attachment);
+      }
+      return resolved;
+    } catch (error) {
+      await this.relinquishAll(claimedIds);
+      throw error;
     }
-    return resolved;
+  }
+
+  async relinquishAll(attachmentIds: readonly string[]): Promise<void> {
+    await Promise.allSettled(attachmentIds.map((attachmentId) =>
+      this.broker.relinquish(attachmentId)));
   }
 
   private async revalidate(

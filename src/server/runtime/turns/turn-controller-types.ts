@@ -92,6 +92,11 @@ export interface TurnMetadataRefreshHookInput {
   status: AgentTurnTerminalStatus;
 }
 
+export interface TurnAttachmentReleaseHookInput {
+  turn: AgentTurn;
+  attachmentIds: readonly string[];
+}
+
 export interface TurnControllerHooks {
   broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void;
@@ -107,6 +112,7 @@ export interface TurnControllerHooks {
   captureGitBefore?(input: TurnGitArtifactHookInput): void | Promise<void>;
   captureGitArtifacts?(input: TurnGitArtifactHookInput): void | Promise<void>;
   refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;
+  releaseTurnAttachments?(input: TurnAttachmentReleaseHookInput): void | Promise<void>;
   onTurnSettled?(turn: AgentTurn): void | Promise<void>;
 }
 
@@ -152,12 +158,16 @@ export interface ActiveTurn {
   turn: AgentTurn;
   conversation: Conversation;
   providerInput: ProviderRunInput;
+  attachmentIds: readonly string[];
   checkpointId: string | null;
   rendererOwnerId: string | null;
   structuredContext: unknown;
   gitBeforeCapture: Promise<void> | null;
   runStartedAt: number;
   workspaceRunCreated: boolean;
+  providerRunStarted: boolean;
+  attachmentsReleased: boolean;
+  attachmentRelease: Promise<void> | null;
   acceptingProviderEvents: boolean;
   settled: boolean;
   sessionAfter: string | null;

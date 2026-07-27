@@ -35,7 +35,9 @@ export type RuntimeWorkerCommand =
   | { type: "runtime.shutdown" }
   | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
   | RuntimeCredentialResult
-  | RuntimeAttachmentResult;
+  | RuntimeAttachmentResult
+  | RuntimeAttachmentReleaseResult
+  | RuntimeAttachmentRelinquishResult;
 
 export type RuntimeCredentialOperation = "resolve" | "status" | "clear" | "forget";
 export type RuntimeCredentialFailureCode = "not-found" | "unavailable" | "invalid";
@@ -50,6 +52,36 @@ export type RuntimeAttachmentResult =
     }
   | {
       type: "runtime.attachment-result";
+      requestId: string;
+      ok: false;
+      code: RuntimeAttachmentFailureCode;
+      message: string;
+    };
+
+export type RuntimeAttachmentReleaseResult =
+  | {
+      type: "runtime.attachment-release-result";
+      requestId: string;
+      ok: true;
+      released: boolean;
+    }
+  | {
+      type: "runtime.attachment-release-result";
+      requestId: string;
+      ok: false;
+      code: RuntimeAttachmentFailureCode;
+      message: string;
+    };
+
+export type RuntimeAttachmentRelinquishResult =
+  | {
+      type: "runtime.attachment-relinquish-result";
+      requestId: string;
+      ok: true;
+      relinquished: boolean;
+    }
+  | {
+      type: "runtime.attachment-relinquish-result";
       requestId: string;
       ok: false;
       code: RuntimeAttachmentFailureCode;
@@ -100,6 +132,21 @@ export type RuntimeWorkerEvent =
       attachmentId: string;
     }
   | {
+      type: "runtime.attachment-release-request";
+      requestId: string;
+      attachmentId: string;
+    }
+  | {
+      type: "runtime.attachment-cleanup-request";
+      requestId: string;
+      attachmentId: string;
+    }
+  | {
+      type: "runtime.attachment-relinquish-request";
+      requestId: string;
+      attachmentId: string;
+    }
+  | {
       type: "runtime.credential-request";
       requestId: string;
       operation: RuntimeCredentialOperation;
@@ -121,6 +168,12 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   if (value.type === "runtime.shutdown" && Object.keys(value).length === 1) return { type: "runtime.shutdown" };
   if (value.type === "runtime.attachment-result") {
     return parseRuntimeAttachmentResult(value);
+  }
+  if (value.type === "runtime.attachment-release-result") {
+    return parseRuntimeAttachmentReleaseResult(value);
+  }
+  if (value.type === "runtime.attachment-relinquish-result") {
+    return parseRuntimeAttachmentRelinquishResult(value);
   }
   if (value.type === "runtime.credential-result") {
     return parseRuntimeCredentialResult(value);
@@ -180,7 +233,12 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   if (!plainObject(value) || typeof value.type !== "string") return null;
   if (value.type === "runtime.stopped" && Object.keys(value).length === 1) return { type: "runtime.stopped" };
   if (
-    value.type === "runtime.attachment-request"
+    (
+      value.type === "runtime.attachment-request"
+      || value.type === "runtime.attachment-release-request"
+      || value.type === "runtime.attachment-cleanup-request"
+      || value.type === "runtime.attachment-relinquish-request"
+    )
     && Object.keys(value).length === 3
     && typeof value.requestId === "string"
     && UUID_PATTERN.test(value.requestId)
@@ -188,7 +246,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     && UUID_PATTERN.test(value.attachmentId)
   ) {
     return {
-      type: "runtime.attachment-request",
+      type: value.type,
       requestId: value.requestId,
       attachmentId: value.attachmentId,
     };
@@ -242,6 +300,86 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     return { type: "runtime.ready", websocketUrl: value.websocketUrl };
   }
   return null;
+}
+
+function parseRuntimeAttachmentRelinquishResult(
+  value: Record<string, unknown>,
+): RuntimeAttachmentRelinquishResult | null {
+  if (
+    typeof value.requestId !== "string"
+    || !UUID_PATTERN.test(value.requestId)
+    || typeof value.ok !== "boolean"
+  ) return null;
+  if (!value.ok) {
+    if (
+      Object.keys(value).length !== 5
+      || (
+        value.code !== "not-found"
+        && value.code !== "unavailable"
+        && value.code !== "invalid"
+      )
+      || typeof value.message !== "string"
+    ) return null;
+    const message = value.message.trim();
+    return message.length > 0 && message.length <= 300
+      ? {
+          type: "runtime.attachment-relinquish-result",
+          requestId: value.requestId,
+          ok: false,
+          code: value.code,
+          message,
+        }
+      : null;
+  }
+  return Object.keys(value).length === 4
+    && typeof value.relinquished === "boolean"
+    ? {
+        type: "runtime.attachment-relinquish-result",
+        requestId: value.requestId,
+        ok: true,
+        relinquished: value.relinquished,
+      }
+    : null;
+}
+
+function parseRuntimeAttachmentReleaseResult(
+  value: Record<string, unknown>,
+): RuntimeAttachmentReleaseResult | null {
+  if (
+    typeof value.requestId !== "string"
+    || !UUID_PATTERN.test(value.requestId)
+    || typeof value.ok !== "boolean"
+  ) return null;
+  if (!value.ok) {
+    if (
+      Object.keys(value).length !== 5
+      || (
+        value.code !== "not-found"
+        && value.code !== "unavailable"
+        && value.code !== "invalid"
+      )
+      || typeof value.message !== "string"
+    ) return null;
+    const message = value.message.trim();
+    return message.length > 0 && message.length <= 300
+      ? {
+          type: "runtime.attachment-release-result",
+          requestId: value.requestId,
+          ok: false,
+          code: value.code,
+          message,
+        }
+      : null;
+  }
+  return Object.keys(value).length === 4
+    && typeof value.released === "boolean"
+    ? {
+        type: "runtime.attachment-release-result",
+        requestId: value.requestId,
+        ok: true,
+        released: value.released,
+      }
+    : null;
 }
 
 function parseRuntimeAttachmentResult(

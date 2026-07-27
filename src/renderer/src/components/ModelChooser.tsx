@@ -1,5 +1,6 @@
 import { Search, Star } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -215,14 +216,14 @@ export function ModelChooser({
     reasoningEffort: selectedRoute.reasoningEffort ?? null,
   });
 
-  const close = (restoreFocus = true): void => {
+  const close = useCallback((restoreFocus = true): void => {
     setOpen(false);
     setQuery("");
     onOpenChange?.(false);
     if (restoreFocus) {
       window.requestAnimationFrame(() => triggerRef.current?.focus());
     }
-  };
+  }, [onOpenChange]);
 
   useEffect(() => {
     if (!open) return;
@@ -258,18 +259,24 @@ export function ModelChooser({
       }
       close(outsidePointerShouldRestoreFocus(event.target));
     };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+    };
     document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => document.removeEventListener(
-      "pointerdown",
-      handlePointerDown,
-      true,
-    );
-  }, [open]);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [close, open]);
 
   useEffect(() => {
     if (!open || (!disabled && closeSignal === null)) return;
     close(false);
-  }, [closeSignal, disabled, open]);
+  }, [close, closeSignal, disabled, open]);
 
   const select = (route: ComposerModelRoute): void => {
     if (!route.selectable) return;
@@ -288,11 +295,6 @@ export function ModelChooser({
   const handleNavigation = (
     event: ReactKeyboardEvent<HTMLDivElement>,
   ): void => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close(true);
-      return;
-    }
     const shortcut = shortcuts.find((binding) =>
       matchesModelShortcut(event.nativeEvent, binding));
     if (shortcut) {

@@ -271,34 +271,37 @@ export class TurnController {
 
   private startProvider(active: ActiveTurn): boolean {
     if (active.settled || this.closing) return false;
-    let result: Promise<ProviderRunResult>;
     try {
-      result = this.providers.run(active.providerInput, {
+      const result = this.providers.run(active.providerInput, {
         onEvent: (event) => {
           this.handleProviderEvent(event);
         },
       });
+      active.providerRunStarted = true;
+      void result.then(
+        (providerResult) => this.handleProviderResult(active, providerResult),
+        (error: unknown) => {
+          const failure = providerPromiseFailure(active, error);
+          this.settle(
+            active,
+            "failed",
+            "provider-process-crash",
+            failure.message,
+            failure,
+          );
+        },
+      ).finally(() => this.releaseTurnAttachments(active))
+        .catch(() => undefined);
       if (this.store.agentTurn(active.turn.id).status === "starting") {
         if (this.transition(active, "running")) this.hooks.broadcastSnapshot();
       }
     } catch (error) {
+      if (active.providerRunStarted) {
+        this.providers.cancel(active.conversation.id);
+      }
       this.settle(active, "failed", "turn-start-failed", this.publicError(error));
       return false;
     }
-
-    void result.then(
-      (providerResult) => this.handleProviderResult(active, providerResult),
-      (error: unknown) => {
-        const failure = providerPromiseFailure(active, error);
-        this.settle(
-          active,
-          "failed",
-          "provider-process-crash",
-          failure.message,
-          failure,
-        );
-      },
-    );
     return true;
   }
 
@@ -307,6 +310,13 @@ export class TurnController {
     if (!active || active.settled) return false;
     this.providers.cancel(conversationId);
     return this.settle(active, "cancelled", cause, "Stopped");
+  }
+
+  failBeforeStart(conversationId: string, message: string): boolean {
+    const active = this.activeByConversation.get(conversationId);
+    if (!active || active.settled) return false;
+    this.providers.cancel(conversationId);
+    return this.settle(active, "failed", "turn-start-failed", message);
   }
 
   async steer(
@@ -534,13 +544,36 @@ export class TurnController {
     message?: string,
     failure?: ProviderRunFailure,
   ): boolean {
-    return this.settlement.settle(
+    const settled = this.settlement.settle(
       active,
       status,
       cause,
       message,
       failure,
     );
+    if (!active.providerRunStarted) {
+      this.track(this.releaseTurnAttachments(active));
+    }
+    return settled;
+  }
+
+  private async releaseTurnAttachments(active: ActiveTurn): Promise<void> {
+    if (active.attachmentsReleased || active.attachmentIds.length === 0) return;
+    if (active.attachmentRelease) return await active.attachmentRelease;
+    const release = Promise.resolve(this.hooks.releaseTurnAttachments?.({
+      turn: active.turn,
+      attachmentIds: active.attachmentIds,
+    })).then(() => {
+      active.attachmentsReleased = true;
+    });
+    active.attachmentRelease = release;
+    try {
+      await release;
+    } finally {
+      if (active.attachmentRelease === release) {
+        active.attachmentRelease = null;
+      }
+    }
   }
 
   private cleanup(active: ActiveTurn): void {

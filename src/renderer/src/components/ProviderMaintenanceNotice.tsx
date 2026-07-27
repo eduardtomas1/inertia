@@ -80,7 +80,8 @@ export function shouldShowProviderMaintenanceNotice({
   const activeOperation = operation?.status === "queued"
     || operation?.status === "running";
   if (activeOperation) return true;
-  if (operation) return !operationDismissed;
+  if (operation && !operationDismissed) return true;
+  if (operation) return updateAvailable && !updateDismissed;
   return (updateAvailable || managedActionAvailable) && !updateDismissed;
 }
 
@@ -133,22 +134,28 @@ export function ProviderMaintenanceNotice({
   const updateAvailable = status?.versionStatus === "update-available";
   const managedActionAvailable = Boolean(
     showManagedUpdateAction
-    && status?.installedVersion
+    && status
     && status.installMethod === "provider-managed"
     && status.updateAvailability === "available"
     && status.versionStatus === "unknown",
   );
-  const isDismissed = dismissed[status?.providerId ?? ""] === updateVersion;
+  const updateDismissed = Boolean(
+    dismissible
+    && dismissed[status?.providerId ?? ""] === updateVersion,
+  );
   const operationDismissed = Boolean(
     dismissible
     && operation
     && !activeOperation
     && dismissedOperations.has(operation.id),
   );
+  const displayOperation = operationDismissed && updateAvailable
+    ? null
+    : operation;
   const visible = shouldShowProviderMaintenanceNotice({
     operation,
     updateAvailable,
-    updateDismissed: isDismissed,
+    updateDismissed,
     operationDismissed,
     managedActionAvailable,
   });
@@ -160,8 +167,8 @@ export function ProviderMaintenanceNotice({
   if (!status || !visible) return null;
 
   const dismiss = (): void => {
-    if (operation && !activeOperation) {
-      const next = new Set(dismissedOperations).add(operation.id);
+    if (displayOperation && !activeOperation) {
+      const next = new Set(dismissedOperations).add(displayOperation.id);
       setDismissedOperations(next);
       saveDismissedOperations(next);
       return;
@@ -189,18 +196,18 @@ export function ProviderMaintenanceNotice({
   };
   const Icon = activeOperation
     ? LoaderCircle
-    : operation?.status === "failed"
+    : displayOperation?.status === "failed"
       ? CircleAlert
-      : operation
+      : displayOperation
         ? CheckCircle2
         : Download;
-  const title = operation
-    ? operationLabel(operation)
+  const title = displayOperation
+    ? operationLabel(displayOperation)
     : updateAvailable
       ? `${providerLabel} update available`
       : `${providerLabel} maintenance`;
   const detail = requestError
-    ?? operation?.message
+    ?? displayOperation?.message
     ?? (managedActionAvailable ? status.message : null)
     ?? [
       status.installedVersion ? `Installed ${status.installedVersion}` : null,
@@ -209,8 +216,8 @@ export function ProviderMaintenanceNotice({
 
   return (
     <div
-      className={`provider-maintenance-notice${activeOperation ? " is-active" : ""}${operation?.status === "failed" ? " is-failed" : ""}`}
-      role={operation?.status === "failed" ? "alert" : "status"}
+      className={`provider-maintenance-notice${activeOperation ? " is-active" : ""}${displayOperation?.status === "failed" ? " is-failed" : ""}`}
+      role={displayOperation?.status === "failed" ? "alert" : "status"}
       aria-live="polite"
       aria-busy={activeOperation}
     >
@@ -260,7 +267,7 @@ export function ProviderMaintenanceNotice({
               <ExternalLink size={11} aria-hidden="true" />
               Instructions
             </button>
-          ) : !operation ? (
+          ) : !displayOperation ? (
             <button
               type="button"
               disabled={disabled}

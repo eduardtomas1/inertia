@@ -59,6 +59,40 @@ describe("cross-platform packaged behavior contract", () => {
     );
   });
 
+  it("keeps attachment cleanup behind runtime ownership and shutdown", async () => {
+    const main = await source("src/main/index.ts");
+    const closedStart = main.indexOf('window.on("closed"');
+    const closedEnd = main.indexOf("\n  });", closedStart);
+    const closedHandler = main.slice(closedStart, closedEnd);
+    expect(closedStart).toBeGreaterThanOrEqual(0);
+    expect(closedHandler).not.toContain("disposeImportedAttachments");
+
+    const releaseStart = main.indexOf("ipcMain.handle(IPC.releaseAttachment");
+    const releaseEnd = main.indexOf("\n  });", releaseStart);
+    const releaseHandler = main.slice(releaseStart, releaseEnd);
+    expect(releaseHandler.indexOf("deferAttachmentRelease")).toBeLessThan(
+      releaseHandler.indexOf("attachmentRegistry().release"),
+    );
+
+    const quitStart = main.indexOf('app.on("before-quit"');
+    const quitEnd = main.indexOf("\n  });", quitStart);
+    const quitHandler = main.slice(quitStart, quitEnd);
+    expect(quitHandler.indexOf("supervisorToStop.stop()")).toBeLessThan(
+      quitHandler.indexOf("disposeImportedAttachments()"),
+    );
+    expect(quitHandler).toContain("if (runtimeExitConfirmed)");
+    expect(quitHandler).toContain(
+      "Retaining temporary attachments because runtime process exit was not confirmed",
+    );
+    expect(main).toContain("attachmentReservation = orphanReservation");
+    expect(main).toContain(
+      "reservedRecords: attachmentReservation.records",
+    );
+    expect(main).toContain(
+      "reservedBytes: attachmentReservation.bytes",
+    );
+  });
+
   it("keeps exact-tag release packages and smoke validation aligned across every platform", async () => {
     const workflow = await source(".github/workflows/release-platforms.yml");
     for (const expected of [

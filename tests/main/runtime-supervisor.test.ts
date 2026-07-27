@@ -285,6 +285,7 @@ describe("RuntimeSupervisor", () => {
       resolve: vi.fn(() => new Promise<typeof trustedAttachment | null>((resolvePromise) => {
         resolveAttachment = resolvePromise;
       })),
+      release: vi.fn(async () => true),
     };
     const { children, supervisor } = createHarness({
       attachmentBroker,
@@ -300,6 +301,7 @@ describe("RuntimeSupervisor", () => {
       requestId,
       attachmentId,
     });
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
     await vi.advanceTimersByTimeAsync(0);
     expect(attachmentBroker.resolve).toHaveBeenCalledWith(
       attachmentId,
@@ -312,10 +314,12 @@ describe("RuntimeSupervisor", () => {
       ok: false,
       code: "unavailable",
     });
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
 
     children[0].exit(1);
     resolveAttachment?.(trustedAttachment);
     await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
     expect(children[0].messages).not.toContainEqual(expect.objectContaining({
       type: "runtime.attachment-result",
       attachment: trustedAttachment,
@@ -325,6 +329,7 @@ describe("RuntimeSupervisor", () => {
   it("returns only the main-authorized attachment descriptor", async () => {
     const attachmentBroker: RuntimeAttachmentBroker = {
       resolve: vi.fn(async () => trustedAttachment),
+      release: vi.fn(async () => true),
     };
     const { children, supervisor } = createHarness({ attachmentBroker });
     supervisor.start();
@@ -344,6 +349,343 @@ describe("RuntimeSupervisor", () => {
       ok: true,
       attachment: trustedAttachment,
     });
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+
+    const relinquishRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-relinquish-request",
+      requestId: relinquishRequestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.attachment-relinquish-result",
+      requestId: relinquishRequestId,
+      ok: true,
+      relinquished: true,
+    });
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+
+    children[0].message({
+      type: "runtime.attachment-relinquish-request",
+      requestId: relinquishRequestId,
+      attachmentId,
+    });
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.attachment-relinquish-result",
+      requestId: relinquishRequestId,
+      ok: false,
+      code: "invalid",
+      message: "The attachment request identifier was already used.",
+    });
+
+    const retryRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-request",
+      requestId: retryRequestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.attachment-result",
+      requestId: retryRequestId,
+      ok: true,
+      attachment: trustedAttachment,
+    });
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+
+    const releaseRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-release-request",
+      requestId: releaseRequestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
+    expect(attachmentBroker.release).toHaveBeenCalledWith(
+      attachmentId,
+      expect.any(AbortSignal),
+    );
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.attachment-release-result",
+      requestId: releaseRequestId,
+      ok: true,
+      released: true,
+    });
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
+
+    children[0].message({
+      type: "runtime.attachment-release-request",
+      requestId: releaseRequestId,
+      attachmentId,
+    });
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.attachment-release-result",
+      requestId: releaseRequestId,
+      ok: false,
+      code: "invalid",
+      message: "The attachment request identifier was already used.",
+    });
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
+
+    children[0].exit(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts same-capability claims and deletes only after the last claim releases", async () => {
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(async () => trustedAttachment),
+      release: vi.fn(async () => true),
+    };
+    const { children, supervisor } = createHarness({ attachmentBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    for (const requestId of [crypto.randomUUID(), crypto.randomUUID()]) {
+      children[0].message({
+        type: "runtime.attachment-request",
+        requestId,
+        attachmentId,
+      });
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+
+    const relinquishRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-relinquish-request",
+      requestId: relinquishRequestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.attachment-relinquish-result",
+      requestId: relinquishRequestId,
+      ok: true,
+      relinquished: true,
+    });
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+
+    const releaseRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-release-request",
+      requestId: releaseRequestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
+  });
+
+  it("keeps zero-claim release non-destructive and reserves cleanup for recovery", async () => {
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(async () => trustedAttachment),
+      release: vi.fn(async () => true),
+    };
+    const { children, supervisor } = createHarness({ attachmentBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const releaseRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-release-request",
+      requestId: releaseRequestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.attachment-release-result",
+      requestId: releaseRequestId,
+      ok: true,
+      released: false,
+    });
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+
+    const cleanupRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-cleanup-request",
+      requestId: cleanupRequestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.attachment-release-result",
+      requestId: cleanupRequestId,
+      ok: true,
+      released: true,
+    });
+  });
+
+  it("honors renderer deletion deferred during a late resolve result", async () => {
+    let finishResolve!: (attachment: typeof trustedAttachment) => void;
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(() =>
+        new Promise<typeof trustedAttachment | null>((resolveAttachment) => {
+        finishResolve = resolveAttachment;
+        })),
+      release: vi.fn(async () => true),
+    };
+    const { children, supervisor } = createHarness({ attachmentBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const requestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-request",
+      requestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(supervisor.deferAttachmentRelease(attachmentId)).toBe(true);
+
+    finishResolve(trustedAttachment);
+    await vi.advanceTimersByTimeAsync(0);
+    const relinquishRequestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-relinquish-request",
+      requestId: relinquishRequestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
+  });
+
+  it("releases generation-owned attachments when runtime startup fails", async () => {
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(async () => trustedAttachment),
+      release: vi.fn(async () => true),
+    };
+    const { children, supervisor } = createHarness({ attachmentBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({
+      type: "runtime.attachment-request",
+      requestId: crypto.randomUUID(),
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+
+    children[0].message({
+      type: "runtime.startup-failed",
+      message: "The database is locked.",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(1);
+    expect(attachmentBroker.release).toHaveBeenCalledWith(attachmentId);
+  });
+
+  it("drops generation ownership when release confirms the capability is already absent", async () => {
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(async () => trustedAttachment),
+      release: vi.fn(async () => false),
+    };
+    const { children, supervisor } = createHarness({ attachmentBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    children[0].message({
+      type: "runtime.attachment-request",
+      requestId: crypto.randomUUID(),
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+
+    const requestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-release-request",
+      requestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.attachment-release-result",
+      requestId,
+      ok: true,
+      released: false,
+    });
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
+  });
+
+  it("retains generation ownership when attachment deletion fails", async () => {
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(async () => trustedAttachment),
+      release: vi.fn()
+        .mockRejectedValueOnce(new Error("attachment file is locked"))
+        .mockResolvedValueOnce(true),
+    };
+    const { children, supervisor } = createHarness({ attachmentBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    children[0].message({
+      type: "runtime.attachment-request",
+      requestId: crypto.randomUUID(),
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const requestId = crypto.randomUUID();
+    children[0].message({
+      type: "runtime.attachment-release-request",
+      requestId,
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.attachment-release-result",
+      requestId,
+      ok: false,
+      code: "unavailable",
+    });
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+
+    children[0].exit(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.release).toHaveBeenCalledTimes(2);
+    expect(attachmentBroker.release).toHaveBeenLastCalledWith(attachmentId);
+  });
+
+  it("keeps runtime-owned attachments until graceful shutdown settles", async () => {
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(async () => trustedAttachment),
+      release: vi.fn(async () => true),
+    };
+    const { children, supervisor } = createHarness({ attachmentBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    children[0].message({
+      type: "runtime.attachment-request",
+      requestId: crypto.randomUUID(),
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+
+    const stopped = supervisor.stop();
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+
+    children[0].message({ type: "runtime.stopped" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attachmentBroker.release).toHaveBeenCalledWith(attachmentId);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(false);
+
+    children[0].exit(0);
+    await expect(stopped).resolves.toBe(true);
   });
 
   it("correlates authoritative project-path resolutions and rejects them on worker exit", async () => {
@@ -469,10 +811,25 @@ describe("RuntimeSupervisor", () => {
     expect(children).toHaveLength(1);
   });
 
-  it("settles after forcing an unresponsive utility process and never starts a replacement", async () => {
-    const { children, forceKill, supervisor } = createHarness();
+  it("reports an unconfirmed stop without releasing attachments from a live utility process", async () => {
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn(async () => trustedAttachment),
+      release: vi.fn(async () => true),
+    };
+    const { children, forceKill, supervisor } = createHarness({
+      attachmentBroker,
+    });
     supervisor.start();
     children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    children[0].message({
+      type: "runtime.attachment-request",
+      requestId: crypto.randomUUID(),
+      attachmentId,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+
     const stopped = supervisor.stop();
     vi.advanceTimersByTime(1_000);
     expect(children[0].killCalls).toBe(1);
@@ -480,9 +837,22 @@ describe("RuntimeSupervisor", () => {
     expect(forceKill).toHaveBeenCalledWith(10_000);
     vi.advanceTimersByTime(500);
     expect(forceKill).toHaveBeenCalledTimes(2);
-    await stopped;
-    expect(supervisor.snapshot()).toMatchObject({ phase: "stopped", pid: null, lastError: expect.stringContaining("shutdown deadline") });
+    await expect(stopped).resolves.toBe(false);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopping",
+      pid: 10_000,
+      lastError: expect.stringContaining("shutdown deadline"),
+    });
+    expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+    expect(attachmentBroker.release).not.toHaveBeenCalled();
+
     children[0].exit(137);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      pid: null,
+    });
+    expect(attachmentBroker.release).toHaveBeenCalledWith(attachmentId);
     vi.advanceTimersByTime(60_000);
     expect(children).toHaveLength(1);
   });

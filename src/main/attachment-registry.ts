@@ -28,6 +28,14 @@ import {
 
 const MAX_SESSION_ATTACHMENT_RECORDS = 256;
 const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
+const ATTACHMENT_RELEASE_ATTEMPTS = 3;
+const ATTACHMENT_RELEASE_RETRY_BASE_MS = 25;
+const TRANSIENT_UNLINK_CODES = new Set([
+  "EACCES",
+  "EBUSY",
+  "EPERM",
+  "ETXTBSY",
+]);
 const OWNED_ATTACHMENT_FILE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json)$/iu;
 
@@ -38,24 +46,65 @@ interface AttachmentRegistryRecord extends TrustedRuntimeAttachment {
 export interface AttachmentRegistryLimits {
   readonly maxRecords?: number;
   readonly maxBytes?: number;
+  readonly reservedRecords?: number;
+  readonly reservedBytes?: number;
+}
+
+export interface AttachmentStorageReservation {
+  readonly records: number;
+  readonly bytes: number;
+}
+
+interface OrphanCleanupOptions {
+  readonly readDirectory?: (directory: string) => Promise<string[]>;
+  readonly inspectFile?: (path: string) => ReturnType<typeof lstat>;
+  readonly unlinkFile?: (path: string) => Promise<void>;
+  readonly waitForRetry?: (delayMs: number) => Promise<void>;
 }
 
 export async function cleanupOrphanedAttachments(
   directory: string,
-): Promise<void> {
+  options: OrphanCleanupOptions = {},
+): Promise<AttachmentStorageReservation> {
+  const readDirectory = options.readDirectory ?? readdir;
+  const inspectFile = options.inspectFile ?? lstat;
+  const unlinkFile = options.unlinkFile ?? unlink;
+  const waitForRetry = options.waitForRetry ?? waitForReleaseRetry;
+  let entries: string[];
   try {
-    const entries = await readdir(directory);
-    await Promise.all(entries.map(async (name) => {
-      if (!OWNED_ATTACHMENT_FILE.test(name)) return;
-      const path = join(directory, name);
-      const info = await lstat(path);
-      if (info.isFile() || info.isSymbolicLink()) {
-        await unlink(path);
-      }
-    }));
-  } catch {
-    // Startup cleanup is best effort. Registry writes still fail closed later.
+    entries = await readDirectory(directory);
+  } catch (error) {
+    return errorCode(error) === "ENOENT"
+      ? { records: 0, bytes: 0 }
+      : fullReservation();
   }
+  let records = 0;
+  let bytes = 0;
+  for (const name of entries) {
+    if (!OWNED_ATTACHMENT_FILE.test(name)) continue;
+    const path = join(directory, name);
+    try {
+      const info = await inspectFile(path);
+      if (!info.isFile() && !info.isSymbolicLink()) continue;
+      try {
+        await unlinkWithRetry(path, unlinkFile, waitForRetry);
+      } catch {
+        records += 1;
+        const size = typeof info.size === "bigint"
+          ? info.size >= BigInt(MAX_SESSION_ATTACHMENT_BYTES)
+            ? MAX_SESSION_ATTACHMENT_BYTES
+            : Number(info.size)
+          : info.size;
+        bytes += Math.max(0, size);
+      }
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") return fullReservation();
+    }
+  }
+  return {
+    records: Math.min(records, MAX_SESSION_ATTACHMENT_RECORDS),
+    bytes: Math.min(bytes, MAX_SESSION_ATTACHMENT_BYTES),
+  };
 }
 
 function isContained(root: string, target: string): boolean {
@@ -74,10 +123,60 @@ function boundedLimit(value: number | undefined, maximum: number): number {
     : maximum;
 }
 
+function errorCode(error: unknown): string | null {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && typeof error.code === "string"
+    ? error.code
+    : null;
+}
+
+function waitForReleaseRetry(delayMs: number): Promise<void> {
+  return new Promise((resolveWait) => {
+    setTimeout(resolveWait, delayMs);
+  });
+}
+
+async function unlinkWithRetry(
+  path: string,
+  unlinkFile: (path: string) => Promise<void>,
+  waitForRetry: (delayMs: number) => Promise<void>,
+): Promise<void> {
+  for (let attempt = 0; attempt < ATTACHMENT_RELEASE_ATTEMPTS; attempt += 1) {
+    try {
+      await unlinkFile(path);
+      return;
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === "ENOENT") return;
+      if (
+        !code
+        || !TRANSIENT_UNLINK_CODES.has(code)
+        || attempt === ATTACHMENT_RELEASE_ATTEMPTS - 1
+      ) {
+        throw error;
+      }
+      await waitForRetry(ATTACHMENT_RELEASE_RETRY_BASE_MS * 2 ** attempt);
+    }
+  }
+}
+
+function fullReservation(): AttachmentStorageReservation {
+  return {
+    records: MAX_SESSION_ATTACHMENT_RECORDS,
+    bytes: MAX_SESSION_ATTACHMENT_BYTES,
+  };
+}
+
 export class AttachmentRegistry {
   private readonly records = new Map<string, AttachmentRegistryRecord>();
+  private readonly releases = new Map<string, Promise<boolean>>();
+  private readonly revokedAttachmentIds = new Set<string>();
   private readonly maxRecords: number;
   private readonly maxBytes: number;
+  private readonly reservedRecords: number;
+  private readonly reservedBytes: number;
   private importTail: Promise<void> = Promise.resolve();
   private disposed = false;
   private disposal: Promise<void> | null = null;
@@ -85,6 +184,9 @@ export class AttachmentRegistry {
   constructor(
     private readonly directory: string,
     limits: AttachmentRegistryLimits = {},
+    private readonly unlinkFile: (path: string) => Promise<void> = unlink,
+    private readonly waitForRetry:
+      (delayMs: number) => Promise<void> = waitForReleaseRetry,
   ) {
     this.maxRecords = boundedLimit(
       limits.maxRecords,
@@ -93,6 +195,14 @@ export class AttachmentRegistry {
     this.maxBytes = boundedLimit(
       limits.maxBytes,
       MAX_SESSION_ATTACHMENT_BYTES,
+    );
+    this.reservedRecords = Math.max(
+      0,
+      Math.min(Math.trunc(limits.reservedRecords ?? 0), this.maxRecords),
+    );
+    this.reservedBytes = Math.max(
+      0,
+      Math.min(Math.trunc(limits.reservedBytes ?? 0), this.maxBytes),
     );
   }
 
@@ -131,8 +241,9 @@ export class AttachmentRegistry {
       0,
     );
     if (
-      this.records.size + deduplicated.length > this.maxRecords
-      || retainedBytes + totalBytes > this.maxBytes
+      this.reservedRecords + this.records.size + deduplicated.length
+        > this.maxRecords
+      || this.reservedBytes + retainedBytes + totalBytes > this.maxBytes
     ) {
       throw new Error(
         "Temporary attachment storage is full. Remove an attachment and try again.",
@@ -155,6 +266,7 @@ export class AttachmentRegistry {
   }
 
   preview(id: string): Pick<ChatAttachment, "path" | "mimeType" | "size"> | null {
+    if (this.revokedAttachmentIds.has(id)) return null;
     const record = this.records.get(id);
     return record
       ? { path: record.path, mimeType: record.mimeType, size: record.size }
@@ -166,9 +278,11 @@ export class AttachmentRegistry {
     signal?: AbortSignal,
   ): Promise<TrustedRuntimeAttachment | null> {
     assertNotAborted(signal);
+    if (this.revokedAttachmentIds.has(id)) return null;
     const record = this.records.get(id);
     if (!record) return null;
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    if (this.revokedAttachmentIds.has(id)) return null;
     const canonicalRoot = await realpath(this.directory);
     const pathInfo = await lstat(record.path);
     if (!pathInfo.isFile() || pathInfo.isSymbolicLink()) {
@@ -227,11 +341,21 @@ export class AttachmentRegistry {
     };
   }
 
-  async release(id: string): Promise<void> {
+  async release(id: string): Promise<boolean> {
+    const pending = this.releases.get(id);
+    if (pending) return await pending;
     const record = this.records.get(id);
-    this.records.delete(id);
-    if (!record) return;
-    await unlink(record.path).catch(() => undefined);
+    if (!record) return false;
+    this.revokedAttachmentIds.add(id);
+    const release = this.releaseRecord(record);
+    this.releases.set(id, release);
+    try {
+      return await release;
+    } finally {
+      if (this.releases.get(id) === release) {
+        this.releases.delete(id);
+      }
+    }
   }
 
   dispose(): Promise<void> {
@@ -243,10 +367,23 @@ export class AttachmentRegistry {
 
   private async disposeExclusive(): Promise<void> {
     await this.importTail;
+    await Promise.allSettled(this.releases.values());
     const records = [...this.records.values()];
     this.records.clear();
+    this.revokedAttachmentIds.clear();
     await Promise.all(records.map(({ path }) =>
       unlink(path).catch(() => undefined)));
+  }
+
+  private async releaseRecord(
+    record: AttachmentRegistryRecord,
+  ): Promise<boolean> {
+    await unlinkWithRetry(record.path, this.unlinkFile, this.waitForRetry);
+    if (this.records.get(record.id) === record) {
+      this.records.delete(record.id);
+    }
+    this.revokedAttachmentIds.delete(record.id);
+    return true;
   }
 
   private async persist(

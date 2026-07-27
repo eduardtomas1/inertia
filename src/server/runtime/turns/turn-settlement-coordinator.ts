@@ -137,6 +137,7 @@ export class TurnSettlementCoordinator {
     } catch {
       try {
         const latest = this.options.store.agentTurn(active.turn.id);
+        const repairedAt = this.options.now();
         active.turn = isAgentTurnTerminalStatus(latest.status)
           ? latest
           : this.options.store.settleAgentTurn(active.turn.id, {
@@ -146,8 +147,9 @@ export class TurnSettlementCoordinator {
               terminalReason: "stream-persistence-failed",
               checkpointId: active.checkpointId,
               usageAtCompletion: active.lastUsage,
-              completedAt: this.options.now(),
-              updatedAt: this.options.now(),
+              startedAt: latest.startedAt ?? repairedAt,
+              completedAt: repairedAt,
+              updatedAt: repairedAt,
             }).turn;
       } catch {
         // Runtime recovery repairs any lifecycle row that could not settle.
@@ -190,6 +192,7 @@ export class TurnSettlementCoordinator {
     message?: string,
     failure?: ProviderRunFailure,
   ): boolean {
+    const completedAt = this.options.now();
     const settlement = this.options.store.settleAgentTurn(active.turn.id, {
       status,
       terminalAssistantMessageId: active.latestAssistantMessageId,
@@ -197,8 +200,11 @@ export class TurnSettlementCoordinator {
       terminalReason,
       checkpointId: active.checkpointId,
       usageAtCompletion: active.lastUsage,
-      completedAt: this.options.now(),
-      updatedAt: this.options.now(),
+      // A queued turn may fail after command acceptance but before start().
+      // Give that direct terminal transition one coherent lifecycle boundary.
+      startedAt: active.turn.startedAt ?? completedAt,
+      completedAt,
+      updatedAt: completedAt,
     });
     active.turn = settlement.turn;
     this.options.cleanup(active);

@@ -8,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AttachmentRegistry,
@@ -22,7 +22,11 @@ const png = Buffer.from([
 ]);
 const alternatePng = Buffer.concat([png, Buffer.from([0x01])]);
 
-async function registry(limits?: AttachmentRegistryLimits): Promise<{
+async function registry(
+  limits?: AttachmentRegistryLimits,
+  unlinkFile?: (path: string) => Promise<void>,
+  waitForRetry?: (delayMs: number) => Promise<void>,
+): Promise<{
   directory: string;
   registry: AttachmentRegistry;
 }> {
@@ -30,7 +34,12 @@ async function registry(limits?: AttachmentRegistryLimits): Promise<{
   directories.push(directory);
   return {
     directory,
-    registry: new AttachmentRegistry(directory, limits),
+    registry: new AttachmentRegistry(
+      directory,
+      limits,
+      unlinkFile,
+      waitForRetry,
+    ),
   };
 }
 
@@ -87,7 +96,8 @@ describe("main-owned attachment registry", () => {
       data: png,
     }]);
 
-    await attachments.release(imported!.id);
+    await expect(attachments.release(imported!.id)).resolves.toBe(true);
+    await expect(attachments.release(imported!.id)).resolves.toBe(false);
     await expect(attachments.resolve(imported!.id)).resolves.toBeNull();
     await expect(readFile(imported!.path)).rejects.toThrow();
   });
@@ -148,6 +158,86 @@ describe("main-owned attachment registry", () => {
     }])).resolves.toHaveLength(1);
   });
 
+  it("retries transient startup orphan deletion before reserving capacity", async () => {
+    const { directory, registry: previousProcess } = await registry();
+    const [orphan] = await previousProcess.import([{
+      name: "transient-orphan.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+    const waits: number[] = [];
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValueOnce(Object.assign(new Error("locked"), {
+        code: "EPERM",
+      }))
+      .mockRejectedValueOnce(Object.assign(new Error("busy"), {
+        code: "EBUSY",
+      }))
+      .mockImplementation(async (path) => {
+        await rm(path, { force: true });
+      });
+
+    await expect(cleanupOrphanedAttachments(directory, {
+      unlinkFile,
+      waitForRetry: async (delayMs) => {
+        waits.push(delayMs);
+      },
+    })).resolves.toEqual({ records: 0, bytes: 0 });
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    expect(waits).toEqual([25, 50]);
+    await expect(readFile(orphan!.path)).rejects.toThrow();
+  });
+
+  it("reserves capacity for persistently locked startup orphans", async () => {
+    const { directory, registry: previousProcess } = await registry();
+    const [orphan] = await previousProcess.import([{
+      name: "locked-orphan.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+    const reservation = await cleanupOrphanedAttachments(directory, {
+      unlinkFile: vi.fn(async () => {
+        throw Object.assign(new Error("still locked"), { code: "EPERM" });
+      }),
+      waitForRetry: async () => undefined,
+    });
+    expect(reservation).toEqual({ records: 1, bytes: png.length });
+
+    const restarted = new AttachmentRegistry(directory, {
+      maxRecords: 1,
+      maxBytes: png.length,
+      reservedRecords: reservation.records,
+      reservedBytes: reservation.bytes,
+    });
+    await expect(restarted.resolve(orphan!.id)).resolves.toBeNull();
+    await expect(restarted.import([{
+      name: "must-not-bypass-orphan.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+  });
+
+  it("reserves the full ceiling when startup inventory cannot be inspected", async () => {
+    const { directory } = await registry();
+    const reservation = await cleanupOrphanedAttachments(directory, {
+      readDirectory: vi.fn(async () => {
+        throw Object.assign(new Error("inventory unavailable"), {
+          code: "EACCES",
+        });
+      }),
+    });
+    const restarted = new AttachmentRegistry(directory, {
+      reservedRecords: reservation.records,
+      reservedBytes: reservation.bytes,
+    });
+
+    await expect(restarted.import([{
+      name: "unaccounted-bypass.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+  });
+
   it("serializes concurrent imports so they cannot race past the session cap", async () => {
     const { directory, registry: attachments } = await registry({
       maxRecords: 1,
@@ -188,6 +278,129 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       data: alternatePng,
     }])).resolves.toHaveLength(1);
+  });
+
+  it("retries transient unlink failures with bounded backoff", async () => {
+    const waits: number[] = [];
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValueOnce(Object.assign(
+        new Error("file is still in use"),
+        { code: "EPERM" },
+      ))
+      .mockRejectedValueOnce(Object.assign(
+        new Error("file is still busy"),
+        { code: "EBUSY" },
+      ))
+      .mockImplementation(async (path) => {
+        await rm(path, { force: true });
+      });
+    const { registry: attachments } = await registry({
+      maxRecords: 1,
+      maxBytes: png.length,
+    }, unlinkFile, async (delayMs) => {
+      waits.push(delayMs);
+    });
+    const [first] = await attachments.import([{
+      name: "locked.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    await expect(attachments.release(first!.id)).resolves.toBe(true);
+    await expect(attachments.import([{
+      name: "after-retry.png",
+      mimeType: "image/png",
+      data: png,
+    }])).resolves.toHaveLength(1);
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    expect(waits).toEqual([25, 50]);
+  });
+
+  it("retains records and accounting after transient unlink retries exhaust", async () => {
+    const waits: number[] = [];
+    const persistentError = Object.assign(
+      new Error("file remains locked"),
+      { code: "EPERM" },
+    );
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValue(persistentError);
+    const { registry: attachments } = await registry({
+      maxRecords: 1,
+      maxBytes: png.length,
+    }, unlinkFile, async (delayMs) => {
+      waits.push(delayMs);
+    });
+    const [first] = await attachments.import([{
+      name: "persistently-locked.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    await expect(attachments.release(first!.id)).rejects.toThrow(
+      "file remains locked",
+    );
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    expect(waits).toEqual([25, 50]);
+    expect(attachments.preview(first!.id)).toBeNull();
+    await expect(attachments.resolve(first!.id)).resolves.toBeNull();
+    await expect(attachments.import([{
+      name: "blocked-by-accounting.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+
+    unlinkFile.mockImplementation(async (path) => {
+      await rm(path, { force: true });
+    });
+    await expect(attachments.release(first!.id)).resolves.toBe(true);
+    await expect(attachments.import([{
+      name: "after-explicit-retry.png",
+      mimeType: "image/png",
+      data: png,
+    }])).resolves.toHaveLength(1);
+  });
+
+  it("coalesces concurrent release attempts without double-unlinking", async () => {
+    let finishUnlink!: () => void;
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>(
+      () => new Promise<void>((resolve) => {
+        finishUnlink = resolve;
+      }),
+    );
+    const { registry: attachments } = await registry(undefined, unlinkFile);
+    const [attachment] = await attachments.import([{
+      name: "concurrent.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    const first = attachments.release(attachment!.id);
+    const second = attachments.release(attachment!.id);
+    expect(unlinkFile).toHaveBeenCalledTimes(1);
+    finishUnlink();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+    await expect(attachments.resolve(attachment!.id)).resolves.toBeNull();
+  });
+
+  it("fails closed when a new generation resolves during a slow release", async () => {
+    let finishUnlink!: () => void;
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>(
+      () => new Promise<void>((resolveUnlink) => {
+        finishUnlink = resolveUnlink;
+      }),
+    );
+    const { registry: attachments } = await registry(undefined, unlinkFile);
+    const [attachment] = await attachments.import([{
+      name: "cross-generation.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    const release = attachments.release(attachment!.id);
+    await expect(attachments.resolve(attachment!.id)).resolves.toBeNull();
+    finishUnlink();
+    await expect(release).resolves.toBe(true);
   });
 
   it("rejects an over-cap batch before creating records or files", async () => {

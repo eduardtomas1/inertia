@@ -290,5 +290,101 @@ describe("runtime process protocol", () => {
       code: "not-found",
       message: "The attachment capability is unavailable.",
     })).toMatchObject({ ok: false, code: "not-found" });
+
+    const releaseRequest = {
+      type: "runtime.attachment-release-request",
+      requestId,
+      attachmentId,
+    };
+    expect(parseRuntimeWorkerEvent(releaseRequest)).toEqual(releaseRequest);
+    expect(parseRuntimeWorkerEvent({
+      ...releaseRequest,
+      path: attachment.path,
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...releaseRequest,
+      attachmentId: "not-an-opaque-capability",
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-release-result",
+      requestId,
+      ok: true,
+      released: true,
+    })).toEqual({
+      type: "runtime.attachment-release-result",
+      requestId,
+      ok: true,
+      released: true,
+    });
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-release-result",
+      requestId,
+      ok: true,
+      released: true,
+      path: attachment.path,
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-release-result",
+      requestId,
+      ok: false,
+      code: "unavailable",
+      message: "Secure attachment storage is unavailable.",
+    })).toMatchObject({
+      type: "runtime.attachment-release-result",
+      ok: false,
+      code: "unavailable",
+    });
+
+    const cleanupRequest = {
+      type: "runtime.attachment-cleanup-request",
+      requestId,
+      attachmentId,
+    };
+    expect(parseRuntimeWorkerEvent(cleanupRequest)).toEqual(cleanupRequest);
+    expect(parseRuntimeWorkerEvent({
+      ...cleanupRequest,
+      mode: "force",
+    })).toBeNull();
+
+    const relinquishRequest = {
+      type: "runtime.attachment-relinquish-request",
+      requestId,
+      attachmentId,
+    };
+    expect(parseRuntimeWorkerEvent(relinquishRequest))
+      .toEqual(relinquishRequest);
+    expect(parseRuntimeWorkerEvent({
+      ...relinquishRequest,
+      path: attachment.path,
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-relinquish-result",
+      requestId,
+      ok: true,
+      relinquished: true,
+    })).toEqual({
+      type: "runtime.attachment-relinquish-result",
+      requestId,
+      ok: true,
+      relinquished: true,
+    });
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-relinquish-result",
+      requestId,
+      ok: true,
+      relinquished: true,
+      released: true,
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.attachment-relinquish-result",
+      requestId,
+      ok: false,
+      code: "invalid",
+      message: "The attachment request identifier was already used.",
+    })).toMatchObject({
+      type: "runtime.attachment-relinquish-result",
+      ok: false,
+      code: "invalid",
+    });
   });
 });

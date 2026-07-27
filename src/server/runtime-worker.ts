@@ -25,8 +25,6 @@ async function shutdown(exitCode = 0): Promise<void> {
   stopping = true;
   const activeRuntime = runtime;
   runtime = null;
-  credentials.close();
-  attachments.close();
   if (activeRuntime) {
     try {
       await activeRuntime.close(exitCode === 0 ? "runtime-shutdown" : "runtime-crash");
@@ -34,6 +32,8 @@ async function shutdown(exitCode = 0): Promise<void> {
       exitCode = 1;
     }
   }
+  credentials.close();
+  attachments.close();
   post({ type: "runtime.stopped" });
   process.exit(exitCode);
 }
@@ -51,6 +51,14 @@ parentPort.on("message", (messageEvent) => {
   }
   if (command.type === "runtime.attachment-result") {
     attachments.handle(command);
+    return;
+  }
+  if (command.type === "runtime.attachment-release-result") {
+    attachments.handleRelease(command);
+    return;
+  }
+  if (command.type === "runtime.attachment-relinquish-result") {
+    attachments.handleRelinquish(command);
     return;
   }
   if (command.type === "runtime.shutdown") {

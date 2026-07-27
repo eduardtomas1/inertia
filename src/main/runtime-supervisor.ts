@@ -35,6 +35,10 @@ interface RuntimeProcessRecord {
   reportedFailure: string | null;
   credentialRequestIds: Set<string>;
   attachmentRequestIds: Set<string>;
+  attachmentClaimCounts: Map<string, number>;
+  deferredAttachmentReleaseIds: Set<string>;
+  deletingAttachmentIds: Set<string>;
+  attachmentOperationTails: Map<string, Promise<void>>;
 }
 
 interface PendingProjectPath {
@@ -127,8 +131,8 @@ export class RuntimeSupervisor {
   private shutdownDeadlineTimer: Timer | null = null;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
   private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
-  private stopPromise: Promise<void> | null = null;
-  private resolveStop: (() => void) | null = null;
+  private stopPromise: Promise<boolean> | null = null;
+  private resolveStop: ((confirmed: boolean) => void) | null = null;
 
   constructor(options: RuntimeSupervisorOptions) {
     this.spawnProcess = options.spawn;
@@ -208,7 +212,20 @@ export class RuntimeSupervisor {
     };
   }
 
-  stop(): Promise<void> {
+  ownsAttachment(attachmentId: string): boolean {
+    return (this.current?.attachmentClaimCounts.get(attachmentId) ?? 0) > 0;
+  }
+
+  deferAttachmentRelease(attachmentId: string): boolean {
+    return this.current
+      ? this.attachmentRequests.deferRendererRelease(
+          this.current,
+          attachmentId,
+        )
+      : false;
+  }
+
+  stop(): Promise<boolean> {
     if (this.stopPromise) return this.stopPromise;
     this.desiredRunning = false;
     this.clearTimerValue("restartTimer");
@@ -217,18 +234,19 @@ export class RuntimeSupervisor {
     this.websocketUrl = null;
     this.rejectProjectPaths(this.current, "The local service is stopping.");
     this.clearCredentialRequests(this.current);
-    if (this.current) this.attachmentRequests.clear(this.current);
 
     if (!this.current) {
       this.phase = "stopped";
       this.emitState();
-      return Promise.resolve();
+      return Promise.resolve(true);
     }
 
     this.phase = "stopping";
     this.current.acceptingReady = false;
     this.emitState();
-    this.stopPromise = new Promise<void>((resolve) => { this.resolveStop = resolve; });
+    this.stopPromise = new Promise<boolean>((resolve) => {
+      this.resolveStop = resolve;
+    });
     this.post(this.current.child, { type: "runtime.shutdown" });
     const record = this.current;
     const child = record.child;
@@ -248,7 +266,9 @@ export class RuntimeSupervisor {
       const pid = child.pid;
       if (pid) this.forceKill(pid);
       this.lastError = "The runtime process did not report exit before the shutdown deadline; forced termination was requested.";
-      this.settleStopped(record);
+      this.emitState();
+      this.resolveStop?.(false);
+      this.resolveStop = null;
     }, this.shutdownGraceMs + this.forceKillWaitMs * 2);
     return this.stopPromise;
   }
@@ -278,6 +298,10 @@ export class RuntimeSupervisor {
       reportedFailure: null,
       credentialRequestIds: new Set(),
       attachmentRequestIds: new Set(),
+      attachmentClaimCounts: new Map(),
+      deferredAttachmentReleaseIds: new Set(),
+      deletingAttachmentIds: new Set(),
+      attachmentOperationTails: new Map(),
     };
     this.current = record;
     child.once("spawn", () => {
@@ -319,7 +343,12 @@ export class RuntimeSupervisor {
       this.handleCredentialRequest(record, event);
       return;
     }
-    if (event.type === "runtime.attachment-request") {
+    if (
+      event.type === "runtime.attachment-request"
+      || event.type === "runtime.attachment-release-request"
+      || event.type === "runtime.attachment-cleanup-request"
+      || event.type === "runtime.attachment-relinquish-request"
+    ) {
       this.attachmentRequests.handle(record, event);
       return;
     }
@@ -581,7 +610,7 @@ export class RuntimeSupervisor {
     this.clearShutdownTimers();
     this.phase = "stopped";
     this.emitState();
-    this.resolveStop?.();
+    this.resolveStop?.(true);
     this.resolveStop = null;
   }
 

@@ -50,7 +50,12 @@ async function fixture(): Promise<{
 function broker(
   attachment: TrustedRuntimeAttachment | null,
 ): RuntimeAttachmentBroker {
-  return { resolve: vi.fn(async () => attachment) };
+  return {
+    resolve: vi.fn(async () => attachment),
+    release: vi.fn(async () => true),
+    cleanup: vi.fn(async () => true),
+    relinquish: vi.fn(async () => true),
+  };
 }
 
 afterEach(async () => {
@@ -83,14 +88,16 @@ describe("trusted runtime attachment resolution", () => {
     const { root, trusted } = await fixture();
     const outside = join(root, "..", "outside.png");
     await writeFile(outside, png);
-    const resolver = new TrustedAttachmentResolver(
-      root,
-      broker({ ...trusted, path: await realpath(outside) }),
-    );
+    const attachmentBroker = broker({
+      ...trusted,
+      path: await realpath(outside),
+    });
+    const resolver = new TrustedAttachmentResolver(root, attachmentBroker);
 
     await expect(resolver.resolveAll([trusted])).rejects.toThrow(
       /no longer available|verified/u,
     );
+    expect(attachmentBroker.relinquish).toHaveBeenCalledWith(id);
   });
 
   it.each([

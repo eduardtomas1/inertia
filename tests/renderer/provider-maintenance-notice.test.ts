@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ProviderMaintenanceNotice,
@@ -114,10 +114,10 @@ describe("provider maintenance notice", () => {
     }))).toBe("");
   });
 
-  it("offers an honest settings-only provider-managed action without claiming an update exists", () => {
+  it("offers a provider-managed action when version discovery is unavailable", () => {
     const cursorStatus = status({
       providerId: "cursor",
-      installedVersion: "2.1.0",
+      installedVersion: null,
       latestVersion: null,
       versionStatus: "unknown",
       freshness: "unavailable",
@@ -149,6 +149,82 @@ describe("provider maintenance notice", () => {
     expect(settingsHtml).not.toContain("Latest");
   });
 
+  it("lets a new update supersede a dismissed terminal operation", () => {
+    const completed = operation({
+      status: "succeeded",
+      finishedAt: "2026-07-27T12:02:00.000Z",
+      afterVersion: "1.3.0",
+      message: "Provider updated.",
+    });
+    const values = new Map<string, string>([
+      [
+        "inertia:provider-maintenance-operations-dismissed:v1",
+        JSON.stringify([completed.id]),
+      ],
+    ]);
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+    };
+    vi.stubGlobal("window", {
+      localStorage: storage,
+      sessionStorage: storage,
+    });
+    try {
+      const html = render(status({
+        installedVersion: "1.3.0",
+        latestVersion: "1.4.0",
+        versionStatus: "update-available",
+      }), completed);
+
+      expect(html).toContain("Codex update available");
+      expect(html).toContain(">Update</button>");
+      expect(html).not.toContain("Updated to 1.3.0");
+      expect(html).not.toContain("Provider updated.");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps settings actions visible when the composer update was dismissed", () => {
+    const values = new Map<string, string>([
+      [
+        "inertia:provider-updates-dismissed:v1",
+        JSON.stringify({ codex: "1.3.0" }),
+      ],
+    ]);
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+    };
+    vi.stubGlobal("window", {
+      localStorage: storage,
+      sessionStorage: storage,
+    });
+    try {
+      expect(render(status())).toBe("");
+      const settingsHtml = renderToStaticMarkup(createElement(
+        ProviderMaintenanceNotice,
+        {
+          providerLabel: "Codex",
+          status: status(),
+          operation: null,
+          dismissible: false,
+          ...actions,
+        },
+      ));
+      expect(settingsHtml).toContain("Codex update available");
+      expect(settingsHtml).toContain(">Update</button>");
+      expect(settingsHtml).not.toContain("Dismiss Codex update notice");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("removes a dismissed terminal operation from the composer notice", () => {
     const completed = operation({
       status: "succeeded",
@@ -166,6 +242,18 @@ describe("provider maintenance notice", () => {
       operation: completed,
       updateAvailable: false,
       updateDismissed: false,
+      operationDismissed: true,
+    })).toBe(false);
+    expect(shouldShowProviderMaintenanceNotice({
+      operation: completed,
+      updateAvailable: true,
+      updateDismissed: false,
+      operationDismissed: true,
+    })).toBe(true);
+    expect(shouldShowProviderMaintenanceNotice({
+      operation: completed,
+      updateAvailable: true,
+      updateDismissed: true,
       operationDismissed: true,
     })).toBe(false);
     expect(shouldShowProviderMaintenanceNotice({

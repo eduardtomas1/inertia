@@ -128,7 +128,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     options.defaultWorkspacePath,
     { recoverInterruptedRuns: false },
   );
-  recoverInterruptedTurns(store);
+  const recovery = recoverInterruptedTurns(store);
+  if (options.attachments && recovery.recoveredAttachmentIds.length > 0) {
+    void Promise.allSettled(recovery.recoveredAttachmentIds.map(
+      (attachmentId) => options.attachments!.cleanup(attachmentId),
+    ));
+  }
   await Promise.all(store.shellSnapshot().projects.map(async (project) => {
     try {
       const identity = await inspectProjectIdentity(project.path);
@@ -382,6 +387,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         broadcastSnapshot();
       },
       captureGitArtifacts: (input) => turnGitArtifacts.finalize(input),
+      releaseTurnAttachments: ({ attachmentIds }) =>
+        options.attachments
+          ? Promise.all(attachmentIds.map((attachmentId) =>
+              options.attachments!.release(attachmentId))).then(() => undefined)
+          : undefined,
       refreshProviderMetadata: async ({ providerId, turnId, runStartedAt, status }) => {
         if (status !== "completed") return;
         const turn = store.agentTurn(turnId);

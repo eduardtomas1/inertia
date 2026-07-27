@@ -165,7 +165,11 @@ describe("ModelChooser", () => {
     expect(source).toContain("searchModelRoutes(sourceRoutes, query)");
     expect(source).toContain("resolveModelShortcutBindings");
     expect(source).toContain("triggerRef.current?.focus()");
-    expect(source).toContain('event.key === "Escape"');
+    expect(source).toContain('event.key !== "Escape"');
+    expect(source).toContain(
+      'document.addEventListener("keydown", handleKeyDown, true)',
+    );
+    expect(source).toContain("event.stopPropagation()");
     expect(source).toContain('"ArrowDown", "ArrowUp", "Home", "End"');
     expect(source).toContain('role="listbox"');
     expect(source).toContain("results.emptyState");

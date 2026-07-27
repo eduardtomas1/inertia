@@ -3,6 +3,7 @@ import { RuntimeStore } from "../../database";
 
 export interface TurnRecoveryResult {
   recoveredTurns: AgentTurn[];
+  recoveredAttachmentIds: string[];
 }
 
 /**
@@ -13,10 +14,20 @@ export interface TurnRecoveryResult {
 export function recoverInterruptedTurns(store: RuntimeStore): TurnRecoveryResult {
   const before = store.unfinishedAgentTurns();
   store.recoverInterruptedRuns();
+  const recoveredTurns = before
+    .map(({ id }) => store.agentTurn(id))
+    .filter(({ status, terminalReason }) =>
+      status === "interrupted" && terminalReason === "runtime-restart");
+  const recoveredAttachmentIds = new Set<string>();
+  for (const turn of recoveredTurns) {
+    const message = store.conversationDetail(turn.conversationId)?.messages
+      .find(({ id }) => id === turn.userMessageId);
+    for (const attachment of message?.attachments ?? []) {
+      recoveredAttachmentIds.add(attachment.id);
+    }
+  }
   return {
-    recoveredTurns: before
-      .map(({ id }) => store.agentTurn(id))
-      .filter(({ status, terminalReason }) =>
-        status === "interrupted" && terminalReason === "runtime-restart"),
+    recoveredTurns,
+    recoveredAttachmentIds: [...recoveredAttachmentIds],
   };
 }

@@ -37,6 +37,7 @@ import {
 import {
   AttachmentRegistry,
   cleanupOrphanedAttachments,
+  type AttachmentStorageReservation,
 } from "./attachment-registry.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
@@ -104,6 +105,10 @@ let previewBounds: Electron.Rectangle | null = null;
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
 let attachmentCleanup: Promise<void> = Promise.resolve();
+let attachmentReservation: AttachmentStorageReservation = {
+  records: 0,
+  bytes: 0,
+};
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -122,7 +127,10 @@ function attachmentDirectory(): string {
 }
 
 function attachmentRegistry(): AttachmentRegistry {
-  importedAttachments ??= new AttachmentRegistry(attachmentDirectory());
+  importedAttachments ??= new AttachmentRegistry(attachmentDirectory(), {
+    reservedRecords: attachmentReservation.records,
+    reservedBytes: attachmentReservation.bytes,
+  });
   return importedAttachments;
 }
 
@@ -460,6 +468,7 @@ function registerIpcHandlers(): void {
     if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
       throw new Error("Invalid attachment.");
     }
+    if (runtimeSupervisor?.deferAttachmentRelease(value)) return;
     await attachmentRegistry().release(value);
   });
 
@@ -635,7 +644,6 @@ async function createWindow(): Promise<void> {
   window.on("close", () => saveWindowState(window));
   window.on("closed", () => {
     closePreview();
-    void disposeImportedAttachments();
     if (mainWindow === window) {
       mainWindow = null;
     }
@@ -695,11 +703,12 @@ async function bootstrap(): Promise<void> {
     ),
   );
 
-  await Promise.all([
+  const [, , orphanReservation] = await Promise.all([
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
     cleanupOrphanedAttachments(attachmentDirectory()),
   ]);
+  attachmentReservation = orphanReservation;
 
   registerAppProtocol();
   packageSmokeFilePath = process.env.NODE_ENV === "test"
@@ -721,6 +730,8 @@ async function bootstrap(): Promise<void> {
     attachmentBroker: {
       resolve: (attachmentId, signal) =>
         attachmentRegistry().resolve(attachmentId, signal),
+      release: (attachmentId) =>
+        attachmentRegistry().release(attachmentId),
     },
     credentialBroker: {
       resolve: (secretReference) => credentialVault!.resolve(secretReference),
@@ -805,31 +816,40 @@ if (!hasSingleInstanceLock) {
     }
   });
   app.on("before-quit", (event) => {
-    if (!runtimeSupervisor || stoppingRuntime) {
-      return;
-    }
+    if (stoppingRuntime) return;
 
     event.preventDefault();
     stoppingRuntime = true;
     recordPackageSmokeStage("before-quit");
     if (mainWindow) saveWindowState(mainWindow);
     const supervisorToStop = runtimeSupervisor;
-    runtimeSupervisor = null;
     runtimeDiagnostics?.record("app.stop");
 
-    void Promise.all([
-      supervisorToStop.stop().catch((error: unknown) => {
-        runtimeDiagnostics?.record("runtime.failure", {
-          phase: "stopping",
-          message: error instanceof Error ? error.message : "The local runtime could not stop cleanly.",
+    void (async () => {
+      let runtimeExitConfirmed = supervisorToStop === null;
+      if (supervisorToStop) {
+        runtimeExitConfirmed = await supervisorToStop.stop().catch((error: unknown) => {
+          runtimeDiagnostics?.record("runtime.failure", {
+            phase: "stopping",
+            message: error instanceof Error ? error.message : "The local runtime could not stop cleanly.",
+          });
+          console.error("Failed to stop the local runtime", error);
+          return false;
         });
-        console.error("Failed to stop the local runtime", error);
-      }),
-      disposeImportedAttachments().catch((error: unknown) => {
-        console.error("Failed to remove temporary attachments", error);
-      }),
-    ])
-      .finally(finishQuitAfterCleanup);
+        if (runtimeExitConfirmed && runtimeSupervisor === supervisorToStop) {
+          runtimeSupervisor = null;
+        }
+      }
+      if (runtimeExitConfirmed) {
+        await disposeImportedAttachments().catch((error: unknown) => {
+          console.error("Failed to remove temporary attachments", error);
+        });
+      } else {
+        console.warn(
+          "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
+        );
+      }
+    })().finally(finishQuitAfterCleanup);
   });
 
   void app

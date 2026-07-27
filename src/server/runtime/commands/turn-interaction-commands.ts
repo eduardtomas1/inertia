@@ -97,11 +97,16 @@ export function createTurnInteractionCommandHandler(
                 "The selected attachment is no longer available or could not be verified.",
               );
             })();
+        const relinquishAttachments = () =>
+          dependencies.attachmentResolver?.relinquishAll(
+            attachments.map(({ id }) => id),
+          );
         if (
           attachments.some(
             ({ mimeType }) => chatAttachmentKind(mimeType) === "document",
           )
         ) {
+          await relinquishAttachments();
           throw new RuntimeRequestError(
             "Document attachments are preview-only and cannot be sent to the selected provider.",
           );
@@ -110,55 +115,60 @@ export function createTurnInteractionCommandHandler(
           const selectedProvider = dependencies.providerInfo().find(
             ({ id }) => id === conversation.providerId,
           );
-          dependencies.backendProfileController.validateSelection(
-            conversation.modelSelection,
-          );
-          const backendReadiness = await dependencies
-            .backendProfileController.readiness(
+          try {
+            dependencies.backendProfileController.validateSelection(
               conversation.modelSelection,
-              selectedProvider,
             );
-          if (backendReadiness && !backendReadiness.ready) {
-            throw new RuntimeRequestError(
-              backendReadiness.message
-                ?? "The selected model backend is unavailable.",
-            );
-          }
-          if (!backendReadiness && !selectedProvider?.canRun) {
-            throw new RuntimeRequestError(
-              selectedProvider?.statusMessage
-                ?? "This agent is not ready. Open Settings to finish setup.",
-            );
-          }
-          const selectedModel = !backendReadiness
-            ? conversation.model
-              ? selectedProvider?.models.find(
-                  ({ id }) => id === conversation.model,
-                )
-              : selectedProvider?.models.find(({ isDefault }) => isDefault)
-                ?? selectedProvider?.models[0]
-            : undefined;
-          if (
-            !backendReadiness
-            && conversation.model
-            && (selectedProvider?.models.length ?? 0) > 0
-            && !selectedModel
-          ) {
-            throw new RuntimeRequestError(
-              "That model is no longer offered by this provider. Choose another model before sending.",
-            );
-          }
-          if (
-            !backendReadiness
-            && conversation.reasoningEffort
-            && selectedModel?.reasoningOptions.length
-            && !selectedModel.reasoningOptions.some(
-              ({ value }) => value === conversation.reasoningEffort,
-            )
-          ) {
-            throw new RuntimeRequestError(
-              "That reasoning level is not supported by the selected model.",
-            );
+            const backendReadiness = await dependencies
+              .backendProfileController.readiness(
+                conversation.modelSelection,
+                selectedProvider,
+              );
+            if (backendReadiness && !backendReadiness.ready) {
+              throw new RuntimeRequestError(
+                backendReadiness.message
+                  ?? "The selected model backend is unavailable.",
+              );
+            }
+            if (!backendReadiness && !selectedProvider?.canRun) {
+              throw new RuntimeRequestError(
+                selectedProvider?.statusMessage
+                  ?? "This agent is not ready. Open Settings to finish setup.",
+              );
+            }
+            const selectedModel = !backendReadiness
+              ? conversation.model
+                ? selectedProvider?.models.find(
+                    ({ id }) => id === conversation.model,
+                  )
+                : selectedProvider?.models.find(({ isDefault }) => isDefault)
+                  ?? selectedProvider?.models[0]
+              : undefined;
+            if (
+              !backendReadiness
+              && conversation.model
+              && (selectedProvider?.models.length ?? 0) > 0
+              && !selectedModel
+            ) {
+              throw new RuntimeRequestError(
+                "That model is no longer offered by this provider. Choose another model before sending.",
+              );
+            }
+            if (
+              !backendReadiness
+              && conversation.reasoningEffort
+              && selectedModel?.reasoningOptions.length
+              && !selectedModel.reasoningOptions.some(
+                ({ value }) => value === conversation.reasoningEffort,
+              )
+            ) {
+              throw new RuntimeRequestError(
+                "That reasoning level is not supported by the selected model.",
+              );
+            }
+          } catch (error) {
+            await relinquishAttachments();
+            throw error;
           }
         }
         let checkpointId: string | null = null;
@@ -198,38 +208,60 @@ export function createTurnInteractionCommandHandler(
             }
           }
         }
-        const queued = dependencies.enableProviders
-          ? dependencies.turns.queue({
-              conversationId: conversation.id,
-              content: command.payload.content,
+        let queued: ReturnType<typeof dependencies.turns.queue> | null;
+        try {
+          queued = dependencies.enableProviders
+            ? dependencies.turns.queue({
+                conversationId: conversation.id,
+                content: command.payload.content,
+                attachments,
+                context: command.payload.context,
+                checkpointId,
+              })
+            : null;
+        } catch (error) {
+          await relinquishAttachments();
+          throw error;
+        }
+        let attachmentOwnershipAccepted = queued !== null;
+        try {
+          if (!dependencies.enableProviders) {
+            dependencies.store.createMessage(
+              conversation.id,
+              command.payload.content,
+              "user",
               attachments,
-              context: command.payload.context,
-              checkpointId,
-            })
-          : null;
-        if (!dependencies.enableProviders) {
-          dependencies.store.createMessage(
-            conversation.id,
-            command.payload.content,
-            "user",
-            attachments,
-          );
-        }
-        if (
-          conversation.title === "New chat"
-          || conversation.title === "New thread"
-        ) {
-          dependencies.store.updateConversation(conversation.id, {
-            title: command.payload.content.slice(0, 64),
+            );
+            attachmentOwnershipAccepted = true;
+          }
+          if (
+            conversation.title === "New chat"
+            || conversation.title === "New thread"
+          ) {
+            dependencies.store.updateConversation(conversation.id, {
+              title: command.payload.content.slice(0, 64),
+            });
+          }
+          dependencies.send(socket, {
+            type: "request.ok",
+            requestId: command.requestId,
           });
+          dependencies.broadcastSnapshot();
+          if (queued) dependencies.turns.start(queued.turn.id);
+          return "handled";
+        } catch (error) {
+          if (queued) {
+            dependencies.turns.failBeforeStart(
+              conversation.id,
+              error instanceof Error
+                ? error.message
+                : "The turn could not start.",
+            );
+          } else if (!attachmentOwnershipAccepted) {
+            await relinquishAttachments();
+          }
+          throw error;
         }
-        dependencies.send(socket, {
-          type: "request.ok",
-          requestId: command.requestId,
-        });
-        dependencies.broadcastSnapshot();
-        if (queued) dependencies.turns.start(queued.turn.id);
-        return "handled";
       }
       case "agent.stop":
         if (

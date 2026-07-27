@@ -1,12 +1,22 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
+import type {
+  AgentActivity,
+  AgentTurn,
+  ChatMessage,
+} from "../../src/shared/contracts";
 import {
   ResponseTimeline,
   resolveFinalAnswerPresentation,
 } from "../../src/renderer/src/components/ResponseTimeline";
+import {
+  buildResponseTimeline,
+  buildTurnExecutionStream,
+  type ResponseTurn,
+} from "../../src/renderer/src/utils/responseTimeline";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 
@@ -15,6 +25,7 @@ function message(
   turnId: string,
   role: ChatMessage["role"],
   content: string,
+  createdAt = "2026-07-26T10:00:08.000Z",
 ): ChatMessage {
   return {
     id,
@@ -23,7 +34,25 @@ function message(
     role,
     content,
     attachments: [],
-    createdAt: "2026-07-26T10:00:08.000Z",
+    createdAt,
+  };
+}
+
+function activity(
+  id: string,
+  turnId: string,
+  createdAt: string,
+): AgentActivity {
+  return {
+    id,
+    conversationId,
+    runId: "run-streaming-answer",
+    turnId,
+    kind: "tool",
+    title: "Read source",
+    detail: null,
+    status: "completed",
+    createdAt,
   };
 }
 
@@ -85,11 +114,12 @@ function renderTimeline(
   turn: AgentTurn,
   messages: ChatMessage[],
   streamingText: string,
+  activities: AgentActivity[] = [],
 ): string {
   return renderToStaticMarkup(createElement(ResponseTimeline, {
     turns: [turn],
     messages,
-    activities: [],
+    activities,
     reasonings: [],
     plans: [],
     checkpoints: [],
@@ -117,8 +147,24 @@ function renderTimeline(
   }));
 }
 
+function authoritativeTurn(
+  turn: AgentTurn,
+  messages: ChatMessage[],
+  activities: AgentActivity[],
+): ResponseTurn {
+  const item = buildResponseTimeline({
+    turns: [turn],
+    messages,
+    activities,
+    reasonings: [],
+    checkpoints: [],
+  }).find((candidate) => candidate.kind === "turn");
+  if (!item || item.kind !== "turn") throw new Error("Expected an authoritative turn.");
+  return item.turn;
+}
+
 describe("Quiet Ledger streaming answer handoff", () => {
-  it("keeps active prose in the work transcript and retains it through the persistence gap on settle", () => {
+  it("keeps active prose in the work transcript and waits for the authoritative terminal message", () => {
     const draft = "Draft answer\n\n```ts\nconst stable = true;";
     const streaming = resolveFinalAnswerPresentation({
       isActive: true,
@@ -130,16 +176,10 @@ describe("Quiet Ledger streaming answer handoff", () => {
       isActive: false,
       terminalAssistantMessage: null,
     }, "", draft);
-    expect(settling).toMatchObject({
-      content: draft,
-      phase: "settling",
-      markdownStreaming: true,
-      showCaret: false,
-      terminalAnswer: null,
-    });
+    expect(settling).toBeNull();
   });
 
-  it("renders live prose in sequence and promotes only the persisted terminal message to the answer document", () => {
+  it("renders live prose in sequence and promotes only a settled persisted terminal message", () => {
     const userMessage = message(
       "user-streaming-answer",
       "turn-streaming-answer",
@@ -158,8 +198,13 @@ describe("Quiet Ledger streaming answer handoff", () => {
       "assistant",
       "Authoritative persisted answer",
     );
-    const handoffHtml = renderTimeline(
+    const activeTerminalHtml = renderTimeline(
       agentTurn("running", terminalMessage.id),
+      [userMessage, terminalMessage],
+      "STALE STREAM MUST NOT RENDER",
+    );
+    const handoffHtml = renderTimeline(
+      agentTurn("completed", terminalMessage.id),
       [userMessage, terminalMessage],
       "STALE STREAM MUST NOT RENDER",
     );
@@ -171,6 +216,10 @@ describe("Quiet Ledger streaming answer handoff", () => {
     expect(liveHtml).toContain("some &lt;unsafe&gt; code");
     expect(liveHtml.match(/streaming-caret/gu)).toHaveLength(1);
 
+    expect(activeTerminalHtml).not.toContain("turn-final-answer-document");
+    expect(activeTerminalHtml).not.toContain("Authoritative persisted answer");
+    expect(activeTerminalHtml).not.toContain("STALE STREAM MUST NOT RENDER");
+
     expect(handoffHtml.match(/turn-final-answer-document/gu)).toHaveLength(1);
     expect(handoffHtml).toContain('data-turn-layer="final-answer"');
     expect(handoffHtml).toContain('data-answer-phase="persisted"');
@@ -178,5 +227,174 @@ describe("Quiet Ledger streaming answer handoff", () => {
     expect(handoffHtml.match(/Authoritative persisted answer/gu)).toHaveLength(1);
     expect(handoffHtml).not.toContain("STALE STREAM MUST NOT RENDER");
     expect(handoffHtml).not.toContain("streaming-caret");
+  });
+
+  it("keeps commentary, activity, later commentary, and the transient tail in chronological segments", () => {
+    const turn = agentTurn("running", null);
+    const at = (seconds: number): string =>
+      `2026-07-26T10:00:${String(seconds).padStart(2, "0")}.000Z`;
+    const messages = [
+      message(
+        "user-streaming-answer",
+        turn.id,
+        "user",
+        "Inspect, then explain.",
+        at(0),
+      ),
+      message(
+        "assistant-commentary-before",
+        turn.id,
+        "assistant",
+        "I’m checking the implementation.",
+        at(3),
+      ),
+      message(
+        "assistant-commentary-after",
+        turn.id,
+        "assistant",
+        "The source confirms the behavior.",
+        at(7),
+      ),
+    ];
+    const activities = [activity("activity-between-commentary", turn.id, at(5))];
+    const responseTurn = authoritativeTurn(turn, messages, activities);
+    const stream = buildTurnExecutionStream(responseTurn, {
+      liveContent: "I’m writing the final response.",
+    });
+
+    expect(stream.map(({ kind, id }) => [kind, id])).toEqual([
+      ["commentary", "assistant-commentary-before"],
+      ["activity-group", "activity-group:activity-between-commentary"],
+      ["commentary", "assistant-commentary-after"],
+      ["commentary", `live-commentary:${turn.id}`],
+    ]);
+
+    const html = renderTimeline(
+      turn,
+      messages,
+      "I’m writing the final response.",
+      activities,
+    );
+    const before = html.indexOf("I’m checking the implementation.");
+    const work = html.indexOf("Read source");
+    const after = html.indexOf("The source confirms the behavior.");
+    const live = html.indexOf("I’m writing the final response.");
+    expect(before).toBeGreaterThanOrEqual(0);
+    expect(work).toBeGreaterThan(before);
+    expect(after).toBeGreaterThan(work);
+    expect(live).toBeGreaterThan(after);
+    expect(html).toContain(
+      'data-assistant-commentary-id="assistant-commentary-before"',
+    );
+    expect(html).toContain(
+      'data-assistant-commentary-id="assistant-commentary-after"',
+    );
+    expect(html).toContain(
+      `data-assistant-commentary-id="live-commentary:${turn.id}"`,
+    );
+    expect(html.match(/turn-commentary-row is-streaming/gu)).toHaveLength(1);
+    expect(html.match(/streaming-caret/gu)).toHaveLength(1);
+    expect(html).not.toContain("turn-final-answer-document");
+  });
+
+  it("shows no surrogate answer during the settlement gap", () => {
+    const turn = {
+      ...agentTurn("completed", null),
+      updatedAt: "2026-07-26T10:00:10.000Z",
+    };
+    const html = renderTimeline(
+      turn,
+      [message(
+        "user-streaming-answer",
+        turn.id,
+        "user",
+        "Wait for persistence.",
+      )],
+      "STALE DRAFT MUST NOT SURVIVE SETTLEMENT",
+    );
+
+    expect(html).toContain(`data-response-row-id="${turn.id}"`);
+    expect(html).not.toContain("STALE DRAFT MUST NOT SURVIVE SETTLEMENT");
+    expect(html).not.toContain("turn-commentary-row");
+    expect(html).not.toContain("turn-final-answer-document");
+    expect(html).not.toContain("data-turn-layer=\"supporting-ledger\"");
+  });
+
+  it("renders terminal text once even when the cleared transient tail has identical content", () => {
+    const terminalText = "Authoritative persisted answer";
+    const terminalMessage = message(
+      "assistant-streaming-answer",
+      "turn-streaming-answer",
+      "assistant",
+      terminalText,
+    );
+    const html = renderTimeline(
+      agentTurn("completed", terminalMessage.id),
+      [
+        message(
+          "user-streaming-answer",
+          "turn-streaming-answer",
+          "user",
+          "Do not duplicate the final response.",
+        ),
+        terminalMessage,
+      ],
+      terminalText,
+    );
+
+    expect(html.match(/turn-final-answer-document/gu)).toHaveLength(1);
+    expect(html.match(/Authoritative persisted answer/gu)).toHaveLength(1);
+    expect(html).toContain('data-answer-phase="persisted"');
+    expect(html).not.toContain("turn-commentary-row is-streaming");
+    expect(html).not.toContain("streaming-caret");
+    expect(html).not.toContain("turn-working-status");
+  });
+
+  it("keeps streamed tokens out of live regions and preserves stable keyed source contracts", () => {
+    const turn = agentTurn("running", null);
+    const html = renderTimeline(
+      turn,
+      [message(
+        "user-streaming-answer",
+        turn.id,
+        "user",
+        "Stream quietly.",
+      )],
+      "Token-by-token prose",
+    );
+    const commentaryStart = html.indexOf('aria-label="Live agent update"');
+    const commentaryEnd = html.indexOf("</article>", commentaryStart);
+    const commentary = html.slice(commentaryStart, commentaryEnd);
+
+    expect(commentary).toContain(
+      `data-assistant-commentary-id="live-commentary:${turn.id}"`,
+    );
+    expect(commentary).not.toContain("aria-live");
+    expect(commentary).not.toContain('role="status"');
+    expect(commentary).toContain('class="streaming-caret" aria-hidden="true"');
+
+    const timelineSource = readFileSync(
+      new URL("../../src/renderer/src/components/ResponseTimeline.tsx", import.meta.url),
+      "utf8",
+    );
+    const projectionSource = readFileSync(
+      new URL("../../src/renderer/src/utils/responseTimeline.ts", import.meta.url),
+      "utf8",
+    );
+    const appSource = readFileSync(
+      new URL("../../src/renderer/src/App.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(timelineSource).toContain('key={entry.id}');
+    expect(timelineSource).toContain(
+      'data-assistant-commentary-id={entry.message?.id ?? entry.id}',
+    );
+    expect(projectionSource).toContain('id: `live-commentary:${turn.id}`');
+    expect(appSource).toMatch(
+      /event\.type === "agent\.activity"[\s\S]*?setStreamingText\(""\);[\s\S]*?event\.type === "agent\.text"/u,
+    );
+    expect(appSource).toMatch(
+      /event\.type === "agent\.completed" \|\| event\.type === "agent\.failed"[\s\S]*?setStreamingText\(""\)/u,
+    );
   });
 });

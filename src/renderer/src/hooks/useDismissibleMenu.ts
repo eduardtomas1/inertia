@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { dismissibleMenuTransition, type DismissibleMenuAction } from "../utils/dismissibleMenu";
+import {
+  dismissibleMenuTransition,
+  outsidePointerShouldRestoreFocus,
+  type DismissibleMenuAction,
+} from "../utils/dismissibleMenu";
 
 export function useDismissibleMenu<Menu extends string>(): {
   menu: Menu | null;
@@ -48,6 +52,7 @@ export function useDismissibleMenu<Menu extends string>(): {
         return;
       }
       dispatch({ type: "outside-pointer" });
+      if (outsidePointerShouldRestoreFocus(target)) restoreTriggerFocus(menu);
     };
 
     const onKeyDown = (event: KeyboardEvent) => {

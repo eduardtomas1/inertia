@@ -1,3 +1,5 @@
+import type { ChatAttachmentMimeType } from "./attachments";
+
 export interface RuntimeConnection {
   websocketUrl: string;
 }
@@ -6,13 +8,14 @@ export interface DesktopAttachment {
   id: string;
   name: string;
   path: string;
-  mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  mimeType: ChatAttachmentMimeType;
   size: number;
 }
 
 export interface AttachmentImport {
   name: string;
-  mimeType: DesktopAttachment["mimeType"];
+  /** Renderer-declared only; the privileged boundary verifies it against bytes and extension. */
+  mimeType: string;
   data: ArrayBuffer;
 }
 
@@ -72,6 +75,8 @@ export interface DesktopBridge {
   revealRuntimeLogs: () => Promise<string>;
   selectAttachments: () => Promise<DesktopAttachment[]>;
   importAttachments: (files: AttachmentImport[]) => Promise<DesktopAttachment[]>;
+  /** Releases an unsent temporary attachment and its privileged preview registration. */
+  releaseAttachment: (id: string) => Promise<void>;
   /** Internal file selection stays in the renderer; only scoped OS actions cross this bridge. */
   openProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
   openExternal: (url: string) => Promise<void>;

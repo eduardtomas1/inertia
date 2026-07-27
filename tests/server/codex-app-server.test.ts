@@ -2,7 +2,13 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ProviderManager, type ProviderAccessMode, type ProviderApprovalEvent } from "../../src/server/providers";
+import {
+  ProviderManager,
+  type ProviderAccessMode,
+  type ProviderApprovalEvent,
+  type ProviderSubagentEvent,
+} from "../../src/server/providers";
+import { startCodexAppServerRun } from "../../src/server/codex-app-server";
 import { readCodexMetadata } from "../../src/server/codex-metadata";
 import {
   portableFixtureRoot,
@@ -52,6 +58,9 @@ const fs = require("node:fs");
 const readline = require("node:readline");
 const capture = (value) => fs.appendFileSync(process.env.INERTIA_APP_SERVER_CAPTURE, JSON.stringify(value) + "\\n");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+if (process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed") {
+  process.stdout.on("error", () => {});
+}
 const approvalMethod = process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "file-change"
   ? "item/fileChange/requestApproval"
   : process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "permissions"
@@ -80,6 +89,8 @@ const requestInput = () => send({
 const complete = () => {
   send({ method: "turn/plan/updated", params: { threadId, turnId, explanation: "A native plan", plan: [{ step: "Inspect", status: "completed" }, { step: "Implement", status: "inProgress" }] } });
   send({ method: "item/reasoning/summaryTextDelta", params: { threadId, turnId, itemId: "reasoning-1", summaryIndex: 0, delta: "Checking the safest path." } });
+  send({ method: "item/started", params: { threadId, turnId, item: { id: "command-1", type: "commandExecution", command: "npm test" } } });
+  send({ method: "item/completed", params: { threadId, turnId, item: { id: "command-1", type: "commandExecution", command: "npm test", aggregatedOutput: "passed" } } });
   send({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { total: { totalTokens: 11839, inputTokens: 11833, cachedInputTokens: 3456, outputTokens: 6, reasoningOutputTokens: 0 }, last: { totalTokens: 126, inputTokens: 120, cachedInputTokens: 0, outputTokens: 6, reasoningOutputTokens: 0 }, modelContextWindow: 258400 } } });
   send({ method: "account/rateLimits/updated", params: { rateLimits: { limitId: "codex", limitName: null, primary: { usedPercent: 41, windowDurationMins: 300, resetsAt: 1893456000 }, secondary: null }, rateLimitsByLimitId: null } });
   send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "Hello " } });
@@ -90,6 +101,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   capture(message);
   if (message.method === "initialize") {
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "rpc-timeout") return;
     return send({ id: message.id, result: { userAgent: "fake" } });
   }
   if (message.method === "initialized") return;
@@ -113,14 +125,50 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {
       return process.stdout.write(
-        "x".repeat(1024 * 1024 + 32) + "\\n"
+        "x".repeat(16 * 1024 * 1024 + 1) + "\\n"
         + JSON.stringify({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "trailing", delta: "must be ignored" } }) + "\\n"
         + JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } }) + "\\n"
       );
     }
     send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "legacy-large-frame") {
+      send({ method: "account/rateLimits/updated", params: { padding: "x".repeat(1024 * 1024 + 32) } });
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      return;
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "aggregate-overflow") {
+      for (let index = 0; index < 12; index += 1) {
+        send({ method: "account/rateLimits/updated", params: { padding: "x".repeat(512), index } });
+      }
+      return;
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "malformed-frame") {
+      return process.stdout.write("{not-json}\\n");
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "premature-exit") {
+      send({ method: "item/started", params: { threadId, turnId, item: { id: "command-before-exit", type: "commandExecution", command: "npm test" } } });
+      console.error("token=super-secret-value");
+      return process.exit(7);
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "signal-exit") {
+      return process.kill(process.pid, "SIGTERM");
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "terminal-then-exit") {
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      return setImmediate(() => process.exit(9));
+    }
     send({ method: "turn/completed", params: { threadId, turn: { id: "orphan-turn", status: "completed", items: [], error: null } } });
-    if (process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt") return;
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "steer-and-collab") {
+      send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-1", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-1"], prompt: "Inspect the tests", model: null, reasoningEffort: null, agentsStates: { "child-1": { status: "pendingInit", message: null } } } } });
+      send({ method: "thread/started", params: { thread: { id: "child-1", parentThreadId: threadId, agentNickname: "Scout", agentRole: "researcher", preview: "Inspect the tests" } } });
+      send({ method: "item/completed", params: { threadId: "child-1", turnId: "child-turn-1", item: { type: "agentMessage", id: "child-message-1", text: "Found coverage." } } });
+      send({ method: "turn/completed", params: { threadId: "child-1", turn: { id: "child-turn-1", status: "completed", items: [], error: null } } });
+      return;
+    }
+    if (
+      process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt"
+      || process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed"
+    ) return;
     if (message.params.approvalPolicy === "never") {
       requestInput();
       return;
@@ -165,6 +213,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (message.id === "input-rpc") return complete();
+  if (message.method === "turn/steer") {
+    send({ id: message.id, result: {} });
+    send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    return;
+  }
   if (message.method === "turn/interrupt") {
     send({ id: message.id, result: {} });
     send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "interrupted", items: [], error: null } } });
@@ -213,6 +266,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const reasoning: string[] = [];
     const usage: Array<number | null> = [];
     const metadata: string[][] = [];
+    const activities: Array<{ activityId?: string; detail?: string; phase: string }> = [];
 
     const run = manager.run(nativeProviderRunInput({
       providerId: "codex",
@@ -236,6 +290,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       },
       onPlan: (event) => plans.push(event.explanation ?? ""),
       onReasoning: (event) => reasoning.push(event.text),
+      onActivity: (event) => activities.push(event),
       onUsage: (event) => usage.push(event.usage.usedTokens),
       onMetadata: (event) => metadata.push(event.metadata.rateLimits?.map((limit) => limit.id) ?? []),
     });
@@ -255,6 +310,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(inputs).toEqual(["Which path should Codex take?"]);
     expect(plans).toEqual(["A native plan"]);
     expect(reasoning).toEqual(["Checking the safest path."]);
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "command-1",
+      phase: "completed",
+      detail: "Command:\nnpm test\n\nOutput:\npassed",
+    }));
     expect(usage).toEqual([126]);
     expect(metadata).toContainEqual(["codex:primary"]);
     expect(manager.cachedMetadata("codex")).toMatchObject({
@@ -479,6 +539,70 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     await manager.disposeAll();
   });
 
+  it("steers the exact active parent turn and projects nested collab identities", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "steer-and-collab";
+    const manager = trackedManager(fake.command);
+    const subagents: ProviderSubagentEvent[] = [];
+    let steered = false;
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-steer",
+      runId: "run-steer",
+      turnId: "local-turn-steer",
+      cwd: fake.root,
+      prompt: "Delegate and wait.",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onStatus: (event) => {
+        if (event.status !== "running" || steered) return;
+        steered = true;
+        void manager.steer(
+          event.conversationId,
+          "Include the edge case.",
+          { runId: event.runId, turnId: event.turnId! },
+        );
+      },
+      onSubagent: (event) => subagents.push(event),
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "completed" });
+    expect(steered).toBe(true);
+    expect(subagents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerAgentId: "child-1",
+        providerToolUseId: "spawn-1",
+        status: "spawned",
+      }),
+      expect.objectContaining({
+        providerAgentId: "child-1",
+        providerRole: "researcher",
+        providerName: "Scout",
+        status: "running",
+      }),
+      expect.objectContaining({
+        providerAgentId: "child-1",
+        status: "completed",
+        result: "Found coverage.",
+      }),
+    ]));
+    expect(captured(fake.capturePath).find(({ method }) =>
+      method === "turn/steer")).toMatchObject({
+      params: {
+        threadId: "thread-new",
+        expectedTurnId: "turn-1",
+        input: [{
+          type: "text",
+          text: "Include the edge case.",
+          text_elements: [],
+        }],
+      },
+    });
+  });
+
   it("fails closed when App Server rejects full-access policy fields", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
@@ -599,11 +723,204 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       onApproval: (event) => approvals.push(event.request.requestId),
       onText: (event) => text.push(event.text),
     });
-    expect(result).toMatchObject({ status: "failed", error: "Codex could not complete the request." });
+    expect(result).toMatchObject({
+      status: "failed",
+      error: "Codex produced a protocol message that was too large to process safely.",
+      failure: {
+        reason: "protocol-overflow",
+        technicalDetail: expect.stringContaining("16777216 bytes"),
+      },
+    });
     expect(approvals).toEqual([]);
     expect(text).toEqual([]);
     expect(manager.activeConversationIds()).toEqual([]);
     await manager.disposeAll();
+  });
+
+  it("accepts a valid protocol frame above the former one MiB boundary", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "legacy-large-frame";
+    const manager = trackedManager(fake.command);
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-former-boundary",
+      cwd: fake.root,
+      prompt: "Accept the large notification",
+      interactionMode: "build",
+      access: "full",
+    }));
+    expect(result).toMatchObject({ status: "completed" });
+    expect(result).not.toHaveProperty("failure");
+  });
+
+  it("classifies aggregate protocol overflow and terminates the owned process", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "aggregate-overflow";
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Exercise the aggregate protocol budget",
+      planMode: false,
+      access: "full",
+      protocolLimits: {
+        maxFrameBytes: 1_024,
+        maxProtocolBytes: 4_096,
+      },
+    });
+    const closed = run.child.exitCode !== null || run.child.signalCode !== null
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => run.child.once("close", () => resolve()));
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "protocol-overflow",
+        technicalDetail: expect.stringContaining("4096 bytes"),
+      },
+    });
+    await closed;
+    expect(run.child.exitCode !== null || run.child.signalCode !== null).toBe(true);
+  });
+
+  it.each([
+    ["malformed-frame", "malformed-protocol"],
+    ["premature-exit", "process-exit"],
+  ] as const)("classifies %s without exposing raw diagnostics", async (scenario, reason) => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = scenario;
+    const manager = trackedManager(fake.command, 100);
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: `conversation-${scenario}`,
+      cwd: fake.root,
+      prompt: "Exercise the transport failure",
+      interactionMode: "build",
+      access: "full",
+    }));
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: {
+        reason,
+        technicalDetail: expect.any(String),
+      },
+    });
+    expect(result.failure?.technicalDetail).not.toContain("super-secret-value");
+    expect(result.failure?.technicalDetail?.length).toBeLessThanOrEqual(32 * 1024);
+    if (scenario === "premature-exit") {
+      expect(result).toMatchObject({
+        exitCode: 7,
+        failure: {
+          activityId: "command-before-exit",
+          technicalDetail: expect.stringContaining("Activity: command-before-exit"),
+        },
+      });
+    }
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("classifies a parent-observed transport close and cleans up the live process", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "transport-observed";
+    let run: ReturnType<typeof startCodexAppServerRun> | undefined;
+    let transportClosed = false;
+
+    run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Exercise the transport failure",
+      planMode: false,
+      access: "full",
+      onStatus: () => {
+        queueMicrotask(() => {
+          if (!run || transportClosed) return;
+          transportClosed = true;
+          run.child.stdout.destroy();
+        });
+      },
+    });
+    const closed = new Promise<void>((resolve) => run?.child.once("close", () => resolve()));
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "transport-closed",
+        technicalDetail: expect.any(String),
+      },
+    });
+    await closed;
+    expect(transportClosed).toBe(true);
+    expect(run.child.exitCode !== null || run.child.signalCode !== null).toBe(true);
+  });
+
+  it("preserves process signals and ignores a later process exit after a terminal event", async () => {
+    const signalFake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = signalFake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "signal-exit";
+    const signalManager = trackedManager(signalFake.command);
+    const signalled = await signalManager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-signal",
+      cwd: signalFake.root,
+      prompt: "Stop by signal",
+      interactionMode: "build",
+      access: "full",
+    }));
+    expect(signalled.status).toBe("failed");
+    if (process.platform === "win32") {
+      expect(["process-exit", "process-signal"]).toContain(signalled.failure?.reason);
+    } else {
+      expect(signalled).toMatchObject({
+        signal: "SIGTERM",
+        failure: { reason: "process-signal" },
+      });
+    }
+
+    const terminalFake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = terminalFake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "terminal-then-exit";
+    const terminalManager = trackedManager(terminalFake.command);
+    const completed = await terminalManager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-terminal-exit",
+      cwd: terminalFake.root,
+      prompt: "Complete first",
+      interactionMode: "build",
+      access: "full",
+    }));
+    expect(completed).toMatchObject({ status: "completed" });
+    expect(completed).not.toHaveProperty("failure");
+  });
+
+  it("classifies an RPC timeout and cleans up the owned process", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "rpc-timeout";
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Time out initialization",
+      planMode: false,
+      access: "full",
+      rpcTimeoutMs: 25,
+    });
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "rpc-timeout",
+        technicalDetail: expect.stringContaining("RPC method: initialize"),
+      },
+    });
   });
 
   it("ignores a stale completion while opening the new turn", async () => {

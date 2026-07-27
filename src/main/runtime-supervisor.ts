@@ -310,11 +310,13 @@ export class RuntimeSupervisor {
       record.acceptingReady = false;
       this.lastError = event.message;
       this.clearTimerValue("startupTimer");
+      this.clearCredentialRequests(record);
       this.emitState();
       return;
     }
     if (event.type === "runtime.stopped") {
       record.acceptingReady = false;
+      this.clearCredentialRequests(record);
       return;
     }
     if (!this.desiredRunning || !record.acceptingReady || record.ready) return;
@@ -400,7 +402,7 @@ export class RuntimeSupervisor {
     >,
   ): void {
     if (!event) return;
-    if (!record.ready || !this.credentialBroker) {
+    if (!this.acceptsCredentialRequests(record) || !this.credentialBroker) {
       this.post(record.child, {
         type: "runtime.credential-result",
         requestId: event.requestId,
@@ -460,7 +462,7 @@ export class RuntimeSupervisor {
         if (this.pendingCredentialRequests.get(event.requestId) !== pending) return;
         this.pendingCredentialRequests.delete(event.requestId);
         this.clearTimer(pending.timer);
-        if (this.current !== record || !record.ready) return;
+        if (!this.acceptsCredentialRequests(record)) return;
         if (event.operation === "resolve") {
           if (typeof value !== "string") {
             this.post(record.child, {
@@ -508,7 +510,7 @@ export class RuntimeSupervisor {
         if (this.pendingCredentialRequests.get(event.requestId) !== pending) return;
         this.pendingCredentialRequests.delete(event.requestId);
         this.clearTimer(pending.timer);
-        if (this.current !== record || !record.ready) return;
+        if (!this.acceptsCredentialRequests(record)) return;
         this.post(record.child, {
           type: "runtime.credential-result",
           requestId: event.requestId,
@@ -519,6 +521,17 @@ export class RuntimeSupervisor {
         });
       },
     );
+  }
+
+  private acceptsCredentialRequests(record: RuntimeProcessRecord): boolean {
+    return this.current === record
+      && this.desiredRunning
+      && record.acceptingReady
+      && (
+        this.phase === "starting"
+        || this.phase === "restarting"
+        || this.phase === "ready"
+      );
   }
 
   private clearCredentialRequests(record: RuntimeProcessRecord | null): void {

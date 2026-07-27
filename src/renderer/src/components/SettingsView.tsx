@@ -46,6 +46,10 @@ import { Switch } from "./ui";
 import { ModelBackendsSettings } from "./ModelBackendsSettings";
 
 type SettingsViewProps = {
+  target?: {
+    section: "providers" | "backends";
+    profileId?: string;
+  } | null;
   settings: AppSettings;
   disabled: boolean;
   providers: ProviderInfo[];
@@ -95,6 +99,7 @@ const shortcuts = [
 ] as const;
 
 export function SettingsView({
+  target,
   settings,
   disabled,
   providers,
@@ -118,7 +123,9 @@ export function SettingsView({
   onSetBackendDefault,
   onClearBackendDefault,
 }: SettingsViewProps): React.JSX.Element {
-  const [section, setSection] = useState<SettingsSection>("general");
+  const [section, setSection] = useState<SettingsSection>(
+    target?.section ?? "general",
+  );
   const [revealingLogs, setRevealingLogs] = useState(false);
   const [logRevealStatus, setLogRevealStatus] = useState<string | null>(null);
   const defaultProvider = providers.find(({ id }) => id === settings.defaultProvider);
@@ -272,6 +279,9 @@ export function SettingsView({
         {section === "backends" && (
           <ModelBackendsSettings
             profiles={backendProfiles}
+            initialProfileId={target?.section === "backends"
+              ? target.profileId
+              : undefined}
             defaults={backendDefaults}
             projects={projects}
             disabled={disabled}

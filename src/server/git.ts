@@ -151,6 +151,8 @@ export interface GitSnapshotComparison {
   files: TurnGitArtifactFile[];
   insertions: number;
   deletions: number;
+  summaryTruncated: boolean;
+  patchTruncated: boolean;
   truncated: boolean;
 }
 
@@ -519,6 +521,7 @@ export async function getRepositoryStatus(repositoryPath: string): Promise<GitRe
   const root = await repositoryRoot(repositoryPath);
   const statusResult = await runGit(root, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"], {
     maxOutputBytes: DEFAULT_OUTPUT_BYTES,
+    truncateOutput: true,
     failureMessage: "Unable to read the repository status.",
   });
   const parsed = parsePorcelain(statusResult.stdout);
@@ -527,7 +530,11 @@ export async function getRepositoryStatus(repositoryPath: string): Promise<GitRe
     (await hasHead(root))
       ? ["diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "HEAD", "--"]
       : ["diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "--cached", "--"],
-    { maxOutputBytes: DEFAULT_OUTPUT_BYTES, failureMessage: "Unable to calculate repository change totals." },
+    {
+      maxOutputBytes: DEFAULT_OUTPUT_BYTES,
+      truncateOutput: true,
+      failureMessage: "Unable to calculate repository change totals.",
+    },
   );
   const stats = parseNumstat(statsResult.stdout);
   for (const file of parsed.files) {
@@ -728,15 +735,18 @@ export async function compareGitSnapshots(
     };
   });
   const files = allFiles.slice(0, 200);
+  const summaryTruncated = names.truncated
+    || stats.truncated
+    || allFiles.length > files.length;
+  const patchTruncated = patch.truncated;
   return {
     patch: utf8Prefix(patch.stdout, maxBytes),
     files,
     insertions: allFiles.reduce((total, file) => total + file.insertions, 0),
     deletions: allFiles.reduce((total, file) => total + file.deletions, 0),
-    truncated: names.truncated
-      || stats.truncated
-      || patch.truncated
-      || allFiles.length > files.length,
+    summaryTruncated,
+    patchTruncated,
+    truncated: summaryTruncated || patchTruncated,
   };
 }
 

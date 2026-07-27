@@ -6,6 +6,7 @@ import type {
   ModelSelection,
   ProviderModel,
   ProviderRateLimit,
+  SubagentTraceStatus,
   ThreadUsageSnapshot,
 } from "../../shared/contracts";
 import type { BackendCompatibilityProbeResult } from "../../shared/backend-probe";
@@ -85,6 +86,29 @@ export type ProviderRunStatus =
   | "failed"
   | "cancelled";
 
+export const PROVIDER_FAILURE_REASONS = [
+  "protocol-overflow",
+  "malformed-protocol",
+  "process-exit",
+  "process-signal",
+  "rpc-timeout",
+  "codex-error",
+  "transport-closed",
+] as const;
+
+export type ProviderFailureReason = (typeof PROVIDER_FAILURE_REASONS)[number];
+
+export interface ProviderRunFailure {
+  reason: ProviderFailureReason;
+  /** Safe user-facing summary. */
+  message: string;
+  /** Bounded, scrubbed diagnostic exposed only through Technical details. */
+  technicalDetail?: string;
+  phase?: string;
+  terminalEvent?: string;
+  activityId?: string;
+}
+
 export interface ProviderEventBase {
   providerId: ProviderId;
   /** The caller's thread or conversation identifier, normalized to one key. */
@@ -108,6 +132,10 @@ export interface ProviderActivityEvent extends ProviderEventBase {
   kind: ProviderActivityKind;
   phase: ProviderActivityPhase;
   label: string;
+  /** Official provider item/call identity when the transport exposes one. */
+  activityId?: string;
+  /** Bounded, scrubbed technical input/output; never assistant prose. */
+  detail?: string;
 }
 
 export interface ProviderStatusEvent extends ProviderEventBase {
@@ -169,6 +197,27 @@ export interface ProviderMetadataEvent extends ProviderEventBase {
   complete: boolean;
 }
 
+/**
+ * A provider-authored delegated-agent state transition. Adapters only emit
+ * allowlisted fields with exact transport identities; raw provider payloads
+ * never cross this boundary.
+ */
+export interface ProviderSubagentEvent extends ProviderEventBase {
+  type: "subagent";
+  sequence: number;
+  providerTaskId: string | null;
+  providerAgentId: string | null;
+  parentProviderAgentId: string | null;
+  parentProviderToolUseId: string | null;
+  providerToolUseId: string | null;
+  providerRole: string | null;
+  providerName: string | null;
+  status: SubagentTraceStatus;
+  description: string | null;
+  progress: string | null;
+  result: string | null;
+}
+
 export type ProviderEvent =
   | ProviderTextEvent
   | ProviderActivityEvent
@@ -181,7 +230,8 @@ export type ProviderEvent =
   | ProviderPlanEvent
   | ProviderReasoningEvent
   | ProviderUsageEvent
-  | ProviderMetadataEvent;
+  | ProviderMetadataEvent
+  | ProviderSubagentEvent;
 
 export interface ProviderRunCallbacks {
   onEvent?: (event: ProviderEvent) => void;
@@ -197,6 +247,7 @@ export interface ProviderRunCallbacks {
   onReasoning?: (event: ProviderReasoningEvent) => void;
   onUsage?: (event: ProviderUsageEvent) => void;
   onMetadata?: (event: ProviderMetadataEvent) => void;
+  onSubagent?: (event: ProviderSubagentEvent) => void;
 }
 
 export interface ProviderRunResult {
@@ -209,6 +260,7 @@ export interface ProviderRunResult {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   error?: string;
+  failure?: ProviderRunFailure;
 }
 
 export type ProviderRuntimeErrorCode = "invalid_input" | "already_running";

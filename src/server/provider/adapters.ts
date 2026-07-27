@@ -15,6 +15,7 @@ import {
   type ProviderId,
   type ProviderRunInput,
 } from "./contracts";
+import { providerActivityDetailSections } from "./activity-detail";
 
 export interface ProviderInvocation {
   command: string;
@@ -28,6 +29,10 @@ export interface ProviderParserState {
   sawStreamingDelta: boolean;
   hadErrorEvent: boolean;
   failureText?: string;
+  toolActivities?: Map<
+    string,
+    { kind: ProviderActivityKind; label: string }
+  >;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -100,16 +105,6 @@ function contentTexts(value: unknown): string[] {
   return texts;
 }
 
-function toolNamesFromContent(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const names: string[] = [];
-  for (const entry of value) {
-    const block = objectValue(entry);
-    if (block?.type === "tool_use") names.push(humanizeToolName(block.name));
-  }
-  return names;
-}
-
 function cursorToolName(toolCall: unknown): string {
   const object = objectValue(toolCall);
   if (!object) return "Tool";
@@ -124,7 +119,12 @@ export function normalizeProviderLine(
   line: string,
   state: ProviderParserState,
   emitText: (text: string) => void,
-  emitActivity: (kind: ProviderActivityKind, phase: ProviderActivityPhase, label: string) => void,
+  emitActivity: (
+    kind: ProviderActivityKind,
+    phase: ProviderActivityPhase,
+    label: string,
+    detail?: { activityId?: string; detail?: string },
+  ) => void,
   emitSession: (sessionId: string) => void,
 ): void {
   let parsed: unknown;
@@ -153,7 +153,13 @@ export function normalizeProviderLine(
     state.hadErrorEvent = true;
     const error = objectValue(event.error);
     state.failureText ??= stringValue(event.message) ?? stringValue(error?.message) ?? stringValue(event.result);
-    emitActivity("system", "failed", `${PROVIDER_INFO[providerId].name} reported an error`);
+    const detail = providerActivityDetailSections({ error: state.failureText });
+    emitActivity(
+      "system",
+      "failed",
+      `${PROVIDER_INFO[providerId].name} reported an error`,
+      detail ? { detail } : undefined,
+    );
   }
 
   switch (providerId) {
@@ -169,15 +175,46 @@ export function normalizeProviderLine(
         return;
       }
       if (itemType === "reasoning") {
-        emitActivity("reasoning", type === "item.completed" ? "completed" : "started", "Reasoning");
+        emitActivity(
+          "reasoning",
+          type === "item.completed" ? "completed" : "started",
+          "Reasoning",
+          boundedIdentifier(item.id) ? { activityId: boundedIdentifier(item.id)! } : undefined,
+        );
         return;
       }
       if (itemType === "command_execution") {
-        emitActivity("command", type === "item.completed" ? "completed" : "started", "Command");
+        const detail = providerActivityDetailSections({
+          command: item.command ?? item.cmd,
+          ...(type === "item.completed"
+            ? {
+                output: item.aggregated_output
+                  ?? item.aggregatedOutput
+                  ?? item.output
+                  ?? [item.stdout, item.stderr],
+              }
+            : {}),
+        });
+        emitActivity(
+          "command",
+          type === "item.completed" ? "completed" : "started",
+          "Command",
+          {
+            ...(boundedIdentifier(item.id)
+              ? { activityId: boundedIdentifier(item.id)! }
+              : {}),
+            ...(detail ? { detail } : {}),
+          },
+        );
         return;
       }
       if (itemType && itemType !== "agent_message") {
-        emitActivity("tool", type === "item.completed" ? "completed" : "started", humanizeToolName(itemType));
+        emitActivity(
+          "tool",
+          type === "item.completed" ? "completed" : "started",
+          humanizeToolName(itemType),
+          boundedIdentifier(item.id) ? { activityId: boundedIdentifier(item.id)! } : undefined,
+        );
       }
       return;
     }
@@ -191,13 +228,56 @@ export function normalizeProviderLine(
         if (!state.sawStreamingDelta) {
           for (const text of contentTexts(message?.content)) emitNonEmptyText(text);
         }
-        for (const name of toolNamesFromContent(message?.content)) emitActivity("tool", "started", name);
+        if (Array.isArray(message?.content)) {
+          for (const blockValue of message.content) {
+            const block = objectValue(blockValue);
+            if (block?.type !== "tool_use") continue;
+            const label = humanizeToolName(block.name);
+            const kind = block.name === "Bash" ? "command" : "tool";
+            const activityId = boundedIdentifier(block.id);
+            if (activityId) {
+              (state.toolActivities ??= new Map()).set(activityId, {
+                kind,
+                label,
+              });
+            }
+            const input = objectValue(block.input);
+            const detail = kind === "command"
+              ? providerActivityDetailSections({ command: input?.command })
+              : null;
+            emitActivity(kind, "started", label, {
+              ...(activityId ? { activityId } : {}),
+              ...(detail ? { detail } : {}),
+            });
+          }
+        }
         return;
       }
       if (type === "user") {
         const message = objectValue(event.message);
-        if (Array.isArray(message?.content) && message.content.some((block) => objectValue(block)?.type === "tool_result")) {
-          emitActivity("tool", "completed", "Tool");
+        if (Array.isArray(message?.content)) {
+          for (const blockValue of message.content) {
+            const block = objectValue(blockValue);
+            if (block?.type !== "tool_result") continue;
+            const activityId = boundedIdentifier(block.tool_use_id);
+            const activity = activityId
+              ? state.toolActivities?.get(activityId)
+              : undefined;
+            const failed = block.is_error === true;
+            const detail = providerActivityDetailSections({
+              [failed ? "error" : "output"]: block.content,
+            });
+            emitActivity(
+              activity?.kind ?? "tool",
+              failed ? "failed" : "completed",
+              activity?.label ?? "Tool",
+              {
+                ...(activityId ? { activityId } : {}),
+                ...(detail ? { detail } : {}),
+              },
+            );
+            if (activityId) state.toolActivities?.delete(activityId);
+          }
         }
         return;
       }
@@ -228,7 +308,22 @@ export function normalizeProviderLine(
       }
       if (type === "tool_call") {
         const phase = event.subtype === "completed" ? "completed" : event.subtype === "failed" ? "failed" : "started";
-        emitActivity("tool", phase, cursorToolName(event.tool_call));
+        const toolCall = objectValue(event.tool_call);
+        const activityId = boundedIdentifier(toolCall?.toolCallId)
+          ?? boundedIdentifier(toolCall?.id)
+          ?? boundedIdentifier(event.tool_call_id);
+        const kind = toolCall?.kind === "execute" ? "command" : "tool";
+        const rawInput = objectValue(toolCall?.rawInput);
+        const failed = phase === "failed";
+        const detail = providerActivityDetailSections({
+          command: rawInput?.command,
+          [failed ? "error" : "output"]:
+            toolCall?.rawOutput ?? toolCall?.output ?? toolCall?.content,
+        });
+        emitActivity(kind, phase, cursorToolName(event.tool_call), {
+          ...(activityId ? { activityId } : {}),
+          ...(detail ? { detail } : {}),
+        });
         return;
       }
       if (type === "result") {
@@ -251,7 +346,29 @@ export function normalizeProviderLine(
       if (type === "tool_use") {
         const toolState = objectValue(part?.state);
         const phase = toolState?.status === "completed" ? "completed" : toolState?.status === "error" ? "failed" : "started";
-        emitActivity("tool", phase, humanizeToolName(part?.tool));
+        const tool = stringValue(part?.tool);
+        const input = objectValue(toolState?.input);
+        const error = objectValue(toolState?.error);
+        const detail = providerActivityDetailSections({
+          command: input?.command,
+          ...(phase === "failed"
+            ? { error: stringValue(error?.message) ?? toolState?.error }
+            : { output: toolState?.output }),
+        });
+        emitActivity(
+          tool === "bash" ? "command" : "tool",
+          phase,
+          humanizeToolName(tool),
+          {
+            ...(boundedIdentifier(part?.callID) ?? boundedIdentifier(part?.id)
+              ? {
+                  activityId: (boundedIdentifier(part?.callID)
+                    ?? boundedIdentifier(part?.id))!,
+                }
+              : {}),
+            ...(detail ? { detail } : {}),
+          },
+        );
         return;
       }
       if (type === "step_finish") {

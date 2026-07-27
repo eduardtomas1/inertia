@@ -13,8 +13,10 @@ import {
 
 import type {
   ChatAttachment,
+  InteractionMode,
   TurnRequestContext,
 } from "../../../shared/contracts";
+import { chatAttachmentKind } from "../../../shared/attachments";
 
 export const MAX_EXECUTION_CONTEXT_REFERENCES = 32;
 export const MAX_EXECUTION_MESSAGE_SEGMENTS = 48;
@@ -29,6 +31,12 @@ const MAX_IMAGE_COUNT = 8;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
 const SHA256_REFERENCE_PATTERN = /^sha256:([0-9a-f]{64})$/u;
+const BUILD_MODE_INSTRUCTION_LABEL = "build-mode";
+
+export const BUILD_MODE_INSTRUCTION = [
+  "In Build mode, inspect enough to act safely, then implement and validate promptly.",
+  "Keep visible planning brief and operational; use a formal numbered plan only when the user requests one, the task is ambiguous, or safe staged coordination requires it.",
+].join(" ");
 
 export type TurnExecutionContextKind =
   | "file"
@@ -91,6 +99,11 @@ export interface AssembledTurnRequest {
 export interface AssembleTurnRequestInput {
   cwd: string;
   visibleContent: string;
+  /**
+   * Normal user turns supply their authoritative persisted mode. Privileged
+   * callers that omit a mode receive no interaction-mode instruction.
+   */
+  interactionMode?: InteractionMode;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];
   context?: TurnRequestContext;
@@ -508,6 +521,15 @@ function validateImages(
   attachments: readonly ChatAttachment[],
   requestedPaths: readonly string[] | undefined,
 ): { imagePaths: string[]; imageBytes: number } {
+  const documentCount = attachments.filter(({ mimeType }) =>
+    chatAttachmentKind(mimeType) === "document").length;
+  if (documentCount > 0) {
+    throw new Error(
+      documentCount === 1
+        ? "Document attachments are preview-only and cannot be sent to this provider."
+        : `${documentCount} document attachments are preview-only and cannot be sent to this provider.`,
+    );
+  }
   const paths = requestedPaths ?? attachments.map(({ path }) => path);
   if (paths.length > MAX_IMAGE_COUNT) {
     throw new Error(`Attach at most ${MAX_IMAGE_COUNT} images to one turn.`);
@@ -549,7 +571,17 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     input.attachments ?? [],
     input.imagePaths,
   );
-  const internalInstructions = (input.internalInstructions ?? []).map(({ label, text }) => ({
+  const modeInstructions: readonly HiddenProviderInstruction[] =
+    input.interactionMode === "build"
+      ? [{
+          label: BUILD_MODE_INSTRUCTION_LABEL,
+          text: BUILD_MODE_INSTRUCTION,
+        }]
+      : [];
+  const internalInstructions = [
+    ...modeInstructions,
+    ...(input.internalInstructions ?? []),
+  ].map(({ label, text }) => ({
     label: boundedLabel(label, "Internal instruction label"),
     text: boundedText(
       text,

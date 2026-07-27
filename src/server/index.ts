@@ -18,6 +18,7 @@ import {
   type RuntimeMutationEvent,
   type RuntimeSyncCursor,
   type TurnRequestContext,
+  chatAttachmentKind,
 } from "../shared/contracts";
 import type { OpenProjectPathRequest } from "../shared/desktop";
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
@@ -60,6 +61,11 @@ import {
   readWorkspaceTextFile,
   searchWorkspaceEntries,
 } from "./workspace";
+import {
+  discoverWorkspaceGitRepositories,
+  resolveWorkspaceGitRepository,
+  workspaceGitFilePath,
+} from "./workspace-git";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
 import { inspectProjectIdentity } from "./project-identity";
@@ -199,7 +205,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     }
   }));
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
-  await turnGitArtifacts.reconcile().catch(() => undefined);
   const enableProviders = options.enableProviders ?? true;
   const terminals = new TerminalManager();
   const metadataCache = new ProviderMetadataCache({
@@ -245,6 +250,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const websocketPath = `/runtime/${token}`;
   const webSockets = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES, perMessageDeflate: false });
   let closed = false;
+  let artifactReconciliation: Promise<void> | null = null;
 
   const server = createServer((_request, response) => {
     response.writeHead(404, {
@@ -409,7 +415,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   }> => {
     const conversation = store.conversation(selection.conversationId);
     if (conversation.projectId !== selection.projectId) throw new RequestError("The thread does not belong to this project.");
-    const diff = await getUnifiedDiff(store.conversationPath(conversation.id), { ignoreWhitespace: selection.ignoreWhitespace });
+    const repositoryPath = selection.repositoryPath ?? ".";
+    if (purpose === "revision" && repositoryPath !== ".") {
+      throw new RequestError("Agent revisions are available only for the project-root repository.");
+    }
+    const workspaceRoot = store.conversationPath(conversation.id);
+    const repository = await resolveWorkspaceGitRepository(workspaceRoot, repositoryPath);
+    const diff = await getUnifiedDiff(repository.root, { ignoreWhitespace: selection.ignoreWhitespace });
     if (diff.truncated) throw new RequestError("The current diff is truncated. Reduce the change set before reviewing a selection.");
     const structured = parseUnifiedDiff(diff.text);
     if (structured.fingerprint !== selection.fingerprint) throw new RequestError("The diff changed before this review action started. Refresh and select the lines again.");
@@ -430,7 +442,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         || (purpose === "ask" ? DEFAULT_DIFF_QUESTION : DEFAULT_DIFF_REVISION),
       requestContext: {
         diffSelections: [{
-          path: file.path,
+          path: workspaceGitFilePath(repositoryPath, file.path),
           hunkHeader: hunk.header,
           content: context.text,
           selectedLineCount: context.selectedLineCount,
@@ -484,10 +496,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         await turnGitArtifacts.captureBefore(input);
         broadcastSnapshot();
       },
-      captureGitArtifacts: async (input) => {
-        await turnGitArtifacts.captureAfter(input);
-        broadcastSnapshot();
-      },
+      captureGitArtifacts: (input) => turnGitArtifacts.finalize(input),
       refreshProviderMetadata: async ({ providerId, turnId, runStartedAt, status }) => {
         if (status !== "completed") return;
         const turn = store.agentTurn(turnId);
@@ -770,8 +779,39 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         }
         case "message.send": {
           const conversation = store.conversation(command.payload.conversationId);
-          if (turns.isActive(conversation.id) || isolatedRuns.has(conversation.id)) {
+          if (turns.isActive(conversation.id)) {
+            if (
+              command.payload.attachments.length > 0
+              || command.payload.context !== undefined
+            ) {
+              throw new RequestError(
+                "Follow-ups while the agent is working support text only.",
+              );
+            }
+            const followedUp = await turns.steer(
+              conversation.id,
+              command.payload.content,
+            );
+            if (!followedUp) {
+              throw new RequestError(
+                "This active agent route cannot accept a follow-up.",
+              );
+            }
+            send(socket, {
+              type: "request.ok",
+              requestId: command.requestId,
+            });
+            broadcastSnapshot();
+            return;
+          }
+          if (isolatedRuns.has(conversation.id)) {
             throw new RequestError("Wait for the current run or read-only review to finish first.");
+          }
+          if (command.payload.attachments.some(({ mimeType }) =>
+            chatAttachmentKind(mimeType) === "document")) {
+            throw new RequestError(
+              "Document attachments are preview-only and cannot be sent to the selected provider.",
+            );
           }
           if (enableProviders) {
             const selectedProvider = providerInfo.find(({ id }) => id === conversation.providerId);
@@ -850,6 +890,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             && !turns.cancel(command.payload.conversationId)
           ) {
             throw new RequestError("This thread does not have an active run.");
+          }
+          break;
+        case "agent.subagent.stop":
+          if (!await turns.stopSubagent(
+            command.payload.conversationId,
+            command.payload.traceId,
+          )) {
+            throw new RequestError(
+              "That delegated Claude task is no longer live or cannot be stopped.",
+            );
           }
           break;
         case "activity.stop": {
@@ -1051,6 +1101,38 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           if (command.payload.conversationId && !command.payload.path && !diff.truncated) broadcastSnapshot();
           return;
         }
+        case "git.workspace.refresh": {
+          const path = workspacePath(command.payload.projectId, command.payload.conversationId);
+          const status = await discoverWorkspaceGitRepositories(path);
+          send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: { kind: "git.workspace.status", status },
+          });
+          return;
+        }
+        case "git.workspace.diff": {
+          const path = workspacePath(command.payload.projectId, command.payload.conversationId);
+          const repository = await resolveWorkspaceGitRepository(path, command.payload.repositoryPath);
+          const diff = await getUnifiedDiff(repository.root, {
+            ...(command.payload.path ? { paths: [command.payload.path] } : {}),
+            ignoreWhitespace: command.payload.ignoreWhitespace,
+          });
+          send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: {
+              kind: "git.workspace.diff",
+              diff: {
+                repositoryPath: command.payload.repositoryPath,
+                patch: diff.text,
+                truncated: diff.truncated,
+                files: changedFiles(repository.status),
+              },
+            },
+          });
+          return;
+        }
         case "git.turn.diff": {
           const conversation = store.conversation(command.payload.conversationId);
           if (conversation.projectId !== command.payload.projectId) {
@@ -1211,6 +1293,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
                 assertActive();
                 return {
                   conversationId: conversation.id,
+                  repositoryPath: command.payload.repositoryPath ?? ".",
                   fingerprint: context.fingerprint,
                   filePath: context.filePath,
                   hunkId: context.hunkId,
@@ -1494,11 +1577,20 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           const path = workspacePath(command.payload.projectId, command.payload.conversationId);
           const result = command.payload.query
             ? await searchWorkspaceEntries(path, command.payload.query)
-            : await listWorkspaceEntries(path);
+            : await listWorkspaceEntries(path, command.payload.directory);
           const entries = result.entries
             .filter((entry) => entry.kind === "file" || entry.kind === "directory")
             .map((entry) => ({ path: entry.path, kind: entry.kind as "file" | "directory" }));
-          send(socket, { type: "request.result", requestId: command.requestId, result: { kind: "workspace.entries", entries, truncated: result.truncated } });
+          send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: {
+              kind: "workspace.entries",
+              directory: "directory" in result ? result.directory : "",
+              entries,
+              truncated: result.truncated,
+            },
+          });
           return;
         }
         case "workspace.file.read": {
@@ -1628,6 +1720,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const address = server.address();
   if (!address || typeof address === "string") { store.close(); throw new Error("Runtime did not receive a local port."); }
 
+  // Reconcile durable pending artifacts only after the runtime can serve the
+  // already-terminal turn snapshot. Restart recovery must not hold the app
+  // startup screen behind Git work.
+  artifactReconciliation = turnGitArtifacts.reconcile()
+    .then((changed) => {
+      if (changed && !closed) broadcastSnapshot();
+    })
+    .catch(() => undefined);
+
   if (enableProviders) void refreshProviderInfo(undefined, true).catch(() => {
     if (closed) return;
     providerInfo = providerInfo.map((provider) => ({
@@ -1649,6 +1750,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       terminals.disposeAll();
       await isolatedRuns.dispose(cause);
       await turns.dispose(cause);
+      await artifactReconciliation;
       runtimeSync.terminateAll((client) => client.terminate());
       await Promise.all([
         new Promise<void>((resolveClose) => webSockets.close(() => resolveClose())),

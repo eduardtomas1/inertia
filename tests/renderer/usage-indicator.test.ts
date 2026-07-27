@@ -4,11 +4,23 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { ProviderMetadataFieldState, ProviderRateLimit, ThreadUsageSnapshot, UsageDisplayMode } from "../../src/shared/contracts";
+import type {
+  ProviderMetadataFieldState,
+  ProviderRateLimit,
+  ThreadUsageSnapshot,
+  UsageDisplayMode,
+} from "../../src/shared/contracts";
 import {
+  contextUsageDisplayValue,
+  type ContextUsageDataQuality,
+  usageQuotaSourceForSelection,
+} from "../../src/renderer/src/utils/usageDisplay";
+import {
+  CONTEXT_NEAR_LIMIT_REMAINING_PERCENT,
   contextRemaining,
+  contextRingState,
+  contextTriggerSummary,
   displayPercent,
-  usageAutoCollapseReason,
   UsageIndicator,
 } from "../../src/renderer/src/components/UsageIndicator";
 
@@ -44,136 +56,383 @@ function render(
   rateLimits: ProviderRateLimit[],
   rateLimitState: ProviderMetadataFieldState,
   mode: UsageDisplayMode = "expanded",
+  options: {
+    contextQuality?: ContextUsageDataQuality;
+    providerLabel?: string;
+    quotaSource?: "selected-route" | "isolated";
+  } = {},
 ): string {
   return renderToStaticMarkup(createElement(UsageIndicator, {
     usage: snapshot,
     rateLimits,
     rateLimitState,
+    quotaSource: options.quotaSource ?? "selected-route",
     mode,
-    providerLabel: "Codex",
+    providerLabel: options.providerLabel ?? "Codex · Native · GPT-5",
+    contextQuality: options.contextQuality,
     onModeChange: () => undefined,
   }));
 }
 
 describe("UsageIndicator", () => {
-  it("supports expanded, compact, and hidden modes with explicit disclosure state", () => {
-    const expanded = render(usage(), [], freshState);
+  it("never falls back from a missing custom profile to native account quota", () => {
+    expect(usageQuotaSourceForSelection({
+      backendProfileId: "custom:deleted",
+    }, undefined)).toBe("isolated");
+    expect(usageQuotaSourceForSelection({
+      backendProfileId: "builtin:anthropic",
+    }, undefined)).toBe("selected-route");
+    expect(usageQuotaSourceForSelection({
+      backendProfileId: "builtin:anthropic",
+    }, {
+      id: "custom:mismatched",
+      preset: "custom",
+    })).toBe("isolated");
+    expect(usageQuotaSourceForSelection({
+      backendProfileId: "builtin:anthropic",
+    }, {
+      id: "builtin:anthropic",
+      preset: "native",
+    })).toBe("selected-route");
+  });
+
+  it("renders task-30 circle surfaces as an anchored, closed disclosure", () => {
     const compact = render(usage(), [], freshState, "compact");
+    const expanded = render(usage(), [], freshState, "expanded");
+    const controls = compact.match(/aria-controls="([^"]+)"/u)?.[1];
+
+    expect(compact).toContain('data-mode="compact"');
+    expect(compact).toContain('data-composer-control="usage"');
+    expect(compact).toContain('aria-haspopup="dialog"');
+    expect(compact).toContain('aria-expanded="false"');
+    expect(compact).toContain('data-context-state="current"');
+    expect(compact).toContain('data-context-ring-state="current"');
+    expect(compact).toContain('title="Context window 50% remaining."');
+    expect(compact).toContain('aria-label="Open usage and context. Context window 50% remaining."');
+    expect(compact).toContain('class="usage-context-ring-value"');
+    expect(compact).toContain('stroke-dasharray="50 50"');
+    expect(compact).not.toContain("usage-trigger-value");
+    expect(compact).not.toContain("spinner");
+    expect(controls).toBeTruthy();
+    expect(compact).toContain(`id="${controls}"`);
+    expect(compact).toContain('role="dialog"');
+    expect(compact).toContain('hidden=""');
 
     expect(expanded).toContain('data-mode="expanded"');
-    expect(expanded).toContain('aria-label="Collapse usage and context"');
-    expect(expanded).toContain('aria-expanded="true"');
-    expect(compact).toContain('data-mode="compact"');
-    expect(compact).toContain('aria-label="Expand usage and context"');
-    expect(compact).toContain('aria-expanded="false"');
-    expect(compact).toContain('aria-label="Hide usage and context"');
+    expect(expanded).toContain('class="usage-trigger-value"');
+    expect(expanded).toContain(">50%</span>");
     expect(render(usage(), [], freshState, "hidden")).toBe("");
   });
 
-  it("keeps the composer card bounded and collapses its grid in narrow composer regions", () => {
+  it("keeps the anchored popover width and height bounded", () => {
     const css = readFileSync(new URL("../../src/renderer/src/styles.css", import.meta.url), "utf8");
-    expect(css).toMatch(/\.composer-usage\s*\{[^}]*width:\s*min\(830px,\s*100%\)[^}]*max-width:\s*830px/su);
-    expect(css).toMatch(/\.composer-region\s*\{[^}]*container-type:\s*inline-size/su);
-    expect(css).toMatch(/@container\s*\(max-width:\s*560px\)\s*\{[^}]*\.usage-expanded-content\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/su);
-    expect(css).toMatch(/@media\s*\(max-width:\s*1024px\),\s*\(max-height:\s*760px\)\s*\{[^}]*\.usage-panel\.is-expanded\s+\.usage-expanded-content\s*\{[^}]*max-height:/su);
-  });
-
-  it("auto-collapses only when space is constrained or no useful report exists", () => {
-    expect(usageAutoCollapseReason(usage(), [], false)).toBeNull();
-    expect(usageAutoCollapseReason(usage(), [], true)).toBe("space");
-    expect(usageAutoCollapseReason(null, [], false)).toBe("unavailable");
-    expect(usageAutoCollapseReason(usage({ usedTokens: null, maxTokens: null, totalProcessedTokens: null }), [], false)).toBe("unavailable");
-    expect(usageAutoCollapseReason(usage({ usedTokens: null, maxTokens: 200_000 }), [], false)).toBeNull();
-  });
-
-  it("keeps raw quota overflow out of display values and meter widths", () => {
-    const html = render(
-      usage(),
-      [{ id: "quota", label: "Quota", usedPercent: 130, remainingPercent: -30, windowMinutes: 300, resetsAt: "2026-07-22T15:00:00.000Z" }],
-      freshState,
+    expect(css).toMatch(
+      /\.usage-popover\s*\{[^}]*width:\s*min\(320px,\s*calc\(100vw\s*-\s*24px\)\)[^}]*max-width:\s*calc\(100vw\s*-\s*24px\)[^}]*max-height:\s*min\(460px,\s*calc\(100vh\s*-\s*72px\)\)/su,
     );
-    expect(displayPercent(-30)).toBe(0);
-    expect(displayPercent(130)).toBe(100);
-    expect(displayPercent(Number.NaN)).toBeNull();
-    expect(html).toContain("0% left");
-    expect(html).toContain("width:0%");
-    expect(html).not.toContain("-30%");
-    expect(html).toMatch(/Resets Jul 22.*(?:UTC|GMT)/u);
+    expect(css).toMatch(/\.usage-popover\s*\{[^}]*position:\s*absolute[^}]*right:\s*0[^}]*bottom:\s*calc\(100%\s*\+\s*8px\)/su);
+    expect(css).toMatch(/\.composer-usage\s*\{[^}]*flex:\s*0 0 auto[^}]*align-self:\s*center/su);
+    expect(css).not.toMatch(/\.composer-usage\s*\{[^}]*width:/su);
+    expect(css).not.toContain(".usage-panel");
+    expect(css).not.toContain(".usage-expanded-content");
+    expect(css).not.toContain(".usage-compact-main");
   });
 
-  it("does not invent context capacity for unknown occupancy or a zero denominator", () => {
+  it("retains conservative context handling", () => {
+    expect(contextRemaining(usage())).toBe(50);
     expect(contextRemaining(usage({ maxTokens: 0 }))).toBeNull();
     expect(contextRemaining(usage({ usedTokens: null, maxTokens: 200_000 }))).toBeNull();
     expect(contextRemaining(usage({ usedTokens: 200_001, maxTokens: 200_000 }))).toBeNull();
     expect(contextRemaining(usage({ usedTokens: -1, maxTokens: 200_000 }))).toBeNull();
-    const html = render(
-      usage({ usedTokens: null, maxTokens: 200_000, totalProcessedTokens: 900, totalProcessedScope: "session" }),
-      [],
-      { ...freshState, freshness: "unavailable", provenance: null, updatedAt: null },
-    );
-    expect(html).toContain("current occupancy unavailable");
-    expect(html).toContain("900 processed in this session");
-    expect(html).toContain("Provider quota");
-    expect(html).toContain("Unavailable");
-    expect(html).not.toContain("100% left");
   });
 
-  it("renders every provider window with reset timing and freshness provenance", () => {
-    const fresh = render(
-      usage(),
-      [
-        { id: "five-hour", label: "Five hour", usedPercent: 25, remainingPercent: 75, windowMinutes: 300, resetsAt: "2026-07-22T15:00:00.000Z" },
-        { id: "weekly", label: "Weekly", usedPercent: 40, remainingPercent: 60, windowMinutes: 10_080, resetsAt: null },
-      ],
+  it("distinguishes current, stale, near-limit, and unavailable context honestly", () => {
+    const current = contextUsageDisplayValue({ usedTokens: 50, maxTokens: 100 }, "current");
+    const stale = contextUsageDisplayValue({ usedTokens: 50, maxTokens: 100 }, "stale");
+    const nearLimit = contextUsageDisplayValue({ usedTokens: 85, maxTokens: 100 }, "current");
+    const staleNearLimit = contextUsageDisplayValue({ usedTokens: 85, maxTokens: 100 }, "stale");
+    const unavailable = contextUsageDisplayValue(null, "unavailable");
+
+    expect(CONTEXT_NEAR_LIMIT_REMAINING_PERCENT).toBe(20);
+    expect(contextRingState(current)).toBe("current");
+    expect(contextRingState(stale)).toBe("stale");
+    expect(contextRingState(nearLimit)).toBe("near-limit");
+    expect(contextRingState(staleNearLimit)).toBe("near-limit");
+    expect(contextRingState(unavailable)).toBe("unavailable");
+    expect(contextTriggerSummary(current, false)).toBe("Context window 50% remaining.");
+    expect(contextTriggerSummary(stale, false)).toBe("Context window 50% remaining, stale.");
+    expect(contextTriggerSummary(nearLimit, false)).toBe("Context window 15% remaining, near limit.");
+    expect(contextTriggerSummary(staleNearLimit, false)).toBe("Context window 15% remaining, stale and near limit.");
+    expect(contextTriggerSummary(unavailable, false)).toBe("Context window unavailable.");
+  });
+
+  it("renders a calm near-limit ring without borrowing quota semantics", () => {
+    const html = render(
+      usage({ usedTokens: 85, maxTokens: 100 }),
+      [{
+        id: "weekly",
+        label: "Weekly quota",
+        usedPercent: 5,
+        remainingPercent: 95,
+        windowMinutes: 10_080,
+        resetsAt: null,
+      }],
       freshState,
-    );
-    const cached = render(
-      usage(),
-      [{ id: "quota", label: "Quota", usedPercent: 25, remainingPercent: 75, windowMinutes: 300, resetsAt: null }],
-      { ...freshState, freshness: "stale", provenance: "persistent-cache" },
-    );
-    const stale = render(
-      usage(),
-      [{ id: "quota", label: "Quota", usedPercent: 25, remainingPercent: 75, windowMinutes: 300, resetsAt: null }],
-      { ...freshState, freshness: "stale", provenance: "session" },
+      "expanded",
     );
 
-    expect(fresh).toContain("2 windows reported");
-    expect(fresh).toContain("Five hour · 5 hours");
-    expect(fresh).toContain("Weekly · 7 days");
-    expect(fresh).toContain("75% left");
-    expect(fresh).toContain("60% left");
-    expect(fresh).toContain("Fresh");
-    expect(fresh).toMatch(/Resets Jul 22.*(?:UTC|GMT)/u);
-    expect(fresh).toContain("Reset time unavailable");
-    expect(cached).toContain("Cached · stale");
-    expect(cached).toContain("Cached quota may be out of date");
-    expect(stale).toContain(">Stale<");
-    expect(stale).toContain("Provider quota may be out of date");
+    expect(html).toContain('data-context-state="near-limit"');
+    expect(html).toContain('data-context-ring-state="near-limit"');
+    expect(html).toContain('stroke-dasharray="15 85"');
+    expect(html).toContain('title="Context window 15% remaining, near limit."');
+    expect(html).toContain("15%");
+    expect(html).toContain("95% left");
+    expect(html).not.toContain('title="Context window 95%');
   });
 
-  it("keeps stale status explicit while a last-known-good quota refreshes", () => {
-    const html = render(
-      usage(),
-      [{ id: "quota", label: "Quota", usedPercent: 25, remainingPercent: 75, windowMinutes: 300, resetsAt: null }],
-      { ...freshState, freshness: "stale", provenance: "persistent-cache", refreshing: true },
-    );
-    expect(html).toContain("Refreshing · stale");
-    expect(html).toContain("shown quota may be out of date");
-  });
-
-  it("shows unavailable context and quota honestly even when no values exist", () => {
+  it("keeps provider quota refresh separate from unavailable context", () => {
     const html = render(
       null,
       [],
-      { ...freshState, freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null },
+      {
+        ...freshState,
+        freshness: "unavailable",
+        provenance: null,
+        updatedAt: null,
+        refreshing: true,
+      },
+      "compact",
     );
-    expect(html).toContain('data-mode="compact"');
-    expect(html).toContain('data-auto-collapsed="true"');
-    expect(html).toContain('data-collapse-reason="unavailable"');
-    expect(html).toContain("Usage unavailable");
+
+    expect(html).toContain('data-context-state="unavailable"');
+    expect(html).toContain('data-quota-refreshing="true"');
+    expect(html).toContain("usage-quota-refresh-indicator");
+    expect(html).toContain('title="Context window unavailable. Provider quota refreshing."');
+    expect(html).toContain('aria-label="Open usage and context. Context window unavailable. Provider quota refreshing."');
+    expect(html).not.toContain('data-context-ring-state="refreshing"');
+  });
+
+  it("uses semantic, scale-aware ring styling with no idle spinner motion", () => {
+    const css = readFileSync(new URL("../../src/renderer/src/styles.css", import.meta.url), "utf8");
+    const ringBlock = css.match(/\.usage-context-ring\s*\{(?<body>[^}]*)\}/su)?.groups?.body ?? "";
+    const refreshBlock = css.match(/\.usage-quota-refresh-indicator\s*\{(?<body>[^}]*)\}/su)?.groups?.body ?? "";
+    const reducedMotion = css.slice(css.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
+
+    expect(ringBlock).toMatch(/width:\s*clamp\(23px,\s*calc\(var\(--control-height\)\s*-\s*7px\),\s*31px\)/su);
+    expect(css).toMatch(/\.usage-context-ring-value\s*\{[^}]*stroke:\s*color-mix\(in srgb,\s*var\(--accent\)\s*72%,\s*var\(--text-muted\)\)/su);
+    expect(css).toMatch(/\.usage-context-ring-track,\s*\.usage-context-ring-value\s*\{[^}]*stroke-width:\s*1\.65/su);
+    expect(css).toMatch(/\.usage-context-ring\.is-near-limit\s+\.usage-context-ring-value\s*\{[^}]*stroke:\s*var\(--warning\)/su);
+    expect(css).toMatch(/\.usage-context-ring\.is-unavailable\s+\.usage-context-ring-track\s*\{[^}]*stroke-dasharray:/su);
+    expect(ringBlock).not.toContain("animation");
+    expect(css).not.toMatch(/\.usage-context-ring-value\s*\{[^}]*animation:/su);
+    expect(refreshBlock).not.toContain("animation");
+    expect(reducedMotion).toMatch(/\.usage-context-ring-value\s*\{[^}]*transition:\s*none/su);
+  });
+
+  it("shows only reported context details and never substitutes processed totals", () => {
+    const html = render(
+      usage({
+        usedTokens: null,
+        maxTokens: 200_000,
+        totalProcessedTokens: 900,
+        totalProcessedScope: "session",
+      }),
+      [],
+      { ...freshState, freshness: "unavailable", provenance: null, updatedAt: null },
+    );
+    expect(html).toContain("Context window unavailable");
+    expect(html).toContain("200K window · occupancy unavailable");
+    expect(html).toContain("Processed in this session");
+    expect(html).toContain("Provider-reported session total");
+    expect(html).not.toContain("100% left");
+
+    const invalidScope = render(
+      usage({ totalProcessedTokens: 900, totalProcessedScope: null }),
+      [],
+      freshState,
+    );
+    expect(invalidScope).not.toContain("Processed in this");
+    expect(invalidScope).not.toContain("Provider-reported session total");
+  });
+
+  it("shows only provider-reported token details and explicit compaction state", () => {
+    const reported = render(
+      usage({
+        inputTokens: 1_500,
+        cachedInputTokens: 900,
+        cacheWriteInputTokens: 200,
+        outputTokens: 350,
+        reasoningOutputTokens: 125,
+        compactsAutomatically: true,
+      }),
+      [],
+      freshState,
+    );
+
+    expect(reported).toContain("Latest token breakdown");
+    expect(reported).toContain("<dt>Input</dt><dd>1.5K</dd>");
+    expect(reported).toContain("<dt>Cache read</dt><dd>900</dd>");
+    expect(reported).toContain("<dt>Cache write</dt><dd>200</dd>");
+    expect(reported).toContain("<dt>Output</dt><dd>350</dd>");
+    expect(reported).toContain("<dt>Reasoning</dt><dd>125</dd>");
+    expect(reported).toContain("cache counts are a breakdown of input where applicable");
+    expect(reported).toContain("Automatic compaction enabled");
+
+    const unavailable = render(
+      usage({
+        inputTokens: null,
+        cachedInputTokens: null,
+        cacheWriteInputTokens: null,
+        outputTokens: null,
+        reasoningOutputTokens: null,
+        compactsAutomatically: null,
+      }),
+      [],
+      freshState,
+    );
+    expect(unavailable).not.toContain("Latest token breakdown");
+    expect(unavailable).not.toContain("Automatic compaction");
+
+    const explicitlyDisabled = render(
+      usage({ compactsAutomatically: false }),
+      [],
+      freshState,
+    );
+    expect(explicitlyDisabled).toContain("Automatic compaction disabled");
+  });
+
+  it("renders reported quota windows, reset timing, and bounded percentages", () => {
+    const html = render(
+      usage(),
+      [
+        {
+          id: "five-hour",
+          label: "Five hour",
+          usedPercent: 25,
+          remainingPercent: 75,
+          windowMinutes: 300,
+          resetsAt: "2026-07-22T15:00:00.000Z",
+        },
+        {
+          id: "weekly",
+          label: "Weekly",
+          usedPercent: 130,
+          remainingPercent: -30,
+          windowMinutes: 10_080,
+          resetsAt: null,
+        },
+      ],
+      freshState,
+    );
+
+    expect(displayPercent(-30)).toBe(0);
+    expect(displayPercent(130)).toBe(100);
+    expect(displayPercent(Number.NaN)).toBeNull();
+    expect(html).toContain("Five hour · 5 hours");
+    expect(html).toContain("Weekly · 7 days");
+    expect(html).toContain("75% left");
+    expect(html).toContain("0% left");
+    expect(html).toContain("width:75%");
+    expect(html).toContain("width:0%");
+    expect(html).toMatch(/Resets Jul 22.*(?:UTC|GMT)/u);
+    expect(html).not.toContain("Reset time unavailable");
+  });
+
+  it("keeps stale and cached data quality explicit without inventing timestamps", () => {
+    const cached = render(
+      usage(),
+      [{
+        id: "quota",
+        label: "Quota",
+        usedPercent: 25,
+        remainingPercent: 75,
+        windowMinutes: 300,
+        resetsAt: null,
+      }],
+      {
+        ...freshState,
+        freshness: "stale",
+        provenance: "persistent-cache",
+        updatedAt: null,
+      },
+      "expanded",
+      { contextQuality: "stale" },
+    );
+    const refreshing = render(
+      usage(),
+      [{
+        id: "quota",
+        label: "Quota",
+        usedPercent: 25,
+        remainingPercent: 75,
+        windowMinutes: 300,
+        resetsAt: null,
+      }],
+      {
+        ...freshState,
+        freshness: "stale",
+        provenance: "persistent-cache",
+        refreshing: true,
+      },
+    );
+
+    expect(cached).toContain('data-context-quality="stale"');
+    expect(cached).toContain("50% · stale");
+    expect(cached).toContain("Cached · stale");
+    expect(cached).toContain("Cached quota may be out of date");
+    expect(cached).not.toContain("Update time unavailable");
+    expect(refreshing).toContain("Refreshing · stale");
+    expect(refreshing).toContain("shown quota may be out of date");
+  });
+
+  it("isolates native account quota from custom routes even when values are passed", () => {
+    const html = render(
+      usage(),
+      [{
+        id: "native-weekly",
+        label: "Native weekly",
+        usedPercent: 10,
+        remainingPercent: 90,
+        windowMinutes: 10_080,
+        resetsAt: "2026-07-29T10:00:00.000Z",
+      }],
+      { ...freshState, refreshing: true },
+      "expanded",
+      {
+        quotaSource: "isolated",
+        providerLabel: "Codex CLI · External gateway · custom-model",
+      },
+    );
+
+    expect(html).toContain('data-quota-source="isolated"');
+    expect(html).toContain("Codex CLI · External gateway · custom-model");
+    expect(html).toContain("Quota is unavailable for this selected custom route.");
+    expect(html).not.toContain("Native weekly");
+    expect(html).not.toContain("90% left");
+    expect(html).not.toContain(">Fresh<");
+    expect(html).not.toContain("Jul 29");
+    expect(html).not.toContain("usage-quota-refresh-indicator");
+  });
+
+  it("preserves the selected route identity as text without exposing unavailable fields", () => {
+    const html = render(
+      null,
+      [],
+      {
+        freshness: "unavailable",
+        provenance: null,
+        updatedAt: null,
+        lastAttemptedAt: null,
+        refreshing: false,
+      },
+      "compact",
+      { providerLabel: "Claude SDK · Team profile · sonnet" },
+    );
+
+    expect(html).toContain("Claude SDK · Team profile · sonnet");
+    expect(html).toContain("Unavailable");
     expect(html).toContain("Provider quota unavailable");
-    expect(html).toContain('aria-label="Expand usage and context"');
     expect(html).not.toContain('role="progressbar"');
+    expect(html).not.toContain("Update time unavailable");
+    expect(html).not.toContain("Reset time unavailable");
   });
 });

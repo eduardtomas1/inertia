@@ -526,16 +526,32 @@ export function Sidebar({
                         </span>
                         <span className={clsx("project-status", `status-${project.status}`)} title={project.status} />
                       </button>
-                      <IconButton
-                        label={`Project actions for ${project.name}`}
-                        className="project-menu-button"
-                        onClick={() => {
-                          const anchor = `classic:${project.id}`;
-                          setProjectMenu(projectMenu?.anchor === anchor ? null : { projectId: project.id, anchor });
-                        }}
-                      >
-                        <MoreHorizontal size={14} />
-                      </IconButton>
+                      <span className="project-row-actions">
+                        <IconButton
+                          label={`New chat in ${project.name}`}
+                          className="project-new-chat-button"
+                          disabled={connectionStatus !== "online"}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setConversationMenu(null);
+                            setProjectMenu(null);
+                            onCreateConversation(project);
+                          }}
+                        >
+                          <SquarePen size={13} />
+                        </IconButton>
+                        <IconButton
+                          label={`Project actions for ${project.name}`}
+                          className="project-menu-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const anchor = `classic:${project.id}`;
+                            setProjectMenu(projectMenu?.anchor === anchor ? null : { projectId: project.id, anchor });
+                          }}
+                        >
+                          <MoreHorizontal size={14} />
+                        </IconButton>
+                      </span>
                       {projectMenu?.anchor === `classic:${project.id}` && projectActions(project)}
                     </div>
 

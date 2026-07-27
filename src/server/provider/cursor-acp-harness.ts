@@ -33,6 +33,7 @@ import type {
   AgentInputRequest,
   AgentPlanStep,
 } from "./interactions";
+import { providerActivityDetailSections } from "./activity-detail";
 import { CappedProviderBuffer } from "./io";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
@@ -81,6 +82,7 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     options.callbacks,
     options.input.runId ?? conversationId,
     options.input.turnId ?? null,
+    options.input.cwd,
   );
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
@@ -90,6 +92,10 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   let cancelRequested = false;
   let supportsImages = false;
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
+  const toolActivities = new Map<
+    string,
+    { kind: "command" | "tool"; label: string }
+  >();
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
 
@@ -128,7 +134,14 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     })
     .onNotification(acp.methods.client.session.update, ({ params }) => {
       if (!sessionId || params.sessionId !== sessionId) return;
-      handleCursorUpdate(params, resultText, emitter, supportsImages, contextUsage);
+      handleCursorUpdate(
+        params,
+        resultText,
+        emitter,
+        supportsImages,
+        contextUsage,
+        toolActivities,
+      );
     })
     .onRequest("cursor/ask_question", parseCursorQuestionRequest, async ({ params, signal }) => {
       if (cancelRequested) return { outcome: "cancelled" };
@@ -322,6 +335,7 @@ function handleCursorUpdate(
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
   supportsImages: boolean,
   contextUsage: CursorContextUsage,
+  toolActivities: Map<string, { kind: "command" | "tool"; label: string }>,
 ): void {
   const update = notification.update;
   if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
@@ -331,10 +345,46 @@ function handleCursorUpdate(
   } else if (update.sessionUpdate === "agent_thought_chunk" && update.content.type === "text") {
     emitter.rich({ type: "reasoning-summary", text: bounded(update.content.text) });
   } else if (update.sessionUpdate === "tool_call") {
-    emitter.activity(update.kind === "execute" ? "command" : "tool", "started", bounded(update.title));
+    const activityId = update.toolCallId;
+    const kind = update.kind === "execute" ? "command" : "tool";
+    const label = bounded(update.title);
+    const rawInput = objectValue(update.rawInput);
+    toolActivities.set(activityId, { kind, label });
+    emitter.activity(kind, "started", label, {
+      activityId,
+      ...(providerActivityDetailSections({ command: rawInput?.command })
+        ? {
+            detail: providerActivityDetailSections({
+              command: rawInput?.command,
+            })!,
+          }
+        : {}),
+    });
   } else if (update.sessionUpdate === "tool_call_update") {
-    const phase = update.status === "failed" ? "failed" : update.status === "completed" ? "completed" : "info";
-    emitter.activity(update.kind === "execute" ? "command" : "tool", phase, bounded(update.title ?? update.name ?? "Cursor tool"));
+    const phase = update.status === "failed"
+      ? "failed"
+      : update.status === "completed"
+        ? "completed"
+        : "started";
+    const record = update as unknown as Record<string, unknown>;
+    const activityId = update.toolCallId;
+    const existing = toolActivities.get(activityId);
+    const kind = existing?.kind ?? (update.kind === "execute" ? "command" : "tool");
+    const label = existing?.label ?? bounded(update.title ?? update.name ?? "Cursor tool");
+    const rawInput = objectValue(record.rawInput);
+    const output = record.rawOutput ?? record.output ?? record.content;
+    const failed = phase === "failed";
+    const detail = providerActivityDetailSections({
+      command: rawInput?.command,
+      [failed ? "error" : "output"]: output,
+    });
+    emitter.activity(kind, phase, label, {
+      activityId,
+      ...(detail ? { detail } : {}),
+    });
+    if (phase === "completed" || phase === "failed") {
+      toolActivities.delete(activityId);
+    }
   } else if (update.sessionUpdate === "plan") {
     emitter.rich({ type: "plan", explanation: null, steps: update.entries.map((entry) => ({ step: bounded(entry.content), status: entry.status === "in_progress" ? "inProgress" : entry.status })) });
   } else if (update.sessionUpdate === "usage_update") {
@@ -624,6 +674,11 @@ function imageMediaType(path: string): string | undefined {
   }
 }
 function bounded(value: string): string { return value.slice(0, MAX_EVENT_TEXT_CHARS); }
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
 function safeError(error: unknown, fallback: string): string { return error instanceof Error && error.message ? bounded(error.message) : fallback; }
 function jsonSummary(value: unknown): string { try { return value === undefined ? "Cursor requested permission." : JSON.stringify(value); } catch { return "Cursor requested permission."; } }
 function requireObject(value: unknown, label: string): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object.`); return value as Record<string, unknown>; }

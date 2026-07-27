@@ -8,6 +8,7 @@ const IPC = {
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
+  releaseAttachment: "inertia:release-attachment",
   openProjectPath: "inertia:open-project-path",
   openExternal: "inertia:open-external",
   previewNavigate: "inertia:preview-navigate",
@@ -28,6 +29,7 @@ const bridge: DesktopBridge = Object.freeze({
   revealRuntimeLogs: () => ipcRenderer.invoke(IPC.revealRuntimeLogs) as Promise<string>,
   selectAttachments: () => ipcRenderer.invoke(IPC.selectAttachments) as ReturnType<DesktopBridge["selectAttachments"]>,
   importAttachments: (files: Parameters<DesktopBridge["importAttachments"]>[0]) => ipcRenderer.invoke(IPC.importAttachments, files) as ReturnType<DesktopBridge["importAttachments"]>,
+  releaseAttachment: (id: string) => ipcRenderer.invoke(IPC.releaseAttachment, id) as Promise<void>,
   openProjectPath: (request: Parameters<DesktopBridge["openProjectPath"]>[0]) =>
     ipcRenderer.invoke(IPC.openProjectPath, request) as Promise<string>,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,

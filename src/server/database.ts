@@ -33,10 +33,13 @@ import {
   type ProjectGroupingMode,
   type ProviderId,
   type ProviderInfo,
+  type SubagentTrace,
+  type SubagentTraceStatus,
   type ThemePreference,
   type ThreadStatus,
   type ThreadUsageSnapshot,
   type TurnGitArtifact,
+  type TurnGitArtifactAbsenceReason,
   type TurnGitArtifactCompleteness,
   type TurnGitArtifactFile,
   type TurnGitArtifactStatus,
@@ -78,6 +81,15 @@ import {
   type PersistedProviderMetadata,
 } from "./provider/metadata";
 import { providerTimestamp, validateProviderUsage } from "./provider/usage-values";
+import {
+  boundedSubagentIdentifier,
+  boundedSubagentText,
+  isTerminalSubagentStatus,
+  MAX_SUBAGENT_DESCRIPTION_CHARS,
+  MAX_SUBAGENT_PROGRESS_CHARS,
+  MAX_SUBAGENT_RESULT_CHARS,
+  MAX_SUBAGENT_TRACES_PER_TURN,
+} from "./provider/subagent-trace";
 import {
   parsePersistedReviewSummaryJson,
   upgradeLegacyPersistedReviewSummary,
@@ -187,6 +199,7 @@ interface TurnGitArtifactRow {
   captured_at: string | null;
   terminal_assistant_message_id: string | null;
   failure_reason: string | null;
+  absence_reason: TurnGitArtifactAbsenceReason | null;
   created_at: string;
   updated_at: string;
 }
@@ -211,6 +224,29 @@ interface ActivityRow {
   detail: string | null;
   status: AgentActivity["status"];
   created_at: string;
+}
+
+interface SubagentTraceRow {
+  id: string;
+  conversation_id: string;
+  run_id: string;
+  turn_id: string;
+  provider_id: ProviderId;
+  provider_task_id: string | null;
+  provider_agent_id: string | null;
+  parent_trace_id: string | null;
+  parent_provider_agent_id: string | null;
+  parent_provider_tool_use_id: string | null;
+  provider_tool_use_id: string | null;
+  provider_role: string | null;
+  provider_name: string | null;
+  status: SubagentTraceStatus;
+  description: string | null;
+  progress: string | null;
+  result: string | null;
+  sequence: number;
+  created_at: string;
+  updated_at: string;
 }
 
 interface CheckpointRow {
@@ -1134,6 +1170,9 @@ function turnGitArtifactFromRow(row: TurnGitArtifactRow): TurnGitArtifact {
     capturedAt: row.captured_at,
     terminalAssistantMessageId: row.terminal_assistant_message_id,
     failureReason: row.failure_reason,
+    absenceReason: row.absence_reason === "not-repository"
+      ? row.absence_reason
+      : null,
   };
 }
 
@@ -1221,6 +1260,31 @@ function messageFromRow(row: MessageRow): ChatMessage {
 
 function activityFromRow(row: ActivityRow): AgentActivity {
   return { id: row.id, conversationId: row.conversation_id, runId: row.run_id, turnId: row.turn_id, kind: row.kind, title: row.title, detail: row.detail, status: row.status, createdAt: row.created_at };
+}
+
+function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    runId: row.run_id,
+    turnId: row.turn_id,
+    providerId: row.provider_id,
+    providerTaskId: row.provider_task_id,
+    providerAgentId: row.provider_agent_id,
+    parentTraceId: row.parent_trace_id,
+    parentProviderAgentId: row.parent_provider_agent_id,
+    parentProviderToolUseId: row.parent_provider_tool_use_id,
+    providerToolUseId: row.provider_tool_use_id,
+    providerRole: row.provider_role,
+    providerName: row.provider_name,
+    status: row.status,
+    description: row.description,
+    progress: row.progress,
+    result: row.result,
+    sequence: row.sequence,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function checkpointFromRow(row: CheckpointRow): CheckpointSummary {
@@ -1448,6 +1512,7 @@ export interface CreateTurnGitArtifactInput {
   status?: TurnGitArtifactStatus;
   completeness?: TurnGitArtifactCompleteness;
   failureReason?: string | null;
+  absenceReason?: TurnGitArtifactAbsenceReason | null;
   createdAt?: string;
 }
 
@@ -1464,6 +1529,7 @@ export interface CompleteTurnGitArtifactInput {
   capturedAt?: string | null;
   terminalAssistantMessageId?: string | null;
   failureReason?: string | null;
+  absenceReason?: TurnGitArtifactAbsenceReason | null;
   updatedAt?: string;
 }
 
@@ -1473,6 +1539,7 @@ export interface RuntimeStoreSnapshot extends Omit<AppSnapshot, "conversations">
   turnGitArtifacts: TurnGitArtifact[];
   messages: ChatMessage[];
   activities: AgentActivity[];
+  subagents: SubagentTrace[];
   reasonings: AgentReasoning[];
   usage: ThreadUsageSnapshot[];
   plans: AgentPlan[];
@@ -1480,6 +1547,31 @@ export interface RuntimeStoreSnapshot extends Omit<AppSnapshot, "conversations">
   reviewSummaries: DiffReviewSummary[];
   reviewStates: DiffReviewState[];
   reviewNotes: DiffReviewNote[];
+}
+
+export interface UpsertSubagentTraceInput {
+  conversationId: string;
+  runId: string;
+  turnId: string;
+  providerId: ProviderId;
+  providerTaskId: string | null;
+  providerAgentId: string | null;
+  parentProviderAgentId: string | null;
+  parentProviderToolUseId: string | null;
+  providerToolUseId: string | null;
+  providerRole: string | null;
+  providerName: string | null;
+  status: SubagentTraceStatus;
+  description: string | null;
+  progress: string | null;
+  result: string | null;
+  sequence: number;
+  updatedAt?: string;
+}
+
+export interface UpsertSubagentTraceResult {
+  trace: SubagentTrace;
+  changed: boolean;
 }
 
 export interface StoredModelBackendProfile {
@@ -1524,6 +1616,9 @@ export class RuntimeStore {
       ).all() as TurnGitArtifactRow[]).map(turnGitArtifactFromRow),
       messages: (this.database.prepare("SELECT * FROM messages ORDER BY created_at ASC, id ASC").all() as MessageRow[]).map(messageFromRow),
       activities: (this.database.prepare("SELECT * FROM activities ORDER BY created_at ASC, id ASC").all() as ActivityRow[]).map(activityFromRow),
+      subagents: (this.database.prepare(
+        "SELECT * FROM subagent_traces ORDER BY created_at ASC, sequence ASC, id ASC",
+      ).all() as SubagentTraceRow[]).map(subagentTraceFromRow),
       reasonings: (this.database.prepare("SELECT * FROM agent_reasonings ORDER BY created_at ASC, id ASC").all() as AgentReasoningRow[]).map(reasoningFromRow),
       usage: (this.database.prepare("SELECT * FROM thread_usage ORDER BY updated_at ASC").all() as ThreadUsageRow[]).map(usageFromRow),
       plans: (this.database.prepare(`
@@ -1610,6 +1705,11 @@ export class RuntimeStore {
         WHERE conversation_id = ?
         ORDER BY created_at ASC, id ASC
       `).all(conversationId) as ActivityRow[]).map(activityFromRow),
+      subagents: (this.database.prepare(`
+        SELECT * FROM subagent_traces
+        WHERE conversation_id = ?
+        ORDER BY created_at ASC, sequence ASC, id ASC
+      `).all(conversationId) as SubagentTraceRow[]).map(subagentTraceFromRow),
       reasonings: (this.database.prepare(`
         SELECT * FROM agent_reasonings
         WHERE conversation_id = ?
@@ -2372,6 +2472,9 @@ export class RuntimeStore {
       capturedAt: null,
       terminalAssistantMessageId: null,
       failureReason: optionalTurnString(input.failureReason, "Artifact failure reason", 1_000),
+      absenceReason: input.absenceReason === "not-repository"
+        ? input.absenceReason
+        : null,
       createdAt,
       updatedAt: createdAt,
     };
@@ -2381,12 +2484,12 @@ export class RuntimeStore {
         branch, before_checkpoint_id, before_ref, after_ref, before_fingerprint,
         after_fingerprint, files_json, insertions, deletions, status, completeness,
         patch_state, patch_digest, captured_at, terminal_assistant_message_id,
-        failure_reason, created_at, updated_at
+        failure_reason, absence_reason, created_at, updated_at
       ) VALUES (
         @id, @turnId, @conversationId, @runId, @repositoryIdentity, @worktreeIdentity,
         @branch, @beforeCheckpointId, @beforeRef, NULL, @beforeFingerprint,
         NULL, '[]', 0, 0, @status, @completeness,
-        'none', NULL, NULL, NULL, @failureReason, @createdAt, @updatedAt
+        'none', NULL, NULL, NULL, @failureReason, @absenceReason, @createdAt, @updatedAt
       )
     `).run(artifact);
     return artifact;
@@ -2448,6 +2551,11 @@ export class RuntimeStore {
     const failureReason = input.failureReason === undefined
       ? current.failureReason
       : optionalTurnString(input.failureReason, "Artifact failure reason", 1_000);
+    const absenceReason = input.absenceReason === undefined
+      ? current.absenceReason ?? null
+      : input.absenceReason === "not-repository"
+        ? input.absenceReason
+        : null;
     this.database.prepare(`
       UPDATE turn_git_artifacts SET
         after_ref = @afterRef,
@@ -2462,6 +2570,7 @@ export class RuntimeStore {
         captured_at = @capturedAt,
         terminal_assistant_message_id = @terminalAssistantMessageId,
         failure_reason = @failureReason,
+        absence_reason = @absenceReason,
         updated_at = @updatedAt
       WHERE turn_id = @turnId
     `).run({
@@ -2478,6 +2587,7 @@ export class RuntimeStore {
       capturedAt,
       terminalAssistantMessageId,
       failureReason,
+      absenceReason,
       updatedAt,
     });
     return this.turnGitArtifactStorage(turnId);
@@ -2754,6 +2864,64 @@ export class RuntimeStore {
     return message;
   }
 
+  createFollowUpMessage(
+    conversationId: string,
+    turnId: string,
+    content: string,
+    createdAt?: string,
+  ): ChatMessage {
+    const conversation = this.requireConversation(conversationId);
+    const turn = agentTurnFromRow(this.requireAgentTurn(turnId));
+    if (
+      turn.conversationId !== conversationId
+      || isAgentTurnTerminalStatus(turn.status)
+    ) {
+      throw new Error("The active turn cannot accept this follow-up.");
+    }
+    const now = createdAt === undefined
+      ? new Date().toISOString()
+      : requireTimestamp(createdAt, "Follow-up creation time");
+    const message: ChatMessage = {
+      id: randomUUID(),
+      conversationId,
+      turnId,
+      role: "user",
+      content,
+      attachments: [],
+      createdAt: now,
+    };
+    this.database.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO messages (
+          id, conversation_id, turn_id, role, content,
+          attachments_json, created_at
+        ) VALUES (@id, @conversationId, @turnId, 'user', @content, '[]', @createdAt)
+      `).run(message);
+      this.database.prepare(`
+        UPDATE conversations
+        SET updated_at = ?, settled_at = NULL, last_viewed_at = ?
+        WHERE id = ?
+      `).run(now, now, conversationId);
+      this.touchProject(conversation.project_id, now);
+    })();
+    return message;
+  }
+
+  deleteFollowUpMessage(
+    messageId: string,
+    conversationId: string,
+    turnId: string,
+  ): boolean {
+    const result = this.database.prepare(`
+      DELETE FROM messages
+      WHERE id = ? AND conversation_id = ? AND turn_id = ? AND role = 'user'
+        AND id <> (
+          SELECT user_message_id FROM agent_turns WHERE id = ?
+        )
+    `).run(messageId, conversationId, turnId, turnId);
+    return result.changes > 0;
+  }
+
   associateMessageWithTurn(messageId: string, conversationId: string, runId: string, turnId: string): ChatMessage {
     const turn = this.assertAgentTurnIdentity(conversationId, runId, turnId);
     const row = this.database.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as MessageRow | undefined;
@@ -2830,6 +2998,217 @@ export class RuntimeStore {
     const next = { ...activityFromRow(row), ...update };
     this.database.prepare("UPDATE activities SET title = ?, detail = ?, status = ? WHERE id = ?").run(next.title, next.detail, next.status, id);
     return next;
+  }
+
+  subagentTrace(traceId: string): SubagentTrace {
+    const row = this.database.prepare(
+      "SELECT * FROM subagent_traces WHERE id = ?",
+    ).get(traceId) as SubagentTraceRow | undefined;
+    if (!row) throw new RecordNotFoundError("Delegated task not found.");
+    return subagentTraceFromRow(row);
+  }
+
+  upsertSubagentTrace(
+    input: UpsertSubagentTraceInput,
+  ): UpsertSubagentTraceResult | null {
+    this.assertAgentTurnIdentity(input.conversationId, input.runId, input.turnId);
+    const providerTaskId = boundedSubagentIdentifier(input.providerTaskId);
+    const providerAgentId = boundedSubagentIdentifier(input.providerAgentId);
+    if (!providerTaskId && !providerAgentId) return null;
+    if (!Number.isSafeInteger(input.sequence) || input.sequence < 0) return null;
+    const identityParams = [
+      input.conversationId,
+      input.runId,
+      input.providerId,
+    ] as const;
+    const byTask = providerTaskId
+      ? this.database.prepare(`
+          SELECT * FROM subagent_traces
+          WHERE conversation_id = ? AND run_id = ? AND provider_id = ?
+            AND provider_task_id = ?
+        `).get(...identityParams, providerTaskId) as SubagentTraceRow | undefined
+      : undefined;
+    const byAgent = providerAgentId
+      ? this.database.prepare(`
+          SELECT * FROM subagent_traces
+          WHERE conversation_id = ? AND run_id = ? AND provider_id = ?
+            AND provider_agent_id = ?
+        `).get(...identityParams, providerAgentId) as SubagentTraceRow | undefined
+      : undefined;
+    if (byTask && byAgent && byTask.id !== byAgent.id) return null;
+    const providerToolUseId = boundedSubagentIdentifier(input.providerToolUseId);
+    const byToolUse = !byTask && !byAgent && providerToolUseId
+      ? this.database.prepare(`
+          SELECT * FROM subagent_traces
+          WHERE conversation_id = ? AND run_id = ? AND provider_id = ?
+            AND provider_tool_use_id = ?
+          ORDER BY created_at ASC, id ASC
+          LIMIT 1
+        `).get(...identityParams, providerToolUseId) as SubagentTraceRow | undefined
+      : undefined;
+    const existing = byTask ?? byAgent ?? byToolUse;
+    if (existing && input.sequence <= existing.sequence) {
+      return { trace: subagentTraceFromRow(existing), changed: false };
+    }
+    if (
+      existing
+      && isTerminalSubagentStatus(existing.status)
+      && !isTerminalSubagentStatus(input.status)
+    ) {
+      return { trace: subagentTraceFromRow(existing), changed: false };
+    }
+
+    const parentProviderAgentId = boundedSubagentIdentifier(
+      input.parentProviderAgentId,
+    );
+    const parentProviderToolUseId = boundedSubagentIdentifier(
+      input.parentProviderToolUseId,
+    );
+    const parentByAgent = parentProviderAgentId
+      ? this.database.prepare(`
+          SELECT id FROM subagent_traces
+          WHERE conversation_id = ? AND run_id = ? AND provider_id = ?
+            AND provider_agent_id = ?
+          ORDER BY created_at ASC, id ASC
+          LIMIT 1
+        `).get(...identityParams, parentProviderAgentId) as { id: string } | undefined
+      : undefined;
+    const parentByToolUse = !parentByAgent && parentProviderToolUseId
+      ? this.database.prepare(`
+          SELECT id FROM subagent_traces
+          WHERE conversation_id = ? AND run_id = ? AND provider_id = ?
+            AND provider_tool_use_id = ?
+          ORDER BY created_at ASC, id ASC
+          LIMIT 1
+        `).get(...identityParams, parentProviderToolUseId) as { id: string } | undefined
+      : undefined;
+    const parent = parentByAgent ?? parentByToolUse;
+    const now = input.updatedAt === undefined
+      ? new Date().toISOString()
+      : requireTimestamp(input.updatedAt, "Delegated task update time");
+    const normalized = {
+      providerTaskId,
+      providerAgentId,
+      parentTraceId: parent?.id ?? null,
+      parentProviderAgentId,
+      parentProviderToolUseId,
+      providerToolUseId,
+      providerRole: boundedSubagentIdentifier(input.providerRole, 200),
+      providerName: boundedSubagentIdentifier(input.providerName, 200),
+      description: boundedSubagentText(
+        input.description,
+        MAX_SUBAGENT_DESCRIPTION_CHARS,
+      ),
+      progress: boundedSubagentText(
+        input.progress,
+        MAX_SUBAGENT_PROGRESS_CHARS,
+      ),
+      result: boundedSubagentText(input.result, MAX_SUBAGENT_RESULT_CHARS),
+    };
+
+    if (existing) {
+      this.database.prepare(`
+        UPDATE subagent_traces
+        SET provider_task_id = COALESCE(@providerTaskId, provider_task_id),
+            provider_agent_id = COALESCE(@providerAgentId, provider_agent_id),
+            parent_trace_id = COALESCE(@parentTraceId, parent_trace_id),
+            parent_provider_agent_id = COALESCE(
+              @parentProviderAgentId,
+              parent_provider_agent_id
+            ),
+            parent_provider_tool_use_id = COALESCE(
+              @parentProviderToolUseId,
+              parent_provider_tool_use_id
+            ),
+            provider_tool_use_id = COALESCE(
+              @providerToolUseId,
+              provider_tool_use_id
+            ),
+            provider_role = COALESCE(@providerRole, provider_role),
+            provider_name = COALESCE(@providerName, provider_name),
+            status = @status,
+            description = COALESCE(@description, description),
+            progress = COALESCE(@progress, progress),
+            result = COALESCE(@result, result),
+            sequence = @sequence,
+            updated_at = @updatedAt
+        WHERE id = @id
+      `).run({
+        id: existing.id,
+        ...normalized,
+        status: input.status,
+        sequence: input.sequence,
+        updatedAt: now < existing.updated_at ? existing.updated_at : now,
+      });
+      this.linkSubagentChildren(existing.id);
+      return {
+        trace: this.subagentTrace(existing.id),
+        changed: true,
+      };
+    }
+
+    const count = (this.database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM subagent_traces
+      WHERE turn_id = ?
+    `).get(input.turnId) as { count: number }).count;
+    if (count >= MAX_SUBAGENT_TRACES_PER_TURN) return null;
+    const trace: SubagentTrace = {
+      id: randomUUID(),
+      conversationId: input.conversationId,
+      runId: input.runId,
+      turnId: input.turnId,
+      providerId: input.providerId,
+      ...normalized,
+      status: input.status,
+      sequence: input.sequence,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.database.prepare(`
+      INSERT INTO subagent_traces (
+        id, conversation_id, run_id, turn_id, provider_id,
+        provider_task_id, provider_agent_id, parent_trace_id,
+        parent_provider_agent_id, parent_provider_tool_use_id,
+        provider_tool_use_id, provider_role,
+        provider_name, status, description, progress, result, sequence,
+        created_at, updated_at
+      ) VALUES (
+        @id, @conversationId, @runId, @turnId, @providerId,
+        @providerTaskId, @providerAgentId, @parentTraceId,
+        @parentProviderAgentId, @parentProviderToolUseId,
+        @providerToolUseId, @providerRole,
+        @providerName, @status, @description, @progress, @result, @sequence,
+        @createdAt, @updatedAt
+      )
+    `).run(trace);
+    this.linkSubagentChildren(trace.id);
+    return { trace, changed: true };
+  }
+
+  settleLiveSubagents(
+    turnId: string,
+    status: Extract<SubagentTraceStatus, "cancelled" | "lost">,
+    updatedAt = new Date().toISOString(),
+  ): SubagentTrace[] {
+    const now = requireTimestamp(updatedAt, "Delegated task settlement time");
+    const rows = this.database.prepare(`
+      SELECT * FROM subagent_traces
+      WHERE turn_id = ?
+        AND status IN ('spawned', 'running', 'waiting')
+      ORDER BY created_at ASC, sequence ASC, id ASC
+    `).all(turnId) as SubagentTraceRow[];
+    if (rows.length === 0) return [];
+    const update = this.database.prepare(`
+      UPDATE subagent_traces
+      SET status = ?, sequence = sequence + 1, updated_at = ?
+      WHERE id = ?
+        AND status IN ('spawned', 'running', 'waiting')
+    `);
+    this.database.transaction(() => {
+      for (const row of rows) update.run(status, now, row.id);
+    })();
+    return rows.map(({ id }) => this.subagentTrace(id));
   }
 
   createReasoning(conversationId: string, runId: string, turnId: string | null = null): AgentReasoning {
@@ -3511,6 +3890,53 @@ export class RuntimeStore {
     return turn;
   }
 
+  private linkSubagentChildren(parentTraceId: string): void {
+    const parent = this.database.prepare(`
+      SELECT conversation_id, run_id, provider_id, provider_agent_id,
+             provider_tool_use_id
+      FROM subagent_traces
+      WHERE id = ?
+    `).get(parentTraceId) as Pick<
+      SubagentTraceRow,
+      | "conversation_id"
+      | "run_id"
+      | "provider_id"
+      | "provider_agent_id"
+      | "provider_tool_use_id"
+    > | undefined;
+    if (!parent) return;
+    this.database.prepare(`
+      UPDATE subagent_traces
+      SET parent_trace_id = ?
+      WHERE id <> ?
+        AND conversation_id = ?
+        AND run_id = ?
+        AND provider_id = ?
+        AND parent_trace_id IS NULL
+        AND (
+          (
+            ? IS NOT NULL
+            AND parent_provider_agent_id = ?
+          )
+          OR
+          (
+            ? IS NOT NULL
+            AND parent_provider_tool_use_id = ?
+          )
+        )
+    `).run(
+      parentTraceId,
+      parentTraceId,
+      parent.conversation_id,
+      parent.run_id,
+      parent.provider_id,
+      parent.provider_agent_id,
+      parent.provider_agent_id,
+      parent.provider_tool_use_id,
+      parent.provider_tool_use_id,
+    );
+  }
+
   private migrate(): void {
     const runtimeMigrations: DatabaseMigration[] = migrations.map((sql, index) => {
       const version = index + 1;
@@ -3702,6 +4128,9 @@ export class RuntimeStore {
           captured_at TEXT,
           terminal_assistant_message_id TEXT,
           failure_reason TEXT CHECK (failure_reason IS NULL OR length(failure_reason) <= 1000),
+          absence_reason TEXT CHECK (
+            absence_reason IS NULL OR absence_reason = 'not-repository'
+          ),
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           CHECK (created_at <= updated_at),
@@ -3985,6 +4414,89 @@ export class RuntimeStore {
         }
       },
     });
+    runtimeMigrations.push({
+      version: migrations.length + 10,
+      name: "ClassifyTurnGitArtifactAbsence",
+      up: (database) => {
+        const columns = database.prepare("PRAGMA table_info(turn_git_artifacts)")
+          .all() as Array<{ name: string }>;
+        if (!columns.some(({ name }) => name === "absence_reason")) {
+          database.exec(`
+            ALTER TABLE turn_git_artifacts ADD COLUMN absence_reason TEXT
+              CHECK (absence_reason IS NULL OR absence_reason = 'not-repository');
+          `);
+        }
+        database.prepare(`
+          UPDATE turn_git_artifacts
+          SET absence_reason = 'not-repository'
+          WHERE status = 'unavailable'
+            AND completeness = 'unavailable'
+            AND absence_reason IS NULL
+            AND failure_reason IN (
+              'This workspace is not a Git repository.',
+              'The selected folder is not a Git repository.'
+            )
+        `).run();
+      },
+    });
+    runtimeMigrations.push({
+      version: migrations.length + 11,
+      name: "PersistBoundedSubagentTraces",
+      up: `
+        CREATE TABLE IF NOT EXISTS subagent_traces (
+          id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+          conversation_id TEXT NOT NULL
+            REFERENCES conversations(id) ON DELETE CASCADE,
+          run_id TEXT NOT NULL CHECK (length(run_id) BETWEEN 1 AND 200),
+          turn_id TEXT NOT NULL
+            REFERENCES agent_turns(id) ON DELETE CASCADE,
+          provider_id TEXT NOT NULL
+            CHECK (provider_id IN ('codex', 'claude', 'cursor', 'opencode')),
+          provider_task_id TEXT
+            CHECK (provider_task_id IS NULL OR length(provider_task_id) BETWEEN 1 AND 1000),
+          provider_agent_id TEXT
+            CHECK (provider_agent_id IS NULL OR length(provider_agent_id) BETWEEN 1 AND 1000),
+          parent_trace_id TEXT
+            REFERENCES subagent_traces(id) ON DELETE SET NULL,
+          parent_provider_agent_id TEXT
+            CHECK (parent_provider_agent_id IS NULL OR length(parent_provider_agent_id) BETWEEN 1 AND 1000),
+          parent_provider_tool_use_id TEXT
+            CHECK (parent_provider_tool_use_id IS NULL OR length(parent_provider_tool_use_id) BETWEEN 1 AND 1000),
+          provider_tool_use_id TEXT
+            CHECK (provider_tool_use_id IS NULL OR length(provider_tool_use_id) BETWEEN 1 AND 1000),
+          provider_role TEXT
+            CHECK (provider_role IS NULL OR length(provider_role) BETWEEN 1 AND 200),
+          provider_name TEXT
+            CHECK (provider_name IS NULL OR length(provider_name) BETWEEN 1 AND 200),
+          status TEXT NOT NULL CHECK (status IN (
+            'spawned', 'running', 'waiting', 'completed', 'failed',
+            'cancelled', 'lost'
+          )),
+          description TEXT
+            CHECK (description IS NULL OR length(description) BETWEEN 1 AND 4000),
+          progress TEXT
+            CHECK (progress IS NULL OR length(progress) BETWEEN 1 AND 4000),
+          result TEXT
+            CHECK (result IS NULL OR length(result) BETWEEN 1 AND 16000),
+          sequence INTEGER NOT NULL
+            CHECK (sequence BETWEEN 0 AND 2147483647),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (provider_task_id IS NOT NULL OR provider_agent_id IS NOT NULL),
+          CHECK (created_at <= updated_at)
+        );
+        CREATE INDEX IF NOT EXISTS subagent_traces_turn_order_idx
+          ON subagent_traces(turn_id, created_at ASC, sequence ASC, id ASC);
+        CREATE UNIQUE INDEX IF NOT EXISTS subagent_traces_task_identity_idx
+          ON subagent_traces(conversation_id, run_id, provider_id, provider_task_id)
+          WHERE provider_task_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS subagent_traces_agent_identity_idx
+          ON subagent_traces(conversation_id, run_id, provider_id, provider_agent_id)
+          WHERE provider_agent_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS subagent_traces_parent_idx
+          ON subagent_traces(parent_trace_id, created_at ASC);
+      `,
+    });
     runDatabaseMigrations(this.database, runtimeMigrations, {
       onDiagnostic: (diagnostic) => {
         if (diagnostic.outcome === "failed") {
@@ -4128,6 +4640,20 @@ export class RuntimeStore {
           finished_at = ?
       WHERE status IN ('running', 'waiting')
     `).run(now);
+    this.database.prepare(`
+      UPDATE subagent_traces
+      SET status = 'lost',
+          sequence = sequence + 1,
+          updated_at = CASE WHEN updated_at > ? THEN updated_at ELSE ? END
+      WHERE status IN ('spawned', 'running', 'waiting')
+        AND turn_id IN (
+          SELECT id FROM agent_turns
+          WHERE status IN (
+            'queued', 'starting', 'running',
+            'waiting-for-approval', 'waiting-for-input'
+          )
+        )
+    `).run(now, now);
     if (interrupted.length === 0) return;
 
     const markConversation = this.database.prepare("UPDATE conversations SET status = 'failed', attention_kind = NULL, updated_at = ? WHERE id = ?");

@@ -1,6 +1,12 @@
 import { z } from "zod";
 
 import {
+  CHAT_ATTACHMENT_MIME_TYPES,
+  MAX_CHAT_ATTACHMENTS,
+  MAX_CHAT_ATTACHMENT_BYTES,
+  type ChatAttachmentMimeType,
+} from "./attachments";
+import {
   modelBackendProfileIdSchema,
   modelSelectionSchema,
   type ContinuationIdentity,
@@ -21,6 +27,7 @@ import {
 
 export * from "./model-routing";
 export * from "./backend-profile-settings";
+export * from "./attachments";
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -157,7 +164,7 @@ export interface ChatAttachment {
   id: string;
   name: string;
   path: string;
-  mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  mimeType: ChatAttachmentMimeType;
   size: number;
 }
 
@@ -426,6 +433,44 @@ export interface AgentActivity {
   createdAt: string;
 }
 
+export type SubagentTraceStatus =
+  | "spawned"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "lost";
+
+/**
+ * A bounded, provider-authored projection of one delegated agent. Provider
+ * task and agent identities remain separate because neither transport
+ * guarantees that they are interchangeable.
+ */
+export interface SubagentTrace {
+  id: string;
+  conversationId: string;
+  runId: string;
+  turnId: string;
+  providerId: ProviderId;
+  providerTaskId: string | null;
+  providerAgentId: string | null;
+  parentTraceId: string | null;
+  parentProviderAgentId: string | null;
+  parentProviderToolUseId: string | null;
+  providerToolUseId: string | null;
+  providerRole: string | null;
+  providerName: string | null;
+  status: SubagentTraceStatus;
+  description: string | null;
+  progress: string | null;
+  result: string | null;
+  /** Monotonic within the provider run; stale/replayed patches are ignored. */
+  sequence: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AgentApprovalRequest {
   id: string;
   /** Captured when the request is emitted; provider switches must not relabel it. */
@@ -541,6 +586,7 @@ export interface ConversationDetail {
   turnGitArtifacts: TurnGitArtifact[];
   messages: ChatMessage[];
   activities: AgentActivity[];
+  subagents: SubagentTrace[];
   reasonings: AgentReasoning[];
   usage: ThreadUsageSnapshot[];
   plans: AgentPlan[];
@@ -592,9 +638,58 @@ export interface GitDiffSnapshot {
   files: ChangedFile[];
 }
 
+export type WorkspaceGitRepositoryState = "ready" | "error";
+
+/**
+ * Status for one Git toplevel discovered inside the active workspace.
+ * `repositoryPath` is a safe, POSIX-style path relative to that workspace;
+ * the workspace root itself is represented by ".".
+ */
+export interface WorkspaceGitRepositorySnapshot {
+  repositoryPath: string;
+  state: WorkspaceGitRepositoryState;
+  error: string | null;
+  branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  hasRemote: boolean;
+  files: ChangedFile[];
+  insertions: number;
+  deletions: number;
+  clean: boolean;
+  truncated: boolean;
+}
+
+export interface WorkspaceGitIssue {
+  repositoryPath: string;
+  message: string;
+}
+
+/**
+ * Bounded, workspace-wide Git discovery result. It deliberately remains
+ * separate from immutable per-turn Git artifacts.
+ */
+export interface WorkspaceGitSnapshot {
+  repositories: WorkspaceGitRepositorySnapshot[];
+  files: number;
+  insertions: number;
+  deletions: number;
+  scannedDirectories: number;
+  skippedDirectories: number;
+  partial: boolean;
+  truncated: boolean;
+  issues: WorkspaceGitIssue[];
+}
+
+export interface WorkspaceGitDiffSnapshot extends GitDiffSnapshot {
+  repositoryPath: string;
+}
+
 export type TurnGitArtifactStatus = "pending" | "ready" | "partial" | "unavailable" | "failed";
 export type TurnGitArtifactCompleteness = "complete" | "truncated" | "partial" | "unavailable";
 export type TurnGitPatchState = "none" | "available" | "truncated" | "expired" | "failed";
+export type TurnGitArtifactAbsenceReason = "not-repository";
 
 export interface TurnGitArtifactFile extends ChangedFile {
   previousPath: string | null;
@@ -627,6 +722,11 @@ export interface TurnGitArtifact {
   capturedAt: string | null;
   terminalAssistantMessageId: string | null;
   failureReason: string | null;
+  /**
+   * Expected absence at the selected project root. Optional for snapshots
+   * produced before the typed classification was introduced.
+   */
+  absenceReason?: TurnGitArtifactAbsenceReason | null;
 }
 
 export interface TurnGitDiffSnapshot extends GitDiffSnapshot {
@@ -731,6 +831,8 @@ export interface DiffReviewSummary {
  */
 export interface DiffSelectionReviewAnswer {
   conversationId: string;
+  /** Workspace-relative Git root used for this answer; "." is the workspace root. */
+  repositoryPath?: string;
   fingerprint: string;
   filePath: string;
   hunkId: string;
@@ -813,6 +915,13 @@ export interface WorkspaceEntry {
   kind: "file" | "directory";
 }
 
+export interface WorkspaceEntriesPage {
+  /** Project-relative directory for a lazy listing; empty for root and search results. */
+  directory: string;
+  entries: WorkspaceEntry[];
+  truncated: boolean;
+}
+
 export interface WorkspaceFilePreview {
   path: string;
   content: string;
@@ -831,6 +940,25 @@ const requestBase = {
   requestId: z.string().uuid(),
 };
 
+function isPortableWorkspacePath(path: string, allowRoot: boolean): boolean {
+  if (
+    /[\0\r\n]/u.test(path)
+    || /^[\\/]/u.test(path)
+    || /^[A-Za-z]:/u.test(path)
+    || path.split(/[\\/]/u).some((segment) => segment === "..")
+  ) return false;
+  return allowRoot || (path !== "" && path !== ".");
+}
+
+const workspaceDirectoryPathSchema = z.string()
+  .min(1)
+  .max(4_096)
+  .refine((path) => isPortableWorkspacePath(path, true), "Invalid project-relative directory.");
+const workspaceFilePathSchema = z.string()
+  .min(1)
+  .max(4_096)
+  .refine((path) => isPortableWorkspacePath(path, false), "Invalid project-relative file.");
+
 const providerIdSchema = z.enum(["codex", "claude", "cursor", "opencode"]);
 const accessModeSchema = z.enum(["supervised", "auto-edit", "full"]);
 const interactionModeSchema = z.enum(["build", "plan"]);
@@ -839,8 +967,8 @@ const attachmentSchema = z
     id: z.string().uuid(),
     name: z.string().trim().min(1).max(255),
     path: z.string().min(1).max(4096),
-    mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
-    size: z.number().int().min(1).max(10 * 1024 * 1024),
+    mimeType: z.enum(CHAT_ATTACHMENT_MIME_TYPES),
+    size: z.number().int().min(1).max(MAX_CHAT_ATTACHMENT_BYTES),
   })
   .strict();
 const turnRequestContextSchema = z
@@ -887,6 +1015,7 @@ const turnRequestContextSchema = z
 const diffReviewSelectionSchema = z.object({
   projectId: z.string().uuid(),
   conversationId: z.string().uuid(),
+  repositoryPath: z.string().min(1).max(4096).optional(),
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
   filePath: z.string().min(1).max(4096),
   hunkId: z.string().min(1).max(128),
@@ -1015,7 +1144,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
         .object({
           conversationId: z.string().uuid(),
           content: z.string().trim().min(1).max(20_000),
-          attachments: z.array(attachmentSchema).max(8).default([]),
+          attachments: z.array(attachmentSchema).max(MAX_CHAT_ATTACHMENTS).default([]),
           context: turnRequestContextSchema.optional(),
         })
         .strict(),
@@ -1026,6 +1155,16 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       ...requestBase,
       type: z.literal("agent.stop"),
       payload: z.object({ conversationId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("agent.subagent.stop"),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        traceId: z.string().uuid(),
+      }).strict(),
     })
     .strict(),
   z
@@ -1180,6 +1319,28 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("git.diff"),
       payload: z
         .object({ projectId: z.string().uuid(), conversationId: z.string().uuid().optional(), path: z.string().max(512).optional(), ignoreWhitespace: z.boolean().optional() })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.workspace.refresh"),
+      payload: z.object({ projectId: z.string().uuid(), conversationId: z.string().uuid().optional() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.workspace.diff"),
+      payload: z
+        .object({
+          projectId: z.string().uuid(),
+          conversationId: z.string().uuid().optional(),
+          repositoryPath: z.string().min(1).max(4096),
+          path: z.string().min(1).max(4096).optional(),
+          ignoreWhitespace: z.boolean().optional(),
+        })
         .strict(),
     })
     .strict(),
@@ -1402,14 +1563,29 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
     .object({
       ...requestBase,
       type: z.literal("workspace.entries"),
-      payload: z.object({ projectId: z.string().uuid(), conversationId: z.string().uuid().optional(), query: z.string().trim().max(256).optional() }).strict(),
+      payload: z
+        .object({
+          projectId: z.string().uuid(),
+          conversationId: z.string().uuid().optional(),
+          directory: workspaceDirectoryPathSchema.optional(),
+          query: z.string().trim().min(1).max(200).optional(),
+        })
+        .strict()
+        .refine(
+          ({ directory, query }) => !(directory && query),
+          "Choose either a folder listing or a project search.",
+        ),
     })
     .strict(),
   z
     .object({
       ...requestBase,
       type: z.literal("workspace.file.read"),
-      payload: z.object({ projectId: z.string().uuid(), conversationId: z.string().uuid().optional(), path: z.string().min(1).max(512) }).strict(),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid().optional(),
+        path: workspaceFilePathSchema,
+      }).strict(),
     })
     .strict(),
   z
@@ -1503,6 +1679,7 @@ export type RuntimeMutationEvent =
   | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string }
   | { type: "agent.usage"; usage: ThreadUsageSnapshot }
   | { type: "agent.activity"; activity: AgentActivity }
+  | { type: "agent.subagent.updated"; trace: SubagentTrace }
   | { type: "agent.approval.requested"; request: AgentApprovalRequest }
   | { type: "agent.approval.resolved"; conversationId: string; runId: string; turnId: string; requestId: string; decision: "approve" | "deny" | "cancel" | "cancelled" }
   | { type: "agent.input.requested"; request: AgentInputRequest }
@@ -1537,13 +1714,15 @@ export type ServerEvent =
       result:
         | { kind: "git.status"; status: GitStatusSnapshot }
         | { kind: "git.diff"; diff: GitDiffSnapshot }
+        | { kind: "git.workspace.status"; status: WorkspaceGitSnapshot }
+        | { kind: "git.workspace.diff"; diff: WorkspaceGitDiffSnapshot }
         | { kind: "git.turn.diff"; diff: TurnGitDiffSnapshot }
         | { kind: "git.reversal.plan"; plan: DiffReversalPlan }
         | { kind: "git.reversal"; diff: GitDiffSnapshot; operation: DiffReversalOperation }
         | { kind: "review.selection.answer"; answer: DiffSelectionReviewAnswer }
         | { kind: "review.summary"; summary: DiffReviewSummary }
         | { kind: "git.branches"; branches: GitBranchInfo[] }
-        | { kind: "workspace.entries"; entries: WorkspaceEntry[]; truncated: boolean }
+        | ({ kind: "workspace.entries" } & WorkspaceEntriesPage)
         | { kind: "workspace.file"; file: WorkspaceFilePreview }
         | { kind: "project.actions"; actions: ProjectAction[] }
         | { kind: "backend.profile"; profile: ModelBackendProfileDetail }

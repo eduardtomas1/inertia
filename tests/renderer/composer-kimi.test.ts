@@ -25,13 +25,9 @@ describe("Kimi composer identity", () => {
     expect(modelSelectionIdentityLabel(selection)).toBe(
       "Claude harness · Kimi · K3",
     );
-    expect(source).toContain("title={selectedIdentityLabel}");
-    expect(source).toContain(
-      "kimiSelection ? selectedIdentityLabel : selectedModel?.label",
-    );
-    expect(source).toContain(
-      "disabled: !kimiSelection && !selectedProvider?.models.length",
-    );
+    expect(source).toContain("selectedRoute={selectedModelRoute}");
+    expect(source).toContain("<ModelChooser");
+    expect(source).toContain("modelSelectionIdentityLabel");
     expect(source).toContain(
       "reasoningOptions: KIMI_CLAUDE_REASONING_OPTIONS",
     );
@@ -54,10 +50,11 @@ describe("Kimi composer identity", () => {
       "utf8",
     );
 
-    expect(css).toMatch(/\.composer-provider-control\s*\{[^}]*min-width:\s*0;[^}]*flex:\s*0 1 auto;/su);
-    expect(css).toMatch(/\.composer-provider-control \.composer-pill\s*\{[^}]*max-width:\s*190px;/su);
-    expect(css).toMatch(/\.composer-pill > span\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;/su);
-    expect(css).toMatch(/\.send-button\s*\{[^}]*flex:\s*0 0 32px;/su);
-    expect(css).toMatch(/@media \(max-width:\s*560px\)\s*\{[\s\S]*?\.composer-options \.composer-pill span\s*\{[^}]*display:\s*none;/u);
+    expect(css).toMatch(/\.model-chooser-anchor\s*\{[^}]*min-width:\s*0;[^}]*flex:\s*0 1 auto;/su);
+    expect(css).toMatch(/\.selected-model-chip-label\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;/su);
+    expect(css).toMatch(
+      /\.send-button\s*\{[^}]*flex:\s*0 0 var\(--composer-control-height\);/su,
+    );
+    expect(css).toMatch(/@container \(max-width:\s*480px\)\s*\{[\s\S]*?\.model-chooser-anchor\s*\{[^}]*max-width:\s*52px/u);
   });
 });

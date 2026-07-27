@@ -8,6 +8,42 @@ export type DismissibleMenuAction<Menu extends string> =
 
 export type HorizontalSubmenuSide = "left" | "right";
 
+export const OUTSIDE_POINTER_FOCUS_TARGET_SELECTOR = [
+  "button:not(:disabled)",
+  "a[href]",
+  "input:not(:disabled)",
+  "textarea:not(:disabled)",
+  "select:not(:disabled)",
+  "summary",
+  "label",
+  '[contenteditable]:not([contenteditable="false"])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+type ClosestTarget = {
+  closest: (selectors: string) => unknown;
+};
+
+function hasClosestTarget(value: EventTarget | null): value is EventTarget & ClosestTarget {
+  return Boolean(
+    value
+    && typeof (value as EventTarget & Partial<ClosestTarget>).closest
+      === "function",
+  );
+}
+
+/**
+ * A blank outside click needs to return focus to the control that opened the
+ * disclosure. A click aimed at another focus destination must be left alone so
+ * the browser can move focus there without a later animation frame stealing it.
+ */
+export function outsidePointerShouldRestoreFocus(
+  target: EventTarget | null,
+): boolean {
+  return !hasClosestTarget(target)
+    || !target.closest(OUTSIDE_POINTER_FOCUS_TARGET_SELECTOR);
+}
+
 export function chooseHorizontalSubmenuSide(
   bounds: Pick<DOMRect, "left" | "right">,
   viewportWidth: number,

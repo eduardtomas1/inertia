@@ -10,10 +10,18 @@ import type {
   AgentApprovalRequest,
   AgentInputRequest,
   AgentPlan,
+  ModelSelection,
   ProviderInfo,
   ServerEvent,
 } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
+import {
+  continuationIdentityForSelection,
+  modelSelectionSchema,
+  nativeBackendProfile,
+  nativeModelSelection,
+  resolveHarnessBackendCompatibility,
+} from "../../src/shared/model-routing";
 import type {
   ProviderEvent,
   ProviderRunCallbacks,
@@ -27,6 +35,7 @@ import {
   type TurnTimerScheduler,
 } from "../../src/server/runtime/turns/turn-controller";
 import { recoverInterruptedTurns } from "../../src/server/runtime/turns/turn-recovery";
+import { BUILD_MODE_INSTRUCTION } from "../../src/server/runtime/turns/request-context";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
 const directories: string[] = [];
@@ -60,6 +69,10 @@ class FakeProvider implements TurnProviderRuntime {
   disposed = false;
   approvalSupported = true;
   inputSupported = true;
+  steerSupported = true;
+  stopSubagentSupported = true;
+  readonly steerCalls: string[] = [];
+  readonly stoppedSubagentIds: string[] = [];
   private resolveResult: ((result: ProviderRunResult) => void) | null = null;
   private rejectResult: ((error: unknown) => void) | null = null;
 
@@ -121,6 +134,22 @@ class FakeProvider implements TurnProviderRuntime {
     return this.inputSupported;
   }
 
+  async steer(
+    _conversationId: string,
+    content: string,
+  ): Promise<boolean> {
+    this.steerCalls.push(content);
+    return this.steerSupported;
+  }
+
+  async stopSubagent(
+    _conversationId: string,
+    providerTaskId: string,
+  ): Promise<boolean> {
+    this.stoppedSubagentIds.push(providerTaskId);
+    return this.stopSubagentSupported;
+  }
+
   async disposeAll(): Promise<void> {
     this.disposed = true;
   }
@@ -173,7 +202,16 @@ interface TestRuntime {
   metadataRefreshes: string[];
 }
 
-async function testRuntime(hookOverrides: Partial<TurnControllerHooks> = {}): Promise<TestRuntime> {
+interface TestRuntimeOptions {
+  interactionMode?: "build" | "plan";
+  modelSelection?: ModelSelection;
+  resolveModelRoute?: TurnProviderRuntime["resolveModelRoute"];
+}
+
+async function testRuntime(
+  hookOverrides: Partial<TurnControllerHooks> = {},
+  options: TestRuntimeOptions = {},
+): Promise<TestRuntime> {
   const directory = await mkdtemp(join(tmpdir(), "inertia-turn-controller-"));
   const workspace = join(directory, "workspace");
   await mkdir(workspace);
@@ -185,13 +223,20 @@ async function testRuntime(hookOverrides: Partial<TurnControllerHooks> = {}): Pr
   );
   const project = store.createProject("Turn project", workspace);
   const conversation = store.createConversation(project.id, "Turn conversation", {
-    providerId: "codex",
-    model: "gpt-test",
-    reasoningEffort: "high",
-    interactionMode: "build",
+    ...(options.modelSelection
+      ? { modelSelection: options.modelSelection }
+      : {
+          providerId: "codex" as const,
+          model: "gpt-test",
+          reasoningEffort: "high",
+        }),
+    interactionMode: options.interactionMode ?? "build",
     accessMode: "supervised",
   });
   const provider = new FakeProvider();
+  if (options.resolveModelRoute) {
+    provider.resolveModelRoute = options.resolveModelRoute;
+  }
   const scheduler = new FakeScheduler();
   const events: ServerEvent[] = [];
   const settled: string[] = [];
@@ -271,21 +316,363 @@ afterEach(async () => {
 });
 
 describe("TurnController authoritative lifecycle", () => {
-  it("gates provider start and terminal settlement on exact Git capture without opening a stale-turn window", async () => {
+  it("queues parent follow-ups on the same turn and rolls back unsupported sends", async () => {
+    const runtime = await testRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Start the parent turn.",
+    });
+    runtime.controller.start(queued.turn.id);
+
+    const followedUp = await runtime.controller.steer(
+      runtime.conversationId,
+      "Inspect the edge case next.",
+    );
+    expect(followedUp).toMatchObject({
+      role: "user",
+      turnId: queued.turn.id,
+      content: "Inspect the edge case next.",
+    });
+    expect(runtime.provider.steerCalls).toEqual([
+      "Inspect the edge case next.",
+    ]);
+    expect(runtime.store.conversationDetail(runtime.conversationId)?.messages)
+      .toContainEqual(expect.objectContaining({
+        id: followedUp?.id,
+        turnId: queued.turn.id,
+      }));
+
+    const beforeRejected = runtime.store.snapshot().messages;
+    runtime.provider.steerSupported = false;
+    expect(await runtime.controller.steer(
+      runtime.conversationId,
+      "Do not leave this rejected follow-up behind.",
+    )).toBeNull();
+    expect(runtime.store.snapshot().messages).toEqual(beforeRejected);
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("persists ordered delegated-agent traces, rejects regressions, and stops only an exact live Claude task", async () => {
+    const runtime = await testRuntime({}, {
+      modelSelection: nativeModelSelection({
+        providerId: "claude",
+        modelId: "provider-default",
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Delegate this work.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const base = identity(runtime);
+    runtime.provider.emit({
+      ...base,
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: "task-1",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-1",
+      providerRole: "researcher",
+      providerName: "Evidence",
+      status: "running",
+      description: "Check Bearer abcdefghijklmnop",
+      progress: "Reading the repository",
+      result: null,
+    });
+    let trace = runtime.store.conversationDetail(
+      runtime.conversationId,
+    )?.subagents[0];
+    expect(trace).toMatchObject({
+      providerTaskId: "task-1",
+      providerRole: "researcher",
+      status: "running",
+      sequence: 1,
+      description: "Check [redacted]",
+    });
+    expect(await runtime.controller.stopSubagent(
+      runtime.conversationId,
+      trace!.id,
+    )).toBe(true);
+    expect(runtime.provider.stoppedSubagentIds).toEqual(["task-1"]);
+
+    runtime.provider.emit({
+      ...base,
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: "task-1",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-1",
+      providerRole: null,
+      providerName: null,
+      status: "failed",
+      description: null,
+      progress: null,
+      result: "stale",
+    });
+    expect(runtime.store.subagentTrace(trace!.id).status).toBe("running");
+    runtime.provider.emit({
+      ...base,
+      type: "subagent",
+      sequence: 2,
+      providerTaskId: "task-1",
+      providerAgentId: "agent-1",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-1",
+      providerRole: null,
+      providerName: null,
+      status: "completed",
+      description: null,
+      progress: null,
+      result: "Verified",
+    });
+    runtime.provider.emit({
+      ...base,
+      type: "subagent",
+      sequence: 3,
+      providerTaskId: "task-1",
+      providerAgentId: "agent-1",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-1",
+      providerRole: null,
+      providerName: null,
+      status: "running",
+      description: null,
+      progress: "late replay",
+      result: null,
+    });
+    trace = runtime.store.subagentTrace(trace!.id);
+    expect(trace).toMatchObject({
+      providerAgentId: "agent-1",
+      status: "completed",
+      sequence: 2,
+      result: "Verified",
+    });
+    expect(runtime.events.filter((event) =>
+      event.type === "agent.subagent.updated")).toHaveLength(2);
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("marks live delegated traces lost when an interrupted runtime reconnects", async () => {
+    const runtime = await testRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Leave delegated work in flight.",
+    });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: null,
+      providerAgentId: "child-thread-1",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "spawn-1",
+      providerRole: "worker",
+      providerName: null,
+      status: "running",
+      description: "Inspect",
+      progress: null,
+      result: null,
+    });
+    const databasePath = join(runtime.directory, "inertia.sqlite");
+    runtime.store.close();
+
+    const reopened = new RuntimeStore(databasePath, runtime.workspace);
+    expect(reopened.agentTurn(queued.turn.id).status).toBe("interrupted");
+    expect(reopened.conversationDetail(runtime.conversationId)?.subagents)
+      .toContainEqual(expect.objectContaining({
+        providerAgentId: "child-thread-1",
+        status: "lost",
+        sequence: 2,
+      }));
+    reopened.close();
+  });
+
+  it("injects one Build instruction before every native or custom adapter and never in Plan mode", async () => {
+    const nativeProviders = ["codex", "claude", "cursor", "opencode"] as const;
+    for (const providerId of nativeProviders) {
+      const runtime = await testRuntime({}, {
+        modelSelection: nativeModelSelection({
+          providerId,
+          modelId: "provider-default",
+        }),
+      });
+      const visibleContent = `Implement through ${providerId}.`;
+      const queued = runtime.controller.queue({
+        conversationId: runtime.conversationId,
+        content: visibleContent,
+      });
+      expect(runtime.controller.start(queued.turn.id)).toBe(true);
+      expect(runtime.provider.input).toMatchObject({
+        providerId,
+        prompt: expect.stringContaining(BUILD_MODE_INSTRUCTION),
+      });
+      expect(runtime.provider.input?.prompt.startsWith(`${visibleContent}\n\n`))
+        .toBe(true);
+      expect(runtime.provider.input?.prompt.split(BUILD_MODE_INSTRUCTION))
+        .toHaveLength(2);
+      runtime.provider.resolve();
+      await flushPromises();
+      runtime.store.close();
+    }
+
+    const customProfile = {
+      ...nativeBackendProfile("codex"),
+      id: "custom:responses-task-51",
+      displayName: "Task 51 custom Responses",
+      protocol: "openai-responses" as const,
+      authenticationMode: "api-key" as const,
+      source: "custom" as const,
+      configurationRevision: 51,
+      endpointIdentity: "endpoint:task-51",
+    };
+    const customHarnessId = "codex-app-server" as const;
+    const customSelection = modelSelectionSchema.parse({
+      ...nativeModelSelection({
+        providerId: "codex",
+        modelId: "custom-model",
+      }),
+      harnessId: customHarnessId,
+      backendProfileId: customProfile.id,
+      backendProfileDisplayName: customProfile.displayName,
+      backendConfigurationRevision: customProfile.configurationRevision,
+    });
+    const customCompatibility = resolveHarnessBackendCompatibility(
+      customHarnessId,
+      customProfile,
+    );
+    const customRuntime = await testRuntime({}, {
+      modelSelection: customSelection,
+      resolveModelRoute: () => ({
+        providerId: "codex",
+        harnessId: customHarnessId,
+        backendProfile: customProfile,
+        compatibility: customCompatibility,
+        continuationIdentity: continuationIdentityForSelection(
+          customSelection,
+          customProfile.endpointIdentity,
+          !customCompatibility.allowsModelSwitchWithinSession,
+        ),
+      }),
+    });
+    const customQueued = customRuntime.controller.queue({
+      conversationId: customRuntime.conversationId,
+      content: "Implement through the custom adapter.",
+    });
+    expect(customRuntime.controller.start(customQueued.turn.id)).toBe(true);
+    expect(customRuntime.provider.input).toMatchObject({
+      backendProfile: { id: customProfile.id, source: "custom" },
+      prompt: expect.stringContaining(BUILD_MODE_INSTRUCTION),
+    });
+    expect(customRuntime.provider.input?.prompt.split(BUILD_MODE_INSTRUCTION))
+      .toHaveLength(2);
+    customRuntime.provider.resolve();
+    await flushPromises();
+    customRuntime.store.close();
+
+    const planRuntime = await testRuntime({}, { interactionMode: "plan" });
+    const planQueued = planRuntime.controller.queue({
+      conversationId: planRuntime.conversationId,
+      content: "Plan this change without acting.",
+    });
+    expect(planRuntime.controller.start(planQueued.turn.id)).toBe(true);
+    expect(planRuntime.provider.input?.prompt).toBe(
+      "Plan this change without acting.",
+    );
+    expect(planRuntime.provider.input?.prompt).not.toContain(
+      BUILD_MODE_INSTRUCTION,
+    );
+    planRuntime.provider.resolve();
+    await flushPromises();
+    planRuntime.store.close();
+  });
+
+  it("adds the Build instruction once per follow-up when resuming a provider session", async () => {
+    const runtime = await testRuntime();
+    const first = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Implement the first change.",
+    });
+    expect(runtime.controller.start(first.turn.id)).toBe(true);
+    expect(runtime.provider.input?.prompt.split(BUILD_MODE_INSTRUCTION))
+      .toHaveLength(2);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "session",
+      sessionId: "task-51-session",
+    });
+    runtime.provider.resolve();
+    await flushPromises();
+
+    const followUp = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Now validate the follow-up.",
+    });
+    expect(runtime.controller.start(followUp.turn.id)).toBe(true);
+    expect(runtime.provider.input?.sessionId).toBe("task-51-session");
+    expect(runtime.provider.input?.prompt.startsWith(
+      "Now validate the follow-up.\n\n",
+    )).toBe(true);
+    expect(runtime.provider.input?.prompt).not.toContain(
+      "Implement the first change.",
+    );
+    expect(runtime.provider.input?.prompt.split(BUILD_MODE_INSTRUCTION))
+      .toHaveLength(2);
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("settles and broadcasts the provider terminal state before slow Git finalization", async () => {
     let resolveBefore!: () => void;
     let resolveAfter!: () => void;
-    const runtime = await testRuntime({
-      captureGitBefore: () => new Promise<void>((resolve) => {
-        resolveBefore = resolve;
-      }),
-      captureGitArtifacts: () => new Promise<void>((resolve) => {
-        resolveAfter = resolve;
-      }),
+    let captureObservedTerminal = false;
+    let beforeCaptures = 0;
+    let originalTurnId = "";
+    let terminalSnapshotObserved = false;
+    let runtime!: TestRuntime;
+    runtime = await testRuntime({
+      broadcastSnapshot: () => {
+        if (!originalTurnId) return;
+        terminalSnapshotObserved = runtime.store.agentTurn(originalTurnId).status === "completed";
+      },
+      captureGitBefore: () => {
+        beforeCaptures += 1;
+        if (beforeCaptures > 1) return undefined;
+        return new Promise<void>((resolve) => {
+          resolveBefore = resolve;
+        });
+      },
+      captureGitArtifacts: ({ turn }) => {
+        captureObservedTerminal = runtime.store.agentTurn(turn.id).status === "completed"
+          && runtime.events.some((event) => (
+            event.type === "agent.completed"
+            && event.turnId === turn.id
+          ))
+          && terminalSnapshotObserved;
+        return new Promise<void>((resolve) => {
+          resolveAfter = resolve;
+        });
+      },
     });
     const queued = runtime.controller.queue({
       conversationId: runtime.conversationId,
       content: "Capture this exact turn.",
     });
+    originalTurnId = queued.turn.id;
     expect(runtime.controller.start(queued.turn.id)).toBe(true);
     expect(runtime.provider.input).toBeNull();
 
@@ -295,16 +682,30 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.provider.resolve({ status: "completed", text: "Captured." });
     await flushPromises();
 
-    expect(runtime.store.agentTurn(queued.turn.id).status).toBe("running");
-    expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
-    expect(() => runtime.controller.queue({
+    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+      status: "completed",
+      terminalAssistantMessageId: expect.any(String),
+    });
+    expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+    expect(runtime.controller.cancel(runtime.conversationId)).toBe(false);
+    expect(captureObservedTerminal).toBe(true);
+
+    const followUp = runtime.controller.queue({
       conversationId: runtime.conversationId,
-      content: "This must not overtake post-capture.",
-    })).toThrow("already has an active turn");
+      content: "Do not overtake the exact after-state.",
+    });
+    expect(runtime.controller.start(followUp.turn.id)).toBe(true);
+    expect(runtime.provider.input?.turnId).toBe(queued.turn.id);
 
     resolveAfter();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(runtime.provider.input?.turnId).toBe(followUp.turn.id);
+    runtime.provider.resolve({ status: "completed", text: "Follow-up done." });
     await flushPromises();
+    resolveAfter();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed");
+    expect(runtime.store.agentTurn(followUp.turn.id).status).toBe("completed");
     expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
     runtime.store.close();
   });
@@ -331,6 +732,86 @@ describe("TurnController authoritative lifecycle", () => {
       terminalReason: "stream-persistence-failed",
     });
     expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+    runtime.store.close();
+  });
+
+  it("settles a provider process exit while Git finalization is still pending", async () => {
+    let resolveArtifact!: () => void;
+    const runtime = await testRuntime({
+      captureGitArtifacts: () => new Promise<void>((resolve) => {
+        resolveArtifact = resolve;
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Survive the provider exit.",
+    });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.reject(new Error("provider process exited"));
+    await flushPromises();
+
+    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+      status: "failed",
+      terminalReason: "provider-process-crash",
+    });
+    expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+    expect(runtime.events.some((event) => (
+      event.type === "agent.failed"
+      && event.turnId === queued.turn.id
+    ))).toBe(true);
+
+    resolveArtifact();
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("treats a rejected provider promise as an interrupted transport without exposing diagnostics", async () => {
+    const runtime = await testRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Run a command before the provider bridge disappears.",
+    });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "activity",
+      kind: "command",
+      phase: "started",
+      label: "npm test",
+      activityId: "command-before-rejection",
+      detail: "Command:\nnpm test",
+    });
+
+    runtime.provider.reject(
+      new Error("socket closed token=super-secret-value"),
+    );
+    await flushPromises();
+
+    const activities =
+      runtime.store.conversationDetail(runtime.conversationId)?.activities ?? [];
+    expect(activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: "Interrupted · npm test",
+        status: "failed",
+        detail: expect.stringContaining(
+          "Interrupted: The Codex App Server connection closed",
+        ),
+      }),
+      expect.objectContaining({
+        kind: "error",
+        title:
+          "The Codex App Server connection closed before the turn completed.",
+        detail: expect.stringContaining("Terminal event: not received"),
+      }),
+    ]));
+    const errorDetail =
+      activities.find(({ kind }) => kind === "error")?.detail ?? "";
+    expect(errorDetail).toContain("token=[redacted]");
+    expect(errorDetail).not.toContain("super-secret-value");
+    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+      status: "failed",
+      terminalReason: "provider-process-crash",
+    });
     runtime.store.close();
   });
 
@@ -369,7 +850,9 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.store.turnExecutionManifest(queued.turn.id)).toMatchObject({
       contextReferenceCount: 2,
       uniqueContextBlobCount: 2,
-      internalInstructionCount: 1,
+      // The trusted caller control remains separate from the one centralized
+      // Build-mode instruction.
+      internalInstructionCount: 2,
     });
     expect(JSON.stringify(runtime.store.turnExecutionManifest(queued.turn.id)))
       .not.toContain("INTERNAL_SECRET_POLICY");
@@ -1036,6 +1519,105 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.store.agentTurn(queued.turn.id).terminalReason).toBe(reason);
     expect(runtime.settled.filter((entry) => entry.endsWith(`:${queued.turn.id}`)))
       .toEqual(expect.arrayContaining([`${status}:${queued.turn.id}`]));
+    runtime.store.close();
+  });
+
+  it("marks in-flight work interrupted when the Codex transport disappears and keeps diagnostics behind the turn failure", async () => {
+    const runtime = await testRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Run a command before the transport closes.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const base = identity(runtime);
+    runtime.provider.emit({
+      ...base,
+      type: "activity",
+      kind: "command",
+      phase: "started",
+      label: "npm test",
+      activityId: "command-transport",
+      detail: "Command:\nnpm test",
+    });
+    runtime.provider.resolve({
+      status: "failed",
+      exitCode: null,
+      error: "The Codex App Server connection closed before the turn completed.",
+      failure: {
+        reason: "transport-closed",
+        message: "The Codex App Server connection closed before the turn completed.",
+        technicalDetail: "Reason: transport-closed\nExit code: none\nSignal: none",
+        phase: "running",
+        activityId: "command-transport",
+      },
+    });
+    await flushPromises();
+
+    const activities = runtime.store.conversationDetail(runtime.conversationId)?.activities ?? [];
+    expect(activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "command",
+        title: "Interrupted · npm test",
+        status: "failed",
+        detail: expect.stringContaining("Interrupted: The Codex App Server connection closed"),
+      }),
+      expect.objectContaining({
+        kind: "error",
+        title: "The Codex App Server connection closed before the turn completed.",
+        detail: expect.stringContaining("Reason: transport-closed"),
+      }),
+    ]));
+    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+      status: "failed",
+      terminalReason: "provider-process-exit",
+    });
+    runtime.store.close();
+  });
+
+  it("keeps a provider-reported tool failure failed instead of relabeling it as interrupted", async () => {
+    const runtime = await testRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Preserve the provider failure.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const base = identity(runtime);
+    runtime.provider.emit({
+      ...base,
+      type: "activity",
+      kind: "command",
+      phase: "started",
+      label: "npm test",
+      activityId: "command-provider-failure",
+    });
+    runtime.provider.emit({
+      ...base,
+      type: "activity",
+      kind: "command",
+      phase: "failed",
+      label: "npm test failed",
+      activityId: "command-provider-failure",
+      detail: "Error:\nAssertion failed",
+    });
+    runtime.provider.resolve({
+      status: "failed",
+      exitCode: 1,
+      error: "Codex reported an error.",
+      failure: {
+        reason: "codex-error",
+        message: "Codex reported an error.",
+        technicalDetail: "Reason: codex-error",
+      },
+    });
+    await flushPromises();
+
+    const command = runtime.store.conversationDetail(runtime.conversationId)
+      ?.activities.find(({ kind }) => kind === "command");
+    expect(command).toMatchObject({
+      title: "npm test failed",
+      status: "failed",
+    });
+    expect(command?.title).not.toContain("Interrupted");
     runtime.store.close();
   });
 

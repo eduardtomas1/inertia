@@ -1,4 +1,5 @@
 import type {
+  ProviderActivityEvent,
   ProviderActivityKind,
   ProviderActivityPhase,
   ProviderEvent,
@@ -7,6 +8,7 @@ import type {
   ProviderMetadataEvent,
   ProviderRunCallbacks,
   ProviderRunStatus,
+  ProviderSubagentEvent,
   ProviderUsageEvent,
 } from "./contracts";
 import type {
@@ -31,7 +33,12 @@ export interface ProviderEmitter {
   matches: (identity: ProviderEventBase) => boolean;
   event: (event: ProviderEvent) => void;
   text: (text: string) => void;
-  activity: (kind: ProviderActivityKind, phase: ProviderActivityPhase, label: string) => void;
+  activity: (
+    kind: ProviderActivityKind,
+    phase: ProviderActivityPhase,
+    label: string,
+    detail?: Pick<ProviderActivityEvent, "activityId" | "detail">,
+  ) => void;
   status: (status: ProviderRunStatus, message?: string) => void;
   session: (sessionId: string) => void;
   approval: (request: AgentApprovalRequest) => void;
@@ -42,6 +49,7 @@ export interface ProviderEmitter {
   reasoning: (text: string) => void;
   usage: (usage: ProviderUsageEvent["usage"]) => void;
   metadata: (metadata: ProviderMetadataEvent["metadata"], source: ProviderMetadataEvent["source"], complete: boolean) => void;
+  subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type">) => void;
 }
 
 export function createProviderEmitter(
@@ -98,6 +106,9 @@ export function createProviderEmitter(
       case "metadata":
         safeCallback(() => callbacks.onMetadata?.(providerEvent));
         break;
+      case "subagent":
+        safeCallback(() => callbacks.onSubagent?.(providerEvent));
+        break;
     }
   };
 
@@ -106,7 +117,14 @@ export function createProviderEmitter(
     matches,
     event,
     text: (text) => event({ ...base, type: "text", text }),
-    activity: (kind, phase, label) => event({ ...base, type: "activity", kind, phase, label }),
+    activity: (kind, phase, label, detail = {}) => event({
+      ...base,
+      type: "activity",
+      kind,
+      phase,
+      label,
+      ...detail,
+    }),
     status: (status, message) => event({ ...base, type: "status", status, ...(message ? { message } : {}) }),
     session: (sessionId) => event({ ...base, type: "session", sessionId }),
     approval: (request) => event({ ...base, type: "approval", request }),
@@ -117,6 +135,7 @@ export function createProviderEmitter(
     reasoning: (text) => event({ ...base, type: "reasoning-summary", text }),
     usage: (usage) => event({ ...base, type: "usage", usage }),
     metadata: (metadata, source, complete) => event({ ...base, type: "metadata", metadata, source, complete }),
+    subagent: (subagent) => event({ ...base, type: "subagent", ...subagent }),
   };
 }
 

@@ -1,0 +1,177 @@
+import { readFileSync } from "node:fs";
+
+import { describe, expect, it } from "vitest";
+
+import {
+  COMPOSER_ACTION_STALE_FALLBACK_MS,
+  composerFollowUpState,
+  composerPrimaryActionState,
+  supportsActiveParentFollowUp,
+} from "../../src/renderer/src/utils/composerPrimaryAction";
+
+const composerSource = readFileSync(
+  new URL("../../src/renderer/src/components/Composer.tsx", import.meta.url),
+  "utf8",
+);
+const chatWorkspaceSource = readFileSync(
+  new URL("../../src/renderer/src/components/ChatWorkspace.tsx", import.meta.url),
+  "utf8",
+);
+const appSource = readFileSync(
+  new URL("../../src/renderer/src/App.tsx", import.meta.url),
+  "utf8",
+);
+const css = readFileSync(
+  new URL("../../src/renderer/src/styles.css", import.meta.url),
+  "utf8",
+);
+
+describe("composer Send and Stop", () => {
+  it("uses one deterministic primary-action state matrix", () => {
+    const state = (
+      update: Partial<Parameters<typeof composerPrimaryActionState>[0]>,
+    ) => composerPrimaryActionState({
+      sendEligible: false,
+      submitting: false,
+      sending: false,
+      running: false,
+      stopping: false,
+      ...update,
+    });
+
+    expect(state({})).toBe("send-disabled");
+    expect(state({ sendEligible: true })).toBe("send-ready");
+    expect(state({ sendEligible: true, submitting: true })).toBe("submitting");
+    expect(state({ sendEligible: true, sending: true })).toBe("submitting");
+    expect(state({ running: true, sending: true })).toBe("stop-ready");
+    expect(state({ running: true, stopping: true })).toBe("stop-pending");
+    expect(state({ stopping: true })).toBe("send-disabled");
+  });
+
+  it("bridges a delayed runtime start without an enabled Send gap", () => {
+    expect(COMPOSER_ACTION_STALE_FALLBACK_MS).toBeGreaterThanOrEqual(3_000);
+
+    const acceptedAtTwoSeconds = composerPrimaryActionState({
+      sendEligible: true,
+      submitting: 2_000 < COMPOSER_ACTION_STALE_FALLBACK_MS,
+      sending: false,
+      running: false,
+      stopping: false,
+    });
+    const runtimeStarted = composerPrimaryActionState({
+      sendEligible: true,
+      submitting: true,
+      sending: false,
+      running: true,
+      stopping: false,
+    });
+
+    expect(acceptedAtTwoSeconds).toBe("submitting");
+    expect(runtimeStarted).toBe("stop-ready");
+  });
+
+  it("preserves keyboard and focus semantics with explicit action labels", () => {
+    expect(composerSource).toContain(
+      'if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); }',
+    );
+    expect(composerSource).toContain(
+      "readOnly={submissionPending || followUpPending}",
+    );
+    expect(composerSource).toContain('label="Send message"');
+    expect(composerSource).toContain('label="Sending message"');
+    expect(composerSource).toContain('"Stopping agent" : "Stop agent"');
+    expect(composerSource).toContain(
+      "aria-busy={submissionPending || followUpPending || running || stopping}",
+    );
+    expect(composerSource).toContain("if (stoppingRef.current || !running) return;");
+    expect(composerSource).toContain("textareaRef.current?.focus()");
+    expect(chatWorkspaceSource).toContain("onStop: () => Promise<void>;");
+    expect(chatWorkspaceSource).toContain(
+      "onStop={() => { void onStop().catch(() => undefined); }}",
+    );
+  });
+
+  it("keeps Stop primary while exposing only truthful parent follow-ups", () => {
+    expect(supportsActiveParentFollowUp("codex-app-server")).toBe(true);
+    expect(supportsActiveParentFollowUp("claude-agent-sdk")).toBe(true);
+    expect(supportsActiveParentFollowUp("codex-cli")).toBe(false);
+    expect(supportsActiveParentFollowUp("claude-cli")).toBe(false);
+    expect(composerFollowUpState({
+      running: true,
+      harnessId: "codex-app-server",
+      hasDraft: true,
+      textOnly: true,
+      submitting: false,
+      sending: false,
+    })).toBe("ready");
+    expect(composerFollowUpState({
+      running: true,
+      harnessId: "claude-agent-sdk",
+      hasDraft: true,
+      textOnly: true,
+      submitting: true,
+      sending: false,
+    })).toBe("pending");
+    expect(composerFollowUpState({
+      running: true,
+      harnessId: "codex-cli",
+      hasDraft: true,
+      textOnly: true,
+      submitting: false,
+      sending: false,
+    })).toBe("unavailable");
+    expect(composerFollowUpState({
+      running: true,
+      harnessId: "codex-app-server",
+      hasDraft: true,
+      textOnly: false,
+      submitting: false,
+      sending: false,
+    })).toBe("unavailable");
+    expect(composerSource).toContain('className="secondary-button composer-follow-up-button"');
+    expect(composerSource).toContain("Follow-up unavailable");
+    const textarea = composerSource.slice(
+      composerSource.indexOf("<textarea"),
+      composerSource.indexOf("/>", composerSource.indexOf("<textarea")),
+    );
+    expect(textarea).toContain("disabled={disabled}");
+    expect(textarea).not.toContain("disabled={disabled || running}");
+  });
+
+  it("shows distinct pending feedback for initial messages and follow-ups", () => {
+    expect(appSource).toContain('sending={busyAction === "message.send"}');
+    expect(appSource).not.toContain(
+      'sending={busyAction === "message.send" || busyAction === "review.summary.generate"}',
+    );
+    expect(composerSource.match(/<LoadingMark\b/gu)).toHaveLength(2);
+    expect(composerSource).toContain('<LoadingMark label="Sending follow-up" />');
+    expect(composerSource).toContain('<LoadingMark label="Sending message" />');
+  });
+
+  it("keeps equal circular geometry with calm theme-token states and no glow", () => {
+    const sendRule = css.match(/\.send-button\s*\{(?<body>[^}]*)\}/u)?.groups?.body ?? "";
+    const disabledRule = css.match(/\.send-button:disabled\s*\{(?<body>[^}]*)\}/u)?.groups?.body ?? "";
+    const loadingRule = css.match(/\.send-button-loading:disabled\s*\{(?<body>[^}]*)\}/u)?.groups?.body ?? "";
+    const stopRule = css.match(/\.stop-button,\s*\.stop-button:disabled\s*\{(?<body>[^}]*)\}/u)?.groups?.body ?? "";
+
+    expect(sendRule).toContain("width: var(--composer-control-height)");
+    expect(sendRule).toContain("height: var(--composer-control-height)");
+    expect(sendRule).toContain("flex: 0 0 var(--composer-control-height)");
+    expect(sendRule).toContain("border-radius: 50%");
+    expect(sendRule).toContain("background: var(--accent)");
+    expect(sendRule).toContain("box-shadow: none");
+    expect(disabledRule).toContain("background: var(--surface-muted)");
+    expect(disabledRule).toContain("box-shadow: none");
+    expect(loadingRule).toContain("var(--accent-soft)");
+    expect(stopRule).toContain("var(--danger)");
+    expect(stopRule).toContain("var(--danger-soft)");
+    expect(stopRule).toContain("box-shadow: none");
+    expect(css).toContain('--ui-control-height: 32px;');
+    expect(css).toMatch(
+      /:root\[data-interface-scale="compact"\]\s*\{[^}]*--ui-control-height:\s*30px/su,
+    );
+    expect(css).toMatch(
+      /:root\[data-interface-scale="large"\]\s*\{[^}]*--ui-control-height:\s*38px/su,
+    );
+  });
+});

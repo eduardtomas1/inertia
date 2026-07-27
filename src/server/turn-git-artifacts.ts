@@ -13,6 +13,7 @@ import { gzipSync, gunzipSync } from "node:zlib";
 import type {
   AgentTurn,
   TurnGitArtifact,
+  TurnGitArtifactAbsenceReason,
   TurnGitDiffSnapshot,
 } from "../shared/contracts";
 import {
@@ -30,12 +31,17 @@ const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_COMPRESSED_BYTES = 4 * 1024 * 1024;
 const MAX_RETAINED_PATCHES = 200;
 const MAX_RETAINED_BYTES = 128 * 1024 * 1024;
+const DEFAULT_FINALIZATION_TIMEOUT_MS = 60_000;
 const DIGEST = /^[0-9a-f]{64}$/u;
 
 export interface CaptureTurnGitArtifactInput {
   turn: AgentTurn;
   checkpointId: string | null;
   terminalAssistantMessageId?: string | null;
+}
+
+export interface TurnGitArtifactManagerOptions {
+  finalizationTimeoutMs?: number;
 }
 
 export class TurnGitArtifactError extends Error {
@@ -55,6 +61,18 @@ function safeFailure(error: unknown): string {
   return "The repository artifact could not be captured.";
 }
 
+function preCaptureAbsenceReason(
+  error: unknown,
+): TurnGitArtifactAbsenceReason | null {
+  if (error instanceof GitError && error.code === "not-repository") {
+    return "not-repository";
+  }
+  if (error instanceof CheckpointError && error.message === "not-repository") {
+    return "not-repository";
+  }
+  return null;
+}
+
 function historicalTitle(artifact: TurnGitArtifact): string {
   const shortTurn = artifact.turnId.length > 12
     ? artifact.turnId.slice(0, 8)
@@ -62,17 +80,40 @@ function historicalTitle(artifact: TurnGitArtifact): string {
   return `Changed by turn ${shortTurn}`;
 }
 
+function truncatedCaptureReason(input: {
+  summaryTruncated: boolean;
+  patchTruncated: boolean;
+}): string | null {
+  if (input.summaryTruncated && input.patchTruncated) {
+    return "The historical file summary and stored patch reached their capture limits.";
+  }
+  if (input.summaryTruncated) {
+    return "The historical file list or change totals reached their capture limit.";
+  }
+  if (input.patchTruncated) {
+    return "The complete file summary is retained, but the stored patch reached its size limit.";
+  }
+  return null;
+}
+
 export class TurnGitArtifactManager {
   readonly #patchDirectory: string;
   readonly #checkpointDirectory: string;
+  readonly #finalizationTimeoutMs: number;
+  readonly #finalizations = new Map<string, Promise<void>>();
 
   constructor(
     private readonly store: RuntimeStore,
     dataDirectory: string,
     private readonly now: () => Date = () => new Date(),
+    options: TurnGitArtifactManagerOptions = {},
   ) {
     this.#patchDirectory = resolve(dataDirectory, "turn-git-artifacts");
     this.#checkpointDirectory = resolve(dataDirectory, "checkpoint-indexes");
+    this.#finalizationTimeoutMs = Math.max(
+      1,
+      options.finalizationTimeoutMs ?? DEFAULT_FINALIZATION_TIMEOUT_MS,
+    );
   }
 
   async captureBefore(input: CaptureTurnGitArtifactInput): Promise<void> {
@@ -119,6 +160,7 @@ export class TurnGitArtifactManager {
           status: "unavailable",
           completeness: "unavailable",
           failureReason: safeFailure(error),
+          absenceReason: preCaptureAbsenceReason(error),
           createdAt: this.now().toISOString(),
         });
       }
@@ -151,6 +193,7 @@ export class TurnGitArtifactManager {
           capturedAt: this.now().toISOString(),
           terminalAssistantMessageId: input.terminalAssistantMessageId ?? null,
           failureReason: artifact.failureReason,
+          absenceReason: artifact.absenceReason ?? null,
         });
       }
       return;
@@ -162,7 +205,7 @@ export class TurnGitArtifactManager {
       || !stored.repositoryIdentity
       || !stored.worktreeIdentity
     ) {
-      this.store.completeTurnGitArtifact(input.turn.id, {
+      this.#completeIfPending(input.turn.id, {
         status: "unavailable",
         completeness: "unavailable",
         patchState: "none",
@@ -187,7 +230,7 @@ export class TurnGitArtifactManager {
         after.repositoryIdentity !== stored.repositoryIdentity
         || after.worktreeIdentity !== stored.worktreeIdentity
       ) {
-        this.store.completeTurnGitArtifact(input.turn.id, {
+        this.#completeIfPending(input.turn.id, {
           afterRef,
           afterFingerprint: after.fingerprint,
           status: "partial",
@@ -206,7 +249,7 @@ export class TurnGitArtifactManager {
         { maxBytes: MAX_PATCH_BYTES },
       );
       const digest = await this.#writePatch(comparison.patch);
-      this.store.completeTurnGitArtifact(input.turn.id, {
+      this.#completeIfPending(input.turn.id, {
         afterRef,
         afterFingerprint: after.fingerprint,
         files: comparison.files,
@@ -214,17 +257,15 @@ export class TurnGitArtifactManager {
         deletions: comparison.deletions,
         status: comparison.truncated ? "partial" : "ready",
         completeness: comparison.truncated ? "truncated" : "complete",
-        patchState: comparison.truncated ? "truncated" : "available",
+        patchState: comparison.patchTruncated ? "truncated" : "available",
         patchDigest: digest,
         capturedAt: this.now().toISOString(),
         terminalAssistantMessageId: input.terminalAssistantMessageId ?? null,
-        failureReason: comparison.truncated
-          ? "The complete file summary is retained, but the stored patch reached its size limit."
-          : null,
+        failureReason: truncatedCaptureReason(comparison),
       });
       await this.prune();
     } catch (error) {
-      this.store.completeTurnGitArtifact(input.turn.id, {
+      this.#completeIfPending(input.turn.id, {
         afterRef,
         status: stored.beforeRef ? "partial" : "failed",
         completeness: stored.beforeRef ? "partial" : "unavailable",
@@ -236,7 +277,25 @@ export class TurnGitArtifactManager {
     }
   }
 
-  async reconcile(): Promise<void> {
+  /**
+   * Completes a post-turn capture without allowing Git work to hold lifecycle
+   * settlement indefinitely. Concurrent callers share one finalization and a
+   * late capture cannot overwrite the bounded timeout state.
+   */
+  finalize(input: CaptureTurnGitArtifactInput): Promise<void> {
+    const existing = this.#finalizations.get(input.turn.id);
+    if (existing) return existing;
+    const task = this.#finalizeBounded(input).finally(() => {
+      if (this.#finalizations.get(input.turn.id) === task) {
+        this.#finalizations.delete(input.turn.id);
+      }
+    });
+    this.#finalizations.set(input.turn.id, task);
+    return task;
+  }
+
+  async reconcile(): Promise<boolean> {
+    const before = JSON.stringify(this.store.snapshot().turnGitArtifacts);
     for (const artifact of this.store.pendingTurnGitArtifacts()) {
       const turn = this.store.agentTurn(artifact.turnId);
       if (
@@ -245,7 +304,7 @@ export class TurnGitArtifactManager {
         && turn.status !== "cancelled"
         && turn.status !== "interrupted"
       ) continue;
-      await this.captureAfter({
+      await this.finalize({
         turn,
         checkpointId: turn.checkpointId,
         terminalAssistantMessageId: turn.terminalAssistantMessageId,
@@ -263,6 +322,48 @@ export class TurnGitArtifactManager {
       });
     }
     await this.prune();
+    return JSON.stringify(this.store.snapshot().turnGitArtifacts) !== before;
+  }
+
+  async #finalizeBounded(input: CaptureTurnGitArtifactInput): Promise<void> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const work = Promise.resolve().then(() => this.captureAfter(input));
+    const outcome = await Promise.race([
+      work.then(() => "captured" as const, () => "failed" as const),
+      new Promise<"timed-out">((resolveTimeout) => {
+        timeout = setTimeout(
+          () => resolveTimeout("timed-out"),
+          this.#finalizationTimeoutMs,
+        );
+        timeout.unref?.();
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+    if (outcome === "captured") return;
+
+    // The underlying Git commands have their own process timeouts. This state
+    // transition bounds renderer/restart reconciliation and prevents any late
+    // command result from replacing the authoritative timeout.
+    this.#completeIfPending(input.turn.id, {
+      status: "failed",
+      completeness: "partial",
+      patchState: "failed",
+      capturedAt: this.now().toISOString(),
+      terminalAssistantMessageId: input.terminalAssistantMessageId ?? null,
+      failureReason: outcome === "timed-out"
+        ? "Capturing turn changes timed out."
+        : "The repository artifact could not be finalized.",
+    });
+    void work.catch(() => undefined);
+  }
+
+  #completeIfPending(
+    turnId: string,
+    input: Parameters<RuntimeStore["completeTurnGitArtifact"]>[1],
+  ): StoredTurnGitArtifact | null {
+    const current = this.store.turnGitArtifact(turnId);
+    if (!current || current.status !== "pending") return null;
+    return this.store.completeTurnGitArtifact(turnId, input);
   }
 
   async turnDiff(turnId: string, path?: string): Promise<TurnGitDiffSnapshot> {
@@ -314,7 +415,7 @@ export class TurnGitArtifactManager {
       turnId: later.turnId,
       title: `Compare ${historicalTitle(earlier).replace("Changed by ", "")} → ${historicalTitle(later).replace("Changed by ", "")}`,
       completeness: comparison.truncated ? "truncated" : "complete",
-      patchState: comparison.truncated ? "truncated" : "available",
+      patchState: comparison.patchTruncated ? "truncated" : "available",
       patch: comparison.patch,
       truncated: comparison.truncated,
       files: comparison.files,

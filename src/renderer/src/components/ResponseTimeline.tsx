@@ -16,7 +16,6 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDot,
-  Clock3,
   Copy,
   ExternalLink,
   FileCode2,
@@ -25,7 +24,6 @@ import {
   ListChecks,
   Paperclip,
   RotateCcw,
-  Square,
   TriangleAlert,
 } from "lucide-react";
 import clsx from "clsx";
@@ -39,19 +37,34 @@ import type {
   AgentTurn,
   ChatMessage,
   CheckpointSummary,
+  InterfaceScale,
   ProviderInfo,
+  ResponseDensity,
+  SubagentTrace,
 } from "@shared/contracts";
 import { formatClockTime } from "../lib/format";
-import { finalAnswerIdentityLabel } from "../utils/finalAnswerIdentity";
 import {
+  activeWorkIdentityLabel,
+  finalAnswerIdentityLabel,
+} from "../utils/finalAnswerIdentity";
+import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../utils/interfaceScale";
+import {
+  activityAttentionSeverity,
+  activityDetailPresentation,
   activityNeedsAttention,
   buildTurnExecutionStream,
   buildResponseTimeline,
   buildTimelineMinimapMarkers,
   estimateTimelineRowSize,
   formatElapsed,
+  isInterruptedActivity,
   resolveTimelineKeyboardIntent,
+  resolveActivityGroupPresentation,
+  shouldAdjustTimelineScrollPosition,
+  shouldConsolidateSettledWorkIntoRunDetails,
+  shouldFollowTimeline,
   shouldShowTimelineMinimap,
+  shouldShowTurnGitArtifactSummary,
   shouldVirtualizeTimeline,
   stabilizeResponseTimeline,
   turnExecutionElapsedMs,
@@ -61,16 +74,19 @@ import {
   type ResponseTimelineItem,
   type ResponseTimelineCompatibility,
   type ResponseTurn,
+  type ActivityAttentionSeverity,
   type TurnExecutionStreamEntry,
   type TurnGitArtifactSummary,
 } from "../utils/responseTimeline";
 import { ApprovalCard, InputRequestCard } from "./AgentRequestCard";
 import { ResponseMarkdown } from "./ResponseMarkdown";
+import { SubagentDisclosure } from "./SubagentDisclosure";
 
 export interface ResponseTimelineProps {
   turns: AgentTurn[];
   messages: ChatMessage[];
   activities: AgentActivity[];
+  subagents?: SubagentTrace[];
   reasonings: AgentReasoning[];
   plans: AgentPlan[];
   checkpoints: CheckpointSummary[];
@@ -104,6 +120,7 @@ export interface ResponseTimelineProps {
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
   onOpenTurnFile: (path: string) => void;
   onStop: () => void;
+  onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
 }
 
 function useCopyAction(): [boolean, (content: string) => Promise<void>] {
@@ -144,7 +161,7 @@ function CopyAnswerButton({
       onClick={() => void copy(content)}
     >
       {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
-      <span>{copied ? "Copied" : "Copy answer"}</span>
+      <span>{copied ? "Copied" : "Copy"}</span>
     </button>
   );
 }
@@ -158,25 +175,162 @@ function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Element {
   return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)))}</span>;
 }
 
-function ActivityRow({
+type ActivityLineSeverity = "neutral" | ActivityAttentionSeverity;
+
+function activityTitleConveysSeverity(
+  title: string,
+  severity: ActivityAttentionSeverity,
+): boolean {
+  return severity === "failure"
+    ? /\b(?:error|failed|failure)\b/iu.test(title)
+    : /\b(?:blocked|canceled|cancelled|incomplete|interrupted|partial(?:ly)?|skipped|unsupported|warned|warning)\b/iu
+      .test(title);
+}
+
+function splitActivityTitle(
+  title: string,
+  severity: ActivityLineSeverity,
+): {
+  leadingTarget: string;
+  verb: string;
+  trailingTarget: string;
+} {
+  const trimmed = title.trim();
+  const words = trimmed.split(/\s+/u).filter(Boolean);
+  let statusVerbIndex = -1;
+  if (severity !== "neutral") {
+    words.forEach((word, index) => {
+      if (
+        /^(?:blocked|canceled|cancelled|error|failed|failure|incomplete|interrupted|partial|partially|skipped|unsupported|warned|warning)$/iu.test(
+          word.replace(/[.:,;!?]+$/u, ""),
+        )
+      ) {
+        statusVerbIndex = index;
+      }
+    });
+  }
+  const verbIndex = statusVerbIndex >= 0 ? statusVerbIndex : 0;
+  return {
+    leadingTarget: words.slice(0, verbIndex).join(" "),
+    verb: words[verbIndex] ?? "",
+    trailingTarget: words.slice(verbIndex + 1).join(" "),
+  };
+}
+
+export function ActivityRow({
   activity,
   visibility,
+  onBeforeToggle,
+  onAfterToggle,
 }: {
   activity: AgentActivity;
   visibility?: "recent" | "details" | "important";
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
 }): React.JSX.Element {
-  const Icon = activity.status === "failed" ? TriangleAlert : activity.status === "completed" ? CheckCircle2 : CircleDot;
+  const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
+  const interrupted = isInterruptedActivity(activity);
+  const attentionSeverity = activityAttentionSeverity(activity);
+  const needsAttention = attentionSeverity !== null;
+  const severity: ActivityLineSeverity = attentionSeverity ?? "neutral";
+  const detailPresentation = activityDetailPresentation(activity);
+  const showDisclosure = Boolean(
+    detailPresentation.full
+    && (detailPresentation.expandable || needsAttention),
+  );
+  // Transport diagnostics are deliberately opt-in. The public failure summary
+  // already lives in the row title; exit/signal/protocol detail belongs only
+  // behind the Technical details disclosure.
+  const showPreview = Boolean(
+    detailPresentation.preview
+    && showDisclosure
+    && activity.kind !== "error"
+    && !interrupted,
+  );
+  const Icon = severity !== "neutral"
+    ? TriangleAlert
+    : activity.status === "completed"
+      ? Check
+      : CircleDot;
+  const fullLabel = [
+    activity.title,
+    showPreview ? detailPresentation.preview : null,
+  ].filter(Boolean).join(" — ");
+  const { leadingTarget, verb, trailingTarget } = splitActivityTitle(
+    activity.title,
+    severity,
+  );
+  const spokenState = interrupted
+    ? "Interrupted"
+    : severity === "failure"
+      ? "Failed"
+      : severity === "warning"
+        ? "Warning"
+        : turnStatusLabel(activity.status);
+  const visibleState = attentionSeverity
+    && !activityTitleConveysSeverity(activity.title, attentionSeverity)
+    ? spokenState
+    : null;
   return (
     <div
-      className={clsx("agent-activity", `is-${activity.status}`, activityNeedsAttention(activity) && "is-important")}
+      className={clsx(
+        "agent-activity",
+        `is-${activity.status}`,
+        needsAttention && "is-important",
+        showDisclosure && "has-technical-detail",
+      )}
+      data-activity-kind={activity.kind}
+      data-activity-severity={severity}
       data-activity-visibility={visibility}
+      title={fullLabel}
     >
-      <Icon size={14} aria-hidden="true" />
-      <span>
-        <span className="visually-hidden">{turnStatusLabel(activity.status === "running" ? "running" : activity.status)}: </span>
-        <strong>{activity.title}</strong>
-        {activity.detail && <small>{activity.detail}</small>}
+      <Icon size={12} aria-hidden="true" />
+      <span className={clsx(
+        "agent-activity-copy",
+        detailPresentation.full && !showPreview && !needsAttention && "has-detail",
+        showPreview && "has-preview",
+      )}>
+        <span className="visually-hidden">{spokenState}: </span>
+        {visibleState && (
+          <span className="agent-activity-state" aria-hidden="true">{visibleState}</span>
+        )}
+        <strong className="agent-activity-title">
+          {leadingTarget && (
+            <span className="agent-activity-target">{`${leadingTarget} `}</span>
+          )}
+          <span className="agent-activity-verb">{verb}</span>
+          {trailingTarget && (
+            <span className="agent-activity-target">{` ${trailingTarget}`}</span>
+          )}
+        </strong>
+        {detailPresentation.full && !showPreview && !needsAttention && (
+          <small className="agent-activity-detail">
+            <span className="visually-hidden"> — </span>
+            {detailPresentation.full}
+          </small>
+        )}
+        {showPreview && (
+          <small className="agent-activity-detail-preview">
+            <span className="visually-hidden">Technical output preview: </span>
+            {detailPresentation.preview}
+          </small>
+        )}
       </span>
+      {showDisclosure && (
+        <details className="agent-activity-technical">
+          <summary {...anchorToggleHandlers}>
+            <span>
+              {activity.kind === "error" || interrupted
+                ? "Technical details"
+                : activity.kind === "command"
+                  ? "Full command output"
+                  : "Full output"}
+            </span>
+            <ChevronDown size={11} aria-hidden="true" />
+          </summary>
+          <pre>{detailPresentation.full}</pre>
+        </details>
+      )}
     </div>
   );
 }
@@ -225,6 +379,23 @@ function CommentaryRow({
   );
 }
 
+function FollowUpRow({
+  entry,
+}: {
+  entry: Extract<TurnExecutionStreamEntry, { kind: "follow-up" }>;
+}): React.JSX.Element {
+  return (
+    <article
+      className="turn-follow-up-row"
+      aria-label="Your follow-up"
+      data-follow-up-message-id={entry.message.id}
+    >
+      <span>You</span>
+      <p>{entry.message.content}</p>
+    </article>
+  );
+}
+
 function useAnchoredDetailsToggle(
   onBeforeToggle?: () => void,
   onAfterToggle?: () => void,
@@ -259,7 +430,7 @@ function useAnchoredDetailsToggle(
   };
 }
 
-function ActivityGroup({
+export function ActivityGroup({
   entry,
   onBeforeToggle,
   onAfterToggle,
@@ -269,23 +440,31 @@ function ActivityGroup({
   onAfterToggle?: () => void;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const latest = entry.activities.at(-1)!;
-  const alwaysVisible = new Set(entry.activities
-    .filter((activity) =>
-      activity.id === latest.id
-      || activityNeedsAttention(activity))
-    .map(({ id }) => id));
-  const hiddenCount = entry.activities.filter(({ id }) => !alwaysVisible.has(id)).length;
-  const visibleActivities = expanded
-    ? entry.activities
-    : entry.activities.filter(({ id }) => alwaysVisible.has(id));
+  const { hiddenCount, visibleActivities } = resolveActivityGroupPresentation(
+    entry.activities,
+    expanded,
+  );
+  const containsAttention = entry.activities.some(activityNeedsAttention);
   const toggle = (): void => {
     onBeforeToggle?.();
     setExpanded((current) => !current);
     window.requestAnimationFrame(() => onAfterToggle?.());
   };
   return (
-    <div className="turn-activity-group" data-activity-group={entry.id}>
+    <div
+      className="turn-activity-group"
+      data-activity-group={entry.id}
+      data-activity-group-mode={containsAttention ? "attention" : "calls"}
+    >
+      {visibleActivities.map((activity) => (
+        <ActivityRow
+          activity={activity}
+          visibility={activityNeedsAttention(activity) ? "important" : "recent"}
+          onBeforeToggle={onBeforeToggle}
+          onAfterToggle={onAfterToggle}
+          key={activity.id}
+        />
+      ))}
       {hiddenCount > 0 && (
         <button
           type="button"
@@ -296,18 +475,11 @@ function ActivityGroup({
           <ChevronDown size={12} aria-hidden="true" />
           <span>
             {expanded
-              ? "Show fewer calls"
-              : `${hiddenCount} earlier ${hiddenCount === 1 ? "call" : "calls"}`}
+              ? "Show fewer tool calls"
+              : `+${hiddenCount} previous tool ${hiddenCount === 1 ? "call" : "calls"}`}
           </span>
         </button>
       )}
-      {visibleActivities.map((activity) => (
-        <ActivityRow
-          activity={activity}
-          visibility={activityNeedsAttention(activity) ? "important" : "recent"}
-          key={activity.id}
-        />
-      ))}
     </div>
   );
 }
@@ -332,8 +504,9 @@ function ExecutionStream({
   if (entries.length === 0) return null;
   return (
     <div className="turn-execution-stream" role="list" aria-label="Agent work transcript">
-      {entries.map((entry) => entry.kind === "commentary"
-        ? (
+      {entries.map((entry) => {
+        if (entry.kind === "commentary") {
+          return (
             <div role="listitem" key={entry.id}>
               <CommentaryRow
                 entry={entry}
@@ -343,16 +516,84 @@ function ExecutionStream({
                 defaultCodeWrap={defaultCodeWrap}
               />
             </div>
-          )
-        : (
+          );
+        }
+        if (entry.kind === "follow-up") {
+          return (
             <div role="listitem" key={entry.id}>
-              <ActivityGroup
-                entry={entry}
-                onBeforeToggle={onBeforeToggle}
-                onAfterToggle={onAfterToggle}
-              />
+              <FollowUpRow entry={entry} />
             </div>
-          ))}
+          );
+        }
+        return (
+          <div role="listitem" key={entry.id}>
+            <ActivityGroup
+              entry={entry}
+              onBeforeToggle={onBeforeToggle}
+              onAfterToggle={onAfterToggle}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function shouldCollapseSuccessfulWorkOnSettlement(input: {
+  wasActive: boolean;
+  isActive: boolean;
+  status: AgentTurn["status"];
+  autoCollapse: boolean;
+}): boolean {
+  return input.autoCollapse
+    && input.wasActive
+    && !input.isActive
+    && input.status === "completed";
+}
+
+function SettledWorkDetails({
+  id,
+  entries,
+  turn,
+  reasoningContent,
+  includesReasoning,
+  projectRoot,
+  projectId,
+  conversationId,
+  defaultCodeWrap,
+  onBeforeToggle,
+  onAfterToggle,
+}: {
+  id?: string;
+  entries: TurnExecutionStreamEntry[];
+  turn: ResponseTurn;
+  reasoningContent: string;
+  includesReasoning: boolean;
+  projectRoot: string;
+  projectId: string;
+  conversationId: string;
+  defaultCodeWrap: boolean;
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
+}): React.JSX.Element {
+  return (
+    <div className="turn-work-details" id={id}>
+      <ExecutionStream
+        entries={entries}
+        projectRoot={projectRoot}
+        projectId={projectId}
+        conversationId={conversationId}
+        defaultCodeWrap={defaultCodeWrap}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
+      {includesReasoning && (
+        <div className="turn-reasoning-detail">
+          <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
+          <p>{reasoningContent}</p>
+        </div>
+      )}
+      {turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
     </div>
   );
 }
@@ -383,9 +624,20 @@ function WorkLog({
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
   const [expanded, setExpanded] = useState(!autoCollapse);
+  const workWasActive = useRef(turn.isActive);
   const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
   const detailsId = `turn-work-details-${turn.id}`;
   useEffect(() => setExpanded(!autoCollapse), [autoCollapse]);
+  useLayoutEffect(() => {
+    const shouldCollapse = shouldCollapseSuccessfulWorkOnSettlement({
+      wasActive: workWasActive.current,
+      isActive: turn.isActive,
+      status: turn.agentTurn.status,
+      autoCollapse,
+    });
+    workWasActive.current = turn.isActive;
+    if (shouldCollapse) setExpanded(false);
+  }, [autoCollapse, turn.agentTurn.status, turn.isActive]);
 
   const includesReasoning = showThinking && Boolean(reasoningContent);
   // Provider lifecycle pings ("thinking", "turn completed", heartbeats) are
@@ -463,7 +715,13 @@ function WorkLog({
   );
 
   return (
-    <div className="turn-work-log is-settled" data-settled-work-status={status}>
+    <div
+      className="turn-work-log is-settled"
+      data-settled-work-status={status}
+      data-settled-work-visibility={hasFoldableDetails
+        ? expanded ? "expanded" : "collapsed"
+        : "static"}
+    >
       {hasFoldableDetails && (
         <details
           open={expanded}
@@ -479,25 +737,19 @@ function WorkLog({
             <small>{expanded ? "Hide details" : "Details"}</small>
             <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
           </summary>
-          <div className="turn-work-details" id={detailsId}>
-            <ExecutionStream
-              entries={stream}
-              projectRoot={projectRoot}
-              projectId={projectId}
-              conversationId={conversationId}
-              defaultCodeWrap={defaultCodeWrap}
-              onBeforeToggle={onBeforeToggle}
-              onAfterToggle={onAfterToggle}
-            />
-            {includesReasoning && (
-              <div className="turn-reasoning-detail">
-                <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
-                <p>{reasoningContent}</p>
-              </div>
-            )}
-            {turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
-            {supplementalActivities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
-          </div>
+          <SettledWorkDetails
+            id={detailsId}
+            entries={stream}
+            turn={turn}
+            reasoningContent={reasoningContent}
+            includesReasoning={includesReasoning}
+            projectRoot={projectRoot}
+            projectId={projectId}
+            conversationId={conversationId}
+            defaultCodeWrap={defaultCodeWrap}
+            onBeforeToggle={onBeforeToggle}
+            onAfterToggle={onAfterToggle}
+          />
         </details>
       )}
       {!hasFoldableDetails && (
@@ -505,7 +757,14 @@ function WorkLog({
           {summaryContent}
         </div>
       )}
-      {turn.importantActivities.map((activity) => <ActivityRow activity={activity} key={activity.id} />)}
+      {turn.importantActivities.map((activity) => (
+        <ActivityRow
+          activity={activity}
+          onBeforeToggle={onBeforeToggle}
+          onAfterToggle={onAfterToggle}
+          key={activity.id}
+        />
+      ))}
     </div>
   );
 }
@@ -535,7 +794,7 @@ function ChangedFilesSummary({
         tabIndex={-1}
       >
         <Files size={13} aria-hidden="true" />
-        <span><strong>Changed by this turn</strong><small>Capturing the historical Git state…</small></span>
+        <span><strong>Capturing changes…</strong><small>Git history will appear here when ready.</small></span>
       </div>
     );
   }
@@ -559,19 +818,8 @@ function ChangedFilesSummary({
       </div>
     );
   }
-  const patchAvailable = artifact.patchState === "available" || artifact.patchState === "truncated";
-  const completenessWarning = artifact.failureReason
-    ?? (artifact.completeness === "truncated"
-      ? "The complete file summary is retained, but the stored patch was truncated."
-      : artifact.completeness === "partial"
-        ? "Only a partial historical Git capture is available for this turn."
-        : artifact.patchState === "expired"
-          ? "The stored patch has expired; the historical file summary is still available."
-          : artifact.patchState === "failed"
-            ? "The historical file summary is available, but its stored patch could not be read."
-            : artifact.patchState === "none"
-              ? "The historical file summary is available without a stored patch."
-              : null);
+  const patchAvailable = turnGitArtifactPatchAvailable(artifact);
+  const completenessWarning = turnGitArtifactCompletenessWarning(artifact);
   return (
     <details
       className="turn-changed-files"
@@ -595,7 +843,6 @@ function ChangedFilesSummary({
           <small>
             · +{artifact.insertions} −{artifact.deletions}
             {artifact.branch && ` · ${artifact.branch}`}
-            {artifact.completeness !== "complete" && " · incomplete"}
           </small>
         </span>
         <span className="turn-changed-files-toggle">
@@ -650,30 +897,131 @@ function ChangedFilesSummary({
   );
 }
 
-const EXPECTED_NON_GIT_ARTIFACT_FAILURES = new Set([
-  "This workspace is not a Git repository.",
-  "The selected folder is not a Git repository.",
-]);
-
-function shouldShowChangedFilesSummary(artifact: TurnGitArtifactSummary): boolean {
-  return !(
-    artifact.status === "unavailable"
-    && artifact.completeness === "unavailable"
-    && EXPECTED_NON_GIT_ARTIFACT_FAILURES.has(artifact.failureReason ?? "")
-  );
+export function turnGitArtifactPatchAvailable(
+  artifact: TurnGitArtifactSummary,
+): boolean {
+  return artifact.patchState === "available" || artifact.patchState === "truncated";
 }
 
-function defaultTurnDurationLabel(turn: ResponseTurn): string {
-  const execution = turnExecutionElapsedMs(turn);
-  if (execution === null) {
-    return turn.isActive
-      ? `Queued ${formatElapsed(turnQueueElapsedMs(turn))}`
-      : "Not started";
+export function turnGitArtifactCompletenessWarning(
+  artifact: TurnGitArtifactSummary,
+): string | null {
+  if (artifact.failureReason) return artifact.failureReason;
+  const warnings: string[] = [];
+  if (artifact.completeness === "truncated") {
+    warnings.push(
+      "This historical artifact reached a capture limit; its file list, totals, or stored patch may be incomplete.",
+    );
+  } else if (artifact.completeness === "partial") {
+    warnings.push("Only a partial historical Git capture is available for this turn.");
   }
-  const duration = formatElapsed(execution);
-  if (turn.isActive) return `Working ${duration}`;
-  if (turn.agentTurn.status === "completed") return `Worked ${duration}`;
-  return `Ran ${duration}`;
+  if (artifact.patchState === "expired") {
+    warnings.push("The stored patch has expired; the historical file summary is still available.");
+  } else if (artifact.patchState === "failed") {
+    warnings.push("The historical file summary is available, but its stored patch could not be read.");
+  } else if (artifact.patchState === "none") {
+    warnings.push("The historical file summary is available without a stored patch.");
+  }
+  return warnings.length > 0 ? warnings.join(" ") : null;
+}
+
+export function shouldShowChangedFilesSummary(
+  artifact: TurnGitArtifactSummary,
+): boolean {
+  return shouldShowTurnGitArtifactSummary(artifact);
+}
+
+export interface TurnRunDetail {
+  label: string;
+  value: string;
+  technical: boolean;
+}
+
+export interface TurnMetadataPresentation {
+  statusLabel: string;
+  durationLabel: string;
+  details: TurnRunDetail[];
+}
+
+function sessionContinuationLabel(agentTurn: AgentTurn): string {
+  if (agentTurn.providerSessionBefore !== null) return "Resumed existing session";
+  if (agentTurn.providerSessionAfter !== null) return "Started new session";
+  return "Not recorded";
+}
+
+export function turnMetadataPresentation(
+  turn: ResponseTurn,
+  now = Date.now(),
+): TurnMetadataPresentation {
+  const { agentTurn } = turn;
+  const selection = agentTurn.modelSelection;
+  const execution = turnExecutionElapsedMs(turn, now);
+  let durationLabel: string;
+  if (execution === null) {
+    durationLabel = turn.isActive
+      ? `Queued ${formatElapsed(turnQueueElapsedMs(turn, now))}`
+      : "Not started";
+  } else {
+    const duration = formatElapsed(execution);
+    durationLabel = turn.isActive
+      ? `Working ${duration}`
+      : agentTurn.status === "completed"
+        ? `Worked ${duration}`
+        : `Ran ${duration}`;
+  }
+
+  const details: TurnRunDetail[] = [
+    { label: "Harness ID", value: selection.harnessId, technical: true },
+    { label: "Backend profile ID", value: selection.backendProfileId, technical: true },
+    { label: "Exact model ID", value: selection.modelId, technical: true },
+    {
+      label: "Requested alias",
+      value: selection.alias ?? "Not requested",
+      technical: selection.alias !== null,
+    },
+    {
+      label: "Reasoning level",
+      value: selection.reasoningEffort ?? "Default",
+      technical: selection.reasoningEffort !== null,
+    },
+    { label: "Interaction mode", value: agentTurn.interactionMode, technical: true },
+    { label: "Access mode", value: agentTurn.accessMode, technical: true },
+    {
+      label: "Queue duration",
+      value: formatElapsed(turnQueueElapsedMs(turn, now)),
+      technical: false,
+    },
+    {
+      label: "Execution duration",
+      value: execution === null ? "Not started" : formatElapsed(execution),
+      technical: false,
+    },
+    {
+      label: "Historical association",
+      value: agentTurn.association === "authoritative" ? "Authoritative" : "Inferred",
+      technical: false,
+    },
+    {
+      label: "Session continuation",
+      value: sessionContinuationLabel(agentTurn),
+      technical: false,
+    },
+  ];
+  if (
+    turn.gitArtifact === null
+    || shouldShowChangedFilesSummary(turn.gitArtifact)
+  ) {
+    details.push({
+      label: "Artifact completeness",
+      value: artifactCompletenessLabel(turn.gitArtifact),
+      technical: false,
+    });
+  }
+  return {
+    statusLabel: turnStatusLabel(agentTurn.status),
+    durationLabel,
+    details,
+  };
 }
 
 export function turnCompletionAnnouncement(
@@ -699,26 +1047,44 @@ function TurnMetadata({
   turn,
   terminalAnswer,
   showTimestamp,
+  settledWorkDetails,
+  workDetailsExpandedByDefault,
   onBeforeToggle,
   onAfterToggle,
 }: {
   turn: ResponseTurn;
   terminalAnswer: ChatMessage | null;
   showTimestamp: boolean;
+  settledWorkDetails?: React.JSX.Element | null;
+  workDetailsExpandedByDefault?: boolean;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
-  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(
+    workDetailsExpandedByDefault === true,
+  );
   const { agentTurn } = turn;
-  const selection = agentTurn.modelSelection;
-  const queueDuration = formatElapsed(turnQueueElapsedMs(turn));
-  const execution = turnExecutionElapsedMs(turn);
+  const presentation = turnMetadataPresentation(turn);
   const detailsId = `turn-run-details-${turn.id}`;
-  const toggleDetails = (): void => {
+  const detailsLabelId = `${detailsId}-label`;
+  const togglePrepared = useRef(false);
+  const prepareToggle = (): void => {
+    if (togglePrepared.current) return;
+    togglePrepared.current = true;
     onBeforeToggle?.();
-    setDetailsExpanded((current) => !current);
-    window.requestAnimationFrame(() => onAfterToggle?.());
   };
+  const toggleDetails = (): void => {
+    prepareToggle();
+    setDetailsExpanded((current) => !current);
+  };
+  useLayoutEffect(() => {
+    if (!togglePrepared.current) return;
+    onAfterToggle?.();
+    togglePrepared.current = false;
+  }, [detailsExpanded, onAfterToggle]);
+  useEffect(() => {
+    setDetailsExpanded(workDetailsExpandedByDefault === true);
+  }, [workDetailsExpandedByDefault]);
   return (
     <footer className="turn-meta" aria-label="Final answer actions and run metadata">
       <div className="turn-meta-primary">
@@ -728,30 +1094,46 @@ function TurnMetadata({
         {showTimestamp && terminalAnswer && (
           <time dateTime={terminalAnswer.createdAt}>{formatClockTime(terminalAnswer.createdAt)}</time>
         )}
-        <span data-turn-status={agentTurn.status}>{turnStatusLabel(agentTurn.status)}</span>
-        <span className="turn-duration">{defaultTurnDurationLabel(turn)}</span>
+        <span data-turn-status={agentTurn.status}>{presentation.statusLabel}</span>
+        <span className="turn-duration">{presentation.durationLabel}</span>
         <button
           type="button"
           className="turn-run-details-toggle"
+          id={detailsLabelId}
           aria-expanded={detailsExpanded}
           aria-controls={detailsId}
+          onPointerDownCapture={prepareToggle}
+          onPointerCancelCapture={() => {
+            togglePrepared.current = false;
+          }}
+          onKeyDownCapture={(event) => {
+            if (event.key === "Enter" || event.key === " ") prepareToggle();
+          }}
+          onClickCapture={prepareToggle}
           onClick={toggleDetails}
         >
           <span>Run details</span>
           <ChevronDown size={12} aria-hidden="true" />
         </button>
       </div>
-      <dl className="turn-run-details" id={detailsId} hidden={!detailsExpanded}>
-        <div><dt>Harness ID</dt><dd><code>{selection.harnessId}</code></dd></div>
-        <div><dt>Backend profile ID</dt><dd><code>{selection.backendProfileId}</code></dd></div>
-        <div><dt>Exact model ID</dt><dd><code>{selection.modelId}</code></dd></div>
-        <div><dt>Reasoning level</dt><dd><code>{selection.reasoningEffort ?? "(default)"}</code></dd></div>
-        <div><dt>Mode</dt><dd><code>{agentTurn.interactionMode}</code></dd></div>
-        <div><dt>Access</dt><dd><code>{agentTurn.accessMode}</code></dd></div>
-        <div><dt>Queue duration</dt><dd>{queueDuration}</dd></div>
-        <div><dt>Execution duration</dt><dd>{execution === null ? "Not started" : formatElapsed(execution)}</dd></div>
-        <div><dt>Historical association</dt><dd>{agentTurn.association === "authoritative" ? "Authoritative" : "Inferred"}</dd></div>
-        <div><dt>Artifact completeness</dt><dd>{artifactCompletenessLabel(turn.gitArtifact)}</dd></div>
+      <dl
+        className="turn-run-details"
+        id={detailsId}
+        aria-labelledby={detailsLabelId}
+        hidden={!detailsExpanded}
+      >
+        {presentation.details.map((detail) => (
+          <div key={detail.label}>
+            <dt>{detail.label}</dt>
+            <dd>{detail.technical ? <code>{detail.value}</code> : detail.value}</dd>
+          </div>
+        ))}
+        {settledWorkDetails && (
+          <div className="turn-run-work-details">
+            <dt>Execution transcript</dt>
+            <dd>{settledWorkDetails}</dd>
+          </div>
+        )}
       </dl>
     </footer>
   );
@@ -782,14 +1164,19 @@ function UserRequestLayer({
       </div>
       <div className="message-body">{turn.userMessage.content}</div>
       {turn.userMessage.attachments.length > 0 && (
-        <div className="message-attachments turn-user-request-attachments" aria-label="Request attachments">
+        <ul className="message-attachments turn-user-request-context" aria-label="Request context">
           {turn.userMessage.attachments.map((attachment) => (
-            <span key={attachment.id}>
+            <li
+              className="turn-user-request-context-chip"
+              data-request-context-kind="image"
+              key={attachment.id}
+              title={`Image · ${attachment.name}`}
+            >
               <Paperclip size={12} aria-hidden="true" />
               <span>Image · {attachment.name}</span>
-            </span>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </article>
   );
@@ -816,6 +1203,10 @@ function AgentExecutionLayer({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
+  const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
+  const subagents = (props.subagents ?? []).filter(
+    ({ turnId }) => turnId === turn.agentTurn.id,
+  );
   const statusLabel = turn.agentTurn.status === "queued"
     ? `${providerLabel} is queued`
     : turn.agentTurn.status === "starting"
@@ -827,20 +1218,26 @@ function AgentExecutionLayer({
           : `${providerLabel} is working`;
   return (
     <section
-      className="agent-run-flow turn-agent-execution"
+      className={clsx(
+        "agent-run-flow turn-agent-execution",
+        consolidatesSettledWork && "is-quiet-settled",
+      )}
       aria-label={`${providerLabel} activity`}
       data-turn-layer="agent-execution"
     >
       {turn.isActive ? (
-        <div className="turn-execution-rail is-live">
-          <header className="turn-working-state">
+        <div
+          className="turn-execution-rail is-live"
+          data-active-work-region=""
+          data-active-work-state={turn.agentTurn.status}
+          data-work-identity-source="persisted-model-selection"
+        >
+          <header className="turn-working-state" title={providerLabel}>
             <span className="turn-working-status" role="status" aria-live="polite" aria-atomic="true">
-              <span className="turn-working-pulse"><CircleDot size={14} aria-hidden="true" /></span>
               <strong>{statusLabel}</strong>
             </span>
             <span className="turn-working-elapsed" aria-live="off">
               <span className="turn-working-separator" aria-hidden="true">·</span>
-              <Clock3 size={12} aria-hidden="true" />
               <LiveElapsed startedAt={timerStart} />
             </span>
             <button
@@ -849,7 +1246,6 @@ function AgentExecutionLayer({
               aria-label={`Stop ${providerLabel} run`}
               onClick={props.onStop}
             >
-              <Square size={11} fill="currentColor" aria-hidden="true" />
               <span>Stop</span>
             </button>
           </header>
@@ -867,7 +1263,7 @@ function AgentExecutionLayer({
             onAfterToggle={onAfterToggle}
           />
         </div>
-      ) : (
+      ) : !consolidatesSettledWork ? (
         <div className="turn-execution-rail is-settled">
           <WorkLog
             turn={turn}
@@ -883,7 +1279,12 @@ function AgentExecutionLayer({
             onAfterToggle={onAfterToggle}
           />
         </div>
-      )}
+      ) : null}
+      <SubagentDisclosure
+        subagents={subagents}
+        turns={props.turns}
+        onStopSubagent={props.onStopSubagent}
+      />
       <span
         className="visually-hidden"
         role="status"
@@ -895,6 +1296,20 @@ function AgentExecutionLayer({
       </span>
       {turn.approvals.map((request) => <ApprovalCard key={request.id} request={request} onRespond={props.onRespondToApproval} />)}
       {turn.inputRequests.map((request) => <InputRequestCard key={request.id} request={request} onRespond={props.onRespondToInput} />)}
+      {turn.systemMessages.map((message) => (
+        <article
+          className="message is-system turn-system-notice"
+          aria-label="Agent system notice"
+          data-turn-work-notice=""
+          key={message.id}
+        >
+          <div className="message-meta">
+            <span>System</span>
+            {props.showTimestamps && <time dateTime={message.createdAt}>{formatClockTime(message.createdAt)}</time>}
+          </div>
+          <div className="message-body">{message.content}</div>
+        </article>
+      ))}
     </section>
   );
 }
@@ -909,30 +1324,18 @@ export interface FinalAnswerPresentation {
 
 export function resolveFinalAnswerPresentation(
   turn: Pick<ResponseTurn, "isActive" | "terminalAssistantMessage">,
-  liveContent: string,
-  retainedLiveContent: string,
+  _liveContent: string,
+  _retainedLiveContent: string,
 ): FinalAnswerPresentation | null {
-  const terminalAnswer = turn.terminalAssistantMessage;
-  if (terminalAnswer) {
-    if (!terminalAnswer.content) return null;
-    return {
-      content: terminalAnswer.content,
-      phase: "persisted",
-      markdownStreaming: false,
-      showCaret: false,
-      terminalAnswer,
-    };
-  }
-
   if (turn.isActive) return null;
-  const content = liveContent || retainedLiveContent;
-  if (!content) return null;
+  const terminalAnswer = turn.terminalAssistantMessage;
+  if (!terminalAnswer?.content) return null;
   return {
-    content,
-    phase: "settling",
-    markdownStreaming: true,
+    content: terminalAnswer.content,
+    phase: "persisted",
+    markdownStreaming: false,
     showCaret: false,
-    terminalAnswer: null,
+    terminalAnswer,
   };
 }
 
@@ -968,7 +1371,11 @@ function FinalAnswerDocument({
       data-turn-layer="final-answer"
       tabIndex={-1}
     >
-      <header className="final-answer-identity">
+      <header
+        className="final-answer-identity"
+        aria-label="Historical answer identity"
+        data-identity-source="persisted-model-selection"
+      >
         <span data-final-answer-identity="historical-model-selection">
           {finalAnswerIdentityLabel(turn.agentTurn.modelSelection)}
         </span>
@@ -984,6 +1391,81 @@ function FinalAnswerDocument({
       />
       {presentation.showCaret && <span className="streaming-caret" aria-hidden="true" />}
     </article>
+  );
+}
+
+function SupportingLedgerLayer({
+  turn,
+  props,
+  previousArtifactTurnId,
+  onBeforeToggle,
+  onAfterToggle,
+}: {
+  turn: ResponseTurn;
+  props: ResponseTimelineProps;
+  previousArtifactTurnId: string | null;
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
+}): React.JSX.Element | null {
+  if (turn.isActive) return null;
+  const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
+  const settledWorkStream = consolidatesSettledWork
+    ? buildTurnExecutionStream(turn)
+    : [];
+  const includesReasoning = consolidatesSettledWork
+    && props.showThinking
+    && Boolean(turn.reasoning?.content);
+  const hasSettledWorkDetails = settledWorkStream.length > 0
+    || includesReasoning
+    || turn.plans.length > 0;
+  const showChangedFiles = props.showChangedFileSummaries
+    && turn.gitArtifact !== null
+    && shouldShowChangedFilesSummary(turn.gitArtifact);
+  if (!turn.terminalAssistantMessage && !showChangedFiles) return null;
+
+  return (
+    <section
+      className="turn-supporting-ledger"
+      aria-label="Supporting turn ledger"
+      data-turn-layer="supporting-ledger"
+    >
+      {turn.terminalAssistantMessage && (
+        <TurnMetadata
+          turn={turn}
+          terminalAnswer={turn.terminalAssistantMessage}
+          showTimestamp={props.showTimestamps}
+          settledWorkDetails={hasSettledWorkDetails
+            ? (
+                <SettledWorkDetails
+                  entries={settledWorkStream}
+                  turn={turn}
+                  reasoningContent={turn.reasoning?.content ?? ""}
+                  includesReasoning={includesReasoning}
+                  projectRoot={props.projectRoot}
+                  projectId={props.projectId}
+                  conversationId={props.conversationId}
+                  defaultCodeWrap={props.defaultCodeWrap}
+                  onBeforeToggle={onBeforeToggle}
+                  onAfterToggle={onAfterToggle}
+                />
+              )
+            : null}
+          workDetailsExpandedByDefault={hasSettledWorkDetails
+            && !props.autoCollapseWorkLog}
+          onBeforeToggle={onBeforeToggle}
+          onAfterToggle={onAfterToggle}
+        />
+      )}
+      {showChangedFiles && turn.gitArtifact && (
+        <ChangedFilesSummary
+          artifact={turn.gitArtifact}
+          previousTurnId={previousArtifactTurnId}
+          props={props}
+          onBeforeToggle={onBeforeToggle}
+          onAfterToggle={onAfterToggle}
+        />
+      )}
+    </section>
   );
 }
 
@@ -1006,20 +1488,13 @@ function TurnTimelineComponent({
   const reasoningContent = turn.isActive
     ? props.streamingReasoning || turn.reasoning?.content || ""
     : turn.reasoning?.content || "";
-  const providerLabel = props.providers.find(({ id }) => id === turn.agentTurn.providerId)?.label
-    ?? turn.agentTurn.providerId;
+  const providerLabel = activeWorkIdentityLabel(turn.agentTurn.modelSelection);
   const timerStart = turn.startedAt ?? turn.requestedAt;
   const wasActive = useRef(turn.isActive);
   const [completionAnnouncement, setCompletionAnnouncement] = useState("");
-  const renderedAnswerWhileActive = useRef(
-    turn.isActive && Boolean(turn.terminalAssistantMessage?.content),
-  );
   const [settlingTransition, setSettlingTransition] = useState<{
     revealAnswer: boolean;
   } | null>(null);
-  if (turn.isActive && turn.terminalAssistantMessage?.content) {
-    renderedAnswerWhileActive.current = true;
-  }
   const isSettling = settlingTransition !== null;
   const isRevealingSettledAnswer = settlingTransition?.revealAnswer ?? false;
 
@@ -1028,20 +1503,33 @@ function TurnTimelineComponent({
     if (announcement) {
       setCompletionAnnouncement(announcement);
       setSettlingTransition({
-        revealAnswer: !renderedAnswerWhileActive.current,
+        // Task 12 deliberately never renders a final document while active.
+        // A terminal row already present in the settlement snapshot is still
+        // newly visible and receives the restrained document reveal.
+        revealAnswer: Boolean(turn.terminalAssistantMessage?.content),
       });
+    } else if (
+      settlingTransition
+      && !settlingTransition.revealAnswer
+      && !turn.isActive
+      && turn.terminalAssistantMessage?.content
+    ) {
+      // Keep a short persistence gap inside the same transition window without
+      // promoting transient prose or restarting the completion timer.
+      setSettlingTransition({ revealAnswer: true });
     }
     wasActive.current = turn.isActive;
   }, [
     providerLabel,
+    settlingTransition,
     turn,
     turn.isActive,
   ]);
   useEffect(() => {
-    if (!settlingTransition) return;
+    if (!isSettling) return;
     const timer = window.setTimeout(() => setSettlingTransition(null), 220);
     return () => window.clearTimeout(timer);
-  }, [settlingTransition]);
+  }, [isSettling]);
 
   return (
     <section
@@ -1052,6 +1540,7 @@ function TurnTimelineComponent({
         isRevealingSettledAnswer && "is-revealing-settled-answer",
       )}
       aria-label={`Turn ${turn.index}`}
+      data-completion-transition={isSettling ? "active-to-settled" : undefined}
       data-response-row-id={turn.id}
       data-turn-id={turn.id}
       data-turn-association={turn.agentTurn.association}
@@ -1072,49 +1561,24 @@ function TurnTimelineComponent({
         onAfterToggle={() => onAfterToggle?.(turn.id)}
       />
 
-      {turn.systemMessages.map((message) => (
-        <article
-          className="message is-system"
-          aria-label="Agent system notice"
-          data-turn-work-notice=""
-          key={message.id}
-        >
-          <div className="message-meta"><span>System</span>{props.showTimestamps && <time dateTime={message.createdAt}>{formatClockTime(message.createdAt)}</time>}</div>
-          <div className="message-body">{message.content}</div>
-        </article>
-      ))}
-
       <FinalAnswerDocument
         turn={turn}
         props={props}
         liveContent={liveContent}
       />
 
-      {turn.terminalAssistantMessage && (
-        <TurnMetadata
-          turn={turn}
-          terminalAnswer={turn.terminalAssistantMessage}
-          showTimestamp={props.showTimestamps}
-          onBeforeToggle={() => onBeforeToggle?.(turn.id)}
-          onAfterToggle={() => onAfterToggle?.(turn.id)}
-        />
-      )}
-      {props.showChangedFileSummaries
-        && turn.gitArtifact
-        && shouldShowChangedFilesSummary(turn.gitArtifact) && (
-          <ChangedFilesSummary
-            artifact={turn.gitArtifact}
-            previousTurnId={previousArtifactTurnId}
-            props={props}
-            onBeforeToggle={() => onBeforeToggle?.(turn.id)}
-            onAfterToggle={() => onAfterToggle?.(turn.id)}
-          />
-        )}
+      <SupportingLedgerLayer
+        turn={turn}
+        props={props}
+        previousArtifactTurnId={previousArtifactTurnId}
+        onBeforeToggle={() => onBeforeToggle?.(turn.id)}
+        onAfterToggle={() => onAfterToggle?.(turn.id)}
+      />
     </section>
   );
 }
 
-function sameTurnTimelineProps(
+export function sameTurnTimelineProps(
   previous: {
     turn: ResponseTurn;
     props: ResponseTimelineProps;
@@ -1139,7 +1603,6 @@ function sameTurnTimelineProps(
     && left.projectRoot === right.projectRoot
     && left.projectId === right.projectId
     && left.conversationId === right.conversationId
-    && left.providers === right.providers
     && left.showTimestamps === right.showTimestamps
     && left.showThinking === right.showThinking
     && left.defaultCodeWrap === right.defaultCodeWrap
@@ -1153,6 +1616,8 @@ function sameTurnTimelineProps(
     && left.onCompareTurnArtifacts === right.onCompareTurnArtifacts
     && left.onOpenTurnFile === right.onOpenTurnFile
     && left.onStop === right.onStop
+    && left.onStopSubagent === right.onStopSubagent
+    && left.subagents === right.subagents
     && (!next.turn.isActive || (
       left.streamingText === right.streamingText
       && left.streamingReasoning === right.streamingReasoning
@@ -1238,6 +1703,101 @@ function currentPlainTimelineIndex(
     ? timeline.findIndex(({ id }) => id === visible.dataset.responseRowId)
     : -1;
   return index >= 0 ? index : Math.max(0, timeline.length - 1);
+}
+
+function currentInterfaceScale(): InterfaceScale {
+  if (typeof document === "undefined") return "default";
+  const value = document.documentElement.dataset.interfaceScale;
+  return value === "compact"
+    || value === "comfortable"
+    || value === "large"
+    ? value
+    : "default";
+}
+
+function currentResponseDensity(root: HTMLElement | null | undefined): ResponseDensity {
+  const workspace = root?.closest<HTMLElement>(".chat-workspace");
+  if (workspace?.classList.contains("response-density-compact")) return "compact";
+  if (workspace?.classList.contains("response-density-comfortable")) return "comfortable";
+  return "default";
+}
+
+interface TimelineEstimateLayout {
+  availableWidth: number;
+  interfaceScale: InterfaceScale;
+  responseDensity: ResponseDensity;
+}
+
+interface TimelineLayoutAnchor {
+  rowId: string | null;
+  viewportOffset: number;
+  wasFollowing: boolean;
+}
+
+const DEFAULT_TIMELINE_ESTIMATE_LAYOUT: TimelineEstimateLayout = {
+  availableWidth: 880,
+  interfaceScale: "default",
+  responseDensity: "default",
+};
+
+function useTimelineEstimateLayout(
+  timelineElementRef: RefObject<HTMLDivElement | null> | undefined,
+  conversationId: string,
+  onBeforeLayoutChange: () => void,
+): TimelineEstimateLayout {
+  const [layout, setLayout] = useState(DEFAULT_TIMELINE_ESTIMATE_LAYOUT);
+  useLayoutEffect(() => {
+    const timelineElement = timelineElementRef?.current;
+    if (!timelineElement) return;
+    const workspace = timelineElement.closest<HTMLElement>(".chat-workspace");
+    let lastLayout = DEFAULT_TIMELINE_ESTIMATE_LAYOUT;
+    const measure = (): void => {
+      const next = {
+        availableWidth: Math.max(320, Math.round(timelineElement.clientWidth)),
+        interfaceScale: currentInterfaceScale(),
+        responseDensity: currentResponseDensity(timelineElement),
+      };
+      if (
+        lastLayout.availableWidth === next.availableWidth
+        && lastLayout.interfaceScale === next.interfaceScale
+        && lastLayout.responseDensity === next.responseDensity
+      ) return;
+      onBeforeLayoutChange();
+      lastLayout = next;
+      setLayout(next);
+    };
+    measure();
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(measure);
+    resizeObserver?.observe(timelineElement);
+    const mutationObserver = typeof MutationObserver === "undefined"
+      ? null
+      : new MutationObserver(measure);
+    window.addEventListener(
+      INTERFACE_SCALE_WILL_CHANGE_EVENT,
+      onBeforeLayoutChange,
+    );
+    mutationObserver?.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-interface-scale"],
+    });
+    if (workspace) {
+      mutationObserver?.observe(workspace, {
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+    }
+    return () => {
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      window.removeEventListener(
+        INTERFACE_SCALE_WILL_CHANGE_EVENT,
+        onBeforeLayoutChange,
+      );
+    };
+  }, [conversationId, onBeforeLayoutChange, timelineElementRef]);
+  return layout;
 }
 
 interface TimelineGutter {
@@ -1352,6 +1912,11 @@ function TimelineMinimap({
 
 export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Element {
   const previousTimeline = useRef<ResponseTimelineItem[]>([]);
+  const pendingLayoutAnchor = useRef<TimelineLayoutAnchor | null>(null);
+  const captureLayoutAnchorRef = useRef<() => void>(() => undefined);
+  const captureLayoutAnchorBeforeChange = useCallback(() => {
+    captureLayoutAnchorRef.current();
+  }, []);
   const builtTimeline = useMemo(() => buildResponseTimeline({
     turns: props.turns,
     messages: props.messages,
@@ -1399,6 +1964,11 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     return result;
   }, [timeline]);
   const virtualized = shouldVirtualizeTimeline(timeline.length);
+  const estimateLayout = useTimelineEstimateLayout(
+    props.timelineElementRef,
+    props.conversationId,
+    captureLayoutAnchorBeforeChange,
+  );
   const getItemKey = useCallback(
     (index: number) => timeline[index]?.id ?? `missing-${index}`,
     [timeline],
@@ -1407,9 +1977,13 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     const item = timeline[index];
     if (!item) return 280;
     const artifact = item.kind === "turn" ? item.turn.gitArtifact : null;
+    const expandsConsolidatedWork = item.kind === "turn"
+      && !props.autoCollapseWorkLog
+      && shouldConsolidateSettledWorkIntoRunDetails(item.turn);
     return estimateTimelineRowSize(item, {
-      availableWidth: props.scrollElementRef?.current?.clientWidth,
+      ...estimateLayout,
       workDetailsExpanded: !props.autoCollapseWorkLog,
+      runDetailsExpanded: expandsConsolidatedWork,
       showThinking: props.showThinking,
       showChangedFiles: props.showChangedFileSummaries
         && artifact !== null
@@ -1417,9 +1991,9 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     });
   }, [
     props.autoCollapseWorkLog,
-    props.scrollElementRef,
     props.showChangedFileSummaries,
     props.showThinking,
+    estimateLayout,
     timeline,
   ]);
   const virtualizer = useVirtualizer({
@@ -1444,9 +2018,144 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
   const pendingAnchors = useRef(new Map<string, ExpansionAnchor>());
   const activeAnchorRestorations = useRef(new Map<string, number>());
   const manuallyAdjustedRows = useRef(new Set<string>());
+  const layoutAnchorActive = useRef(false);
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
-    !manuallyAdjustedRows.current.has(String(item.key))
-    && item.start < (instance.scrollOffset ?? 0) + 1;
+    shouldAdjustTimelineScrollPosition({
+      itemStart: item.start,
+      itemSize: item.size,
+      scrollOffset: instance.scrollOffset ?? 0,
+      firstMeasurement: !instance.itemSizeCache.has(item.key),
+      scrollDirection: instance.scrollDirection,
+      manuallyAnchored: layoutAnchorActive.current
+        || manuallyAdjustedRows.current.has(String(item.key)),
+    });
+  captureLayoutAnchorRef.current = () => {
+    if (pendingLayoutAnchor.current) return;
+    const scrollElement = props.scrollElementRef?.current;
+    const root = props.timelineElementRef?.current;
+    if (!scrollElement || !root) return;
+    const wasFollowing = shouldFollowTimeline(
+      scrollElement.scrollTop,
+      scrollElement.clientHeight,
+      scrollElement.scrollHeight,
+    );
+    const viewportTop = scrollElement.getBoundingClientRect().top;
+    const anchor = wasFollowing
+      ? null
+      : [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")]
+          .find((row) => row.getBoundingClientRect().bottom > viewportTop + 8) ?? null;
+    pendingLayoutAnchor.current = {
+      rowId: anchor?.dataset.responseRowId ?? null,
+      viewportOffset: anchor
+        ? anchor.getBoundingClientRect().top - viewportTop
+        : 0,
+      wasFollowing,
+    };
+  };
+  const previousEstimateLayout = useRef(estimateLayout);
+  useLayoutEffect(() => {
+    const previous = previousEstimateLayout.current;
+    previousEstimateLayout.current = estimateLayout;
+    if (
+      !virtualized
+      || (
+        previous.availableWidth === estimateLayout.availableWidth
+        && previous.interfaceScale === estimateLayout.interfaceScale
+        && previous.responseDensity === estimateLayout.responseDensity
+      )
+    ) {
+      pendingLayoutAnchor.current = null;
+      return;
+    }
+    const scrollElement = props.scrollElementRef?.current;
+    const root = props.timelineElementRef?.current;
+    if (!scrollElement || !root) return;
+    captureLayoutAnchorRef.current();
+    const layoutAnchor = pendingLayoutAnchor.current;
+    pendingLayoutAnchor.current = null;
+    if (!layoutAnchor) return;
+    const { rowId, viewportOffset, wasFollowing } = layoutAnchor;
+    const anchorIndex = rowId === null
+      ? -1
+      : timeline.findIndex((item) => item.id === rowId);
+    layoutAnchorActive.current = true;
+    virtualizer.measure();
+
+    let cancelled = false;
+    let attempts = 0;
+    let stableFrames = 0;
+    const settleUntil = performance.now() + 2_000;
+    const maximumSettleFrames = 360;
+    const removeIntentListeners = (): void => {
+      scrollElement.removeEventListener("wheel", cancelForUserIntent);
+      scrollElement.removeEventListener("touchstart", cancelForUserIntent);
+      scrollElement.removeEventListener("pointerdown", cancelForUserIntent);
+      scrollElement.removeEventListener("keydown", cancelForUserIntent);
+    };
+    const finishRestoration = (): void => {
+      if (cancelled) return;
+      cancelled = true;
+      layoutAnchorActive.current = false;
+      removeIntentListeners();
+    };
+    const restore = (): void => {
+      if (cancelled) return;
+      if (wasFollowing) {
+        scrollElement.scrollTo({ top: scrollElement.scrollHeight, behavior: "auto" });
+        finishRestoration();
+        return;
+      }
+      const row = rowId
+        ? [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")]
+            .find((element) => element.dataset.responseRowId === rowId)
+        : null;
+      if (!row) {
+        if (anchorIndex >= 0 && attempts % 4 === 0) {
+          virtualizer.scrollToIndex(anchorIndex, { align: "start", behavior: "auto" });
+        }
+        attempts += 1;
+        if (attempts < maximumSettleFrames) {
+          window.requestAnimationFrame(restore);
+        } else {
+          finishRestoration();
+        }
+        return;
+      }
+      const currentOffset = row.getBoundingClientRect().top
+        - scrollElement.getBoundingClientRect().top;
+      const delta = currentOffset - viewportOffset;
+      if (Math.abs(delta) >= 0.5) scrollElement.scrollTop += delta;
+      stableFrames = Math.abs(delta) < 0.5 ? stableFrames + 1 : 0;
+      attempts += 1;
+      if (
+        attempts < maximumSettleFrames
+        && (performance.now() < settleUntil || stableFrames < 8)
+      ) {
+        window.requestAnimationFrame(restore);
+      } else {
+        finishRestoration();
+      }
+    };
+    function cancelForUserIntent(): void {
+      finishRestoration();
+    }
+    scrollElement.addEventListener("wheel", cancelForUserIntent, { passive: true });
+    scrollElement.addEventListener("touchstart", cancelForUserIntent, { passive: true });
+    scrollElement.addEventListener("pointerdown", cancelForUserIntent);
+    scrollElement.addEventListener("keydown", cancelForUserIntent);
+    const frame = window.requestAnimationFrame(restore);
+    return () => {
+      finishRestoration();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [
+    estimateLayout,
+    props.scrollElementRef,
+    props.timelineElementRef,
+    timeline,
+    virtualized,
+    virtualizer,
+  ]);
 
   const captureExpansionAnchor = useCallback((sourceTurnId: string): void => {
     const scrollElement = props.scrollElementRef?.current;
@@ -1504,6 +2213,7 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
       return Math.abs(delta);
     };
     let stableFrames = 0;
+    let sawAdjustment = false;
     const settle = (remainingFrames: number): void => {
       if (pendingAnchors.current.get(sourceTurnId) !== anchor) {
         if (activeAnchorRestorations.current.get(sourceTurnId) === anchor.sequence) {
@@ -1512,7 +2222,10 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
         return;
       }
       const adjustment = adjustToAnchor();
-      stableFrames = adjustment !== null && adjustment < 0.5 ? stableFrames + 1 : 0;
+      if (adjustment !== null && adjustment >= 0.5) sawAdjustment = true;
+      stableFrames = sawAdjustment && adjustment !== null && adjustment < 0.5
+        ? stableFrames + 1
+        : 0;
       if (remainingFrames > 0 && stableFrames < 2) {
         window.requestAnimationFrame(() => settle(remainingFrames - 1));
         return;

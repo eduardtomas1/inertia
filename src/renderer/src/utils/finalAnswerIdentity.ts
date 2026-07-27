@@ -15,6 +15,20 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "opencode-cli": "OpenCode",
 };
 
+const STRUCTURAL_BACKEND_LABELS: Readonly<Record<string, string>> = {
+  "builtin:openai": "OpenAI",
+  "native:codex:app-server": "OpenAI",
+  "builtin:anthropic": "Anthropic",
+  "builtin:kimi-code": "Kimi",
+  "builtin:cursor": "Cursor",
+  "builtin:opencode": "OpenCode",
+};
+
+function persistedBackendLabel(selection: ModelSelection): string {
+  return STRUCTURAL_BACKEND_LABELS[selection.backendProfileId]
+    ?? selection.backendProfileDisplayName;
+}
+
 function persistedModelLabel(selection: ModelSelection): string {
   if (selection.alias) return selection.alias;
   if (selection.modelId === "provider-default") return "Provider default";
@@ -22,6 +36,16 @@ function persistedModelLabel(selection: ModelSelection): string {
     return kimiCodingModelDisplayName(selection.modelId);
   }
   return selection.modelId;
+}
+
+/**
+ * Operational identity for an active turn. The active work header deliberately
+ * stops at the persisted harness/backend route; the exact model remains
+ * available in the final-answer identity and run details.
+ */
+export function activeWorkIdentityLabel(selection: ModelSelection): string {
+  const harness = HARNESS_LABELS[selection.harnessId] ?? selection.harnessId;
+  return `${harness} · ${selection.backendProfileDisplayName}`;
 }
 
 /**
@@ -33,7 +57,7 @@ export function finalAnswerIdentityLabel(selection: ModelSelection): string {
   const harness = HARNESS_LABELS[selection.harnessId] ?? selection.harnessId;
   return [
     harness,
-    selection.backendProfileDisplayName,
+    persistedBackendLabel(selection),
     persistedModelLabel(selection),
   ].join(" · ");
 }

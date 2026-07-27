@@ -9,7 +9,11 @@ import type {
   ChatMessage,
   CheckpointSummary,
 } from "../../src/shared/contracts";
-import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import {
+  ResponseTimeline,
+  turnGitArtifactCompletenessWarning,
+  turnGitArtifactPatchAvailable,
+} from "../../src/renderer/src/components/ResponseTimeline";
 import {
   activityNeedsAttention,
   buildResponseTimeline,
@@ -219,6 +223,42 @@ describe("authoritative response timeline", () => {
     expect(response.terminalAssistantMessage?.id).toBe("assistant-final");
   });
 
+  it("keeps parent follow-ups inside their authoritative turn and execution order", () => {
+    const turn = agentTurn("turn-follow-up", "user-primary", {
+      status: "running",
+      completedAt: null,
+    });
+    const timeline = buildResponseTimeline({
+      turns: [turn],
+      messages: [
+        message("user-primary", turn.id, "user", "Start the investigation.", "2026-07-23T10:00:00.000Z"),
+        message("commentary-before", turn.id, "assistant", "I found the relevant path.", "2026-07-23T10:00:02.000Z"),
+        message("user-follow-up", turn.id, "user", "Please include the Windows path too.", "2026-07-23T10:00:04.000Z"),
+        message("commentary-after", turn.id, "assistant", "I am checking both platforms.", "2026-07-23T10:00:06.000Z"),
+      ],
+      activities: [
+        activity("call-before", turn.id, { createdAt: "2026-07-23T10:00:03.000Z" }),
+        activity("call-after", turn.id, { createdAt: "2026-07-23T10:00:05.000Z" }),
+      ],
+      reasonings: [],
+      checkpoints: [],
+    });
+    const response = timelineTurn(timeline, turn.id);
+    const compatibility = timeline.find(({ kind }) => kind === "compatibility");
+
+    expect(response.followUpMessages.map(({ id }) => id)).toEqual(["user-follow-up"]);
+    expect(compatibility).toBeUndefined();
+    expect(buildTurnExecutionStream(response).map((entry) => (
+      entry.kind === "activity-group" ? entry.activities[0]?.id : entry.id
+    ))).toEqual([
+      "commentary-before",
+      "call-before",
+      "user-follow-up",
+      "call-after",
+      "commentary-after",
+    ]);
+  });
+
   it("groups only adjacent calls and preserves commentary between work phases", () => {
     const turn = agentTurn("turn-interleaved", "user-interleaved", {
       status: "running",
@@ -314,6 +354,7 @@ describe("authoritative response timeline", () => {
     expect(html).toContain('data-turn-layer="user-request"');
     expect(html).toContain('data-turn-layer="agent-execution"');
     expect(html).toContain('data-turn-layer="final-answer"');
+    expect(html).toContain('data-turn-layer="supporting-ledger"');
     expect(html).toContain('data-answer-phase="persisted"');
     expect(html).toContain("reference.png");
     expect(html).toContain("Run details");
@@ -329,7 +370,9 @@ describe("authoritative response timeline", () => {
       .toBeGreaterThan(html.indexOf('data-turn-layer="user-request"'));
     expect(html.indexOf('data-turn-layer="final-answer"'))
       .toBeGreaterThan(html.indexOf('data-turn-layer="agent-execution"'));
-    expect(html.indexOf("Terminal answer stays visible")).toBeGreaterThan(html.indexOf("Working note"));
+    expect(html.indexOf('data-turn-layer="supporting-ledger"'))
+      .toBeGreaterThan(html.indexOf('data-turn-layer="final-answer"'));
+    expect(html.indexOf("Terminal answer stays visible")).toBeLessThan(html.indexOf("Working note"));
   });
 
   it("keeps active commentary in the execution stream and reserves the answer document for persistence", () => {
@@ -392,8 +435,10 @@ describe("authoritative response timeline", () => {
     expect(activeHtml).toContain('data-turn-layer="agent-execution"');
     expect(activeHtml).toContain("Answer in progress");
     expect(activeHtml).not.toContain('aria-label="Final answer actions and run metadata"');
+    expect(activeHtml).not.toContain('data-turn-layer="supporting-ledger"');
     expect(settledHtml).toContain("turn-final-answer-document");
     expect(settledHtml).toContain('data-turn-layer="final-answer"');
+    expect(settledHtml).toContain('data-turn-layer="supporting-ledger"');
     expect(settledHtml.indexOf('data-turn-layer="final-answer"'))
       .toBeGreaterThan(settledHtml.indexOf('data-turn-layer="user-request"'));
     expect(settledHtml).toContain('data-answer-phase="persisted"');
@@ -464,16 +509,23 @@ describe("authoritative response timeline", () => {
     }));
 
     expect(html).toContain("turn-execution-rail is-live");
-    expect(html).toContain("codex is working");
-    expect(html.match(/codex is working/g)).toHaveLength(1);
-    expect(html).toContain('aria-label="Stop codex run"');
+    expect(html).toContain("Codex · Codex App Server is working");
+    expect(html.match(/Codex · Codex App Server is working/g)).toHaveLength(1);
+    expect(html).toContain('data-active-work-region=""');
+    expect(html).toContain('data-active-work-state="running"');
+    expect(html).toContain('data-work-identity-source="persisted-model-selection"');
+    expect(html).toContain('aria-label="Stop Codex · Codex App Server run"');
     expect(html).toContain(">Stop</span></button>");
-    expect(html.match(/data-activity-group=/g)).toHaveLength(2);
-    expect(html).toContain("earlier calls");
+    expect(html.match(/data-activity-group=/g)).toHaveLength(5);
+    expect(html).toContain("+3 previous tool calls");
+    expect(html.indexOf("Completed command")).toBeLessThan(html.indexOf("+3 previous tool calls"));
     expect(html).toContain("Inspect package");
     expect(html).toContain("Checking the existing presentation.");
     expect(html.indexOf("Inspect package")).toBeLessThan(html.indexOf("Checking the existing presentation."));
     expect(html.indexOf("Checking the existing presentation.")).toBeLessThan(html.indexOf("Build failed"));
+    expect(html.indexOf("+3 previous tool calls")).toBeLessThan(html.indexOf("Build failed"));
+    expect(html.indexOf("Build failed")).toBeLessThan(html.indexOf("Unsupported option skipped"));
+    expect(html.indexOf("Unsupported option skipped")).toBeLessThan(html.indexOf("Run tests"));
 
     const detailsStart = html.indexOf('class="turn-work-details"');
     const detailsEnd = html.indexOf("</details>", detailsStart);
@@ -547,10 +599,41 @@ describe("authoritative response timeline", () => {
     const nonGitHtml = renderArtifact(artifact("artifact-no-git", turn.id, "", {
       ...unavailable,
       failureReason: "This workspace is not a Git repository.",
+      absenceReason: "not-repository",
     }));
     expect(nonGitHtml).toContain('aria-label="Final answer actions and run metadata"');
     expect(nonGitHtml).not.toContain("Turn changes unavailable");
     expect(nonGitHtml).not.toContain("This workspace is not a Git repository.");
+    expect(nonGitHtml).not.toContain("<dt>Artifact completeness</dt>");
+
+    const pendingHtml = renderArtifact(artifact("artifact-pending", turn.id, "", {
+      status: "pending",
+      completeness: "partial",
+      afterFingerprint: null,
+      patchState: "none",
+      patchDigest: null,
+      capturedAt: null,
+      terminalAssistantMessageId: "assistant-no-git",
+      files: [],
+      insertions: 0,
+      deletions: 0,
+    }));
+    expect(pendingHtml).toContain("Capturing changes…");
+    expect(pendingHtml).toContain("Git history will appear here when ready.");
+    expect(pendingHtml).not.toContain("is working");
+    expect(pendingHtml).not.toContain(">Stop</span></button>");
+
+    const untypedLegacyTextHtml = renderArtifact(artifact(
+      "artifact-untyped-no-git-text",
+      turn.id,
+      "",
+      {
+        ...unavailable,
+        failureReason: "This workspace is not a Git repository.",
+        absenceReason: null,
+      },
+    ));
+    expect(untypedLegacyTextHtml).toContain("Turn changes unavailable");
 
     const failedCaptureHtml = renderArtifact(artifact("artifact-failed", turn.id, "", {
       ...unavailable,
@@ -620,7 +703,7 @@ describe("authoritative response timeline", () => {
     expect(html).toContain('class="turn-changed-files"');
     expect(html).toContain('aria-label="Changed by this turn"');
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain("<strong>2 files changed</strong><small>· +84 −21 · main · incomplete</small>");
+    expect(html).toContain("<strong>2 files changed</strong><small>· +84 −21 · main</small>");
     expect(html).toContain("View");
     expect(html).toContain('class="turn-changed-files-list"');
     expect(html).toContain("modified · +64 −9");
@@ -629,6 +712,27 @@ describe("authoritative response timeline", () => {
     expect(html).toContain('aria-label="Open src/history.ts"');
     expect(html).toContain("The complete file summary is retained, but the stored patch reached its size limit.");
     expect(html.indexOf("2 files changed")).toBeGreaterThan(html.indexOf('aria-label="Final answer actions and run metadata"'));
+
+    const expired = {
+      ...gitArtifact,
+      failureReason: null,
+      completeness: "complete" as const,
+      patchState: "expired" as const,
+    };
+    expect(turnGitArtifactPatchAvailable(expired)).toBe(false);
+    expect(turnGitArtifactCompletenessWarning(expired)).toBe(
+      "The stored patch has expired; the historical file summary is still available.",
+    );
+    expect(turnGitArtifactCompletenessWarning({
+      ...expired,
+      completeness: "partial",
+    })).toBe(
+      "Only a partial historical Git capture is available for this turn. The stored patch has expired; the historical file summary is still available.",
+    );
+    expect(turnGitArtifactPatchAvailable({
+      ...expired,
+      patchState: "truncated",
+    })).toBe(true);
   });
 
   it("offers comparison with the nearest earlier compatible worktree", () => {
@@ -830,14 +934,22 @@ describe("authoritative response timeline", () => {
     expect(footerPrimary).toContain('aria-controls="turn-run-details-turn-footer"');
     expect(footerPrimary).toContain("<span>Run details</span>");
     expect(footerPrimary).not.toContain("vendor-harness-v2");
-    expect(runDetails).toContain('id="turn-run-details-turn-footer" hidden=""');
+    expect(runDetails).toContain(
+      'id="turn-run-details-turn-footer" aria-labelledby="turn-run-details-turn-footer-label" hidden=""',
+    );
     expect(runDetails).toContain("<dt>Harness ID</dt><dd><code>vendor-harness-v2</code>");
     expect(runDetails).toContain("<dt>Backend profile ID</dt><dd><code>custom:acme</code>");
     expect(runDetails).toContain("<dt>Exact model ID</dt><dd><code>acme/code-pro</code>");
+    expect(runDetails).toContain("<dt>Requested alias</dt><dd><code>Code Pro</code>");
     expect(runDetails).toContain("<dt>Reasoning level</dt><dd><code>medium</code>");
+    expect(runDetails).toContain("<dt>Interaction mode</dt><dd><code>build</code>");
+    expect(runDetails).toContain("<dt>Access mode</dt><dd><code>auto-edit</code>");
     expect(runDetails).toContain("<dt>Queue duration</dt><dd>5s</dd>");
     expect(runDetails).toContain("<dt>Execution duration</dt><dd>7s</dd>");
     expect(runDetails).toContain("<dt>Historical association</dt><dd>Authoritative</dd>");
+    expect(runDetails).toContain(
+      "<dt>Session continuation</dt><dd>Resumed existing session</dd>",
+    );
     expect(runDetails).toContain("<dt>Artifact completeness</dt><dd>Partial</dd>");
     expect(html).not.toContain("provider-session-before-secret");
     expect(html).not.toContain("provider-session-after-secret");

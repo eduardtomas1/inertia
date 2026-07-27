@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
-import { Check, ChevronDown, ChevronUp, CircleHelp, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Sparkles, Square, StickyNote, Trash2, WandSparkles, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Sparkles, Square, StickyNote, Trash2, WandSparkles, X } from "lucide-react";
 import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, DiffSelectionReviewAnswer, GitDiffSnapshot } from "@shared/contracts";
 import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, parseUnifiedDiff, selectedLineFingerprint } from "@shared/diff-review";
 import { IconButton, LoadingMark } from "./ui";
@@ -12,6 +12,7 @@ export type DiffSelection = {
   hunk: DiffHunk;
   lineIds: string[];
   reference: string;
+  repositoryPath?: string;
 };
 
 export type ChangesPanelProps = {
@@ -26,7 +27,16 @@ export type ChangesPanelProps = {
   summaryLoading?: boolean;
   wrapLines?: boolean;
   lastReversal?: DiffReversalOperation | null;
+  fileNavigator?: ReactNode;
+  compactFileNavigator?: ReactNode;
+  notice?: ReactNode;
+  headerMetrics?: { files: number; repositories?: number; insertions: number; deletions: number };
+  emptyState?: { title: string; detail: string };
+  diffEmptyState?: { title: string; detail: string };
+  capabilities?: { persistentReview?: boolean; agentRevision?: boolean; selectiveRevert?: boolean };
+  repositoryPath?: string;
   onSelectFile: (path: string) => void;
+  onOpenFile?: (path: string) => void;
   onRefresh?: () => void;
   onGenerateSummary?: () => Promise<void>;
   onCancelSummary?: () => Promise<void>;
@@ -113,7 +123,16 @@ export function ChangesPanel({
   summaryLoading = false,
   wrapLines = true,
   lastReversal = null,
+  fileNavigator,
+  compactFileNavigator,
+  notice,
+  headerMetrics,
+  emptyState,
+  diffEmptyState,
+  capabilities,
+  repositoryPath = ".",
   onSelectFile,
+  onOpenFile,
   onRefresh,
   onGenerateSummary,
   onCancelSummary,
@@ -136,6 +155,9 @@ export function ChangesPanel({
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [activeHunkId, setActiveHunkId] = useState<string | null>(null);
+  const persistentReview = capabilities?.persistentReview ?? true;
+  const agentRevision = capabilities?.agentRevision ?? true;
+  const selectiveRevert = capabilities?.selectiveRevert ?? true;
   const structured = useMemo(() => parseUnifiedDiff(diff?.patch ?? ""), [diff?.patch]);
   const selectedFile = selectedPath
     ? structured.files.find((file) => file.path === selectedPath) ?? null
@@ -146,6 +168,9 @@ export function ChangesPanel({
     (result, file) => ({ insertions: result.insertions + file.insertions, deletions: result.deletions + file.deletions }),
     { insertions: 0, deletions: 0 },
   ), [files]);
+  const toolbarFiles = headerMetrics?.files ?? files.length;
+  const toolbarInsertions = headerMetrics?.insertions ?? totals.insertions;
+  const toolbarDeletions = headerMetrics?.deletions ?? totals.deletions;
   const hunkReviewed = (file: DiffFile, hunk: DiffHunk): boolean => {
     const fingerprint = diffHunkFingerprint(file, hunk);
     return reviewStates.some((state) => state.scope === "hunk" && state.path === file.path && state.hunkId === hunk.id && state.targetFingerprint === fingerprint && state.reviewed && !state.stale);
@@ -198,6 +223,7 @@ export function ChangesPanel({
       hunk,
       lineIds: selection.lineIds,
       reference: "",
+      repositoryPath,
     };
   };
   const submit = async (file: DiffFile, hunk: DiffHunk) => {
@@ -281,16 +307,16 @@ export function ChangesPanel({
       <header className="panel-toolbar">
         <div className="panel-heading">
           <GitCompareArrows size={17} aria-hidden="true" />
-          <div className="panel-heading-copy"><h2>Changes</h2><span>{files.length} {files.length === 1 ? "file" : "files"}</span></div>
+          <div className="panel-heading-copy"><h2>Changes</h2><span>{toolbarFiles} {toolbarFiles === 1 ? "file" : "files"}{headerMetrics?.repositories !== undefined ? ` in ${headerMetrics.repositories} ${headerMetrics.repositories === 1 ? "repository" : "repositories"}` : ""}</span></div>
         </div>
-        <div className="panel-stats" aria-label={`${totals.insertions} insertions and ${totals.deletions} deletions`}>
-          <span className="stat-additions">+{totals.insertions}</span><span className="stat-deletions">−{totals.deletions}</span>
+        <div className="panel-stats" aria-label={`${toolbarInsertions} insertions and ${toolbarDeletions} deletions`}>
+          <span className="stat-additions">+{toolbarInsertions}</span><span className="stat-deletions">−{toolbarDeletions}</span>
           {lastReversal && onUndoReversal && (
             <button type="button" className="subtle-button" title={`Restore ${lastReversal.filePath} to its staged and working-tree state before the reversal`} onClick={() => void onUndoReversal()}>
               <RotateCcw size={13} />Undo revert
             </button>
           )}
-          {onGenerateSummary && files.length > 0 && (
+          {onGenerateSummary && toolbarFiles > 0 && (
             <IconButton
               label={summaryLoading ? "Cancel change summary" : activeSummary ? "Refresh agent summaries" : "Summarize changes"}
               onClick={() => {
@@ -306,8 +332,9 @@ export function ChangesPanel({
         </div>
       </header>
 
+      {notice}
       {activeSummary && <div className="diff-overall-summary"><Sparkles size={14} /><span><strong>Change summary</strong>{activeSummary.overall}<ClassificationHints hints={activeSummary.classifications} /></span></div>}
-      {totalHunks > 0 && (
+      {totalHunks > 0 && persistentReview && (
         <div className="diff-review-toolbar">
           <span><strong>{reviewedHunks}/{totalHunks}</strong> hunks reviewed</span>
           <progress aria-label={`${reviewedHunks} of ${totalHunks} hunks reviewed`} max={totalHunks} value={reviewedHunks} />
@@ -321,12 +348,12 @@ export function ChangesPanel({
         </div>
       )}
 
-      {files.length === 0 ? (
-        <div className="panel-empty changes-empty"><GitCompareArrows size={22} /><h3>No local changes</h3><p>Edits made in this workspace will appear here.</p></div>
+      {files.length === 0 && !fileNavigator ? (
+        <div className="panel-empty changes-empty"><GitCompareArrows size={22} /><h3>{emptyState?.title ?? "No local changes"}</h3><p>{emptyState?.detail ?? "Edits made in this workspace will appear here."}</p></div>
       ) : (
         <div className="changes-layout">
-          <div className="changes-file-picker"><span>Reviewing</span><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{statusCode(file)} · {file.path}</option>)}</select></div>
-          <nav className="changes-file-list" aria-label="Changed files">
+          {compactFileNavigator ?? <div className="changes-file-picker"><span>Reviewing</span><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{statusCode(file)} · {file.path}</option>)}</select></div>}
+          {fileNavigator ?? <nav className="changes-file-list" aria-label="Changed files">
             {files.filter((file) => visibleFiles.some((visible) => visible.path === file.path)).map((file) => {
               const parts = pathParts(file.path);
               const diffFile = structured.files.find((candidate) => candidate.path === file.path);
@@ -340,7 +367,7 @@ export function ChangesPanel({
                 </span>
               </button>;
             })}
-          </nav>
+          </nav>}
 
           <div className="changes-diff" aria-label={selectedFile ? `Diff for ${selectedFile.path}` : "Unified diff"}>
             {loading && !diff ? <div className="panel-loading"><LoadingMark label="Loading diff" /><span>Loading diff…</span></div> : selectedFile ? (
@@ -351,8 +378,9 @@ export function ChangesPanel({
               }}>
                 <div className="diff-file-review-heading">
                   <span><strong>{selectedFile.path}</strong>{fileSummary && <small>{fileSummary.summary}</small>}<ClassificationHints hints={fileSummary?.classifications} /></span>
-                  <button type="button" className={clsx(fileReviewed(selectedFile) && "is-reviewed")} onClick={() => void toggleState(selectedFile)}><Check size={12} />{fileReviewed(selectedFile) ? "Reviewed" : "Mark file reviewed"}</button>
-                  <button type="button" onClick={() => void createScopedNote(selectedFile)}><StickyNote size={12} />Note</button>
+                  {onOpenFile && <button type="button" onClick={() => onOpenFile(selectedFile.path)}><ExternalLink size={12} />Open file</button>}
+                  {persistentReview && <button type="button" className={clsx(fileReviewed(selectedFile) && "is-reviewed")} onClick={() => void toggleState(selectedFile)}><Check size={12} />{fileReviewed(selectedFile) ? "Reviewed" : "Mark file reviewed"}</button>}
+                  {persistentReview && <button type="button" onClick={() => void createScopedNote(selectedFile)}><StickyNote size={12} />Note</button>}
                 </div>
                 {notes.filter((note) => note.path === selectedFile.path && note.hunkId === null).map((note) => (
                   <div className={clsx("diff-review-note", note.stale && "is-stale")} key={note.id}>
@@ -379,6 +407,7 @@ export function ChangesPanel({
                   const changedSelection = selected ? hunk.lines.some((line) => selected.lineIds.includes(line.id) && (line.kind === "addition" || line.kind === "deletion")) : false;
                   const hunkNotes = notes.filter((note) => note.path === selectedFile.path && note.hunkId === hunk.id);
                   const hunkAnswer = selectionAnswer
+                    && (selectionAnswer.repositoryPath ?? ".") === repositoryPath
                     && selectionAnswer.fingerprint === structured.fingerprint
                     && selectionAnswer.filePath === selectedFile.path
                     && selectionAnswer.hunkId === hunk.id
@@ -388,8 +417,8 @@ export function ChangesPanel({
                     <div className="diff-hunk-header">
                       <code>{hunk.header}</code>{hunkSummary && <span><Sparkles size={12} />{hunkSummary}<ClassificationHints hints={fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.classifications} /></span>}
                       <span className="diff-hunk-actions">
-                        <button type="button" className={clsx(hunkReviewed(selectedFile, hunk) && "is-reviewed")} onClick={() => void toggleState(selectedFile, hunk)}><Check size={11} />{hunkReviewed(selectedFile, hunk) ? "Reviewed" : "Mark reviewed"}</button>
-                        <button type="button" onClick={() => void createScopedNote(selectedFile, hunk)}><StickyNote size={11} />Note</button>
+                        {persistentReview && <button type="button" className={clsx(hunkReviewed(selectedFile, hunk) && "is-reviewed")} onClick={() => void toggleState(selectedFile, hunk)}><Check size={11} />{hunkReviewed(selectedFile, hunk) ? "Reviewed" : "Mark reviewed"}</button>}
+                        {persistentReview && <button type="button" onClick={() => void createScopedNote(selectedFile, hunk)}><StickyNote size={11} />Note</button>}
                       </span>
                     </div>
                     {hunkAnswer && <SelectionReviewAnswerCard answer={hunkAnswer} onDismiss={onDismissSelectionAnswer} />}
@@ -397,7 +426,7 @@ export function ChangesPanel({
                       <div className={clsx("diff-review-note", note.stale && "is-stale")} key={note.id}>
                         <span><StickyNote size={12} /><strong>{note.lineIds.length > 0 ? `${note.lineIds.length}-line note` : "Hunk note"}{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
                         <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
-                        <button type="button" disabled={note.stale} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><WandSparkles size={12} />Revise</button>
+                        {agentRevision && <button type="button" disabled={note.stale} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><WandSparkles size={12} />Revise</button>}
                         <IconButton label="Edit note" onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
                         <IconButton label="Delete note" onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
                       </div>
@@ -415,9 +444,9 @@ export function ChangesPanel({
                         <div className="diff-selection-popover">
                           <div className="diff-selection-actions">
                             <button type="button" onClick={() => setReviewAction("ask")}><CircleHelp size={13} />Ask about</button>
-                            <button type="button" onClick={() => setReviewAction("revise")}><WandSparkles size={13} />Request revision</button>
-                            <button type="button" onClick={() => setReviewAction("revert")} disabled={!changedSelection || diff?.truncated}><RotateCcw size={13} />Revert</button>
-                            <button type="button" onClick={() => setReviewAction("note")}><StickyNote size={13} />Note</button>
+                            {agentRevision && <button type="button" onClick={() => setReviewAction("revise")}><WandSparkles size={13} />Request revision</button>}
+                            {selectiveRevert && <button type="button" onClick={() => setReviewAction("revert")} disabled={!changedSelection || diff?.truncated}><RotateCcw size={13} />Revert</button>}
+                            {persistentReview && <button type="button" onClick={() => setReviewAction("note")}><StickyNote size={13} />Note</button>}
                             <button type="button" onClick={() => addSelectionToPrompt(selectedFile, hunk, selected)}><MessageSquarePlus size={13} />Add to prompt</button>
                             <IconButton label="Clear selection" onClick={clearSelection}><X size={13} /></IconButton>
                           </div>
@@ -450,7 +479,7 @@ export function ChangesPanel({
                 })}
                 {selectionError && <p className="panel-notice diff-selection-error">{selectionError}</p>}
               </div>
-            ) : <div className="panel-empty changes-empty"><FileCode2 size={22} /><h3>{selectedPath ? "Diff unavailable" : "Select a file"}</h3><p>{selectedPath ? "This file is outside the bounded diff preview. Refresh after reducing the change set." : "Choose a changed file to inspect it."}</p></div>}
+            ) : <div className="panel-empty changes-empty"><FileCode2 size={22} /><h3>{selectedPath ? "Diff unavailable" : diffEmptyState?.title ?? "Select a file"}</h3><p>{selectedPath ? "This file is outside the bounded diff preview. Refresh after reducing the change set." : diffEmptyState?.detail ?? "Choose a changed file to inspect it."}</p></div>}
             {diff?.truncated && <p className="panel-notice diff-truncated">This diff is truncated to keep the workspace responsive.</p>}
           </div>
         </div>

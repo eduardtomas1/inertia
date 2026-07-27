@@ -12,6 +12,7 @@ import {
   rpcId,
   stringValue,
   type JsonObject,
+  type JsonLineDecoderFailure,
   type RpcId,
 } from "./codex/protocol";
 import { codexInputAnswers, parseCodexInputRequest } from "./codex/questions";
@@ -28,6 +29,11 @@ import type {
   AgentApprovalRequest,
   AgentInputRequest,
 } from "./provider/interactions";
+import {
+  providerActivityDetailSections,
+  sanitizeProviderActivityDetail,
+} from "./provider/activity-detail";
+import type { ProviderRunFailure } from "./provider/contracts";
 import { providerProcessInvocation } from "./provider/process";
 import { terminateProcessTree } from "./process-lifecycle";
 
@@ -67,12 +73,34 @@ interface PendingInput {
   request: AgentInputRequest;
 }
 
-const MAX_LINE_CHARS = 1024 * 1024;
+export const CODEX_APP_SERVER_MAX_FRAME_BYTES = 16 * 1024 * 1024;
+export const CODEX_APP_SERVER_MAX_PROTOCOL_BYTES = 256 * 1024 * 1024;
 const MAX_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_DIAGNOSTIC_CHARS = 32 * 1024;
 const RPC_TIMEOUT_MS = 30_000;
+const TRANSPORT_CLOSE_GRACE_MS = 100;
 
 type CodexRunPhase = "opening" | "starting-turn" | "running" | "settled";
+
+function codexProtocolLimits(
+  override: CodexAppServerOptions["protocolLimits"],
+): { maxFrameBytes: number; maxProtocolBytes: number } {
+  if (!override) {
+    return {
+      maxFrameBytes: CODEX_APP_SERVER_MAX_FRAME_BYTES,
+      maxProtocolBytes: CODEX_APP_SERVER_MAX_PROTOCOL_BYTES,
+    };
+  }
+  if (
+    !Number.isSafeInteger(override.maxFrameBytes)
+    || override.maxFrameBytes < 1
+    || !Number.isSafeInteger(override.maxProtocolBytes)
+    || override.maxProtocolBytes < override.maxFrameBytes
+  ) {
+    throw new Error("The Codex App Server protocol limits are invalid.");
+  }
+  return override;
+}
 
 function commandExecutionLabel(item: JsonObject): string {
   const raw = boundedText(item.command, 4_000)
@@ -170,6 +198,7 @@ function validateCodexModelProvider(
 
 export function startCodexAppServerRun(options: CodexAppServerOptions): CodexAppServerRun {
   const modelProvider = validateCodexModelProvider(options);
+  const protocolLimits = codexProtocolLimits(options.protocolLimits);
   const invocation = providerProcessInvocation(options.executable, ["app-server"], options.environment);
   const child = spawn(invocation.command, invocation.args, {
     cwd: options.cwd,
@@ -188,7 +217,11 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
   const pendingInputs = new Map<string, PendingInput>();
   const deltaItems = new Set<string>();
   const reasoningDeltaItems = new Set<string>();
+  const childParents = new Map<string, string>();
+  const childResults = new Map<string, CappedTextBuffer>();
+  const childDeltaItems = new Set<string>();
   let nextRequestId = 1;
+  let subagentSequence = 0;
   let providerThreadId = options.sessionId;
   let activeTurnId: string | undefined;
   let cancelRequested = false;
@@ -196,6 +229,12 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
   let spawned = false;
   let phase: CodexRunPhase = "opening";
   let lastError: string | undefined;
+  let failure: ProviderRunFailure | undefined;
+  let lastProtocolMethod: string | undefined;
+  let lastActivityId: string | undefined;
+  let terminalEvent: string | undefined;
+  let transportCloseTimer: NodeJS.Timeout | undefined;
+  let decoder: JsonLineDecoder | undefined;
   let compatibilityError: CodexAppServerResult["compatibilityError"];
   let continuationError: CodexAppServerResult["continuationError"];
   let resolveResult!: (result: CodexAppServerResult) => void;
@@ -204,12 +243,60 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     resolveResult = resolve;
   });
 
+  const rememberFailure = (
+    reason: ProviderRunFailure["reason"],
+    message: string,
+    technicalDetail?: string,
+  ): void => {
+    failure ??= {
+      reason,
+      message,
+      phase,
+      ...(terminalEvent ? { terminalEvent } : {}),
+      ...(lastActivityId ? { activityId: lastActivityId } : {}),
+      ...(technicalDetail ? { technicalDetail } : {}),
+    };
+  };
+
+  const settledFailure = (
+    exitCode: number | null,
+    signal: NodeJS.Signals | null,
+  ): ProviderRunFailure | undefined => {
+    if (!failure) return undefined;
+    const details = [
+      `Reason: ${failure.reason}`,
+      `Phase: ${failure.phase ?? phase}`,
+      `Exit code: ${exitCode ?? "none"}`,
+      `Signal: ${signal ?? "none"}`,
+      `Terminal event: ${failure.terminalEvent ?? terminalEvent ?? "not received"}`,
+      `Turn: ${activeTurnId ?? "not started"}`,
+      `Activity: ${failure.activityId ?? lastActivityId ?? "not reported"}`,
+      `Last protocol method: ${lastProtocolMethod ?? "none"}`,
+      failure.technicalDetail,
+      lastError,
+      diagnostic.toString(),
+    ].filter((value): value is string => Boolean(value));
+    const technicalDetail = sanitizeProviderActivityDetail(details.join("\n"), {
+      workspaceRoot: options.cwd,
+    });
+    return {
+      ...failure,
+      ...(terminalEvent ? { terminalEvent } : {}),
+      ...(lastActivityId ? { activityId: lastActivityId } : {}),
+      ...(technicalDetail ? { technicalDetail } : {}),
+    };
+  };
+
   const writeMessage = (message: JsonObject): boolean => {
     if (settled || child.stdin.destroyed || !child.stdin.writable) return false;
     try {
       child.stdin.write(`${JSON.stringify(message)}\n`);
       return true;
     } catch {
+      rememberFailure(
+        "transport-closed",
+        "The Codex App Server connection closed while sending a request.",
+      );
       return false;
     }
   };
@@ -247,8 +334,16 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     signal: NodeJS.Signals | null,
   ): void => {
     if (settled) return;
+    if (transportCloseTimer) {
+      clearTimeout(transportCloseTimer);
+      transportCloseTimer = undefined;
+    }
+    const finalFailure = status === "failed"
+      ? settledFailure(exitCode, signal)
+      : undefined;
     settled = true;
     phase = "settled";
+    decoder?.stop();
     settlePendingRequests("Codex App Server stopped before responding.");
     settleApprovals("cancelled");
     settleInputs();
@@ -260,6 +355,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
       exitCode,
       signal,
       ...((lastError || diagnostic.toString()) ? { diagnostic: lastError ?? diagnostic.toString() } : {}),
+      ...(finalFailure ? { failure: finalFailure } : {}),
       ...(compatibilityError ? { compatibilityError } : {}),
       ...(continuationError ? { continuationError } : {}),
     });
@@ -272,8 +368,13 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     return new Promise<JsonObject>((resolve, reject) => {
       const timeout = setTimeout(() => {
         pendingRequests.delete(id);
+        rememberFailure(
+          "rpc-timeout",
+          "Codex App Server did not respond in time.",
+          `RPC method: ${method}`,
+        );
         reject(new Error(`${method} timed out.`));
-      }, RPC_TIMEOUT_MS);
+      }, options.rpcTimeoutMs ?? RPC_TIMEOUT_MS);
       timeout.unref();
       pendingRequests.set(id, { method, resolve, reject, timeout });
       if (!writeMessage({ method, id, params })) {
@@ -292,7 +393,117 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     kind: "system" | "turn" | "tool" | "command" | "reasoning",
     phase: "started" | "completed" | "failed" | "info",
     label: string,
-  ): void => options.onActivity?.(kind, phase, label);
+    detail?: Parameters<NonNullable<CodexAppServerOptions["onActivity"]>>[3],
+  ): void => options.onActivity?.(kind, phase, label, detail);
+
+  type CodexSubagentUpdate = Parameters<
+    NonNullable<CodexAppServerOptions["onSubagent"]>
+  >[0];
+
+  const emitSubagent = (
+    update: Omit<CodexSubagentUpdate, "sequence">,
+  ): void => {
+    subagentSequence += 1;
+    options.onSubagent?.({ sequence: subagentSequence, ...update });
+  };
+
+  const collabStatus = (
+    value: unknown,
+  ): CodexSubagentUpdate["status"] | null => {
+    if (value === "pendingInit") return "spawned";
+    if (value === "running") return "running";
+    if (value === "interrupted") return "cancelled";
+    if (value === "completed" || value === "shutdown") return "completed";
+    if (value === "errored") return "failed";
+    if (value === "notFound") return "lost";
+    return null;
+  };
+
+  const emitCollabAgentItem = (
+    item: JsonObject,
+    itemPhase: "started" | "completed",
+  ): boolean => {
+    if (stringValue(item.type) !== "collabAgentToolCall") return false;
+    const tool = stringValue(item.tool);
+    if (
+      tool !== "spawnAgent"
+      && tool !== "sendInput"
+      && tool !== "resumeAgent"
+      && tool !== "wait"
+      && tool !== "closeAgent"
+    ) return true;
+    const senderThreadId = boundedText(item.senderThreadId, 1_000);
+    const receiverThreadIds = Array.isArray(item.receiverThreadIds)
+      ? item.receiverThreadIds.flatMap((value) => {
+          const id = boundedText(value, 1_000);
+          return id ? [id] : [];
+        })
+      : [];
+    const toolUseId = boundedText(item.id, 1_000) ?? null;
+    const prompt = boundedText(item.prompt, 4_000) ?? null;
+    const agentsStates = objectValue(item.agentsStates) ?? {};
+    for (const providerAgentId of receiverThreadIds) {
+      if (senderThreadId) childParents.set(providerAgentId, senderThreadId);
+      const agentState = objectValue(agentsStates[providerAgentId]);
+      const exactStatus = collabStatus(agentState?.status);
+      const fallbackStatus: CodexSubagentUpdate["status"] =
+        tool === "spawnAgent"
+          ? itemPhase === "started" ? "spawned" : "running"
+          : tool === "wait"
+            ? itemPhase === "started" ? "waiting" : "running"
+            : tool === "closeAgent"
+              ? "cancelled"
+              : "running";
+      emitSubagent({
+        providerTaskId: null,
+        providerAgentId,
+        parentProviderAgentId:
+          senderThreadId && senderThreadId !== providerThreadId
+            ? senderThreadId
+            : null,
+        parentProviderToolUseId: null,
+        providerToolUseId: toolUseId,
+        providerRole: null,
+        providerName: null,
+        status: exactStatus ?? fallbackStatus,
+        description: tool === "spawnAgent" ? prompt : null,
+        progress: boundedText(agentState?.message, 4_000) ?? null,
+        result: exactStatus === "completed"
+          ? boundedText(agentState?.message, 16_000) ?? null
+          : null,
+      });
+    }
+    return true;
+  };
+
+  const emitSubagentActivity = (item: JsonObject): boolean => {
+    if (stringValue(item.type) !== "subAgentActivity") return false;
+    const providerAgentId = boundedText(item.agentThreadId, 1_000);
+    const kind = stringValue(item.kind);
+    if (!providerAgentId || !kind) return true;
+    const parentProviderAgentId = childParents.get(providerAgentId) ?? null;
+    emitSubagent({
+      providerTaskId: null,
+      providerAgentId,
+      parentProviderAgentId:
+        parentProviderAgentId === providerThreadId
+          ? null
+          : parentProviderAgentId,
+      parentProviderToolUseId: null,
+      providerToolUseId: boundedText(item.id, 1_000) ?? null,
+      providerRole: null,
+      providerName: null,
+      status: kind === "started"
+        ? "running"
+        : kind === "interrupted"
+          ? "cancelled"
+          : "running",
+      description: null,
+      progress: null,
+      result: null,
+    });
+    return true;
+  };
 
   const handleServerRequest = (id: RpcId, method: string, params: JsonObject): void => {
     if (settled) return;
@@ -330,6 +541,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
 
   const handleNotification = (method: string, params: JsonObject): void => {
     if (settled) return;
+    lastProtocolMethod = method;
     if (method === "account/rateLimits/updated") {
       const limits = parseCodexRateLimits({ rateLimits: params.rateLimits, rateLimitsByLimitId: params.rateLimitsByLimitId });
       if (limits.length > 0) options.onRateLimits?.(limits, false);
@@ -353,8 +565,131 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
       return;
     }
 
+    if (method === "thread/started") {
+      const thread = objectValue(params.thread);
+      const childThreadId = boundedText(thread?.id, 1_000);
+      const parentThreadId = boundedText(thread?.parentThreadId, 1_000);
+      if (
+        childThreadId
+        && parentThreadId
+        && childThreadId !== providerThreadId
+        && (
+          parentThreadId === providerThreadId
+          || childParents.has(parentThreadId)
+        )
+      ) {
+        childParents.set(childThreadId, parentThreadId);
+        emitSubagent({
+          providerTaskId: null,
+          providerAgentId: childThreadId,
+          parentProviderAgentId:
+            parentThreadId === providerThreadId ? null : parentThreadId,
+          parentProviderToolUseId: null,
+          providerToolUseId: null,
+          providerRole: boundedText(thread?.agentRole, 200) ?? null,
+          providerName:
+            boundedText(thread?.agentNickname, 200)
+            ?? boundedText(thread?.name, 200)
+            ?? null,
+          status: "running",
+          description: boundedText(thread?.preview, 4_000) ?? null,
+          progress: null,
+          result: null,
+        });
+        return;
+      }
+    }
+
     const notificationThreadId = boundedText(params.threadId, 512);
     const notificationTurnId = boundedText(params.turnId, 512) ?? boundedText(objectValue(params.turn)?.id, 512);
+    const knownChild = notificationThreadId
+      ? childParents.has(notificationThreadId)
+      : false;
+
+    if (knownChild && notificationThreadId) {
+      if (method === "item/agentMessage/delta") {
+        const delta = stringValue(params.delta);
+        if (delta) {
+          const itemId = boundedText(params.itemId, 1_000);
+          if (itemId) childDeltaItems.add(itemId);
+          const buffer = childResults.get(notificationThreadId)
+            ?? new CappedTextBuffer(16_000);
+          buffer.append(delta);
+          childResults.set(notificationThreadId, buffer);
+        }
+        return;
+      }
+      if (method === "item/started" || method === "item/completed") {
+        const item = objectValue(params.item);
+        if (!item) return;
+        if (emitCollabAgentItem(
+          item,
+          method === "item/started" ? "started" : "completed",
+        )) return;
+        if (emitSubagentActivity(item)) return;
+        if (
+          method === "item/completed"
+          && stringValue(item.type) === "agentMessage"
+        ) {
+          const text = stringValue(item.text);
+          const itemId = boundedText(item.id, 1_000);
+          if (text && (!itemId || !childDeltaItems.has(itemId))) {
+            const buffer = childResults.get(notificationThreadId)
+              ?? new CappedTextBuffer(16_000);
+            buffer.append(text);
+            childResults.set(notificationThreadId, buffer);
+            emitSubagent({
+              providerTaskId: null,
+              providerAgentId: notificationThreadId,
+              parentProviderAgentId:
+                childParents.get(notificationThreadId) === providerThreadId
+                  ? null
+                  : childParents.get(notificationThreadId) ?? null,
+              parentProviderToolUseId: null,
+              providerToolUseId: itemId ?? null,
+              providerRole: null,
+              providerName: null,
+              status: "running",
+              description: null,
+              progress: boundedText(text, 4_000) ?? null,
+              result: null,
+            });
+          }
+        }
+        return;
+      }
+      if (method === "turn/completed") {
+        const turn = objectValue(params.turn);
+        const status = stringValue(turn?.status);
+        const turnError = objectValue(turn?.error);
+        const result = childResults.get(notificationThreadId)?.toString();
+        emitSubagent({
+          providerTaskId: null,
+          providerAgentId: notificationThreadId,
+          parentProviderAgentId:
+            childParents.get(notificationThreadId) === providerThreadId
+              ? null
+              : childParents.get(notificationThreadId) ?? null,
+          parentProviderToolUseId: null,
+          providerToolUseId: null,
+          providerRole: null,
+          providerName: null,
+          status: status === "failed"
+            ? "failed"
+            : status === "interrupted"
+              ? "cancelled"
+              : "completed",
+          description: null,
+          progress: null,
+          result:
+            boundedText(turnError?.message, 16_000)
+            ?? boundedText(result, 16_000)
+            ?? null,
+        });
+        childResults.delete(notificationThreadId);
+        return;
+      }
+    }
 
     if (method === "turn/started") {
       if (phase !== "starting-turn" && phase !== "running") return;
@@ -397,6 +732,15 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
 
     if (method === "item/started" || method === "item/completed") {
       const item = objectValue(params.item);
+      lastActivityId = boundedText(item?.id, 1_000) ?? lastActivityId;
+      if (
+        item
+        && emitCollabAgentItem(
+          item,
+          method === "item/started" ? "started" : "completed",
+        )
+      ) return;
+      if (item && emitSubagentActivity(item)) return;
       const itemType = stringValue(item?.type);
       const phase = method === "item/completed" ? "completed" : "started";
       if (itemType === "reasoning") {
@@ -406,8 +750,39 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
           if (summary) options.onReasoning?.(summary);
         }
       }
-      else if (itemType === "commandExecution" && item) emitActivity("command", phase, commandExecutionLabel(item));
-      else if (itemType === "fileChange") emitActivity("tool", phase, "File change");
+      else if (itemType === "commandExecution" && item) {
+        const command = item.command ?? item.cmd;
+        const output = item.aggregatedOutput
+          ?? item.output
+          ?? [item.stdout, item.stderr];
+        const activityDetail = providerActivityDetailSections({
+          command,
+          ...(method === "item/completed" ? { output } : {}),
+        });
+        emitActivity(
+          "command",
+          phase,
+          commandExecutionLabel(item),
+          {
+            ...(boundedText(item.id, 1_000)
+              ? { activityId: boundedText(item.id, 1_000)! }
+              : {}),
+            ...(activityDetail
+              ? { detail: activityDetail }
+              : {}),
+          },
+        );
+      }
+      else if (itemType === "fileChange") {
+        emitActivity(
+          "tool",
+          phase,
+          "File change",
+          boundedText(item?.id, 1_000)
+            ? { activityId: boundedText(item?.id, 1_000)! }
+            : undefined,
+        );
+      }
       else if (itemType === "agentMessage" && method === "item/completed") {
         const itemId = boundedText(item?.id, 512);
         const text = stringValue(item?.text);
@@ -422,7 +797,20 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     if (method === "error") {
       const error = objectValue(params.error);
       lastError = boundedText(error?.message, 4_000) ?? "Codex reported an error.";
-      if (params.willRetry !== true) emitActivity("system", "failed", "Codex reported an error");
+      if (params.willRetry !== true) {
+        rememberFailure("codex-error", "Codex reported an error.", lastError);
+        emitActivity(
+          "system",
+          "failed",
+          "Codex reported an error",
+          {
+            ...(boundedText(params.itemId, 1_000)
+              ? { activityId: boundedText(params.itemId, 1_000)! }
+              : {}),
+            detail: providerActivityDetailSections({ error: lastError })!,
+          },
+        );
+      }
       return;
     }
 
@@ -437,9 +825,13 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
       const status = stringValue(turn?.status);
       const turnError = objectValue(turn?.error);
       lastError = boundedText(turnError?.message, 4_000) ?? lastError;
+      terminalEvent = "turn/completed";
       emitActivity("turn", status === "failed" ? "failed" : "completed", status === "failed" ? "Turn failed" : "Turn completed");
       if (cancelRequested || status === "interrupted") finish("cancelled", null, null);
-      else if (status === "failed") finish("failed", 1, null);
+      else if (status === "failed") {
+        rememberFailure("codex-error", "Codex could not complete the turn.", lastError);
+        finish("failed", 1, null);
+      }
       else finish("completed", 0, null);
     }
   };
@@ -450,14 +842,28 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     try {
       parsed = JSON.parse(line);
     } catch {
-      diagnostic.append("Codex App Server returned invalid JSON.\n");
+      rememberFailure(
+        "malformed-protocol",
+        "Codex App Server returned a malformed protocol message.",
+        "A JSONL frame could not be decoded as JSON.",
+      );
+      finish("failed", null, null);
       return;
     }
     const message = objectValue(parsed);
-    if (!message) return;
+    if (!message) {
+      rememberFailure(
+        "malformed-protocol",
+        "Codex App Server returned a malformed protocol message.",
+        "The decoded JSONL frame was not a JSON object.",
+      );
+      finish("failed", null, null);
+      return;
+    }
     const id = rpcId(message.id);
     const method = stringValue(message.method);
     const params = objectValue(message.params) ?? {};
+    lastProtocolMethod = method ?? lastProtocolMethod;
 
     if (id !== undefined && method) {
       handleServerRequest(id, method, params);
@@ -472,6 +878,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
       const error = objectValue(message.error);
       if (error) {
         const errorMessage = boundedText(error.message, 4_000) ?? `${pending.method} failed.`;
+        rememberFailure("codex-error", "Codex rejected a protocol request.", errorMessage);
         pending.reject(new Error(errorMessage));
       } else {
         pending.resolve(objectValue(message.result) ?? {});
@@ -479,28 +886,88 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
       return;
     }
 
-    if (method) handleNotification(method, params);
+    if (method) {
+      handleNotification(method, params);
+      return;
+    }
+    rememberFailure(
+      "malformed-protocol",
+      "Codex App Server returned a malformed protocol message.",
+      "The JSON-RPC message could not be routed.",
+    );
+    finish("failed", null, null);
   };
 
-  let decoder!: JsonLineDecoder;
-  decoder = new JsonLineDecoder(MAX_LINE_CHARS, handleLine, () => {
-    decoder.stop();
-    lastError = "Codex App Server emitted an oversized protocol message.";
+  const decoderFailure = (decoderError: JsonLineDecoderFailure): void => {
+    decoder?.stop();
+    if (decoderError === "malformed-utf8") {
+      rememberFailure(
+        "malformed-protocol",
+        "Codex App Server returned invalid UTF-8.",
+        "The JSONL transport emitted a frame that was not valid UTF-8.",
+      );
+    } else {
+      const scope = decoderError === "line-overflow" ? "frame" : "run";
+      rememberFailure(
+        "protocol-overflow",
+        "Codex App Server exceeded Inertia's protocol safety limit.",
+        scope === "frame"
+          ? `A JSONL frame exceeded ${protocolLimits.maxFrameBytes} bytes.`
+          : `JSONL output exceeded ${protocolLimits.maxProtocolBytes} bytes for one run.`,
+      );
+    }
     finish("failed", null, null);
-  });
+  };
+  decoder = new JsonLineDecoder(
+    protocolLimits.maxFrameBytes,
+    handleLine,
+    decoderFailure,
+    protocolLimits.maxProtocolBytes,
+  );
 
-  child.stdout.on("data", (chunk: Buffer) => decoder.push(chunk));
-  child.stdout.once("end", () => decoder.end());
+  child.stdout.on("data", (chunk: Buffer) => decoder?.push(chunk));
+  const handleTransportClose = (): void => {
+    if (settled || transportCloseTimer) return;
+    decoder?.end();
+    if (settled) return;
+    transportCloseTimer = setTimeout(() => {
+      transportCloseTimer = undefined;
+      if (settled) return;
+      rememberFailure(
+        "transport-closed",
+        "The Codex App Server connection closed before the turn completed.",
+      );
+      finish("failed", null, null);
+    }, TRANSPORT_CLOSE_GRACE_MS);
+    transportCloseTimer.unref();
+  };
+  child.stdout.once("end", handleTransportClose);
+  child.stdout.once("close", handleTransportClose);
   child.stderr.on("data", (chunk: Buffer) => diagnostic.append(chunk.toString("utf8")));
   child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-    if (!settled) lastError ??= error.message;
+    if (!settled) {
+      lastError ??= error.message;
+      rememberFailure(
+        "transport-closed",
+        "The Codex App Server connection closed while sending a request.",
+        error.message,
+      );
+    }
   });
   child.once("error", (error: NodeJS.ErrnoException) => {
     lastError = error.message;
+    rememberFailure("process-exit", "Codex App Server could not be started.", error.message);
     finish(cancelRequested ? "cancelled" : "failed", null, null);
   });
   child.once("close", (code, signal) => {
-    if (!settled) finish(cancelRequested ? "cancelled" : "failed", code, signal);
+    if (settled) return;
+    rememberFailure(
+      signal ? "process-signal" : "process-exit",
+      signal
+        ? "Codex App Server stopped unexpectedly."
+        : "Codex App Server exited before the turn completed.",
+    );
+    finish(cancelRequested ? "cancelled" : "failed", code, signal);
   });
 
   child.once("spawn", () => {
@@ -601,6 +1068,7 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
           compatibilityError = "full-access-unsupported";
         }
         lastError = error instanceof Error ? error.message : "Codex App Server could not start.";
+        rememberFailure("codex-error", "Codex App Server could not start the turn.", lastError);
         finish(cancelRequested ? "cancelled" : "failed", null, null);
       }
     })();
@@ -649,5 +1117,34 @@ export function startCodexAppServerRun(options: CodexAppServerOptions): CodexApp
     return true;
   };
 
-  return { child, result, cancel, respondToApproval, respondToInput };
+  const steer = async (content: string): Promise<boolean> => {
+    const text = content.replaceAll("\0", "").trim();
+    if (
+      !text
+      || settled
+      || cancelRequested
+      || phase !== "running"
+      || !providerThreadId
+      || !activeTurnId
+    ) return false;
+    try {
+      await request("turn/steer", {
+        threadId: providerThreadId,
+        input: [{ type: "text", text, text_elements: [] }],
+        expectedTurnId: activeTurnId,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  return {
+    child,
+    result,
+    cancel,
+    respondToApproval,
+    respondToInput,
+    steer,
+  };
 }

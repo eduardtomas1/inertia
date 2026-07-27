@@ -146,6 +146,7 @@ function startCliRun(
     options.callbacks,
     options.input.runId ?? conversationId,
     options.input.turnId ?? null,
+    options.input.cwd,
   );
   const parserState: ProviderParserState = {
     sessionId: options.input.sessionId,

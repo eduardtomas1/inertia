@@ -186,6 +186,46 @@ describe("client command contract", () => {
     }).success).toBe(false);
   });
 
+  it("accepts one bounded workspace directory or search and rejects path escapes", () => {
+    const projectId = crypto.randomUUID();
+    const requestId = crypto.randomUUID();
+    expect(clientCommandSchema.safeParse({
+      type: "workspace.entries",
+      requestId,
+      payload: { projectId, directory: "src/components" },
+    }).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      type: "workspace.entries",
+      requestId,
+      payload: { projectId, query: "Button" },
+    }).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      type: "workspace.entries",
+      requestId,
+      payload: { projectId, directory: "src", query: "Button" },
+    }).success).toBe(false);
+
+    for (const directory of [
+      "../outside",
+      "src/../../outside",
+      "/etc",
+      "\\\\server\\share",
+      "C:\\Windows",
+      "C:Windows",
+    ]) {
+      expect(clientCommandSchema.safeParse({
+        type: "workspace.entries",
+        requestId,
+        payload: { projectId, directory },
+      }).success).toBe(false);
+    }
+    expect(clientCommandSchema.safeParse({
+      type: "workspace.file.read",
+      requestId,
+      payload: { projectId, path: "../secret.txt" },
+    }).success).toBe(false);
+  });
+
   it("accepts only one UUID-scoped conversation detail target", () => {
     const command = {
       type: "conversation.detail.load",

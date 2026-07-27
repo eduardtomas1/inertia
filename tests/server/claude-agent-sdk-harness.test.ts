@@ -25,6 +25,13 @@ import {
   createClaudeBackendLaunchResolver,
 } from "../../src/server/runtime/backends/claude-compatible-adapter";
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
+import {
+  claudeBackgroundTasks,
+  claudeSessionState,
+  claudeSuccessResult,
+  claudeSystem,
+  fixtureClaudeQuery,
+} from "../helpers/claude-agent-sdk-protocol";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 describe("Claude Agent SDK harness", () => {
@@ -75,11 +82,51 @@ describe("Claude Agent SDK harness", () => {
             event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Claude response" } },
           } as unknown as SDKMessage;
           yield {
+            type: "assistant",
+            session_id: "33333333-3333-4333-8333-333333333333",
+            parent_tool_use_id: null,
+            message: {
+              content: [{
+                type: "tool_use",
+                id: "tool-native-1",
+                name: "Bash",
+                input: { command: "npm test" },
+              }],
+            },
+          } as unknown as SDKMessage;
+          yield {
+            type: "user",
+            session_id: "33333333-3333-4333-8333-333333333333",
+            parent_tool_use_id: null,
+            message: {
+              role: "user",
+              content: [{
+                type: "tool_result",
+                tool_use_id: "tool-native-1",
+                content: [{ type: "text", text: "passed" }],
+              }],
+            },
+          } as unknown as SDKMessage;
+          // Let the non-blocking context control response settle without
+          // making terminal result handling wait for it.
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          yield {
+            type: "rate_limit_event",
+            session_id: "33333333-3333-4333-8333-333333333333",
+            rate_limit_info: {
+              status: "allowed",
+              rateLimitType: "five_hour",
+              utilization: 30,
+              resetsAt: 1_893_456_000,
+            },
+          } as unknown as SDKMessage;
+          yield {
             type: "result",
             subtype: "success",
             session_id: "33333333-3333-4333-8333-333333333333",
             result: "Claude response",
-          usage: { input_tokens: 120, output_tokens: 30, cache_read_input_tokens: 10, cache_creation_input_tokens: 5 },
+            num_turns: 1,
+            usage: { input_tokens: 120, output_tokens: 30, cache_read_input_tokens: 10, cache_creation_input_tokens: 5 },
             modelUsage: { sonnet: { contextWindow: 200_000 } },
           } as unknown as SDKMessage;
         })();
@@ -114,6 +161,7 @@ describe("Claude Agent SDK harness", () => {
     const usages: Array<number | null> = [];
     const usageDetails: Array<Record<string, unknown>> = [];
     const metadata: Array<{ models: string[]; rateLimits: string[] }> = [];
+    const activities: Array<{ activityId?: string; detail?: string; phase: string }> = [];
 
     const result = await manager.run(nativeProviderRunInput({
       providerId: "claude",
@@ -141,6 +189,7 @@ describe("Claude Agent SDK harness", () => {
       },
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
+      onActivity: (event) => activities.push(event),
       onUsage: (event) => {
         usages.push(event.usage.usedTokens);
         usageDetails.push(event.usage);
@@ -167,6 +216,16 @@ describe("Claude Agent SDK harness", () => {
     expect(questionIds).toEqual(["tool-2:question:1"]);
     expect(plans).toEqual(["Inspect", "Implement"]);
     expect(reasoning).toEqual(["Checking constraints"]);
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "tool-native-1",
+      phase: "started",
+      detail: "Command:\nnpm test",
+    }));
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "tool-native-1",
+      phase: "completed",
+      detail: "Output:\npassed",
+    }));
     expect(usages).toEqual([75]);
     expect(usageDetails).toEqual([expect.objectContaining({
       usedTokens: 75,
@@ -280,6 +339,7 @@ describe("Claude Agent SDK harness", () => {
             subtype: "success",
             session_id: "77777777-7777-4777-8777-777777777777",
             result: "Kimi response",
+            num_turns: 1,
             usage: { input_tokens: 50, output_tokens: 10 },
             modelUsage: { k3: { contextWindow: 1_048_576 } },
           } as unknown as SDKMessage;
@@ -386,6 +446,316 @@ describe("Claude Agent SDK harness", () => {
     expect(metadata).toEqual([]);
     expect(manager.cachedMetadata("claude").models).toEqual([]);
     expect(manager.cachedMetadata("claude").rateLimits).toEqual([]);
+  });
+
+  it("keeps the run active until delegated work returns, then resumes the same SDK session", async () => {
+    const root = portableFixtureRoot("Claude SDK delegated wait");
+    roots.push(root);
+    let createCalls = 0;
+    let closeCalls = 0;
+    let generatorCleanupCalls = 0;
+    let resumedWith: string | undefined;
+    let markSuspended!: () => void;
+    const suspended = new Promise<void>((resolve) => { markSuspended = resolve; });
+    let releaseDelegate!: () => void;
+    const delegateFinished = new Promise<void>((resolve) => {
+      releaseDelegate = resolve;
+    });
+
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        createCalls += 1;
+        if (createCalls === 1) {
+          const stream = (async function* (): AsyncGenerator<SDKMessage> {
+            try {
+              yield claudeBackgroundTasks(["agent-47"]);
+              yield claudeSystem("task_started", {
+                task_id: "agent-47",
+                description: "Inspect delegated lifecycle",
+              });
+              yield claudeSuccessResult(
+                "Delegated work is still running",
+                "background_requested",
+              );
+              markSuspended();
+              await delegateFinished;
+              yield claudeBackgroundTasks([]);
+              yield claudeSystem("task_notification", {
+                task_id: "agent-47",
+                status: "completed",
+                output_file: "/tmp/agent-47",
+                summary: "Delegated lifecycle inspected",
+              });
+              yield claudeSessionState("running");
+              yield claudeSuccessResult(
+                "Delegate result received",
+                "completed",
+              );
+              yield claudeSessionState("idle");
+            } finally {
+              generatorCleanupCalls += 1;
+            }
+          })();
+          return fixtureClaudeQuery(stream, {
+            close: () => { closeCalls += 1; },
+          });
+        }
+
+        resumedWith = options?.resume;
+        const stream = (async function* (): AsyncGenerator<SDKMessage> {
+          try {
+            yield claudeSuccessResult("Follow-up complete", "completed");
+            yield claudeSessionState("idle");
+          } finally {
+            generatorCleanupCalls += 1;
+          }
+        })();
+        return fixtureClaudeQuery(stream, {
+          close: () => { closeCalls += 1; },
+        });
+      },
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const statuses: string[] = [];
+    let firstSettled = false;
+    const firstRun = manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-delegated-wait",
+      cwd: root,
+      prompt: "Delegate lifecycle research",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onStatus: ({ status }) => statuses.push(status),
+    }).then((value) => {
+      firstSettled = true;
+      return value;
+    });
+
+    await suspended;
+    expect(firstSettled).toBe(false);
+    expect(manager.activeConversationIds()).toContain("claude-delegated-wait");
+    expect(statuses).toEqual(["starting", "running"]);
+
+    releaseDelegate();
+    const firstResult = await firstRun;
+    expect(firstResult).toMatchObject({
+      status: "completed",
+      text: "Delegate result received",
+    });
+    expect(firstResult.text).not.toContain("still running");
+
+    const followUp = await manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-delegated-follow-up",
+      cwd: root,
+      prompt: "Use the delegated result",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: firstResult.sessionId,
+    }));
+
+    expect(followUp).toMatchObject({
+      status: "completed",
+      text: "Follow-up complete",
+      sessionId: firstResult.sessionId,
+    });
+    expect(resumedWith).toBe(firstResult.sessionId);
+    expect(closeCalls).toBe(2);
+    expect(generatorCleanupCalls).toBe(2);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("queues an active parent follow-up on the same Query and stops an exact live task", async () => {
+    const root = portableFixtureRoot("Claude SDK active follow-up");
+    roots.push(root);
+    const prompts: SDKUserMessage[] = [];
+    const stoppedTaskIds: string[] = [];
+    let releaseStop!: () => void;
+    const stopRequested = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ prompt }) => {
+        const stream = (async function* (): AsyncGenerator<SDKMessage> {
+          const iterator = (prompt as AsyncIterable<SDKUserMessage>)[
+            Symbol.asyncIterator
+          ]();
+          prompts.push((await iterator.next()).value!);
+          yield claudeSystem("task_started", {
+            task_id: "task-live",
+            tool_use_id: "tool-live",
+            description: "Inspect the edge case",
+            subagent_type: "researcher",
+          });
+          await stopRequested;
+          prompts.push((await iterator.next()).value!);
+          yield claudeSystem("task_notification", {
+            task_id: "task-live",
+            tool_use_id: "tool-live",
+            status: "stopped",
+            output_file: "/tmp/task-live",
+            summary: "Stopped by the user",
+          });
+          yield claudeSuccessResult("Parent follow-up handled", "completed");
+          yield claudeSessionState("idle");
+        })();
+        return fixtureClaudeQuery(stream, {
+          stopTask: async (taskId) => {
+            stoppedTaskIds.push(taskId);
+            releaseStop();
+          },
+        });
+      },
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    let followUpAccepted: Promise<boolean> | null = null;
+    let stopAccepted: Promise<boolean> | null = null;
+    const traceStatuses: string[] = [];
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-active-follow-up",
+      runId: "claude-active-run",
+      turnId: "claude-active-turn",
+      cwd: root,
+      prompt: "Start delegated work",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onStatus: (event) => {
+        if (event.status !== "running" || followUpAccepted) return;
+        followUpAccepted = manager.steer(
+          event.conversationId,
+          "Check the second condition too.",
+          { runId: event.runId, turnId: event.turnId! },
+        );
+      },
+      onSubagent: (event) => {
+        traceStatuses.push(event.status);
+        if (event.status !== "spawned" || stopAccepted) return;
+        stopAccepted = manager.stopSubagent(
+          event.conversationId,
+          event.providerTaskId!,
+          { runId: event.runId, turnId: event.turnId! },
+        );
+      },
+    });
+
+    await expect(result).resolves.toMatchObject({
+      status: "completed",
+      text: "Parent follow-up handled",
+    });
+    await expect(followUpAccepted).resolves.toBe(true);
+    await expect(stopAccepted).resolves.toBe(true);
+    expect(stoppedTaskIds).toEqual(["task-live"]);
+    expect(traceStatuses).toEqual(["spawned", "cancelled"]);
+    const promptText = (message: SDKUserMessage): string =>
+      ((message.message.content as unknown as Array<{ text?: string }>)[0]
+        ?.text ?? "");
+    expect(prompts.map(promptText)).toEqual([
+      "Start delegated work",
+      "Check the second condition too.",
+    ]);
+  });
+
+  it("cancels and cleans up while the parent is suspended on a delegate", async () => {
+    const root = portableFixtureRoot("Claude SDK delegated cancellation");
+    roots.push(root);
+    let interruptCalls = 0;
+    let closeCalls = 0;
+    let generatorCleanupCalls = 0;
+    let markSuspended!: () => void;
+    const suspended = new Promise<void>((resolve) => { markSuspended = resolve; });
+    let releaseStream!: () => void;
+    const interrupted = new Promise<void>((resolve) => { releaseStream = resolve; });
+
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => {
+        const stream = (async function* (): AsyncGenerator<SDKMessage> {
+          try {
+            yield claudeBackgroundTasks(["agent-cancel"]);
+            yield claudeSuccessResult(
+              "Delegated work is still running",
+              "background_requested",
+            );
+            markSuspended();
+            await interrupted;
+          } finally {
+            generatorCleanupCalls += 1;
+          }
+        })();
+        return fixtureClaudeQuery(stream, {
+          interrupt: async () => {
+            interruptCalls += 1;
+            releaseStream();
+          },
+          close: () => {
+            closeCalls += 1;
+            releaseStream();
+          },
+        });
+      },
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([harness]),
+    );
+    const run = manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-delegate-cancel",
+      cwd: root,
+      prompt: "Wait for the delegate",
+      interactionMode: "build",
+      access: "supervised",
+    }));
+
+    await suspended;
+    expect(manager.cancel("claude-delegate-cancel")).toBe(true);
+    await expect(run).resolves.toMatchObject({ status: "cancelled" });
+    expect(interruptCalls).toBe(1);
+    expect(closeCalls).toBe(1);
+    expect(generatorCleanupCalls).toBe(1);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("fails closed when the SDK process exits with a live delegated roster", async () => {
+    const root = portableFixtureRoot("Claude SDK abandoned delegate");
+    roots.push(root);
+    let closeCalls = 0;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeBackgroundTasks(["agent-abandoned"]);
+          yield claudeSuccessResult("Premature result", "completed");
+        })(),
+        { close: () => { closeCalls += 1; } },
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-abandoned-delegate",
+      cwd: root,
+      prompt: "Do not abandon the delegate",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: "Claude Agent SDK exited while delegated work was still running.",
+      text: "",
+    });
+    expect(closeCalls).toBe(1);
+    expect(manager.activeConversationIds()).toEqual([]);
   });
 
   it("resumes through the SDK contract and interrupts without leaving an active run", async () => {

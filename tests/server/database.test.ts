@@ -1477,7 +1477,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.close();
     const legacy = new Database(databasePath);
     legacy.exec("DROP TABLE provider_metadata_scoped_cache");
-    legacy.prepare("DELETE FROM schema_migrations WHERE version = 26").run();
+    legacy.prepare("DELETE FROM schema_migrations WHERE version >= 26").run();
     legacy.prepare(`
       INSERT INTO provider_metadata_cache (
         provider_id, executable, version, auth_state,

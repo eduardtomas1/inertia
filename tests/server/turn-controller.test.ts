@@ -710,6 +710,35 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
+  it("does not start a provider after cancellation wins during pre-turn Git capture", async () => {
+    let resolveBefore!: () => void;
+    const runtime = await testRuntime({
+      captureGitBefore: () => new Promise<void>((resolve) => {
+        resolveBefore = resolve;
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Wait for the repository checkpoint.",
+    });
+
+    expect(runtime.controller.start(queued.turn.id)).toBe(true);
+    expect(runtime.provider.input).toBeNull();
+    expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
+    expect(runtime.store.agentTurn(queued.turn.id).status).toBe("cancelled");
+
+    resolveBefore();
+    await flushPromises();
+
+    expect(runtime.provider.input).toBeNull();
+    expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+    expect(runtime.events.filter((event) => (
+      event.type === "agent.completed"
+      && event.turnId === queued.turn.id
+    ))).toHaveLength(1);
+    runtime.store.close();
+  });
+
   it("repairs a rejected async finalization without leaving the controller wedged", async () => {
     const runtime = await testRuntime({
       captureGitArtifacts: async () => undefined,

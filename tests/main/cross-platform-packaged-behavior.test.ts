@@ -48,10 +48,10 @@ describe("cross-platform packaged behavior contract", () => {
   });
 
   it("registers runtime socket handlers before sending the first hydration frame", async () => {
-    const runtime = await source("src/server/index.ts");
-    const start = runtime.indexOf('webSockets.on("connection"');
-    const end = runtime.indexOf('server.on("error"', start);
-    const connectionHandler = runtime.slice(start, end);
+    const boundary = await source("src/server/runtime/websocket-boundary.ts");
+    const start = boundary.indexOf('webSockets.on("connection"');
+    const end = boundary.indexOf("\n  return {", start);
+    const connectionHandler = boundary.slice(start, end);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     expect(connectionHandler.indexOf('socket.on("message"')).toBeLessThan(

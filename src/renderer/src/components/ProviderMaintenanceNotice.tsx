@@ -69,17 +69,19 @@ export function shouldShowProviderMaintenanceNotice({
   updateAvailable,
   updateDismissed,
   operationDismissed,
+  managedActionAvailable = false,
 }: {
   operation: ProviderMaintenanceOperation | null;
   updateAvailable: boolean;
   updateDismissed: boolean;
   operationDismissed: boolean;
+  managedActionAvailable?: boolean;
 }): boolean {
   const activeOperation = operation?.status === "queued"
     || operation?.status === "running";
   if (activeOperation) return true;
   if (operation) return !operationDismissed;
-  return updateAvailable && !updateDismissed;
+  return (updateAvailable || managedActionAvailable) && !updateDismissed;
 }
 
 function operationLabel(operation: ProviderMaintenanceOperation): string {
@@ -101,6 +103,7 @@ export interface ProviderMaintenanceNoticeProps {
   operation: ProviderMaintenanceOperation | null;
   disabled?: boolean;
   dismissible?: boolean;
+  showManagedUpdateAction?: boolean;
   onRefresh: () => Promise<void>;
   onUpdate: () => Promise<void>;
   onCancel: (operationId: string) => Promise<void>;
@@ -113,6 +116,7 @@ export function ProviderMaintenanceNotice({
   operation,
   disabled = false,
   dismissible = true,
+  showManagedUpdateAction = false,
   onRefresh,
   onUpdate,
   onCancel,
@@ -127,6 +131,13 @@ export function ProviderMaintenanceNotice({
     || operation?.status === "running";
   const updateVersion = status?.latestVersion ?? "available";
   const updateAvailable = status?.versionStatus === "update-available";
+  const managedActionAvailable = Boolean(
+    showManagedUpdateAction
+    && status?.installedVersion
+    && status.installMethod === "provider-managed"
+    && status.updateAvailability === "available"
+    && status.versionStatus === "unknown",
+  );
   const isDismissed = dismissed[status?.providerId ?? ""] === updateVersion;
   const operationDismissed = Boolean(
     dismissible
@@ -139,6 +150,7 @@ export function ProviderMaintenanceNotice({
     updateAvailable,
     updateDismissed: isDismissed,
     operationDismissed,
+    managedActionAvailable,
   });
 
   useEffect(() => {
@@ -184,9 +196,12 @@ export function ProviderMaintenanceNotice({
         : Download;
   const title = operation
     ? operationLabel(operation)
-    : `${providerLabel} update available`;
+    : updateAvailable
+      ? `${providerLabel} update available`
+      : `${providerLabel} maintenance`;
   const detail = requestError
     ?? operation?.message
+    ?? (managedActionAvailable ? status.message : null)
     ?? [
       status.installedVersion ? `Installed ${status.installedVersion}` : null,
       status.latestVersion ? `Latest ${status.latestVersion}` : null,
@@ -217,19 +232,23 @@ export function ProviderMaintenanceNotice({
           >
             Cancel
           </button>
-        ) : updateAvailable && status.updateAvailability === "available" ? (
+        ) : (
+          updateAvailable || managedActionAvailable
+        ) && status.updateAvailability === "available" ? (
           <button
             type="button"
             disabled={disabled}
             onClick={() => {
               if (!window.confirm(
-                `Update ${providerLabel} from ${status.installedVersion ?? "the installed version"} to ${status.latestVersion ?? "the latest version"}?`,
+                managedActionAvailable
+                  ? `Ask ${providerLabel} to check for and install updates using its provider-managed updater?`
+                  : `Update ${providerLabel} from ${status.installedVersion ?? "the installed version"} to ${status.latestVersion ?? "the latest version"}?`,
               )) return;
               void run(onUpdate);
             }}
           >
             <Download size={11} aria-hidden="true" />
-            Update
+            {managedActionAvailable ? "Check & update" : "Update"}
           </button>
         ) : updateAvailable
           && status.updateAvailability === "instructions-only" ? (

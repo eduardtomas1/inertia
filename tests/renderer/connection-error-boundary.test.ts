@@ -1,11 +1,15 @@
 import { readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-const connectionSource = readFileSync(
-  new URL("../../src/renderer/src/hooks/useInertiaConnection.ts", import.meta.url),
-  "utf8",
-);
+import {
+  decodeServerEventMessage,
+  deliverDecodedServerEvent,
+  notifyConnectionListeners,
+  settlePendingConnectionRequest,
+  UNREADABLE_RUNTIME_RESPONSE,
+} from "../../src/renderer/src/utils/connectionMessages";
+
 const appSource = readFileSync(
   new URL("../../src/renderer/src/App.tsx", import.meta.url),
   "utf8",
@@ -20,27 +24,61 @@ const workspaceGitSource = readFileSync(
 );
 
 describe("renderer error visibility boundary", () => {
-  it("rejects command-scoped request errors without turning them into connection errors", () => {
-    const requestErrorStart = connectionSource.indexOf(
-      'if (event.type === "request.error")',
+  it("keeps a first-send request failure command-scoped while malformed transport data becomes global", () => {
+    const pending = new Map();
+    let commandError: Error | null = null;
+    let connectionError: string | null = null;
+    let clearedTimeout: number | null = null;
+    pending.set("first-send", {
+      resolve: () => undefined,
+      reject: (error: Error) => {
+        commandError = error;
+      },
+      timeout: 42,
+    });
+    const receive = (data: unknown): void => {
+      try {
+        const event = decodeServerEventMessage(data);
+        settlePendingConnectionRequest(event, pending, (timeout) => {
+          clearedTimeout = timeout;
+        });
+      } catch {
+        connectionError = UNREADABLE_RUNTIME_RESPONSE;
+      }
+    };
+
+    receive(JSON.stringify({
+      type: "request.error",
+      requestId: "first-send",
+      message: "The first message could not be sent.",
+    }));
+
+    expect(commandError).toEqual(
+      new Error("The first message could not be sent."),
     );
-    const requestErrorEnd = connectionSource.indexOf(
-      "} else {",
-      requestErrorStart,
-    );
-    const requestErrorBranch = connectionSource.slice(
-      requestErrorStart,
-      requestErrorEnd,
+    expect(connectionError).toBeNull();
+    expect(clearedTimeout).toBe(42);
+    expect(pending.size).toBe(0);
+
+    receive("{malformed transport frame");
+    expect(connectionError).toBe(UNREADABLE_RUNTIME_RESPONSE);
+  });
+
+  it("does not mislabel valid runtime data when a projection listener throws", () => {
+    const unreadable = vi.fn();
+    const projectionError = new Error("projection failed");
+    const deliver = () => deliverDecodedServerEvent(
+      JSON.stringify({ type: "snapshot.updated", snapshot: {} }),
+      (event) => {
+        notifyConnectionListeners(event, [
+          () => { throw projectionError; },
+        ], (error) => { throw error; });
+      },
+      unreadable,
     );
 
-    expect(requestErrorBranch).toContain("pending.reject(requestError)");
-    expect(requestErrorBranch).not.toContain("setError(");
-    expect(connectionSource).toContain(
-      'setError("Inertia received an unreadable response from its local service.")',
-    );
-    expect(connectionSource).toContain(
-      'setError(connectionError instanceof Error ? connectionError.message : "The local service is unavailable.")',
-    );
+    expect(deliver).toThrow(projectionError);
+    expect(unreadable).not.toHaveBeenCalled();
   });
 
   it("keeps first-connect workspace hydration failures inside their owning tools", () => {

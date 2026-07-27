@@ -10,6 +10,13 @@ const appSource = readFileSync(
   new URL("../../src/renderer/src/App.tsx", import.meta.url),
   "utf8",
 );
+const sceneModelSource = readFileSync(
+  new URL(
+    "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe("provider maintenance renderer projection", () => {
   it("consumes cached snapshot state and the two authoritative runtime events", () => {
@@ -28,8 +35,8 @@ describe("provider maintenance renderer projection", () => {
     expect(appSource).toContain(
       "providerMaintenance.statuses.get(selectedMaintenanceProviderId)",
     );
-    expect(appSource).toContain(
-      "maintenanceStatus={selectedMaintenanceStatus}",
+    expect(sceneModelSource).toContain(
+      "maintenanceStatus: selectedMaintenanceStatus",
     );
     expect(appSource).not.toMatch(
       /setActionError\([^)]*provider\.maintenance/su,

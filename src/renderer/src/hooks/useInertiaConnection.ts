@@ -9,14 +9,15 @@ import {
   runtimeResumeUrl,
   RuntimeProjectionSequence,
 } from "../utils/runtimeSequencing";
+import {
+  deliverDecodedServerEvent,
+  notifyConnectionListeners,
+  settlePendingConnectionRequest,
+  UNREADABLE_RUNTIME_RESPONSE,
+  type PendingConnectionRequest,
+} from "../utils/connectionMessages";
 
 export type ConnectionStatus = "connecting" | "online" | "offline";
-
-type PendingRequest = {
-  resolve: (event: ServerEvent) => void;
-  reject: (error: Error) => void;
-  timeout: number;
-};
 
 type EventListener = (event: ServerEvent) => void;
 
@@ -28,10 +29,6 @@ export interface InertiaConnection {
   clearError: () => void;
   sendCommand: (command: ClientCommand) => Promise<ServerEvent>;
   subscribe: (listener: EventListener) => () => void;
-}
-
-function isServerEvent(value: unknown): value is ServerEvent {
-  return Boolean(value && typeof value === "object" && "type" in value && typeof value.type === "string");
 }
 
 function requestTimeoutMs(command: ClientCommand): number {
@@ -56,7 +53,7 @@ function requestTimeoutMs(command: ClientCommand): number {
 
 export function useInertiaConnection(): InertiaConnection {
   const socketRef = useRef<WebSocket | null>(null);
-  const pendingRef = useRef(new Map<string, PendingRequest>());
+  const pendingRef = useRef(new Map<string, PendingConnectionRequest>());
   const listenersRef = useRef(new Set<EventListener>());
   const projectionRef = useRef(new RuntimeProjectionSequence());
   const detailConversationRef = useRef<string | null>(null);
@@ -114,84 +111,74 @@ export function useInertiaConnection(): InertiaConnection {
         socket.addEventListener("message", (message) => {
           if (disposed || socketRef.current !== socket) return;
 
-          try {
-            const received: unknown = JSON.parse(String(message.data));
-            if (!isServerEvent(received)) throw new Error("Malformed server event");
-            let event: ServerEvent = received;
-
-            const requireAuthoritativeRefresh = (): void => {
-              forceSnapshot = true;
-              projectionRef.current.reset();
-              if (socket.readyState === WebSocket.OPEN) socket.close();
-            };
-
-            if (event.type === "server.welcome") {
-              const sync = event.sync ?? event.snapshot.sync;
-              if (sync) {
-                projectionRef.current.replaceFromSnapshot(sync);
-                setRuntimeGeneration(sync.runtimeGeneration);
-              }
-              else {
-                // Compatibility with pre-sequencing local runtimes.
+          deliverDecodedServerEvent(
+            message.data,
+            (receivedEvent) => {
+              let event = receivedEvent;
+              const requireAuthoritativeRefresh = (): void => {
+                forceSnapshot = true;
                 projectionRef.current.reset();
-                setRuntimeGeneration(null);
-                setStatus("online");
-              }
-              setSnapshot(event.snapshot);
-            } else if (event.type === "runtime.resumed") {
-              if (projectionRef.current.beginResume(event.sync) !== "resume") {
-                requireAuthoritativeRefresh();
-                return;
-              }
-              setRuntimeGeneration(event.sync.runtimeGeneration);
-            } else if (event.type === "runtime.event" || event.type === "runtime.cursor") {
-              const decision = projectionRef.current.classifyFrame(event.sync);
-              if (decision === "generation-mismatch" || decision === "gap") {
-                requireAuthoritativeRefresh();
-                return;
-              }
-              if (decision === "ignore") return;
-              if (event.type === "runtime.cursor") return;
-              event = event.event;
-              if (event.type === "snapshot.updated") setSnapshot(event.snapshot);
-            } else if (event.type === "runtime.sync.completed") {
-              const decision = projectionRef.current.complete(event.sync);
-              if (decision === "generation-mismatch" || decision === "gap") {
-                requireAuthoritativeRefresh();
-                return;
-              }
-              if (decision === "completed") {
-                attempt = 0;
-                setStatus("online");
-                setError(null);
-              }
-            } else if (event.type === "snapshot.updated") {
-              setSnapshot(event.snapshot);
-            }
+                if (socket.readyState === WebSocket.OPEN) socket.close();
+              };
 
-            if (
-              event.type === "request.error" ||
-              event.type === "request.ok" ||
-              event.type === "request.result" ||
-              event.type === "terminal.created"
-            ) {
-              const pending = pendingRef.current.get(event.requestId);
-              if (pending) {
-                window.clearTimeout(pending.timeout);
-                pendingRef.current.delete(event.requestId);
-                if (event.type === "request.error") {
-                  const requestError = new Error(event.message);
-                  pending.reject(requestError);
+              if (event.type === "server.welcome") {
+                const sync = event.sync ?? event.snapshot.sync;
+                if (sync) {
+                  projectionRef.current.replaceFromSnapshot(sync);
+                  setRuntimeGeneration(sync.runtimeGeneration);
                 } else {
-                  pending.resolve(event);
+                  // Compatibility with pre-sequencing local runtimes.
+                  projectionRef.current.reset();
+                  setRuntimeGeneration(null);
+                  setStatus("online");
                 }
+                setSnapshot(event.snapshot);
+              } else if (event.type === "runtime.resumed") {
+                if (projectionRef.current.beginResume(event.sync) !== "resume") {
+                  requireAuthoritativeRefresh();
+                  return;
+                }
+                setRuntimeGeneration(event.sync.runtimeGeneration);
+              } else if (
+                event.type === "runtime.event"
+                || event.type === "runtime.cursor"
+              ) {
+                const decision = projectionRef.current.classifyFrame(event.sync);
+                if (decision === "generation-mismatch" || decision === "gap") {
+                  requireAuthoritativeRefresh();
+                  return;
+                }
+                if (decision === "ignore") return;
+                if (event.type === "runtime.cursor") return;
+                event = event.event;
+                if (event.type === "snapshot.updated") {
+                  setSnapshot(event.snapshot);
+                }
+              } else if (event.type === "runtime.sync.completed") {
+                const decision = projectionRef.current.complete(event.sync);
+                if (decision === "generation-mismatch" || decision === "gap") {
+                  requireAuthoritativeRefresh();
+                  return;
+                }
+                if (decision === "completed") {
+                  attempt = 0;
+                  setStatus("online");
+                  setError(null);
+                }
+              } else if (event.type === "snapshot.updated") {
+                setSnapshot(event.snapshot);
               }
-            }
 
-            for (const listener of listenersRef.current) listener(event);
-          } catch {
-            setError("Inertia received an unreadable response from its local service.");
-          }
+              settlePendingConnectionRequest(
+                event,
+                pendingRef.current,
+                window.clearTimeout,
+              );
+
+              notifyConnectionListeners(event, listenersRef.current);
+            },
+            () => setError(UNREADABLE_RUNTIME_RESPONSE),
+          );
         });
 
         socket.addEventListener("close", () => {

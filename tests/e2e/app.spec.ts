@@ -26,6 +26,7 @@ import {
   MAC_TRAFFIC_LIGHT_POSITION,
 } from "../../src/shared/window-chrome";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../src/renderer/src/utils/interfaceScale";
+import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
 
 const execFileAsync = promisify(execFile);
 
@@ -153,8 +154,10 @@ async function expectComposerEndsAtDock(composer: Locator): Promise<void> {
 
   expect(layout.directDockOnly).toBe(true);
   expect(layout.directShellOnly).toBe(true);
-  expect(layout.bottomPadding).toBe(0);
-  expect(Math.abs(layout.bottomGap)).toBeLessThanOrEqual(1);
+  expect(layout.bottomPadding).toBeGreaterThanOrEqual(8);
+  expect(layout.bottomPadding).toBeLessThanOrEqual(14);
+  expect(Math.abs(layout.bottomGap - layout.bottomPadding))
+    .toBeLessThanOrEqual(1);
   expect(layout.detachedContextRows).toBe(0);
 }
 
@@ -1779,6 +1782,27 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   );
   expect(modelFavoriteActionsAx).toContain('- button "Add ');
   expect(modelFavoriteActionsAx).not.toContain("- option ");
+  const firstResult = modelChooser.locator(".model-chooser-result").first();
+  await firstResult.evaluate((element) => {
+    element.style.minHeight = "92px";
+  });
+  const rowCenters = await modelChooser.locator(".model-chooser-result")
+    .evaluateAll((elements) => elements.map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.top + bounds.height / 2;
+    }));
+  const favoriteCenters = await modelFavoriteActions.getByRole("button")
+    .evaluateAll((elements) => elements.map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.top + bounds.height / 2;
+    }));
+  expect(favoriteCenters).toHaveLength(rowCenters.length);
+  for (const [index, center] of rowCenters.entries()) {
+    expect(Math.abs(center - favoriteCenters[index]!)).toBeLessThanOrEqual(1);
+  }
+  await firstResult.evaluate((element) => {
+    element.style.removeProperty("min-height");
+  });
   const searchModels = modelChooser.getByRole("searchbox", { name: "Search models" });
   await expect(searchModels).toBeFocused();
   const codexSource = modelChooser.getByRole("button", {
@@ -1931,6 +1955,10 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
           value: "high",
           label: "High",
           description: "Thorough reasoning.",
+        }, {
+          value: "xhigh",
+          label: "Extra high",
+          description: "Maximum reasoning.",
         }],
         defaultReasoningEffort: "high",
       },
@@ -2004,13 +2032,61 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   });
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
 
+  await page.evaluate((storageKey) => {
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      version: 2,
+      favorites: [
+        {
+          harnessId: "codex-app-server",
+          backendProfileId: "builtin:openai",
+          modelId: "gpt-5.6-sol",
+          reasoningEffort: "high",
+        },
+        {
+          harnessId: "codex-app-server",
+          backendProfileId: "builtin:openai",
+          modelId: "gpt-5.6-sol",
+          reasoningEffort: "xhigh",
+        },
+      ],
+    }));
+  }, MODEL_FAVORITES_STORAGE_KEY);
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
   await searchModels.fill("Sol");
-  await expect(modelChooser.getByRole("option").filter({
+  const solResults = modelChooser.getByRole("option").filter({
     hasText: /^Sol/u,
-  })).toBeVisible();
+  });
+  await expect(solResults).toHaveCount(2);
+  const solXhigh = solResults.filter({ hasText: /xhigh reasoning/u });
+  await expect(solXhigh).toBeVisible();
   await captureChooserScenario("model-chooser-search-sol-1440x720");
+  await solXhigh.click();
+  await expect.poll(() => {
+    const database = new Database(databasePath, { readonly: true });
+    const row = database.prepare(`
+      SELECT model_selection_json AS selection
+      FROM conversations
+      WHERE id = ?
+    `).get(currentConversation.id) as { selection: string };
+    database.close();
+    const selection = JSON.parse(row.selection) as {
+      modelId: string;
+      reasoningEffort: string | null;
+    };
+    return {
+      modelId: selection.modelId,
+      reasoningEffort: selection.reasoningEffort,
+    };
+  }).toEqual({
+    modelId: "gpt-5.6-sol",
+    reasoningEffort: "xhigh",
+  });
+
+  await modelTrigger.click();
+  await expect(modelChooser).toBeVisible();
   await searchModels.fill("Codex Beta");
   const codexBeta = modelChooser.getByRole("option").filter({
     hasText: /^Codex Beta/u,

@@ -291,6 +291,7 @@ export function SettingsView({
                           operation={maintenanceOperations.get(provider.id) ?? null}
                           disabled={disabled}
                           dismissible={false}
+                          showManagedUpdateAction
                           onRefresh={() => onRefreshProviderMaintenance(provider.id)}
                           onUpdate={() => onUpdateProvider(provider.id)}
                           onCancel={onCancelProviderUpdate}

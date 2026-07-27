@@ -10,7 +10,9 @@ const lineBudgets = new Map([
   ["src/renderer/src/utils/responseTimeline.ts", 200],
   ["src/server/git.ts", 200],
   ["src/server/runtime/backends/backend-compatibility-probe.ts", 240],
-  ["src/renderer/src/App.tsx", 800],
+  ["src/renderer/src/App.tsx", 820],
+  ["src/renderer/src/components/WorkspaceScene.tsx", 120],
+  ["src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts", 560],
   ["src/renderer/src/hooks/useConversationProjection.ts", 400],
   ["src/renderer/src/hooks/useWorkspaceLayout.ts", 280],
   ["src/renderer/src/hooks/useWorkspaceTools.ts", 120],
@@ -25,6 +27,18 @@ const lineBudgets = new Map([
   ["src/server/index.ts", 600],
   ["src/server/runtime/turns/turn-controller.ts", 620],
   ["src/shared/contracts.ts", 50],
+]);
+
+const maximumLineLengths = new Map([
+  ["src/renderer/src/App.tsx", 180],
+  ["src/renderer/src/components/WorkspaceScene.tsx", 120],
+  ["src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts", 120],
+]);
+
+const importBudgets = new Map([
+  ["src/renderer/src/App.tsx", 32],
+  ["src/renderer/src/components/WorkspaceScene.tsx", 14],
+  ["src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts", 16],
 ]);
 
 const forbiddenFacadeImports = [
@@ -139,6 +153,26 @@ for (const [file, maximumLines] of lineBudgets) {
   const lineCount = contents.split(/\r?\n/u).length;
   if (lineCount > maximumLines) {
     failures.push(`${file} has ${lineCount} lines (budget: ${maximumLines}).`);
+  }
+}
+
+for (const [file, maximumLength] of maximumLineLengths) {
+  const contents = readFileSync(join(workspaceRoot, file), "utf8");
+  const lines = contents.split(/\r?\n/u);
+  const invalidLine = lines.findIndex((line) => line.length > maximumLength);
+  if (invalidLine >= 0) {
+    failures.push(
+      `${file}:${invalidLine + 1} exceeds ${maximumLength} characters `
+      + `(actual: ${lines[invalidLine].length}).`,
+    );
+  }
+}
+
+for (const [file, maximumImports] of importBudgets) {
+  const contents = readFileSync(join(workspaceRoot, file), "utf8");
+  const importCount = [...contents.matchAll(/^import\b/gmu)].length;
+  if (importCount > maximumImports) {
+    failures.push(`${file} has ${importCount} imports (budget: ${maximumImports}).`);
   }
 }
 

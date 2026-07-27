@@ -114,6 +114,41 @@ describe("provider maintenance notice", () => {
     }))).toBe("");
   });
 
+  it("offers an honest settings-only provider-managed action without claiming an update exists", () => {
+    const cursorStatus = status({
+      providerId: "cursor",
+      installedVersion: "2.1.0",
+      latestVersion: null,
+      versionStatus: "unknown",
+      freshness: "unavailable",
+      installMethod: "provider-managed",
+      updateAvailability: "available",
+      updateLabel: "Update Cursor",
+      message: "Cursor does not publish a machine-readable latest version.",
+    });
+    const composerHtml = render(cursorStatus);
+    const settingsHtml = renderToStaticMarkup(createElement(
+      ProviderMaintenanceNotice,
+      {
+        providerLabel: "Cursor",
+        status: cursorStatus,
+        operation: null,
+        showManagedUpdateAction: true,
+        dismissible: false,
+        ...actions,
+      },
+    ));
+
+    expect(composerHtml).toBe("");
+    expect(settingsHtml).toContain("Cursor maintenance");
+    expect(settingsHtml).toContain("Check &amp; update");
+    expect(settingsHtml).toContain(
+      "Cursor does not publish a machine-readable latest version.",
+    );
+    expect(settingsHtml).not.toContain("Cursor update available");
+    expect(settingsHtml).not.toContain("Latest");
+  });
+
   it("removes a dismissed terminal operation from the composer notice", () => {
     const completed = operation({
       status: "succeeded",

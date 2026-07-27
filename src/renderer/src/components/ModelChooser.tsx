@@ -101,6 +101,25 @@ function favoriteKeyForRoute(
   return modelFavoriteKey(route);
 }
 
+/**
+ * Search operates across discovered routes and saved favorite variants. A
+ * favorite keeps its full reasoning identity while an exact discovered
+ * duplicate is removed, so selecting a searched favorite cannot silently fall
+ * back to the discovered route's default effort.
+ */
+export function searchableModelChooserRoutes(
+  routes: readonly ComposerModelRoute[],
+  favoriteRoutes: readonly ComposerModelRoute[],
+): ComposerModelRoute[] {
+  const seen = new Set<string>();
+  return [...favoriteRoutes, ...routes].filter((route) => {
+    const key = favoriteKeyForRoute(route);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function preferredModelChooserSource(
   items: readonly { filter: ModelSourceFilter }[],
 ): ModelSourceFilter {
@@ -152,13 +171,23 @@ export function ModelChooser({
     [resolvedFavoriteRoutes, routes],
   );
   const selectedSourceId = modelSourceFilterId(sourceFilter);
+  const searchableRoutes = useMemo(
+    () => searchableModelChooserRoutes(routes, resolvedFavoriteRoutes),
+    [resolvedFavoriteRoutes, routes],
+  );
   const sourceRoutes = useMemo(
     () => query.trim()
-      ? routes
+      ? searchableRoutes
       : sourceFilter.kind === "favorites"
         ? resolvedFavoriteRoutes
         : filterModelRoutesBySource(routes, sourceFilter),
-    [query, resolvedFavoriteRoutes, routes, sourceFilter],
+    [
+      query,
+      resolvedFavoriteRoutes,
+      routes,
+      searchableRoutes,
+      sourceFilter,
+    ],
   );
   const results = useMemo(
     () => searchModelRoutes(sourceRoutes, query),
@@ -385,6 +414,7 @@ export function ModelChooser({
                         ? "model-chooser-result is-navigated"
                         : "model-chooser-result"}
                       role="presentation"
+                      style={{ gridRow: index + 1 }}
                       onPointerMove={() => {
                         if (route.selectable) setActiveIndex(index);
                       }}
@@ -408,6 +438,7 @@ export function ModelChooser({
                         key={row.key}
                         className="model-chooser-favorite-slot"
                         role="presentation"
+                        style={{ gridRow: index + 1 }}
                         onPointerMove={() => {
                           if (row.selectable) setActiveIndex(index);
                         }}

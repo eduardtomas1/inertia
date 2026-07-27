@@ -8,6 +8,7 @@ import {
   modelShortcutPlatform,
   nextModelChooserIndex,
   preferredModelChooserSource,
+  searchableModelChooserRoutes,
 } from "../../src/renderer/src/components/ModelChooser";
 import type { ComposerModelRoute } from "../../src/renderer/src/utils/modelChooserRoutes";
 import {
@@ -18,11 +19,13 @@ import {
 function route(
   modelId: string,
   selectable = true,
+  reasoningEffort: string | null = null,
 ): ComposerModelRoute {
   const selection = nativeModelSelection({
     providerId: "codex",
     modelId,
     alias: modelId.toUpperCase(),
+    reasoningEffort,
   });
   return {
     key: JSON.stringify([
@@ -41,7 +44,7 @@ function route(
     source: "built-in",
     routeTerms: [],
     reasoningEffort: selection.reasoningEffort,
-    reasoningOptions: [],
+    reasoningOptions: reasoningEffort ? [reasoningEffort] : [],
     selectable,
     unavailableReason: selectable ? null : "This route is unavailable.",
     selection,
@@ -108,6 +111,42 @@ describe("ModelChooser", () => {
     expect(modelShortcutPlatform("Win32")).toBe("win32");
     expect(modelShortcutPlatform("Linux x86_64")).toBe("linux");
     expect(modelShortcutPlatform("Plan 9")).toBe("unknown");
+  });
+
+  it("keeps searched favorite reasoning variants and deduplicates exact routes", () => {
+    const discoveredHigh = route("sol", true, "high");
+    discoveredHigh.reasoningOptions = ["high", "xhigh"];
+    const favoriteHigh = {
+      ...discoveredHigh,
+      key: "favorite-high",
+      selection: {
+        ...discoveredHigh.selection,
+        reasoningEffort: "high",
+      },
+    };
+    const favoriteXhigh = {
+      ...discoveredHigh,
+      key: "favorite-xhigh",
+      reasoningEffort: "xhigh",
+      selection: {
+        ...discoveredHigh.selection,
+        reasoningEffort: "xhigh",
+      },
+    };
+
+    const searchable = searchableModelChooserRoutes(
+      [discoveredHigh],
+      [favoriteHigh, favoriteXhigh],
+    );
+
+    expect(searchable.map(({ reasoningEffort, selection }) => [
+      reasoningEffort,
+      selection.reasoningEffort,
+    ])).toEqual([
+      ["high", "high"],
+      ["xhigh", "xhigh"],
+    ]);
+    expect(searchable).toHaveLength(2);
   });
 
   it("owns labelled autofocus search, composed filters, focus restoration, and keyboard commands", () => {

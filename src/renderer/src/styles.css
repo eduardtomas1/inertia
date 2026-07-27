@@ -9510,47 +9510,38 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .model-chooser-results {
-  position: relative;
+  display: grid;
   height: 100%;
   min-height: 0;
+  grid-template-columns: minmax(0, 1fr) max(26px, calc(var(--ui-control-height) - 6px));
+  align-content: start;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
 
-.model-chooser-listbox {
-  min-height: 100%;
+.model-chooser-listbox,
+.model-chooser-favorite-actions {
+  display: contents;
 }
 
 .model-chooser-result {
+  min-width: 0;
+  grid-column: 1;
   padding: 1px 4px;
 }
 
 .model-chooser-listbox .model-chooser-row {
-  padding-right: calc(max(26px, calc(var(--ui-control-height) - 6px)) + 8px);
   border-radius: var(--radius-small);
-}
-
-.model-chooser-favorite-actions {
-  position: absolute;
-  z-index: 1;
-  top: 0;
-  right: 5px;
-  display: grid;
-  width: max(26px, calc(var(--ui-control-height) - 6px));
-  pointer-events: none;
 }
 
 .model-chooser-favorite-slot {
   display: grid;
+  min-width: 0;
   min-height: calc(max(44px, var(--model-row-height)) + 2px);
+  grid-column: 2;
   place-items: center;
-  pointer-events: none;
-}
-
-.model-chooser-favorite-slot > .model-chooser-row-favorite {
-  pointer-events: auto;
 }
 
 .model-chooser-result.is-navigated > .model-chooser-row {
@@ -9561,6 +9552,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .model-chooser-empty {
   display: flex;
   min-height: 170px;
+  grid-column: 1 / -1;
   align-items: center;
   justify-content: center;
   gap: 9px;

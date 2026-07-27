@@ -1,6 +1,10 @@
 import type Database from "better-sqlite3";
 
-import type { AgentTurn } from "../../shared/contracts";
+import type {
+  AgentTurn,
+  ChatAttachment,
+  ChatMessage,
+} from "../../shared/contracts";
 import type {
   AgentTurnRow,
   ConversationRow,
@@ -14,6 +18,14 @@ export interface PersistenceContext {
     runId: string,
     turnId: string,
   ): AgentTurn;
+  createMessage(
+    conversationId: string,
+    content: string,
+    role?: ChatMessage["role"],
+    attachments?: ChatAttachment[],
+    turnId?: string | null,
+    createdAt?: string,
+  ): ChatMessage;
   database: Database.Database;
   requireAgentTurn(turnId: string): AgentTurnRow;
   requireConversation(conversationId: string): ConversationRow;

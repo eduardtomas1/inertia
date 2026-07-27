@@ -1,11 +1,17 @@
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { RuntimeStore } from "../../src/server/database";
+import {
+  RecordNotFoundError as PublicRecordNotFoundError,
+  RuntimeStore,
+} from "../../src/server/database";
+import {
+  RecordNotFoundError as RepositoryRecordNotFoundError,
+} from "../../src/server/persistence/errors";
 
 const temporaryDirectories: string[] = [];
 
@@ -34,6 +40,40 @@ afterEach(async () => {
 });
 
 describe("RuntimeStore repository compatibility", () => {
+  it("preserves the public not-found error constructor across repository boundaries", async () => {
+    expect(PublicRecordNotFoundError).toBe(RepositoryRecordNotFoundError);
+    const { store } = await createStore();
+    expect(() => store.project("missing-project"))
+      .toThrow(PublicRecordNotFoundError);
+    store.close();
+  });
+
+  it("keeps SQL-heavy turn and migration ownership outside the public facade", async () => {
+    const repositoryRoot = resolve(import.meta.dirname, "..", "..");
+    const databaseSource = await readFile(
+      join(repositoryRoot, "src", "server", "database.ts"),
+      "utf8",
+    );
+    expect(databaseSource).not.toContain("CREATE TABLE");
+    expect(databaseSource).not.toContain("INSERT INTO agent_turns");
+    expect(databaseSource).not.toContain("UPDATE agent_turns SET");
+
+    const repositorySources = await Promise.all([
+      "turn-ledger-repository.ts",
+      "execution-ledger-repository.ts",
+      "git-artifact-repository.ts",
+      "recovery-repository.ts",
+    ].map((file) =>
+      readFile(
+        join(repositoryRoot, "src", "server", "persistence", file),
+        "utf8",
+      )));
+    for (const source of repositorySources) {
+      expect(source).not.toContain('from "../database"');
+      expect(source).not.toContain("RuntimeStore");
+    }
+  });
+
   it("keeps project creation and active selection atomic", async () => {
     const { databasePath, store, workspacePath } = await createStore();
     const project = store.createProject("Primary", workspacePath);

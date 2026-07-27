@@ -2,6 +2,35 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.10 — 2026-07-27
+
+### A stronger foundation without changing the workflow
+
+- Inertia's largest renderer, runtime, database, Git, transcript, composer, provider, and shared-contract files are now split into focused modules with clear ownership.
+- Compatibility boundaries preserve the behavior and stored history from 0.0.9 while making individual features easier to understand, test, and change safely.
+- New architecture checks catch oversized core files, dependency cycles, misplaced command ownership, and accidental imports through compatibility facades before they reach a release.
+- Persistence migrations and repositories now live in explicit domains, keeping projects, conversations, turns, usage, Git artifacts, reviews, provider metadata, settings, and recovery state independently testable.
+
+### Smoother daily work across every platform
+
+- Model Favorites now save the useful route as one preset—including harness, backend, model, and reasoning—while the chooser opens directly on those choices instead of an unnecessary All view.
+- Provider setup can detect supported CLI updates, explain the official update route, run it inside Inertia, show bounded progress, and keep the operation available after a renderer reconnect.
+- Windows transcript spacing, model-row hover geometry, first-message readiness, Linux readability, composer breathing room, and narrow-layout behavior received a focused cross-platform pass.
+- Tool activity keeps its restrained workstream presentation with lower-cost animation and more stable scroll anchoring during long or rapidly updating runs.
+- Initial Git refresh failures are now reported instead of leaving an unexplained empty Changes view, and recursive Files refreshes no longer retain stale nested folders.
+
+### Safer attachments and more reliable lifecycles
+
+- Pasted and selected attachments now cross the renderer boundary as opaque capabilities rather than arbitrary paths. The runtime independently verifies the app-owned location, identity, type, size, and content digest before a provider can use them.
+- Attachment ownership follows renderer, runtime, retry, cancellation, restart, and shutdown lifecycles so removed or orphaned files cannot silently escape the retained-storage limit.
+- Provider completion settles and reaches the interface before optional Git capture or attachment cleanup, so Stop and working states disappear when the provider actually finishes.
+- Active provider updates survive reconnects, rejected submissions keep safe retry ownership, and interrupted runtime cleanup remains conservative until process exit is confirmed.
+
+### Release confidence
+
+- Architecture checks, linting, typecheck, 1,002 unit tests, 113 portable provider tests, 35 Electron end-to-end tests, packaged-app smoke tests, Electron fuse verification, dependency auditing, and strict macOS bundle verification protect the release.
+- Linux x64, Windows x64, and macOS arm64 continue to build from the exact release tag with checksums and build-provenance attestations.
+
 ## 0.0.9 — 2026-07-27
 
 ### A minimal workstream instead of stacked chat panels

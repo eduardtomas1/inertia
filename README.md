@@ -18,7 +18,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 ### The whole coding loop, without the noise
 
 - Connect locally installed Codex, Claude, Cursor, or OpenCode accounts without leaving the app.
-- Find models quickly through a searchable provider-aware palette, then favorite the routes you use most.
+- Find models quickly through a searchable provider-aware palette, then save complete harness, backend, model, and reasoning routes as Favorites.
 - See provider-supplied thinking summaries, remaining context, and account usage through one compact context control.
 - Work with streaming conversations, resumable sessions, native plans, agent questions, image and document inputs, cancellation, and supervised approvals whenever the selected provider supports them.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
@@ -65,6 +65,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 ![Inertia settings in dark mode](docs/screenshots/inertia-settings.png)
 
 - Create, test, enable, and choose model backend profiles without mixing them into the agent harness that runs the conversation.
+- See when a supported provider CLI has an update and run the official update flow without leaving Inertia.
 - Use the built-in Kimi coding profile through the Claude harness, or define a compatible custom endpoint with explicit models and routing.
 - Existing conversations keep their original execution route. Supported same-backend model changes can continue in place; changing the harness or backend opens a clearly separated new chat.
 
@@ -74,13 +75,13 @@ Inertia uses the coding tools and accounts already installed on your computer. C
 
 Provider account credentials remain in each provider's own storage. Credentials added for custom model backends are encrypted through the operating system's secure credential storage; only non-secret profile settings live in Inertia's local database. Inertia stores workspace history and preferences locally, and its optional runtime diagnostics exclude prompts, source, token values, credentials, and connection capabilities.
 
-### Version 0.0.9
+### Version 0.0.10
 
-This release gives Inertia one calmer conversation surface. Live commentary and compact tool calls follow their real order, successful work settles into the answer footer, and final answers read like documents instead of response cards.
+This release gives Inertia a stronger internal foundation without changing the workflow that already feels good. The largest renderer, runtime, database, Git, transcript, composer, and provider modules now have focused ownership and automated architecture guardrails.
 
-The composer is now one cohesive dock with a searchable model palette, favorite routes, a compact context control, and removable image and document previews. Recursive Files, nested Git repositories, delegated agents, and heavy Codex runs are easier to follow without adding more permanent interface.
+Favorites now remember the complete model route and reasoning choice, provider CLI updates can run inside the app, and cross-platform spacing, readiness, animation, attachment cleanup, reconnects, and turn settlement are more dependable.
 
-Download [Inertia v0.0.9](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.9):
+Download [Inertia v0.0.10](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.10):
 
 | Platform | Download |
 | --- | --- |

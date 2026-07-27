@@ -1,0 +1,9 @@
+export const DEFAULT_OUTPUT_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_DIFF_BYTES = 512 * 1024;
+export const MAX_DIFF_BYTES = 2 * 1024 * 1024;
+export const DEFAULT_DIFF_FILES = 50;
+export const MAX_DIFF_FILES = 100;
+export const STDERR_BYTES = 16 * 1024;
+export const LOCAL_TIMEOUT_MS = 30_000;
+export const NETWORK_TIMEOUT_MS = 120_000;
+export const MAX_PATH_LENGTH = 4_096;

@@ -63,7 +63,7 @@ export async function loopbackPortIsOpen(port: number): Promise<boolean> {
 }
 
 export async function removePortableFixture(root: string): Promise<void> {
-  const retryDelays = process.platform === "win32" ? [0, 50, 150, 350, 750, 1_500] : [0];
+  const retryDelays = [0, 50, 150, 350, 750, 1_500];
   let lastError: unknown;
   for (const retryDelay of retryDelays) {
     if (retryDelay > 0) await delay(retryDelay);

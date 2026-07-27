@@ -20,6 +20,12 @@ import {
   runDatabaseMigrations,
 } from "../../src/server/database-migrations";
 import { RuntimeStore } from "../../src/server/database";
+import {
+  CURRENT_DATABASE_SCHEMA_VERSION,
+  LEGACY_SCHEMA_MIGRATION_COUNT,
+  createRuntimeMigrationCatalog,
+  type DatabaseMigrationDefinition,
+} from "../../src/server/persistence/migrations/catalog";
 
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const fixtureDirectory = join(repositoryRoot, "tests", "fixtures", "database");
@@ -662,6 +668,41 @@ describe("transactional database migrations", () => {
       count: number;
     }).count).toBe(1);
     database.close();
+  });
+});
+
+describe("runtime migration catalog", () => {
+  it("pins released numbering in one immutable, contiguous catalog", () => {
+    const definition = (name: string): DatabaseMigrationDefinition => ({
+      name,
+      up: "SELECT 1;",
+    });
+    const legacy = Array.from(
+      { length: LEGACY_SCHEMA_MIGRATION_COUNT },
+      (_, index) => definition(`legacy-${index + 1}`),
+    );
+    const extensions = Array.from(
+      {
+        length: CURRENT_DATABASE_SCHEMA_VERSION
+          - LEGACY_SCHEMA_MIGRATION_COUNT,
+      },
+      (_, index) => definition(`extension-${index + 1}`),
+    );
+
+    const catalog = createRuntimeMigrationCatalog(legacy, extensions);
+
+    expect(catalog.map(({ version }) => version)).toEqual(
+      Array.from(
+        { length: CURRENT_DATABASE_SCHEMA_VERSION },
+        (_, index) => index + 1,
+      ),
+    );
+    expect(Object.isFrozen(catalog)).toBe(true);
+    expect(catalog.every(Object.isFrozen)).toBe(true);
+    expect(() => createRuntimeMigrationCatalog(legacy.slice(1), extensions))
+      .toThrow(/legacy schema catalog/iu);
+    expect(() => createRuntimeMigrationCatalog(legacy, extensions.slice(1)))
+      .toThrow(/runtime schema catalog/iu);
   });
 });
 

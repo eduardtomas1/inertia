@@ -1,19 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { resolve } from "node:path";
 
 import Database from "better-sqlite3";
 
 import {
-  defaultSettings,
-  type AccessMode,
   type AgentActivity,
   type AgentPlan,
   type AgentReasoning,
   type AgentTurn,
-  type AgentTurnAssociation,
-  type AgentTurnStatus,
-  type AgentTurnTerminalStatus,
-  type AgentTurnUsageSnapshot,
   type AppSettings,
   type AppSnapshot,
   type ChatAttachment,
@@ -21,29 +14,17 @@ import {
   type CheckpointSummary,
   type Conversation,
   type ConversationDetail,
-  type ConversationLatestTurnSummary,
-  type ConversationShell,
   type DiffReviewNote,
   type DiffReviewState,
   type DiffReviewSummary,
-  type InteractionMode,
-  type ContinuationIdentity,
   type ModelSelection,
   type Project,
-  type ProjectGroupingMode,
   type ProviderId,
   type ProviderInfo,
   type SubagentTrace,
   type SubagentTraceStatus,
-  type ThemePreference,
-  type ThreadStatus,
   type ThreadUsageSnapshot,
   type TurnGitArtifact,
-  type TurnGitArtifactAbsenceReason,
-  type TurnGitArtifactCompleteness,
-  type TurnGitArtifactFile,
-  type TurnGitArtifactStatus,
-  type TurnGitPatchState,
   type WorkspaceRun,
   canTransitionAgentTurnStatus,
   isAgentTurnTerminalStatus,
@@ -51,36 +32,28 @@ import {
 import {
   continuationIdentityForSelection,
   continuationIdentitySchema,
-  knownHarnessIdSchema,
   legacyProviderIdForHarness,
   modelSelectionSchema,
-  nativeBackendProfile,
   nativeModelSelection,
-  resolveHarnessBackendCompatibility,
 } from "../shared/model-routing";
 import {
-  containsBackendCredentialMaterial,
-  modelBackendDefaultSchema,
-  persistedModelBackendProfileSchema,
   type ModelBackendDefault,
   type PersistedModelBackendProfile,
 } from "../shared/backend-profile-settings";
 import {
-  backendCompatibilityProbeResultSchema,
   type BackendCompatibilityProbeResult,
 } from "../shared/backend-probe";
 import {
   backfillLegacyAgentTurns,
   formatMigrationDiagnostic,
   runDatabaseMigrations,
-  type DatabaseMigration,
 } from "./database-migrations";
 import {
   nativeProviderMetadataScope,
   providerMetadataScopeKey,
   type PersistedProviderMetadata,
 } from "./provider/metadata";
-import { providerTimestamp, validateProviderUsage } from "./provider/usage-values";
+import { validateProviderUsage } from "./provider/usage-values";
 import {
   boundedSubagentIdentifier,
   boundedSubagentText,
@@ -91,1496 +64,103 @@ import {
   MAX_SUBAGENT_TRACES_PER_TURN,
 } from "./provider/subagent-trace";
 import {
-  parsePersistedReviewSummaryJson,
-  upgradeLegacyPersistedReviewSummary,
-  validatePersistedReviewSummary,
-} from "./review-summary";
-import {
   parseSanitizedTurnExecutionManifest,
   validateExecutionContextReference,
   validatePersistedTurnExecutionContext,
   type PersistedTurnExecutionContext,
   type SanitizedTurnExecutionManifest,
 } from "./runtime/turns/request-context";
-
-const PROJECT_COLORS = ["#6f76d9", "#5b8ca8", "#8a73ba", "#a76c79", "#9a814f", "#687f91"] as const;
-
-interface ProjectRow {
-  id: string;
-  name: string;
-  path: string;
-  normalized_path: string;
-  repository_identity: string | null;
-  repository_root: string | null;
-  repository_relative_path: string;
-  grouping_mode: ProjectGroupingMode | null;
-  color: string;
-  status: Project["status"];
-  created_at: string;
-  updated_at: string;
-}
-
-interface ConversationRow {
-  id: string;
-  project_id: string;
-  title: string;
-  provider_id: ProviderId;
-  model_selection_json: string | null;
-  continuation_identity_json: string | null;
-  model: string;
-  reasoning_effort: string;
-  interaction_mode: InteractionMode;
-  access_mode: AccessMode;
-  status: ThreadStatus;
-  attention_kind: Conversation["attentionKind"];
-  branch: string | null;
-  worktree_path: string | null;
-  provider_session_id: string | null;
-  archived_at: string | null;
-  settled_at: string | null;
-  completed_at: string | null;
-  last_viewed_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface AgentTurnRow {
-  id: string;
-  conversation_id: string;
-  run_id: string;
-  user_message_id: string;
-  terminal_assistant_message_id: string | null;
-  provider_id: ProviderId;
-  model_selection_json: string | null;
-  continuation_identity_json: string | null;
-  harness_id: string;
-  backend_profile_id: string;
-  model: string;
-  model_alias: string | null;
-  reasoning_effort: string;
-  interaction_mode: InteractionMode;
-  access_mode: AccessMode;
-  provider_session_before: string | null;
-  provider_session_after: string | null;
-  requested_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-  status: AgentTurnStatus;
-  terminal_reason: string | null;
-  checkpoint_id: string | null;
-  usage_start_json: string | null;
-  usage_completion_json: string | null;
-  configuration_revision: number;
-  association: AgentTurnAssociation;
-  created_at: string;
-  updated_at: string;
-}
-
-interface TurnGitArtifactRow {
-  id: string;
-  turn_id: string;
-  conversation_id: string;
-  run_id: string;
-  repository_identity: string | null;
-  worktree_identity: string | null;
-  branch: string | null;
-  before_checkpoint_id: string | null;
-  before_ref: string | null;
-  after_ref: string | null;
-  before_fingerprint: string | null;
-  after_fingerprint: string | null;
-  files_json: string;
-  insertions: number;
-  deletions: number;
-  status: TurnGitArtifactStatus;
-  completeness: TurnGitArtifactCompleteness;
-  patch_state: TurnGitPatchState;
-  patch_digest: string | null;
-  captured_at: string | null;
-  terminal_assistant_message_id: string | null;
-  failure_reason: string | null;
-  absence_reason: TurnGitArtifactAbsenceReason | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface MessageRow {
-  id: string;
-  conversation_id: string;
-  turn_id: string | null;
-  role: ChatMessage["role"];
-  content: string;
-  attachments_json: string;
-  created_at: string;
-}
-
-interface ActivityRow {
-  id: string;
-  conversation_id: string;
-  run_id: string;
-  turn_id: string | null;
-  kind: AgentActivity["kind"];
-  title: string;
-  detail: string | null;
-  status: AgentActivity["status"];
-  created_at: string;
-}
-
-interface SubagentTraceRow {
-  id: string;
-  conversation_id: string;
-  run_id: string;
-  turn_id: string;
-  provider_id: ProviderId;
-  provider_task_id: string | null;
-  provider_agent_id: string | null;
-  parent_trace_id: string | null;
-  parent_provider_agent_id: string | null;
-  parent_provider_tool_use_id: string | null;
-  provider_tool_use_id: string | null;
-  provider_role: string | null;
-  provider_name: string | null;
-  status: SubagentTraceStatus;
-  description: string | null;
-  progress: string | null;
-  result: string | null;
-  sequence: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface CheckpointRow {
-  id: string;
-  conversation_id: string;
-  turn_id: string | null;
-  ref: string;
-  label: string;
-  turn_index: number;
-  files_changed: number;
-  insertions: number;
-  deletions: number;
-  created_at: string;
-}
-
-interface AgentPlanRow {
-  conversation_id: string;
-  run_id: string;
-  turn_id: string | null;
-  explanation: string | null;
-  steps_json: string;
-}
-
-interface AgentReasoningRow {
-  id: string;
-  conversation_id: string;
-  run_id: string;
-  turn_id: string | null;
-  content: string;
-  status: AgentReasoning["status"];
-  created_at: string;
-}
-
-interface ThreadUsageRow {
-  conversation_id: string;
-  turn_id: string | null;
-  used_tokens: number | null;
-  total_processed_tokens: number | null;
-  total_processed_scope: ThreadUsageSnapshot["totalProcessedScope"];
-  max_tokens: number | null;
-  input_tokens: number | null;
-  cached_input_tokens: number | null;
-  cache_write_input_tokens: number | null;
-  output_tokens: number | null;
-  reasoning_output_tokens: number | null;
-  compacts_automatically: 0 | 1 | null;
-  updated_at: string;
-}
-
-interface StateRow {
-  theme: ThemePreference;
-  compact_sidebar: 0 | 1;
-  show_timestamps: 0 | 1;
-  terminal_font_size: number;
-  default_provider: ProviderId;
-  default_model: string;
-  default_access_mode: AccessMode;
-  new_thread_mode: AppSettings["newThreadMode"];
-  wrap_diffs: 0 | 1;
-  ignore_whitespace: 0 | 1;
-  show_thinking: 0 | 1;
-  show_usage: 0 | 1;
-  usage_display_mode: AppSettings["usageDisplayMode"];
-  interface_scale: AppSettings["interfaceScale"];
-  response_density: AppSettings["responseDensity"];
-  default_code_wrap: 0 | 1;
-  auto_collapse_work_log: 0 | 1;
-  show_changed_file_summaries: 0 | 1;
-  sidebar_mode: AppSettings["sidebarMode"];
-  project_grouping: AppSettings["projectGrouping"];
-  auto_open_plan: 0 | 1;
-  confirm_destructive_actions: 0 | 1;
-  default_reasoning_effort: string;
-  default_interaction_mode: InteractionMode;
-  codex_binary_path: string;
-  active_project_id: string | null;
-  active_conversation_id: string | null;
-}
-
-interface ProviderMetadataCacheRow {
-  scope_key: string;
-  provider_id: ProviderId;
-  harness_id: PersistedProviderMetadata["scope"]["harnessId"];
-  backend_profile_id: string;
-  model_id: string;
-  executable: string | null;
-  version: string | null;
-  backend_configuration_revision: number;
-  auth_state: PersistedProviderMetadata["scope"]["authState"];
-  models_json: string;
-  models_updated_at: string | null;
-  models_last_attempted_at: string | null;
-  models_provenance: PersistedProviderMetadata["modelsProvenance"];
-  models_stale: 0 | 1;
-  rate_limits_json: string;
-  rate_limits_updated_at: string | null;
-  rate_limits_last_attempted_at: string | null;
-  rate_limits_provenance: PersistedProviderMetadata["rateLimitsProvenance"];
-  rate_limits_stale: 0 | 1;
-}
-
-interface DiffReviewSummaryRow {
-  conversation_id: string;
-  fingerprint: string;
-  provider_id: ProviderId;
-  overall: string;
-  files_json: string;
-  generated_at: string;
-  summary_json: string | null;
-}
-
-interface DiffReviewStateRow {
-  conversation_id: string;
-  scope: DiffReviewState["scope"];
-  path: string;
-  hunk_id: string;
-  target_fingerprint: string;
-  reviewed: 0 | 1;
-  stale: 0 | 1;
-  updated_at: string;
-}
-
-interface DiffReviewNoteRow {
-  id: string;
-  conversation_id: string;
-  path: string;
-  hunk_id: string;
-  line_ids_json: string;
-  target_fingerprint: string;
-  body: string;
-  stale: 0 | 1;
-  created_at: string;
-  updated_at: string;
-}
-
-interface WorkspaceRunRow {
-  id: string;
-  kind: WorkspaceRun["kind"];
-  project_id: string;
-  conversation_id: string | null;
-  action_id: string | null;
-  label: string;
-  detail: string | null;
-  status: WorkspaceRun["status"];
-  attention_state?: WorkspaceRun["attentionState"];
-  port: number | null;
-  started_at: string;
-  finished_at: string | null;
-}
-
-interface ModelBackendProfileRow {
-  profile_id: string;
-  harness_id: string;
-  preset: string;
-  protocol: string;
-  source: string;
-  enabled: 0 | 1;
-  configuration_revision: number;
-  endpoint_identity: string | null;
-  credential_generation: string | null;
-  configuration_json: string;
-  latest_probe_json: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface ModelBackendDefaultRow {
-  scope: ModelBackendDefault["scope"];
-  project_id: string | null;
-  selection_json: string;
-  updated_at: string;
-}
-
-const migrations = [
-  `
-    CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      path TEXT NOT NULL,
-      color TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('ready', 'working', 'attention')),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE conversations (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      title TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE INDEX conversations_project_id_idx ON conversations(project_id);
-
-    CREATE TABLE messages (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-      content TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX messages_conversation_id_idx ON messages(conversation_id);
-
-    CREATE TABLE app_state (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      theme TEXT NOT NULL CHECK (theme IN ('system', 'light', 'dark')),
-      compact_sidebar INTEGER NOT NULL CHECK (compact_sidebar IN (0, 1)),
-      show_timestamps INTEGER NOT NULL CHECK (show_timestamps IN (0, 1)),
-      terminal_font_size INTEGER NOT NULL CHECK (terminal_font_size BETWEEN 11 AND 22),
-      active_project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
-      active_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL
-    );
-  `,
-  `
-    ALTER TABLE conversations ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'codex';
-    ALTER TABLE conversations ADD COLUMN model TEXT NOT NULL DEFAULT '';
-    ALTER TABLE conversations ADD COLUMN interaction_mode TEXT NOT NULL DEFAULT 'build';
-    ALTER TABLE conversations ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'supervised';
-    ALTER TABLE conversations ADD COLUMN status TEXT NOT NULL DEFAULT 'idle';
-    ALTER TABLE conversations ADD COLUMN branch TEXT;
-    ALTER TABLE conversations ADD COLUMN worktree_path TEXT;
-    ALTER TABLE conversations ADD COLUMN provider_session_id TEXT;
-    ALTER TABLE conversations ADD COLUMN archived_at TEXT;
-    ALTER TABLE messages ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]';
-
-    ALTER TABLE app_state ADD COLUMN default_provider TEXT NOT NULL DEFAULT 'codex';
-    ALTER TABLE app_state ADD COLUMN default_model TEXT NOT NULL DEFAULT '';
-    ALTER TABLE app_state ADD COLUMN default_access_mode TEXT NOT NULL DEFAULT 'supervised';
-    ALTER TABLE app_state ADD COLUMN new_thread_mode TEXT NOT NULL DEFAULT 'local';
-    ALTER TABLE app_state ADD COLUMN wrap_diffs INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE app_state ADD COLUMN ignore_whitespace INTEGER NOT NULL DEFAULT 0;
-
-    CREATE TABLE activities (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      run_id TEXT NOT NULL,
-      kind TEXT NOT NULL CHECK (kind IN ('status', 'tool', 'command', 'file', 'reasoning', 'error')),
-      title TEXT NOT NULL,
-      detail TEXT,
-      status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX activities_conversation_id_idx ON activities(conversation_id, created_at);
-
-    CREATE TABLE checkpoints (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      ref TEXT NOT NULL,
-      label TEXT NOT NULL,
-      turn_index INTEGER NOT NULL,
-      files_changed INTEGER NOT NULL DEFAULT 0,
-      insertions INTEGER NOT NULL DEFAULT 0,
-      deletions INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX checkpoints_conversation_id_idx ON checkpoints(conversation_id, turn_index);
-  `,
-  `
-    CREATE TABLE agent_plans (
-      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
-      run_id TEXT NOT NULL,
-      explanation TEXT,
-      steps_json TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `,
-  `
-    ALTER TABLE conversations ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT '';
-
-    ALTER TABLE app_state ADD COLUMN show_thinking INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE app_state ADD COLUMN show_usage INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE app_state ADD COLUMN auto_open_plan INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE app_state ADD COLUMN confirm_destructive_actions INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE app_state ADD COLUMN default_reasoning_effort TEXT NOT NULL DEFAULT '';
-    ALTER TABLE app_state ADD COLUMN default_interaction_mode TEXT NOT NULL DEFAULT 'build';
-
-    CREATE TABLE agent_reasonings (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      run_id TEXT NOT NULL,
-      content TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX agent_reasonings_conversation_id_idx ON agent_reasonings(conversation_id, created_at);
-
-    CREATE TABLE thread_usage (
-      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
-      used_tokens INTEGER NOT NULL,
-      total_processed_tokens INTEGER,
-      max_tokens INTEGER,
-      input_tokens INTEGER,
-      cached_input_tokens INTEGER,
-      output_tokens INTEGER,
-      reasoning_output_tokens INTEGER,
-      compacts_automatically INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT NOT NULL
-    );
-  `,
-  `
-    CREATE TABLE provider_metadata_cache (
-      provider_id TEXT PRIMARY KEY CHECK (provider_id IN ('codex', 'claude', 'cursor', 'opencode')),
-      executable TEXT CHECK (executable IS NULL OR length(executable) <= 4096),
-      version TEXT CHECK (version IS NULL OR length(version) <= 200),
-      auth_state TEXT CHECK (auth_state IS NULL OR auth_state IN ('checking', 'authenticated', 'unauthenticated', 'configured', 'unknown', 'error')),
-      models_json TEXT NOT NULL DEFAULT '[]' CHECK (length(models_json) <= 262144),
-      models_updated_at TEXT,
-      models_last_attempted_at TEXT,
-      models_provenance TEXT CHECK (models_provenance IS NULL OR models_provenance IN ('provider', 'session', 'persistent-cache')),
-      models_stale INTEGER NOT NULL DEFAULT 0 CHECK (models_stale IN (0, 1)),
-      rate_limits_json TEXT NOT NULL DEFAULT '[]' CHECK (length(rate_limits_json) <= 65536),
-      rate_limits_updated_at TEXT,
-      rate_limits_last_attempted_at TEXT,
-      rate_limits_provenance TEXT CHECK (rate_limits_provenance IS NULL OR rate_limits_provenance IN ('provider', 'session', 'persistent-cache')),
-      rate_limits_stale INTEGER NOT NULL DEFAULT 0 CHECK (rate_limits_stale IN (0, 1))
-    );
-  `,
-  `
-    CREATE TABLE thread_usage_v2 (
-      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
-      used_tokens INTEGER,
-      total_processed_tokens INTEGER,
-      total_processed_scope TEXT CHECK (total_processed_scope IS NULL OR total_processed_scope IN ('thread', 'session', 'run')),
-      max_tokens INTEGER,
-      input_tokens INTEGER,
-      cached_input_tokens INTEGER,
-      cache_write_input_tokens INTEGER,
-      output_tokens INTEGER,
-      reasoning_output_tokens INTEGER,
-      compacts_automatically INTEGER CHECK (compacts_automatically IS NULL OR compacts_automatically IN (0, 1)),
-      updated_at TEXT NOT NULL
-    );
-    INSERT INTO thread_usage_v2 (
-      conversation_id, used_tokens, total_processed_tokens, total_processed_scope, max_tokens,
-      input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens,
-      reasoning_output_tokens, compacts_automatically, updated_at
-    )
-    SELECT
-      usage.conversation_id,
-      CASE WHEN conversations.provider_id = 'codex' THEN usage.used_tokens ELSE NULL END,
-      CASE WHEN conversations.provider_id IN ('codex', 'cursor') THEN usage.total_processed_tokens ELSE NULL END,
-      CASE conversations.provider_id WHEN 'codex' THEN 'thread' WHEN 'cursor' THEN 'session' ELSE NULL END,
-      usage.max_tokens, usage.input_tokens, usage.cached_input_tokens, NULL, usage.output_tokens,
-      usage.reasoning_output_tokens, NULL, usage.updated_at
-    FROM thread_usage AS usage
-    JOIN conversations ON conversations.id = usage.conversation_id;
-    DROP TABLE thread_usage;
-    ALTER TABLE thread_usage_v2 RENAME TO thread_usage;
-  `,
-  `
-    CREATE TABLE diff_review_summaries (
-      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
-      fingerprint TEXT NOT NULL CHECK (length(fingerprint) = 8),
-      provider_id TEXT NOT NULL CHECK (provider_id IN ('codex', 'claude', 'cursor', 'opencode')),
-      overall TEXT NOT NULL CHECK (length(overall) <= 4000),
-      files_json TEXT NOT NULL CHECK (length(files_json) <= 262144),
-      generated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE workspace_runs (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL CHECK (kind IN ('agent', 'check', 'service', 'source-control')),
-      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
-      label TEXT NOT NULL CHECK (length(label) BETWEEN 1 AND 200),
-      detail TEXT CHECK (detail IS NULL OR length(detail) <= 1000),
-      status TEXT NOT NULL CHECK (status IN ('running', 'waiting', 'succeeded', 'failed', 'cancelled')),
-      port INTEGER CHECK (port IS NULL OR port BETWEEN 1 AND 65535),
-      started_at TEXT NOT NULL,
-      finished_at TEXT
-    );
-    CREATE INDEX workspace_runs_started_at_idx ON workspace_runs(started_at DESC);
-    CREATE INDEX workspace_runs_active_idx ON workspace_runs(status, started_at DESC);
-  `,
-  `
-    CREATE TABLE diff_review_summaries_sha256 (
-      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
-      fingerprint TEXT NOT NULL CHECK (length(fingerprint) IN (8, 64)),
-      provider_id TEXT NOT NULL CHECK (provider_id IN ('codex', 'claude', 'cursor', 'opencode')),
-      overall TEXT NOT NULL CHECK (length(overall) <= 4000),
-      files_json TEXT NOT NULL CHECK (length(files_json) <= 262144),
-      generated_at TEXT NOT NULL
-    );
-    INSERT INTO diff_review_summaries_sha256
-      (conversation_id, fingerprint, provider_id, overall, files_json, generated_at)
-    SELECT conversation_id, fingerprint, provider_id, overall, files_json, generated_at
-    FROM diff_review_summaries;
-    DROP TABLE diff_review_summaries;
-    ALTER TABLE diff_review_summaries_sha256 RENAME TO diff_review_summaries;
-  `,
-  `
-    CREATE TABLE diff_review_states (
-      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      scope TEXT NOT NULL CHECK (scope IN ('file', 'hunk')),
-      path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096),
-      hunk_id TEXT NOT NULL DEFAULT '' CHECK (length(hunk_id) <= 128),
-      target_fingerprint TEXT NOT NULL CHECK (length(target_fingerprint) = 64),
-      reviewed INTEGER NOT NULL CHECK (reviewed IN (0, 1)),
-      stale INTEGER NOT NULL DEFAULT 0 CHECK (stale IN (0, 1)),
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY (conversation_id, scope, path, hunk_id)
-    );
-    CREATE INDEX diff_review_states_conversation_idx ON diff_review_states(conversation_id, stale, reviewed);
-
-    CREATE TABLE diff_review_notes (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096),
-      hunk_id TEXT NOT NULL DEFAULT '' CHECK (length(hunk_id) <= 128),
-      line_ids_json TEXT NOT NULL CHECK (length(line_ids_json) <= 65536),
-      target_fingerprint TEXT NOT NULL CHECK (length(target_fingerprint) = 64),
-      body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 8000),
-      stale INTEGER NOT NULL DEFAULT 0 CHECK (stale IN (0, 1)),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE INDEX diff_review_notes_conversation_idx ON diff_review_notes(conversation_id, path, hunk_id);
-  `,
-  `
-    ALTER TABLE app_state ADD COLUMN response_density TEXT NOT NULL DEFAULT 'default'
-      CHECK (response_density IN ('compact', 'default', 'comfortable'));
-    ALTER TABLE app_state ADD COLUMN default_code_wrap INTEGER NOT NULL DEFAULT 0
-      CHECK (default_code_wrap IN (0, 1));
-    ALTER TABLE app_state ADD COLUMN auto_collapse_work_log INTEGER NOT NULL DEFAULT 1
-      CHECK (auto_collapse_work_log IN (0, 1));
-    ALTER TABLE app_state ADD COLUMN show_changed_file_summaries INTEGER NOT NULL DEFAULT 1
-      CHECK (show_changed_file_summaries IN (0, 1));
-  `,
-  `
-    ALTER TABLE projects ADD COLUMN normalized_path TEXT NOT NULL DEFAULT '';
-    ALTER TABLE projects ADD COLUMN repository_identity TEXT;
-    ALTER TABLE projects ADD COLUMN repository_root TEXT;
-    ALTER TABLE projects ADD COLUMN repository_relative_path TEXT NOT NULL DEFAULT '.';
-    ALTER TABLE projects ADD COLUMN grouping_mode TEXT
-      CHECK (grouping_mode IS NULL OR grouping_mode IN ('repository', 'repository-path', 'separate'));
-    UPDATE projects SET normalized_path = path WHERE normalized_path = '';
-    CREATE INDEX projects_repository_identity_idx ON projects(repository_identity, repository_relative_path);
-
-    ALTER TABLE conversations ADD COLUMN attention_kind TEXT
-      CHECK (attention_kind IS NULL OR attention_kind IN ('approval', 'input'));
-    ALTER TABLE conversations ADD COLUMN settled_at TEXT;
-    ALTER TABLE conversations ADD COLUMN completed_at TEXT;
-    ALTER TABLE conversations ADD COLUMN last_viewed_at TEXT;
-    UPDATE conversations
-      SET completed_at = CASE WHEN status = 'completed' THEN updated_at ELSE NULL END,
-          last_viewed_at = updated_at;
-    CREATE INDEX conversations_activity_idx ON conversations(settled_at, status, updated_at DESC);
-
-    ALTER TABLE app_state ADD COLUMN sidebar_mode TEXT NOT NULL DEFAULT 'classic'
-      CHECK (sidebar_mode IN ('classic', 'activity'));
-    ALTER TABLE app_state ADD COLUMN project_grouping TEXT NOT NULL DEFAULT 'separate'
-      CHECK (project_grouping IN ('repository', 'repository-path', 'separate'));
-  `,
-  `
-    ALTER TABLE workspace_runs ADD COLUMN action_id TEXT
-      CHECK (action_id IS NULL OR length(action_id) BETWEEN 1 AND 200);
-    CREATE INDEX workspace_runs_action_idx ON workspace_runs(project_id, action_id, started_at DESC);
-  `,
-  `
-    ALTER TABLE app_state ADD COLUMN codex_binary_path TEXT NOT NULL DEFAULT ''
-      CHECK (length(codex_binary_path) <= 4096);
-  `,
-  `
-    ALTER TABLE app_state ADD COLUMN interface_scale TEXT NOT NULL DEFAULT 'default'
-      CHECK (interface_scale IN ('compact', 'default', 'comfortable', 'large'));
-  `,
-  `
-    ALTER TABLE app_state ADD COLUMN usage_display_mode TEXT NOT NULL DEFAULT 'expanded'
-      CHECK (usage_display_mode IN ('expanded', 'compact', 'hidden'));
-    UPDATE app_state SET usage_display_mode = 'hidden' WHERE show_usage = 0;
-  `,
-  `
-    CREATE TABLE IF NOT EXISTS agent_turns (
-      id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
-      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      run_id TEXT NOT NULL UNIQUE CHECK (length(run_id) BETWEEN 1 AND 200),
-      user_message_id TEXT NOT NULL CHECK (length(user_message_id) BETWEEN 1 AND 200),
-      terminal_assistant_message_id TEXT
-        CHECK (terminal_assistant_message_id IS NULL OR length(terminal_assistant_message_id) BETWEEN 1 AND 200),
-      provider_id TEXT NOT NULL CHECK (provider_id IN ('codex', 'claude', 'cursor', 'opencode')),
-      harness_id TEXT NOT NULL CHECK (length(harness_id) BETWEEN 1 AND 200),
-      backend_profile_id TEXT NOT NULL CHECK (length(backend_profile_id) BETWEEN 1 AND 200),
-      model TEXT NOT NULL CHECK (length(model) BETWEEN 1 AND 300),
-      model_alias TEXT CHECK (model_alias IS NULL OR length(model_alias) BETWEEN 1 AND 300),
-      reasoning_effort TEXT NOT NULL CHECK (length(reasoning_effort) <= 80),
-      interaction_mode TEXT NOT NULL CHECK (interaction_mode IN ('build', 'plan')),
-      access_mode TEXT NOT NULL CHECK (access_mode IN ('supervised', 'auto-edit', 'full')),
-      provider_session_before TEXT
-        CHECK (provider_session_before IS NULL OR length(provider_session_before) BETWEEN 1 AND 1000),
-      provider_session_after TEXT
-        CHECK (provider_session_after IS NULL OR length(provider_session_after) BETWEEN 1 AND 1000),
-      requested_at TEXT NOT NULL,
-      started_at TEXT,
-      completed_at TEXT,
-      status TEXT NOT NULL CHECK (status IN (
-        'queued', 'starting', 'running', 'waiting-for-approval', 'waiting-for-input',
-        'completed', 'failed', 'cancelled', 'interrupted'
-      )),
-      terminal_reason TEXT CHECK (terminal_reason IS NULL OR length(terminal_reason) BETWEEN 1 AND 4000),
-      checkpoint_id TEXT CHECK (checkpoint_id IS NULL OR length(checkpoint_id) BETWEEN 1 AND 200),
-      usage_start_json TEXT CHECK (usage_start_json IS NULL OR length(usage_start_json) <= 16384),
-      usage_completion_json TEXT CHECK (usage_completion_json IS NULL OR length(usage_completion_json) <= 16384),
-      configuration_revision INTEGER NOT NULL CHECK (configuration_revision >= 0),
-      association TEXT NOT NULL CHECK (association IN ('authoritative', 'inferred')),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      CHECK (started_at IS NULL OR started_at >= requested_at),
-      CHECK (started_at IS NULL OR started_at <= updated_at),
-      CHECK (completed_at IS NULL OR (started_at IS NOT NULL AND completed_at >= started_at)),
-      CHECK (completed_at IS NULL OR completed_at <= updated_at),
-      CHECK (
-        (status IN ('completed', 'failed', 'cancelled', 'interrupted') AND completed_at IS NOT NULL)
-        OR
-        (status NOT IN ('completed', 'failed', 'cancelled', 'interrupted') AND completed_at IS NULL)
-      ),
-      CHECK (
-        status IN ('completed', 'failed', 'cancelled', 'interrupted')
-        OR (
-          terminal_assistant_message_id IS NULL
-          AND provider_session_after IS NULL
-          AND terminal_reason IS NULL
-          AND checkpoint_id IS NULL
-          AND usage_completion_json IS NULL
-        )
-      ),
-      CHECK (created_at <= updated_at)
-    );
-    CREATE INDEX IF NOT EXISTS agent_turns_conversation_requested_idx
-      ON agent_turns(conversation_id, requested_at ASC, id ASC);
-    CREATE INDEX IF NOT EXISTS agent_turns_status_requested_idx
-      ON agent_turns(status, requested_at ASC);
-  `,
-  `
-    CREATE INDEX IF NOT EXISTS messages_conversation_turn_created_idx
-      ON messages(conversation_id, turn_id, created_at ASC, id ASC);
-    CREATE INDEX IF NOT EXISTS activities_conversation_turn_created_idx
-      ON activities(conversation_id, turn_id, created_at ASC, id ASC);
-    CREATE INDEX IF NOT EXISTS agent_reasonings_conversation_turn_created_idx
-      ON agent_reasonings(conversation_id, turn_id, created_at ASC, id ASC);
-    CREATE INDEX IF NOT EXISTS agent_plans_conversation_turn_idx
-      ON agent_plans(conversation_id, turn_id);
-    CREATE INDEX IF NOT EXISTS thread_usage_conversation_turn_idx
-      ON thread_usage(conversation_id, turn_id);
-    CREATE INDEX IF NOT EXISTS checkpoints_conversation_turn_created_idx
-      ON checkpoints(conversation_id, turn_id, created_at ASC, id ASC);
-  `,
-] as const;
-
-function projectFromRow(row: ProjectRow): Project {
-  return {
-    id: row.id,
-    name: row.name,
-    path: row.path,
-    normalizedPath: row.normalized_path || row.path,
-    repositoryIdentity: row.repository_identity,
-    repositoryRoot: row.repository_root,
-    repositoryRelativePath: row.repository_relative_path || ".",
-    groupingMode: row.grouping_mode,
-    color: row.color,
-    status: row.status,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function legacyModelSelection(input: {
-  providerId: ProviderId;
-  harnessId: string;
-  backendProfileId: string;
-  model: string;
-  modelAlias: string | null;
-  reasoningEffort: string;
-  configurationRevision: number;
-}): ModelSelection {
-  const native = nativeBackendProfile(input.providerId);
-  const nativeProfile = input.backendProfileId === native.id;
-  const backendProfileDisplayName = nativeProfile
-    ? native.displayName
-    : `Unavailable backend (${input.backendProfileId})`.slice(0, 200);
-  return modelSelectionSchema.parse({
-    harnessId: input.harnessId,
-    backendProfileId: input.backendProfileId,
-    backendProfileDisplayName,
-    modelId: input.model || "provider-default",
-    alias: input.modelAlias || null,
-    reasoningEffort: input.reasoningEffort || null,
-    contextWindowOverride: null,
-    providerOptions: {},
-    capabilities: [],
-    backendConfigurationRevision: input.configurationRevision,
-  });
-}
-
-function parseModelSelection(
-  value: string | null,
-  fallback: () => ModelSelection,
-): ModelSelection {
-  if (value !== null) {
-    try {
-      const parsed = modelSelectionSchema.safeParse(JSON.parse(value));
-      if (parsed.success) return parsed.data;
-    } catch {
-      // Preserve readable historical state through the safe flattened fallback.
-    }
-  }
-  return fallback();
-}
-
-function legacyNativeContinuationIdentity(
-  selection: ModelSelection,
-): ContinuationIdentity | null {
-  const providerId = legacyProviderIdForHarness(selection.harnessId);
-  const harnessId = knownHarnessIdSchema.safeParse(selection.harnessId);
-  if (!providerId || !harnessId.success) return null;
-  const native = nativeBackendProfile(providerId);
-  if (native.id !== selection.backendProfileId) return null;
-  const compatibility = resolveHarnessBackendCompatibility(
-    harnessId.data,
-    native,
-  );
-  return continuationIdentityForSelection(
-    selection,
-    native.endpointIdentity,
-    !compatibility.allowsModelSwitchWithinSession,
-  );
-}
-
-function parseConversationContinuationIdentity(
-  value: string | null,
-  selection: ModelSelection,
-): ContinuationIdentity | null {
-  if (value !== null) {
-    try {
-      const parsed = continuationIdentitySchema.safeParse(JSON.parse(value));
-      if (parsed.success) return parsed.data;
-    } catch {
-      // A persisted but unreadable identity must never be guessed.
-    }
-    return null;
-  }
-  return legacyNativeContinuationIdentity(selection);
-}
-
-function parseAgentTurnContinuationIdentity(
-  value: string | null,
-  selection: ModelSelection,
-): ContinuationIdentity {
-  const parsed = parseConversationContinuationIdentity(value, selection);
-  if (parsed) return parsed;
-  throw new Error(
-    "An agent turn requires a valid, explicit continuation identity.",
-  );
-}
-
-function conversationFromRow(row: ConversationRow): Conversation {
-  const modelSelection = parseModelSelection(
-    row.model_selection_json,
-    () => nativeModelSelection({
-      providerId: row.provider_id,
-      modelId: row.model || "provider-default",
-      alias: row.model || null,
-      reasoningEffort: row.reasoning_effort || null,
-    }),
-  );
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    title: row.title,
-    providerId: row.provider_id,
-    modelSelection,
-    continuationIdentity: row.provider_session_id
-      ? parseConversationContinuationIdentity(
-        row.continuation_identity_json,
-        modelSelection,
-      )
-      : null,
-    model: row.model,
-    reasoningEffort: row.reasoning_effort,
-    interactionMode: row.interaction_mode,
-    accessMode: row.access_mode,
-    status: row.status,
-    attentionKind: row.attention_kind,
-    branch: row.branch,
-    worktreePath: row.worktree_path,
-    providerSessionId: row.provider_session_id,
-    archivedAt: row.archived_at,
-    settledAt: row.settled_at,
-    completedAt: row.completed_at,
-    lastViewedAt: row.last_viewed_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function conversationTurnSummary(turn: AgentTurn | null): ConversationLatestTurnSummary | null {
-  if (!turn) return null;
-  return {
-    id: turn.id,
-    runId: turn.runId,
-    status: turn.status,
-    providerId: turn.providerId,
-    harnessId: turn.harnessId,
-    backendProfileId: turn.backendProfileId,
-    modelSelection: turn.modelSelection,
-    continuationIdentity: turn.continuationIdentity,
-    model: turn.model,
-    reasoningEffort: turn.reasoningEffort,
-    requestedAt: turn.requestedAt,
-    startedAt: turn.startedAt,
-    completedAt: turn.completedAt,
-    terminalReason: turn.terminalReason,
-    updatedAt: turn.updatedAt,
-  };
-}
-
-function conversationShellFromRow(
-  row: ConversationRow,
-  latestTurn: AgentTurn | null,
-): ConversationShell {
-  const conversation = conversationFromRow(row);
-  return {
-    id: conversation.id,
-    projectId: conversation.projectId,
-    title: conversation.title,
-    providerId: conversation.providerId,
-    modelSelection: conversation.modelSelection,
-    continuationIdentity: conversation.continuationIdentity,
-    model: conversation.model,
-    reasoningEffort: conversation.reasoningEffort,
-    interactionMode: conversation.interactionMode,
-    accessMode: conversation.accessMode,
-    status: conversation.status,
-    attentionKind: conversation.attentionKind,
-    branch: conversation.branch,
-    worktreePath: conversation.worktreePath,
-    providerSessionId: conversation.providerSessionId,
-    archivedAt: conversation.archivedAt,
-    settledAt: conversation.settledAt,
-    completedAt: conversation.completedAt,
-    lastViewedAt: conversation.lastViewedAt,
-    createdAt: conversation.createdAt,
-    updatedAt: conversation.updatedAt,
-    latestTurn: conversationTurnSummary(latestTurn),
-    pendingApproval: false,
-    pendingInput: false,
-  };
-}
-
-function settingsFromState(state: StateRow): AppSettings {
-  return {
-    theme: state.theme,
-    compactSidebar: state.compact_sidebar === 1,
-    showTimestamps: state.show_timestamps === 1,
-    terminalFontSize: state.terminal_font_size,
-    defaultProvider: state.default_provider,
-    defaultModel: state.default_model,
-    defaultAccessMode: state.default_access_mode,
-    newThreadMode: state.new_thread_mode,
-    wrapDiffs: state.wrap_diffs === 1,
-    ignoreWhitespace: state.ignore_whitespace === 1,
-    showThinking: state.show_thinking === 1,
-    usageDisplayMode: state.usage_display_mode,
-    interfaceScale: state.interface_scale,
-    responseDensity: state.response_density,
-    defaultCodeWrap: state.default_code_wrap === 1,
-    autoCollapseWorkLog: state.auto_collapse_work_log === 1,
-    showChangedFileSummaries: state.show_changed_file_summaries === 1,
-    sidebarMode: state.sidebar_mode,
-    projectGrouping: state.project_grouping,
-    autoOpenPlan: state.auto_open_plan === 1,
-    confirmDestructiveActions: state.confirm_destructive_actions === 1,
-    defaultReasoningEffort: state.default_reasoning_effort,
-    defaultInteractionMode: state.default_interaction_mode,
-    codexBinaryPath: state.codex_binary_path,
-  };
-}
-
-function requireTimestamp(value: string, label: string): string {
-  const timestamp = providerTimestamp(value);
-  if (!timestamp) throw new Error(`${label} must be a valid ISO timestamp.`);
-  return timestamp;
-}
-
-function requiredTurnString(value: string, label: string, maximum: number): string {
-  const normalized = value.trim();
-  if (!normalized || normalized.length > maximum) {
-    throw new Error(`${label} must contain between 1 and ${maximum} characters.`);
-  }
-  return normalized;
-}
-
-function optionalTurnString(value: string | null | undefined, label: string, maximum: number): string | null {
-  if (value === null || value === undefined) return null;
-  return requiredTurnString(value, label, maximum);
-}
-
-function normalizeAgentTurnUsage(usage: AgentTurnUsageSnapshot): AgentTurnUsageSnapshot {
-  return {
-    ...validateProviderUsage(usage),
-    capturedAt: requireTimestamp(usage.capturedAt, "Turn usage capture time"),
-  };
-}
-
-function parseAgentTurnUsage(value: string | null): AgentTurnUsageSnapshot | null {
-  if (value === null) return null;
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (!parsed || typeof parsed !== "object" || !("capturedAt" in parsed) || typeof parsed.capturedAt !== "string") {
-      return null;
-    }
-    return normalizeAgentTurnUsage(parsed as AgentTurnUsageSnapshot);
-  } catch {
-    return null;
-  }
-}
-
-function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
-  const modelSelection = parseModelSelection(
-    row.model_selection_json,
-    () => legacyModelSelection({
-      providerId: row.provider_id,
-      harnessId: row.harness_id,
-      backendProfileId: row.backend_profile_id,
-      model: row.model,
-      modelAlias: row.model_alias,
-      reasoningEffort: row.reasoning_effort,
-      configurationRevision: row.configuration_revision,
-    }),
-  );
-  return {
-    id: row.id,
-    conversationId: row.conversation_id,
-    runId: row.run_id,
-    userMessageId: row.user_message_id,
-    terminalAssistantMessageId: row.terminal_assistant_message_id,
-    providerId: row.provider_id,
-    modelSelection,
-    continuationIdentity: parseAgentTurnContinuationIdentity(
-      row.continuation_identity_json,
-      modelSelection,
-    ),
-    harnessId: modelSelection.harnessId,
-    backendProfileId: modelSelection.backendProfileId,
-    model: modelSelection.modelId,
-    modelAlias: modelSelection.alias,
-    reasoningEffort: modelSelection.reasoningEffort ?? "",
-    interactionMode: row.interaction_mode,
-    accessMode: row.access_mode,
-    providerSessionBefore: row.provider_session_before,
-    providerSessionAfter: row.provider_session_after,
-    requestedAt: row.requested_at,
-    startedAt: row.started_at,
-    completedAt: row.completed_at,
-    status: row.status,
-    terminalReason: row.terminal_reason,
-    checkpointId: row.checkpoint_id,
-    usageAtStart: parseAgentTurnUsage(row.usage_start_json),
-    usageAtCompletion: parseAgentTurnUsage(row.usage_completion_json),
-    configurationRevision: modelSelection.backendConfigurationRevision,
-    association: row.association,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function parseTurnGitArtifactFiles(value: string): TurnGitArtifactFile[] {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const file = item as Partial<TurnGitArtifactFile>;
-      if (
-        typeof file.path !== "string"
-        || file.path.length === 0
-        || file.path.length > 4_096
-        || typeof file.status !== "string"
-        || !Number.isSafeInteger(file.insertions)
-        || (file.insertions ?? -1) < 0
-        || !Number.isSafeInteger(file.deletions)
-        || (file.deletions ?? -1) < 0
-      ) return [];
-      return [{
-        path: file.path,
-        previousPath: typeof file.previousPath === "string" ? file.previousPath : null,
-        status: file.status.slice(0, 40),
-        insertions: file.insertions!,
-        deletions: file.deletions!,
-        binary: file.binary === true,
-        untracked: file.untracked === true,
-        staged: file.staged === true,
-        unstaged: file.unstaged === true,
-        indexStatus: typeof file.indexStatus === "string" ? file.indexStatus.slice(0, 4) : ".",
-        worktreeStatus: typeof file.worktreeStatus === "string" ? file.worktreeStatus.slice(0, 4) : ".",
-      }];
-    }).slice(0, 200);
-  } catch {
-    return [];
-  }
-}
-
-function turnGitArtifactFromRow(row: TurnGitArtifactRow): TurnGitArtifact {
-  return {
-    id: row.id,
-    turnId: row.turn_id,
-    conversationId: row.conversation_id,
-    runId: row.run_id,
-    repositoryIdentity: row.repository_identity,
-    worktreeIdentity: row.worktree_identity,
-    branch: row.branch,
-    beforeCheckpointId: row.before_checkpoint_id,
-    beforeFingerprint: row.before_fingerprint,
-    afterFingerprint: row.after_fingerprint,
-    files: parseTurnGitArtifactFiles(row.files_json),
-    insertions: row.insertions,
-    deletions: row.deletions,
-    status: row.status,
-    completeness: row.completeness,
-    patchState: row.patch_state,
-    patchDigest: row.patch_digest,
-    capturedAt: row.captured_at,
-    terminalAssistantMessageId: row.terminal_assistant_message_id,
-    failureReason: row.failure_reason,
-    absenceReason: row.absence_reason === "not-repository"
-      ? row.absence_reason
-      : null,
-  };
-}
-
-function storedTurnGitArtifactFromRow(row: TurnGitArtifactRow): StoredTurnGitArtifact {
-  return {
-    ...turnGitArtifactFromRow(row),
-    beforeRef: row.before_ref,
-    afterRef: row.after_ref,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function optionalSha256(value: string | null | undefined, label: string): string | null {
-  if (value === null || value === undefined) return null;
-  if (!/^[0-9a-f]{64}$/u.test(value)) throw new Error(`${label} must be a SHA-256 digest.`);
-  return value;
-}
-
-function optionalArtifactRef(value: string | null | undefined, label: string): string | null {
-  if (value === null || value === undefined) return null;
-  if (
-    value.length > 500
-    || !/^refs\/inertia\/checkpoints\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/u.test(value)
-  ) throw new Error(`${label} is invalid.`);
-  return value;
-}
-
-function normalizeTurnGitArtifactFiles(files: readonly TurnGitArtifactFile[]): TurnGitArtifactFile[] {
-  if (files.length > 200) throw new Error("A turn Git artifact can contain at most 200 files.");
-  return files.map((file) => {
-    const path = file.path.trim();
-    const previousPath = file.previousPath?.trim() || null;
-    if (
-      path.length === 0
-      || path.length > 4_096
-      || path.startsWith("/")
-      || path.includes("\0")
-      || path.split("/").includes("..")
-      || (previousPath !== null && (
-        previousPath.length > 4_096
-        || previousPath.startsWith("/")
-        || previousPath.includes("\0")
-        || previousPath.split("/").includes("..")
-      ))
-    ) throw new Error("A turn Git artifact contains an invalid repository-relative path.");
-    if (
-      !Number.isSafeInteger(file.insertions)
-      || file.insertions < 0
-      || !Number.isSafeInteger(file.deletions)
-      || file.deletions < 0
-    ) throw new Error("Turn Git artifact statistics must be non-negative integers.");
-    return {
-      ...file,
-      path,
-      previousPath,
-      status: file.status.trim().slice(0, 40) || "unknown",
-      indexStatus: file.indexStatus.slice(0, 4),
-      worktreeStatus: file.worktreeStatus.slice(0, 4),
-    };
-  });
-}
-
-function parseAttachments(value: string): ChatAttachment[] {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? (parsed as ChatAttachment[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseJsonArray(value: string): unknown[] {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function messageFromRow(row: MessageRow): ChatMessage {
-  return { id: row.id, conversationId: row.conversation_id, turnId: row.turn_id, role: row.role, content: row.content, attachments: parseAttachments(row.attachments_json), createdAt: row.created_at };
-}
-
-function activityFromRow(row: ActivityRow): AgentActivity {
-  return { id: row.id, conversationId: row.conversation_id, runId: row.run_id, turnId: row.turn_id, kind: row.kind, title: row.title, detail: row.detail, status: row.status, createdAt: row.created_at };
-}
-
-function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
-  return {
-    id: row.id,
-    conversationId: row.conversation_id,
-    runId: row.run_id,
-    turnId: row.turn_id,
-    providerId: row.provider_id,
-    providerTaskId: row.provider_task_id,
-    providerAgentId: row.provider_agent_id,
-    parentTraceId: row.parent_trace_id,
-    parentProviderAgentId: row.parent_provider_agent_id,
-    parentProviderToolUseId: row.parent_provider_tool_use_id,
-    providerToolUseId: row.provider_tool_use_id,
-    providerRole: row.provider_role,
-    providerName: row.provider_name,
-    status: row.status,
-    description: row.description,
-    progress: row.progress,
-    result: row.result,
-    sequence: row.sequence,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function checkpointFromRow(row: CheckpointRow): CheckpointSummary {
-  return { id: row.id, conversationId: row.conversation_id, turnId: row.turn_id, ref: row.ref, label: row.label, turnIndex: row.turn_index, filesChanged: row.files_changed, insertions: row.insertions, deletions: row.deletions, createdAt: row.created_at };
-}
-
-function planFromRow(row: AgentPlanRow): AgentPlan {
-  let steps: AgentPlan["steps"] = [];
-  try {
-    const parsed: unknown = JSON.parse(row.steps_json);
-    if (Array.isArray(parsed)) {
-      steps = parsed.flatMap((value) => {
-        if (!value || typeof value !== "object") return [];
-        const step = "step" in value && typeof value.step === "string" ? value.step : undefined;
-        const status = "status" in value && (value.status === "pending" || value.status === "inProgress" || value.status === "completed") ? value.status : undefined;
-        return step && status ? [{ step, status }] : [];
-      }).slice(0, 50);
-    }
-  } catch {
-    // A malformed legacy plan is represented as empty rather than breaking startup.
-  }
-  return { conversationId: row.conversation_id, runId: row.run_id, turnId: row.turn_id, explanation: row.explanation, steps };
-}
-
-function reasoningFromRow(row: AgentReasoningRow): AgentReasoning {
-  return {
-    id: row.id,
-    conversationId: row.conversation_id,
-    runId: row.run_id,
-    turnId: row.turn_id,
-    content: row.content,
-    status: row.status,
-    createdAt: row.created_at,
-  };
-}
-
-function usageFromRow(row: ThreadUsageRow): ThreadUsageSnapshot {
-  return {
-    conversationId: row.conversation_id,
-    turnId: row.turn_id,
-    usedTokens: row.used_tokens,
-    totalProcessedTokens: row.total_processed_tokens,
-    totalProcessedScope: row.total_processed_scope,
-    maxTokens: row.max_tokens,
-    inputTokens: row.input_tokens,
-    cachedInputTokens: row.cached_input_tokens,
-    cacheWriteInputTokens: row.cache_write_input_tokens,
-    outputTokens: row.output_tokens,
-    reasoningOutputTokens: row.reasoning_output_tokens,
-    compactsAutomatically: row.compacts_automatically === null ? null : row.compacts_automatically === 1,
-    updatedAt: row.updated_at,
-  };
-}
-
-let malformedReviewSummaryWarningEmitted = false;
-
-function flagMalformedReviewSummary(): null {
-  if (!malformedReviewSummaryWarningEmitted) {
-    malformedReviewSummaryWarningEmitted = true;
-    console.warn("A malformed persisted review summary was omitted from the runtime snapshot.");
-  }
-  return null;
-}
-
-function reviewSummaryFromRow(row: DiffReviewSummaryRow): DiffReviewSummary | null {
-  if (row.summary_json !== null) {
-    const summary = parsePersistedReviewSummaryJson(row.summary_json);
-    if (
-      !summary
-      || summary.conversationId !== row.conversation_id
-      || summary.fingerprint !== row.fingerprint
-      || summary.providerId !== row.provider_id
-      || summary.overall !== row.overall
-      || summary.generatedAt !== row.generated_at
-    ) {
-      return flagMalformedReviewSummary();
-    }
-    return summary;
-  }
-
-  let files: unknown;
-  try {
-    files = JSON.parse(row.files_json) as unknown;
-  } catch {
-    return flagMalformedReviewSummary();
-  }
-  return upgradeLegacyPersistedReviewSummary({
-    conversationId: row.conversation_id,
-    fingerprint: row.fingerprint,
-    providerId: row.provider_id,
-    overall: row.overall,
-    files,
-    generatedAt: row.generated_at,
-  }) ?? flagMalformedReviewSummary();
-}
-
-function reviewStateFromRow(row: DiffReviewStateRow): DiffReviewState {
-  return {
-    conversationId: row.conversation_id,
-    scope: row.scope,
-    path: row.path,
-    hunkId: row.hunk_id || null,
-    targetFingerprint: row.target_fingerprint,
-    reviewed: row.reviewed === 1,
-    stale: row.stale === 1,
-    updatedAt: row.updated_at,
-  };
-}
-
-function reviewNoteFromRow(row: DiffReviewNoteRow): DiffReviewNote {
-  const parsed = parseJsonArray(row.line_ids_json).filter((value): value is string => typeof value === "string").slice(0, 500);
-  return {
-    id: row.id,
-    conversationId: row.conversation_id,
-    path: row.path,
-    hunkId: row.hunk_id || null,
-    lineIds: parsed,
-    targetFingerprint: row.target_fingerprint,
-    body: row.body,
-    stale: row.stale === 1,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function workspaceRunFromRow(row: WorkspaceRunRow): WorkspaceRun {
-  return {
-    id: row.id,
-    kind: row.kind,
-    projectId: row.project_id,
-    conversationId: row.conversation_id,
-    actionId: row.action_id,
-    label: row.label,
-    detail: row.detail,
-    status: row.status,
-    // Compatibility for pre-attention fixtures while the v20 migration is
-    // pending. Failures and waits fail open; other legacy rows stay quiet.
-    attentionState: row.attention_state
-      ?? (row.status === "failed" || row.status === "waiting" ? "unseen" : "acknowledged"),
-    canStop: false,
-    port: row.port,
-    startedAt: row.started_at,
-    finishedAt: row.finished_at,
-  };
-}
-
-export interface NewConversationOptions {
-  providerId?: ProviderId;
-  modelSelection?: ModelSelection;
-  model?: string;
-  reasoningEffort?: string;
-  interactionMode?: InteractionMode;
-  accessMode?: AccessMode;
-  branch?: string | null;
-  worktreePath?: string | null;
-}
-
-export interface CreateAgentTurnInput {
-  id?: string;
-  conversationId: string;
-  runId: string;
-  userMessageId: string;
-  providerId: ProviderId;
-  modelSelection?: ModelSelection;
-  continuationIdentity?: ContinuationIdentity;
-  /** Legacy database-boundary fields accepted for V0.0.6 compatibility. */
-  harnessId?: string;
-  backendProfileId?: string;
-  model?: string;
-  modelAlias?: string | null;
-  reasoningEffort: string;
-  interactionMode: InteractionMode;
-  accessMode: AccessMode;
-  providerSessionBefore?: string | null;
-  requestedAt?: string;
-  usageAtStart?: AgentTurnUsageSnapshot | null;
-  configurationRevision: number;
-  association: AgentTurnAssociation;
-}
-
-export interface AgentTurnLifecycleUpdate {
-  status: AgentTurnStatus;
-  terminalAssistantMessageId?: string | null;
-  providerSessionAfter?: string | null;
-  terminalReason?: string | null;
-  checkpointId?: string | null;
-  usageAtCompletion?: AgentTurnUsageSnapshot | null;
-  startedAt?: string;
-  completedAt?: string;
-  updatedAt?: string;
-}
-
-export interface BeginAgentTurnInput extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
-  content: string;
-  attachments?: ChatAttachment[];
-  executionContext?: PersistedTurnExecutionContext;
-  requestedAt?: string;
-}
-
-export interface AgentTurnSettlementUpdate extends Omit<AgentTurnLifecycleUpdate, "status"> {
-  status: AgentTurnTerminalStatus;
-}
-
-export interface AgentTurnSettlementResult {
-  settled: boolean;
-  turn: AgentTurn;
-}
-
-export interface StoredTurnGitArtifact extends TurnGitArtifact {
-  beforeRef: string | null;
-  afterRef: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateTurnGitArtifactInput {
-  id?: string;
-  turnId: string;
-  repositoryIdentity?: string | null;
-  worktreeIdentity?: string | null;
-  branch?: string | null;
-  beforeCheckpointId?: string | null;
-  beforeRef?: string | null;
-  beforeFingerprint?: string | null;
-  status?: TurnGitArtifactStatus;
-  completeness?: TurnGitArtifactCompleteness;
-  failureReason?: string | null;
-  absenceReason?: TurnGitArtifactAbsenceReason | null;
-  createdAt?: string;
-}
-
-export interface CompleteTurnGitArtifactInput {
-  afterRef?: string | null;
-  afterFingerprint?: string | null;
-  files?: TurnGitArtifactFile[];
-  insertions?: number;
-  deletions?: number;
-  status: TurnGitArtifactStatus;
-  completeness: TurnGitArtifactCompleteness;
-  patchState?: TurnGitPatchState;
-  patchDigest?: string | null;
-  capturedAt?: string | null;
-  terminalAssistantMessageId?: string | null;
-  failureReason?: string | null;
-  absenceReason?: TurnGitArtifactAbsenceReason | null;
-  updatedAt?: string;
-}
-
-export interface RuntimeStoreSnapshot extends Omit<AppSnapshot, "conversations"> {
-  conversations: Conversation[];
-  agentTurns: AgentTurn[];
-  turnGitArtifacts: TurnGitArtifact[];
-  messages: ChatMessage[];
-  activities: AgentActivity[];
-  subagents: SubagentTrace[];
-  reasonings: AgentReasoning[];
-  usage: ThreadUsageSnapshot[];
-  plans: AgentPlan[];
-  checkpoints: CheckpointSummary[];
-  reviewSummaries: DiffReviewSummary[];
-  reviewStates: DiffReviewState[];
-  reviewNotes: DiffReviewNote[];
-}
-
-export interface UpsertSubagentTraceInput {
-  conversationId: string;
-  runId: string;
-  turnId: string;
-  providerId: ProviderId;
-  providerTaskId: string | null;
-  providerAgentId: string | null;
-  parentProviderAgentId: string | null;
-  parentProviderToolUseId: string | null;
-  providerToolUseId: string | null;
-  providerRole: string | null;
-  providerName: string | null;
-  status: SubagentTraceStatus;
-  description: string | null;
-  progress: string | null;
-  result: string | null;
-  sequence: number;
-  updatedAt?: string;
-}
-
-export interface UpsertSubagentTraceResult {
-  trace: SubagentTrace;
-  changed: boolean;
-}
-
-export interface StoredModelBackendProfile {
-  profile: PersistedModelBackendProfile;
-  latestProbe: BackendCompatibilityProbeResult | null;
-}
+import {
+  activityFromRow,
+  agentTurnFromRow,
+  checkpointFromRow,
+  legacyModelSelection,
+  normalizeAgentTurnUsage,
+  optionalTurnString,
+  reasoningFromRow,
+  requiredTurnString,
+  requireTimestamp,
+  subagentTraceFromRow,
+  usageFromRow,
+} from "./persistence/codecs";
+import { BackendProfileRepository } from "./persistence/backend-profile-repository";
+import { ConversationRepository } from "./persistence/conversation-repository";
+import { RecordNotFoundError } from "./persistence/errors";
+import {
+  normalizeTurnGitArtifactFiles,
+  optionalArtifactRef,
+  optionalSha256,
+  storedTurnGitArtifactFromRow,
+  turnGitArtifactFromRow,
+} from "./persistence/git-artifact-codecs";
+import {
+  createRuntimeMigrationCatalog,
+  type DatabaseMigrationDefinition,
+} from "./persistence/migrations/catalog";
+import { LEGACY_SCHEMA_SQL } from "./persistence/migrations/legacy-schema";
+import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository";
+import { ProjectRepository } from "./persistence/project-repository";
+import { ReviewRepository } from "./persistence/review-repository";
+import { SettingsRepository } from "./persistence/settings-repository";
+import { SnapshotRepository } from "./persistence/snapshot-repository";
+import { TranscriptRepository } from "./persistence/transcript-repository";
+import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
+import type {
+  ActivityRow,
+  AgentReasoningRow,
+  AgentTurnRow,
+  CheckpointRow,
+  ConversationRow,
+  MessageRow,
+  ProjectRow,
+  SubagentTraceRow,
+  ThreadUsageRow,
+  TurnGitArtifactRow,
+} from "./persistence/rows";
+import type {
+  AgentTurnLifecycleUpdate,
+  AgentTurnSettlementResult,
+  AgentTurnSettlementUpdate,
+  BeginAgentTurnInput,
+  CompleteTurnGitArtifactInput,
+  CreateAgentTurnInput,
+  CreateTurnGitArtifactInput,
+  NewConversationOptions,
+  RuntimeStoreSnapshot,
+  StoredModelBackendProfile,
+  StoredTurnGitArtifact,
+  UpsertSubagentTraceInput,
+  UpsertSubagentTraceResult,
+} from "./persistence/types";
+
+export { RecordNotFoundError } from "./persistence/errors";
+export type {
+  AgentTurnLifecycleUpdate,
+  AgentTurnSettlementResult,
+  AgentTurnSettlementUpdate,
+  BeginAgentTurnInput,
+  CompleteTurnGitArtifactInput,
+  CreateAgentTurnInput,
+  CreateTurnGitArtifactInput,
+  NewConversationOptions,
+  RuntimeStoreSnapshot,
+  StoredModelBackendProfile,
+  StoredTurnGitArtifact,
+  UpsertSubagentTraceInput,
+  UpsertSubagentTraceResult,
+} from "./persistence/types";
 
 export class RuntimeStore {
   private readonly database: Database.Database;
+  private readonly backendProfileRepository: BackendProfileRepository;
+  private readonly conversationRepository: ConversationRepository;
+  private readonly providerMetadataRepository: ProviderMetadataRepository;
+  private readonly projectRepository: ProjectRepository;
+  private readonly reviewRepository: ReviewRepository;
+  private readonly settingsRepository: SettingsRepository;
+  private readonly snapshotRepository: SnapshotRepository;
+  private readonly transcriptRepository: TranscriptRepository;
+  private readonly workspaceRunRepository: WorkspaceRunRepository;
 
   constructor(
     databasePath: string,
@@ -1588,6 +168,42 @@ export class RuntimeStore {
     options: { recoverInterruptedRuns?: boolean } = {},
   ) {
     this.database = new Database(databasePath);
+    this.backendProfileRepository = new BackendProfileRepository({
+      database: this.database,
+      requireProject: (projectId) => this.requireProject(projectId),
+    });
+    this.providerMetadataRepository = new ProviderMetadataRepository(this.database);
+    this.projectRepository = new ProjectRepository({
+      database: this.database,
+      requireProject: (projectId) => this.requireProject(projectId),
+    });
+    this.settingsRepository = new SettingsRepository({ database: this.database });
+    this.conversationRepository = new ConversationRepository({
+      database: this.database,
+      requireConversation: (conversationId) => this.requireConversation(conversationId),
+      requireProject: (projectId) => this.requireProject(projectId),
+      selectProject: (projectId) => this.projectRepository.select(projectId),
+      state: () => this.settingsRepository.state(),
+      touchProject: (projectId, timestamp) => this.projectRepository.touch(projectId, timestamp),
+    });
+    this.reviewRepository = new ReviewRepository({
+      database: this.database,
+      requireConversation: (conversationId) => this.requireConversation(conversationId),
+    });
+    this.snapshotRepository = new SnapshotRepository({ database: this.database });
+    this.transcriptRepository = new TranscriptRepository({
+      assertAgentTurnIdentity: (conversationId, runId, turnId) =>
+        this.assertAgentTurnIdentity(conversationId, runId, turnId),
+      database: this.database,
+      requireAgentTurn: (turnId) => this.requireAgentTurn(turnId),
+      requireConversation: (conversationId) => this.requireConversation(conversationId),
+      touchProject: (projectId, timestamp) => this.projectRepository.touch(projectId, timestamp),
+    });
+    this.workspaceRunRepository = new WorkspaceRunRepository({
+      database: this.database,
+      requireConversation: (conversationId) => this.requireConversation(conversationId),
+      requireProject: (projectId) => this.requireProject(projectId),
+    });
     try {
       this.database.pragma("foreign_keys = ON");
       this.database.pragma("busy_timeout = 5000");
@@ -1606,221 +222,23 @@ export class RuntimeStore {
   }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {
-    const state = this.getState();
-    return {
-      projects: (this.database.prepare("SELECT * FROM projects ORDER BY updated_at DESC, id ASC").all() as ProjectRow[]).map(projectFromRow),
-      conversations: (this.database.prepare("SELECT * FROM conversations ORDER BY updated_at DESC, id ASC").all() as ConversationRow[]).map(conversationFromRow),
-      agentTurns: (this.database.prepare("SELECT * FROM agent_turns ORDER BY requested_at ASC, id ASC").all() as AgentTurnRow[]).map(agentTurnFromRow),
-      turnGitArtifacts: (this.database.prepare(
-        "SELECT * FROM turn_git_artifacts ORDER BY created_at ASC, id ASC",
-      ).all() as TurnGitArtifactRow[]).map(turnGitArtifactFromRow),
-      messages: (this.database.prepare("SELECT * FROM messages ORDER BY created_at ASC, id ASC").all() as MessageRow[]).map(messageFromRow),
-      activities: (this.database.prepare("SELECT * FROM activities ORDER BY created_at ASC, id ASC").all() as ActivityRow[]).map(activityFromRow),
-      subagents: (this.database.prepare(
-        "SELECT * FROM subagent_traces ORDER BY created_at ASC, sequence ASC, id ASC",
-      ).all() as SubagentTraceRow[]).map(subagentTraceFromRow),
-      reasonings: (this.database.prepare("SELECT * FROM agent_reasonings ORDER BY created_at ASC, id ASC").all() as AgentReasoningRow[]).map(reasoningFromRow),
-      usage: (this.database.prepare("SELECT * FROM thread_usage ORDER BY updated_at ASC").all() as ThreadUsageRow[]).map(usageFromRow),
-      plans: (this.database.prepare(`
-        SELECT conversation_id, run_id, turn_id, explanation, steps_json
-        FROM agent_plans
-        ORDER BY updated_at ASC, conversation_id ASC, run_id ASC
-      `).all() as AgentPlanRow[]).map(planFromRow),
-      checkpoints: (this.database.prepare("SELECT * FROM checkpoints ORDER BY created_at ASC, id ASC").all() as CheckpointRow[]).map(checkpointFromRow),
-      reviewSummaries: (this.database.prepare("SELECT * FROM diff_review_summaries ORDER BY generated_at ASC").all() as DiffReviewSummaryRow[])
-        .flatMap((row) => {
-          const summary = reviewSummaryFromRow(row);
-          return summary ? [summary] : [];
-        }),
-      reviewStates: (this.database.prepare("SELECT * FROM diff_review_states ORDER BY updated_at ASC").all() as DiffReviewStateRow[]).map(reviewStateFromRow),
-      reviewNotes: (this.database.prepare("SELECT * FROM diff_review_notes ORDER BY created_at ASC").all() as DiffReviewNoteRow[]).map(reviewNoteFromRow),
-      runs: (this.database.prepare("SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200").all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
-      providers,
-      settings: settingsFromState(state),
-      activeProjectId: state.active_project_id,
-      activeConversationId: state.active_conversation_id,
-    };
+    return this.snapshotRepository.snapshot(providers);
   }
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
-    const state = this.getState();
-    const latestTurns = new Map(
-      (this.database.prepare(`
-        SELECT turn.*
-        FROM agent_turns AS turn
-        WHERE turn.id = (
-          SELECT candidate.id
-          FROM agent_turns AS candidate
-          WHERE candidate.conversation_id = turn.conversation_id
-          ORDER BY candidate.requested_at DESC, candidate.id DESC
-          LIMIT 1
-        )
-      `).all() as AgentTurnRow[])
-        .map(agentTurnFromRow)
-        .map((turn) => [turn.conversationId, turn] as const),
-    );
-    return {
-      projects: (this.database.prepare(
-        "SELECT * FROM projects ORDER BY updated_at DESC, id ASC",
-      ).all() as ProjectRow[]).map(projectFromRow),
-      conversations: (this.database.prepare(
-        "SELECT * FROM conversations ORDER BY updated_at DESC, id ASC",
-      ).all() as ConversationRow[]).map((row) =>
-        conversationShellFromRow(row, latestTurns.get(row.id) ?? null)),
-      runs: (this.database.prepare(
-        "SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200",
-      ).all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
-      providers,
-      settings: settingsFromState(state),
-      activeProjectId: state.active_project_id,
-      activeConversationId: state.active_conversation_id,
-    };
+    return this.snapshotRepository.shellSnapshot(providers);
   }
 
   conversationDetail(conversationId: string): ConversationDetail | null {
-    const conversationRow = this.database.prepare(
-      "SELECT * FROM conversations WHERE id = ?",
-    ).get(conversationId) as ConversationRow | undefined;
-    if (!conversationRow) return null;
-
-    return {
-      conversation: conversationFromRow(conversationRow),
-      agentTurns: (this.database.prepare(`
-        SELECT * FROM agent_turns
-        WHERE conversation_id = ?
-        ORDER BY requested_at ASC, id ASC
-      `).all(conversationId) as AgentTurnRow[]).map(agentTurnFromRow),
-      turnGitArtifacts: (this.database.prepare(`
-        SELECT * FROM turn_git_artifacts
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, id ASC
-      `).all(conversationId) as TurnGitArtifactRow[]).map(turnGitArtifactFromRow),
-      messages: (this.database.prepare(`
-        SELECT * FROM messages
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, id ASC
-      `).all(conversationId) as MessageRow[]).map(messageFromRow),
-      activities: (this.database.prepare(`
-        SELECT * FROM activities
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, id ASC
-      `).all(conversationId) as ActivityRow[]).map(activityFromRow),
-      subagents: (this.database.prepare(`
-        SELECT * FROM subagent_traces
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, sequence ASC, id ASC
-      `).all(conversationId) as SubagentTraceRow[]).map(subagentTraceFromRow),
-      reasonings: (this.database.prepare(`
-        SELECT * FROM agent_reasonings
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, id ASC
-      `).all(conversationId) as AgentReasoningRow[]).map(reasoningFromRow),
-      usage: (this.database.prepare(`
-        SELECT * FROM thread_usage
-        WHERE conversation_id = ?
-        ORDER BY updated_at ASC
-      `).all(conversationId) as ThreadUsageRow[]).map(usageFromRow),
-      plans: (this.database.prepare(`
-        SELECT conversation_id, run_id, turn_id, explanation, steps_json
-        FROM agent_plans
-        WHERE conversation_id = ?
-        ORDER BY updated_at ASC, conversation_id ASC, run_id ASC
-      `).all(conversationId) as AgentPlanRow[]).map(planFromRow),
-      checkpoints: (this.database.prepare(`
-        SELECT * FROM checkpoints
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, id ASC
-      `).all(conversationId) as CheckpointRow[]).map(checkpointFromRow),
-      reviewSummaries: (this.database.prepare(`
-        SELECT * FROM diff_review_summaries
-        WHERE conversation_id = ?
-        ORDER BY generated_at ASC
-      `).all(conversationId) as DiffReviewSummaryRow[]).flatMap((row) => {
-        const summary = reviewSummaryFromRow(row);
-        return summary ? [summary] : [];
-      }),
-      reviewStates: (this.database.prepare(`
-        SELECT * FROM diff_review_states
-        WHERE conversation_id = ?
-        ORDER BY updated_at ASC
-      `).all(conversationId) as DiffReviewStateRow[]).map(reviewStateFromRow),
-      reviewNotes: (this.database.prepare(`
-        SELECT * FROM diff_review_notes
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC
-      `).all(conversationId) as DiffReviewNoteRow[]).map(reviewNoteFromRow),
-    };
+    return this.snapshotRepository.conversationDetail(conversationId);
   }
 
   loadProviderMetadata(): PersistedProviderMetadata[] {
-    const rows = this.database.prepare(`
-      SELECT *
-      FROM provider_metadata_scoped_cache
-      ORDER BY provider_id ASC, scope_key ASC
-    `).all() as ProviderMetadataCacheRow[];
-    return rows.map((row) => ({
-      scope: {
-        providerId: row.provider_id,
-        harnessId: row.harness_id,
-        backendProfileId: row.backend_profile_id,
-        modelId: row.model_id,
-        executable: row.executable,
-        version: row.version,
-        backendConfigurationRevision: row.backend_configuration_revision,
-        authState: row.auth_state,
-      },
-      models: parseJsonArray(row.models_json),
-      modelsUpdatedAt: row.models_updated_at,
-      modelsLastAttemptedAt: row.models_last_attempted_at,
-      modelsProvenance: row.models_provenance,
-      modelsStale: row.models_stale === 1,
-      rateLimits: parseJsonArray(row.rate_limits_json),
-      rateLimitsUpdatedAt: row.rate_limits_updated_at,
-      rateLimitsLastAttemptedAt: row.rate_limits_last_attempted_at,
-      rateLimitsProvenance: row.rate_limits_provenance,
-      rateLimitsStale: row.rate_limits_stale === 1,
-    })) as PersistedProviderMetadata[];
+    return this.providerMetadataRepository.load();
   }
 
   saveProviderMetadata(metadata: PersistedProviderMetadata): void {
-    const modelsJson = JSON.stringify(metadata.models);
-    const rateLimitsJson = JSON.stringify(metadata.rateLimits);
-    if (modelsJson.length > 262_144 || rateLimitsJson.length > 65_536) return;
-    const scopeKey = providerMetadataScopeKey(metadata.scope);
-    this.database.prepare(`
-      INSERT INTO provider_metadata_scoped_cache (
-        scope_key, provider_id, harness_id, backend_profile_id, model_id,
-        executable, version, backend_configuration_revision, auth_state,
-        models_json, models_updated_at, models_last_attempted_at, models_provenance, models_stale,
-        rate_limits_json, rate_limits_updated_at, rate_limits_last_attempted_at, rate_limits_provenance, rate_limits_stale
-      ) VALUES (
-        @scopeKey, @providerId, @harnessId, @backendProfileId, @modelId,
-        @executable, @version, @backendConfigurationRevision, @authState,
-        @modelsJson, @modelsUpdatedAt, @modelsLastAttemptedAt, @modelsProvenance, @modelsStaleValue,
-        @rateLimitsJson, @rateLimitsUpdatedAt, @rateLimitsLastAttemptedAt, @rateLimitsProvenance, @rateLimitsStaleValue
-      ) ON CONFLICT(scope_key) DO UPDATE SET
-        executable = excluded.executable,
-        version = excluded.version,
-        auth_state = excluded.auth_state,
-        models_json = excluded.models_json,
-        models_updated_at = excluded.models_updated_at,
-        models_last_attempted_at = excluded.models_last_attempted_at,
-        models_provenance = excluded.models_provenance,
-        models_stale = excluded.models_stale,
-        rate_limits_json = excluded.rate_limits_json,
-        rate_limits_updated_at = excluded.rate_limits_updated_at,
-        rate_limits_last_attempted_at = excluded.rate_limits_last_attempted_at,
-        rate_limits_provenance = excluded.rate_limits_provenance,
-        rate_limits_stale = excluded.rate_limits_stale
-    `).run({
-      scopeKey,
-      ...metadata.scope,
-      ...metadata,
-      modelsJson,
-      rateLimitsJson,
-      modelsStaleValue: metadata.modelsStale ? 1 : 0,
-      rateLimitsStaleValue: metadata.rateLimitsStale ? 1 : 0,
-    });
+    this.providerMetadataRepository.save(metadata);
   }
 
   createProject(
@@ -1828,269 +246,42 @@ export class RuntimeStore {
     projectPath: string,
     identity: Partial<Pick<Project, "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">> = {},
   ): Project {
-    const id = randomUUID();
-    const now = new Date().toISOString();
-    const projectCount = (this.database.prepare("SELECT COUNT(*) AS count FROM projects").get() as { count: number }).count;
-    const path = resolve(projectPath);
-    const project: Project = {
-      id,
-      name,
-      path,
-      normalizedPath: identity.normalizedPath ?? path,
-      repositoryIdentity: identity.repositoryIdentity ?? null,
-      repositoryRoot: identity.repositoryRoot ?? null,
-      repositoryRelativePath: identity.repositoryRelativePath ?? ".",
-      groupingMode: null,
-      color: PROJECT_COLORS[projectCount % PROJECT_COLORS.length],
-      status: "ready",
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.database.transaction(() => {
-      this.database.prepare(`
-        INSERT INTO projects (
-          id, name, path, normalized_path, repository_identity, repository_root,
-          repository_relative_path, grouping_mode, color, status, created_at, updated_at
-        ) VALUES (
-          @id, @name, @path, @normalizedPath, @repositoryIdentity, @repositoryRoot,
-          @repositoryRelativePath, @groupingMode, @color, @status, @createdAt, @updatedAt
-        )
-      `).run(project);
-      this.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = NULL WHERE id = 1").run(project.id);
-    })();
-    return project;
+    return this.projectRepository.create(name, projectPath, identity);
   }
 
   updateProject(
     projectId: string,
     update: Partial<Pick<Project, "name" | "groupingMode" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">>,
   ): Project {
-    const current = projectFromRow(this.requireProject(projectId));
-    const unchanged = Object.entries(update).every(([key, value]) => current[key as keyof Project] === value);
-    if (unchanged) return current;
-    const next = { ...current, ...update, updatedAt: new Date().toISOString() };
-    this.database.prepare(`
-      UPDATE projects SET
-        name = @name,
-        normalized_path = @normalizedPath,
-        repository_identity = @repositoryIdentity,
-        repository_root = @repositoryRoot,
-        repository_relative_path = @repositoryRelativePath,
-        grouping_mode = @groupingMode,
-        updated_at = @updatedAt
-      WHERE id = @id
-    `).run(next);
-    return next;
+    return this.projectRepository.update(projectId, update);
   }
 
   removeProject(projectId: string): void {
-    this.requireProject(projectId);
-    this.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
-    const next = this.database.prepare("SELECT id FROM projects ORDER BY updated_at DESC LIMIT 1").get() as { id: string } | undefined;
-    if (next) this.selectProject(next.id);
+    this.projectRepository.remove(projectId);
   }
 
   selectProject(projectId: string): void {
-    this.requireProject(projectId);
-    const conversation = this.database.prepare(`SELECT id FROM conversations WHERE project_id = ? AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 1`).get(projectId) as { id: string } | undefined;
-    this.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(projectId, conversation?.id ?? null);
+    this.projectRepository.select(projectId);
   }
 
   createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation {
-    this.requireProject(projectId);
-    const state = this.getState();
-    const now = new Date().toISOString();
-    const legacyProviderId = options.providerId ?? state.default_provider;
-    const modelSelection = options.modelSelection
-      ? modelSelectionSchema.parse(options.modelSelection)
-      : nativeModelSelection({
-        providerId: legacyProviderId,
-        modelId: options.model || state.default_model || "provider-default",
-        alias: options.model || state.default_model || null,
-        reasoningEffort: options.reasoningEffort ?? state.default_reasoning_effort,
-      });
-    const providerId = legacyProviderIdForHarness(modelSelection.harnessId);
-    if (!providerId) throw new Error("The selected harness is unavailable in this build.");
-    if (options.providerId && options.providerId !== providerId) {
-      throw new Error("The legacy provider and model selection harness do not match.");
-    }
-    const conversation: Conversation = {
-      id: randomUUID(), projectId, title,
-      providerId,
-      modelSelection,
-      continuationIdentity: null,
-      model: modelSelection.modelId === "provider-default" ? "" : modelSelection.modelId,
-      reasoningEffort: modelSelection.reasoningEffort ?? "",
-      interactionMode: options.interactionMode ?? state.default_interaction_mode,
-      accessMode: options.accessMode ?? state.default_access_mode,
-      status: "idle",
-      attentionKind: null,
-      branch: options.branch ?? null,
-      worktreePath: options.worktreePath ?? null,
-      providerSessionId: null,
-      archivedAt: null,
-      settledAt: null,
-      completedAt: null,
-      lastViewedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const modelSelectionJson = JSON.stringify(modelSelection);
-    this.database.transaction(() => {
-      this.database.prepare(`
-        INSERT INTO conversations (
-          id, project_id, title, provider_id, model_selection_json, continuation_identity_json,
-          model, reasoning_effort, interaction_mode,
-          access_mode, status, attention_kind, branch, worktree_path, provider_session_id,
-          archived_at, settled_at, completed_at, last_viewed_at, created_at, updated_at
-        ) VALUES (
-          @id, @projectId, @title, @providerId, @modelSelectionJson, NULL,
-          @model, @reasoningEffort, @interactionMode,
-          @accessMode, @status, @attentionKind, @branch, @worktreePath, @providerSessionId,
-          @archivedAt, @settledAt, @completedAt, @lastViewedAt, @createdAt, @updatedAt
-        )
-      `).run({ ...conversation, modelSelectionJson });
-      this.touchProject(projectId, now);
-      this.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(projectId, conversation.id);
-    })();
-    return conversation;
+    return this.conversationRepository.create(projectId, title, options);
   }
 
   selectConversation(conversationId: string): void {
-    const conversation = this.requireConversation(conversationId);
-    const completedTime = conversation.completed_at ? Date.parse(conversation.completed_at) : 0;
-    const now = new Date(Math.max(
-      Date.now(),
-      Number.isFinite(completedTime) ? completedTime : 0,
-    )).toISOString();
-    this.database.transaction(() => {
-      // This timestamp remains a legacy transcript-visit marker. Canonical
-      // run attention is changed only by the explicit attention commands.
-      this.database.prepare("UPDATE conversations SET last_viewed_at = ? WHERE id = ?")
-        .run(now, conversationId);
-      this.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1")
-        .run(conversation.project_id, conversationId);
-    })();
+    this.conversationRepository.select(conversationId);
   }
 
   hasConversationMessages(conversationId: string): boolean {
-    this.requireConversation(conversationId);
-    return this.database.prepare("SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1").get(conversationId) !== undefined;
+    return this.conversationRepository.hasMessages(conversationId);
   }
 
   hasConversationTurns(conversationId: string): boolean {
-    this.requireConversation(conversationId);
-    return this.database.prepare(
-      "SELECT 1 FROM agent_turns WHERE conversation_id = ? LIMIT 1",
-    ).get(conversationId) !== undefined;
+    return this.conversationRepository.hasTurns(conversationId);
   }
 
   updateConversation(conversationId: string, update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind">>): Conversation {
-    const current = conversationFromRow(this.requireConversation(conversationId));
-    const requestedProviderId = update.providerId ?? current.providerId;
-    const legacySelectionChanged = update.providerId !== undefined
-      || update.model !== undefined
-      || update.reasoningEffort !== undefined;
-    const modelSelection = update.modelSelection
-      ? modelSelectionSchema.parse(update.modelSelection)
-      : legacySelectionChanged
-        ? nativeModelSelection({
-          providerId: requestedProviderId,
-          modelId: update.model ?? (
-            update.providerId && update.providerId !== current.providerId
-              ? "provider-default"
-              : current.modelSelection.modelId
-          ),
-          alias: update.model ?? (
-            update.providerId && update.providerId !== current.providerId
-              ? null
-              : current.modelSelection.alias
-          ),
-          reasoningEffort: update.reasoningEffort ?? (
-            update.providerId && update.providerId !== current.providerId
-              ? null
-              : current.modelSelection.reasoningEffort
-          ),
-        })
-        : current.modelSelection;
-    const selectedProviderId = legacyProviderIdForHarness(modelSelection.harnessId);
-    if (!selectedProviderId) throw new Error("The selected harness is unavailable in this build.");
-    if (update.providerId && update.providerId !== selectedProviderId) {
-      throw new Error("The legacy provider and model selection harness do not match.");
-    }
-    const continuationBoundaryChanged = (
-      modelSelection.harnessId !== current.modelSelection.harnessId
-      || modelSelection.backendProfileId !== current.modelSelection.backendProfileId
-      || modelSelection.backendConfigurationRevision
-        !== current.modelSelection.backendConfigurationRevision
-    );
-    const statusChanged = update.status !== undefined && update.status !== current.status;
-    const currentUpdatedTime = Date.parse(current.updatedAt);
-    const eventTime = update.status === "completed" && statusChanged
-      ? Math.max(Date.now(), Number.isFinite(currentUpdatedTime) ? currentUpdatedTime + 1 : 0)
-      : Date.now();
-    const now = new Date(eventTime).toISOString();
-    const next = {
-      ...current,
-      ...update,
-      providerId: selectedProviderId,
-      modelSelection,
-      providerSessionId: continuationBoundaryChanged
-        ? null
-        : (update.providerSessionId ?? current.providerSessionId),
-      continuationIdentity: continuationBoundaryChanged
-        ? null
-        : update.providerSessionId === null
-          ? null
-          : (update.continuationIdentity ?? current.continuationIdentity),
-      model: modelSelection.modelId === "provider-default" ? "" : modelSelection.modelId,
-      reasoningEffort: modelSelection.reasoningEffort ?? "",
-      attentionKind: update.status && update.status !== "needs-input"
-        ? null
-        : (update.attentionKind ?? current.attentionKind),
-      settledAt: update.status === "running" ? null : current.settledAt,
-      completedAt: update.status === "completed" && statusChanged ? now : current.completedAt,
-      lastViewedAt: current.lastViewedAt,
-      updatedAt: now,
-    };
-    if (next.providerSessionId && !next.continuationIdentity) {
-      const native = nativeBackendProfile(selectedProviderId);
-      const harnessId = knownHarnessIdSchema.safeParse(modelSelection.harnessId);
-      if (!harnessId.success || native.id !== modelSelection.backendProfileId) {
-        throw new Error(
-          "A custom or historical provider session requires an explicit continuation identity.",
-        );
-      }
-      const compatibility = resolveHarnessBackendCompatibility(
-        harnessId.data,
-        native,
-      );
-      next.continuationIdentity = continuationIdentityForSelection(
-        modelSelection,
-        native.endpointIdentity,
-        !compatibility.allowsModelSwitchWithinSession,
-      );
-    }
-    const modelSelectionJson = JSON.stringify(modelSelection);
-    const continuationIdentityJson = next.continuationIdentity
-      ? JSON.stringify(continuationIdentitySchema.parse(next.continuationIdentity))
-      : null;
-    this.database.prepare(`
-      UPDATE conversations SET
-        title = @title, provider_id = @providerId,
-        model_selection_json = @modelSelectionJson,
-        continuation_identity_json = @continuationIdentityJson,
-        model = @model,
-        reasoning_effort = @reasoningEffort, interaction_mode = @interactionMode,
-        access_mode = @accessMode, branch = @branch, worktree_path = @worktreePath,
-        provider_session_id = @providerSessionId, status = @status,
-        attention_kind = @attentionKind, settled_at = @settledAt,
-        completed_at = @completedAt, last_viewed_at = @lastViewedAt,
-        updated_at = @updatedAt
-      WHERE id = @id
-    `).run({ ...next, modelSelectionJson, continuationIdentityJson });
-    this.touchProject(current.projectId, next.updatedAt);
-    return next;
+    return this.conversationRepository.update(conversationId, update);
   }
 
   createAgentTurn(input: CreateAgentTurnInput): AgentTurn {
@@ -2801,30 +992,15 @@ export class RuntimeStore {
   }
 
   settleConversation(conversationId: string, settled: boolean): Conversation {
-    const current = conversationFromRow(this.requireConversation(conversationId));
-    if (settled && (current.status === "running" || current.status === "needs-input")) {
-      throw new Error("Active threads cannot be settled while the agent is working or waiting for you.");
-    }
-    const now = new Date().toISOString();
-    const settledAt = settled ? now : null;
-    this.database.prepare("UPDATE conversations SET settled_at = ?, last_viewed_at = CASE WHEN ? THEN ? ELSE last_viewed_at END, updated_at = ? WHERE id = ?")
-      .run(settledAt, Number(settled), now, now, conversationId);
-    this.touchProject(current.projectId, now);
-    return { ...current, settledAt, lastViewedAt: settled ? now : current.lastViewedAt, updatedAt: now };
+    return this.conversationRepository.settle(conversationId, settled);
   }
 
   archiveConversation(conversationId: string, archived: boolean): void {
-    const conversation = this.requireConversation(conversationId);
-    const archivedAt = archived ? new Date().toISOString() : null;
-    this.database.prepare("UPDATE conversations SET archived_at = ?, updated_at = ? WHERE id = ?").run(archivedAt, new Date().toISOString(), conversationId);
-    const state = this.getState();
-    if (archived && state.active_conversation_id === conversationId) this.selectProject(conversation.project_id);
+    this.conversationRepository.archive(conversationId, archived);
   }
 
   deleteConversation(conversationId: string): void {
-    const conversation = this.requireConversation(conversationId);
-    this.database.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
-    if (this.getState().active_conversation_id === null) this.selectProject(conversation.project_id);
+    this.conversationRepository.delete(conversationId);
   }
 
   createMessage(
@@ -2835,33 +1011,14 @@ export class RuntimeStore {
     turnId: string | null = null,
     createdAt?: string,
   ): ChatMessage {
-    const conversation = this.requireConversation(conversationId);
-    if (turnId) {
-      const turn = agentTurnFromRow(this.requireAgentTurn(turnId));
-      if (turn.conversationId !== conversationId) throw new Error("The message turn belongs to a different conversation.");
-      if (role === "user" && turn.userMessageId) {
-        throw new Error("Create the user message before creating its agent turn.");
-      }
-    }
-    const now = createdAt === undefined
-      ? new Date().toISOString()
-      : requireTimestamp(createdAt, "Message creation time");
-    const message: ChatMessage = { id: randomUUID(), conversationId, turnId, role, content, attachments, createdAt: now };
-    this.database.transaction(() => {
-      this.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt)`).run({ ...message, attachmentsJson: JSON.stringify(attachments) });
-      this.database.prepare(`
-        UPDATE conversations
-        SET updated_at = ?, settled_at = NULL,
-            last_viewed_at = CASE WHEN ? = 'user' THEN ? ELSE last_viewed_at END
-        WHERE id = ?
-      `).run(now, role, now, conversationId);
-      this.touchProject(conversation.project_id, now);
-      if (role === "user") {
-        this.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1")
-          .run(conversation.project_id, conversationId);
-      }
-    })();
-    return message;
+    return this.transcriptRepository.createMessage(
+      conversationId,
+      content,
+      role,
+      attachments,
+      turnId,
+      createdAt,
+    );
   }
 
   createFollowUpMessage(
@@ -2870,41 +1027,12 @@ export class RuntimeStore {
     content: string,
     createdAt?: string,
   ): ChatMessage {
-    const conversation = this.requireConversation(conversationId);
-    const turn = agentTurnFromRow(this.requireAgentTurn(turnId));
-    if (
-      turn.conversationId !== conversationId
-      || isAgentTurnTerminalStatus(turn.status)
-    ) {
-      throw new Error("The active turn cannot accept this follow-up.");
-    }
-    const now = createdAt === undefined
-      ? new Date().toISOString()
-      : requireTimestamp(createdAt, "Follow-up creation time");
-    const message: ChatMessage = {
-      id: randomUUID(),
+    return this.transcriptRepository.createFollowUpMessage(
       conversationId,
       turnId,
-      role: "user",
       content,
-      attachments: [],
-      createdAt: now,
-    };
-    this.database.transaction(() => {
-      this.database.prepare(`
-        INSERT INTO messages (
-          id, conversation_id, turn_id, role, content,
-          attachments_json, created_at
-        ) VALUES (@id, @conversationId, @turnId, 'user', @content, '[]', @createdAt)
-      `).run(message);
-      this.database.prepare(`
-        UPDATE conversations
-        SET updated_at = ?, settled_at = NULL, last_viewed_at = ?
-        WHERE id = ?
-      `).run(now, now, conversationId);
-      this.touchProject(conversation.project_id, now);
-    })();
-    return message;
+      createdAt,
+    );
   }
 
   deleteFollowUpMessage(
@@ -2912,35 +1040,24 @@ export class RuntimeStore {
     conversationId: string,
     turnId: string,
   ): boolean {
-    const result = this.database.prepare(`
-      DELETE FROM messages
-      WHERE id = ? AND conversation_id = ? AND turn_id = ? AND role = 'user'
-        AND id <> (
-          SELECT user_message_id FROM agent_turns WHERE id = ?
-        )
-    `).run(messageId, conversationId, turnId, turnId);
-    return result.changes > 0;
+    return this.transcriptRepository.deleteFollowUpMessage(
+      messageId,
+      conversationId,
+      turnId,
+    );
   }
 
   associateMessageWithTurn(messageId: string, conversationId: string, runId: string, turnId: string): ChatMessage {
-    const turn = this.assertAgentTurnIdentity(conversationId, runId, turnId);
-    const row = this.database.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as MessageRow | undefined;
-    if (!row || row.conversation_id !== conversationId) throw new RecordNotFoundError("Message not found.");
-    if (row.role === "user" && turn.userMessageId !== messageId) {
-      throw new Error("The user message is owned by a different turn.");
-    }
-    if (row.turn_id !== null && row.turn_id !== turnId) {
-      throw new Error("The message is already owned by a different turn.");
-    }
-    if (row.turn_id === null) this.database.prepare("UPDATE messages SET turn_id = ? WHERE id = ?").run(turnId, messageId);
-    return { ...messageFromRow(row), turnId };
+    return this.transcriptRepository.associateMessageWithTurn(
+      messageId,
+      conversationId,
+      runId,
+      turnId,
+    );
   }
 
   updateMessageContent(messageId: string, content: string): void {
-    const message = this.database.prepare("SELECT conversation_id FROM messages WHERE id = ?").get(messageId) as { conversation_id: string } | undefined;
-    if (!message) throw new RecordNotFoundError("Message not found.");
-    this.database.prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, messageId);
-    this.database.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), message.conversation_id);
+    this.transcriptRepository.updateMessageContent(messageId, content);
   }
 
   upsertAgentPlan(plan: AgentPlan): void {
@@ -3316,94 +1433,27 @@ export class RuntimeStore {
   }
 
   upsertReviewSummary(summary: DiffReviewSummary): DiffReviewSummary {
-    const validated = validatePersistedReviewSummary(summary);
-    this.requireConversation(validated.conversationId);
-    const filesJson = JSON.stringify(validated.files);
-    const summaryJson = JSON.stringify(validated);
-    this.database.prepare(`
-      INSERT INTO diff_review_summaries
-        (conversation_id, fingerprint, provider_id, overall, files_json, generated_at, summary_json)
-      VALUES
-        (@conversationId, @fingerprint, @providerId, @overall, @filesJson, @generatedAt, @summaryJson)
-      ON CONFLICT(conversation_id) DO UPDATE SET
-        fingerprint = excluded.fingerprint,
-        provider_id = excluded.provider_id,
-        overall = excluded.overall,
-        files_json = excluded.files_json,
-        generated_at = excluded.generated_at,
-        summary_json = excluded.summary_json
-    `).run({ ...validated, filesJson, summaryJson });
-    return validated;
+    return this.reviewRepository.upsertSummary(summary);
   }
 
   setReviewState(input: Omit<DiffReviewState, "stale" | "updatedAt">): DiffReviewState {
-    this.requireConversation(input.conversationId);
-    if ((input.scope === "file" && input.hunkId !== null) || (input.scope === "hunk" && !input.hunkId)) {
-      throw new Error("The review target is invalid.");
-    }
-    const state: DiffReviewState = { ...input, stale: false, updatedAt: new Date().toISOString() };
-    this.database.prepare(`
-      INSERT INTO diff_review_states
-        (conversation_id, scope, path, hunk_id, target_fingerprint, reviewed, stale, updated_at)
-      VALUES (@conversationId, @scope, @path, @hunkId, @targetFingerprint, @reviewedValue, 0, @updatedAt)
-      ON CONFLICT(conversation_id, scope, path, hunk_id) DO UPDATE SET
-        target_fingerprint = excluded.target_fingerprint,
-        reviewed = excluded.reviewed,
-        stale = 0,
-        updated_at = excluded.updated_at
-    `).run({
-      ...state,
-      hunkId: state.hunkId ?? "",
-      reviewedValue: Number(state.reviewed),
-    });
-    return state;
+    return this.reviewRepository.setState(input);
   }
 
   createReviewNote(input: Omit<DiffReviewNote, "id" | "stale" | "createdAt" | "updatedAt">): DiffReviewNote {
-    this.requireConversation(input.conversationId);
-    const now = new Date().toISOString();
-    const note: DiffReviewNote = {
-      ...input,
-      id: randomUUID(),
-      body: input.body.trim(),
-      lineIds: [...new Set(input.lineIds)].slice(0, 500),
-      stale: false,
-      createdAt: now,
-      updatedAt: now,
-    };
-    if (!note.body || note.body.length > 8_000) throw new Error("Review notes must contain between 1 and 8,000 characters.");
-    const lineIdsJson = JSON.stringify(note.lineIds);
-    if (lineIdsJson.length > 65_536) throw new Error("The review note range is too large.");
-    this.database.prepare(`
-      INSERT INTO diff_review_notes
-        (id, conversation_id, path, hunk_id, line_ids_json, target_fingerprint, body, stale, created_at, updated_at)
-      VALUES (@id, @conversationId, @path, @hunkId, @lineIdsJson, @targetFingerprint, @body, 0, @createdAt, @updatedAt)
-    `).run({ ...note, hunkId: note.hunkId ?? "", lineIdsJson });
-    return note;
+    return this.reviewRepository.createNote(input);
   }
 
   updateReviewNote(conversationId: string, noteId: string, body: string): DiffReviewNote {
-    this.requireConversation(conversationId);
-    const row = this.database.prepare("SELECT * FROM diff_review_notes WHERE id = ? AND conversation_id = ?")
-      .get(noteId, conversationId) as DiffReviewNoteRow | undefined;
-    if (!row) throw new RecordNotFoundError("Review note not found.");
-    const nextBody = body.trim();
-    if (!nextBody || nextBody.length > 8_000) throw new Error("Review notes must contain between 1 and 8,000 characters.");
-    const updatedAt = new Date().toISOString();
-    this.database.prepare("UPDATE diff_review_notes SET body = ?, updated_at = ? WHERE id = ?").run(nextBody, updatedAt, noteId);
-    return { ...reviewNoteFromRow(row), body: nextBody, updatedAt };
+    return this.reviewRepository.updateNote(conversationId, noteId, body);
   }
 
   deleteReviewNote(conversationId: string, noteId: string): void {
-    this.requireConversation(conversationId);
-    const result = this.database.prepare("DELETE FROM diff_review_notes WHERE id = ? AND conversation_id = ?").run(noteId, conversationId);
-    if (result.changes === 0) throw new RecordNotFoundError("Review note not found.");
+    this.reviewRepository.deleteNote(conversationId, noteId);
   }
 
   reviewNotesFor(conversationId: string): DiffReviewNote[] {
-    this.requireConversation(conversationId);
-    return (this.database.prepare("SELECT * FROM diff_review_notes WHERE conversation_id = ? ORDER BY created_at ASC")
-      .all(conversationId) as DiffReviewNoteRow[]).map(reviewNoteFromRow);
+    return this.reviewRepository.notesFor(conversationId);
   }
 
   reconcileReviewTargets(
@@ -3414,34 +1464,7 @@ export class RuntimeStore {
       notes: Readonly<Record<string, string | null>>;
     },
   ): void {
-    this.requireConversation(conversationId);
-    const stateRows = this.database.prepare("SELECT * FROM diff_review_states WHERE conversation_id = ?")
-      .all(conversationId) as DiffReviewStateRow[];
-    const noteRows = this.database.prepare("SELECT * FROM diff_review_notes WHERE conversation_id = ?")
-      .all(conversationId) as DiffReviewNoteRow[];
-    const updateState = this.database.prepare("UPDATE diff_review_states SET reviewed = ?, stale = ?, updated_at = ? WHERE conversation_id = ? AND scope = ? AND path = ? AND hunk_id = ?");
-    const updateNote = this.database.prepare("UPDATE diff_review_notes SET stale = ? WHERE id = ?");
-    const now = new Date().toISOString();
-    this.database.transaction(() => {
-      for (const row of stateRows) {
-        const current = row.scope === "file"
-          ? targets.files[row.path]
-          : targets.hunks[`${row.path}\0${row.hunk_id}`];
-        const stale = current !== row.target_fingerprint;
-        if (stale !== (row.stale === 1) || (stale && row.reviewed === 1)) {
-          updateState.run(stale ? 0 : row.reviewed, Number(stale), now, row.conversation_id, row.scope, row.path, row.hunk_id);
-        }
-      }
-      for (const row of noteRows) {
-        const current = Object.prototype.hasOwnProperty.call(targets.notes, row.id)
-          ? targets.notes[row.id]
-          : row.hunk_id
-            ? targets.hunks[`${row.path}\0${row.hunk_id}`]
-            : targets.files[row.path];
-        const stale = current !== row.target_fingerprint;
-        if (stale !== (row.stale === 1)) updateNote.run(Number(stale), row.id);
-      }
-    })();
+    this.reviewRepository.reconcileTargets(conversationId, targets);
   }
 
   createWorkspaceRun(
@@ -3451,134 +1474,35 @@ export class RuntimeStore {
       attentionState?: WorkspaceRun["attentionState"];
     },
   ): WorkspaceRun {
-    this.requireProject(input.projectId);
-    if (input.conversationId) this.requireConversation(input.conversationId);
-    const run: WorkspaceRun = {
-      ...input,
-      id: input.id ?? randomUUID(),
-      actionId: input.actionId?.trim().slice(0, 200) || null,
-      label: input.label.trim().slice(0, 200),
-      detail: input.detail?.slice(0, 1_000) ?? null,
-      attentionState: input.attentionState
-        ?? (
-          input.status === "waiting"
-          || input.status === "failed"
-          || (input.kind === "agent" && input.status === "succeeded")
-            ? "unseen"
-            : "acknowledged"
-        ),
-      canStop: false,
-      startedAt: new Date().toISOString(),
-      finishedAt: null,
-    };
-    this.database.prepare(`
-      INSERT INTO workspace_runs (
-        id, kind, project_id, conversation_id, action_id, label, detail,
-        status, attention_state, port, started_at, finished_at
-      )
-      VALUES (
-        @id, @kind, @projectId, @conversationId, @actionId, @label, @detail,
-        @status, @attentionState, @port, @startedAt, @finishedAt
-      )
-    `).run(run);
-    this.database.prepare(`
-      DELETE FROM workspace_runs WHERE id IN (
-        SELECT id FROM workspace_runs WHERE status NOT IN ('running', 'waiting') ORDER BY started_at DESC LIMIT -1 OFFSET 200
-      )
-    `).run();
-    return run;
+    return this.workspaceRunRepository.create(input);
   }
 
   updateWorkspaceRun(id: string, update: Partial<Pick<WorkspaceRun, "label" | "detail" | "status" | "port" | "finishedAt">>): WorkspaceRun {
-    const row = this.database.prepare("SELECT * FROM workspace_runs WHERE id = ?").get(id) as WorkspaceRunRow | undefined;
-    if (!row) throw new RecordNotFoundError("Workspace activity not found.");
-    const current = workspaceRunFromRow(row);
-    const nextStatus = update.status ?? current.status;
-    const statusChanged = nextStatus !== current.status;
-    const attentionState = !statusChanged
-      ? current.attentionState
-      : nextStatus === "waiting"
-        || nextStatus === "failed"
-        || (current.kind === "agent" && nextStatus === "succeeded")
-        ? "unseen"
-        : nextStatus === "cancelled" || nextStatus === "succeeded"
-          ? "acknowledged"
-          : current.attentionState;
-    const next: WorkspaceRun = {
-      ...current,
-      ...update,
-      attentionState,
-      label: update.label === undefined ? current.label : update.label.trim().slice(0, 200),
-      detail: update.detail === undefined ? current.detail : update.detail?.slice(0, 1_000) ?? null,
-      finishedAt: update.finishedAt !== undefined
-        ? update.finishedAt
-        : update.status && !["running", "waiting"].includes(update.status)
-          ? new Date().toISOString()
-          : current.finishedAt,
-    };
-    this.database.prepare(`
-      UPDATE workspace_runs
-      SET label = ?, detail = ?, status = ?, attention_state = ?, port = ?, finished_at = ?
-      WHERE id = ?
-    `).run(next.label, next.detail, next.status, next.attentionState, next.port, next.finishedAt, id);
-    return next;
+    return this.workspaceRunRepository.update(id, update);
   }
 
   workspaceRun(id: string): WorkspaceRun {
-    const row = this.database.prepare("SELECT * FROM workspace_runs WHERE id = ?").get(id) as WorkspaceRunRow | undefined;
-    if (!row) throw new RecordNotFoundError("Workspace activity not found.");
-    return workspaceRunFromRow(row);
+    return this.workspaceRunRepository.get(id);
   }
 
   hasActiveWorkspaceRunForProject(projectId: string): boolean {
-    this.requireProject(projectId);
-    return Boolean(this.database.prepare(`
-      SELECT 1
-      FROM workspace_runs
-      WHERE project_id = ? AND status IN ('running', 'waiting')
-      LIMIT 1
-    `).get(projectId));
+    return this.workspaceRunRepository.hasActiveForProject(projectId);
   }
 
   hasActiveWorkspaceRunForConversation(conversationId: string): boolean {
-    this.requireConversation(conversationId);
-    return Boolean(this.database.prepare(`
-      SELECT 1
-      FROM workspace_runs
-      WHERE conversation_id = ? AND status IN ('running', 'waiting')
-      LIMIT 1
-    `).get(conversationId));
+    return this.workspaceRunRepository.hasActiveForConversation(conversationId);
   }
 
   markWorkspaceRunSeen(id: string): WorkspaceRun {
-    const run = this.workspaceRun(id);
-    if (run.attentionState !== "unseen") return run;
-    this.database.prepare("UPDATE workspace_runs SET attention_state = 'seen' WHERE id = ? AND attention_state = 'unseen'")
-      .run(id);
-    return { ...run, attentionState: "seen" };
+    return this.workspaceRunRepository.markSeen(id);
   }
 
   acknowledgeWorkspaceRun(id: string): WorkspaceRun {
-    const run = this.workspaceRun(id);
-    if (run.status === "running" || run.status === "waiting") {
-      throw new Error("Active or waiting workspace activity cannot be acknowledged.");
-    }
-    if (run.attentionState === "acknowledged") return run;
-    if (run.attentionState === "dismissed") {
-      throw new Error("Dismissed workspace activity cannot be acknowledged.");
-    }
-    this.database.prepare("UPDATE workspace_runs SET attention_state = 'acknowledged' WHERE id = ?")
-      .run(id);
-    return { ...run, attentionState: "acknowledged" };
+    return this.workspaceRunRepository.acknowledge(id);
   }
 
   dismissWorkspaceRun(id: string): void {
-    const run = this.workspaceRun(id);
-    if (run.status === "running" || run.status === "waiting") {
-      throw new Error("Active workspace activity cannot be dismissed.");
-    }
-    this.database.prepare("UPDATE workspace_runs SET attention_state = 'dismissed' WHERE id = ?")
-      .run(id);
+    this.workspaceRunRepository.dismiss(id);
   }
 
   checkpoint(checkpointId: string): CheckpointSummary {
@@ -3588,288 +1512,77 @@ export class RuntimeStore {
   }
 
   listModelBackendProfiles(): StoredModelBackendProfile[] {
-    return (this.database.prepare(`
-      SELECT * FROM model_backend_profiles
-      ORDER BY created_at ASC, profile_id ASC
-    `).all() as ModelBackendProfileRow[]).map((row) =>
-      this.modelBackendProfileFromRow(row));
+    return this.backendProfileRepository.listProfiles();
   }
 
   modelBackendProfile(profileId: string): StoredModelBackendProfile {
-    const row = this.database.prepare(`
-      SELECT * FROM model_backend_profiles WHERE profile_id = ?
-    `).get(profileId) as ModelBackendProfileRow | undefined;
-    if (!row) throw new RecordNotFoundError("Model backend profile not found.");
-    return this.modelBackendProfileFromRow(row);
+    return this.backendProfileRepository.profile(profileId);
   }
 
   saveModelBackendProfile(
     profileInput: PersistedModelBackendProfile,
   ): StoredModelBackendProfile {
-    const parsed = persistedModelBackendProfileSchema.parse(profileInput);
-    const existing = this.database.prepare(`
-      SELECT * FROM model_backend_profiles WHERE profile_id = ?
-    `).get(parsed.id) as ModelBackendProfileRow | undefined;
-    const profile = existing
-      ? persistedModelBackendProfileSchema.parse({
-          ...parsed,
-          createdAt: existing.created_at,
-        })
-      : parsed;
-    if (containsBackendCredentialMaterial(profile)) {
-      throw new Error("Model backend profiles cannot contain credential material.");
-    }
-    const configurationJson = JSON.stringify(profile);
-    if (Buffer.byteLength(configurationJson, "utf8") > 262_144) {
-      throw new Error("The model backend profile is too large.");
-    }
-    if (existing && existing.source === "built-in" && profile.source === "custom") {
-      throw new Error("Built-in model backend identities cannot be replaced.");
-    }
-    const invalidatesEvidence = Boolean(existing && (
-      existing.configuration_revision !== profile.configurationRevision
-      || existing.endpoint_identity !== profile.endpointIdentity
-      || existing.protocol !== profile.protocol
-    ));
-    this.database.transaction(() => {
-      this.database.prepare(`
-        INSERT INTO model_backend_profiles (
-          profile_id, harness_id, preset, protocol, source, enabled,
-          configuration_revision, endpoint_identity, credential_generation,
-          configuration_json, latest_probe_json, created_at, updated_at
-        ) VALUES (
-          @profileId, @harnessId, @preset, @protocol, @source, @enabled,
-          @configurationRevision, @endpointIdentity, @credentialGeneration,
-          @configurationJson, NULL, @createdAt, @updatedAt
-        )
-        ON CONFLICT(profile_id) DO UPDATE SET
-          harness_id = excluded.harness_id,
-          preset = excluded.preset,
-          protocol = excluded.protocol,
-          source = excluded.source,
-          enabled = excluded.enabled,
-          configuration_revision = excluded.configuration_revision,
-          endpoint_identity = excluded.endpoint_identity,
-          credential_generation = excluded.credential_generation,
-          configuration_json = excluded.configuration_json,
-          latest_probe_json = CASE
-            WHEN model_backend_profiles.configuration_revision
-                   <> excluded.configuration_revision
-              OR model_backend_profiles.endpoint_identity
-                   IS NOT excluded.endpoint_identity
-              OR model_backend_profiles.protocol <> excluded.protocol
-              THEN NULL
-            ELSE model_backend_profiles.latest_probe_json
-          END,
-          updated_at = excluded.updated_at
-      `).run({
-        profileId: profile.id,
-        harnessId: profile.harnessId,
-        preset: profile.preset,
-        protocol: profile.protocol,
-        source: profile.source,
-        enabled: Number(profile.enabled),
-        configurationRevision: profile.configurationRevision,
-        endpointIdentity: profile.endpointIdentity,
-        credentialGeneration: profile.credentialGeneration,
-        configurationJson,
-        createdAt: existing?.created_at ?? profile.createdAt,
-        updatedAt: profile.updatedAt,
-      });
-      if (invalidatesEvidence) this.clearModelBackendDefaultsForProfile(profile.id);
-    })();
-    return this.modelBackendProfile(profile.id);
+    return this.backendProfileRepository.saveProfile(profileInput);
   }
 
   reconcileModelBackendCredentialGeneration(
     profileId: string,
     credentialGeneration: string | null,
   ): StoredModelBackendProfile {
-    const stored = this.modelBackendProfile(profileId);
-    if (stored.profile.credentialGeneration === credentialGeneration) return stored;
-    const now = new Date().toISOString();
-    const next = persistedModelBackendProfileSchema.parse({
-      ...stored.profile,
-      enabled: false,
+    return this.backendProfileRepository.reconcileCredentialGeneration(
+      profileId,
       credentialGeneration,
-      configurationRevision: stored.profile.configurationRevision + 1,
-      updatedAt: now,
-    });
-    return this.saveModelBackendProfile(next);
+    );
   }
 
   recordModelBackendProbe(
     profileId: string,
     resultInput: BackendCompatibilityProbeResult,
   ): StoredModelBackendProfile {
-    const stored = this.modelBackendProfile(profileId);
-    const result = backendCompatibilityProbeResultSchema.parse(resultInput);
-    if (
-      result.profileId !== stored.profile.id
-      || result.backendConfigurationRevision
-        !== stored.profile.configurationRevision
-      || result.endpointIdentity !== stored.profile.endpointIdentity
-      || result.protocol !== stored.profile.protocol
-    ) {
-      throw new Error("The backend probe result does not match this profile revision.");
-    }
-    const resultJson = JSON.stringify(result);
-    if (Buffer.byteLength(resultJson, "utf8") > 262_144) {
-      throw new Error("The backend probe result is too large.");
-    }
-    this.database.prepare(`
-      UPDATE model_backend_profiles
-      SET latest_probe_json = ?
-      WHERE profile_id = ?
-    `).run(resultJson, profileId);
-    return this.modelBackendProfile(profileId);
+    return this.backendProfileRepository.recordProbe(profileId, resultInput);
   }
 
   deleteModelBackendProfile(profileId: string): void {
-    const stored = this.modelBackendProfile(profileId);
-    if (stored.profile.source === "built-in") {
-      throw new Error("Built-in model backend profiles cannot be deleted.");
-    }
-    this.database.transaction(() => {
-      this.clearModelBackendDefaultsForProfile(profileId);
-      this.database.prepare(
-        "DELETE FROM model_backend_profiles WHERE profile_id = ?",
-      ).run(profileId);
-    })();
+    this.backendProfileRepository.deleteProfile(profileId);
   }
 
   listModelBackendDefaults(): ModelBackendDefault[] {
-    return (this.database.prepare(`
-      SELECT * FROM model_backend_defaults
-      ORDER BY CASE scope WHEN 'global' THEN 0 ELSE 1 END, project_id ASC
-    `).all() as ModelBackendDefaultRow[]).map((row) =>
-      modelBackendDefaultSchema.parse({
-        scope: row.scope,
-        projectId: row.project_id,
-        selection: JSON.parse(row.selection_json) as unknown,
-        updatedAt: row.updated_at,
-      }));
+    return this.backendProfileRepository.listDefaults();
   }
 
   saveModelBackendDefault(
     projectId: string | null,
     selectionInput: ModelSelection,
   ): ModelBackendDefault {
-    if (projectId !== null) this.requireProject(projectId);
-    const selection = modelSelectionSchema.parse(selectionInput);
-    const value = modelBackendDefaultSchema.parse({
-      scope: projectId === null ? "global" : "project",
-      projectId,
-      selection,
-      updatedAt: new Date().toISOString(),
-    });
-    this.database.transaction(() => {
-      if (projectId === null) {
-        this.database.prepare(
-          "DELETE FROM model_backend_defaults WHERE scope = 'global'",
-        ).run();
-      } else {
-        this.database.prepare(`
-          DELETE FROM model_backend_defaults
-          WHERE scope = 'project' AND project_id = ?
-        `).run(projectId);
-      }
-      this.database.prepare(`
-        INSERT INTO model_backend_defaults (
-          scope, project_id, selection_json, updated_at
-        ) VALUES (?, ?, ?, ?)
-      `).run(
-        value.scope,
-        value.projectId,
-        JSON.stringify(value.selection),
-        value.updatedAt,
-      );
-    })();
-    return value;
+    return this.backendProfileRepository.saveDefault(projectId, selectionInput);
   }
 
   clearModelBackendDefault(projectId: string | null): void {
-    if (projectId === null) {
-      this.database.prepare(
-        "DELETE FROM model_backend_defaults WHERE scope = 'global'",
-      ).run();
-      return;
-    }
-    this.database.prepare(`
-      DELETE FROM model_backend_defaults
-      WHERE scope = 'project' AND project_id = ?
-    `).run(projectId);
+    this.backendProfileRepository.clearDefault(projectId);
   }
 
   updateSettings(update: Partial<AppSettings>): void {
-    const current = this.snapshot().settings;
-    const next = { ...current, ...update };
-    this.database.prepare(`
-      UPDATE app_state SET
-        theme = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?,
-        default_provider = ?, default_model = ?, default_access_mode = ?,
-        new_thread_mode = ?, wrap_diffs = ?, ignore_whitespace = ?, show_thinking = ?,
-        show_usage = ?, usage_display_mode = ?, interface_scale = ?, response_density = ?, default_code_wrap = ?,
-        auto_collapse_work_log = ?, show_changed_file_summaries = ?,
-        sidebar_mode = ?, project_grouping = ?, auto_open_plan = ?,
-        confirm_destructive_actions = ?, default_reasoning_effort = ?,
-        default_interaction_mode = ?,
-        codex_binary_path = ?
-      WHERE id = 1
-    `).run(
-      next.theme,
-      Number(next.compactSidebar),
-      Number(next.showTimestamps),
-      next.terminalFontSize,
-      next.defaultProvider,
-      next.defaultModel,
-      next.defaultAccessMode,
-      next.newThreadMode,
-      Number(next.wrapDiffs),
-      Number(next.ignoreWhitespace),
-      Number(next.showThinking),
-      Number(next.usageDisplayMode !== "hidden"),
-      next.usageDisplayMode,
-      next.interfaceScale,
-      next.responseDensity,
-      Number(next.defaultCodeWrap),
-      Number(next.autoCollapseWorkLog),
-      Number(next.showChangedFileSummaries),
-      next.sidebarMode,
-      next.projectGrouping,
-      Number(next.autoOpenPlan),
-      Number(next.confirmDestructiveActions),
-      next.defaultReasoningEffort,
-      next.defaultInteractionMode,
-      next.codexBinaryPath,
-    );
+    this.settingsRepository.update(update);
   }
 
   project(projectId: string): Project {
-    return projectFromRow(this.requireProject(projectId));
+    return this.projectRepository.get(projectId);
   }
 
   conversation(conversationId: string): Conversation {
-    return conversationFromRow(this.requireConversation(conversationId));
+    return this.conversationRepository.get(conversationId);
   }
 
   projectPath(projectId: string): string {
-    return this.requireProject(projectId).path;
+    return this.projectRepository.path(projectId);
   }
 
   conversationPath(conversationId: string): string {
-    const conversation = this.requireConversation(conversationId);
-    return conversation.worktree_path ?? this.requireProject(conversation.project_id).path;
+    return this.conversationRepository.path(conversationId);
   }
 
   private touchProject(projectId: string, timestamp: string): void {
-    this.database.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(timestamp, projectId);
-  }
-
-  private getState(): StateRow {
-    const state = this.database.prepare("SELECT * FROM app_state WHERE id = 1").get() as StateRow | undefined;
-    if (!state) throw new Error("Runtime state is unavailable.");
-    return state;
+    this.projectRepository.touch(projectId, timestamp);
   }
 
   private requireProject(projectId: string): ProjectRow {
@@ -3938,10 +1651,10 @@ export class RuntimeStore {
   }
 
   private migrate(): void {
-    const runtimeMigrations: DatabaseMigration[] = migrations.map((sql, index) => {
+    const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
+      (sql, index) => {
       const version = index + 1;
       return {
-        version,
         name: version === 17 ? "ExplicitTurnOwnership" : `SchemaVersion${version}`,
         up: version === 17
           ? (database) => {
@@ -3951,8 +1664,8 @@ export class RuntimeStore {
           : sql,
       };
     });
-    runtimeMigrations.push({
-      version: migrations.length + 1,
+    const migrationExtensions: DatabaseMigrationDefinition[] = [];
+    migrationExtensions.push({
       name: "BackfillLegacyAgentTurns",
       up: (database, context) => {
         context.setLegacyBackfillDiagnostics(backfillLegacyAgentTurns(database, {
@@ -3960,8 +1673,7 @@ export class RuntimeStore {
         }));
       },
     });
-    runtimeMigrations.push({
-      version: migrations.length + 2,
+    migrationExtensions.push({
       name: "PersistCompleteDiffReviewSummary",
       up: (database) => {
         const columns = database.prepare("PRAGMA table_info(diff_review_summaries)")
@@ -3974,8 +1686,7 @@ export class RuntimeStore {
         }
       },
     });
-    runtimeMigrations.push({
-      version: migrations.length + 3,
+    migrationExtensions.push({
       name: "PersistWorkspaceRunAttention",
       up: (database) => {
         const columns = database.prepare("PRAGMA table_info(workspace_runs)")
@@ -4024,8 +1735,7 @@ export class RuntimeStore {
         `);
       },
     });
-    runtimeMigrations.push({
-      version: migrations.length + 4,
+    migrationExtensions.push({
       name: "PersistAgentPlansPerTurn",
       up: `
         CREATE TABLE agent_plans_v21 (
@@ -4052,8 +1762,7 @@ export class RuntimeStore {
           ON agent_plans(conversation_id, updated_at ASC, run_id ASC);
       `,
     });
-    runtimeMigrations.push({
-      version: migrations.length + 5,
+    migrationExtensions.push({
       name: "PersistBoundedTurnExecutionContext",
       up: `
         CREATE TABLE IF NOT EXISTS turn_execution_context_blobs (
@@ -4091,8 +1800,7 @@ export class RuntimeStore {
         END;
       `,
     });
-    runtimeMigrations.push({
-      version: migrations.length + 6,
+    migrationExtensions.push({
       name: "PersistTurnGitArtifacts",
       up: `
         CREATE TABLE IF NOT EXISTS turn_git_artifacts (
@@ -4146,8 +1854,7 @@ export class RuntimeStore {
           ON turn_git_artifacts(patch_digest) WHERE patch_digest IS NOT NULL;
       `,
     });
-    runtimeMigrations.push({
-      version: migrations.length + 7,
+    migrationExtensions.push({
       name: "PersistTurnModelSelection",
       up: (database) => {
         const addColumn = (
@@ -4238,8 +1945,7 @@ export class RuntimeStore {
         }
       },
     });
-    runtimeMigrations.push({
-      version: migrations.length + 8,
+    migrationExtensions.push({
       name: "PersistModelBackendProfiles",
       up: `
         CREATE TABLE IF NOT EXISTS model_backend_profiles (
@@ -4298,8 +2004,7 @@ export class RuntimeStore {
           ON model_backend_defaults(project_id) WHERE scope = 'project';
       `,
     });
-    runtimeMigrations.push({
-      version: migrations.length + 9,
+    migrationExtensions.push({
       name: "ScopeProviderMetadataByExecutionIdentity",
       up: (database) => {
         database.exec(`
@@ -4414,8 +2119,7 @@ export class RuntimeStore {
         }
       },
     });
-    runtimeMigrations.push({
-      version: migrations.length + 10,
+    migrationExtensions.push({
       name: "ClassifyTurnGitArtifactAbsence",
       up: (database) => {
         const columns = database.prepare("PRAGMA table_info(turn_git_artifacts)")
@@ -4439,8 +2143,7 @@ export class RuntimeStore {
         `).run();
       },
     });
-    runtimeMigrations.push({
-      version: migrations.length + 11,
+    migrationExtensions.push({
       name: "PersistBoundedSubagentTraces",
       up: `
         CREATE TABLE IF NOT EXISTS subagent_traces (
@@ -4497,6 +2200,10 @@ export class RuntimeStore {
           ON subagent_traces(parent_trace_id, created_at ASC);
       `,
     });
+    const runtimeMigrations = createRuntimeMigrationCatalog(
+      legacyMigrations,
+      migrationExtensions,
+    );
     runDatabaseMigrations(this.database, runtimeMigrations, {
       onDiagnostic: (diagnostic) => {
         if (diagnostic.outcome === "failed") {
@@ -4512,65 +2219,6 @@ export class RuntimeStore {
         }
       },
     });
-  }
-
-  private modelBackendProfileFromRow(
-    row: ModelBackendProfileRow,
-  ): StoredModelBackendProfile {
-    let profileValue: unknown;
-    let probeValue: unknown = null;
-    try {
-      profileValue = JSON.parse(row.configuration_json) as unknown;
-      if (row.latest_probe_json !== null) {
-        probeValue = JSON.parse(row.latest_probe_json) as unknown;
-      }
-    } catch {
-      throw new Error("The stored model backend profile is invalid.");
-    }
-    if (containsBackendCredentialMaterial(profileValue)) {
-      throw new Error("The stored model backend profile contains credential material.");
-    }
-    const profile = persistedModelBackendProfileSchema.parse(profileValue);
-    if (
-      profile.id !== row.profile_id
-      || profile.harnessId !== row.harness_id
-      || profile.preset !== row.preset
-      || profile.protocol !== row.protocol
-      || profile.source !== row.source
-      || profile.enabled !== (row.enabled === 1)
-      || profile.configurationRevision !== row.configuration_revision
-      || profile.endpointIdentity !== row.endpoint_identity
-      || profile.credentialGeneration !== row.credential_generation
-      || profile.createdAt !== row.created_at
-      || profile.updatedAt !== row.updated_at
-    ) {
-      throw new Error("The stored model backend profile columns do not match its configuration.");
-    }
-    const latestProbe = probeValue === null
-      ? null
-      : backendCompatibilityProbeResultSchema.parse(probeValue);
-    return { profile, latestProbe };
-  }
-
-  private clearModelBackendDefaultsForProfile(profileId: string): void {
-    const rows = this.database.prepare(`
-      SELECT rowid AS row_id, selection_json
-      FROM model_backend_defaults
-    `).all() as Array<{ row_id: number; selection_json: string }>;
-    const remove = this.database.prepare(
-      "DELETE FROM model_backend_defaults WHERE rowid = ?",
-    );
-    for (const row of rows) {
-      try {
-        const selection = modelSelectionSchema.parse(
-          JSON.parse(row.selection_json) as unknown,
-        );
-        if (selection.backendProfileId === profileId) remove.run(row.row_id);
-      } catch {
-        // Invalid defaults fail closed and cannot remain eligible.
-        remove.run(row.row_id);
-      }
-    }
   }
 
   private ensureTurnAssociationColumns(): void {
@@ -4590,7 +2238,7 @@ export class RuntimeStore {
   }
 
   private initializeState(): void {
-    this.database.prepare(`INSERT OR IGNORE INTO app_state (id, theme, compact_sidebar, show_timestamps, terminal_font_size, default_provider, default_model, default_access_mode, new_thread_mode, wrap_diffs, ignore_whitespace, usage_display_mode, active_project_id, active_conversation_id) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`).run(defaultSettings.theme, Number(defaultSettings.compactSidebar), Number(defaultSettings.showTimestamps), defaultSettings.terminalFontSize, defaultSettings.defaultProvider, defaultSettings.defaultModel, defaultSettings.defaultAccessMode, defaultSettings.newThreadMode, Number(defaultSettings.wrapDiffs), Number(defaultSettings.ignoreWhitespace), defaultSettings.usageDisplayMode);
+    this.settingsRepository.initialize();
   }
 
   recoverInterruptedRuns(): void {
@@ -4724,5 +2372,3 @@ export class RuntimeStore {
   }
 
 }
-
-export class RecordNotFoundError extends Error {}

@@ -2,6 +2,39 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.9 — 2026-07-27
+
+### A minimal workstream instead of stacked chat panels
+
+- The conversation now reads like a calm engineering document: a lightly tinted request, chronological agent commentary, compact operational activity, a clean final answer, and quiet supporting details.
+- Commentary continues to break tool activity into its real sequences. Adjacent calls can fold together without reordering work or hiding failures, warnings, approvals, or provider questions.
+- Successful historical turns no longer repeat a prominent `Worked for…` row above every answer. Status, duration, copy, and run details settle into the answer footer while important exceptional work remains visible.
+- Raw command output and large diagnostics stay inside bounded execution details instead of taking over the primary transcript. Interrupted transport work is distinguished from a genuine provider or tool failure.
+- Active work uses a restrained motion-aware wash, while completed history remains static and reduced-motion preferences are respected.
+
+### One composer, faster model and context choices
+
+- The composer is now one cohesive bottom dock with the multiline prompt, attachments, model, reasoning, access, mode, context, and Send or Stop controls sharing one restrained surface.
+- The selected model opens an anchored searchable palette with provider and harness filters, favorites, keyboard navigation, compatibility explanations, and truthful backend identity.
+- Incompatible harness, backend, endpoint, or configuration changes still require a clearly explained new chat, so a provider session is never presented as transferred between routes.
+- Context and usage now live behind one compact circular control. The popover separates context occupancy, processed tokens, quotas, reset timing, freshness, and unavailable provider data without borrowing limits from another backend.
+- Pasted or uploaded images and documents receive secure previews before sending and can be removed individually. Validation, bounded reads, project-path rules, and cleanup remain enforced.
+
+### Real projects, repositories, and delegated work
+
+- Files can be explored recursively with lazy folder loading, project-wide search, keyboard tree navigation, safe previews, and refreshes that invalidate stale nested listings.
+- Changes discovers bounded nested Git repositories, groups their modified files by real repository identity, and keeps the review surface compact when workspace tools are narrow.
+- Expected non-Git workspaces no longer receive noisy turn-artifact warnings, while partial, expired, truncated, or genuinely failed history remains honest.
+- Project rows include a quick New chat action without restoring the repetitive sidebar entry points removed in earlier releases.
+- Claude delegation and provider subagent activity remain connected to the parent turn. Follow-up messages stay inside the authoritative active turn, and supported usage information continues to update without implying that context transfers between agents.
+
+### Faster settlement and stronger heavy-run recovery
+
+- A turn stops appearing active as soon as its provider reaches a terminal result. Git artifact capture can finish separately without leaving Stop or the working animation on screen.
+- Build mode now encourages direct, action-biased execution while preserving investigation, approvals, sandboxing, recovery, and Plan mode.
+- Codex App Server transport accepts safely bounded larger protocol messages, keeps aggregate output limits, classifies process and protocol interruptions, and retains sanitized technical details for diagnosis.
+- Cross-platform coverage now exercises the complete Minimal Workstream, composer, model chooser, context control, attachments, delegated agents, recursive files, nested Git repositories, transport cleanup, responsive layouts, accessibility, packaging, Electron fuses, and native app smoke.
+
 ## 0.0.8 — 2026-07-26
 
 ### A conversation that follows the work

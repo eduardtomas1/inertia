@@ -336,9 +336,8 @@ try {
   await page.getByRole("button", { name: "More composer options" }).waitFor();
   const usage = page.getByRole("region", { name: "Usage and context" });
   await usage.waitFor();
-  await usage.locator(
-    '[role="progressbar"][aria-label="Context remaining"][aria-valuenow="94"]',
-  ).waitFor();
+  await usage.locator('[data-context-ring-state="current"]').waitFor();
+  await usage.locator(".usage-context-ring-label", { hasText: /^94$/u }).waitFor();
   await capture(page, "inertia-dark.png");
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();

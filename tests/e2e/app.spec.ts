@@ -4077,6 +4077,17 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       });
       await page.waitForTimeout(350);
       await expect.poll(() => scenarioTranscript.locator(".response-virtual-item").count()).toBeLessThan(24);
+      await expect.poll(() => page.evaluate(() => {
+        const transcriptElement = document.querySelector<HTMLElement>(".message-scroll");
+        if (!transcriptElement) return false;
+        const viewport = transcriptElement.getBoundingClientRect();
+        const rows = [...document.querySelectorAll<HTMLElement>(".response-virtual-item")]
+          .map((row) => row.getBoundingClientRect())
+          .filter((bounds) => bounds.bottom > viewport.top && bounds.top < viewport.bottom)
+          .sort((left, right) => left.top - right.top);
+        return rows.length > 0 && rows.every((bounds, index) =>
+          index === 0 || rows[index - 1]!.bottom <= bounds.top + 1);
+      })).toBe(true);
       const geometry = await page.evaluate(() => {
         const transcriptElement = document.querySelector<HTMLElement>(".message-scroll");
         const composer = document.querySelector<HTMLElement>(".composer");

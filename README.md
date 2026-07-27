@@ -18,9 +18,9 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 ### The whole coding loop, without the noise
 
 - Connect locally installed Codex, Claude, Cursor, or OpenCode accounts without leaving the app.
-- Choose from the models and reasoning levels your provider actually offers.
-- See provider-supplied thinking summaries, remaining context, and account usage as work progresses.
-- Work with streaming conversations, resumable sessions, native plans, agent questions, image inputs, cancellation, and supervised approvals whenever the selected provider supports them.
+- Find models quickly through a searchable provider-aware palette, then favorite the routes you use most.
+- See provider-supplied thinking summaries, remaining context, and account usage through one compact context control.
+- Work with streaming conversations, resumable sessions, native plans, agent questions, image and document inputs, cancellation, and supervised approvals whenever the selected provider supports them.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
 - Search commands, projects, and threads from one keyboard-friendly palette.
 - Resize or collapse either side of the workspace whenever the conversation needs more room.
@@ -29,6 +29,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 ### Review changes without losing context
 
 - Read every file and hunk in a focused diff view, then mark progress as you review.
+- Review modified files across a project-root repository and nested module repositories without flattening their Git identity.
 - Select a line range to ask a read-only question beside the matching hunk, request a focused revision, save a note, or carry the exact context into the next prompt.
 - Generate a concise agent summary for every current file and hunk, including evidence-backed hints for areas worth extra attention.
 - Revert only selected changed lines across staged, unstaged, and mixed files with current-state validation, a recovery backup, and Undo.
@@ -36,13 +37,15 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 
 ### Conversations that explain the work
 
+- The transcript reads like one calm engineering document: a light request, an understandable workstream, a clean final answer, and a quiet supporting ledger.
 - Responses render polished Markdown with safe project links, highlighted code, copy and wrap controls, and tables that can be copied as Markdown or CSV.
-- Provider updates and tool activity appear in the order they happened. Only adjacent calls fold together, so a new update naturally starts the next stretch of work.
+- Provider updates and compact tool activity appear in the order they happened. Only adjacent calls fold together, so a new update naturally starts the next stretch of work.
 - Reasoning summaries, approvals, questions, warnings, final answers, and turn checkpoints stay together in the same chronological turn.
 - Each completed request keeps its original agent, model backend, and model attribution together with a turn-specific before-and-after Git record, when available, that remains useful after the workspace moves on.
 - Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
 - Long transcripts keep stable rows and load their heavier detail separately, while incremental runtime updates resume safely after a restart.
 - The transcript follows live work only while you are near the bottom, so reading earlier context is not interrupted.
+- Delegated agent work remains attached to its parent turn, with compact progress that can be followed without losing the main conversation.
 
 ### Keep the workspace moving
 
@@ -71,13 +74,13 @@ Inertia uses the coding tools and accounts already installed on your computer. C
 
 Provider account credentials remain in each provider's own storage. Credentials added for custom model backends are encrypted through the operating system's secure credential storage; only non-secret profile settings live in Inertia's local database. Inertia stores workspace history and preferences locally, and its optional runtime diagnostics exclude prompts, source, token values, credentials, and connection capabilities.
 
-### Version 0.0.8
+### Version 0.0.9
 
-This release makes agent work read like the work itself. Provider updates and tool calls are interleaved in their real order, only adjacent calls group together, and the final answer becomes final only when the turn actually settles.
+This release gives Inertia one calmer conversation surface. Live commentary and compact tool calls follow their real order, successful work settles into the answer footer, and final answers read like documents instead of response cards.
 
-The result is quieter without hiding what matters: completed work folds into a light summary, failures stay visible, and long or narrow transcripts remain stable, accessible, and easy to follow.
+The composer is now one cohesive dock with a searchable model palette, favorite routes, a compact context control, and removable image and document previews. Recursive Files, nested Git repositories, delegated agents, and heavy Codex runs are easier to follow without adding more permanent interface.
 
-Download [Inertia v0.0.8](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.8):
+Download [Inertia v0.0.9](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.9):
 
 | Platform | Download |
 | --- | --- |

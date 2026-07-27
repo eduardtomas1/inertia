@@ -97,13 +97,28 @@ export function useWorkspaceGit({
     }
     let cancelled = false;
     setLoading(true);
-    void loadGit().catch(() => undefined).finally(() => {
+    void loadGit().catch((error) => {
+      if (!cancelled) {
+        setActionError(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Git changes could not be loaded.",
+        );
+      }
+    }).finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [conversation?.id, loadGit, online, project?.id, refreshVersion]);
+  }, [
+    conversation?.id,
+    loadGit,
+    online,
+    project?.id,
+    refreshVersion,
+    setActionError,
+  ]);
 
   const loadWorkspaceRepositoryDiff = useCallback(async (
     repositoryPath: string,

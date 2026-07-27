@@ -155,6 +155,50 @@ describe("ProviderMaintenanceController", () => {
     expect(statuses).toEqual(["update-available", "current"]);
   });
 
+  it("projects active updates without replaying command output after reconnect", async () => {
+    const pending = deferred<ProviderMaintenanceRunResult>();
+    const operations: ProviderMaintenanceOperation[] = [];
+    const controller = new ProviderMaintenanceController({
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      resolveCapabilities: async ({ providerId }) => capabilities(providerId),
+      runAction: async (_action, options) => {
+        options.onProgress({
+          output: "private command output",
+          outputTruncated: true,
+        });
+        return await pending.promise;
+      },
+      operationId: operationIds(),
+      onOperation: (operation) => operations.push(operation),
+    });
+
+    const started = await controller.startUpdate("claude");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(controller.activeOperations()).toEqual([expect.objectContaining({
+      id: started.id,
+      providerId: "claude",
+      status: "running",
+      message: "Updating provider.",
+      output: null,
+      outputTruncated: false,
+    })]);
+    expect(controller.operation(started.id)?.output).toBe(
+      "private command output",
+    );
+
+    controller.cancel(started.id);
+    pending.resolve({
+      ...success(),
+      status: "cancelled",
+      message: "Provider update cancelled.",
+    });
+    await waitForTerminal(operations, started.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(controller.activeOperations()).toEqual([]);
+  });
+
   it("serializes different providers sharing one package-manager lock", async () => {
     const first = deferred<ProviderMaintenanceRunResult>();
     const calls: ProviderMaintenanceProviderId[] = [];

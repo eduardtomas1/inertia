@@ -81,7 +81,7 @@ describe("renderer error visibility boundary", () => {
     expect(unreadable).not.toHaveBeenCalled();
   });
 
-  it("keeps first-connect workspace hydration failures inside their owning tools", () => {
+  it("keeps file hydration local while surfacing an initial Git refresh failure", () => {
     const hydrationStart = workspaceToolsSource.indexOf(
       "void Promise.allSettled([loadFiles(), loadActions()])",
     );
@@ -93,8 +93,14 @@ describe("renderer error visibility boundary", () => {
 
     expect(hydrationStart).toBeGreaterThan(-1);
     expect(hydration).not.toContain("setActionError(");
+    expect(workspaceGitSource).toMatch(
+      /void loadGit\(\)\.catch\(\(error\) => \{[\s\S]*?if \(!cancelled\) \{[\s\S]*?setActionError\(/,
+    );
     expect(workspaceGitSource).toContain(
-      "void loadGit().catch(() => undefined).finally",
+      'error instanceof Error && error.message.trim()',
+    );
+    expect(workspaceGitSource).toContain(
+      '"Git changes could not be loaded."',
     );
     expect(workspaceToolsSource).toContain(
       "setFilesError(",

@@ -6,7 +6,10 @@ import type {
   ContinuationIdentity,
   ModelSelection,
 } from "../model-routing";
-import type { ProviderMaintenanceStatus } from "../provider-maintenance";
+import type {
+  ProviderMaintenanceOperation,
+  ProviderMaintenanceStatus,
+} from "../provider-maintenance";
 import type { ProviderId } from "../provider";
 import type { AgentTurnStatus } from "../turn-lifecycle";
 
@@ -216,6 +219,12 @@ export interface AppSnapshot {
   conversations: ConversationShell[];
   runs: WorkspaceRun[];
   providers: ProviderInfo[];
+  /**
+   * Bounded active provider updates used to restore progress and cancellation
+   * after a full renderer synchronization. Historical operations remain
+   * event-driven and are intentionally excluded.
+   */
+  maintenanceOperations?: ProviderMaintenanceOperation[];
   /** Safe backend configuration only; credential values and references are forbidden. */
   backendProfiles?: ModelBackendProfileView[];
   backendDefaults?: ModelBackendDefault[];

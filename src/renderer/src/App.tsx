@@ -72,7 +72,7 @@ type ConversationCreatePayload = Extract<
 export default function App(): React.JSX.Element {
   const connection = useInertiaConnection();
   const providerMaintenance = useProviderMaintenance(
-    connection.snapshot?.providers ?? [],
+    connection.snapshot,
     connection.sendCommand,
     connection.subscribe,
   );

@@ -226,6 +226,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       ...snapshot,
       backendProfiles: backendProfileController.profiles(providerInfo),
       backendDefaults: backendProfileController.defaults(),
+      maintenanceOperations: providerMaintenance.activeOperations(),
       conversations: snapshot.conversations.map((conversation) => ({
         ...conversation,
         pendingApproval: approvalConversationIds.has(conversation.id),

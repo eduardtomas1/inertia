@@ -6,6 +6,7 @@ import {
   lstat,
   mkdir,
   open,
+  readdir,
   realpath,
   unlink,
 } from "node:fs/promises";
@@ -27,6 +28,8 @@ import {
 
 const MAX_SESSION_ATTACHMENT_RECORDS = 256;
 const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
+const OWNED_ATTACHMENT_FILE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json)$/iu;
 
 interface AttachmentRegistryRecord extends TrustedRuntimeAttachment {
   readonly extension: string;
@@ -35,6 +38,24 @@ interface AttachmentRegistryRecord extends TrustedRuntimeAttachment {
 export interface AttachmentRegistryLimits {
   readonly maxRecords?: number;
   readonly maxBytes?: number;
+}
+
+export async function cleanupOrphanedAttachments(
+  directory: string,
+): Promise<void> {
+  try {
+    const entries = await readdir(directory);
+    await Promise.all(entries.map(async (name) => {
+      if (!OWNED_ATTACHMENT_FILE.test(name)) return;
+      const path = join(directory, name);
+      const info = await lstat(path);
+      if (info.isFile() || info.isSymbolicLink()) {
+        await unlink(path);
+      }
+    }));
+  } catch {
+    // Startup cleanup is best effort. Registry writes still fail closed later.
+  }
 }
 
 function isContained(root: string, target: string): boolean {
@@ -58,6 +79,8 @@ export class AttachmentRegistry {
   private readonly maxRecords: number;
   private readonly maxBytes: number;
   private importTail: Promise<void> = Promise.resolve();
+  private disposed = false;
+  private disposal: Promise<void> | null = null;
 
   constructor(
     private readonly directory: string,
@@ -74,6 +97,9 @@ export class AttachmentRegistry {
   }
 
   async import(values: readonly unknown[]): Promise<ChatAttachment[]> {
+    if (this.disposed) {
+      throw new Error("Temporary attachment storage is no longer available.");
+    }
     let unlock = (): void => undefined;
     const previous = this.importTail;
     this.importTail = new Promise<void>((resolveImport) => {
@@ -90,6 +116,9 @@ export class AttachmentRegistry {
   private async importExclusive(
     values: readonly unknown[],
   ): Promise<ChatAttachment[]> {
+    if (this.disposed) {
+      throw new Error("Temporary attachment storage is no longer available.");
+    }
     const validated = values.map(validateAttachmentImport);
     const deduplicated = validated.filter((attachment, index) =>
       validated.findIndex(({ digest }) => digest === attachment.digest) === index);
@@ -205,8 +234,19 @@ export class AttachmentRegistry {
     await unlink(record.path).catch(() => undefined);
   }
 
-  clear(): void {
+  dispose(): Promise<void> {
+    if (this.disposal) return this.disposal;
+    this.disposed = true;
+    this.disposal = this.disposeExclusive();
+    return this.disposal;
+  }
+
+  private async disposeExclusive(): Promise<void> {
+    await this.importTail;
+    const records = [...this.records.values()];
     this.records.clear();
+    await Promise.all(records.map(({ path }) =>
+      unlink(path).catch(() => undefined)));
   }
 
   private async persist(

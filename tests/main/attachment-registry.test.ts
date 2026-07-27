@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   AttachmentRegistry,
+  cleanupOrphanedAttachments,
   type AttachmentRegistryLimits,
 } from "../../src/main/attachment-registry";
 
@@ -89,6 +90,62 @@ describe("main-owned attachment registry", () => {
     await attachments.release(imported!.id);
     await expect(attachments.resolve(imported!.id)).resolves.toBeNull();
     await expect(readFile(imported!.path)).rejects.toThrow();
+  });
+
+  it("disposes every live capability and its private file", async () => {
+    const { directory, registry: attachments } = await registry();
+    await attachments.import([
+      {
+        name: "first.png",
+        mimeType: "image/png",
+        data: png,
+      },
+      {
+        name: "second.png",
+        mimeType: "image/png",
+        data: alternatePng,
+      },
+    ]);
+
+    const firstDisposal = attachments.dispose();
+    const secondDisposal = attachments.dispose();
+    expect(secondDisposal).toBe(firstDisposal);
+    await Promise.all([firstDisposal, secondDisposal]);
+
+    await expect(readdir(directory)).resolves.toEqual([]);
+    await expect(attachments.import([{
+      name: "later.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/no longer available/u);
+  });
+
+  it("removes prior-process orphans before a new registry starts", async () => {
+    const { directory, registry: previousProcess } = await registry({
+      maxRecords: 1,
+      maxBytes: png.length,
+    });
+    const [orphan] = await previousProcess.import([{
+      name: "orphan.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+    await writeFile(join(directory, "keep-me.txt"), "unrelated");
+
+    await cleanupOrphanedAttachments(directory);
+
+    await expect(readFile(orphan!.path)).rejects.toThrow();
+    await expect(readFile(join(directory, "keep-me.txt"), "utf8"))
+      .resolves.toBe("unrelated");
+    const restarted = new AttachmentRegistry(directory, {
+      maxRecords: 1,
+      maxBytes: png.length,
+    });
+    await expect(restarted.import([{
+      name: "new.png",
+      mimeType: "image/png",
+      data: png,
+    }])).resolves.toHaveLength(1);
   });
 
   it("serializes concurrent imports so they cannot race past the session cap", async () => {

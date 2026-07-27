@@ -1,5 +1,5 @@
 import { constants, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, open, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -34,7 +34,10 @@ import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import {
   validateSelectedAttachmentStats,
 } from "./attachment-import.js";
-import { AttachmentRegistry } from "./attachment-registry.js";
+import {
+  AttachmentRegistry,
+  cleanupOrphanedAttachments,
+} from "./attachment-registry.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
   CredentialVault,
@@ -100,6 +103,7 @@ let previewView: WebContentsView | null = null;
 let previewBounds: Electron.Rectangle | null = null;
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
+let attachmentCleanup: Promise<void> = Promise.resolve();
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -120,6 +124,17 @@ function attachmentDirectory(): string {
 function attachmentRegistry(): AttachmentRegistry {
   importedAttachments ??= new AttachmentRegistry(attachmentDirectory());
   return importedAttachments;
+}
+
+function disposeImportedAttachments(): Promise<void> {
+  const registry = importedAttachments;
+  importedAttachments = null;
+  if (registry) {
+    attachmentCleanup = attachmentCleanup
+      .catch(() => undefined)
+      .then(() => registry.dispose());
+  }
+  return attachmentCleanup;
 }
 
 function registerAppProtocol(): void {
@@ -178,20 +193,6 @@ function saveWindowState(window: BrowserWindow): void {
     writeFileSync(windowStatePath(), JSON.stringify({ ...bounds, maximized: window.isMaximized() }), { encoding: "utf8", mode: 0o600 });
   } catch {
     // Window-state persistence is best effort and never blocks shutdown.
-  }
-}
-
-async function cleanupImportedAttachments(): Promise<void> {
-  const directory = attachmentDirectory();
-  try {
-    const entries = await readdir(directory);
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    await Promise.all(entries.filter((name) => /^[0-9a-f-]{36}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json)$/u.test(name)).map(async (name) => {
-      const path = join(directory, name);
-      if ((await stat(path)).mtimeMs < cutoff) await unlink(path);
-    }));
-  } catch {
-    // The temporary attachment directory may not exist yet.
   }
 }
 
@@ -634,7 +635,7 @@ async function createWindow(): Promise<void> {
   window.on("close", () => saveWindowState(window));
   window.on("closed", () => {
     closePreview();
-    attachmentRegistry().clear();
+    void disposeImportedAttachments();
     if (mainWindow === window) {
       mainWindow = null;
     }
@@ -697,7 +698,7 @@ async function bootstrap(): Promise<void> {
   await Promise.all([
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
-    cleanupImportedAttachments(),
+    cleanupOrphanedAttachments(attachmentDirectory()),
   ]);
 
   registerAppProtocol();
@@ -816,15 +817,18 @@ if (!hasSingleInstanceLock) {
     runtimeSupervisor = null;
     runtimeDiagnostics?.record("app.stop");
 
-    void supervisorToStop
-      .stop()
-      .catch((error: unknown) => {
+    void Promise.all([
+      supervisorToStop.stop().catch((error: unknown) => {
         runtimeDiagnostics?.record("runtime.failure", {
           phase: "stopping",
           message: error instanceof Error ? error.message : "The local runtime could not stop cleanly.",
         });
         console.error("Failed to stop the local runtime", error);
-      })
+      }),
+      disposeImportedAttachments().catch((error: unknown) => {
+        console.error("Failed to remove temporary attachments", error);
+      }),
+    ])
       .finally(finishQuitAfterCleanup);
   });
 

@@ -176,6 +176,28 @@ export class ProviderMaintenanceController {
     return this.operations.get(operationId) ?? null;
   }
 
+  /**
+   * Renderer-safe, bounded projection of updates that still own runtime work.
+   * Command output is intentionally omitted from full synchronization; live
+   * operation events remain the only transport for sanitized output previews.
+   */
+  activeOperations(): ProviderMaintenanceOperation[] {
+    return PROVIDER_MAINTENANCE_PROVIDER_IDS.flatMap((providerId) => {
+      const operation = this.active.get(providerId)?.operation;
+      if (
+        !operation
+        || (operation.status !== "queued" && operation.status !== "running")
+      ) {
+        return [];
+      }
+      return [{
+        ...operation,
+        output: null,
+        outputTruncated: false,
+      }];
+    });
+  }
+
   async refresh(
     providerIds: readonly ProviderMaintenanceProviderId[],
     force = false,

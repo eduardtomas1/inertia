@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type {
+  AppSnapshot,
   ClientCommand,
-  ProviderInfo,
   ProviderMaintenanceOperation,
   ProviderMaintenanceProviderId,
   ProviderMaintenanceStatus,
   ServerEvent,
 } from "@shared/contracts";
+import {
+  providerMaintenanceOperationMap,
+} from "../utils/providerMaintenance";
 
 type MaintenanceCommand = Extract<
   ClientCommand,
@@ -43,32 +46,44 @@ export interface ProviderMaintenanceProjection {
 }
 
 function statusMap(
-  providers: readonly ProviderInfo[],
+  snapshot: Pick<AppSnapshot, "providers"> | null,
 ): Map<ProviderMaintenanceProviderId, ProviderMaintenanceStatus> {
-  return new Map(providers.flatMap(({ maintenance }) =>
+  return new Map((snapshot?.providers ?? []).flatMap(({ maintenance }) =>
     maintenance ? [[maintenance.providerId, maintenance] as const] : []));
 }
 
 export function useProviderMaintenance(
-  providers: readonly ProviderInfo[],
+  snapshot: AppSnapshot | null,
   sendCommand: (command: ClientCommand) => Promise<ServerEvent>,
   subscribe: (listener: (event: ServerEvent) => void) => () => void,
 ): ProviderMaintenanceProjection {
-  const [statuses, setStatuses] = useState(() => statusMap(providers));
+  const [statuses, setStatuses] = useState(() => statusMap(snapshot));
   const [operations, setOperations] = useState(
-    () => new Map<
-      ProviderMaintenanceProviderId,
-      ProviderMaintenanceOperation
-    >(),
+    () => providerMaintenanceOperationMap(snapshot?.maintenanceOperations),
   );
 
   useEffect(() => {
-    const fromSnapshot = statusMap(providers);
+    const fromSnapshot = statusMap(snapshot);
     if (fromSnapshot.size === 0) return;
     setStatuses((current) => new Map([...current, ...fromSnapshot]));
-  }, [providers]);
+  }, [snapshot]);
+
+  useEffect(() => {
+    const fromSnapshot = providerMaintenanceOperationMap(
+      snapshot?.maintenanceOperations,
+    );
+    if (fromSnapshot.size === 0) return;
+    setOperations((current) => new Map([...current, ...fromSnapshot]));
+  }, [snapshot]);
 
   useEffect(() => subscribe((event) => {
+    if (event.type === "server.welcome") {
+      setStatuses(statusMap(event.snapshot));
+      setOperations(providerMaintenanceOperationMap(
+        event.snapshot.maintenanceOperations,
+      ));
+      return;
+    }
     if (event.type === "provider.maintenance.updated") {
       setStatuses((current) => new Map([
         ...current,

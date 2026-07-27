@@ -1527,10 +1527,10 @@ test("applies every interface scale live and remains usable at common Linux disp
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const scaleGroup = page.getByRole("radiogroup", { name: "Interface scale" });
   const expected = [
-    ["Compact", "compact", "12.5px", "30px"],
-    ["Default", "default", "13.5px", "32px"],
-    ["Comfortable", "comfortable", "14.5px", "35px"],
-    ["Large", "large", "16px", "38px"],
+    ["Compact", "compact", "13px", "30px"],
+    ["Default", "default", "14px", "32px"],
+    ["Comfortable", "comfortable", "15px", "35px"],
+    ["Large", "large", "16.5px", "38px"],
   ] as const;
 
   for (const [label, value, fontSize, controlHeight] of expected) {

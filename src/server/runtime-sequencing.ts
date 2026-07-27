@@ -42,7 +42,14 @@ interface RetainedRuntimeEvent {
   bytes: number;
 }
 
-function detailConversationId(event: Exclude<RuntimeMutationEvent, { type: "snapshot.updated" }>): string {
+type ConversationRuntimeMutationEvent = Exclude<
+  RuntimeMutationEvent,
+  | { type: "snapshot.updated" }
+  | { type: "provider.maintenance.updated" }
+  | { type: "provider.maintenance.operation" }
+>;
+
+function detailConversationId(event: ConversationRuntimeMutationEvent): string {
   switch (event.type) {
     case "agent.usage":
       return event.usage.conversationId;
@@ -62,9 +69,17 @@ function detailConversationId(event: Exclude<RuntimeMutationEvent, { type: "snap
 }
 
 export function runtimeMutationScope(event: RuntimeMutationEvent): RuntimeEventScope {
-  return event.type === "snapshot.updated"
-    ? { kind: "shell" }
-    : { kind: "conversation-detail", conversationId: detailConversationId(event) };
+  switch (event.type) {
+    case "snapshot.updated":
+    case "provider.maintenance.updated":
+    case "provider.maintenance.operation":
+      return { kind: "shell" };
+    default:
+      return {
+        kind: "conversation-detail",
+        conversationId: detailConversationId(event),
+      };
+  }
 }
 
 export function projectRuntimeFrame(

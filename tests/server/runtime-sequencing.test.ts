@@ -137,6 +137,48 @@ describe("runtime sequence helpers", () => {
     });
   });
 
+  it("keeps provider maintenance global without disturbing detail cursors", () => {
+    const sequencer = new RuntimeSequencer({ runtimeGeneration: GENERATION });
+    sequencer.commit(() => detailEvent(CONVERSATION_A, "visible detail"));
+    const maintenance = sequencer.commit(() => ({
+      type: "provider.maintenance.operation",
+      operation: {
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        providerId: "codex",
+        status: "running",
+        startedAt: "2026-07-27T12:00:00.000Z",
+        finishedAt: null,
+        beforeVersion: "0.1.0",
+        afterVersion: null,
+        targetVersion: "0.2.0",
+        message: "Updating provider.",
+        output: null,
+        outputTruncated: false,
+      },
+    }));
+    sequencer.commit(() => detailEvent(CONVERSATION_B, "private detail"));
+
+    expect(runtimeMutationScope(maintenance.event)).toEqual({ kind: "shell" });
+    const replay = sequencer.replay(
+      GENERATION,
+      0,
+      { conversationId: CONVERSATION_A },
+    );
+    expect(replay.kind).toBe("replay");
+    if (replay.kind !== "replay") return;
+    expect(replay.frames.map(({ type }) => type)).toEqual([
+      "runtime.event",
+      "runtime.event",
+      "runtime.cursor",
+    ]);
+    expect(replay.frames.map(({ sync }) => sync.latestSequence)).toEqual([
+      1,
+      2,
+      3,
+    ]);
+    expect(JSON.stringify(replay.frames)).not.toContain("private detail");
+  });
+
   it("parses only bounded same-path resume parameters", () => {
     const path = "/runtime/token";
     expect(parseRuntimeResumeRequest(path, path)).toEqual({ kind: "none" });

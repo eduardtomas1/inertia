@@ -255,6 +255,55 @@ describe("client command contract", () => {
     expect(clientCommandSchema.parse(refreshOne)).toEqual(refreshOne);
   });
 
+  it("accepts only bounded provider maintenance commands", () => {
+    const requestId = crypto.randomUUID();
+    const operationId = crypto.randomUUID();
+    const valid = [
+      {
+        type: "provider.maintenance.refresh",
+        requestId,
+        payload: {},
+      },
+      {
+        type: "provider.maintenance.refresh",
+        requestId,
+        payload: { providerId: "claude", force: true },
+      },
+      {
+        type: "provider.maintenance.update",
+        requestId,
+        payload: { providerId: "codex" },
+      },
+      {
+        type: "provider.maintenance.cancel",
+        requestId,
+        payload: { operationId },
+      },
+    ];
+    for (const command of valid) {
+      expect(clientCommandSchema.safeParse(command).success).toBe(true);
+    }
+    for (const command of [
+      {
+        type: "provider.maintenance.update",
+        requestId,
+        payload: { providerId: "unknown" },
+      },
+      {
+        type: "provider.maintenance.cancel",
+        requestId,
+        payload: { operationId: "../process" },
+      },
+      {
+        type: "provider.maintenance.refresh",
+        requestId,
+        payload: { force: true, executable: "/tmp/codex" },
+      },
+    ]) {
+      expect(clientCommandSchema.safeParse(command).success).toBe(false);
+    }
+  });
+
   it("accepts only supported interface scales", () => {
     const requestId = crypto.randomUUID();
     for (const interfaceScale of ["compact", "default", "comfortable", "large"] as const) {

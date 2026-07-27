@@ -15,6 +15,7 @@ import {
   type GitStatusSnapshot,
   type Conversation,
   type ProviderInfo,
+  type ProviderMaintenanceProviderId,
   type RuntimeMutationEvent,
   type RuntimeSyncCursor,
   type TurnRequestContext,
@@ -55,6 +56,8 @@ import {
 } from "./git";
 import { PROVIDER_IDS, ProviderManager, type ProviderDetection } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
+import { ProviderMaintenanceController } from "./provider/maintenance-controller";
+import type { ProviderMaintenanceTarget } from "./provider/maintenance-capabilities";
 import { TerminalManager } from "./terminal";
 import {
   listWorkspaceEntries,
@@ -232,6 +235,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const cachedProviderMetadata = Object.fromEntries(PROVIDER_IDS.map((providerId) => [providerId, providers.cachedMetadata(providerId)]));
   let turns: TurnController;
   let providerInfo = initialProviderSnapshots(enableProviders, cachedProviderMetadata);
+  let providerMaintenance: ProviderMaintenanceController;
   const runtimeSync = new RuntimeSyncHub<WebSocket>(send);
   const pendingApprovals = new Map<string, AgentApprovalRequest>();
   const pendingInputs = new Map<string, AgentInputRequest>();
@@ -350,24 +354,73 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         detection,
         providers.cachedMetadata(detection.provider.id),
       );
-      providerInfo = providerInfo.map((current) => current.id === providerId ? detected : current);
+      providerInfo = providerInfo.map((current) => current.id === providerId
+        ? { ...detected, ...(current.maintenance ? { maintenance: current.maintenance } : {}) }
+        : current);
       if (!closed) broadcastSnapshot();
       if (!detection.canRun) return;
       const next = await enrichedSnapshot(detection);
-      providerInfo = providerInfo.map((current) => current.id === providerId ? next : current);
+      providerInfo = providerInfo.map((current) => current.id === providerId
+        ? { ...next, ...(current.maintenance ? { maintenance: current.maintenance } : {}) }
+        : current);
     } else {
       const detections = await providers.detectAll({
         cwd: options.defaultWorkspacePath,
         timeoutMs: 4_000,
         refreshEnvironment,
       });
-      providerInfo = detections.map((detection) =>
-        providerSnapshot(detection, providers.cachedMetadata(detection.provider.id)));
+      const previous = new Map(providerInfo.map((provider) => [provider.id, provider]));
+      providerInfo = detections.map((detection) => {
+        const next = providerSnapshot(
+          detection,
+          providers.cachedMetadata(detection.provider.id),
+        );
+        const maintenance = previous.get(detection.provider.id)?.maintenance;
+        return maintenance ? { ...next, maintenance } : next;
+      });
       if (!closed) broadcastSnapshot();
-      providerInfo = await Promise.all(detections.map(enrichedSnapshot));
+      providerInfo = await Promise.all(detections.map(async (detection) => {
+        const next = await enrichedSnapshot(detection);
+        const maintenance = previous.get(detection.provider.id)?.maintenance;
+        return maintenance ? { ...next, maintenance } : next;
+      }));
     }
     if (!closed) broadcastSnapshot();
   };
+  const maintenanceTarget = (
+    providerId: ProviderMaintenanceProviderId,
+  ): ProviderMaintenanceTarget => {
+    const provider = providerInfo.find((candidate) => candidate.id === providerId);
+    return {
+      providerId,
+      executable: provider?.executable ?? null,
+      installedVersion: provider?.version ?? null,
+      installed: provider?.installState === "installed" && provider.available,
+    };
+  };
+  providerMaintenance = new ProviderMaintenanceController({
+    target: maintenanceTarget,
+    refreshTarget: async (providerId) => {
+      await refreshProviderInfo(providerId, true, true);
+      return maintenanceTarget(providerId);
+    },
+    onStatus: (status) => {
+      providerInfo = providerInfo.map((provider) => provider.id === status.providerId
+        ? { ...provider, maintenance: status }
+        : provider);
+      if (!closed) {
+        broadcast({
+          type: "provider.maintenance.updated",
+          providers: providerMaintenance.current(),
+        });
+      }
+    },
+    onOperation: (operation) => {
+      if (!closed) {
+        broadcast({ type: "provider.maintenance.operation", operation });
+      }
+    },
+  });
   const workspacePath = (projectId: string, conversationId?: string): string => {
     if (!conversationId) return ensureDirectory(store.projectPath(projectId));
     const conversation = store.conversation(conversationId);
@@ -535,6 +588,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           return;
         case "provider.refresh":
           await refreshProviderInfo(command.payload.providerId, true, true);
+          await providerMaintenance.refresh(
+            command.payload.providerId
+              ? [command.payload.providerId]
+              : PROVIDER_IDS,
+            true,
+          );
           send(socket, { type: "request.ok", requestId: command.requestId });
           return;
         case "provider.auth.start": {
@@ -550,6 +609,43 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             () => { void refreshProviderInfo(command.payload.providerId, true, true).catch(() => undefined); },
           );
           send(socket, { type: "terminal.created", requestId: command.requestId, terminalId });
+          return;
+        }
+        case "provider.maintenance.refresh": {
+          const statuses = await providerMaintenance.refresh(
+            command.payload.providerId
+              ? [command.payload.providerId]
+              : PROVIDER_IDS,
+            command.payload.force === true,
+          );
+          send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: { kind: "provider.maintenance", providers: statuses },
+          });
+          return;
+        }
+        case "provider.maintenance.update": {
+          const operation = await providerMaintenance.startUpdate(
+            command.payload.providerId,
+          );
+          send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: { kind: "provider.maintenance.operation", operation },
+          });
+          return;
+        }
+        case "provider.maintenance.cancel": {
+          const operation = providerMaintenance.cancel(
+            command.payload.operationId,
+          );
+          if (!operation) throw new RequestError("That provider update is no longer available.");
+          send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: { kind: "provider.maintenance.operation", operation },
+          });
           return;
         }
         case "project.create": {
@@ -1729,7 +1825,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     })
     .catch(() => undefined);
 
-  if (enableProviders) void refreshProviderInfo(undefined, true).catch(() => {
+  if (enableProviders) void refreshProviderInfo(undefined, true).then(() => {
+    void providerMaintenance.refresh(PROVIDER_IDS, false).catch(() => undefined);
+  }).catch(() => {
     if (closed) return;
     providerInfo = providerInfo.map((provider) => ({
       ...provider,
@@ -1748,6 +1846,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       if (closed) return;
       closed = true;
       terminals.disposeAll();
+      await providerMaintenance.dispose();
       await isolatedRuns.dispose(cause);
       await turns.dispose(cause);
       await artifactReconciliation;

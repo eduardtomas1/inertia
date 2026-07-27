@@ -24,10 +24,17 @@ import {
   type ModelBackendProfileDetail,
   type ModelBackendProfileView,
 } from "./backend-profile-settings";
+import {
+  providerMaintenanceOperationIdSchema,
+  providerMaintenanceProviderIdSchema,
+  type ProviderMaintenanceOperation,
+  type ProviderMaintenanceStatus,
+} from "./provider-maintenance";
 
 export * from "./model-routing";
 export * from "./backend-profile-settings";
 export * from "./attachments";
+export * from "./provider-maintenance";
 
 export const PROTOCOL_VERSION = 1 as const;
 
@@ -158,6 +165,8 @@ export interface ProviderInfo {
   models: ProviderModel[];
   rateLimits: ProviderRateLimit[];
   metadataState: ProviderMetadataState;
+  /** Present after the runtime has checked this exact installed CLI. */
+  maintenance?: ProviderMaintenanceStatus;
 }
 
 export interface ChatAttachment {
@@ -1047,6 +1056,34 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   z
     .object({
       ...requestBase,
+      type: z.literal("provider.maintenance.refresh"),
+      payload: z.object({
+        providerId: providerMaintenanceProviderIdSchema.optional(),
+        force: z.boolean().optional(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("provider.maintenance.update"),
+      payload: z.object({
+        providerId: providerMaintenanceProviderIdSchema,
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("provider.maintenance.cancel"),
+      payload: z.object({
+        operationId: providerMaintenanceOperationIdSchema,
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("project.create"),
       payload: z.object({ name: z.string().trim().min(1).max(80), path: z.string().min(1).max(4096) }).strict(),
     })
@@ -1674,6 +1711,8 @@ export type RuntimeEventScope =
  */
 export type RuntimeMutationEvent =
   | { type: "snapshot.updated"; snapshot: AppSnapshot }
+  | { type: "provider.maintenance.updated"; providers: ProviderMaintenanceStatus[] }
+  | { type: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
   | { type: "agent.started"; conversationId: string; runId: string; turnId: string }
   | { type: "agent.text"; conversationId: string; runId: string; turnId: string; text: string }
   | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string }
@@ -1728,6 +1767,8 @@ export type ServerEvent =
         | { kind: "backend.profile"; profile: ModelBackendProfileDetail }
         | { kind: "backend.profile.probe"; profile: ModelBackendProfileDetail }
         | { kind: "backend.default"; value: ModelBackendDefault | null }
+        | { kind: "provider.maintenance"; providers: ProviderMaintenanceStatus[] }
+        | { kind: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
         | { kind: "worktree.created"; path: string; branch: string }
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }

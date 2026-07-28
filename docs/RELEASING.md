@@ -29,3 +29,9 @@ Complete Windows credentials enable fail-closed Authenticode signing.
 Inertia’s in-app update notice only checks the repository’s public latest
 release. It never downloads or installs an update silently; the user opens the
 release page and chooses an artifact.
+
+Every package build runs `npm run notices:generate` first. The generator reads
+the installed production dependency graph, fails when a package references
+missing license material, and places deterministic third-party notices beside
+Inertia's own license and Electron's Chromium notices in the packaged
+resources. Release validation must not bypass that prebuild step.

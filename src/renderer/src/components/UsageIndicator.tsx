@@ -14,6 +14,7 @@ import {
   usageDisplayBehavior,
 } from "../utils/usageDisplay";
 import { outsidePointerShouldRestoreFocus } from "../utils/dismissibleMenu";
+import { INTERFACE_LOCALE } from "../lib/locale";
 
 type UsageIndicatorProps = {
   usage: ThreadUsageSnapshot | null;
@@ -41,7 +42,10 @@ export const CONTEXT_NEAR_LIMIT_REMAINING_PERCENT = 20;
 export type ContextRingState = "current" | "stale" | "near-limit" | "unavailable";
 
 function compactNumber(value: number): string {
-  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  return new Intl.NumberFormat(INTERFACE_LOCALE, {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
 }
 
 export function displayPercent(value: number): number | null {
@@ -59,7 +63,7 @@ function dateLabel(
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return null;
-  return `${prefix} ${new Intl.DateTimeFormat("en", {
+  return `${prefix} ${new Intl.DateTimeFormat(INTERFACE_LOCALE, {
     month: "short",
     day: "numeric",
     hour: "numeric",

@@ -4,7 +4,7 @@ import type {
   RuntimeCredentialOperation,
   RuntimeCredentialResult,
   RuntimeWorkerEvent,
-} from "../../../main/runtime-process-protocol.js";
+} from "../../../node/runtime-process-protocol.js";
 import {
   isBackendSecretReference,
   type BackendCredentialStatus,

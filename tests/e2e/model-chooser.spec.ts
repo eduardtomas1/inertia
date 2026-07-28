@@ -1,0 +1,566 @@
+import { expect, test } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import Database from "better-sqlite3";
+
+import { RuntimeStore } from "../../src/server/database";
+import { nativeProviderMetadataScope } from "../../src/server/provider/metadata";
+import {
+  continuationIdentityForSelection,
+  nativeModelSelection,
+} from "../../src/shared/model-routing";
+import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
+import {
+  createAppFixture,
+  type AppFixture,
+  type RuntimeTestSnapshot,
+} from "./support/app-fixture";
+
+let app!: AppFixture;
+let electronApp!: AppFixture["electronApp"];
+let page!: AppFixture["page"];
+let testDirectory!: AppFixture["testDirectory"];
+let workspaceDirectory!: AppFixture["workspaceDirectory"];
+let rendererErrors!: AppFixture["rendererErrors"];
+let runtimeSnapshot!: AppFixture["runtimeSnapshot"];
+let resizeWindow!: AppFixture["resizeWindow"];
+
+test.beforeAll(async () => {
+  app = await createAppFixture({ name: "model-chooser", initialState: "conversation" });
+  electronApp = app.electronApp;
+  page = app.page;
+  testDirectory = app.testDirectory;
+  workspaceDirectory = app.workspaceDirectory;
+  rendererErrors = app.rendererErrors;
+  runtimeSnapshot = app.runtimeSnapshot;
+  resizeWindow = app.resizeWindow;
+});
+
+test.afterAll(async () => {
+  await app.close();
+});
+
+test("uses the anchored model chooser and enforces authoritative route boundaries", async ({ browserName: _browserName }, testInfo) => {
+  await resizeWindow(1440, 920);
+  if (await page.getByRole("textbox", { name: "Message" }).count() === 0) {
+    await expect.poll(
+      async () => (await runtimeSnapshot()).phase,
+      { timeout: 10_000 },
+    ).toBe("ready");
+    await expect(
+      page.getByRole("complementary", { name: "Project navigation", exact: true })
+        .locator(".sidebar-mode-switch")
+        .getByRole("button", { name: "Projects", exact: true }),
+    ).toBeEnabled({ timeout: 10_000 });
+    await electronApp.evaluate(({ dialog }, directory) => {
+      Reflect.set(dialog, "showOpenDialog", async () => ({
+        canceled: false,
+        filePaths: [directory],
+        bookmarks: [],
+      }));
+    }, workspaceDirectory);
+    const addProject = page.getByRole("button", { name: "Add your first project" });
+    await expect(addProject).toBeEnabled();
+    await addProject.click();
+    await expect(page.getByRole("heading", { name: "Start with a clear chat." })).toBeVisible();
+    const newChat = page.locator(".project-welcome")
+      .getByRole("button", { name: "New chat", exact: true });
+    await expect(newChat).toBeVisible();
+    await newChat.click();
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  }
+  const workspaceHeader = page.locator(".workspace-header");
+  const closeTools = workspaceHeader.getByRole("button", { name: "Close workspace tools" });
+  if (await closeTools.isVisible() && await closeTools.isEnabled()) {
+    await closeTools.click();
+  }
+  const composer = page.getByRole("textbox", { name: "Message" });
+  await composer.fill("@sam");
+  await expect(page.getByRole("listbox", { name: "Project files" }).getByRole("option").first()).toHaveAttribute("aria-selected", "false");
+  await composer.fill("/p");
+  await expect(page.getByRole("listbox", { name: "Composer commands" }).getByRole("option", { name: /plan/i })).toHaveAttribute("aria-selected", "false");
+  await composer.fill("");
+  await resizeWindow(1440, 720);
+
+  const modelTrigger = page.getByRole("button", { name: /^Choose model\./u });
+  const modelChooser = page.getByRole("dialog", { name: "Choose model" });
+  const captureChooserScenario = async (name: string): Promise<void> => {
+    const screenshotPath = testInfo.outputPath(`${name}.png`);
+    await page.screenshot({
+      animations: "disabled",
+      path: screenshotPath,
+      scale: "device",
+    });
+    await testInfo.attach(name, {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
+  };
+
+  await modelTrigger.click();
+  await expect(modelTrigger).toHaveAttribute("aria-expanded", "true");
+  const chooserId = await modelTrigger.getAttribute("aria-controls");
+  expect(chooserId).toBeTruthy();
+  await expect(modelChooser).toHaveAttribute("id", chooserId!);
+  await expect(modelChooser).toBeVisible();
+  await expect(modelChooser.getByRole("navigation", { name: "Model sources" })).toBeVisible();
+  const modelResults = modelChooser.getByRole("listbox", {
+    name: "Model results",
+  });
+  const modelResultsAx = await modelResults.ariaSnapshot();
+  expect(modelResultsAx).toContain('- listbox "Model results"');
+  expect(modelResultsAx).toContain("- option ");
+  expect(modelResultsAx).toContain("[selected]");
+  expect(modelResultsAx).not.toContain("- button ");
+  const modelFavoriteActions = modelChooser.getByRole("group", {
+    name: "Model favorite actions",
+  });
+  const modelFavoriteActionsAx = await modelFavoriteActions.ariaSnapshot();
+  expect(modelFavoriteActionsAx).toContain(
+    '- group "Model favorite actions"',
+  );
+  expect(modelFavoriteActionsAx).toContain('- button "Add ');
+  expect(modelFavoriteActionsAx).not.toContain("- option ");
+  const firstResult = modelChooser.locator(".model-chooser-result").first();
+  await firstResult.evaluate((element) => {
+    element.style.minHeight = "92px";
+  });
+  const rowCenters = await modelChooser.locator(".model-chooser-result")
+    .evaluateAll((elements) => elements.map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.top + bounds.height / 2;
+    }));
+  const favoriteCenters = await modelFavoriteActions.getByRole("button")
+    .evaluateAll((elements) => elements.map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.top + bounds.height / 2;
+    }));
+  expect(favoriteCenters).toHaveLength(rowCenters.length);
+  for (const [index, center] of rowCenters.entries()) {
+    expect(Math.abs(center - favoriteCenters[index]!)).toBeLessThanOrEqual(1);
+  }
+  await firstResult.evaluate((element) => {
+    element.style.removeProperty("min-height");
+  });
+  const searchModels = modelChooser.getByRole("searchbox", { name: "Search models" });
+  await expect(searchModels).toBeFocused();
+  const codexSource = modelChooser.getByRole("button", {
+    name: /^Codex, \d+ models?$/u,
+  });
+  await expect(codexSource).toHaveAttribute("aria-pressed", "true");
+  const claudeSource = modelChooser.getByRole("button", {
+    name: /^Claude, \d+ models?$/u,
+  });
+  await claudeSource.click();
+  await expect(searchModels).toBeFocused();
+  const initialActiveDescendant = await searchModels.getAttribute(
+    "aria-activedescendant",
+  );
+  await page.keyboard.press("End");
+  await expect.poll(() => searchModels.getAttribute("aria-activedescendant"))
+    .not.toBe(initialActiveDescendant);
+  await page.keyboard.press("Home");
+  await expect(searchModels).toHaveAttribute(
+    "aria-activedescendant",
+    initialActiveDescendant!,
+  );
+  const [headerBounds, modelChooserBounds] = await Promise.all([
+    workspaceHeader.boundingBox(),
+    modelChooser.boundingBox(),
+  ]);
+  expect(modelChooserBounds?.y ?? 0).toBeGreaterThanOrEqual(
+    (headerBounds?.y ?? 0) + (headerBounds?.height ?? 0),
+  );
+  expect((modelChooserBounds?.x ?? 0) + (modelChooserBounds?.width ?? 0))
+    .toBeLessThanOrEqual(1440);
+
+  await captureChooserScenario("anchored-model-chooser-1440x720");
+
+  const firstFavorite = modelFavoriteActions.getByRole("button", {
+    name: /^Add .+ to favorites$/u,
+  }).first();
+  await firstFavorite.click();
+  await expect(modelFavoriteActions.getByRole("button", {
+    name: /^Remove .+ from favorites$/u,
+  }).first()).toHaveAttribute("aria-pressed", "true");
+  const favoritesSource = modelChooser.getByRole("button", {
+    name: /^Favorites, 1 model$/u,
+  });
+  await expect(favoritesSource).toBeVisible();
+  await favoritesSource.click();
+  await expect(modelChooser.getByRole("option")).toHaveCount(1);
+  await captureChooserScenario("model-chooser-favorites-1440x720");
+  await claudeSource.click();
+  await expect(claudeSource).toHaveAttribute("aria-pressed", "true");
+  await captureChooserScenario("model-chooser-claude-1440x720");
+  await searchModels.fill("Kimi K3");
+  await expect(modelChooser.getByRole("option").filter({ hasText: /Kimi/u }).first())
+    .toBeVisible();
+  await expect(modelChooser.getByRole("option").filter({ hasText: /Codex/u }))
+    .toHaveCount(0);
+  await captureChooserScenario("model-chooser-search-kimi-1440x720");
+  await searchModels.fill("route-that-does-not-exist");
+  await expect(modelChooser.getByText("No matching models", { exact: true })).toBeVisible();
+  await searchModels.fill("");
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+1" : "Control+1");
+  await expect(modelChooser).toBeHidden();
+  await expect(modelTrigger).toBeFocused();
+
+  await modelTrigger.click();
+  await expect(modelTrigger).toHaveAttribute("aria-expanded", "true");
+  await modelTrigger.focus();
+  await modelTrigger.press("Escape");
+  await expect(modelChooser).toBeHidden();
+  await expect(modelTrigger).toHaveAttribute("aria-expanded", "false");
+  await expect(modelTrigger).toBeFocused();
+
+  await modelTrigger.click();
+  await expect(modelChooser).toBeVisible();
+  await page.locator(".workspace-header").click({ position: { x: 12, y: 12 } });
+  await expect(modelChooser).toBeHidden();
+  await expect(modelTrigger).toHaveAttribute("aria-expanded", "false");
+  await expect(modelTrigger).toBeFocused();
+
+  await modelTrigger.click();
+  await expect(modelChooser.getByRole("searchbox", { name: "Search models" }))
+    .toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(modelChooser).toBeHidden();
+  await expect(modelTrigger).toBeFocused();
+
+  await modelTrigger.click();
+  const modeTrigger = page.getByRole("button", { name: "Choose work mode" });
+  const modeMenu = page.getByRole("menu", { name: "Work mode" });
+  await modeTrigger.click();
+  await expect(modelChooser).toBeHidden();
+  await expect(modeMenu).toBeVisible();
+  await expect(modeTrigger).toBeFocused();
+
+  const currentMode = await modeTrigger.locator("span").first().textContent();
+  const nextMode = currentMode === "Build" ? "Plan" : "Build";
+  await modeMenu.getByRole("menuitemradio", { name: new RegExp(`^${nextMode}`) }).click();
+  await expect(modeMenu).toBeHidden();
+  await expect(modeTrigger).toBeFocused();
+  await expect(modeTrigger.locator("span").first()).toHaveText(nextMode);
+
+  const databasePath = join(testDirectory, "data", "inertia.sqlite");
+  const stateDatabase = new Database(databasePath, { readonly: true });
+  const state = stateDatabase.prepare(
+    "SELECT active_conversation_id FROM app_state WHERE id = 1",
+  ).get() as { active_conversation_id: string };
+  const conversationCountBefore = (stateDatabase.prepare(
+    "SELECT COUNT(*) AS count FROM conversations",
+  ).get() as { count: number }).count;
+  stateDatabase.close();
+
+  const runtimeStore = new RuntimeStore(databasePath, workspaceDirectory);
+  const currentConversation = runtimeStore.conversation(state.active_conversation_id);
+  const alpha = nativeModelSelection({
+    providerId: "codex",
+    modelId: "codex-alpha",
+    alias: "Codex Alpha",
+    reasoningEffort: "medium",
+  });
+  const alphaIdentity = continuationIdentityForSelection(alpha, null, false);
+  const cachedAt = new Date().toISOString();
+  runtimeStore.saveProviderMetadata({
+    scope: nativeProviderMetadataScope("codex"),
+    models: [
+      {
+        id: "codex-alpha",
+        label: "Codex Alpha",
+        description: "First model in the E2E native catalog.",
+        isDefault: true,
+        inputModalities: ["text"],
+        reasoningOptions: [{
+          value: "medium",
+          label: "Medium",
+          description: "Balanced reasoning.",
+        }],
+        defaultReasoningEffort: "medium",
+      },
+      {
+        id: "codex-beta",
+        label: "Codex Beta",
+        description: "Second model in the E2E native catalog.",
+        isDefault: false,
+        inputModalities: ["text"],
+        reasoningOptions: [{
+          value: "medium",
+          label: "Medium",
+          description: "Balanced reasoning.",
+        }],
+        defaultReasoningEffort: "medium",
+      },
+      {
+        id: "gpt-5.6-sol",
+        label: "Sol",
+        description: "Frontier coding model in the E2E native catalog.",
+        isDefault: false,
+        inputModalities: ["text"],
+        reasoningOptions: [{
+          value: "high",
+          label: "High",
+          description: "Thorough reasoning.",
+        }, {
+          value: "xhigh",
+          label: "Extra high",
+          description: "Maximum reasoning.",
+        }],
+        defaultReasoningEffort: "high",
+      },
+    ],
+    modelsUpdatedAt: cachedAt,
+    modelsLastAttemptedAt: cachedAt,
+    modelsProvenance: "provider",
+    modelsStale: false,
+    rateLimits: [],
+    rateLimitsUpdatedAt: null,
+    rateLimitsLastAttemptedAt: null,
+    rateLimitsProvenance: null,
+    rateLimitsStale: false,
+  });
+  runtimeStore.updateConversation(currentConversation.id, {
+    providerId: "codex",
+    modelSelection: alpha,
+  });
+  runtimeStore.updateConversation(currentConversation.id, {
+    providerSessionId: "composer-e2e-session",
+    continuationIdentity: alphaIdentity,
+  });
+  const requestedAt = new Date(Date.now() - 1_000).toISOString();
+  const { turn } = runtimeStore.beginAgentTurn({
+    conversationId: currentConversation.id,
+    runId: `composer-e2e-${randomUUID()}`,
+    providerId: "codex",
+    modelSelection: alpha,
+    continuationIdentity: alphaIdentity,
+    reasoningEffort: "medium",
+    interactionMode: currentConversation.interactionMode,
+    accessMode: currentConversation.accessMode,
+    providerSessionBefore: "composer-e2e-session",
+    configurationRevision: 0,
+    association: "authoritative",
+    content: "Keep the authoritative Codex route.",
+    requestedAt,
+  });
+  runtimeStore.updateAgentTurnLifecycle(turn.id, {
+    status: "completed",
+    providerSessionAfter: "composer-e2e-session",
+    startedAt: requestedAt,
+    completedAt: cachedAt,
+    updatedAt: cachedAt,
+  });
+  runtimeStore.close();
+
+  const beforeRestart = await runtimeSnapshot();
+  const appShell = page.locator(".app-shell");
+  const rendererGenerationBeforeRestart = await appShell.getAttribute(
+    "data-runtime-generation",
+  );
+  expect(rendererGenerationBeforeRestart).not.toBeNull();
+  await electronApp.evaluate(() => {
+    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+      crash: () => RuntimeTestSnapshot;
+    } | undefined;
+    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
+    runtime.crash();
+  });
+  await expect.poll(async () => {
+    const current = await runtimeSnapshot();
+    return current.phase === "ready" && current.generation > beforeRestart.generation;
+  }, { timeout: 10_000 }).toBe(true);
+  await expect.poll(async () => {
+    const generation = await appShell.getAttribute("data-runtime-generation");
+    return generation && generation !== rendererGenerationBeforeRestart;
+  }, { timeout: 10_000 }).toBe(true);
+  await expect(appShell).toHaveAttribute("data-connection-status", "online", {
+    timeout: 10_000,
+  });
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+
+  await page.evaluate((storageKey) => {
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      version: 2,
+      favorites: [
+        {
+          harnessId: "codex-app-server",
+          backendProfileId: "builtin:openai",
+          modelId: "gpt-5.6-sol",
+          reasoningEffort: "high",
+        },
+        {
+          harnessId: "codex-app-server",
+          backendProfileId: "builtin:openai",
+          modelId: "gpt-5.6-sol",
+          reasoningEffort: "xhigh",
+        },
+      ],
+    }));
+  }, MODEL_FAVORITES_STORAGE_KEY);
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  await modelTrigger.click();
+  await expect(modelChooser).toBeVisible();
+  await searchModels.fill("Sol");
+  const solResults = modelChooser.getByRole("option").filter({
+    hasText: /^Sol/u,
+  });
+  await expect(solResults).toHaveCount(2);
+  const solXhigh = solResults.filter({ hasText: /xhigh reasoning/u });
+  await expect(solXhigh).toBeVisible();
+  await captureChooserScenario("model-chooser-search-sol-1440x720");
+  await solXhigh.click();
+  await expect.poll(() => {
+    const database = new Database(databasePath, { readonly: true });
+    const row = database.prepare(`
+      SELECT model_selection_json AS selection
+      FROM conversations
+      WHERE id = ?
+    `).get(currentConversation.id) as { selection: string };
+    database.close();
+    const selection = JSON.parse(row.selection) as {
+      modelId: string;
+      reasoningEffort: string | null;
+    };
+    return {
+      modelId: selection.modelId,
+      reasoningEffort: selection.reasoningEffort,
+    };
+  }).toEqual({
+    modelId: "gpt-5.6-sol",
+    reasoningEffort: "xhigh",
+  });
+
+  await modelTrigger.click();
+  await expect(modelChooser).toBeVisible();
+  await searchModels.fill("Codex Beta");
+  const codexBeta = modelChooser.getByRole("option").filter({
+    hasText: /^Codex Beta/u,
+  });
+  await expect(codexBeta).toBeEnabled();
+  await codexBeta.click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect.poll(() => {
+    const database = new Database(databasePath, { readonly: true });
+    const row = database.prepare(`
+      SELECT active_conversation_id,
+             (SELECT model_selection_json FROM conversations
+              WHERE id = app_state.active_conversation_id) AS selection,
+             (SELECT COUNT(*) FROM conversations) AS conversation_count
+      FROM app_state
+      WHERE id = 1
+    `).get() as {
+      active_conversation_id: string;
+      selection: string;
+      conversation_count: number;
+    };
+    database.close();
+    return {
+      activeId: row.active_conversation_id,
+      modelId: (JSON.parse(row.selection) as { modelId: string }).modelId,
+      conversationCount: row.conversation_count,
+    };
+  }).toEqual({
+    activeId: currentConversation.id,
+    modelId: "codex-beta",
+    conversationCount: conversationCountBefore,
+  });
+
+  const chooseKimi = async (): Promise<void> => {
+    await modelTrigger.click();
+    await modelChooser.getByRole("searchbox", { name: "Search models" })
+      .fill("Kimi K3");
+    const kimi = modelChooser.getByRole("option")
+      .filter({ hasText: /K3/u })
+      .filter({ hasText: /Kimi/u, hasNotText: /256K/u });
+    await expect(kimi).toBeEnabled();
+    await kimi.click();
+  };
+  await chooseKimi();
+  const routeConfirmation = page.getByRole("alertdialog");
+  await expect(routeConfirmation).toContainText(
+    "Open a new chat for Kimi · K3?",
+  );
+  await expect(routeConfirmation).toContainText(
+    "Start a new chat to use a different agent harness.",
+  );
+  const routeConfirmationAx = await routeConfirmation.ariaSnapshot();
+  expect(routeConfirmationAx).toContain(
+    '- alertdialog "Open a new chat for Kimi · K3?"',
+  );
+  expect(routeConfirmationAx).toContain('- button "Cancel"');
+  expect(routeConfirmationAx).toContain('- button "New chat"');
+  const cancelRouteChange = routeConfirmation.getByRole("button", {
+    name: "Cancel",
+  });
+  await expect(routeConfirmation).toHaveAttribute("aria-busy", "false");
+  await expect(cancelRouteChange).toBeFocused();
+  const routeFocusScreenshot = testInfo.outputPath(
+    "route-change-confirmation-focus-1440x720.png",
+  );
+  await page.locator(".composer").screenshot({
+    animations: "disabled",
+    path: routeFocusScreenshot,
+  });
+  await testInfo.attach("route-change-confirmation-focus-1440x720", {
+    path: routeFocusScreenshot,
+    contentType: "image/png",
+  });
+  await page.keyboard.press("Tab");
+  await expect(routeConfirmation.getByRole("button", {
+    name: "New chat",
+  })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(cancelRouteChange).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(routeConfirmation).toHaveCount(0);
+  await expect(modelTrigger).toBeFocused();
+
+  await chooseKimi();
+  await expect(cancelRouteChange).toBeFocused();
+  await cancelRouteChange.click();
+  await expect(routeConfirmation).toHaveCount(0);
+  await expect(modelTrigger).toBeFocused();
+
+  await chooseKimi();
+  await expect(cancelRouteChange).toBeFocused();
+  await routeConfirmation.getByRole("button", { name: "New chat" }).click();
+  await expect.poll(() => {
+    const database = new Database(databasePath, { readonly: true });
+    const row = database.prepare(`
+      SELECT active_conversation_id,
+             (SELECT model_selection_json FROM conversations
+              WHERE id = app_state.active_conversation_id) AS selection,
+             (SELECT COUNT(*) FROM conversations) AS conversation_count
+      FROM app_state
+      WHERE id = 1
+    `).get() as {
+      active_conversation_id: string;
+      selection: string;
+      conversation_count: number;
+    };
+    database.close();
+    const selection = JSON.parse(row.selection) as {
+      backendProfileId: string;
+      modelId: string;
+    };
+    return {
+      activeChanged: row.active_conversation_id !== currentConversation.id,
+      backendProfileId: selection.backendProfileId,
+      modelId: selection.modelId,
+      conversationCount: row.conversation_count,
+    };
+  }).toEqual({
+    activeChanged: true,
+    backendProfileId: "builtin:kimi-code",
+    modelId: "k3",
+    conversationCount: conversationCountBefore + 1,
+  });
+  await expect(routeConfirmation).toHaveCount(0);
+  await workspaceHeader.getByRole("button", { name: "Open workspace tools" }).click();
+  expect(rendererErrors).toEqual([]);
+});

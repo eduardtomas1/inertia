@@ -512,9 +512,11 @@ export default function App(): React.JSX.Element {
     const path = await window.inertia.selectCodexExecutable();
     if (path) await updateSettings({ codexBinaryPath: path });
   };
-  const cycleTheme = () => updateSettings({
-    theme: nextQuickTheme(settings.theme, window.matchMedia("(prefers-color-scheme: dark)").matches),
-  });
+  const cycleTheme = () => {
+    void updateSettings({
+      theme: nextQuickTheme(settings.theme, window.matchMedia("(prefers-color-scheme: dark)").matches),
+    });
+  };
   const refreshProvider = useCallback((providerId?: ProviderId) => {
     void run("provider.refresh", {
       type: "provider.refresh",
@@ -674,7 +676,9 @@ export default function App(): React.JSX.Element {
             payload: { projectId: item.id, gitRepositoryLimit },
           }).catch(() => undefined);
         }}
-        onSidebarModeChange={(sidebarMode) => updateSettings({ sidebarMode })}
+        onSidebarModeChange={(sidebarMode) => {
+          void updateSettings({ sidebarMode });
+        }}
         onRemoveProject={(item) => {
           const confirmed = !settings.confirmDestructiveActions
             || window.confirm(

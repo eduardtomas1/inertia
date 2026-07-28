@@ -243,7 +243,6 @@ function TerminalSession({
         setSessionState("ready");
         terminal?.clear();
         if (bufferedOutput) terminal?.write(bufferedOutput);
-        terminal?.focus();
       })
       .catch((terminalError) => {
         if (cancelled) return;

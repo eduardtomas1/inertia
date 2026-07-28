@@ -290,7 +290,9 @@ export class TurnController {
             failure,
           );
         },
-      ).finally(() => this.releaseTurnAttachments(active))
+      ).finally(() => {
+        this.track(this.releaseTurnAttachments(active));
+      })
         .catch(() => undefined);
       if (this.store.agentTurn(active.turn.id).status === "starting") {
         if (this.transition(active, "running")) this.hooks.broadcastSnapshot();

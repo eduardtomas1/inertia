@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "composite": false,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    "types": ["node", "electron-vite/node"]
+  },
+  "include": ["src/shared/desktop.ts", "tests/e2e/**/*.ts"]
+}

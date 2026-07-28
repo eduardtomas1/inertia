@@ -13,6 +13,7 @@ test-results/
 .vite/
 .electron-vite/
 .cache/
+resources/generated/
 *.tsbuildinfo
 
 # Local runtime state

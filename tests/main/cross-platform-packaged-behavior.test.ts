@@ -153,4 +153,18 @@ describe("cross-platform packaged behavior contract", () => {
       "vitest run tests/server/kimi-claude-real-smoke.test.ts",
     );
   });
+
+  it("reports provider drift even when result collection never runs", async () => {
+    const workflow = await source(".github/workflows/provider-contract-drift.yml");
+    expect(workflow).toContain(
+      "needs.provider-drift.result != 'success' || needs.provider-drift.outputs.failed != 'false'",
+    );
+    expect(workflow).toContain(
+      "PROVIDER_DRIFT_RESULT: ${{ needs.provider-drift.result }}",
+    );
+    expect(workflow).toContain(
+      '["Canary job", process.env.PROVIDER_DRIFT_RESULT]',
+    );
+    expect(workflow.match(/--connect-timeout 20 --max-time 120/gu)).toHaveLength(2);
+  });
 });

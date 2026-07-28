@@ -5,7 +5,7 @@ import type {
   RuntimeAttachmentReleaseResult,
   RuntimeAttachmentResult,
   RuntimeWorkerEvent,
-} from "../../../main/runtime-process-protocol.js";
+} from "../../../node/runtime-process-protocol.js";
 import type { TrustedRuntimeAttachment } from "../../../shared/runtime-attachments.js";
 import type { RuntimeAttachmentBroker } from "./trusted-attachment-resolver.js";
 

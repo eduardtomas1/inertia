@@ -6,7 +6,7 @@ import {
   isRuntimeWebSocketUrl,
   parseRuntimeWorkerCommand,
   parseRuntimeWorkerEvent,
-} from "../../src/main/runtime-process-protocol";
+} from "../../src/node/runtime-process-protocol";
 import {
   builtInKimiClaudeBackendProfile,
   KIMI_CLAUDE_BUILTIN_PROFILE_ID,

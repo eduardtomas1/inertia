@@ -23,6 +23,12 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
+function nodeFilterCommand(path: string): string {
+  const executable = process.execPath.replaceAll("\\", "/");
+  const script = path.replaceAll("\\", "/");
+  return `"${executable}" "${script}"`;
+}
+
 describe("Git checkpoints", () => {
   const roots: string[] = [];
   afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
@@ -64,23 +70,22 @@ describe("Git checkpoints", () => {
     const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
     roots.push(indexes);
     const marker = join(root, "clean-filter-invoked");
-    const filter = join(root, "hostile-clean-filter");
+    const filter = join(root, "hostile-clean-filter.cjs");
     writeFileSync(
       filter,
       [
-        "#!/usr/bin/env node",
         'const { writeFileSync } = require("node:fs");',
         `writeFileSync(${JSON.stringify(marker)}, "invoked");`,
         'process.stdin.pipe(process.stdout);',
         "",
       ].join("\n"),
     );
-    chmodSync(filter, 0o755);
-    git(root, "config", "filter.hostile.clean", filter);
-    git(root, "config", "filter.hostile.required", "true");
+    if (process.platform !== "win32") chmodSync(filter, 0o755);
     writeFileSync(join(root, ".gitattributes"), "*.txt filter=hostile\n");
     git(root, "add", ".gitattributes");
     git(root, "commit", "-m", "attributes");
+    git(root, "config", "filter.hostile.clean", nodeFilterCommand(filter));
+    git(root, "config", "filter.hostile.required", "true");
     writeFileSync(join(root, "tracked.txt"), "checkpoint bytes\n");
 
     git(root, "hash-object", "--path=tracked.txt", "tracked.txt");
@@ -104,21 +109,20 @@ describe("Git checkpoints", () => {
     const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
     roots.push(indexes);
     const marker = join(root, "process-filter-invoked");
-    const filter = join(root, "hostile-process-filter");
+    const filter = join(root, "hostile-process-filter.cjs");
     writeFileSync(
       filter,
       [
-        "#!/usr/bin/env node",
         'const { writeFileSync } = require("node:fs");',
         `writeFileSync(${JSON.stringify(marker)}, "invoked");`,
         "",
       ].join("\n"),
     );
-    chmodSync(filter, 0o755);
+    if (process.platform !== "win32") chmodSync(filter, 0o755);
     writeFileSync(join(root, ".gitattributes"), "*.txt filter=hostile\n");
     git(root, "add", ".gitattributes");
     git(root, "commit", "-m", "attributes");
-    git(root, "config", "filter.hostile.process", filter);
+    git(root, "config", "filter.hostile.process", nodeFilterCommand(filter));
     git(root, "config", "filter.hostile.required", "true");
     writeFileSync(join(root, "tracked.txt"), "checkpoint bytes\n");
 

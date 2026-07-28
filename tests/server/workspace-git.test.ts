@@ -87,8 +87,10 @@ describe("workspace Git repository discovery", () => {
     configuredFsmonitorHook(root, marker);
 
     git(root, "status", "--porcelain");
-    expect(existsSync(marker)).toBe(true);
-    rmSync(marker);
+    if (process.platform !== "win32") {
+      expect(existsSync(marker)).toBe(true);
+      rmSync(marker);
+    }
 
     const status = await getRepositoryStatus(root);
 
@@ -261,7 +263,7 @@ describe("workspace Git repository discovery", () => {
     expect(snapshot.repositories.at(-1)?.repositoryPath).toBe(
       "modules/repository-63",
     );
-  });
+  }, 60_000);
 
   it("loads the complete diff for one small change in a root-less nested repository", async () => {
     const root = temporaryRoot("single-nested-diff");

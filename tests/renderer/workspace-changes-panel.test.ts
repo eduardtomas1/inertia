@@ -7,10 +7,13 @@ import {
 } from "../../src/renderer/src/components/ChangesPanel";
 import {
   WorkspaceChangesPanel,
+  workspaceGitRepositoriesWithMissingReviewTargets,
   workspaceGitSelectedFileRevision,
 } from "../../src/renderer/src/components/WorkspaceChangesPanel";
 import type {
   ChangedFile,
+  DiffReviewNote,
+  DiffReviewState,
   DiffReviewSummary,
   WorkspaceGitSnapshot,
 } from "../../src/shared/contracts";
@@ -245,6 +248,54 @@ describe("workspace repository-grouped Changes panel", () => {
     expect(workspaceGitSelectedFileRevision(after, selection)).not.toBe(
       workspaceGitSelectedFileRevision(before, selection),
     );
+  });
+
+  it("finds complete nested repositories whose active review targets disappeared", () => {
+    const current = snapshot();
+    current.repositories[1]!.files = [];
+    current.repositories[1]!.insertions = 0;
+    current.repositories[1]!.deletions = 0;
+    current.repositories[1]!.clean = true;
+    const state: DiffReviewState = {
+      conversationId: "conversation",
+      repositoryPath: "modules/org.openbravo.alpha",
+      scope: "file",
+      path: "src/Main.java",
+      hunkId: null,
+      targetFingerprint: "a".repeat(64),
+      reviewed: true,
+      stale: false,
+      updatedAt: new Date(0).toISOString(),
+    };
+    const note: DiffReviewNote = {
+      id: "note",
+      conversationId: "conversation",
+      repositoryPath: "modules/org.openbravo.beta",
+      path: "src/Removed.java",
+      hunkId: null,
+      lineIds: [],
+      targetFingerprint: "b".repeat(64),
+      body: "Review target that is no longer dirty.",
+      stale: false,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+
+    expect(workspaceGitRepositoriesWithMissingReviewTargets(
+      current,
+      [state],
+      [note],
+    )).toEqual([
+      "modules/org.openbravo.alpha",
+      "modules/org.openbravo.beta",
+    ]);
+
+    current.repositories[1]!.truncated = true;
+    expect(workspaceGitRepositoriesWithMissingReviewTargets(
+      current,
+      [state, { ...state, repositoryPath: ".", path: "missing-root.ts" }],
+      [{ ...note, stale: true }],
+    )).toEqual([]);
   });
 
   it("shows nested review support and the checkpoint-backed revision boundary", () => {

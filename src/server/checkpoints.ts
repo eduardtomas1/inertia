@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { gitProcessEnvironment } from "./git/environment";
@@ -10,6 +11,8 @@ export class CheckpointError extends Error {}
 type RunResult = { stdout: Buffer; stderr: Buffer };
 
 const MAX_CHECKPOINT_PATH_BYTES = 16 * 1024 * 1024;
+const RAW_CHECKPOINT_ATTRIBUTES =
+  "* -crlf -filter -ident -text -working-tree-encoding -eol\n";
 
 function runGit(
   cwd: string,
@@ -93,6 +96,7 @@ async function checkpointEnvironment(
   environment: NodeJS.ProcessEnv;
   metadataDirectory: string;
   globalConfigPath: string;
+  hooksDirectory: string;
 }> {
   const metadataDirectory = resolve(
     storageDirectory,
@@ -102,12 +106,23 @@ async function checkpointEnvironment(
     storageDirectory,
     `${checkpointId}.config`,
   );
-  const isolatedConfiguration = {
-    ...environment,
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: globalConfigPath,
-    GIT_ATTR_NOSYSTEM: "1",
-  };
+  const hooksDirectory = resolve(
+    metadataDirectory,
+    "inertia-hooks",
+  );
+  const isolatedConfiguration: NodeJS.ProcessEnv = { ...environment };
+  for (const name of Object.keys(isolatedConfiguration)) {
+    if (
+      name === "GIT_CONFIG_COUNT"
+      || name === "GIT_CONFIG_PARAMETERS"
+      || /^GIT_CONFIG_(?:KEY|VALUE)_\d+$/u.test(name)
+    ) {
+      delete isolatedConfiguration[name];
+    }
+  }
+  isolatedConfiguration.GIT_CONFIG_NOSYSTEM = "1";
+  isolatedConfiguration.GIT_CONFIG_GLOBAL = globalConfigPath;
+  isolatedConfiguration.GIT_ATTR_NOSYSTEM = "1";
   await writeFile(globalConfigPath, "", {
     encoding: "utf8",
     flag: "wx",
@@ -154,9 +169,16 @@ async function checkpointEnvironment(
     ],
     isolatedConfiguration,
   );
+  await mkdir(hooksDirectory, { mode: 0o700 });
+  await writeFile(
+    resolve(metadataDirectory, "info", "attributes"),
+    RAW_CHECKPOINT_ATTRIBUTES,
+    { encoding: "utf8", mode: 0o600 },
+  );
   return {
     metadataDirectory,
     globalConfigPath,
+    hooksDirectory,
     environment: {
       ...isolatedConfiguration,
       GIT_DIR: metadataDirectory,
@@ -211,6 +233,7 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
       await runGit(
         repositoryPath,
         checkpointGitArguments([
+          "--literal-pathspecs",
           "add",
           "-A",
           "--pathspec-from-file=-",
@@ -228,7 +251,13 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
     // reference through the real repository after the object is created.
     await runGit(
       repositoryPath,
-      ["update-ref", ref, commit],
+      checkpointGitArguments([
+        "-c",
+        `core.hooksPath=${isolated.hooksDirectory}`,
+        "update-ref",
+        ref,
+        commit,
+      ]),
       baseEnvironment,
     );
     return { id: checkpointId, ref };
@@ -251,13 +280,100 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
   if (!ref.startsWith(prefix) || !/^refs\/inertia\/checkpoints\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/u.test(ref)) {
     throw new CheckpointError("The checkpoint reference is invalid.");
   }
-  await runGit(repositoryPath, ["rev-parse", "--verify", ref]);
-  await runGit(repositoryPath, ["restore", "--source", ref, "--worktree", "--", "."]);
+  const restoreId = randomUUID();
+  const restoreDirectory = await mkdtemp(
+    join(tmpdir(), "inertia-checkpoint-restore-"),
+  );
+  const indexPath = resolve(restoreDirectory, `${restoreId}.index`);
+  const baseEnvironment = {
+    ...process.env,
+    GIT_INDEX_FILE: indexPath,
+  };
+  try {
+    const commit = (
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments([
+          "rev-parse",
+          "--verify",
+          `${ref}^{commit}`,
+        ]),
+      )
+    ).stdout.toString("utf8").trim();
+    const indexEntries = (
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments(["ls-files", "--stage", "-z"]),
+        process.env,
+        undefined,
+        [0],
+        MAX_CHECKPOINT_PATH_BYTES,
+      )
+    ).stdout;
+    const isolated = await checkpointEnvironment(
+      repositoryPath,
+      restoreDirectory,
+      restoreId,
+      baseEnvironment,
+    );
+    await runGit(
+      repositoryPath,
+      ["read-tree", "--empty"],
+      isolated.environment,
+    );
+    if (indexEntries.length > 0) {
+      await runGit(
+        repositoryPath,
+        ["update-index", "-z", "--index-info"],
+        isolated.environment,
+        indexEntries,
+      );
+    }
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments([
+        "restore",
+        "--source",
+        commit,
+        "--worktree",
+        "--",
+        ".",
+      ]),
+      isolated.environment,
+    );
+  } finally {
+    await rm(restoreDirectory, {
+      force: true,
+      recursive: true,
+    }).catch(() => undefined);
+  }
 }
 
 export async function deleteCheckpoints(repositoryPath: string, conversationId: string): Promise<void> {
   if (!/^[0-9a-f-]{36}$/u.test(conversationId)) throw new CheckpointError("The checkpoint namespace is invalid.");
   const prefix = `refs/inertia/checkpoints/${conversationId}/`;
   const refs = (await runGit(repositoryPath, ["for-each-ref", "--format=%(refname)", prefix])).stdout.toString("utf8").split("\n").map((ref) => ref.trim()).filter((ref) => ref.startsWith(prefix));
-  await Promise.all(refs.map((ref) => runGit(repositoryPath, ["update-ref", "-d", ref])));
+  if (refs.length === 0) return;
+  const hooksDirectory = await mkdtemp(
+    join(tmpdir(), "inertia-checkpoint-hooks-"),
+  );
+  try {
+    await Promise.all(
+      refs.map((ref) => runGit(
+        repositoryPath,
+        checkpointGitArguments([
+          "-c",
+          `core.hooksPath=${hooksDirectory}`,
+          "update-ref",
+          "-d",
+          ref,
+        ]),
+      )),
+    );
+  } finally {
+    await rm(hooksDirectory, {
+      force: true,
+      recursive: true,
+    }).catch(() => undefined);
+  }
 }

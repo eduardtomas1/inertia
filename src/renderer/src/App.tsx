@@ -785,6 +785,7 @@ export default function App(): React.JSX.Element {
 
       <CommitDialog
         open={commitDialogOpen}
+        repositoryPath="."
         status={gitStatus}
         reviewStates={reviewStates}
         diff={structuredDiff}

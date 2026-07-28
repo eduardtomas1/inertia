@@ -10,6 +10,8 @@ import {
 
 import type {
   ChangedFile,
+  DiffReviewNote,
+  DiffReviewState,
   WorkspaceGitDiffSnapshot,
   WorkspaceGitRepositorySnapshot,
   WorkspaceGitSnapshot,
@@ -108,6 +110,44 @@ export function workspaceGitSelectedFileRevision(
   ]);
 }
 
+export function workspaceGitRepositoriesWithMissingReviewTargets(
+  snapshot: WorkspaceGitSnapshot | null,
+  reviewStates: readonly DiffReviewState[],
+  notes: readonly DiffReviewNote[],
+): string[] {
+  if (!snapshot) return [];
+  const activePathsByRepository = new Map<string, Set<string>>();
+  for (const targets of [reviewStates, notes]) {
+    for (const target of targets) {
+      const repositoryPath = target.repositoryPath ?? ".";
+      if (target.stale || repositoryPath === ".") continue;
+      const paths = activePathsByRepository.get(repositoryPath)
+        ?? new Set<string>();
+      paths.add(target.path);
+      activePathsByRepository.set(repositoryPath, paths);
+    }
+  }
+  return snapshot.repositories
+    .filter((repository) => {
+      const activePaths = activePathsByRepository.get(
+        repository.repositoryPath,
+      );
+      if (
+        !activePaths
+        || repository.state !== "ready"
+        || repository.truncated
+      ) {
+        return false;
+      }
+      const changedPaths = new Set(repository.files.map((file) => file.path));
+      for (const path of activePaths) {
+        if (!changedPaths.has(path)) return true;
+      }
+      return false;
+    })
+    .map((repository) => repository.repositoryPath);
+}
+
 export function WorkspaceChangesPanel({
   projectName,
   snapshot,
@@ -152,6 +192,14 @@ export function WorkspaceChangesPanel({
     snapshot,
     effectiveSelection,
   );
+  const missingReviewRepositories = useMemo(
+    () => workspaceGitRepositoriesWithMissingReviewTargets(
+      snapshot,
+      reviewStates,
+      notes,
+    ),
+    [notes, reviewStates, snapshot],
+  );
 
   useEffect(() => {
     if (!effectiveSelection) {
@@ -169,6 +217,15 @@ export function WorkspaceChangesPanel({
       return next;
     });
   }, [effectiveSelection, selected]);
+
+  useEffect(() => {
+    for (const repositoryPath of missingReviewRepositories) {
+      void onLoadRepositoryDiff(repositoryPath).catch(() => undefined);
+    }
+  }, [
+    missingReviewRepositories,
+    onLoadRepositoryDiff,
+  ]);
 
   useEffect(() => {
     if (

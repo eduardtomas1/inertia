@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CheckpointError,
   createCheckpoint,
+  deleteCheckpoints,
   restoreCheckpoint,
 } from "../../src/server/checkpoints";
 import { getPullRequestCreateUrl } from "../../src/server/git";
@@ -27,6 +28,27 @@ function nodeFilterCommand(path: string): string {
   const executable = process.execPath.replaceAll("\\", "/");
   const script = path.replaceAll("\\", "/");
   return `"${executable}" "${script}"`;
+}
+
+function writePrefixFilter(
+  path: string,
+  marker: string,
+  prefix: string,
+): void {
+  writeFileSync(
+    path,
+    [
+      'const { writeFileSync } = require("node:fs");',
+      "const chunks = [];",
+      `const prefix = Buffer.from(${JSON.stringify(prefix)});`,
+      'process.stdin.on("data", (chunk) => chunks.push(chunk));',
+      'process.stdin.on("end", () => {',
+      `  writeFileSync(${JSON.stringify(marker)}, "invoked");`,
+      "  process.stdout.write(Buffer.concat([prefix, ...chunks]));",
+      "});",
+      "",
+    ].join("\n"),
+  );
 }
 
 describe("Git checkpoints", () => {
@@ -135,6 +157,75 @@ describe("Git checkpoints", () => {
     expect(
       git(root, "show", `${checkpoint.ref}:tracked.txt`),
     ).toBe("checkpoint bytes");
+  });
+
+  it("restores exact bytes without running non-idempotent clean or smudge filters", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const cleanMarker = join(root, "clean-filter-invoked");
+    const smudgeMarker = join(root, "smudge-filter-invoked");
+    const cleanFilter = join(root, "prefix-clean-filter.cjs");
+    const smudgeFilter = join(root, "prefix-smudge-filter.cjs");
+    writePrefixFilter(cleanFilter, cleanMarker, "CLEAN:");
+    writePrefixFilter(smudgeFilter, smudgeMarker, "SMUDGE:");
+    writeFileSync(
+      join(root, ".gitattributes"),
+      "*.txt filter=prefix\n",
+    );
+    git(root, "add", ".gitattributes");
+    git(root, "commit", "-m", "attributes");
+    git(root, "config", "filter.prefix.clean", nodeFilterCommand(cleanFilter));
+    git(root, "config", "filter.prefix.smudge", nodeFilterCommand(smudgeFilter));
+    git(root, "config", "filter.prefix.required", "true");
+    const checkpointBytes = Buffer.from("checkpoint bytes\r\n");
+    writeFileSync(join(root, "tracked.txt"), checkpointBytes);
+
+    git(root, "hash-object", "--path=tracked.txt", "tracked.txt");
+    expect(existsSync(cleanMarker)).toBe(true);
+    rmSync(cleanMarker);
+
+    const conversationId = randomUUID();
+    const checkpoint = await createCheckpoint(
+      root,
+      indexes,
+      conversationId,
+    );
+    expect(existsSync(cleanMarker)).toBe(false);
+
+    writeFileSync(join(root, "tracked.txt"), "after checkpoint\n");
+    await restoreCheckpoint(root, checkpoint.ref, conversationId);
+
+    expect(readFileSync(join(root, "tracked.txt"))).toEqual(
+      checkpointBytes,
+    );
+    expect(existsSync(cleanMarker)).toBe(false);
+    expect(existsSync(smudgeMarker)).toBe(false);
+  });
+
+  it("does not run repository reference hooks for checkpoint refs", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const marker = join(root, "reference-hook-invoked");
+    const hook = join(root, ".git", "hooks", "reference-transaction");
+    writeFileSync(
+      hook,
+      [
+        "#!/usr/bin/env node",
+        'const { writeFileSync } = require("node:fs");',
+        `writeFileSync(${JSON.stringify(marker)}, "invoked");`,
+        "",
+      ].join("\n"),
+    );
+    if (process.platform !== "win32") chmodSync(hook, 0o755);
+    const conversationId = randomUUID();
+
+    await createCheckpoint(root, indexes, conversationId);
+    expect(existsSync(marker)).toBe(false);
+
+    await deleteCheckpoints(root, conversationId);
+    expect(existsSync(marker)).toBe(false);
   });
 
   it("preserves repository and configured excludes without enabling filters", async () => {

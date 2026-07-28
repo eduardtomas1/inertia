@@ -27,10 +27,40 @@ export type ClaudeQueryFactory = (params: {
   options?: ClaudeOptions;
 }) => Query;
 export const createClaudeQuery: ClaudeQueryFactory = claudeQuery;
-export type ClaudeApprovalSurface = (
-  toolName: string,
-  input: Record<string, unknown>,
-) => ReturnType<CanUseTool> | Promise<PermissionResult>;
+export const claudeCanUseTool: CanUseTool = async (
+  toolName,
+  input,
+  callbackOptions,
+) => {
+  const productApprovalSurface = {
+    toolName,
+    input,
+    signal: callbackOptions.signal,
+    toolUseID: callbackOptions.toolUseID,
+    title: callbackOptions.title,
+    description: callbackOptions.description,
+    decisionReason: callbackOptions.decisionReason,
+    blockedPath: callbackOptions.blockedPath,
+  };
+  void productApprovalSurface;
+  return {
+    behavior: "allow",
+    updatedInput: input,
+  } satisfies PermissionResult;
+};
+export const claudeProductOptions = {
+  abortController: new AbortController(),
+  cwd: ".",
+  env: {},
+  pathToClaudeCodeExecutable: "claude",
+  includePartialMessages: true,
+  permissionMode: "bypassPermissions",
+  allowDangerouslySkipPermissions: true,
+  canUseTool: claudeCanUseTool,
+  resume: "provider-session-id",
+  model: "provider-model-id",
+  effort: "high",
+} satisfies ClaudeOptions;
 export type ClaudeMetadataSurface = Pick<
   Query,
   "supportedModels" | "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET"

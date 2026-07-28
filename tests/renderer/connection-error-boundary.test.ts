@@ -13,15 +13,15 @@ import {
 const appSource = readFileSync(
   new URL("../../src/renderer/src/App.tsx", import.meta.url),
   "utf8",
-);
+).replace(/\r\n?/gu, "\n");
 const workspaceToolsSource = readFileSync(
   new URL("../../src/renderer/src/hooks/workspace-tools/useWorkspaceFiles.ts", import.meta.url),
   "utf8",
-);
+).replace(/\r\n?/gu, "\n");
 const workspaceGitSource = readFileSync(
   new URL("../../src/renderer/src/hooks/workspace-tools/useWorkspaceGit.ts", import.meta.url),
   "utf8",
-);
+).replace(/\r\n?/gu, "\n");
 
 describe("renderer error visibility boundary", () => {
   it("keeps a first-send request failure command-scoped while malformed transport data becomes global", () => {

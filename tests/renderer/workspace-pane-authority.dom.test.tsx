@@ -17,9 +17,13 @@ import {
 import {
   useWorkspaceGit,
 } from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceGit";
+import {
+  useWorkspaceReview,
+} from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceReview";
 import type {
   CommandWithoutId,
 } from "../../src/renderer/src/lib/runtimeCommands";
+import { parseUnifiedDiff } from "../../src/shared/diff-review";
 
 function project(id: string, name: string): Project {
   return {
@@ -274,6 +278,151 @@ describe("workspace pane authority", () => {
 
     expect(hook.result.current.gitStatus?.root).toBe("/beta");
     expect(hook.result.current.gitDiff?.patch).toBe("BETA");
+  });
+
+  it("retains a completed reversal under its initiating pane authority", async () => {
+    const patch = [
+      "diff --git a/src/value.ts b/src/value.ts",
+      "--- a/src/value.ts",
+      "+++ b/src/value.ts",
+      "@@ -1 +1 @@",
+      "-export const value = 1;",
+      "+export const value = 2;",
+    ].join("\n");
+    const structured = parseUnifiedDiff(patch);
+    const file = structured.files[0]!;
+    const hunk = file.hunks[0]!;
+    const selectedLine = hunk.lines.find(({ kind }) => kind === "addition")!;
+    const selection = {
+      fingerprint: structured.fingerprint,
+      file,
+      hunk,
+      lineIds: [selectedLine.id],
+      reference: "src/value.ts",
+      repositoryPath: ".",
+    };
+    const operation = {
+      id: "55555555-5555-4555-8555-555555555555",
+      repositoryPath: ".",
+      filePath: file.path,
+      selectedLineCount: 1,
+      affectedLayers: ["worktree"] as const,
+      createdAt: "2026-07-28T12:01:00.000Z",
+    };
+    let settleReversal: ((event: ServerEvent) => void) | null = null;
+    let settleUndo: ((event: ServerEvent) => void) | null = null;
+    const run = vi.fn((
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "git.selection.inspect") {
+        return Promise.resolve(result({
+          kind: "git.reversal.plan",
+          plan: {
+            filePath: file.path,
+            hunkId: hunk.id,
+            hunkHeader: hunk.header,
+            selectedLineCount: 1,
+            changedLineCount: 1,
+            affectedLayers: ["worktree"],
+            validation: {
+              diffFingerprint: "a".repeat(64),
+              fileFingerprint: "b".repeat(64),
+              hunkFingerprint: "c".repeat(64),
+              selectionFingerprint: "d".repeat(64),
+              gitStateFingerprint: "e".repeat(64),
+            },
+          },
+        }));
+      }
+      if (command.type === "git.selection.revert") {
+        return new Promise((resolve) => {
+          settleReversal = resolve;
+        });
+      }
+      if (command.type === "git.selection.undo") {
+        return new Promise((resolve) => {
+          settleUndo = resolve;
+        });
+      }
+      return Promise.reject(new Error("Unexpected command"));
+    });
+    const setGitDiff = vi.fn();
+    const loadGit = vi.fn(async () => undefined);
+    const hook = renderHook((owner: {
+      project: Project | null;
+      conversation: Conversation | null;
+    }) => useWorkspaceReview({
+      ...owner,
+      detail: null,
+      gitDiff: { patch, truncated: false, files: [] },
+      ignoreWhitespace: false,
+      confirmDestructiveActions: false,
+      request: vi.fn(),
+      run,
+      setGitDiff,
+      loadGit,
+    }), {
+      initialProps: { project: alpha, conversation: alphaChat },
+    });
+
+    let reversal!: Promise<void>;
+    act(() => {
+      reversal = hook.result.current.revertDiffSelection(selection, "");
+    });
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith(
+        "git.selection.revert",
+        expect.objectContaining({ type: "git.selection.revert" }),
+      );
+    });
+
+    hook.rerender({ project: beta, conversation: betaChat });
+    await act(async () => {
+      settleReversal?.(result({
+        kind: "git.reversal",
+        diff: { patch: "REVERSED", truncated: false, files: [] },
+        operation: { ...operation, affectedLayers: [...operation.affectedLayers] },
+      }));
+      await reversal;
+    });
+
+    expect(hook.result.current.lastDiffReversal).toBeNull();
+    expect(setGitDiff).not.toHaveBeenCalled();
+    expect(loadGit).not.toHaveBeenCalled();
+
+    hook.rerender({ project: alpha, conversation: alphaChat });
+    expect(hook.result.current.lastDiffReversal).toEqual(operation);
+
+    let undo!: Promise<void>;
+    act(() => {
+      undo = hook.result.current.undoDiffReversal();
+    });
+    await waitFor(() => {
+      expect(run).toHaveBeenCalledWith("git.selection.undo", {
+        type: "git.selection.undo",
+        payload: {
+          projectId: alpha.id,
+          conversationId: alphaChat.id,
+          repositoryPath: ".",
+          operationId: operation.id,
+        },
+      });
+    });
+
+    hook.rerender({ project: beta, conversation: betaChat });
+    await act(async () => {
+      settleUndo?.(result({
+        kind: "git.diff",
+        diff: { patch: "RESTORED", truncated: false, files: [] },
+      }));
+      await undo;
+    });
+    expect(setGitDiff).not.toHaveBeenCalled();
+    expect(loadGit).not.toHaveBeenCalled();
+
+    hook.rerender({ project: alpha, conversation: alphaChat });
+    expect(hook.result.current.lastDiffReversal).toBeNull();
   });
 
   it("clears a pending project action when the pane owner changes", () => {

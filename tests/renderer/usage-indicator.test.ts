@@ -125,7 +125,10 @@ describe("UsageIndicator", () => {
   });
 
   it("keeps the anchored popover width and height bounded", () => {
-    const css = readFileSync(new URL("../../src/renderer/src/styles.css", import.meta.url), "utf8");
+    const css = readFileSync(
+      new URL("../../src/renderer/src/styles.css", import.meta.url),
+      "utf8",
+    ).replace(/\r\n?/gu, "\n");
     expect(css).toMatch(
       /\.usage-popover\s*\{[^}]*width:\s*min\(320px,\s*calc\(100vw\s*-\s*24px\)\)[^}]*max-width:\s*calc\(100vw\s*-\s*24px\)[^}]*max-height:\s*min\(460px,\s*calc\(100vh\s*-\s*72px\)\)/su,
     );

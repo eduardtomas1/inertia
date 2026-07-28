@@ -88,8 +88,6 @@ export function useConversationProjection({
     setLiveUsage({});
     setLiveActivities({});
     setLiveSubagents({});
-    setPendingApprovals([]);
-    setPendingInputs([]);
     setNativePlans({});
   }, [enabled]);
   const detail = useMemo(() => {
@@ -177,7 +175,6 @@ export function useConversationProjection({
   }, [detail]);
 
   useEffect(() => subscribe((event) => {
-    if (!enabled) return;
     if (event.type === "server.welcome") {
       requestGenerationRef.current += 1;
       setDetailState(null);
@@ -192,39 +189,50 @@ export function useConversationProjection({
       return;
     }
     if (event.type === "agent.approval.requested") {
-      if (event.request.conversationId !== conversation?.id) return;
       setPendingApprovals((current) => [
-        ...current.filter(({ id }) => id !== event.request.id),
+        ...current.filter(({ id, conversationId }) =>
+          id !== event.request.id
+          || conversationId !== event.request.conversationId),
         event.request,
       ]);
-      if (event.request.conversationId === conversation?.id) {
+      if (
+        enabled
+        && event.request.conversationId === conversation?.id
+      ) {
         setStreamingText("");
       }
       return;
     }
     if (event.type === "agent.approval.resolved") {
-      if (event.conversationId !== conversation?.id) return;
       setPendingApprovals((current) =>
-        current.filter(({ id }) => id !== event.requestId));
+        current.filter(({ id, conversationId }) =>
+          id !== event.requestId
+          || conversationId !== event.conversationId));
       return;
     }
     if (event.type === "agent.input.requested") {
-      if (event.request.conversationId !== conversation?.id) return;
       setPendingInputs((current) => [
-        ...current.filter(({ id }) => id !== event.request.id),
+        ...current.filter(({ id, conversationId }) =>
+          id !== event.request.id
+          || conversationId !== event.request.conversationId),
         event.request,
       ]);
-      if (event.request.conversationId === conversation?.id) {
+      if (
+        enabled
+        && event.request.conversationId === conversation?.id
+      ) {
         setStreamingText("");
       }
       return;
     }
     if (event.type === "agent.input.resolved") {
-      if (event.conversationId !== conversation?.id) return;
       setPendingInputs((current) =>
-        current.filter(({ id }) => id !== event.requestId));
+        current.filter(({ id, conversationId }) =>
+          id !== event.requestId
+          || conversationId !== event.conversationId));
       return;
     }
+    if (!enabled) return;
     if (event.type === "agent.plan.updated") {
       if (event.plan.conversationId !== conversation?.id) return;
       setNativePlans((current) => ({

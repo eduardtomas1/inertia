@@ -30,6 +30,26 @@ interface WorkspaceReviewOptions {
   loadGit: () => Promise<void>;
 }
 
+const MAX_RETAINED_REVERSAL_AUTHORITIES = 64;
+
+function retainReversal(
+  current: ReadonlyMap<string, DiffReversalOperation>,
+  authority: string,
+  operation: DiffReversalOperation,
+): ReadonlyMap<string, DiffReversalOperation> {
+  const next = new Map(current);
+  // Reinsertion keeps the bounded map ordered by the latest completed
+  // reversal, rather than by the first time an authority was seen.
+  next.delete(authority);
+  next.set(authority, operation);
+  while (next.size > MAX_RETAINED_REVERSAL_AUTHORITIES) {
+    const oldest = next.keys().next().value;
+    if (oldest === undefined) break;
+    next.delete(oldest);
+  }
+  return next;
+}
+
 export function useWorkspaceReview({
   project,
   conversation,
@@ -45,13 +65,15 @@ export function useWorkspaceReview({
   const [pendingDiffContext, setPendingDiffContext] = useState<string | null>(
     null,
   );
-  const [lastDiffReversal, setLastDiffReversal] =
-    useState<DiffReversalOperation | null>(null);
+  const [diffReversalsByAuthority, setDiffReversalsByAuthority] = useState<
+    ReadonlyMap<string, DiffReversalOperation>
+  >(() => new Map());
   const [selectionReviewAnswer, setSelectionReviewAnswer] =
     useState<DiffSelectionReviewAnswer | null>(null);
   const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const authorityRef = useRef(authority);
   authorityRef.current = authority;
+  const lastDiffReversal = diffReversalsByAuthority.get(authority) ?? null;
 
   const structuredDiff = useMemo(
     () => parseUnifiedDiff(gitDiff?.patch ?? ""),
@@ -70,7 +92,6 @@ export function useWorkspaceReview({
 
   useEffect(() => {
     setPendingDiffContext(null);
-    setLastDiffReversal(null);
   }, [conversation?.id]);
 
   const reviewSummary = useMemo(
@@ -272,9 +293,14 @@ export function useWorkspaceReview({
         "The local service returned an unexpected reversal result.",
       );
     }
+    const operation = reversed.result.operation;
+    setDiffReversalsByAuthority((current) => retainReversal(
+      current,
+      owner,
+      operation,
+    ));
     if (authorityRef.current !== owner) return;
     setGitDiff(reversed.result.diff);
-    setLastDiffReversal(reversed.result.operation);
     await loadGit();
   }, [
     confirmDestructiveActions,
@@ -289,13 +315,14 @@ export function useWorkspaceReview({
   const undoDiffReversal = useCallback(async () => {
     if (!project || !lastDiffReversal) return;
     const owner = `${project.id}:${conversation?.id ?? ""}`;
+    const operation = lastDiffReversal;
     const restored = resultEvent(await run("git.selection.undo", {
       type: "git.selection.undo",
       payload: {
         projectId: project.id,
         ...(conversation ? { conversationId: conversation.id } : {}),
-        repositoryPath: lastDiffReversal.repositoryPath ?? ".",
-        operationId: lastDiffReversal.id,
+        repositoryPath: operation.repositoryPath ?? ".",
+        operationId: operation.id,
       },
     }));
     if (restored.result.kind !== "git.diff") {
@@ -303,9 +330,14 @@ export function useWorkspaceReview({
         "The local service returned an unexpected Undo result.",
       );
     }
+    setDiffReversalsByAuthority((current) => {
+      if (current.get(owner)?.id !== operation.id) return current;
+      const next = new Map(current);
+      next.delete(owner);
+      return next;
+    });
     if (authorityRef.current !== owner) return;
     setGitDiff(restored.result.diff);
-    setLastDiffReversal(null);
     await loadGit();
   }, [
     conversation,

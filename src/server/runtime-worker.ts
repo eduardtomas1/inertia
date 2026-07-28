@@ -1,7 +1,7 @@
 import {
   parseRuntimeWorkerCommand,
   type RuntimeWorkerEvent,
-} from "../main/runtime-process-protocol.js";
+} from "../node/runtime-process-protocol.js";
 import { startRuntime, type RunningRuntime } from "./index.js";
 import { RuntimeCredentialBrokerClient } from "./runtime/backends/credential-broker-client.js";
 import { RuntimeAttachmentBrokerClient } from "./runtime/attachments/attachment-broker-client.js";

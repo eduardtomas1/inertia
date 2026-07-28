@@ -8,7 +8,7 @@ import {
   type RuntimeCredentialOperation,
   type RuntimeWorkerCommand,
   type RuntimeWorkerOptions,
-} from "./runtime-process-protocol.js";
+} from "../node/runtime-process-protocol.js";
 import {
   RuntimeAttachmentBrokerCoordinator,
   type RuntimeAttachmentBroker,

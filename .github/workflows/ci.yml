@@ -57,6 +57,10 @@ jobs:
       - name: Run portable runtime and provider protocol suite
         run: npm run test:portable
 
+      - name: Enforce all-source coverage baselines
+        if: runner.os == 'Linux'
+        run: npm run test:coverage
+
       - name: Run opt-in Kimi through Claude integration
         if: runner.os == 'Linux'
         shell: bash
@@ -154,6 +158,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-test-results-${{ matrix.artifact }}
-          path: test-results
+          path: |
+            test-results
+            coverage/coverage-summary.json
           if-no-files-found: ignore
           retention-days: 7

@@ -79,6 +79,27 @@ Provider account credentials remain in each provider's own storage. Credentials 
 
 Access mode is a real safety boundary. Supervised keeps the selected provider's approval flow active. Auto-edit pre-approves supported file edits while leaving other provider permissions in place. Full Access is an explicit opt-in that asks the provider for its unrestricted mode—for example, Codex uses its danger-full-access sandbox/approval configuration and Claude uses its `--dangerously-skip-permissions` mode. Use it only in a workspace where you trust the request, repository, and commands the agent may run.
 
+### Get started
+
+Download the build for your platform, add a project, then open **Settings → Providers**. Inertia checks Codex, Claude, Cursor, and OpenCode locally and shows the exact Install, Connect, or Refresh action each route needs. Authentication stays in the provider's own official flow.
+
+You only need one ready provider to begin. If none is available yet, projects, files, Git review, and terminals still work; agent runs remain disabled with a route-specific explanation instead of failing after you send a message.
+
+To run Inertia from source, use Node.js 22:
+
+```bash
+npm ci
+npm run dev
+```
+
+Contributors can run the complete local gate with `npm run check`. It covers architecture, lint, type safety, unit and integration tests, and the production bundle.
+
+### Troubleshooting
+
+If something goes wrong, first refresh the affected provider in **Settings → Providers**. For a reproducible app or runtime problem, open **Settings → Runtime diagnostics**, choose **Copy diagnostic report**, review the report once more, and attach it to the [public bug form](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). The built-in report excludes prompts, source content, token values, credentials, and provider capabilities; do not substitute raw logs, databases, or unredacted diagnostic archives.
+
+Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
+
 ### Version 0.0.11
 
 This release makes Inertia's strong workflow easier to evolve safely. Codex App Server execution, backend profiles, workspace rendering, persistence, Git review, diagnostics, and updates now have clearer ownership and stronger architecture guardrails.
@@ -95,13 +116,4 @@ Download [Inertia v0.0.11](https://github.com/eduardtomas1/inertia/releases/tag/
 
 Every release also includes `SHA256SUMS.txt`. See the [changelog](CHANGELOG.md) for the complete release story.
 
-To run from source:
-
-```bash
-npm ci
-npm run dev
-```
-
-The project uses Node.js 22 in continuous integration and release builds.
-
-Inertia is available under the [Apache 2.0 License](LICENSE).
+Inertia is available under the [Apache 2.0 License](LICENSE). Packaged builds also include the generated notices and original license texts supplied by their production dependencies and Electron.

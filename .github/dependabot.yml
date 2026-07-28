@@ -1,0 +1,47 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 8
+    versioning-strategy: increase
+    commit-message:
+      prefix: deps
+    groups:
+      production-patch-and-minor:
+        dependency-type: production
+        update-types:
+          - patch
+          - minor
+        exclude-patterns:
+          - "@agentclientprotocol/sdk"
+          - "@anthropic-ai/claude-agent-sdk"
+          - "@opencode-ai/sdk"
+      development-patch-and-minor:
+        dependency-type: development
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:30"
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 4
+    commit-message:
+      prefix: ci
+    groups:
+      actions-patch-and-minor:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor

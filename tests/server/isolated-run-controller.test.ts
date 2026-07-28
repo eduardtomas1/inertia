@@ -450,7 +450,7 @@ describe("IsolatedRunController", () => {
     const store = new FakeStore();
     const provider = new FakeProvider();
     const fileSystem = fakeFileSystem();
-    fileSystem.create.mockImplementation(async () => await new Promise<string>(() => undefined));
+    fileSystem.create.mockReturnValue(new Promise<string>(() => undefined));
     const controller = new IsolatedRunController(
       store,
       provider,

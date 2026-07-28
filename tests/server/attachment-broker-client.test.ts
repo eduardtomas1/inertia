@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RuntimeWorkerEvent } from "../../src/main/runtime-process-protocol";
+import type { RuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
 import { RuntimeAttachmentBrokerClient } from "../../src/server/runtime/attachments/attachment-broker-client";
 
 const attachmentId = "11111111-1111-4111-8111-111111111111";

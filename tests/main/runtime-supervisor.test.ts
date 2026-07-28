@@ -10,7 +10,7 @@ import {
   type RuntimeAttachmentBroker,
   type RuntimeCredentialBroker,
 } from "../../src/main/runtime-supervisor";
-import type { RuntimeWorkerCommand } from "../../src/main/runtime-process-protocol";
+import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 
 const firstUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
 const secondUrl = `ws://127.0.0.1:41002/runtime/${"b".repeat(43)}`;

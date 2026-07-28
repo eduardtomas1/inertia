@@ -195,7 +195,9 @@ export function createWorkspaceSceneModel({
       archived: connection.snapshot?.conversations.filter(
         ({ archivedAt }) => archivedAt !== null,
       ) ?? [],
-      onUpdate: actions.updateSettings,
+      onUpdate: (updates) => {
+        void actions.updateSettings(updates);
+      },
       onConnectProvider: actions.connectProvider,
       onRefreshProvider: (providerId) => {
         actions.refreshProvider(providerId);

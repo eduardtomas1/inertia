@@ -4,6 +4,27 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+### Faster evidence that a change is safe
+
+- Renderer interaction tests now run in a real lightweight DOM, covering command-palette focus, filtering, selection and reset, global-shortcut ownership, and disclosure lifecycles without waiting for a packaged desktop run.
+- The Electron end-to-end gate keeps all 35 platform-level scenarios while splitting the former 5,552-line release spec into independently seeded feature suites for the shell, settings, workspace, palette, review, terminal, activity, layout, and transcript.
+- Linux CI now measures every TypeScript source file—including files no test imports—and enforces conservative global and renderer coverage floors. macOS, Windows, and Linux continue to run the ordinary unit and packaged-app gates.
+- Type-aware promise checks now catch floating, misused, and incorrectly awaited promises alongside the existing React hook and correctness rules.
+
+### Guardrails that shape the repository
+
+- Architecture validation now parses the complete source import graph, resolves TypeScript aliases and runtime `.js` specifiers, rejects cycles and invalid layer direction, and derives compatibility-facade boundaries from structure instead of a growing path list.
+- The runtime process protocol now lives in the shared Node layer used by Electron main and the supervised utility runtime, removing the last server-to-main dependency.
+- Uniform source, test-case, and test-support ceilings replace hand-maintained per-file budgets, so a failing guardrail cannot be satisfied by appending another exception.
+- Test TypeScript projects now cover the complete unit and Electron suites without hand-enumerating whichever renderer components a test happens to import.
+
+### More predictable onboarding and provider maintenance
+
+- Node.js 22 is declared for contributors, provider-facing SDK versions are exact, Dependabot handles routine dependency and GitHub Actions updates, and a secret-free weekly canary checks the latest Codex, Claude, Cursor, ACP, and OpenCode surfaces before provider drift reaches a release.
+- The repository now includes private security-reporting guidance, privacy-aware bug and pull-request templates, a concise coding-agent guide, and a troubleshooting path built around Inertia's sanitized runtime diagnostic report.
+- Package builds generate deterministic production-dependency notices and include Inertia, Electron, and Chromium license material with every desktop artifact.
+- English-only interface dates, clocks, compact numbers, and quota reset labels now use one explicit locale instead of mixing English and operating-system formatting in the same view.
+
 ## 0.0.11 — 2026-07-28
 
 ### A foundation that is easier to change safely

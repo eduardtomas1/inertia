@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "composite": false,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    "types": ["node", "electron-vite/node", "vite/client", "vitest/globals"]
+  },
+  "include": [
+    "tests/**/*.test.ts",
+    "tests/**/*.test.tsx",
+    "tests/renderer/dom/**/*.ts"
+  ],
+  "exclude": ["tests/e2e/**"]
+}

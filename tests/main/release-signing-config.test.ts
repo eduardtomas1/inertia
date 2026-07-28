@@ -17,15 +17,19 @@ const signingEnvironmentKeys = [
 function loadConfig(
   platform: "macos-arm64" | "windows-x64" | "linux-x64",
   additions: Record<string, string> = {},
+  inspectEnvironment = false,
 ): { status: number | null; stdout: string; stderr: string } {
   const environment = { ...process.env };
   for (const key of signingEnvironmentKeys) delete environment[key];
+  const command = inspectEnvironment
+    ? `const config = require('./scripts/electron-builder.release.cjs');
+       const present = ${JSON.stringify(signingEnvironmentKeys)}.filter((key) =>
+         Object.prototype.hasOwnProperty.call(process.env, key));
+       process.stdout.write(JSON.stringify({ config, present }));`
+    : "process.stdout.write(JSON.stringify(require('./scripts/electron-builder.release.cjs')))";
   const result = spawnSync(
     process.execPath,
-    [
-      "-e",
-      "process.stdout.write(JSON.stringify(require('./scripts/electron-builder.release.cjs')))",
-    ],
+    ["-e", command],
     {
       cwd: root,
       encoding: "utf8",
@@ -44,6 +48,22 @@ function loadConfig(
 }
 
 describe("release signing configuration", () => {
+  it("removes blank CI credential variables before electron-builder can resolve them as paths", () => {
+    const blanks = Object.fromEntries(signingEnvironmentKeys.map((key) => [key, ""]));
+    const result = loadConfig("macos-arm64", blanks, true);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      config: {
+        forceCodeSigning: false,
+        mac: {
+          identity: "-",
+          notarize: false,
+        },
+      },
+      present: [],
+    });
+  });
+
   it("keeps credential-free macOS builds explicit and reproducible", () => {
     const result = loadConfig("macos-arm64");
     expect(result.status).toBe(0);

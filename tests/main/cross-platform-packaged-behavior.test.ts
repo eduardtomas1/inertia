@@ -124,11 +124,15 @@ describe("cross-platform packaged behavior contract", () => {
     const macBuild = workflowStep(workflow, "Build macOS release package");
     expect(macBuild).toContain("if: runner.os == 'macOS'");
     expect(macBuild).toContain("MACOS_CSC_LINK");
+    expect(macBuild).toContain('if [[ -z "${!name:-}" ]]');
+    expect(macBuild).toContain('unset "$name"');
     expect(macBuild).not.toContain("WINDOWS_CSC_LINK");
 
     const windowsBuild = workflowStep(workflow, "Build Windows release package");
     expect(windowsBuild).toContain("if: runner.os == 'Windows'");
     expect(windowsBuild).toContain("WINDOWS_CSC_LINK");
+    expect(windowsBuild).toContain('if [[ -z "${!name:-}" ]]');
+    expect(windowsBuild).toContain('unset "$name"');
     expect(windowsBuild).not.toContain("MACOS_CSC_LINK");
 
     const linuxBuild = workflowStep(workflow, "Build Linux release package");

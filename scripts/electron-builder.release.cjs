@@ -6,6 +6,21 @@ if (!supportedPlatforms.has(platform)) {
   throw new Error("INERTIA_RELEASE_PLATFORM must identify the exact release platform.");
 }
 
+const credentialEnvironmentKeys = [
+  "CSC_LINK",
+  "CSC_KEY_PASSWORD",
+  "APPLE_API_KEY",
+  "APPLE_API_KEY_ID",
+  "APPLE_API_ISSUER",
+  "WIN_CSC_LINK",
+  "WIN_CSC_KEY_PASSWORD",
+];
+for (const name of credentialEnvironmentKeys) {
+  if (typeof process.env[name] === "string" && process.env[name].trim().length === 0) {
+    delete process.env[name];
+  }
+}
+
 function credentialSet(label, names) {
   const present = names.filter((name) => typeof process.env[name] === "string"
     && process.env[name].trim().length > 0);

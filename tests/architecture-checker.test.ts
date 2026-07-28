@@ -117,6 +117,22 @@ describe("architecture checker", () => {
     );
   });
 
+  it("checks dynamic imports that include an options argument", () => {
+    const root = fixture({
+      "src/shared/loader.ts": [
+        "export async function load() {",
+        '  return import("../server/worker.js", {});',
+        "}",
+        "",
+      ].join("\n"),
+      "src/server/worker.ts": "export const worker = true;\n",
+    });
+
+    expect(rejectedCheck(root)).toContain(
+      "crosses source layers shared -> server",
+    );
+  });
+
   it("enforces stable top-level source layers for type-only and runtime edges", () => {
     const root = fixture({
       "src/main/protocol.ts": "export interface Protocol { id: string }\n",

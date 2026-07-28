@@ -342,12 +342,15 @@ function moduleSyntax(file, contents) {
     }
     if (
       node.type === "CallExpression"
-      && node.arguments.length === 1
       && (
-        node.callee?.type === "Import"
+        (
+          node.callee?.type === "Import"
+          && (node.arguments.length === 1 || node.arguments.length === 2)
+        )
         || (
           node.callee?.type === "Identifier"
           && node.callee.name === "require"
+          && node.arguments.length === 1
         )
       )
     ) {

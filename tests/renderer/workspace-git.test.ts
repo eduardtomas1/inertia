@@ -6,9 +6,11 @@ import {
   parseWorkspaceGitIdentity,
   workspaceGitFilePath,
   workspaceGitIdentity,
+  workspaceGitRefreshIdentity,
   workspaceGitRepositoryLabel,
   workspaceGitRepositoryPresentation,
 } from "../../src/renderer/src/utils/workspaceGit";
+import { commandRefreshesConversationDetail } from "../../src/renderer/src/lib/runtimeCommands";
 
 const changedFile = (path: string) => ({
   path,
@@ -60,6 +62,8 @@ const snapshot: WorkspaceGitSnapshot = {
   deletions: 0,
   scannedDirectories: 4,
   skippedDirectories: 0,
+  discoveredRepositories: 2,
+  repositoryLimit: 128,
   partial: false,
   truncated: false,
   issues: [],
@@ -104,5 +108,54 @@ describe("workspace Git renderer identity", () => {
   it("rejects stale or forged selection keys", () => {
     expect(parseWorkspaceGitIdentity("13:modules/alphasrc/Missing.java", snapshot)).toBeNull();
     expect(parseWorkspaceGitIdentity("oops", snapshot)).toBeNull();
+  });
+
+  it("invalidates workspace discovery when a project's repository cap changes", () => {
+    const project = {
+      id: "project-a",
+      name: "Openbravo",
+      path: "/workspace",
+      normalizedPath: "/workspace",
+      repositoryIdentity: null,
+      repositoryRoot: null,
+      repositoryRelativePath: ".",
+      groupingMode: null,
+      gitRepositoryLimit: 64,
+      color: "#000",
+      status: "ready" as const,
+      createdAt: "2026-07-28T00:00:00.000Z",
+      updatedAt: "2026-07-28T00:00:00.000Z",
+    };
+    expect(workspaceGitRefreshIdentity(project)).not.toBe(
+      workspaceGitRefreshIdentity({ ...project, gitRepositoryLimit: 256 }),
+    );
+  });
+
+  it("invalidates conversation detail after a repository diff reconciles review metadata", () => {
+    const command = {
+      type: "git.workspace.diff",
+      payload: {
+        projectId: "11111111-1111-4111-8111-111111111111",
+        conversationId: "22222222-2222-4222-8222-222222222222",
+        repositoryPath: "modules/alpha",
+        path: "src/Main.java",
+      },
+    } as const;
+    const event = (reviewMetadataChanged: boolean) => ({
+      type: "request.result" as const,
+      requestId: "request",
+      result: {
+        kind: "git.workspace.diff" as const,
+        diff: {
+          repositoryPath: "modules/alpha",
+          reviewMetadataChanged,
+          patch: "",
+          truncated: false,
+          files: [],
+        },
+      },
+    });
+    expect(commandRefreshesConversationDetail(command, event(true))).toBe(true);
+    expect(commandRefreshesConversationDetail(command, event(false))).toBe(false);
   });
 });

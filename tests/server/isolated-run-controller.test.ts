@@ -17,7 +17,6 @@ import type {
 } from "../../src/server/providers";
 import {
   IsolatedRunController,
-  IsolatedRunError,
   type IsolatedRunFileSystem,
   type IsolatedRunProviderRuntime,
   type IsolatedRunStore,

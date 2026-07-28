@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -193,7 +194,7 @@ export function useWorkspaceLayout(
     toolsDynamicMaxHeight,
   );
 
-  return {
+  return useMemo(() => ({
     sidebarOpen,
     setSidebarOpen,
     sidebarCollapsed,
@@ -228,5 +229,21 @@ export function useWorkspaceLayout(
       onWidthCommit: setPersistedToolsWidth,
       onHeightCommit: setPersistedToolsHeight,
     },
-  };
+  }), [
+    activeTool,
+    effectiveSidebarWidth,
+    effectiveToolsHeight,
+    effectiveToolsWidth,
+    mobileNavigation,
+    setPersistedSidebarWidth,
+    setPersistedToolsHeight,
+    setPersistedToolsWidth,
+    sidebarCollapsed,
+    sidebarDynamicMax,
+    sidebarOpen,
+    stackedTools,
+    toolsDynamicMaxHeight,
+    toolsDynamicMaxWidth,
+    toolsVisible,
+  ]);
 }

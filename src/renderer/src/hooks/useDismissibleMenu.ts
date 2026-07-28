@@ -68,7 +68,7 @@ export function useDismissibleMenu<Menu extends string>(): {
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [dismissMenu, menu]);
+  }, [dismissMenu, menu, restoreTriggerFocus]);
 
   return { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover };
 }

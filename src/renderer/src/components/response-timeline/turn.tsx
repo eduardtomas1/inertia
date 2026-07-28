@@ -1,5 +1,6 @@
 import {
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -45,6 +46,14 @@ function TurnTimelineComponent({
   } | null>(null);
   const isSettling = settlingTransition !== null;
   const isRevealingSettledAnswer = settlingTransition?.revealAnswer ?? false;
+  const handleBeforeToggle = useCallback(
+    () => onBeforeToggle?.(turn.id),
+    [onBeforeToggle, turn.id],
+  );
+  const handleAfterToggle = useCallback(
+    () => onAfterToggle?.(turn.id),
+    [onAfterToggle, turn.id],
+  );
 
   useLayoutEffect(() => {
     const announcement = turnCompletionAnnouncement(wasActive.current, turn, providerLabel);
@@ -105,8 +114,8 @@ function TurnTimelineComponent({
         liveContent={liveContent}
         timerStart={timerStart}
         completionAnnouncement={completionAnnouncement}
-        onBeforeToggle={() => onBeforeToggle?.(turn.id)}
-        onAfterToggle={() => onAfterToggle?.(turn.id)}
+        onBeforeToggle={handleBeforeToggle}
+        onAfterToggle={handleAfterToggle}
       />
 
       <FinalAnswerDocument
@@ -119,8 +128,8 @@ function TurnTimelineComponent({
         turn={turn}
         props={props}
         previousArtifactTurnId={previousArtifactTurnId}
-        onBeforeToggle={() => onBeforeToggle?.(turn.id)}
-        onAfterToggle={() => onAfterToggle?.(turn.id)}
+        onBeforeToggle={handleBeforeToggle}
+        onAfterToggle={handleAfterToggle}
       />
     </section>
   );

@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 

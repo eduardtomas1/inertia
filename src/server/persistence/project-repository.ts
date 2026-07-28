@@ -30,6 +30,7 @@ export class ProjectRepository {
       repositoryRoot: identity.repositoryRoot ?? null,
       repositoryRelativePath: identity.repositoryRelativePath ?? ".",
       groupingMode: null,
+      gitRepositoryLimit: 128,
       color: PROJECT_COLORS[projectCount % PROJECT_COLORS.length],
       status: "ready",
       createdAt: now,
@@ -39,10 +40,12 @@ export class ProjectRepository {
       this.context.database.prepare(`
         INSERT INTO projects (
           id, name, path, normalized_path, repository_identity, repository_root,
-          repository_relative_path, grouping_mode, color, status, created_at, updated_at
+          repository_relative_path, grouping_mode, git_repository_limit,
+          color, status, created_at, updated_at
         ) VALUES (
           @id, @name, @path, @normalizedPath, @repositoryIdentity, @repositoryRoot,
-          @repositoryRelativePath, @groupingMode, @color, @status, @createdAt, @updatedAt
+          @repositoryRelativePath, @groupingMode, @gitRepositoryLimit,
+          @color, @status, @createdAt, @updatedAt
         )
       `).run(project);
       this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = NULL WHERE id = 1").run(project.id);
@@ -52,7 +55,7 @@ export class ProjectRepository {
 
   update(
     projectId: string,
-    update: Partial<Pick<Project, "name" | "groupingMode" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">>,
+    update: Partial<Pick<Project, "name" | "groupingMode" | "gitRepositoryLimit" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">>,
   ): Project {
     const current = projectFromRow(this.context.requireProject(projectId));
     const unchanged = Object.entries(update).every(([key, value]) => current[key as keyof Project] === value);
@@ -66,6 +69,7 @@ export class ProjectRepository {
         repository_root = @repositoryRoot,
         repository_relative_path = @repositoryRelativePath,
         grouping_mode = @groupingMode,
+        git_repository_limit = @gitRepositoryLimit,
         updated_at = @updatedAt
       WHERE id = @id
     `).run(next);

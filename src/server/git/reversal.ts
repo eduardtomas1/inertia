@@ -60,11 +60,16 @@ interface ReversalState {
   selectedIndexLines: DiffLine[];
 }
 
-async function completeRepositoryDiff(root: string, ignoreWhitespace = false): Promise<GitUnifiedDiff> {
+async function completeRepositoryDiff(
+  root: string,
+  ignoreWhitespace = false,
+  paths?: string[],
+): Promise<GitUnifiedDiff> {
   const diff = await getUnifiedDiff(root, {
     maxBytes: MAX_DIFF_BYTES,
     maxFiles: MAX_DIFF_FILES,
     ignoreWhitespace,
+    paths,
   });
   if (diff.truncated) {
     throw new GitError("output-limit", "The complete repository diff is too large to reverse safely. Narrow the change set first.");
@@ -196,8 +201,16 @@ async function buildReversalState(root: string, selection: GitDiffSelection): Pr
   }
 
   const stateBefore = await repositoryStateFingerprint(root);
-  const current = await completeRepositoryDiff(root, selection.ignoreWhitespace);
-  const structured = parseUnifiedDiff(current.text);
+  let current = await completeRepositoryDiff(
+    root,
+    selection.ignoreWhitespace,
+    [selection.filePath],
+  );
+  let structured = parseUnifiedDiff(current.text);
+  if (structured.fingerprint !== selection.fingerprint) {
+    current = await completeRepositoryDiff(root, selection.ignoreWhitespace);
+    structured = parseUnifiedDiff(current.text);
+  }
   if (structured.fingerprint !== selection.fingerprint) {
     throw new GitError("conflict", "The complete diff changed since this selection was made. Refresh the diff and try again.");
   }

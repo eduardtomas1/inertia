@@ -16,7 +16,7 @@ import {
 export const WORKSPACE_GIT_DEFAULT_LIMITS = Object.freeze({
   maxDepth: 8,
   maxDirectories: 5_000,
-  maxRepositories: 64,
+  maxRepositories: 128,
   statusConcurrency: 4,
   maxIssues: 20,
 });
@@ -224,6 +224,7 @@ export async function discoverWorkspaceGitRepositories(
   const issues: WorkspaceGitIssue[] = [];
   let scannedDirectories = 0;
   let skippedDirectories = 0;
+  let discoveredRepositories = 0;
   let partial = false;
   let truncated = false;
 
@@ -254,14 +255,15 @@ export async function discoverWorkspaceGitRepositories(
           partial = true;
           safeIssue(issues, limits, current.repositoryPath, "An unsafe symbolic-link Git marker was ignored.");
         } else if (markerInfo.isDirectory() || markerInfo.isFile()) {
+          discoveredRepositories += 1;
           if (candidates.length >= limits.maxRepositories) {
             truncated = true;
-            break;
+          } else {
+            candidates.push({
+              absolutePath: current.absolutePath,
+              repositoryPath: current.repositoryPath,
+            });
           }
-          candidates.push({
-            absolutePath: current.absolutePath,
-            repositoryPath: current.repositoryPath,
-          });
         }
       } catch {
         partial = true;
@@ -359,6 +361,8 @@ export async function discoverWorkspaceGitRepositories(
     deletions: repositories.reduce((total, repository) => total + repository.deletions, 0),
     scannedDirectories,
     skippedDirectories,
+    discoveredRepositories,
+    repositoryLimit: limits.maxRepositories,
     partial: partial || truncated,
     truncated,
     issues,

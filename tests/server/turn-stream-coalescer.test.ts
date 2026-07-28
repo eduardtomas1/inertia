@@ -47,7 +47,7 @@ class ManualScheduler implements TurnTimerScheduler {
   }
 
   runThrough(maximumDelayMs: number): void {
-    for (const [id, timer] of [...this.timers]) {
+    for (const [id, timer] of this.timers) {
       if (timer.delayMs > maximumDelayMs) continue;
       this.timers.delete(id);
       timer.callback();

@@ -240,14 +240,19 @@ describe("published database fixtures", () => {
         }]);
       }
       expect(diagnostics).toHaveLength(1);
-      expect(diagnostics[0]).toContain(`schema=${fixture.schemaVersion}->28`);
+      expect(diagnostics[0]).toContain(
+        `schema=${fixture.schemaVersion}->${CURRENT_DATABASE_SCHEMA_VERSION}`,
+      );
       expect(diagnostics[0]).toContain("inferredTurns=2");
       expect(diagnostics[0]).not.toMatch(/fixture:\/\/|request|response|token|secret/iu);
 
       let inspection = new Database(databasePath);
       expect(inspection.prepare(
         "SELECT version FROM schema_migrations ORDER BY version",
-      ).all()).toEqual(Array.from({ length: 28 }, (_, index) => ({ version: index + 1 })));
+      ).all()).toEqual(Array.from(
+        { length: CURRENT_DATABASE_SCHEMA_VERSION },
+        (_, index) => ({ version: index + 1 }),
+      ));
       expect(inspection.prepare(
         "SELECT id, role, content, created_at FROM messages ORDER BY id",
       ).all()).toEqual(messagesBefore);
@@ -438,7 +443,7 @@ describe("published database fixtures", () => {
     const inspection = new Database(databasePath, { readonly: true });
     expect((inspection.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(28);
+    ).get() as { version: number }).version).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
     expect(inspection.pragma("foreign_key_check")).toEqual([]);
     inspection.close();
   });
@@ -575,7 +580,7 @@ describe("published database fixtures", () => {
     )).toThrow(/unique/iu);
     expect((inspection.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(28);
+    ).get() as { version: number }).version).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
     expect(inspection.pragma("foreign_key_check")).toEqual([]);
     inspection.close();
   });

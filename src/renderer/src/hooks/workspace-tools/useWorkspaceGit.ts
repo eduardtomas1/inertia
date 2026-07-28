@@ -13,6 +13,7 @@ import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
+import { workspaceGitRefreshIdentity } from "../../utils/workspaceGit";
 
 interface WorkspaceGitOptions {
   project: Project | null;
@@ -41,6 +42,7 @@ export function useWorkspaceGit({
     useState<WorkspaceGitSnapshot | null>(null);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const projectRefreshIdentity = workspaceGitRefreshIdentity(project);
 
   const loadGit = useCallback(async () => {
     if (!project?.id) return;
@@ -84,14 +86,19 @@ export function useWorkspaceGit({
     if (diffEvent.result.kind === "git.diff") {
       setGitDiff(diffEvent.result.diff);
     }
-  }, [conversation?.id, ignoreWhitespace, project?.id, request]);
+  }, [
+    conversation?.id,
+    ignoreWhitespace,
+    project?.id,
+    request,
+  ]);
 
   useEffect(() => {
     setGitStatus(null);
     setGitDiff(null);
     setWorkspaceGitStatus(null);
     setBranches([]);
-    if (!project || !online) {
+    if (!projectRefreshIdentity || !project?.id || !online) {
       setLoading(false);
       return;
     }
@@ -116,22 +123,25 @@ export function useWorkspaceGit({
     loadGit,
     online,
     project?.id,
+    projectRefreshIdentity,
     refreshVersion,
     setActionError,
   ]);
 
   const loadWorkspaceRepositoryDiff = useCallback(async (
     repositoryPath: string,
+    filePath?: string,
   ): Promise<WorkspaceGitDiffSnapshot> => {
     if (!project?.id) {
       throw new Error("Select a project before loading changes.");
     }
-    const event = resultEvent(await request({
+    const event = resultEvent(await run("git.workspace.diff", {
       type: "git.workspace.diff",
       payload: {
         projectId: project.id,
         conversationId: conversation?.id,
         repositoryPath,
+        ...(filePath ? { path: filePath } : {}),
         ignoreWhitespace,
       },
     }));
@@ -139,7 +149,7 @@ export function useWorkspaceGit({
       throw new Error("Unexpected workspace diff response.");
     }
     return event.result.diff;
-  }, [conversation?.id, ignoreWhitespace, project?.id, request]);
+  }, [conversation?.id, ignoreWhitespace, project?.id, run]);
 
   const loadBranches = useCallback(() => {
     if (!project || !gitStatus?.isRepository) return;

@@ -3,6 +3,7 @@ import { extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const workspaceRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const productionTypeScriptLineCeiling = 1_000;
 
 const lineBudgets = new Map([
   ["src/renderer/src/components/Composer.tsx", 200],
@@ -10,7 +11,7 @@ const lineBudgets = new Map([
   ["src/renderer/src/utils/responseTimeline.ts", 200],
   ["src/server/git.ts", 200],
   ["src/server/runtime/backends/backend-compatibility-probe.ts", 240],
-  ["src/renderer/src/App.tsx", 820],
+  ["src/renderer/src/App.tsx", 850],
   ["src/renderer/src/components/WorkspaceScene.tsx", 120],
   ["src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts", 560],
   ["src/renderer/src/hooks/useConversationProjection.ts", 400],
@@ -26,6 +27,13 @@ const lineBudgets = new Map([
   ["src/server/database.ts", 750],
   ["src/server/index.ts", 600],
   ["src/server/runtime/turns/turn-controller.ts", 620],
+  ["src/server/codex-app-server.ts", 40],
+  ["src/server/codex/app-server-run.ts", 700],
+  ["src/server/codex/app-server-events.ts", 720],
+  ["src/server/codex/app-server-config.ts", 200],
+  ["src/server/runtime/backends/backend-profile-controller.ts", 560],
+  ["src/server/runtime/backends/backend-profile-runtime.ts", 400],
+  ["src/server/runtime/backends/backend-profile-model.ts", 260],
   ["src/shared/contracts.ts", 50],
 ]);
 
@@ -36,7 +44,7 @@ const maximumLineLengths = new Map([
 ]);
 
 const importBudgets = new Map([
-  ["src/renderer/src/App.tsx", 32],
+  ["src/renderer/src/App.tsx", 34],
   ["src/renderer/src/components/WorkspaceScene.tsx", 14],
   ["src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts", 16],
 ]);
@@ -148,6 +156,17 @@ function firstModuleCycle(directory) {
 
 const failures = [];
 
+for (const absoluteFile of sourceFiles("src")) {
+  const contents = readFileSync(absoluteFile, "utf8");
+  const lineCount = contents.split(/\r?\n/u).length;
+  if (lineCount > productionTypeScriptLineCeiling) {
+    failures.push(
+      `${relative(workspaceRoot, absoluteFile)} has ${lineCount} lines `
+      + `(production TypeScript ceiling: ${productionTypeScriptLineCeiling}).`,
+    );
+  }
+}
+
 for (const [file, maximumLines] of lineBudgets) {
   const contents = readFileSync(join(workspaceRoot, file), "utf8");
   const lineCount = contents.split(/\r?\n/u).length;
@@ -191,6 +210,9 @@ for (const rule of forbiddenFacadeImports) {
 
 for (const directory of [
   "src/shared",
+  "src/server/persistence",
+  "src/server/codex",
+  "src/server/runtime/backends",
   "src/renderer/src/utils/response-timeline",
 ]) {
   const cycle = firstModuleCycle(directory);

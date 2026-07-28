@@ -256,6 +256,7 @@ describe("Claude Agent SDK harness", () => {
   it("maps the SDK's authoritative model inventory without sending a prompt", async () => {
     let promptWasRead = false;
     const models = await readClaudeAgentSdkModels("/fake/claude", {}, "/workspace", 1_000, ({ prompt }) => {
+      // oxlint-disable-next-line require-yield -- The empty inventory fixture must not emit SDK messages.
       const stream = (async function* (): AsyncGenerator<SDKMessage> {
         promptWasRead = true;
         for await (const _message of prompt as AsyncIterable<SDKUserMessage>) { /* No prompt should be produced. */ }
@@ -824,6 +825,7 @@ describe("Claude Agent SDK harness", () => {
     const harness = createClaudeAgentSdkHarness({
       createQuery: () => {
         queryCalls += 1;
+        // oxlint-disable-next-line require-yield -- Startup fails before the SDK can emit a message.
         const stream = (async function* (): AsyncGenerator<SDKMessage> {
           throw new Error("SDK transport unavailable");
         })();
@@ -873,6 +875,7 @@ describe("Claude Agent SDK harness", () => {
     const compatibility = claudeHarnessBackendCompatibility(profile);
     const harness = createClaudeAgentSdkHarness({
       createQuery: () => {
+        // oxlint-disable-next-line require-yield -- Authentication fails before the SDK can emit a message.
         const stream = (async function* (): AsyncGenerator<SDKMessage> {
           throw new Error(
             "401 Unauthorized from https://api.kimi.com/coding/ Authorization: Bearer raw-secret",

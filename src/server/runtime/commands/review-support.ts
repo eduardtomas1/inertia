@@ -58,7 +58,9 @@ export function reconcileReviews(
   store: RuntimeStore,
   conversationId: string,
   patch: string,
-): void {
+  repositoryPath = ".",
+  targetPath?: string,
+): boolean {
   const structured = parseUnifiedDiff(patch);
   const files: Record<string, string> = {};
   const hunks: Record<string, string> = {};
@@ -70,6 +72,8 @@ export function reconcileReviews(
   }
   const notes: Record<string, string | null> = {};
   for (const note of store.reviewNotesFor(conversationId)) {
+    if ((note.repositoryPath ?? ".") !== repositoryPath) continue;
+    if (targetPath && note.path !== targetPath) continue;
     const file = structured.files.find(
       (candidate) => candidate.path === note.path,
     );
@@ -90,8 +94,10 @@ export function reconcileReviews(
       notes[note.id] = file ? diffFileFingerprint(file) : null;
     }
   }
-  store.reconcileReviewTargets(
+  return store.reconcileReviewTargets(
     conversationId,
+    repositoryPath,
+    targetPath,
     { files, hunks, notes },
   );
 }
@@ -118,15 +124,29 @@ export async function selectedReviewContext(
     workspaceRoot,
     repositoryPath,
   );
-  const diff = await getUnifiedDiff(repository.root, {
+  let selectionDiff = await getUnifiedDiff(repository.root, {
+    paths: [selection.filePath],
     ignoreWhitespace: selection.ignoreWhitespace,
   });
-  if (diff.truncated) {
+  if (selectionDiff.truncated) {
     throw new RuntimeRequestError(
       "The current diff is truncated. Reduce the change set before reviewing a selection.",
     );
   }
-  const structured = parseUnifiedDiff(diff.text);
+  let fullDiff: Awaited<ReturnType<typeof getUnifiedDiff>> | null = null;
+  let structured = parseUnifiedDiff(selectionDiff.text);
+  if (structured.fingerprint !== selection.fingerprint) {
+    fullDiff = await getUnifiedDiff(repository.root, {
+      ignoreWhitespace: selection.ignoreWhitespace,
+    });
+    if (fullDiff.truncated) {
+      throw new RuntimeRequestError(
+        "The current diff is truncated. Reduce the change set before reviewing a selection.",
+      );
+    }
+    selectionDiff = fullDiff;
+    structured = parseUnifiedDiff(fullDiff.text);
+  }
   if (structured.fingerprint !== selection.fingerprint) {
     throw new RuntimeRequestError(
       "The diff changed before this review action started. Refresh and select the lines again.",
@@ -154,6 +174,16 @@ export async function selectedReviewContext(
     }
     throw error;
   }
+  if (purpose === "revision" && !fullDiff) {
+    fullDiff = await getUnifiedDiff(repository.root, {
+      ignoreWhitespace: selection.ignoreWhitespace,
+    });
+    if (fullDiff.truncated) {
+      throw new RuntimeRequestError(
+        "The complete diff is required to audit a revision for changes outside the selected file.",
+      );
+    }
+  }
   return {
     visibleContent: selection.comment?.trim()
       || (
@@ -170,7 +200,7 @@ export async function selectedReviewContext(
         truncated: context.truncated,
       }],
     },
-    patch: diff.text,
+    patch: purpose === "revision" ? fullDiff!.text : selectionDiff.text,
     fingerprint: structured.fingerprint,
     filePath: file.path,
     hunkId: hunk.id,

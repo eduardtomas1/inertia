@@ -45,12 +45,17 @@ export class ReviewRepository {
     if ((input.scope === "file" && input.hunkId !== null) || (input.scope === "hunk" && !input.hunkId)) {
       throw new Error("The review target is invalid.");
     }
-    const state: DiffReviewState = { ...input, stale: false, updatedAt: new Date().toISOString() };
+    const state: DiffReviewState = {
+      ...input,
+      repositoryPath: input.repositoryPath ?? ".",
+      stale: false,
+      updatedAt: new Date().toISOString(),
+    };
     this.context.database.prepare(`
       INSERT INTO diff_review_states
-        (conversation_id, scope, path, hunk_id, target_fingerprint, reviewed, stale, updated_at)
-      VALUES (@conversationId, @scope, @path, @hunkId, @targetFingerprint, @reviewedValue, 0, @updatedAt)
-      ON CONFLICT(conversation_id, scope, path, hunk_id) DO UPDATE SET
+        (conversation_id, repository_path, scope, path, hunk_id, target_fingerprint, reviewed, stale, updated_at)
+      VALUES (@conversationId, @repositoryPath, @scope, @path, @hunkId, @targetFingerprint, @reviewedValue, 0, @updatedAt)
+      ON CONFLICT(conversation_id, repository_path, scope, path, hunk_id) DO UPDATE SET
         target_fingerprint = excluded.target_fingerprint,
         reviewed = excluded.reviewed,
         stale = 0,
@@ -68,6 +73,7 @@ export class ReviewRepository {
     const now = new Date().toISOString();
     const note: DiffReviewNote = {
       ...input,
+      repositoryPath: input.repositoryPath ?? ".",
       id: randomUUID(),
       body: input.body.trim(),
       lineIds: [...new Set(input.lineIds)].slice(0, 500),
@@ -80,8 +86,8 @@ export class ReviewRepository {
     if (lineIdsJson.length > 65_536) throw new Error("The review note range is too large.");
     this.context.database.prepare(`
       INSERT INTO diff_review_notes
-        (id, conversation_id, path, hunk_id, line_ids_json, target_fingerprint, body, stale, created_at, updated_at)
-      VALUES (@id, @conversationId, @path, @hunkId, @lineIdsJson, @targetFingerprint, @body, 0, @createdAt, @updatedAt)
+        (id, conversation_id, repository_path, path, hunk_id, line_ids_json, target_fingerprint, body, stale, created_at, updated_at)
+      VALUES (@id, @conversationId, @repositoryPath, @path, @hunkId, @lineIdsJson, @targetFingerprint, @body, 0, @createdAt, @updatedAt)
     `).run({ ...note, hunkId: note.hunkId ?? "", lineIdsJson });
     return note;
   }
@@ -112,20 +118,33 @@ export class ReviewRepository {
 
   reconcileTargets(
     conversationId: string,
+    repositoryPath: string,
+    targetPath: string | undefined,
     targets: {
       files: Readonly<Record<string, string>>;
       hunks: Readonly<Record<string, string>>;
       notes: Readonly<Record<string, string | null>>;
     },
-  ): void {
+  ): boolean {
     this.context.requireConversation(conversationId);
-    const stateRows = this.context.database.prepare("SELECT * FROM diff_review_states WHERE conversation_id = ?")
-      .all(conversationId) as DiffReviewStateRow[];
-    const noteRows = this.context.database.prepare("SELECT * FROM diff_review_notes WHERE conversation_id = ?")
-      .all(conversationId) as DiffReviewNoteRow[];
-    const updateState = this.context.database.prepare("UPDATE diff_review_states SET reviewed = ?, stale = ?, updated_at = ? WHERE conversation_id = ? AND scope = ? AND path = ? AND hunk_id = ?");
+    const stateRows = (targetPath
+      ? this.context.database.prepare(
+        "SELECT * FROM diff_review_states WHERE conversation_id = ? AND repository_path = ? AND path = ?",
+      ).all(conversationId, repositoryPath, targetPath)
+      : this.context.database.prepare(
+        "SELECT * FROM diff_review_states WHERE conversation_id = ? AND repository_path = ?",
+      ).all(conversationId, repositoryPath)) as DiffReviewStateRow[];
+    const noteRows = (targetPath
+      ? this.context.database.prepare(
+        "SELECT * FROM diff_review_notes WHERE conversation_id = ? AND repository_path = ? AND path = ?",
+      ).all(conversationId, repositoryPath, targetPath)
+      : this.context.database.prepare(
+        "SELECT * FROM diff_review_notes WHERE conversation_id = ? AND repository_path = ?",
+      ).all(conversationId, repositoryPath)) as DiffReviewNoteRow[];
+    const updateState = this.context.database.prepare("UPDATE diff_review_states SET reviewed = ?, stale = ?, updated_at = ? WHERE conversation_id = ? AND repository_path = ? AND scope = ? AND path = ? AND hunk_id = ?");
     const updateNote = this.context.database.prepare("UPDATE diff_review_notes SET stale = ? WHERE id = ?");
     const now = new Date().toISOString();
+    let changed = false;
     this.context.database.transaction(() => {
       for (const row of stateRows) {
         const current = row.scope === "file"
@@ -133,7 +152,16 @@ export class ReviewRepository {
           : targets.hunks[`${row.path}\0${row.hunk_id}`];
         const stale = current !== row.target_fingerprint;
         if (stale !== (row.stale === 1) || (stale && row.reviewed === 1)) {
-          updateState.run(stale ? 0 : row.reviewed, Number(stale), now, row.conversation_id, row.scope, row.path, row.hunk_id);
+          changed = updateState.run(
+            stale ? 0 : row.reviewed,
+            Number(stale),
+            now,
+            row.conversation_id,
+            row.repository_path,
+            row.scope,
+            row.path,
+            row.hunk_id,
+          ).changes > 0 || changed;
         }
       }
       for (const row of noteRows) {
@@ -143,8 +171,11 @@ export class ReviewRepository {
             ? targets.hunks[`${row.path}\0${row.hunk_id}`]
             : targets.files[row.path];
         const stale = current !== row.target_fingerprint;
-        if (stale !== (row.stale === 1)) updateNote.run(Number(stale), row.id);
+        if (stale !== (row.stale === 1)) {
+          changed = updateNote.run(Number(stale), row.id).changes > 0 || changed;
+        }
       }
     })();
+    return changed;
   }
 }

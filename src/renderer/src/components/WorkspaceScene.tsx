@@ -1,4 +1,4 @@
-import type { ComponentProps, JSX } from "react";
+import { memo, type ComponentProps, type JSX } from "react";
 
 import { ChatWorkspace } from "./ChatWorkspace";
 import { ConversationDetailState } from "./ConversationDetailState";
@@ -39,7 +39,7 @@ export interface WorkspaceSceneProps {
  * controllers and state. Each child receives a complete, typed prop contract,
  * so scene changes do not grow another compressed JSX block in App.
  */
-export function WorkspaceScene({
+function WorkspaceSceneView({
   view,
   settings,
   detailState,
@@ -77,5 +77,8 @@ export function WorkspaceScene({
     </>
   );
 }
+
+export const WorkspaceScene = memo(WorkspaceSceneView);
+WorkspaceScene.displayName = "WorkspaceScene";
 
 export type { WorkspacePanelTab };

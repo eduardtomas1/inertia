@@ -5,6 +5,7 @@ import {
   LOCAL_TIMEOUT_MS,
   STDERR_BYTES,
 } from "./constants";
+import { gitProcessEnvironment } from "./environment";
 import { GitError } from "./types";
 
 export interface GitProcessResult {
@@ -98,12 +99,7 @@ export function runGit(
       shell: false,
       windowsHide: true,
       stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: "0",
-        GIT_ASKPASS: "",
-        LC_ALL: "C",
-      },
+      env: gitProcessEnvironment(),
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];

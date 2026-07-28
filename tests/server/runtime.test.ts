@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -16,7 +16,11 @@ import type {
   ProviderInfo,
   ServerEvent,
 } from "../../src/shared/contracts";
-import { diffFileFingerprint, parseUnifiedDiff } from "../../src/shared/diff-review";
+import {
+  diffFileFingerprint,
+  diffHunkFingerprint,
+  parseUnifiedDiff,
+} from "../../src/shared/diff-review";
 import { RuntimeStore } from "../../src/server/database";
 import { getUnifiedDiff } from "../../src/server/git";
 import { portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
@@ -1279,6 +1283,316 @@ process.exit(child.status ?? 1);
     }));
   });
 
+  it("persists review metadata and safely reverts selections in a nested repository", async () => {
+    const { data, workspace } = temporaryWorkspace();
+    const repositoryPath = "modules/example";
+    const nested = join(workspace, repositoryPath);
+    mkdirSync(nested, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: nested });
+    execFileSync("git", ["config", "user.email", "runtime@example.invalid"], { cwd: nested });
+    execFileSync("git", ["config", "user.name", "Runtime Test"], { cwd: nested });
+    writeFileSync(join(nested, "review.ts"), "export const enabled = false;\n");
+    writeFileSync(join(nested, "other.ts"), "export const count = 1;\n");
+    execFileSync("git", ["add", "review.ts", "other.ts"], { cwd: nested });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd: nested });
+    writeFileSync(join(nested, "review.ts"), "export const enabled = true;\n");
+    writeFileSync(join(nested, "other.ts"), "export const count = 2;\n");
+
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: false,
+    });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
+    );
+    const projectId = welcome.snapshot.activeProjectId!;
+    const conversationId = welcome.snapshot.activeConversationId!;
+    const diff = parseUnifiedDiff((await getUnifiedDiff(nested, {
+      paths: ["review.ts"],
+    })).text);
+    const file = diff.files[0]!;
+    const hunk = file.hunks[0]!;
+    const lineIds = hunk.lines
+      .filter(({ kind }) => kind === "addition" || kind === "deletion")
+      .map(({ id }) => id);
+    const targetFingerprint = diffHunkFingerprint(file, hunk);
+
+    const stateRequestId = randomUUID();
+    send(client.socket, {
+      type: "review.state.set",
+      requestId: stateRequestId,
+      payload: {
+        conversationId,
+        repositoryPath,
+        scope: "hunk",
+        path: file.path,
+        hunkId: hunk.id,
+        targetFingerprint,
+        reviewed: true,
+      },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === stateRequestId,
+    );
+
+    const noteRequestId = randomUUID();
+    send(client.socket, {
+      type: "review.note.create",
+      requestId: noteRequestId,
+      payload: {
+        conversationId,
+        repositoryPath,
+        path: file.path,
+        hunkId: hunk.id,
+        lineIds: [],
+        targetFingerprint,
+        body: "Nested repository note.",
+      },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === noteRequestId,
+    );
+
+    const detail = await loadConversationDetail(
+      client.socket,
+      client.events,
+      conversationId,
+    );
+    expect(detail.reviewStates).toContainEqual(expect.objectContaining({
+      repositoryPath,
+      path: file.path,
+      reviewed: true,
+      stale: false,
+    }));
+    expect(detail.reviewNotes).toContainEqual(expect.objectContaining({
+      repositoryPath,
+      path: file.path,
+      body: "Nested repository note.",
+      stale: false,
+    }));
+
+    const selectedDiffRequestId = randomUUID();
+    send(client.socket, {
+      type: "git.workspace.diff",
+      requestId: selectedDiffRequestId,
+      payload: {
+        projectId,
+        conversationId,
+        repositoryPath,
+        path: file.path,
+      },
+    });
+    const selectedDiff = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === selectedDiffRequestId
+        && event.result.kind === "git.workspace.diff",
+    );
+    if (selectedDiff.result.kind !== "git.workspace.diff") {
+      throw new Error("Expected a selected nested diff.");
+    }
+    expect(selectedDiff.result.diff.reviewMetadataChanged).toBe(false);
+    expect(selectedDiff.result.diff.patch).toContain("review.ts");
+    expect(selectedDiff.result.diff.patch).not.toContain("other.ts");
+
+    const inspectRequestId = randomUUID();
+    send(client.socket, {
+      type: "git.selection.inspect",
+      requestId: inspectRequestId,
+      payload: {
+        projectId,
+        conversationId,
+        repositoryPath,
+        fingerprint: diff.fingerprint,
+        filePath: file.path,
+        hunkId: hunk.id,
+        lineIds,
+      },
+    });
+    const inspected = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === inspectRequestId
+        && event.result.kind === "git.reversal.plan",
+    );
+    if (inspected.result.kind !== "git.reversal.plan") {
+      throw new Error("Expected a nested reversal plan.");
+    }
+
+    const revertRequestId = randomUUID();
+    send(client.socket, {
+      type: "git.selection.revert",
+      requestId: revertRequestId,
+      payload: {
+        projectId,
+        conversationId,
+        repositoryPath,
+        fingerprint: diff.fingerprint,
+        filePath: file.path,
+        hunkId: hunk.id,
+        lineIds,
+        expected: inspected.result.plan.validation,
+      },
+    });
+    const reverted = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === revertRequestId
+        && event.result.kind === "git.reversal",
+    );
+    if (reverted.result.kind !== "git.reversal") {
+      throw new Error("Expected a nested reversal result.");
+    }
+    expect(reverted.result.operation.repositoryPath).toBe(repositoryPath);
+    expect(readFileSync(join(nested, "review.ts"), "utf8")).toContain(
+      "enabled = false",
+    );
+
+    const refreshRequestId = randomUUID();
+    send(client.socket, {
+      type: "git.workspace.diff",
+      requestId: refreshRequestId,
+      payload: {
+        projectId,
+        conversationId,
+        repositoryPath,
+        path: file.path,
+      },
+    });
+    const refreshedDiff = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === refreshRequestId
+        && event.result.kind === "git.workspace.diff",
+    );
+    if (refreshedDiff.result.kind !== "git.workspace.diff") {
+      throw new Error("Expected a reconciled nested diff.");
+    }
+    expect(refreshedDiff.result.diff.reviewMetadataChanged).toBe(true);
+    const reconciled = await loadConversationDetail(
+      client.socket,
+      client.events,
+      conversationId,
+    );
+    expect(reconciled.reviewStates).toContainEqual(expect.objectContaining({
+      repositoryPath,
+      path: file.path,
+      hunkId: hunk.id,
+      reviewed: false,
+      stale: true,
+    }));
+    expect(reconciled.reviewNotes).toContainEqual(expect.objectContaining({
+      repositoryPath,
+      path: file.path,
+      hunkId: hunk.id,
+      body: "Nested repository note.",
+      stale: true,
+    }));
+
+    const undoRequestId = randomUUID();
+    send(client.socket, {
+      type: "git.selection.undo",
+      requestId: undoRequestId,
+      payload: {
+        projectId,
+        conversationId,
+        repositoryPath,
+        operationId: reverted.result.operation.id,
+      },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === undoRequestId
+        && event.result.kind === "git.diff",
+    );
+    expect(readFileSync(join(nested, "review.ts"), "utf8")).toContain(
+      "enabled = true",
+    );
+  });
+
+  it("applies the persisted project repository display limit during workspace refresh", async () => {
+    const { data, workspace } = temporaryWorkspace();
+    for (let index = 0; index < 17; index += 1) {
+      const repository = join(
+        workspace,
+        "modules",
+        `repository-${String(index).padStart(2, "0")}`,
+      );
+      mkdirSync(repository, { recursive: true });
+      execFileSync("git", ["init", "--initial-branch=main"], {
+        cwd: repository,
+      });
+    }
+
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: false,
+    });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
+    );
+    const project = welcome.snapshot.projects.find(
+      ({ id }) => id === welcome.snapshot.activeProjectId,
+    )!;
+    expect(project.gitRepositoryLimit).toBe(128);
+
+    const updateRequestId = randomUUID();
+    send(client.socket, {
+      type: "project.update",
+      requestId: updateRequestId,
+      payload: {
+        projectId: project.id,
+        gitRepositoryLimit: 16,
+      },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === updateRequestId,
+    );
+    const updated = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+        event.type === "snapshot.updated"
+        && event.snapshot.projects.some(
+          (candidate) => (
+            candidate.id === project.id
+            && candidate.gitRepositoryLimit === 16
+          ),
+        ),
+    );
+    expect(updated.snapshot.projects.find(({ id }) => id === project.id))
+      .toMatchObject({ gitRepositoryLimit: 16 });
+
+    const requestId = randomUUID();
+    send(client.socket, {
+      type: "git.workspace.refresh",
+      requestId,
+      payload: { projectId: project.id },
+    });
+    const refreshed = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === requestId
+        && event.result.kind === "git.workspace.status",
+    );
+    if (refreshed.result.kind !== "git.workspace.status") {
+      throw new Error("Expected workspace repository status.");
+    }
+    expect(refreshed.result.status.repositories).toHaveLength(16);
+    expect(refreshed.result.status.discoveredRepositories).toBe(17);
+    expect(refreshed.result.status.repositoryLimit).toBe(16);
+  });
+
   it("rejects a known-unready provider before persisting a turn, then refreshes its state", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     const { authFile, executable } = fakeCodex(root);
@@ -1404,7 +1718,11 @@ process.exit(child.status ?? 1);
   summaryRuntimeIt("returns selection Ask as an isolated contextual result without creating transcript records", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
-    const diff = await getUnifiedDiff(workspace);
+    writeFileSync(join(workspace, "other.ts"), "export const count = 1;\n");
+    execFileSync("git", ["add", "other.ts"], { cwd: workspace });
+    execFileSync("git", ["commit", "-m", "add other file"], { cwd: workspace });
+    writeFileSync(join(workspace, "other.ts"), "export const count = 2;\n");
+    const diff = await getUnifiedDiff(workspace, { paths: ["review.ts"] });
     const structured = parseUnifiedDiff(diff.text);
     const file = structured.files[0]!;
     const hunk = file.hunks[0]!;
@@ -1683,7 +2001,7 @@ process.exit(child.status ?? 1);
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
         event.type === "request.ok" && event.requestId === summaryRequestId,
     );
-    const settled = await client.events.next(
+    await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"
         && event.snapshot.runs.some((run) => run.conversationId === conversationId && run.label.includes("read-only diff summary") && run.status === "cancelled"),
@@ -1734,7 +2052,7 @@ process.exit(child.status ?? 1);
           event.type === "request.error" && event.requestId === requestId,
       );
       expect(failed.message).toMatch(scenario === "interaction" ? /unsupported interaction/u : /stale summary was discarded/u);
-      const settled = await client.events.next(
+      await client.events.next(
         (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
           event.type === "snapshot.updated"
           && event.snapshot.runs.some((run) => run.conversationId === conversationId && run.label.includes("read-only diff summary") && run.status === "failed"),
@@ -1780,7 +2098,7 @@ process.exit(child.status ?? 1);
         event.type === "request.error" && event.requestId === requestId,
     );
     expect(failed.message).toMatch(/timed out/u);
-    const settled = await client.events.next(
+    await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"
         && event.snapshot.runs.some((run) => run.label.includes("read-only diff summary") && run.status === "failed"),

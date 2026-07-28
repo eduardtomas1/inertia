@@ -648,7 +648,12 @@ describe("RuntimeStore conversation lifecycle", () => {
       repositoryRoot: "/workspace",
       repositoryRelativePath: "packages/app",
     });
-    store.updateProject(project.id, { groupingMode: "repository-path", name: "App package" });
+    expect(project.gitRepositoryLimit).toBe(128);
+    store.updateProject(project.id, {
+      groupingMode: "repository-path",
+      gitRepositoryLimit: 256,
+      name: "App package",
+    });
     store.close();
 
     const reopened = new RuntimeStore(databasePath, workspacePath);
@@ -663,6 +668,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       repositoryRoot: "/workspace",
       repositoryRelativePath: "packages/app",
       groupingMode: "repository-path",
+      gitRepositoryLimit: 256,
     });
     reopened.close();
   });
@@ -1251,7 +1257,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       expect.objectContaining({ id: note.id, body: "Check the cancellation path.", stale: false }),
     ]);
 
-    reopened.reconcileReviewTargets(conversation.id, {
+    reopened.reconcileReviewTargets(conversation.id, ".", undefined, {
       files: {},
       hunks: { [`src/review.ts\0hunk-one`]: "c".repeat(64) },
       notes: { [note.id]: null },
@@ -1265,6 +1271,42 @@ describe("RuntimeStore conversation lifecycle", () => {
     reopened.deleteReviewNote(conversation.id, note.id);
     expect(reopened.snapshot().reviewNotes).toEqual([]);
     reopened.close();
+  });
+
+  it("keeps identical review targets independent across repository roots", async () => {
+    const { store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    for (const repositoryPath of [".", "modules/example"]) {
+      store.setReviewState({
+        conversationId: conversation.id,
+        repositoryPath,
+        scope: "file",
+        path: "src/review.ts",
+        hunkId: null,
+        targetFingerprint: "a".repeat(64),
+        reviewed: true,
+      });
+    }
+
+    store.reconcileReviewTargets(conversation.id, ".", undefined, {
+      files: {},
+      hunks: {},
+      notes: {},
+    });
+
+    expect(store.snapshot().reviewStates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        repositoryPath: ".",
+        reviewed: false,
+        stale: true,
+      }),
+      expect.objectContaining({
+        repositoryPath: "modules/example",
+        reviewed: true,
+        stale: false,
+      }),
+    ]));
+    store.close();
   });
 
   it("persists reasoning summaries, context usage, and provider-aware thread defaults", async () => {

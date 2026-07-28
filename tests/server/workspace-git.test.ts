@@ -179,6 +179,55 @@ describe("workspace Git repository discovery", () => {
     expect(repositoryLimited.repositories[0].repositoryPath).toBe("modules/alpha");
   });
 
+  it("finishes traversing a workspace after the repository display limit is reached", async () => {
+    const root = temporaryRoot("many-repositories");
+    for (let index = 0; index < 70; index += 1) {
+      initializeRepository(
+        join(root, "modules", `repository-${String(index).padStart(2, "0")}`),
+      );
+    }
+
+    const snapshot = await discoverWorkspaceGitRepositories(root, {
+      maxRepositories: 64,
+      maxDirectories: 1_000,
+    });
+
+    expect(snapshot.repositories).toHaveLength(64);
+    expect(snapshot.discoveredRepositories).toBe(70);
+    expect(snapshot.repositoryLimit).toBe(64);
+    expect(snapshot.scannedDirectories).toBe(72);
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.repositories.at(-1)?.repositoryPath).toBe(
+      "modules/repository-63",
+    );
+  });
+
+  it("loads the complete diff for one small change in a root-less nested repository", async () => {
+    const root = temporaryRoot("single-nested-diff");
+    const nested = join(root, "modules", "org.openbravo.small");
+    initializeRepository(nested, "src/Main.java");
+    writeFileSync(join(nested, "src/Main.java"), "class Main { int value = 2; }\n");
+
+    const snapshot = await discoverWorkspaceGitRepositories(root);
+    const repository = await resolveWorkspaceGitRepository(
+      root,
+      "modules/org.openbravo.small",
+    );
+    const diff = await getUnifiedDiff(repository.root, {
+      paths: ["src/Main.java"],
+    });
+
+    expect(snapshot.repositories).toHaveLength(1);
+    expect(snapshot.repositories[0]?.files).toEqual([
+      expect.objectContaining({ path: "src/Main.java" }),
+    ]);
+    expect(diff.truncated).toBe(false);
+    expect(diff.filesIncluded).toBe(1);
+    expect(diff.totalFiles).toBe(1);
+    expect(diff.text).toContain("diff --git a/src/Main.java b/src/Main.java");
+    expect(diff.text).toContain("+class Main { int value = 2; }");
+  });
+
   it("keeps malformed repository markers visible as per-repository errors", async () => {
     const root = temporaryRoot("broken-marker");
     const broken = join(root, "modules", "broken");

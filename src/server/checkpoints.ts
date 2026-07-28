@@ -3,13 +3,21 @@ import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
+import { gitProcessEnvironment } from "./git/environment";
+
 export class CheckpointError extends Error {}
 
 type RunResult = { stdout: string; stderr: string };
 
 function runGit(cwd: string, args: string[], environment: NodeJS.ProcessEnv = process.env): Promise<RunResult> {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn("git", args, { cwd, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: { ...environment, GIT_TERMINAL_PROMPT: "0" } });
+    const child = spawn("git", args, {
+      cwd,
+      shell: false,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: gitProcessEnvironment(environment),
+    });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => { child.kill("SIGKILL"); rejectRun(new CheckpointError("Checkpoint operation timed out.")); }, 20_000);

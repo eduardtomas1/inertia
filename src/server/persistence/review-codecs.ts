@@ -71,6 +71,7 @@ export function reviewSummaryFromRow(
 export function reviewStateFromRow(row: DiffReviewStateRow): DiffReviewState {
   return {
     conversationId: row.conversation_id,
+    repositoryPath: row.repository_path || ".",
     scope: row.scope,
     path: row.path,
     hunkId: row.hunk_id || null,
@@ -88,6 +89,7 @@ export function reviewNoteFromRow(row: DiffReviewNoteRow): DiffReviewNote {
   return {
     id: row.id,
     conversationId: row.conversation_id,
+    repositoryPath: row.repository_path || ".",
     path: row.path,
     hunkId: row.hunk_id || null,
     lineIds: parsed,

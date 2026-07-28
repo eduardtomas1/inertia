@@ -227,7 +227,7 @@ test("starts without a demo and adds the first real project", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps Send and Stop clear across submission, cancellation, theme, and scale states", async ({}, testInfo) => {
+test("keeps Send and Stop clear across submission, cancellation, theme, and scale states", async ({ browserName: _browserName }, testInfo) => {
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const initialStore = new RuntimeStore(databasePath, workspaceDirectory, {
     recoverInterruptedRuns: false,
@@ -458,7 +458,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
   expect(rendererErrors).toEqual([]);
 });
 
-test("previews, validates, removes, and cleans up secure composer attachments", async ({}, testInfo) => {
+test("previews, validates, removes, and cleans up secure composer attachments", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   await electronApp.evaluate(({ dialog }, paths) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({
@@ -658,7 +658,7 @@ test("opens a settled chat directly and does not redirect when Work filters hide
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps every ordinary New chat entry point isolated from the viewed chat", async ({}, testInfo) => {
+test("keeps every ordinary New chat entry point isolated from the viewed chat", async ({ browserName: _browserName }, testInfo) => {
   type ConversationRow = {
     id: string;
     provider_id: string;
@@ -920,7 +920,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("manages backend profiles across the responsive theme and scale matrix", async ({}, testInfo) => {
+test("manages backend profiles across the responsive theme and scale matrix", async ({ browserName: _browserName }, testInfo) => {
   const openBackends = async (): Promise<void> => {
     await page.getByRole("button", { name: "Model backends", exact: true }).click();
     await expect(page.getByRole("heading", {
@@ -1191,7 +1191,7 @@ test("keeps runtime support and application update checks explicit in settings",
   expect(rendererErrors).toEqual([]);
 });
 
-test("persists composer usage modes without losing the followed transcript", async ({}, testInfo) => {
+test("persists composer usage modes without losing the followed transcript", async ({ browserName: _browserName }, testInfo) => {
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const usageDatabase = new Database(databasePath, { readonly: true });
   const usageState = usageDatabase.prepare(
@@ -1433,7 +1433,7 @@ test("persists composer usage modes without losing the followed transcript", asy
   expect(rendererErrors).toEqual([]);
 });
 
-test("applies every interface scale live and remains usable at common Linux display scales", async ({}, testInfo) => {
+test("applies every interface scale live and remains usable at common Linux display scales", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const terminalFontSize = await page.locator("aside.terminal-panel").first().getAttribute("data-terminal-font-size");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -1536,7 +1536,7 @@ test("applies every interface scale live and remains usable at common Linux disp
       const shell = page.locator(".app-shell");
       const originalClassName = await shell.getAttribute("class") ?? "";
       await shell.evaluate((element) => {
-        for (const className of [...element.classList]) {
+        for (const className of element.classList) {
           if (className.startsWith("platform-")) {
             element.classList.remove(className);
           }
@@ -1613,7 +1613,7 @@ test("switches between Projects and Work and manages chat history", async () => 
   expect(rendererErrors).toEqual([]);
 });
 
-test("uses the anchored model chooser and enforces authoritative route boundaries", async ({}, testInfo) => {
+test("uses the anchored model chooser and enforces authoritative route boundaries", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   if (await page.getByRole("textbox", { name: "Message" }).count() === 0) {
     await expect.poll(
@@ -2138,7 +2138,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps the composer as one cohesive dock across themes and responsive splits", async ({}, testInfo) => {
+test("keeps the composer as one cohesive dock across themes and responsive splits", async ({ browserName: _browserName }, testInfo) => {
   if (await page.getByRole("textbox", { name: "Message" }).count() === 0) {
     await expect.poll(
       async () => (await runtimeSnapshot()).phase,
@@ -2940,7 +2940,7 @@ test("contains commit dialog focus and restores its trigger", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps the macOS brand in the native titlebar row and navigates it home", async ({}, testInfo) => {
+test("keeps the macOS brand in the native titlebar row and navigates it home", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const shell = page.locator(".app-shell");
   const brand = page.getByRole("button", { name: "Go to workspace" });
@@ -3083,7 +3083,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   expect(rendererErrors).toEqual([]);
 });
 
-test("navigates the project file hierarchy lazily with an accessible keyboard tree", async ({}, testInfo) => {
+test("navigates the project file hierarchy lazily with an accessible keyboard tree", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const addProject = page.getByRole("button", { name: "Add your first project" });
   if (await addProject.isVisible().catch(() => false)) {
@@ -3207,7 +3207,7 @@ test("adds a selected diff range to the next agent prompt", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps a contextual selection answer readable and dismissible across responsive layouts", async ({}, testInfo) => {
+test("keeps a contextual selection answer readable and dismissible across responsive layouts", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   await page.getByRole("tab", { name: /Changes/ }).click();
   const hunkHeader = page.locator(".diff-hunk-header").first();
@@ -3255,7 +3255,6 @@ test("keeps a contextual selection answer readable and dismissible across respon
 
   const card = page.getByLabel("Agent answer about selected lines");
   const answerBody = card.locator(".diff-selection-answer-body");
-  const metadata = card.locator("header small");
   const dismiss = card.getByRole("button", { name: "Dismiss selection answer" });
   await expect(card).toContainText(longBackendName);
   await expect(card).toContainText(longModelName);
@@ -3433,7 +3432,7 @@ test("keeps seen distinct from explicit acknowledgement and preserves dismissed 
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps delegated-agent traces compact while the active composer accepts a parent follow-up", async ({}, testInfo) => {
+test("keeps delegated-agent traces compact while the active composer accepts a parent follow-up", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const store = new RuntimeStore(databasePath, workspaceDirectory, {
@@ -4194,7 +4193,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
   }
 });
 
-test("presents the Quiet Ledger states as one calm, responsive conversation", async ({}, testInfo) => {
+test("presents the Quiet Ledger states as one calm, responsive conversation", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const store = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
@@ -4768,6 +4767,75 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       glyphAnimation: "none",
     });
     await page.emulateMedia({ reducedMotion: "no-preference" });
+
+    await publishFixtureEvent({
+      type: "agent.text",
+      conversationId: conversation.id,
+      runId: active.turn.runId,
+      turnId: active.turn.id,
+      text: "The live caret stays attached to this final paragraph.",
+    });
+    const streamingMarkdown = activeTurn.locator(
+      ".turn-commentary-row.is-streaming .response-markdown",
+    );
+    await expect(streamingMarkdown).toHaveCount(1);
+    const paragraphCaret = await streamingMarkdown.evaluate((element) => {
+      const last = element.lastElementChild;
+      const caret = last ? getComputedStyle(last, "::after") : null;
+      return {
+        lastTag: last?.tagName ?? null,
+        caretContent: caret?.content ?? null,
+        caretDisplay: caret?.display ?? null,
+        duplicateCaret: element.parentElement?.querySelector(
+          ":scope > .streaming-caret",
+        ) !== null,
+      };
+    });
+    expect(paragraphCaret).toEqual({
+      lastTag: "P",
+      caretContent: '""',
+      caretDisplay: "inline-block",
+      duplicateCaret: false,
+    });
+    await publishFixtureEvent({
+      type: "agent.activity",
+      activity: {
+        id: "activity-stream-boundary",
+        conversationId: conversation.id,
+        runId: active.turn.runId,
+        turnId: active.turn.id,
+        kind: "status",
+        title: "Streaming paragraph captured",
+        detail: null,
+        status: "completed",
+        createdAt: activeAt(16),
+      },
+    });
+    await publishFixtureEvent({
+      type: "agent.text",
+      conversationId: conversation.id,
+      runId: active.turn.runId,
+      turnId: active.turn.id,
+      text: "```ts\nconst verified = true;\n```",
+    });
+    const codeCaret = await streamingMarkdown.evaluate((element) => {
+      const last = element.lastElementChild;
+      const code = last?.querySelector("pre code") ?? null;
+      const caret = code ? getComputedStyle(code, "::after") : null;
+      return {
+        lastClass: last?.className ?? null,
+        caretContent: caret?.content ?? null,
+        duplicateCaret: element.parentElement?.querySelector(
+          ":scope > .streaming-caret",
+        ) !== null,
+      };
+    });
+    expect(codeCaret).toEqual({
+      lastClass: "response-code-block",
+      caretContent: '""',
+      duplicateCaret: false,
+    });
+    await captureElementScenario("streaming-caret-code", activeTurn);
 
     await publishFixtureEvent({
       type: "agent.approval.requested",

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type BetterSqlite3 from "better-sqlite3";
+import { quotedSqlIdentifier } from "./sql-identifiers";
 
 // Migration execution is isolated from the RuntimeStore facade so schema
 // upgrades can be verified independently and retried atomically.
@@ -19,6 +20,15 @@ const PROVIDERS = new Set(["codex", "claude", "cursor", "opencode"]);
 const INTERACTION_MODES = new Set(["build", "plan"]);
 const ACCESS_MODES = new Set(["supervised", "auto-edit", "full"]);
 const TERMINAL_WORKSPACE_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+const TURN_OWNERSHIP_TABLES = [
+  "messages",
+  "activities",
+  "agent_reasonings",
+  "agent_plans",
+  "thread_usage",
+  "checkpoints",
+] as const;
+type TurnOwnershipTable = (typeof TURN_OWNERSHIP_TABLES)[number];
 
 export interface LegacyBackfillDiagnostics {
   readonly sourceSchemaVersion: number;
@@ -188,9 +198,13 @@ function hasTable(database: SqliteDatabase, table: string): boolean {
   ).get(table) !== undefined;
 }
 
-function tableColumns(database: SqliteDatabase, table: string): Set<string> {
+function tableColumns(
+  database: SqliteDatabase,
+  table: TurnOwnershipTable,
+): Set<string> {
+  const tableSql = quotedSqlIdentifier(table, TURN_OWNERSHIP_TABLES);
   return new Set(
-    (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+    (database.prepare(`PRAGMA table_info(${tableSql})`).all() as Array<{ name: string }>)
       .map(({ name }) => name),
   );
 }
@@ -518,14 +532,7 @@ function normalizedConversation(conversation: ConversationRow): {
 }
 
 function requireLegacyOwnershipSchema(database: SqliteDatabase): void {
-  for (const table of [
-    "messages",
-    "activities",
-    "agent_reasonings",
-    "agent_plans",
-    "thread_usage",
-    "checkpoints",
-  ]) {
+  for (const table of TURN_OWNERSHIP_TABLES) {
     if (!hasTable(database, table) || !tableColumns(database, table).has("turn_id")) {
       throw new Error("Legacy turn ownership columns are unavailable.");
     }
@@ -797,10 +804,12 @@ export function backfillLegacyAgentTurns(
   const orphanRole = database.prepare(
     "SELECT COUNT(*) AS count FROM messages WHERE role = ? AND turn_id IS NULL",
   );
-  const orphanCount = (table: string): number =>
-    (database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE turn_id IS NULL`).get() as {
+  const orphanCount = (table: TurnOwnershipTable): number => {
+    const tableSql = quotedSqlIdentifier(table, TURN_OWNERSHIP_TABLES);
+    return (database.prepare(`SELECT COUNT(*) AS count FROM ${tableSql} WHERE turn_id IS NULL`).get() as {
       count: number;
     }).count;
+  };
   const diagnostics: LegacyBackfillDiagnostics = {
     sourceSchemaVersion: options.sourceSchemaVersion,
     sourceReleases: publishedReleasesForSchema(options.sourceSchemaVersion),

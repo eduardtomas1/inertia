@@ -21,7 +21,13 @@ export function resultEvent(event: ServerEvent): ResultEvent {
 
 export function commandRefreshesConversationDetail(
   command: CommandWithoutId,
+  event?: ServerEvent,
 ): boolean {
+  if (command.type === "git.workspace.diff") {
+    return event?.type === "request.result"
+      && event.result.kind === "git.workspace.diff"
+      && event.result.diff.reviewMetadataChanged === true;
+  }
   return [
     "message.send",
     "agent.subagent.stop",

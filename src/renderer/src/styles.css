@@ -2042,7 +2042,12 @@ textarea {
   white-space: pre-wrap;
 }
 
-.streaming-caret {
+.streaming-caret,
+.response-markdown.is-streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.response-markdown.is-streaming > :is(ul, ol):last-child > li:last-child::after,
+.response-markdown.is-streaming > blockquote:last-child > :last-child::after,
+.response-markdown.is-streaming > .response-code-block:last-child pre code::after,
+.response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after {
   display: inline-block;
   width: 2px;
   height: 12px;
@@ -2050,6 +2055,16 @@ textarea {
   vertical-align: -1px;
   background: var(--accent);
   animation: pulse 900ms ease-in-out infinite;
+}
+
+.response-markdown.is-streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.response-markdown.is-streaming > :is(ul, ol):last-child > li:last-child::after,
+.response-markdown.is-streaming > blockquote:last-child > :last-child::after,
+.response-markdown.is-streaming > .response-code-block:last-child pre code::after,
+.response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after {
+  margin-right: 0;
+  margin-left: 4px;
+  content: "";
 }
 
 .agent-request-card {
@@ -6848,13 +6863,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   padding-bottom: 5px;
 }
 
-.message.is-assistant.is-streaming > .streaming-caret {
-  position: absolute;
-  right: auto;
-  bottom: 7px;
-  margin-left: 4px;
-}
-
 .message-meta .live-label {
   padding: 2px 6px;
   border-radius: 999px;
@@ -7012,6 +7020,24 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   animation-play-state: paused;
 }
 
+.app-shell[data-document-active="false"] .streaming-caret,
+.app-shell[data-document-active="false"]
+  .response-markdown.is-streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.app-shell[data-document-active="false"]
+  .response-markdown.is-streaming > :is(ul, ol):last-child > li:last-child::after,
+.app-shell[data-document-active="false"]
+  .response-markdown.is-streaming > blockquote:last-child > :last-child::after,
+.app-shell[data-document-active="false"]
+  .response-markdown.is-streaming > .response-code-block:last-child pre code::after,
+.app-shell[data-document-active="false"]
+  .response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after,
+.app-shell[data-document-active="false"]
+  .response-turn.is-active .agent-activity.is-running svg,
+.app-shell[data-document-active="false"] .thread-status-label.is-working svg,
+.app-shell[data-document-active="false"] .thread-status-dot.is-working {
+  animation-play-state: paused;
+}
+
 @keyframes active-work-tonal-wash {
   to {
     transform: translate3d(8%, 0, 0);
@@ -7149,12 +7175,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .turn-commentary-row.is-streaming {
   padding-bottom: 3px;
-}
-
-.turn-commentary-row.is-streaming > .streaming-caret {
-  position: absolute;
-  bottom: 3px;
-  margin-left: 4px;
 }
 
 .turn-follow-up-row {

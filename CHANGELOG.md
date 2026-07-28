@@ -2,6 +2,16 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Next
+
+### Hardening in progress
+
+- Codex App Server execution and backend-profile management are split into bounded protocol, event, configuration, lifecycle, discovery, and runtime modules. Production TypeScript size ceilings, focused ownership budgets, persistence cycle checks, React hook rules, and test linting now run in the normal check.
+- Git children force a stable C locale before classifying failures. Rootless workspaces continue discovering nested repositories after the display cap, report how many roots were found, and let each project choose how many to show.
+- Nested repositories retain repository-scoped review marks, notes, questions, and selective revert. Selected-file diffs load directly for large repositories while validation still detects stale selections and revision spillover against the complete repository state.
+- Streaming transcript updates preserve settled row identities, reuse conversation-scoped approval data, and stop background animations when the window is inactive. The Linux live caret now follows the final rendered Markdown line instead of relying on platform-specific absolute positioning.
+- Full Access is now documented as an explicit provider-level safety bypass, including the unrestricted Codex sandbox/approval configuration and Claude permission-skipping mode it selects under the hood.
+
 ## 0.0.10 — 2026-07-27
 
 ### A stronger foundation without changing the workflow

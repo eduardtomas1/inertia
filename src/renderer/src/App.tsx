@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, X } from "lucide-react";
 import {
   defaultSettings,
   type AgentApprovalDecision,
@@ -18,25 +17,28 @@ import {
   type WorkspaceRun,
 } from "@shared/contracts";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
-import { ActivityCenter } from "./components/ActivityCenter";
-import { CommandPalette } from "./components/CommandPalette";
 import { CommitDialog } from "./components/CommitDialog";
+import { AppNavigationOverlays } from "./components/AppNavigationOverlays";
+import { AppStatusOverlays } from "./components/AppStatusOverlays";
 import { PaneResizeHandle } from "./components/PaneResizeHandle";
-import { ProviderAuthDialog } from "./components/ProviderAuthDialog";
 import { Sidebar } from "./components/Sidebar";
 import { WorkspaceHeader } from "./components/WorkspaceHeader";
 import {
   WorkspaceScene,
   type WorkspacePanelTab,
 } from "./components/WorkspaceScene";
-import { IconButton } from "./components/ui";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
+import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useConversationProjection } from "./hooks/useConversationProjection";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
 import { useActivityActions } from "./hooks/useActivityActions";
-import { AppUpdateNotice, useAppUpdate } from "./app-update";
+import {
+  useStableActions,
+  useStableController,
+} from "./hooks/useStableController";
+import { useAppUpdate } from "./app-update";
 import { useWorkspaceTools } from "./hooks/useWorkspaceTools";
 import { useTheme } from "./hooks/useTheme";
 import {
@@ -63,6 +65,9 @@ import { planFromText } from "./utils/planFromText";
 import {
   createWorkspaceSceneModel,
 } from "./components/workspace-scene/createWorkspaceSceneModel";
+import {
+  createWorkspaceTurnActions,
+} from "./components/workspace-scene/createWorkspaceTurnActions";
 
 type ConversationCreatePayload = Extract<
   ClientCommand,
@@ -90,13 +95,16 @@ function useDocumentActive(): boolean {
 }
 
 export default function App(): React.JSX.Element {
-  const connection = useInertiaConnection();
-  const appUpdate = useAppUpdate();
+  const connection = useStableController(useInertiaConnection());
+  const sendCommand = connection.sendCommand;
+  const appUpdate = useStableController(useAppUpdate());
   const documentActive = useDocumentActive();
-  const providerMaintenance = useProviderMaintenance(
-    connection.snapshot,
-    connection.sendCommand,
-    connection.subscribe,
+  const providerMaintenance = useStableController(
+    useProviderMaintenance(
+      connection.snapshot,
+      sendCommand,
+      connection.subscribe,
+    ),
   );
   const [view, setView] = useState<"workspace" | "settings">("workspace");
   const [settingsTarget, setSettingsTarget] = useState<{
@@ -114,10 +122,13 @@ export default function App(): React.JSX.Element {
   const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
   const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
   const pendingSeenRunsRef = useRef(new Set<string>());
-  const settings = connection.snapshot?.settings ?? {
-    ...defaultSettings,
-    theme: cachedThemePreference(window.localStorage) ?? defaultSettings.theme,
-  };
+  const settings = useMemo(
+    () => connection.snapshot?.settings ?? {
+      ...defaultSettings,
+      theme: cachedThemePreference(window.localStorage) ?? defaultSettings.theme,
+    },
+    [connection.snapshot?.settings],
+  );
   useTheme(settings.theme);
 
   useEffect(() => {
@@ -157,8 +168,8 @@ export default function App(): React.JSX.Element {
 
   const request = useCallback(
     (command: CommandWithoutId) =>
-      connection.sendCommand(withRequestId(command)),
-    [connection.sendCommand],
+      sendCommand(withRequestId(command)),
+    [sendCommand],
   );
   const project = useMemo(
     () => connection.snapshot?.projects.find((item) => item.id === connection.snapshot?.activeProjectId) ?? null,
@@ -180,19 +191,21 @@ export default function App(): React.JSX.Element {
     workspaceBodyStyle,
     sidebar: sidebarLayout,
   } = workspaceLayout;
-  const conversationProjection = useConversationProjection({
-    snapshot: connection.snapshot,
-    status: connection.status,
-    request,
-    subscribe: connection.subscribe,
-    autoOpenPlan: settings.autoOpenPlan,
-    onOpenPlan: (conversationId) => {
-      if (conversationId === connection.snapshot?.activeConversationId) {
-        setActiveTool("plan");
-      }
-    },
-    onTerminal: () => setGitRefreshVersion((version) => version + 1),
-  });
+  const conversationProjection = useStableController(
+    useConversationProjection({
+      snapshot: connection.snapshot,
+      status: connection.status,
+      request,
+      subscribe: connection.subscribe,
+      autoOpenPlan: settings.autoOpenPlan,
+      onOpenPlan: (conversationId) => {
+        if (conversationId === connection.snapshot?.activeConversationId) {
+          setActiveTool("plan");
+        }
+      },
+      onTerminal: () => setGitRefreshVersion((version) => version + 1),
+    }),
+  );
   const {
     conversation,
     detail: conversationDetail,
@@ -242,8 +255,8 @@ export default function App(): React.JSX.Element {
     setBusyAction(key);
     setActionError(null);
     try {
-      const event = await connection.sendCommand(withRequestId(command));
-      if (commandRefreshesConversationDetail(command)) {
+      const event = await sendCommand(withRequestId(command));
+      if (commandRefreshesConversationDetail(command, event)) {
         refreshDetail();
       }
       return event;
@@ -253,7 +266,7 @@ export default function App(): React.JSX.Element {
     } finally {
       setBusyAction((current) => current === key ? null : current);
     }
-  }, [connection.sendCommand, refreshDetail]);
+  }, [refreshDetail, sendCommand]);
   const openProjectPath = useCallback((
     pathRequest: Parameters<typeof window.inertia.openProjectPath>[0],
   ) => {
@@ -269,22 +282,28 @@ export default function App(): React.JSX.Element {
         );
       });
   }, []);
-  const workspaceTools = useWorkspaceTools({
-    project,
-    conversation,
-    detail: conversationDetail,
-    online: connection.status === "online",
-    ignoreWhitespace: settings.ignoreWhitespace,
-    confirmDestructiveActions: settings.confirmDestructiveActions,
-    refreshVersion: gitRefreshVersion,
-    request,
-    run,
-    setActionError,
-    setActiveTool,
-    openProjectPath,
-  });
-  const backendProfileActions = useBackendProfiles({ request, run });
-  const desktopTools = useDesktopTools({ setActionError });
+  const workspaceTools = useStableController(
+    useWorkspaceTools({
+      project,
+      conversation,
+      detail: conversationDetail,
+      online: connection.status === "online",
+      ignoreWhitespace: settings.ignoreWhitespace,
+      confirmDestructiveActions: settings.confirmDestructiveActions,
+      refreshVersion: gitRefreshVersion,
+      request,
+      run,
+      setActionError,
+      setActiveTool,
+      openProjectPath,
+    }),
+  );
+  const backendProfileActions = useStableController(
+    useBackendProfiles({ request, run }),
+  );
+  const desktopTools = useStableController(
+    useDesktopTools({ setActionError }),
+  );
   const { navigatePreview } = desktopTools;
   const {
     gitStatus,
@@ -339,20 +358,6 @@ export default function App(): React.JSX.Element {
     visibleConversationRun,
   ]);
 
-  useEffect(() => {
-    const shortcuts = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey)) return;
-      if (event.key.toLowerCase() === "k") { event.preventDefault(); setPaletteOpen(true); }
-      if (event.key.toLowerCase() === "n") { event.preventDefault(); createConversation(); }
-      if (event.key.toLowerCase() === "j") { event.preventDefault(); setActiveTool((tool) => tool === "terminal" ? null : "terminal"); }
-      if (event.key.toLowerCase() === "b") { event.preventDefault(); if (mobileNavigation) setSidebarOpen(true); else setSidebarCollapsed((collapsed) => !collapsed); }
-    };
-    // Capture app-wide shortcuts before focused widgets such as xterm can
-    // consume platform combinations like Ctrl+K.
-    window.addEventListener("keydown", shortcuts, true);
-    return () => window.removeEventListener("keydown", shortcuts, true);
-  });
-
   const importProject = async () => {
     if (busyAction) return;
     try {
@@ -380,19 +385,21 @@ export default function App(): React.JSX.Element {
     setSidebarOpen(false);
     if (tool) setActiveTool(tool);
   };
-  const activityActions = useActivityActions({
-    snapshot: connection.snapshot,
-    project,
-    conversationId: conversation?.id ?? null,
-    request,
-    run,
-    setActiveTool,
-    setActivityOpen,
-    setActionError,
-    activateContext: activateActivityContext,
-    openProjectPath,
-    navigatePreview,
-  });
+  const activityActions = useStableController(
+    useActivityActions({
+      snapshot: connection.snapshot,
+      project,
+      conversationId: conversation?.id ?? null,
+      request,
+      run,
+      setActiveTool,
+      setActivityOpen,
+      setActionError,
+      activateContext: activateActivityContext,
+      openProjectPath,
+      navigatePreview,
+    }),
+  );
   const {
     runProjectAction,
     openActivityLocation,
@@ -433,6 +440,14 @@ export default function App(): React.JSX.Element {
       .then(() => { setView("workspace"); setSidebarOpen(false); })
       .catch(() => undefined);
   };
+  useGlobalShortcuts({
+    createConversation: () => createConversation(),
+    mobileNavigation,
+    setActiveTool,
+    setPaletteOpen,
+    setSidebarCollapsed,
+    setSidebarOpen,
+  });
   const createConversationForSelection = async (
     selection: ModelSelection,
   ): Promise<void> => {
@@ -530,7 +545,33 @@ export default function App(): React.JSX.Element {
     && (!visibleConversationDetailState || visibleConversationDetailState.state === "loading"),
   );
   const platform = window.inertia?.getPlatform() ?? "unknown";
-  const workspaceScene = createWorkspaceSceneModel({
+  const turnSceneActions = createWorkspaceTurnActions({
+    conversation,
+    confirmDestructiveActions: settings.confirmDestructiveActions,
+    run,
+    loadGit: workspaceTools.loadGit,
+    openTurnDiff: workspaceTools.openTurnDiff,
+    compareTurnArtifacts: workspaceTools.compareTurnArtifacts,
+  });
+  const workspaceSceneActions = useStableActions({
+      importProject,
+      createConversation,
+      createConversationForSelection,
+      sendMessage,
+      respondToApproval,
+      respondToInput,
+      updateConversation,
+      updateSettings,
+      chooseCodexBinary,
+      refreshProvider,
+      connectProvider,
+      openProviderSetup,
+      openBackendSetup,
+      openProjectPath,
+      ...turnSceneActions,
+      run,
+  });
+  const workspaceScene = useMemo(() => createWorkspaceSceneModel({
     view,
     settingsTarget,
     settings,
@@ -549,26 +590,30 @@ export default function App(): React.JSX.Element {
     detailLoading,
     selectedMaintenanceStatus,
     selectedMaintenanceOperation,
-    actions: {
-      importProject,
-      createConversation,
-      createConversationForSelection,
-      sendMessage,
-      respondToApproval,
-      respondToInput,
-      updateConversation,
-      updateSettings,
-      chooseCodexBinary,
-      refreshProvider,
-      connectProvider,
-      openProviderSetup,
-      openBackendSetup,
-      openProjectPath,
-      run,
-    },
+    actions: workspaceSceneActions,
     setActionError,
     setLatestContentVisible,
-  });
+  }), [
+    activityActions,
+    appUpdate,
+    backendProfileActions,
+    busyAction,
+    connection,
+    conversationProjection,
+    desktopTools,
+    detailLoading,
+    planSteps,
+    project,
+    providerMaintenance,
+    selectedMaintenanceOperation,
+    selectedMaintenanceStatus,
+    settings,
+    settingsTarget,
+    view,
+    workspaceLayout,
+    workspaceSceneActions,
+    workspaceTools,
+  ]);
 
   return (
     <div
@@ -621,6 +666,12 @@ export default function App(): React.JSX.Element {
           void run("project.update", {
             type: "project.update",
             payload: { projectId: item.id, groupingMode },
+          }).catch(() => undefined);
+        }}
+        onSetProjectGitRepositoryLimit={(item, gitRepositoryLimit) => {
+          void run("project.update", {
+            type: "project.update",
+            payload: { projectId: item.id, gitRepositoryLimit },
           }).catch(() => undefined);
         }}
         onSidebarModeChange={(sidebarMode) => updateSettings({ sidebarMode })}
@@ -744,67 +795,45 @@ export default function App(): React.JSX.Element {
           setCommitDialogOpen(false);
         }}
       />
-      <ActivityCenter
-        open={activityOpen}
+      <AppNavigationOverlays
+        snapshot={connection.snapshot}
+        activityOpen={activityOpen}
+        paletteOpen={paletteOpen}
         now={activityNow}
-        runs={connection.snapshot?.runs ?? []}
-        projects={connection.snapshot?.projects ?? []}
-        conversations={connection.snapshot?.conversations ?? []}
-        onClose={() => setActivityOpen(false)}
-        onOpenThread={(thread) => { selectConversation(thread); setView("workspace"); setActivityOpen(false); }}
-        onOpenLocation={openActivityLocation}
-        onOpenTerminal={(activity) => { activateActivityContext(activity, "terminal"); setActivityOpen(false); }}
-        onOpenPreview={openActivityPreview}
-        onStop={stopActivity}
-        onRerun={rerunActivity}
-        onMarkSeen={markActivitySeen}
-        onAcknowledge={acknowledgeActivity}
-        onDismiss={dismissActivity}
+        setActivityOpen={setActivityOpen}
+        setPaletteOpen={setPaletteOpen}
+        setWorkspaceView={() => setView("workspace")}
+        selectProject={selectProject}
+        selectConversation={selectConversation}
+        createConversation={() => createConversation()}
+        importProject={importProject}
+        activateActivityContext={activateActivityContext}
+        openActivityLocation={openActivityLocation}
+        openActivityPreview={openActivityPreview}
+        stopActivity={stopActivity}
+        rerunActivity={rerunActivity}
+        markActivitySeen={markActivitySeen}
+        acknowledgeActivity={acknowledgeActivity}
+        dismissActivity={dismissActivity}
+        openSettings={() => setView("settings")}
       />
-      <CommandPalette
-        open={paletteOpen}
-        projects={connection.snapshot?.projects ?? []}
-        conversations={connection.snapshot?.conversations ?? []}
-        onClose={() => setPaletteOpen(false)}
-        onSelectProject={(item) => { selectProject(item); setView("workspace"); }}
-        onSelectConversation={(item) => { selectConversation(item); setView("workspace"); }}
-        onNewThread={() => createConversation()}
-        onAddProject={() => void importProject()}
-        onOpenSettings={() => setView("settings")}
+      <AppStatusOverlays
+        providerAuth={{
+          provider: authProvider,
+          status: connection.status,
+          theme: settings.theme,
+          fontSize: settings.terminalFontSize,
+          sendCommand,
+          subscribe: connection.subscribe,
+          onClose: closeProviderAuth,
+        }}
+        appUpdate={appUpdate}
+        error={visibleError}
+        onDismissError={() => {
+          setActionError(null);
+          connection.clearError();
+        }}
       />
-      <ProviderAuthDialog
-        provider={authProvider}
-        status={connection.status}
-        theme={settings.theme}
-        fontSize={settings.terminalFontSize}
-        sendCommand={connection.sendCommand}
-        subscribe={connection.subscribe}
-        onClose={closeProviderAuth}
-      />
-      {appUpdate.visible && appUpdate.status && (
-        <AppUpdateNotice
-          status={appUpdate.status}
-          onDismiss={appUpdate.dismiss}
-          onOpenRelease={() => {
-            void appUpdate.openRelease().catch(() => undefined);
-          }}
-        />
-      )}
-      {visibleError && (
-        <div className="error-toast" role="alert">
-          <AlertCircle size={17} />
-          <span>{visibleError}</span>
-          <IconButton
-            label="Dismiss error"
-            onClick={() => {
-              setActionError(null);
-              connection.clearError();
-            }}
-          >
-            <X size={15} />
-          </IconButton>
-        </div>
-      )}
     </div>
   );
 }

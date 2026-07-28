@@ -174,6 +174,7 @@ export function ModelBackendsSettings({
     projects[0]?.id ?? "",
   );
   const selected = profiles.find(({ id }) => id === selectedId) ?? profiles[0] ?? null;
+  const selectedProfileId = selected?.id ?? null;
   const editingBuiltIn = Boolean(editingId && selected?.source === "built-in");
   const modelChoices = useMemo(() =>
     profiles.flatMap((profile) => profile.enabled
@@ -190,15 +191,15 @@ export function ModelBackendsSettings({
     scope === "project" && projectId === projectDefaultProjectId) ?? null;
 
   useEffect(() => {
-    if (!selectedId && profiles[0]) setSelectedId(profiles[0].id);
-  }, [profiles, selectedId]);
+    if (!selected && profiles[0]) setSelectedId(profiles[0].id);
+  }, [profiles, selected]);
 
   useEffect(() => {
-    if (!selected || draft) return;
+    if (!selectedProfileId || draft) return;
     let disposed = false;
     setDetail(null);
     setDeleteConfirm(false);
-    void onLoadDetail(selected.id).then(
+    void onLoadDetail(selectedProfileId).then(
       (value) => { if (!disposed) setDetail(value); },
       (reason: unknown) => {
         if (!disposed) setError(
@@ -207,7 +208,7 @@ export function ModelBackendsSettings({
       },
     );
     return () => { disposed = true; };
-  }, [draft, onLoadDetail, selected?.id]);
+  }, [draft, onLoadDetail, selectedProfileId]);
 
   const run = async (
     key: string,

@@ -65,6 +65,7 @@ function TerminalSession({
   const managedActionTerminalRef = useRef(false);
   const actionInFlightRef = useRef<string | null>(null);
   const pendingOutputRef = useRef(new Map<string, string>());
+  const initialOptionsRef = useRef({ fontSize, theme });
   const lastSizeRef = useRef({ cols: 0, rows: 0 });
   const [instanceReady, setInstanceReady] = useState(false);
   const [sessionKey, setSessionKey] = useState(0);
@@ -82,10 +83,10 @@ function TerminalSession({
       cursorBlink: true,
       cursorStyle: "bar",
       fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
-      fontSize,
+      fontSize: initialOptionsRef.current.fontSize,
       lineHeight: 1.35,
       scrollback: 4_000,
-      theme: terminalTheme(theme),
+      theme: terminalTheme(initialOptionsRef.current.theme),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -209,9 +210,10 @@ function TerminalSession({
     let cancelled = false;
     const terminal = terminalRef.current;
     const fitAddon = fitRef.current;
+    const pendingOutput = pendingOutputRef.current;
     setSessionState("starting");
     setSessionError(null);
-    pendingOutputRef.current.clear();
+    pendingOutput.clear();
     terminal?.clear();
     terminal?.writeln(`\x1b[2mStarting a local terminal for ${projectName}…\x1b[0m`);
 
@@ -237,7 +239,7 @@ function TerminalSession({
         managedActionTerminalRef.current = false;
         setTerminalId(event.terminalId);
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
-        pendingOutputRef.current.clear();
+        pendingOutput.clear();
         setSessionState("ready");
         terminal?.clear();
         if (bufferedOutput) terminal?.write(bufferedOutput);
@@ -256,7 +258,7 @@ function TerminalSession({
       terminalIdRef.current = null;
       managedActionTerminalRef.current = false;
       setTerminalId(null);
-      pendingOutputRef.current.clear();
+      pendingOutput.clear();
       // Project actions are runtime-managed so checks and preview services can
       // continue across workspace navigation and remain stoppable by run ID.
       if (terminalId && !managedActionTerminal) {

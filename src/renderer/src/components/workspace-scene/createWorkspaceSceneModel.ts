@@ -5,12 +5,14 @@ import type {
   AgentInputRequest,
   AppSettings,
   ChatAttachment,
+  CheckpointSummary,
   Conversation,
   ModelSelection,
   Project,
   ProviderId,
   ProviderMaintenanceProviderId,
   ServerEvent,
+  SubagentTrace,
   TurnRequestContext,
 } from "@shared/contracts";
 
@@ -83,6 +85,14 @@ interface WorkspaceSceneActions {
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
   ) => void;
+  revertCheckpoint: (checkpoint: CheckpointSummary) => void;
+  openTurnDiff: (turnId: string, path?: string) => void;
+  compareTurnArtifacts: (
+    earlierTurnId: string,
+    laterTurnId: string,
+  ) => void;
+  stopSubagent: (trace: SubagentTrace) => Promise<void>;
+  stopAgent: () => Promise<void>;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
 }
 
@@ -247,12 +257,8 @@ export function createWorkspaceSceneModel({
       streamingText: projection.streamingText,
       streamingReasoning: projection.streamingReasoning,
       usage: projection.usage,
-      approvals: projection.pendingApprovals.filter(
-        (request) => request.conversationId === conversation?.id,
-      ),
-      inputRequests: projection.pendingInputs.filter(
-        (request) => request.conversationId === conversation?.id,
-      ),
+      approvals: projection.pendingApprovals,
+      inputRequests: projection.pendingInputs,
       providers: connection.snapshot?.providers ?? [],
       backendProfiles: connection.snapshot?.backendProfiles ?? [],
       maintenanceStatus: selectedMaintenanceStatus,
@@ -314,41 +320,12 @@ export function createWorkspaceSceneModel({
       },
       onClearPromptContext: () => workspaceTools.setPendingDiffContext(null),
       onLatestContentVisibilityChange: setLatestContentVisible,
-      onOpenTurnDiff: (turnId, path) => {
-        void workspaceTools.openTurnDiff(turnId, path);
-      },
-      onCompareTurnArtifacts: (earlierTurnId, laterTurnId) => {
-        void workspaceTools.compareTurnArtifacts(earlierTurnId, laterTurnId);
-      },
+      onOpenTurnDiff: actions.openTurnDiff,
+      onCompareTurnArtifacts: actions.compareTurnArtifacts,
       onOpenTurnFile: workspaceTools.openTurnFile,
-      onRevertCheckpoint: (checkpoint) => {
-        const confirmed = !settings.confirmDestructiveActions
-          || window.confirm(
-            "Restore the project to before this turn? "
-            + "Untracked files created later will be left in place.",
-          );
-        if (!conversation || !confirmed) return;
-        void actions.run("checkpoint.revert", {
-          type: "checkpoint.revert",
-          payload: {
-            conversationId: conversation.id,
-            checkpointId: checkpoint.id,
-          },
-        }).then(() => workspaceTools.loadGit()).catch(() => undefined);
-      },
-      onStopSubagent: (trace) => actions.run(`agent.subagent.stop:${trace.id}`, {
-        type: "agent.subagent.stop",
-        payload: {
-          conversationId: trace.conversationId,
-          traceId: trace.id,
-        },
-      }).then(() => undefined),
-      onStop: () => conversation
-        ? actions.run("agent.stop", {
-            type: "agent.stop",
-            payload: { conversationId: conversation.id },
-          }).then(() => undefined)
-        : Promise.resolve(),
+      onRevertCheckpoint: actions.revertCheckpoint,
+      onStopSubagent: actions.stopSubagent,
+      onStop: actions.stopAgent,
     },
     resizeHandle: toolsVisible ? {
       label: "Resize workspace tools",

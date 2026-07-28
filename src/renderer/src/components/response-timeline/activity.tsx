@@ -267,7 +267,6 @@ const CommentaryRow = memo(function CommentaryRow({
         defaultCodeWrap={defaultCodeWrap}
         streaming={entry.streaming}
       />
-      {entry.streaming && <span className="streaming-caret" aria-hidden="true" />}
     </article>
   );
 });
@@ -541,13 +540,7 @@ export function WorkLog({
     () => buildTurnExecutionStream(turn, {
       includeImportantActivities: turn.isActive,
     }),
-    [
-      turn.activities,
-      turn.commentaryMessages,
-      turn.followUpMessages,
-      turn.id,
-      turn.isActive,
-    ],
+    [turn],
   );
   // Streaming text is always the final visible execution entry. Appending that
   // one row keeps settled commentary and activity-group identities stable

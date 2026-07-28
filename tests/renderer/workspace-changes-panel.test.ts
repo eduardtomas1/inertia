@@ -2,7 +2,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { WorkspaceChangesPanel } from "../../src/renderer/src/components/WorkspaceChangesPanel";
+import {
+  WorkspaceChangesPanel,
+  workspaceGitSelectedFileRevision,
+} from "../../src/renderer/src/components/WorkspaceChangesPanel";
 import type {
   ChangedFile,
   WorkspaceGitSnapshot,
@@ -91,6 +94,8 @@ function snapshot(partial = false): WorkspaceGitSnapshot {
     deletions: 3,
     scannedDirectories: 19,
     skippedDirectories: 4,
+    discoveredRepositories: 4,
+    repositoryLimit: 128,
     partial,
     truncated: partial,
     issues: partial ? [{ repositoryPath: "modules/deep", message: "Depth limit reached." }] : [],
@@ -149,19 +154,37 @@ describe("workspace repository-grouped Changes panel", () => {
     const html = renderWorkspaceChanges(snapshot(true));
 
     expect(html).toContain('role="status"');
-    expect(html).toContain("Repository scan was bounded.");
+    expect(html).toContain("Repository discovery was bounded.");
     expect(html).toContain("Scanned 19 folders");
     expect(html).toContain("modules/org.openbravo.alpha");
   });
 
-  it("shows a precise nested-only review capability notice", () => {
+  it("changes the selected diff revision when a refresh keeps the file count stable", () => {
+    const before = snapshot();
+    const after = structuredClone(before);
+    after.repositories[1]!.files[0]!.insertions = 4;
+    after.repositories[1]!.insertions = 4;
+    after.insertions = 8;
+    const selection = {
+      repositoryPath: "modules/org.openbravo.alpha",
+      filePath: "src/Main.java",
+    };
+
+    expect(after.files).toBe(before.files);
+    expect(workspaceGitSelectedFileRevision(after, selection)).not.toBe(
+      workspaceGitSelectedFileRevision(before, selection),
+    );
+  });
+
+  it("shows nested review support and the checkpoint-backed revision boundary", () => {
     const nested = snapshot();
     nested.repositories = nested.repositories.filter((repository) => repository.repositoryPath !== ".");
     nested.files = 2;
     const html = renderWorkspaceChanges(nested);
 
     expect(html).toContain("Reviewing modules/org.openbravo.alpha.");
-    expect(html).toContain("Questions and prompt references keep this repository identity.");
-    expect(html).toContain("Persistent marks, local notes, revisions, and selective revert");
+    expect(html).toContain("review marks, local notes, and selective revert keep this repository identity");
+    expect(html).toContain("Agent summaries and revisions remain available only for the project-root repository");
+    expect(html).toContain("recovery checkpoints cover that root");
   });
 });

@@ -147,6 +147,8 @@ export interface Project {
   repositoryRoot: string | null;
   repositoryRelativePath: string;
   groupingMode: ProjectGroupingMode | null;
+  /** Maximum nested Git roots shown for this project during workspace discovery. */
+  gitRepositoryLimit: number;
   color: string;
   status: ProjectStatus;
   createdAt: string;

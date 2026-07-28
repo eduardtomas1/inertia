@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createCheckpoint, restoreCheckpoint } from "../../src/server/checkpoints";
+import {
+  CheckpointError,
+  createCheckpoint,
+  restoreCheckpoint,
+} from "../../src/server/checkpoints";
 import { getPullRequestCreateUrl } from "../../src/server/git";
 
 function git(cwd: string, ...args: string[]): string {
@@ -52,5 +56,25 @@ describe("Git checkpoints", () => {
     const root = repository();
     git(root, "remote", "add", "origin", "git@github.com:example/inertia.git");
     await expect(getPullRequestCreateUrl(root)).resolves.toBe("https://github.com/example/inertia/compare/main?expand=1");
+  });
+
+  it("classifies a non-repository independently of the parent locale", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-not-repository-"));
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(root, indexes);
+    const previousLang = process.env.LANG;
+    const previousLocale = process.env.LC_ALL;
+    process.env.LANG = "es_ES.UTF-8";
+    process.env.LC_ALL = "es_ES.UTF-8";
+    try {
+      await expect(
+        createCheckpoint(root, indexes, randomUUID()),
+      ).rejects.toEqual(new CheckpointError("not-repository"));
+    } finally {
+      if (previousLang === undefined) delete process.env.LANG;
+      else process.env.LANG = previousLang;
+      if (previousLocale === undefined) delete process.env.LC_ALL;
+      else process.env.LC_ALL = previousLocale;
+    }
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   AppSnapshot,
   Project,
@@ -58,12 +58,12 @@ export function useActivityActions({
     setPendingActivityAction(null);
   }, [conversationId, pendingActivityAction, project?.id]);
 
-  const runProjectAction = (action: ProjectAction) => {
+  const runProjectAction = useCallback((action: ProjectAction) => {
     setPendingActionId(action.id);
     setActiveTool("terminal");
-  };
+  }, [setActiveTool]);
 
-  const openActivityLocation = (activity: WorkspaceRun) => {
+  const openActivityLocation = useCallback((activity: WorkspaceRun) => {
     const targetProject = snapshot?.projects.find(
       ({ id }) => id === activity.projectId,
     );
@@ -79,16 +79,16 @@ export function useActivityActions({
       relativePath: ".",
       action: "open-externally",
     });
-  };
+  }, [openProjectPath, snapshot?.conversations, snapshot?.projects]);
 
-  const openActivityPreview = (activity: WorkspaceRun) => {
+  const openActivityPreview = useCallback((activity: WorkspaceRun) => {
     if (!activity.port) return;
     activateContext(activity, "preview");
     navigatePreview(`http://127.0.0.1:${activity.port}`);
     setActivityOpen(false);
-  };
+  }, [activateContext, navigatePreview, setActivityOpen]);
 
-  const stopActivity = (activity: WorkspaceRun) => {
+  const stopActivity = useCallback((activity: WorkspaceRun) => {
     void run(`activity.stop:${activity.id}`, {
       type: "activity.stop",
       payload: { runId: activity.id },
@@ -98,23 +98,23 @@ export function useActivityActions({
         : "The run could not be stopped.";
       setActionError(`Could not stop ${activity.label}: ${detail}`);
     });
-  };
+  }, [run, setActionError]);
 
-  const rerunActivity = (activity: WorkspaceRun) => {
+  const rerunActivity = useCallback((activity: WorkspaceRun) => {
     if (!activity.actionId) return;
     setPendingActivityAction(activity);
     activateContext(activity, "terminal");
     setActivityOpen(false);
-  };
+  }, [activateContext, setActivityOpen]);
 
-  const markActivitySeen = (activity: WorkspaceRun) => {
+  const markActivitySeen = useCallback((activity: WorkspaceRun) => {
     void request({
       type: "activity.mark-seen",
       payload: { runId: activity.id },
     }).catch(() => undefined);
-  };
+  }, [request]);
 
-  const acknowledgeActivity = (activity: WorkspaceRun) => {
+  const acknowledgeActivity = useCallback((activity: WorkspaceRun) => {
     void run(`activity.acknowledge:${activity.id}`, {
       type: "activity.acknowledge",
       payload: { runId: activity.id },
@@ -124,9 +124,9 @@ export function useActivityActions({
         : "The run could not be acknowledged.";
       setActionError(`Could not acknowledge ${activity.label}: ${detail}`);
     });
-  };
+  }, [run, setActionError]);
 
-  const dismissActivity = (activity: WorkspaceRun) => {
+  const dismissActivity = useCallback((activity: WorkspaceRun) => {
     void run(`activity.dismiss:${activity.id}`, {
       type: "activity.dismiss",
       payload: { runId: activity.id },
@@ -136,9 +136,9 @@ export function useActivityActions({
         : "The run could not be dismissed.";
       setActionError(`Could not dismiss ${activity.label}: ${detail}`);
     });
-  };
+  }, [run, setActionError]);
 
-  return {
+  return useMemo(() => ({
     pendingActionId,
     clearPendingAction: () => setPendingActionId(null),
     runProjectAction,
@@ -149,5 +149,15 @@ export function useActivityActions({
     markActivitySeen,
     acknowledgeActivity,
     dismissActivity,
-  };
+  }), [
+    acknowledgeActivity,
+    dismissActivity,
+    markActivitySeen,
+    openActivityLocation,
+    openActivityPreview,
+    pendingActionId,
+    rerunActivity,
+    runProjectAction,
+    stopActivity,
+  ]);
 }

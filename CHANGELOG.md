@@ -4,13 +4,35 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
-### Hardening in progress
+## 0.0.11 — 2026-07-28
 
-- Codex App Server execution and backend-profile management are split into bounded protocol, event, configuration, lifecycle, discovery, and runtime modules. Production TypeScript size ceilings, focused ownership budgets, persistence cycle checks, React hook rules, and test linting now run in the normal check.
-- Git children force a stable C locale before classifying failures. Rootless workspaces continue discovering nested repositories after the display cap, report how many roots were found, and let each project choose how many to show.
-- Nested repositories retain repository-scoped review marks, notes, questions, and selective revert. Selected-file diffs load directly for large repositories while validation still detects stale selections and revision spillover against the complete repository state.
-- Streaming transcript updates preserve settled row identities, reuse conversation-scoped approval data, and stop background animations when the window is inactive. The Linux live caret now follows the final rendered Markdown line instead of relying on platform-specific absolute positioning.
-- Full Access is now documented as an explicit provider-level safety bypass, including the unrestricted Codex sandbox/approval configuration and Claude permission-skipping mode it selects under the hood.
+### A foundation that is easier to change safely
+
+- Codex App Server execution and backend-profile management now live in bounded protocol, event, configuration, lifecycle, discovery, and runtime modules instead of growing inside two giant files.
+- The workspace scene, global shortcuts, update flow, review matching, runtime diagnostics, and provider controls have clearer ownership and smaller renderer update surfaces.
+- Architecture checks now enforce production file and import ceilings, persistence cycle boundaries, React hook rules, and lint coverage for tests as part of the normal check.
+- Database migrations use validated SQL identifiers, Git failure classification is locale-independent, and compatibility facades remain thin enough to preserve the existing V0.0.10 workflow and history.
+
+### Large and rootless workspaces feel first-class
+
+- Projects without a root Git repository can discover nested module repositories beyond the old 64-repository cutoff, report the true bounded result, and choose how many repositories to display.
+- Nested repositories keep their own review marks, notes, questions, selective reverts, stale-target reconciliation, and repository identity throughout the review flow.
+- Large repositories load a selected file's diff directly while still validating its fingerprint against the complete repository state; nested review marks can no longer satisfy a root commit warning accidentally.
+- Automatic checkpoints preserve sparse-checkout boundaries, ignored files, staged index content, exact working-tree bytes, and unusual paths without running repository clean/smudge filters or reference hooks.
+
+### Calmer cross-platform work
+
+- Windows transcript spacing and model-selection geometry, Linux streaming-caret placement and readability, composer breathing room, and narrow layouts received another platform-specific pass.
+- Settled transcript rows keep stable identities, background work animation pauses when the window is inactive, and tool activity remains smooth during long or rapidly updating runs.
+- Supported provider CLI updates and Inertia release notices remain visible through reconnects without duplicating an operation or installing anything silently.
+- Full Access is documented as the provider-level safety bypass it is, including Codex's unrestricted sandbox/approval configuration and Claude's permission-skipping mode.
+
+### Security and release confidence
+
+- Automatic Git inspection disables repository-controlled filesystem monitors, external diff drivers, text conversion, executable filters, and hooks while preserving ordinary explicit Git workflows.
+- Embedded previews accept only literal loopback origins; remote HTTPS links open externally, and attachment previews revalidate ownership, containment, type, size, and content digest before returning exact bytes.
+- Signing credentials are scoped only to their matching release runner, support reports retain their newest bounded diagnostics, and local security reports remain outside the repository.
+- The final release candidate passed architecture checks, lint, typecheck, 1,070 unit and integration tests, 114 portable provider tests, 35 Electron end-to-end tests, production dependency audit, native package smoke, Electron fuse verification, and macOS bundle verification across macOS arm64, Windows x64, and Linux x64.
 
 ## 0.0.10 — 2026-07-27
 

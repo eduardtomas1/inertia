@@ -79,13 +79,13 @@ Provider account credentials remain in each provider's own storage. Credentials 
 
 Access mode is a real safety boundary. Supervised keeps the selected provider's approval flow active. Auto-edit pre-approves supported file edits while leaving other provider permissions in place. Full Access is an explicit opt-in that asks the provider for its unrestricted mode—for example, Codex uses its danger-full-access sandbox/approval configuration and Claude uses its `--dangerously-skip-permissions` mode. Use it only in a workspace where you trust the request, repository, and commands the agent may run.
 
-### Version 0.0.10
+### Version 0.0.11
 
-This release gives Inertia a stronger internal foundation without changing the workflow that already feels good. The largest renderer, runtime, database, Git, transcript, composer, and provider modules now have focused ownership and automated architecture guardrails.
+This release makes Inertia's strong workflow easier to evolve safely. Codex App Server execution, backend profiles, workspace rendering, persistence, Git review, diagnostics, and updates now have clearer ownership and stronger architecture guardrails.
 
-Favorites now remember the complete model route and reasoning choice, provider CLI updates can run inside the app, and cross-platform spacing, readiness, animation, attachment cleanup, reconnects, and turn settlement are more dependable.
+Rootless workspaces with many nested repositories now behave like real multi-repository projects, including repository-scoped reviews and direct file diffs. Sparse checkouts, ignored files, automatic Git inspection, secure previews, Windows spacing, Linux readability, and long-running transcript performance are more dependable too.
 
-Download [Inertia v0.0.10](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.10):
+Download [Inertia v0.0.11](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.11):
 
 | Platform | Download |
 | --- | --- |

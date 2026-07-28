@@ -98,16 +98,21 @@ describe("cross-platform packaged behavior contract", () => {
     for (const expected of [
       'tags:',
       '- "v*.*.*"',
-      "dist_script: dist:mac",
-      "dist_script: dist:win",
-      "dist_script: dist:linux",
+      "dist_script: dist:release:mac",
+      "dist_script: dist:release:win",
+      "dist_script: dist:release:linux",
       "node scripts/validate-release.mjs",
       "run: npm run test:package-smoke",
       "run: xvfb-run --auto-servernum npm run test:package-smoke",
       "codesign --verify --deep --strict",
+      "xcrun stapler validate",
+      "Get-AuthenticodeSignature",
     ]) {
       expect(workflow).toContain(expected);
     }
+    expect(workflow).toContain("MACOS_APPLE_API_KEY_BASE64");
+    expect(workflow).toContain("WINDOWS_CSC_LINK");
+    expect(workflow).not.toContain("BEGIN PRIVATE KEY");
   });
 
   it("runs the real Kimi suite only when its CI secret is explicitly available", async () => {

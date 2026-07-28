@@ -36,6 +36,7 @@ import { useConversationProjection } from "./hooks/useConversationProjection";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
 import { useActivityActions } from "./hooks/useActivityActions";
+import { AppUpdateNotice, useAppUpdate } from "./app-update";
 import { useWorkspaceTools } from "./hooks/useWorkspaceTools";
 import { useTheme } from "./hooks/useTheme";
 import {
@@ -68,9 +69,30 @@ type ConversationCreatePayload = Extract<
   { type: "conversation.create" }
 >["payload"];
 
+function useDocumentActive(): boolean {
+  const [active, setActive] = useState(
+    () => document.visibilityState === "visible" && document.hasFocus(),
+  );
+  useEffect(() => {
+    const synchronize = (): void => {
+      setActive(document.visibilityState === "visible" && document.hasFocus());
+    };
+    document.addEventListener("visibilitychange", synchronize);
+    window.addEventListener("focus", synchronize);
+    window.addEventListener("blur", synchronize);
+    return () => {
+      document.removeEventListener("visibilitychange", synchronize);
+      window.removeEventListener("focus", synchronize);
+      window.removeEventListener("blur", synchronize);
+    };
+  }, []);
+  return active;
+}
 
 export default function App(): React.JSX.Element {
   const connection = useInertiaConnection();
+  const appUpdate = useAppUpdate();
+  const documentActive = useDocumentActive();
   const providerMaintenance = useProviderMaintenance(
     connection.snapshot,
     connection.sendCommand,
@@ -522,6 +544,7 @@ export default function App(): React.JSX.Element {
     backendProfileActions,
     desktopTools,
     activityActions,
+    appUpdate,
     planSteps,
     detailLoading,
     selectedMaintenanceStatus,
@@ -556,6 +579,7 @@ export default function App(): React.JSX.Element {
       data-interface-scale={settings.interfaceScale}
       data-runtime-generation={connection.runtimeGeneration ?? undefined}
       data-connection-status={connection.status}
+      data-document-active={documentActive ? "true" : "false"}
       style={appShellStyle}
     >
       {(mobileNavigation || !sidebarCollapsed) && <Sidebar
@@ -757,6 +781,15 @@ export default function App(): React.JSX.Element {
         subscribe={connection.subscribe}
         onClose={closeProviderAuth}
       />
+      {appUpdate.visible && appUpdate.status && (
+        <AppUpdateNotice
+          status={appUpdate.status}
+          onDismiss={appUpdate.dismiss}
+          onOpenRelease={() => {
+            void appUpdate.openRelease().catch(() => undefined);
+          }}
+        />
+      )}
       {visibleError && (
         <div className="error-toast" role="alert">
           <AlertCircle size={17} />

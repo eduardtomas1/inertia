@@ -282,6 +282,31 @@ describe("TurnStreamCoalescer", () => {
     expect(chunks).toHaveLength(3);
   });
 
+  it("keeps a sustained hundred-thousand-delta session bounded and lossless", () => {
+    const scheduler = new ManualScheduler();
+    const chunks: string[] = [];
+    const coalescer = new TurnStreamCoalescer({
+      scheduler,
+      onFlush: ({ delta }) => chunks.push(delta),
+      onTimerError: (error) => {
+        throw error;
+      },
+    });
+
+    for (let index = 0; index < 100_000; index += 1) {
+      coalescer.append(String(index % 10));
+    }
+    coalescer.flush();
+
+    expect(chunks.join("")).toBe(
+      Array.from({ length: 100_000 }, (_, index) => String(index % 10)).join(""),
+    );
+    expect(chunks).toHaveLength(Math.ceil(100_000 / 1_024));
+    expect(chunks.every((chunk) => chunk.length <= 1_024)).toBe(true);
+    expect(coalescer.hasPending).toBe(false);
+    expect(coalescer.hasScheduledFlush).toBe(false);
+  });
+
   it("contains timer failures, retains pending text, and cancels resources on dispose", () => {
     const scheduler = new ManualScheduler();
     const errors: unknown[] = [];

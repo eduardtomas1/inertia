@@ -7,6 +7,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readFileSync,
   readdirSync,
   renameSync,
   unlinkSync,
@@ -27,6 +28,7 @@ export type RuntimeDiagnosticEvent =
   | "app.start"
   | "app.stop"
   | "logs.reveal"
+  | "report.copy"
   | "runtime.failure"
   | "runtime.state";
 
@@ -35,6 +37,18 @@ export interface RuntimeDiagnosticsOptions {
   maxFiles?: number;
   retentionMs?: number;
   now?: () => number;
+}
+
+export interface RuntimeSupportReportInput {
+  version: string;
+  platform: string;
+  architecture: string;
+  runtime: RuntimeSupervisorSnapshot | null;
+}
+
+export interface RuntimeSupportReport {
+  text: string;
+  eventCount: number;
 }
 
 type DiagnosticFields = Readonly<Record<string, unknown>>;
@@ -83,6 +97,19 @@ function runtimeFailureSummary(value: unknown): string | undefined {
   if (exitCode) return `Runtime process exited unexpectedly (code ${exitCode}).`;
   if (/encountered/iu.test(text)) return "Runtime process reported an operating-system error.";
   return "Runtime lifecycle failure detail omitted.";
+}
+
+function truncateUtf8(value: string, maximumBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
+  let bytes = 0;
+  let result = "";
+  for (const character of value) {
+    const size = Buffer.byteLength(character, "utf8");
+    if (bytes + size > maximumBytes) break;
+    result += character;
+    bytes += size;
+  }
+  return result;
 }
 
 export class RuntimeDiagnostics {
@@ -161,6 +188,96 @@ export class RuntimeDiagnostics {
       message: snapshot.lastError,
       // websocketUrl is deliberately excluded because it contains a capability.
     });
+  }
+
+  supportReport(input: RuntimeSupportReportInput): RuntimeSupportReport {
+    this.ensureDirectory();
+    const events = this.readEvents().slice(-120);
+    const runtime = input.runtime;
+    const lines = [
+      "Inertia support summary",
+      `Generated: ${new Date(this.now()).toISOString()}`,
+      `Version: ${sanitizeRuntimeDiagnosticText(input.version) ?? "unknown"}`,
+      `Platform: ${sanitizeRuntimeDiagnosticText(input.platform) ?? "unknown"}`,
+      `Architecture: ${sanitizeRuntimeDiagnosticText(input.architecture) ?? "unknown"}`,
+      `Runtime: ${runtime?.phase ?? "unavailable"}`,
+      `Runtime generation: ${runtime?.generation ?? 0}`,
+      `Restart attempt: ${runtime?.restartAttempt ?? 0}`,
+      `Restart scheduled: ${runtime?.restartScheduled === true ? "yes" : "no"}`,
+      "",
+      `Recent lifecycle events (${events.length}):`,
+      ...(events.length > 0 ? events : ["No lifecycle events recorded."]),
+      "",
+      "Privacy: prompts, source, project paths, token values, credentials, connection capabilities, and provider output are excluded.",
+    ];
+    return {
+      text: truncateUtf8(lines.join("\n"), 64 * 1_024),
+      eventCount: events.length,
+    };
+  }
+
+  private readEvents(): string[] {
+    const names = readdirSync(this.directory)
+      .filter((name) => LOG_FILE_PATTERN.test(name))
+      .sort((left, right) => {
+        if (left === "runtime.log") return 1;
+        if (right === "runtime.log") return -1;
+        const leftIndex = Number(left.match(/\.(\d+)\./u)?.[1] ?? 0);
+        const rightIndex = Number(right.match(/\.(\d+)\./u)?.[1] ?? 0);
+        return rightIndex - leftIndex;
+      });
+    const events: string[] = [];
+    for (const name of names) {
+      let content: string;
+      try {
+        const path = join(this.directory, name);
+        const metadata = lstatSync(path);
+        if (!metadata.isFile() || metadata.isSymbolicLink()) continue;
+        content = readFileSync(path, "utf8").slice(0, this.maxFileBytes);
+      } catch {
+        // Rotation can race a support-summary read. Skip the disappeared file.
+        continue;
+      }
+      for (const line of content.split(/\r?\n/u)) {
+        if (!line) continue;
+        try {
+          const value = JSON.parse(line) as Record<string, unknown>;
+          const event = typeof value.event === "string"
+            && [
+              "app.start",
+              "app.stop",
+              "logs.reveal",
+              "report.copy",
+              "runtime.failure",
+              "runtime.state",
+            ].includes(value.event)
+              ? value.event
+              : null;
+          const at = typeof value.at === "string"
+            && Number.isFinite(Date.parse(value.at))
+              ? new Date(value.at).toISOString()
+              : null;
+          if (!event || !at) continue;
+          const fields = [
+            typeof value.phase === "string" ? `phase=${value.phase}` : null,
+            boundedInteger(value.generation, 0, Number.MAX_SAFE_INTEGER) !== undefined
+              ? `generation=${value.generation}`
+              : null,
+            boundedInteger(value.restartAttempt, 0, 1_000_000) !== undefined
+              ? `restart=${value.restartAttempt}`
+              : null,
+            typeof value.restartScheduled === "boolean"
+              ? `scheduled=${value.restartScheduled ? "yes" : "no"}`
+              : null,
+            sanitizeRuntimeDiagnosticText(value.message),
+          ].filter((field): field is string => Boolean(field));
+          events.push(`${at} · ${event}${fields.length > 0 ? ` · ${fields.join(" · ")}` : ""}`);
+        } catch {
+          // A malformed diagnostic line is ignored rather than copied.
+        }
+      }
+    }
+    return events;
   }
 
   private append(line: string): void {

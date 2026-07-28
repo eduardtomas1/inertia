@@ -17,6 +17,7 @@ import type {
 import type { PlanPanel } from "../PlanPanel";
 import type { WorkspaceSceneProps } from "../WorkspaceScene";
 import type { useActivityActions } from "../../hooks/useActivityActions";
+import type { useAppUpdate } from "../../hooks/useAppUpdate";
 import type { useBackendProfiles } from "../../hooks/useBackendProfiles";
 import type { useConversationProjection } from "../../hooks/useConversationProjection";
 import type { useDesktopTools } from "../../hooks/useDesktopTools";
@@ -39,6 +40,7 @@ type WorkspaceTools = ReturnType<typeof useWorkspaceTools>;
 type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type DesktopTools = ReturnType<typeof useDesktopTools>;
 type ActivityActions = ReturnType<typeof useActivityActions>;
+type AppUpdate = ReturnType<typeof useAppUpdate>;
 type PlanSteps = ComponentProps<typeof PlanPanel>["steps"];
 
 interface WorkspaceSceneActions {
@@ -101,6 +103,7 @@ export interface WorkspaceSceneModelInput {
   backendProfileActions: BackendProfileActions;
   desktopTools: DesktopTools;
   activityActions: ActivityActions;
+  appUpdate: AppUpdate;
   planSteps: PlanSteps;
   detailLoading: boolean;
   selectedMaintenanceStatus: WorkspaceSceneProps["chat"]["maintenanceStatus"];
@@ -124,6 +127,7 @@ export function createWorkspaceSceneModel({
   backendProfileActions,
   desktopTools,
   activityActions,
+  appUpdate,
   planSteps,
   detailLoading,
   selectedMaintenanceStatus,
@@ -201,6 +205,11 @@ export function createWorkspaceSceneModel({
         void actions.chooseCodexBinary().catch(() => undefined);
       },
       onRevealRuntimeLogs: () => window.inertia.revealRuntimeLogs(),
+      onCopyRuntimeDiagnosticReport: () => window.inertia.copyRuntimeDiagnosticReport(),
+      appUpdateStatus: appUpdate.status,
+      checkingAppUpdate: appUpdate.checking,
+      onCheckAppUpdate: () => appUpdate.check(true),
+      onOpenAppRelease: appUpdate.openRelease,
       onUnarchive: (thread) => {
         void actions.run("conversation.unarchive", {
           type: "conversation.unarchive",

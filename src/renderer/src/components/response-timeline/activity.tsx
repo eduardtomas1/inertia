@@ -1,7 +1,9 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -40,8 +42,28 @@ import { ResponseMarkdown } from "../ResponseMarkdown";
 export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Element {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
+    let timer: number | null = null;
+    const stopTimer = (): void => {
+      if (timer === null) return;
+      window.clearInterval(timer);
+      timer = null;
+    };
+    const synchronize = (): void => {
+      stopTimer();
+      setNow(Date.now());
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    };
+    synchronize();
+    document.addEventListener("visibilitychange", synchronize);
+    window.addEventListener("focus", synchronize);
+    window.addEventListener("blur", synchronize);
+    return () => {
+      stopTimer();
+      document.removeEventListener("visibilitychange", synchronize);
+      window.removeEventListener("focus", synchronize);
+      window.removeEventListener("blur", synchronize);
+    };
   }, []);
   return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)))}</span>;
 }
@@ -88,7 +110,7 @@ function splitActivityTitle(
   };
 }
 
-export function ActivityRow({
+export const ActivityRow = memo(function ActivityRow({
   activity,
   visibility,
   onBeforeToggle,
@@ -204,9 +226,9 @@ export function ActivityRow({
       )}
     </div>
   );
-}
+});
 
-export function PlanDetail({ plan }: { plan: AgentPlan }): React.JSX.Element {
+export const PlanDetail = memo(function PlanDetail({ plan }: { plan: AgentPlan }): React.JSX.Element {
   return (
     <div className="turn-reasoning-detail" data-turn-plan={plan.turnId ?? "legacy"}>
       <span><ListChecks size={13} aria-hidden="true" />Plan</span>
@@ -216,9 +238,9 @@ export function PlanDetail({ plan }: { plan: AgentPlan }): React.JSX.Element {
       )}
     </div>
   );
-}
+});
 
-function CommentaryRow({
+const CommentaryRow = memo(function CommentaryRow({
   entry,
   projectRoot,
   projectId,
@@ -248,7 +270,7 @@ function CommentaryRow({
       {entry.streaming && <span className="streaming-caret" aria-hidden="true" />}
     </article>
   );
-}
+});
 
 function FollowUpRow({
   entry,
@@ -301,7 +323,7 @@ export function useAnchoredDetailsToggle(
   };
 }
 
-export function ActivityGroup({
+export const ActivityGroup = memo(function ActivityGroup({
   entry,
   onBeforeToggle,
   onAfterToggle,
@@ -353,7 +375,7 @@ export function ActivityGroup({
       )}
     </div>
   );
-}
+});
 
 function ExecutionStream({
   entries,
@@ -515,10 +537,41 @@ export function WorkLog({
   // durable diagnostics, not useful transcript rows. Plans and reasoning have
   // dedicated presentations; warnings are already part of the work stream.
   const supplementalActivities: AgentActivity[] = [];
-  const stream = buildTurnExecutionStream(turn, {
-    liveContent: turn.isActive ? liveContent : "",
-    includeImportantActivities: turn.isActive,
-  });
+  const durableStream = useMemo(
+    () => buildTurnExecutionStream(turn, {
+      includeImportantActivities: turn.isActive,
+    }),
+    [
+      turn.activities,
+      turn.commentaryMessages,
+      turn.followUpMessages,
+      turn.id,
+      turn.isActive,
+    ],
+  );
+  // Streaming text is always the final visible execution entry. Appending that
+  // one row keeps settled commentary and activity-group identities stable
+  // instead of sorting the complete workstream for every provider token.
+  const stream = useMemo<TurnExecutionStreamEntry[]>(() => {
+    if (!turn.isActive || !liveContent) return durableStream;
+    return [
+      ...durableStream,
+      {
+        kind: "commentary",
+        id: `live-commentary:${turn.id}`,
+        createdAt: turn.agentTurn.updatedAt,
+        message: null,
+        content: liveContent,
+        streaming: true,
+      },
+    ];
+  }, [
+    durableStream,
+    liveContent,
+    turn.agentTurn.updatedAt,
+    turn.id,
+    turn.isActive,
+  ]);
   const supplementalCount = supplementalActivities.length
     + turn.plans.length
     + (includesReasoning ? 1 : 0);

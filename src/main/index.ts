@@ -6,6 +6,7 @@ import {
   app,
   BrowserWindow,
   WebContentsView,
+  clipboard,
   dialog,
   ipcMain,
   net,
@@ -39,6 +40,7 @@ import {
   cleanupOrphanedAttachments,
   type AttachmentStorageReservation,
 } from "./attachment-registry.js";
+import { AppUpdateService } from "./app-update.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
   CredentialVault,
@@ -62,6 +64,8 @@ const IPC = {
   selectDirectory: "inertia:select-directory",
   selectCodexExecutable: "inertia:select-codex-executable",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
+  copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
+  checkAppUpdate: "inertia:check-app-update",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   releaseAttachment: "inertia:release-attachment",
@@ -96,6 +100,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
+let appUpdateService: AppUpdateService | null = null;
 let credentialVault: CredentialVault | null = null;
 let trustedRendererUrl = "";
 let stoppingRuntime = false;
@@ -365,6 +370,32 @@ function registerIpcHandlers(): void {
     // manager. Production always asks the OS to reveal this fixed local path.
     if (process.env.NODE_ENV === "test") return "";
     return await shell.openPath(directory);
+  });
+
+  ipcMain.handle(IPC.copyRuntimeDiagnosticReport, (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    const diagnostics = runtimeDiagnostics
+      ?? new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
+    runtimeDiagnostics = diagnostics;
+    const report = diagnostics.supportReport({
+      version: app.getVersion(),
+      platform: process.platform,
+      architecture: process.arch,
+      runtime: runtimeSupervisor?.snapshot() ?? null,
+    });
+    clipboard.writeText(report.text);
+    diagnostics.record("report.copy");
+    return { copied: true, eventCount: report.eventCount };
+  });
+
+  ipcMain.handle(IPC.checkAppUpdate, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const [force] = args;
+    if (typeof force !== "boolean") {
+      throw new Error("Invalid update check request");
+    }
+    if (!appUpdateService) throw new Error("Update checks are unavailable.");
+    return await appUpdateService.check(force);
   });
 
   ipcMain.handle(IPC.selectAttachments, async (event, ...args) => {
@@ -684,6 +715,19 @@ function finishQuitAfterCleanup(): void {
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
   runtimeDiagnostics.record("app.start");
+  const testUpdateVersion = process.env.NODE_ENV === "test"
+    && typeof process.env.INERTIA_TEST_APP_UPDATE_VERSION === "string"
+    && /^v?\d+\.\d+\.\d+$/u.test(process.env.INERTIA_TEST_APP_UPDATE_VERSION)
+      ? process.env.INERTIA_TEST_APP_UPDATE_VERSION
+      : app.getVersion();
+  appUpdateService = new AppUpdateService({
+    currentVersion: app.getVersion(),
+    fetch: process.env.NODE_ENV === "test"
+      ? async () => new Response(JSON.stringify({
+          tag_name: `v${testUpdateVersion.replace(/^v/u, "")}`,
+        }))
+      : net.fetch as typeof globalThis.fetch,
+  });
   nativeTheme.on("updated", () => {
     if (windowThemePreference !== "system") return;
     mainWindow?.setBackgroundColor(

@@ -26,6 +26,7 @@
     "src/renderer/src/lib/**/*.ts",
     "src/renderer/src/utils/**/*.ts",
     "src/renderer/src/components/AgentRequestCard.tsx",
+    "src/renderer/src/components/AppUpdateNotice.tsx",
     "src/renderer/src/components/ComposerAttachmentList.tsx",
     "src/renderer/src/components/ChangesPanel.tsx",
     "src/renderer/src/components/FilesPanel.tsx",

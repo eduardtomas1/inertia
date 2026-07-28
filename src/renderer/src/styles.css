@@ -4895,7 +4895,9 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .codex-binary-path > div { display: flex; flex: 0 0 auto; gap: 8px; }
 .runtime-log-setting { align-items: flex-start; margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--border); }
 .runtime-log-setting small { max-width: 620px; overflow: visible; line-height: 1.5; white-space: normal; }
-.runtime-log-setting > button { flex: 0 0 auto; }
+.runtime-log-setting > div,
+.application-update-setting > div { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.application-update-setting small { max-width: 620px; overflow: visible; line-height: 1.5; white-space: normal; }
 .settings-card-note { margin: 10px 2px 0; color: var(--text-muted); font-size: 8.5px; }
 
 .backend-settings {
@@ -5881,7 +5883,71 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   text-align: center;
 }
 
-/* Errors */
+/* App notices and errors */
+.app-update-notice {
+  position: fixed;
+  right: 22px;
+  bottom: 20px;
+  z-index: 99;
+  display: grid;
+  width: min(420px, calc(100vw - 44px));
+  min-height: 52px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-strong) 94%, transparent);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--shadow), var(--glass-inset);
+  grid-template-columns: 17px minmax(0, 1fr) auto 28px;
+}
+
+.app-update-notice > svg {
+  color: var(--accent-strong);
+}
+
+.app-update-notice > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.app-update-notice strong {
+  font-size: var(--ui-font-secondary);
+  font-weight: 670;
+}
+
+.app-update-notice small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-update-notice > button:not(.icon-button) {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-radius: 7px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  font-size: var(--ui-font-micro);
+  font-weight: 650;
+}
+
+.app-update-notice > button:not(.icon-button):hover {
+  background: color-mix(in srgb, var(--accent-soft) 76%, var(--surface-hover));
+}
+
+.app-update-notice ~ .error-toast {
+  bottom: 84px;
+}
+
 .error-toast {
   position: fixed;
   right: 22px;
@@ -6282,6 +6348,21 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 @media (max-width: 560px) {
+  .app-update-notice {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+    grid-template-columns: 17px minmax(0, 1fr) auto 28px;
+  }
+
+  .app-update-notice small {
+    display: none;
+  }
+
+  .app-update-notice ~ .error-toast {
+    bottom: 76px;
+  }
+
   .welcome-card,
   .project-welcome {
     width: calc(100% - 24px);
@@ -6422,7 +6503,8 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   .command-palette,
   .commit-dialog,
   .provider-auth-dialog,
-  .error-toast {
+  .error-toast,
+  .app-update-notice {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -6890,6 +6972,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   position: relative;
   isolation: isolate;
   overflow: clip;
+  contain: paint;
 }
 
 [data-active-work-region][data-active-work-state="queued"]::before,
@@ -6917,6 +7000,16 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   will-change: transform;
   animation: active-work-tonal-wash 4.2s linear infinite alternate;
   content: "";
+}
+
+.app-shell[data-document-active="false"]
+  [data-active-work-region][data-active-work-state="queued"]::before,
+.app-shell[data-document-active="false"]
+  [data-active-work-region][data-active-work-state="starting"]::before,
+.app-shell[data-document-active="false"]
+  [data-active-work-region][data-active-work-state="running"]::before {
+  will-change: auto;
+  animation-play-state: paused;
 }
 
 @keyframes active-work-tonal-wash {

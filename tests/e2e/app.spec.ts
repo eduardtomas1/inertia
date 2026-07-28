@@ -9,9 +9,9 @@ import { randomUUID } from "node:crypto";
 
 import Database from "better-sqlite3";
 
+import type { DiffSelectionReviewAnswer } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
 import { nativeProviderMetadataScope } from "../../src/server/provider/metadata";
-import type { DiffSelectionReviewAnswer } from "../../src/shared/contracts";
 import {
   createKimiClaudeBackendProfile,
   createKimiClaudeModelSelection,
@@ -27,6 +27,12 @@ import {
 } from "../../src/shared/window-chrome";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../src/renderer/src/utils/interfaceScale";
 import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
+import {
+  expectComposerEndsAtDock,
+  expectComposerReadinessContained,
+  expectNoViewportOverflow as expectPageNoViewportOverflow,
+} from "./support/layout-assertions";
+import { selectionAnswerFixtureMarkup } from "./support/selection-answer-fixture";
 
 const execFileAsync = promisify(execFile);
 
@@ -57,42 +63,6 @@ function processExists(pid: number): boolean {
   }
 }
 
-function escapeFixtureHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function selectionAnswerFixtureMarkup(answer: DiffSelectionReviewAnswer): string {
-  const model = answer.modelSelection.alias ?? answer.modelSelection.modelId;
-  const lineLabel = answer.selectedLineCount === 1 ? "line" : "lines";
-  return `
-    <aside class="diff-selection-answer" aria-label="Agent answer about selected lines">
-      <header>
-        <span>
-          <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"></circle>
-            <path d="M9.1 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4" fill="none" stroke="currentColor" stroke-width="2"></path>
-            <path d="M12 18h.01" stroke="currentColor" stroke-width="2"></path>
-          </svg>
-          <strong>Agent answer</strong>
-        </span>
-        <small>${escapeFixtureHtml(answer.modelSelection.backendProfileDisplayName)} · ${escapeFixtureHtml(model)} · ${answer.selectedLineCount} selected ${lineLabel}</small>
-        <button type="button" aria-label="Dismiss selection answer" title="Dismiss selection answer" class="icon-button">
-          <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24">
-            <path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2"></path>
-          </svg>
-        </button>
-      </header>
-      <blockquote>${escapeFixtureHtml(answer.question)}</blockquote>
-      <div class="diff-selection-answer-body">${escapeFixtureHtml(answer.answer)}</div>
-    </aside>
-  `;
-}
-
 async function runtimeSnapshot(): Promise<RuntimeTestSnapshot> {
   const snapshot = await electronApp.evaluate((_electron) => {
     const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as { snapshot: () => RuntimeTestSnapshot } | undefined;
@@ -114,77 +84,7 @@ async function resizeWindow(width: number, height: number): Promise<void> {
 }
 
 async function expectNoViewportOverflow(): Promise<void> {
-  const measurements = await page.evaluate(() => ({
-    innerWidth: window.innerWidth,
-    innerHeight: window.innerHeight,
-    documentWidth: document.documentElement.scrollWidth,
-    documentHeight: document.documentElement.scrollHeight,
-    bodyWidth: document.body.scrollWidth,
-    bodyHeight: document.body.scrollHeight,
-  }));
-
-  expect(measurements.documentWidth).toBeLessThanOrEqual(measurements.innerWidth + 1);
-  expect(measurements.bodyWidth).toBeLessThanOrEqual(measurements.innerWidth + 1);
-  expect(measurements.documentHeight).toBeLessThanOrEqual(measurements.innerHeight + 1);
-  expect(measurements.bodyHeight).toBeLessThanOrEqual(measurements.innerHeight + 1);
-}
-
-async function expectComposerEndsAtDock(composer: Locator): Promise<void> {
-  await expect(composer).toBeVisible();
-  const layout = await composer.evaluate((dock) => {
-    const shell = dock.parentElement;
-    const region = shell?.parentElement;
-    const dockBounds = dock.getBoundingClientRect();
-    const shellBounds = shell?.getBoundingClientRect();
-    const shellStyle = shell ? getComputedStyle(shell) : null;
-    return {
-      directDockOnly: shell?.children.length === 1
-        && shell.firstElementChild === dock
-        && shell.lastElementChild === dock,
-      directShellOnly: region?.children.length === 1
-        && region.firstElementChild === shell
-        && region.lastElementChild === shell,
-      bottomPadding: Number.parseFloat(shellStyle?.paddingBottom ?? "NaN"),
-      bottomGap: shellBounds ? shellBounds.bottom - dockBounds.bottom : Number.NaN,
-      detachedContextRows: region?.querySelectorAll(
-        ":scope > .provider-readiness, :scope > .composer-usage, :scope > .composer-footer, :scope > .composer-note",
-      ).length ?? -1,
-    };
-  });
-
-  expect(layout.directDockOnly).toBe(true);
-  expect(layout.directShellOnly).toBe(true);
-  expect(layout.bottomPadding).toBeGreaterThanOrEqual(8);
-  expect(layout.bottomPadding).toBeLessThanOrEqual(14);
-  expect(Math.abs(layout.bottomGap - layout.bottomPadding))
-    .toBeLessThanOrEqual(1);
-  expect(layout.detachedContextRows).toBe(0);
-}
-
-async function expectComposerReadinessContained(composer: Locator): Promise<void> {
-  const readiness = composer.locator(".provider-readiness");
-  if (await readiness.count() === 0) return;
-  await expect(readiness).toBeVisible();
-  await expect(readiness).not.toContainText("needs attention");
-  await expect(readiness).toHaveAttribute(
-    "data-route-repair",
-    /^(?:add-key|connect|install|none|probe|refresh)$/u,
-  );
-  const geometry = await readiness.evaluate((element) => {
-    const bounds = element.getBoundingClientRect();
-    const composerBounds = element.closest<HTMLElement>(".composer")
-      ?.getBoundingClientRect();
-    return {
-      insideInline: Boolean(
-        composerBounds
-        && bounds.left >= composerBounds.left - 1
-        && bounds.right <= composerBounds.right + 1,
-      ),
-      fits: element.scrollWidth <= element.clientWidth + 1,
-    };
-  });
-  expect(geometry.insideInline).toBe(true);
-  expect(geometry.fits).toBe(true);
+  await expectPageNoViewportOverflow(page);
 }
 
 test.beforeAll(async () => {
@@ -1262,11 +1162,18 @@ test("changes the visible theme on every quick-toggle click", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("reveals the fixed local runtime diagnostics directory from settings", async () => {
+test("keeps runtime support and application update checks explicit in settings", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Archive & data", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Local data" })).toBeVisible();
   await expect(page.getByText("Local-only lifecycle and failure metadata.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Copy support summary" }).click();
+  await expect(page.getByText("Private support summary copied", { exact: false })).toBeVisible();
+  const supportSummary = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
+  expect(supportSummary).toContain("Inertia support summary");
+  expect(supportSummary).toContain("Privacy: prompts, source, project paths");
+  expect(supportSummary).not.toContain(workspaceDirectory);
+  expect(supportSummary).not.toContain("sample.ts");
   await page.getByRole("button", { name: "Reveal log folder" }).click();
   await expect(page.getByText("Runtime log folder opened.", { exact: true })).toBeVisible();
 
@@ -1275,6 +1182,11 @@ test("reveals the fixed local runtime diagnostics directory from settings", asyn
   if (process.platform !== "win32") {
     expect((await stat(logDirectory)).mode & 0o777).toBe(0o700);
   }
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Application updates" })).toBeVisible();
+  await page.getByRole("button", { name: "Check now" }).click();
+  await expect(page.getByText("Inertia is up to date.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Install", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Go to workspace" }).click();
   expect(rendererErrors).toEqual([]);
 });

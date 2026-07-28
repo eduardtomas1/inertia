@@ -266,8 +266,12 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
   const previousTimeline = useRef<ResponseTimelineItem[]>([]);
   const pendingLayoutAnchor = useRef<TimelineLayoutAnchor | null>(null);
   const captureLayoutAnchorRef = useRef<() => void>(() => undefined);
+  const restoreLayoutAnchorRef = useRef<() => void>(() => undefined);
   const captureLayoutAnchorBeforeChange = useCallback(() => {
     captureLayoutAnchorRef.current();
+    // Keep scale restoration independent from the observer/state race. The
+    // event is synchronous and arrives before Chromium applies new metrics.
+    window.requestAnimationFrame(() => restoreLayoutAnchorRef.current());
   }, []);
   const builtTimeline = useMemo(() => buildResponseTimeline({
     turns: props.turns,
@@ -371,6 +375,7 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
   const activeAnchorRestorations = useRef(new Map<string, number>());
   const manuallyAdjustedRows = useRef(new Set<string>());
   const layoutAnchorActive = useRef(false);
+  const cancelLayoutAnchorRestoration = useRef<(() => void) | null>(null);
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
     shouldAdjustTimelineScrollPosition({
       itemStart: item.start,
@@ -382,7 +387,10 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
         || manuallyAdjustedRows.current.has(String(item.key)),
     });
   captureLayoutAnchorRef.current = () => {
-    if (pendingLayoutAnchor.current) return;
+    if (pendingLayoutAnchor.current) {
+      if (!cancelLayoutAnchorRestoration.current) return;
+      cancelLayoutAnchorRestoration.current();
+    }
     const scrollElement = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root) return;
@@ -404,28 +412,19 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
       wasFollowing,
     };
   };
-  const previousEstimateLayout = useRef(estimateLayout);
-  useLayoutEffect(() => {
-    const previous = previousEstimateLayout.current;
-    previousEstimateLayout.current = estimateLayout;
-    if (
-      !virtualized
-      || (
-        previous.availableWidth === estimateLayout.availableWidth
-        && previous.interfaceScale === estimateLayout.interfaceScale
-        && previous.responseDensity === estimateLayout.responseDensity
-      )
-    ) {
+  restoreLayoutAnchorRef.current = () => {
+    const layoutAnchor = pendingLayoutAnchor.current;
+    if (!layoutAnchor || cancelLayoutAnchorRestoration.current) return;
+    if (!virtualized) {
       pendingLayoutAnchor.current = null;
       return;
     }
     const scrollElement = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
-    if (!scrollElement || !root) return;
-    captureLayoutAnchorRef.current();
-    const layoutAnchor = pendingLayoutAnchor.current;
-    pendingLayoutAnchor.current = null;
-    if (!layoutAnchor) return;
+    if (!scrollElement || !root) {
+      pendingLayoutAnchor.current = null;
+      return;
+    }
     const { rowId, viewportOffset, wasFollowing } = layoutAnchor;
     const anchorIndex = rowId === null
       ? -1
@@ -447,7 +446,11 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     const finishRestoration = (): void => {
       if (cancelled) return;
       cancelled = true;
+      if (pendingLayoutAnchor.current === layoutAnchor) {
+        pendingLayoutAnchor.current = null;
+      }
       layoutAnchorActive.current = false;
+      cancelLayoutAnchorRestoration.current = null;
       removeIntentListeners();
     };
     const restore = (): void => {
@@ -495,19 +498,29 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     scrollElement.addEventListener("touchstart", cancelForUserIntent, { passive: true });
     scrollElement.addEventListener("pointerdown", cancelForUserIntent);
     scrollElement.addEventListener("keydown", cancelForUserIntent);
-    const frame = window.requestAnimationFrame(restore);
-    return () => {
-      finishRestoration();
-      window.cancelAnimationFrame(frame);
-    };
+    cancelLayoutAnchorRestoration.current = finishRestoration;
+    window.requestAnimationFrame(restore);
+  };
+  const previousEstimateLayout = useRef(estimateLayout);
+  useLayoutEffect(() => {
+    const previous = previousEstimateLayout.current;
+    previousEstimateLayout.current = estimateLayout;
+    if (
+      !virtualized
+      || (
+        previous.availableWidth === estimateLayout.availableWidth
+        && previous.interfaceScale === estimateLayout.interfaceScale
+        && previous.responseDensity === estimateLayout.responseDensity
+      )
+    ) return;
+    restoreLayoutAnchorRef.current();
   }, [
     estimateLayout,
-    props.scrollElementRef,
-    props.timelineElementRef,
-    timeline,
     virtualized,
-    virtualizer,
   ]);
+  useEffect(() => () => {
+    cancelLayoutAnchorRestoration.current?.();
+  }, []);
 
   const captureExpansionAnchor = useCallback((sourceTurnId: string): void => {
     const scrollElement = props.scrollElementRef?.current;

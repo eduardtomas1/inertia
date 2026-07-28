@@ -20,8 +20,16 @@ test.afterAll(async () => {
   await app.close();
 });
 
+async function ensureWorkspaceTools(): Promise<void> {
+  const panel = page.locator(".workspace-panel");
+  if (await panel.isVisible().catch(() => false)) return;
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await expect(panel).toBeVisible();
+}
+
 test("resizes and persists the internal workspace panes", async () => {
   await resizeWindow(1440, 920);
+  await ensureWorkspaceTools();
   await page.getByRole("tab", { name: "Terminal", exact: true }).click();
 
   const sidebarHandle = page.getByRole("separator", { name: "Resize project navigation" });
@@ -58,6 +66,7 @@ test("resizes and persists the internal workspace panes", async () => {
 
 test("collapses and restores both workspace sides without losing layout", async () => {
   await resizeWindow(1440, 920);
+  await ensureWorkspaceTools();
   const navigationToggle = page.getByRole("button", { name: "Toggle project navigation" });
   await navigationToggle.click();
   await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toHaveCount(0);
@@ -68,7 +77,12 @@ test("collapses and restores both workspace sides without losing layout", async 
   const toolsToggle = page.getByRole("button", { name: "Close workspace tools" }).first();
   await toolsToggle.click();
   await expect(page.locator(".workspace-panel")).toBeHidden();
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("inertia:layout:active-tool:v1"))).toBe("collapsed");
+  await expect.poll(() => page.evaluate(() => ({
+    legacy: window.localStorage.getItem("inertia:layout:active-tool:v1"),
+    lastTool: window.localStorage.getItem(
+      "inertia:layout:last-workspace-tool:v2",
+    ),
+  }))).toEqual({ legacy: null, lastTool: "terminal" });
   const readingCanvas = await page.evaluate(() => {
     const workspaceBody = document.querySelector<HTMLElement>(".workspace-body");
     const chat = document.querySelector<HTMLElement>(".chat-workspace");
@@ -106,6 +120,7 @@ for (const size of [
 ]) {
   test(`keeps the ${size.label} layout reachable without overlap`, async () => {
     await resizeWindow(size.width, size.height);
+    await ensureWorkspaceTools();
     await expectNoViewportOverflow();
     await expect(page.locator(".workspace-header")).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();

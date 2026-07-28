@@ -28,6 +28,12 @@ interface ActivityActionsOptions {
   navigatePreview: (url: string) => void;
 }
 
+interface PendingProjectAction {
+  actionId: string;
+  projectId: string;
+  conversationId: string | null;
+}
+
 export function useActivityActions({
   snapshot,
   project,
@@ -41,9 +47,22 @@ export function useActivityActions({
   openProjectPath,
   navigatePreview,
 }: ActivityActionsOptions) {
-  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] =
+    useState<PendingProjectAction | null>(null);
   const [pendingActivityAction, setPendingActivityAction] =
     useState<WorkspaceRun | null>(null);
+  const [pendingPreviewActivity, setPendingPreviewActivity] =
+    useState<WorkspaceRun | null>(null);
+
+  useEffect(() => {
+    setPendingAction((current) => (
+      current
+      && current.projectId === project?.id
+      && current.conversationId === conversationId
+        ? current
+        : null
+    ));
+  }, [conversationId, project?.id]);
 
   useEffect(() => {
     if (
@@ -54,14 +73,41 @@ export function useActivityActions({
       pendingActivityAction.conversationId
       && conversationId !== pendingActivityAction.conversationId
     ) return;
-    setPendingActionId(pendingActivityAction.actionId);
+    setPendingAction({
+      actionId: pendingActivityAction.actionId,
+      projectId: pendingActivityAction.projectId,
+      conversationId: pendingActivityAction.conversationId,
+    });
     setPendingActivityAction(null);
   }, [conversationId, pendingActivityAction, project?.id]);
 
+  useEffect(() => {
+    if (
+      !pendingPreviewActivity?.port
+      || project?.id !== pendingPreviewActivity.projectId
+    ) return;
+    if (
+      pendingPreviewActivity.conversationId
+      && conversationId !== pendingPreviewActivity.conversationId
+    ) return;
+    navigatePreview(`http://127.0.0.1:${pendingPreviewActivity.port}`);
+    setPendingPreviewActivity(null);
+  }, [
+    conversationId,
+    navigatePreview,
+    pendingPreviewActivity,
+    project?.id,
+  ]);
+
   const runProjectAction = useCallback((action: ProjectAction) => {
-    setPendingActionId(action.id);
+    if (!project) return;
+    setPendingAction({
+      actionId: action.id,
+      projectId: project.id,
+      conversationId,
+    });
     setActiveTool("terminal");
-  }, [setActiveTool]);
+  }, [conversationId, project, setActiveTool]);
 
   const openActivityLocation = useCallback((activity: WorkspaceRun) => {
     const targetProject = snapshot?.projects.find(
@@ -83,10 +129,10 @@ export function useActivityActions({
 
   const openActivityPreview = useCallback((activity: WorkspaceRun) => {
     if (!activity.port) return;
+    setPendingPreviewActivity(activity);
     activateContext(activity, "preview");
-    navigatePreview(`http://127.0.0.1:${activity.port}`);
     setActivityOpen(false);
-  }, [activateContext, navigatePreview, setActivityOpen]);
+  }, [activateContext, setActivityOpen]);
 
   const stopActivity = useCallback((activity: WorkspaceRun) => {
     void run(`activity.stop:${activity.id}`, {
@@ -138,9 +184,15 @@ export function useActivityActions({
     });
   }, [run, setActionError]);
 
+  const pendingActionId = pendingAction
+    && pendingAction.projectId === project?.id
+    && pendingAction.conversationId === conversationId
+    ? pendingAction.actionId
+    : null;
+
   return useMemo(() => ({
     pendingActionId,
-    clearPendingAction: () => setPendingActionId(null),
+    clearPendingAction: () => setPendingAction(null),
     runProjectAction,
     openActivityLocation,
     openActivityPreview,

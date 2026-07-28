@@ -87,7 +87,11 @@ export class ConversationRepository {
         )
       `).run({ ...conversation, modelSelectionJson });
       this.context.touchProject(projectId, now);
-      this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(projectId, conversation.id);
+      if (options.activate !== false) {
+        this.context.database.prepare(
+          "UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1",
+        ).run(projectId, conversation.id);
+      }
     })();
     return conversation;
   }

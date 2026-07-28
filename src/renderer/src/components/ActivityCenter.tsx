@@ -18,10 +18,10 @@ import {
 import type { Conversation, Project, WorkspaceRun } from "@shared/contracts";
 import {
   activityRunActions,
-  activityRunSections,
-  activityRunSummary,
+  activityRunPresentation,
   activityStatusLabel,
   activityWaitingKind,
+  type ActivityRunOperationGroup,
 } from "../utils/activityCenter";
 import { IconButton } from "./ui";
 
@@ -60,6 +60,68 @@ function runKindLabel(kind: WorkspaceRun["kind"]): string {
   return kind.charAt(0).toUpperCase() + kind.slice(1);
 }
 
+function operationStatusLabel(run: WorkspaceRun): string {
+  if (run.status === "running") return "Running";
+  if (run.status === "waiting") return "Waiting";
+  if (run.status === "cancelled") return "Stopped";
+  if (run.status === "failed") return "Failed";
+  return "Completed";
+}
+
+function RunOperations({
+  group,
+  owner,
+  expanded,
+  onToggle,
+}: {
+  group: ActivityRunOperationGroup;
+  owner: WorkspaceRun;
+  expanded: boolean;
+  onToggle: () => void;
+}): React.JSX.Element {
+  const operations = expanded ? group.all : group.visible;
+  const disclosureId = `activity-operations-${owner.id}`;
+  return (
+    <div className="activity-run-operation-group">
+      <ul
+        id={disclosureId}
+        className="activity-run-operations"
+        aria-label={`${expanded ? "All" : "Latest"} operations for ${owner.label}`}
+      >
+        {operations.map((operation) => (
+          <li
+            className={`is-${operation.status}`}
+            key={operation.id}
+            title={operation.detail ?? operation.label}
+          >
+            {operation.status === "succeeded"
+              ? <Check size={11} aria-hidden="true" />
+              : <CircleDot size={11} aria-hidden="true" />}
+            <strong>{operation.label}</strong>
+            <span className="visually-hidden">
+              {operationStatusLabel(operation)}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {group.hiddenCount > 0 && (
+        <button
+          type="button"
+          className="activity-operation-disclosure"
+          aria-controls={disclosureId}
+          aria-expanded={expanded}
+          onClick={onToggle}
+        >
+          <ChevronDown size={11} aria-hidden="true" />
+          {expanded
+            ? "Show latest operations"
+            : `+${group.hiddenCount} earlier ${group.hiddenCount === 1 ? "operation" : "operations"}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function ActivityCenter({
   open,
   now,
@@ -78,6 +140,9 @@ export function ActivityCenter({
   onDismiss,
 }: ActivityCenterProps): React.JSX.Element | null {
   const [expandedFailure, setExpandedFailure] = useState<string | null>(null);
+  const [expandedOperations, setExpandedOperations] = useState<Set<string>>(
+    () => new Set(),
+  );
   const panelRef = useRef<HTMLElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -126,8 +191,11 @@ export function ActivityCenter({
     };
   }, [open]);
 
-  const sections = useMemo(() => activityRunSections(runs, now), [now, runs]);
-  const summary = useMemo(() => activityRunSummary(runs, now), [now, runs]);
+  const presentation = useMemo(
+    () => activityRunPresentation(runs, now),
+    [now, runs],
+  );
+  const { sections, summary } = presentation;
   if (!open) return null;
 
   const projectById = new Map(projects.map((project) => [project.id, project]));
@@ -202,6 +270,9 @@ export function ActivityCenter({
                   const context = [conversation?.title, project?.name].filter(Boolean).join(" · ")
                     || run.detail
                     || "Workspace";
+                  const operationGroup =
+                    presentation.operationsByAgentRun.get(run.id);
+                  const operationsExpanded = expandedOperations.has(run.id);
                   return (
                     <article className={`activity-run is-${run.status}${waitingClass}${run.attentionState === "unseen" ? " is-unseen" : ""}`} key={run.id}>
                       <div className="activity-run-summary">
@@ -215,6 +286,21 @@ export function ActivityCenter({
                         </span>
                         <time dateTime={run.startedAt}>{activityStatusLabel(run, now, waitingKind)}</time>
                       </div>
+                      {operationGroup && operationGroup.all.length > 0 && (
+                        <RunOperations
+                          group={operationGroup}
+                          owner={run}
+                          expanded={operationsExpanded}
+                          onToggle={() => {
+                            setExpandedOperations((current) => {
+                              const next = new Set(current);
+                              if (next.has(run.id)) next.delete(run.id);
+                              else next.add(run.id);
+                              return next;
+                            });
+                          }}
+                        />
+                      )}
                       <div className="activity-run-controls">
                         {primaryAction && (
                           <button type="button" className="activity-primary-action" onClick={primaryAction.run}>

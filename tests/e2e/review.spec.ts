@@ -26,8 +26,15 @@ test.afterAll(async () => {
   await app.close();
 });
 
+async function ensureWorkspaceTools(): Promise<void> {
+  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: "Open workspace tools" }).click();
+  }
+}
+
 test("keeps the Changes panel readable when the side tool area is narrow", async () => {
   await resizeWindow(1040, 800);
+  await ensureWorkspaceTools();
   await page.getByRole("tab", { name: /Changes/ }).click();
   const picker = page.getByRole("combobox", { name: "Repository and changed file" });
   await expect(picker).toBeVisible();
@@ -40,6 +47,7 @@ test("keeps the Changes panel readable when the side tool area is narrow", async
 
 test("adds a selected diff range to the next agent prompt", async () => {
   await resizeWindow(1440, 920);
+  await ensureWorkspaceTools();
   await page.getByRole("tab", { name: /Changes/ }).click();
   const addedLine = page.locator(".diff-line.is-addition").filter({ hasText: "export const ready = true;" }).first();
   await expect(addedLine).toBeVisible();
@@ -54,6 +62,7 @@ test("adds a selected diff range to the next agent prompt", async () => {
 
 test("keeps a contextual selection answer readable and dismissible across responsive layouts", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
+  await ensureWorkspaceTools();
   await page.getByRole("tab", { name: /Changes/ }).click();
   const hunkHeader = page.locator(".diff-hunk-header").first();
   await expect(hunkHeader).toBeVisible();

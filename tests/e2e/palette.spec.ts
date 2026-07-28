@@ -46,6 +46,10 @@ test("opens the command palette and manages a thread", async () => {
   await expect(page.getByRole("button", { name: "Thread actions for Focused V1 pass" })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
 
+  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: "Open workspace tools" }).click();
+  }
+  await page.getByRole("tab", { name: "Terminal", exact: true }).click();
   const terminalInput = page.locator(".xterm-helper-textarea").first();
   await terminalInput.focus();
   await page.keyboard.press("Control+K");

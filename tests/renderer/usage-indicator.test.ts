@@ -215,7 +215,21 @@ describe("UsageIndicator", () => {
     const css = readFileSync(new URL("../../src/renderer/src/styles.css", import.meta.url), "utf8");
     const ringBlock = css.match(/\.usage-context-ring\s*\{(?<body>[^}]*)\}/su)?.groups?.body ?? "";
     const refreshBlock = css.match(/\.usage-quota-refresh-indicator\s*\{(?<body>[^}]*)\}/su)?.groups?.body ?? "";
-    const reducedMotion = css.slice(css.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
+    const reducedRuleIndex = css.indexOf(
+      ".usage-context-ring-value {\n    transition: none;",
+    );
+    const reducedMotionStart = css.lastIndexOf(
+      "@media (prefers-reduced-motion: reduce)",
+      reducedRuleIndex,
+    );
+    const reducedMotionEnd = css.indexOf(
+      "@media (prefers-reduced-motion: reduce)",
+      reducedRuleIndex + 1,
+    );
+    const reducedMotion = css.slice(
+      reducedMotionStart,
+      reducedMotionEnd === -1 ? undefined : reducedMotionEnd,
+    );
 
     expect(ringBlock).toMatch(/width:\s*clamp\(23px,\s*calc\(var\(--control-height\)\s*-\s*7px\),\s*31px\)/su);
     expect(css).toMatch(/\.usage-context-ring-value\s*\{[^}]*stroke:\s*color-mix\(in srgb,\s*var\(--accent\)\s*72%,\s*var\(--text-muted\)\)/su);
@@ -225,6 +239,7 @@ describe("UsageIndicator", () => {
     expect(ringBlock).not.toContain("animation");
     expect(css).not.toMatch(/\.usage-context-ring-value\s*\{[^}]*animation:/su);
     expect(refreshBlock).not.toContain("animation");
+    expect(reducedRuleIndex).toBeGreaterThan(reducedMotionStart);
     expect(reducedMotion).toMatch(/\.usage-context-ring-value\s*\{[^}]*transition:\s*none/su);
   });
 

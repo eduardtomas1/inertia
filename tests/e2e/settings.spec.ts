@@ -39,7 +39,15 @@ test.afterAll(async () => {
   await app.close();
 });
 
+async function ensureTerminalTools(): Promise<void> {
+  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: "Open workspace tools" }).click();
+  }
+  await page.getByRole("tab", { name: "Terminal", exact: true }).click();
+}
+
 test("navigates settings, changes theme, and returns to chat", async () => {
+  await ensureTerminalTools();
   const terminalPanel = page.locator("aside.terminal-panel").first();
   const terminalFontSize = await terminalPanel.getAttribute("data-terminal-font-size");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -598,6 +606,7 @@ test("persists composer usage modes without losing the followed transcript", asy
 
 test("applies every interface scale live and remains usable at common Linux display scales", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
+  await ensureTerminalTools();
   const terminalFontSize = await page.locator("aside.terminal-panel").first().getAttribute("data-terminal-font-size");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const scaleGroup = page.getByRole("radiogroup", { name: "Interface scale" });

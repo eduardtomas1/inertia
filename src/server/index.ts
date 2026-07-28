@@ -441,6 +441,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         deletedConversationIds,
         dataDirectory,
         rememberDeletedConversation,
+        broadcastSnapshot,
         publicError,
         send,
       }),

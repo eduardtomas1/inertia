@@ -14,6 +14,10 @@ const appSource = readFileSync(
   new URL("../../src/renderer/src/App.tsx", import.meta.url),
   "utf8",
 );
+const appLayoutSource = readFileSync(
+  new URL("../../src/renderer/src/components/AppLayout.tsx", import.meta.url),
+  "utf8",
+);
 const activitySource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
   "utf8",
@@ -189,7 +193,9 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(activitySource).toContain('document.addEventListener("visibilitychange", synchronize)');
     expect(activitySource).toContain('window.addEventListener("blur", synchronize)');
     expect(appSource).toContain("function useDocumentActive()");
-    expect(appSource).toContain('data-document-active={documentActive ? "true" : "false"}');
+    expect(appLayoutSource).toContain(
+      'data-document-active={documentActive ? "true" : "false"}',
+    );
     expect(activitySource).toContain("memo(function ActivityRow");
     expect(activitySource).toContain("memo(function ActivityGroup");
     expect(activitySource).toContain("const durableStream = useMemo(");

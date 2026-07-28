@@ -53,12 +53,16 @@ describe("RuntimeProjectionSequence", () => {
     const result = new URL(runtimeResumeUrl(
       "ws://127.0.0.1:4312/runtime/token",
       { runtimeGeneration: GENERATION_A, latestSequence: 19 },
-      CONVERSATION,
+      [CONVERSATION],
     ));
     expect(result.searchParams.get("runtimeGeneration")).toBe(GENERATION_A);
     expect(result.searchParams.get("afterSequence")).toBe("19");
     expect(result.searchParams.get("conversationId")).toBe(CONVERSATION);
-    expect(runtimeResumeUrl("ws://127.0.0.1:4312/runtime/token", null, CONVERSATION))
+    expect(runtimeResumeUrl(
+      "ws://127.0.0.1:4312/runtime/token",
+      null,
+      [CONVERSATION],
+    ))
       .toBe("ws://127.0.0.1:4312/runtime/token");
   });
 });

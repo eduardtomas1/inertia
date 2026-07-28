@@ -71,7 +71,10 @@ export function Composer({
   onStop,
   onClearPromptContext,
 }: ComposerProps): React.JSX.Element {
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(
+    () => window.localStorage.getItem(`inertia:draft:${conversation.id}`) ?? "",
+  );
+  const skipDraftPersistenceRef = useRef(true);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -103,6 +106,7 @@ export function Composer({
   releaseAttachmentRef.current = onReleaseAttachment;
 
   useEffect(() => {
+    skipDraftPersistenceRef.current = true;
     if (submissionReleaseTimerRef.current !== null) {
       window.clearTimeout(submissionReleaseTimerRef.current);
       submissionReleaseTimerRef.current = null;
@@ -170,6 +174,10 @@ export function Composer({
   }, []);
 
   useEffect(() => {
+    if (skipDraftPersistenceRef.current) {
+      skipDraftPersistenceRef.current = false;
+      return;
+    }
     const key = `inertia:draft:${conversation.id}`;
     if (message) window.localStorage.setItem(key, message);
     else window.localStorage.removeItem(key);

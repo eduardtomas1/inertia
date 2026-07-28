@@ -8,6 +8,7 @@ import type { ChatAttachment } from "../../src/shared/contracts";
 import { MAX_CHAT_ATTACHMENT_TOTAL_BYTES } from "../../src/shared/contracts";
 import { ComposerAttachmentList } from "../../src/renderer/src/components/ComposerAttachmentList";
 import {
+  attachmentPreviewKind,
   attachmentPreviewUrl,
   documentAttachmentSendBoundary,
   formatAttachmentSize,
@@ -65,7 +66,7 @@ describe("composer attachment previews", () => {
     });
   });
 
-  it("uses opaque same-origin thumbnail URLs and never document or raw file URLs", () => {
+  it("uses opaque preview URLs for images and PDFs without exposing raw paths", () => {
     const image = attachment("11111111-1111-4111-8111-111111111111");
     const document = attachment("22222222-2222-4222-8222-222222222222", {
       name: "notes.pdf",
@@ -77,7 +78,16 @@ describe("composer attachment previews", () => {
       "inertia://bundle/attachment-preview/11111111-1111-4111-8111-111111111111",
     );
     expect(attachmentPreviewUrl(image)).not.toContain(image.path);
-    expect(attachmentPreviewUrl(document)).toBeNull();
+    expect(attachmentPreviewUrl(document)).toBe(
+      "inertia://bundle/attachment-preview/22222222-2222-4222-8222-222222222222",
+    );
+    expect(attachmentPreviewUrl(document)).not.toContain(document.path);
+    expect(attachmentPreviewKind(image)).toBe("image");
+    expect(attachmentPreviewKind(document)).toBe("pdf");
+    expect(attachmentPreviewUrl(attachment("text", {
+      name: "notes.txt",
+      mimeType: "text/plain",
+    }))).toBeNull();
   });
 
   it("renders real image elements, safe document metadata, and obvious accessible removal", () => {
@@ -97,6 +107,8 @@ describe("composer attachment previews", () => {
     expect(html).toContain("PNG image");
     expect(html).toContain("PDF document");
     expect(html).toContain("2.0 KB");
+    expect(html).toContain("Preview attachment preview.png");
+    expect(html).toContain("Preview attachment notes.pdf");
     expect(html).toContain("Remove attachment notes.pdf");
     expect(html).toContain(">Remove</span>");
     expect(html).not.toContain(document.path);
@@ -130,6 +142,8 @@ describe("composer attachment previews", () => {
     // Development loads the renderer over HTTP, so its privileged preview is
     // cross-origin even though packaged windows use inertia://bundle.
     expect(html).toContain("img-src 'self' inertia: data: blob:");
+    expect(html).toContain("frame-src inertia:");
+    expect(html).toContain("object-src 'none'");
     expect(html).not.toMatch(/img-src[^;]*file:/u);
   });
 

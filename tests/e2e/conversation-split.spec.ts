@@ -1,0 +1,324 @@
+import { expect, test, type Locator } from "@playwright/test";
+
+import {
+  createAppFixture,
+  type AppFixture,
+} from "./support/app-fixture";
+
+let app!: AppFixture;
+let page!: AppFixture["page"];
+
+test.beforeAll(async () => {
+  app = await createAppFixture({
+    name: "conversation-split",
+    initialState: "conversation",
+    seedSecondProject: true,
+  });
+  page = app.page;
+});
+
+test.afterAll(async () => {
+  await app.close();
+});
+
+async function openPaneTool(
+  pane: Locator,
+  chatTitle: string,
+  tab: "Changes" | "Files" | "Terminal" | "Preview",
+): Promise<Locator> {
+  const tools = pane.getByRole("complementary", { name: "Workspace tools" });
+  if (!await tools.isVisible().catch(() => false)) {
+    await pane.getByRole("button", {
+      name: `Open tools for ${chatTitle}`,
+    }).click();
+  }
+  await tools.getByRole("tab", {
+    name: tab === "Changes" ? /Changes/u : tab,
+    exact: tab !== "Changes",
+  }).click();
+  return tools;
+}
+
+test("keeps cross-project chats, tools, and terminals independently scoped", async (
+  { browserName: _browserName },
+  testInfo,
+) => {
+  await app.resizeWindow(1440, 920);
+  await page.keyboard.press("Escape");
+
+  const sidebar = page.getByRole("complementary", {
+    name: "Project navigation",
+  });
+  const primaryTitle = "conversation-split fixture";
+  const secondaryTitle = "conversation-split companion";
+
+  await sidebar.getByRole("button", { name: "Expand Companion" }).click();
+  await sidebar.getByRole("button", {
+    name: `Thread actions for ${secondaryTitle}`,
+  }).click();
+  await sidebar.getByRole("menuitem", {
+    name: "Add this chat to split view",
+  }).click();
+
+  const split = page.getByRole("main", {
+    name: "Split conversation workspace",
+  });
+  let primary = page.getByRole("region", {
+    name: `Primary chat: Inertia · ${primaryTitle}`,
+  });
+  let secondary = page.getByRole("region", {
+    name: `Second chat: Companion · ${secondaryTitle}`,
+  });
+  await expect(split).toBeVisible();
+  await expect(primary).toBeVisible();
+  await expect(secondary).toBeVisible();
+  await expect(page.getByRole("main")).toHaveCount(1);
+  const duplicateIds = await page.locator("[id]").evaluateAll((elements) => {
+    const counts = new Map<string, number>();
+    for (const element of elements) {
+      counts.set(element.id, (counts.get(element.id) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([id]) => id);
+  });
+  expect(duplicateIds).toEqual([]);
+
+  const primaryMessage = primary.getByRole("textbox", { name: "Message" });
+  const secondaryMessage = secondary.getByRole("textbox", { name: "Message" });
+  await primaryMessage.fill("Draft owned by Inertia");
+  await secondaryMessage.fill("Draft owned by Companion");
+  await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
+  await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
+
+  const primaryFiles = await openPaneTool(primary, primaryTitle, "Files");
+  await expect(
+    primaryFiles.getByRole("treeitem", { name: "sample.ts", exact: true }),
+  ).toBeVisible();
+  await expect(
+    primaryFiles.getByRole("treeitem", { name: "beta-only.ts", exact: true }),
+  ).toHaveCount(0);
+
+  const secondaryFiles = await openPaneTool(
+    secondary,
+    secondaryTitle,
+    "Files",
+  );
+  await expect(
+    secondaryFiles.getByRole("treeitem", {
+      name: "beta-only.ts",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    secondaryFiles.getByRole("treeitem", { name: "sample.ts", exact: true }),
+  ).toHaveCount(0);
+
+  const primaryChanges = await openPaneTool(primary, primaryTitle, "Changes");
+  await expect(primaryChanges.getByText("sample.ts", { exact: true }))
+    .toBeVisible();
+  await expect(primaryChanges.getByText("beta-only.ts", { exact: true }))
+    .toHaveCount(0);
+
+  const secondaryChanges = await openPaneTool(
+    secondary,
+    secondaryTitle,
+    "Changes",
+  );
+  await expect(secondaryChanges.getByText("beta-only.ts", { exact: true }))
+    .toBeVisible();
+  await expect(secondaryChanges.getByText("sample.ts", { exact: true }))
+    .toHaveCount(0);
+
+  const primaryTerminal = await openPaneTool(
+    primary,
+    primaryTitle,
+    "Terminal",
+  );
+  const secondaryTerminal = await openPaneTool(
+    secondary,
+    secondaryTitle,
+    "Terminal",
+  );
+  const primarySession = primaryTerminal.locator(
+    ".terminal-panel[data-terminal-id]",
+  );
+  const secondarySession = secondaryTerminal.locator(
+    ".terminal-panel[data-terminal-id]",
+  );
+  await expect(primarySession).toHaveAttribute("data-terminal-id", /.+/u);
+  await expect(secondarySession).toHaveAttribute("data-terminal-id", /.+/u);
+  expect(await primarySession.getAttribute("data-terminal-id"))
+    .not.toBe(await secondarySession.getAttribute("data-terminal-id"));
+  await expect(primaryTerminal.getByText("Inertia", { exact: true }))
+    .toBeVisible();
+  await expect(secondaryTerminal.getByText("Companion", { exact: true }))
+    .toBeVisible();
+
+  const wideScreenshot = testInfo.outputPath(
+    "cross-project-split-independent-tools.png",
+  );
+  await page.screenshot({
+    animations: "disabled",
+    path: wideScreenshot,
+  });
+  await testInfo.attach("cross-project-split-independent-tools", {
+    path: wideScreenshot,
+    contentType: "image/png",
+  });
+
+  const primaryPreview = await openPaneTool(
+    primary,
+    primaryTitle,
+    "Preview",
+  );
+  const secondaryPreview = await openPaneTool(
+    secondary,
+    secondaryTitle,
+    "Preview",
+  );
+  const primaryPreviewUrl = `${app.previewUrl}primary-project`;
+  const secondaryPreviewUrl = `${app.previewUrl}companion-project`;
+  await primaryPreview.getByRole("textbox", {
+    name: "Preview address",
+  }).fill(primaryPreviewUrl);
+  await primaryPreview.getByRole("button", { name: "Go", exact: true }).click();
+  await secondaryPreview.getByRole("textbox", {
+    name: "Preview address",
+  }).fill(secondaryPreviewUrl);
+  await secondaryPreview.getByRole("button", {
+    name: "Go",
+    exact: true,
+  }).click();
+  await expect(primaryPreview.getByRole("textbox", {
+    name: "Preview address",
+  })).toHaveValue(primaryPreviewUrl);
+  await expect(secondaryPreview.getByRole("textbox", {
+    name: "Preview address",
+  })).toHaveValue(secondaryPreviewUrl);
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ webContents }, urls) => urls.every((url) =>
+      webContents.getAllWebContents().some((contents) =>
+        contents.getURL() === url)),
+    [primaryPreviewUrl, secondaryPreviewUrl],
+  )).toBe(true);
+
+  await app.electronApp.evaluate(({ dialog }, path) => {
+    Reflect.set(dialog, "showOpenDialog", async () => ({
+      canceled: false,
+      filePaths: [path],
+      bookmarks: [],
+    }));
+  }, app.attachmentImagePath);
+  await primary.getByRole("button", {
+    name: "Attach images or documents",
+  }).click();
+  await primary.getByRole("button", {
+    name: "Preview attachment preview.png",
+  }).click();
+  const attachmentDialog = page.getByRole("dialog", { name: "preview.png" });
+  await expect(attachmentDialog).toBeVisible();
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ BrowserWindow }, urls) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      if (!window) return false;
+      const previews = window.contentView.children
+        .filter((view) => {
+          const contents = Reflect.get(view, "webContents") as
+            | { getURL: () => string }
+            | undefined;
+          return contents && urls.includes(contents.getURL());
+        });
+      return previews.length === 2 && previews.every((view) => {
+          const bounds = view.getBounds();
+          return bounds.width === 0 && bounds.height === 0;
+        });
+    },
+    [primaryPreviewUrl, secondaryPreviewUrl],
+  )).toBe(true);
+  await attachmentDialog.getByRole("button", {
+    name: "Close preview of preview.png",
+  }).click();
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ BrowserWindow }, urls) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      if (!window) return false;
+      const previews = window.contentView.children
+        .filter((view) => {
+          const contents = Reflect.get(view, "webContents") as
+            | { getURL: () => string }
+            | undefined;
+          return contents && urls.includes(contents.getURL());
+        });
+      return previews.length === 2 && previews.every((view) => {
+          const bounds = view.getBounds();
+          return bounds.width > 0 && bounds.height > 0;
+        });
+    },
+    [primaryPreviewUrl, secondaryPreviewUrl],
+  )).toBe(true);
+  await primaryPreview.getByRole("tab", {
+    name: "Terminal",
+    exact: true,
+  }).click();
+  await secondaryPreview.getByRole("tab", {
+    name: "Terminal",
+    exact: true,
+  }).click();
+
+  await secondary.getByRole("button", {
+    name: `Make ${secondaryTitle} the primary chat`,
+  }).click();
+  primary = page.getByRole("region", {
+    name: `Primary chat: Companion · ${secondaryTitle}`,
+  });
+  secondary = page.getByRole("region", {
+    name: `Second chat: Inertia · ${primaryTitle}`,
+  });
+  await expect(primary).toBeVisible();
+  await expect(secondary).toBeVisible();
+  await expect(primary.getByRole("textbox", { name: "Message" }))
+    .toHaveValue("Draft owned by Companion");
+  await expect(secondary.getByRole("textbox", { name: "Message" }))
+    .toHaveValue("Draft owned by Inertia");
+  await expect(
+    primary.getByRole("complementary", { name: "Workspace tools" })
+      .getByText("Companion", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    secondary.getByRole("complementary", { name: "Workspace tools" })
+      .getByText("Inertia", { exact: true }),
+  ).toBeVisible();
+
+  await app.resizeWindow(760, 820);
+  await expect(page.getByRole("separator", {
+    name: "Resize split chats",
+  })).toHaveAttribute("aria-orientation", "horizontal");
+  await expect(primary.getByRole("button", { name: "Send message" }))
+    .toBeVisible();
+  await expect(secondary.getByRole("button", { name: "Send message" }))
+    .toBeVisible();
+  await app.expectNoViewportOverflow();
+  const narrowScreenshot = testInfo.outputPath(
+    "cross-project-split-narrow.png",
+  );
+  await page.screenshot({
+    animations: "disabled",
+    path: narrowScreenshot,
+  });
+  await testInfo.attach("cross-project-split-narrow", {
+    path: narrowScreenshot,
+    contentType: "image/png",
+  });
+
+  await secondary.getByRole("button", {
+    name: `Close split chat ${primaryTitle}`,
+  }).click();
+  await expect(split).toHaveCount(0);
+  await expect(page.getByRole("main")).toHaveCount(1);
+  await expect(page.getByRole("heading", {
+    name: secondaryTitle,
+    level: 1,
+  })).toBeVisible();
+  expect(app.rendererErrors).toEqual([]);
+});

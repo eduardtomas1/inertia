@@ -1,20 +1,23 @@
 import { AlertCircle, MessageSquareX, RefreshCw } from "lucide-react";
 
 type ConversationDetailStateProps = {
+  embedded?: boolean;
   state: "missing" | "deleted" | "failed";
   message?: string;
   onRetry: () => void;
 };
 
 export function ConversationDetailState({
+  embedded = false,
   state,
   message,
   onRetry,
 }: ConversationDetailStateProps): React.JSX.Element {
   const deleted = state === "deleted";
   const failed = state === "failed";
+  const Root = embedded ? "section" : "main";
   return (
-    <main className="chat-workspace centered-state" role={failed ? "alert" : "status"}>
+    <Root className="chat-workspace centered-state" role={failed ? "alert" : "status"}>
       {failed ? <AlertCircle size={24} /> : <MessageSquareX size={24} />}
       <h2>{deleted ? "This chat was deleted." : failed ? "This chat could not be loaded." : "This chat is no longer available."}</h2>
       <p>{message ?? (deleted
@@ -28,6 +31,6 @@ export function ConversationDetailState({
           <span>Try again</span>
         </button>
       )}
-    </main>
+    </Root>
   );
 }

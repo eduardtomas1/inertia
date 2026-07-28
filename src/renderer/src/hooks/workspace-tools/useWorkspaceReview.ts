@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Conversation,
   ConversationDetail,
@@ -49,6 +49,9 @@ export function useWorkspaceReview({
     useState<DiffReversalOperation | null>(null);
   const [selectionReviewAnswer, setSelectionReviewAnswer] =
     useState<DiffSelectionReviewAnswer | null>(null);
+  const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
+  const authorityRef = useRef(authority);
+  authorityRef.current = authority;
 
   const structuredDiff = useMemo(
     () => parseUnifiedDiff(gitDiff?.patch ?? ""),
@@ -91,6 +94,7 @@ export function useWorkspaceReview({
     comment: string,
   ) => {
     if (!project || !conversation) return;
+    const owner = `${project.id}:${conversation.id}`;
     setSelectionReviewAnswer(null);
     const event = await run("review.selection.ask", {
       type: "review.selection.ask",
@@ -113,7 +117,9 @@ export function useWorkspaceReview({
         "The local service returned an unexpected review answer.",
       );
     }
-    setSelectionReviewAnswer(result.answer);
+    if (authorityRef.current === owner) {
+      setSelectionReviewAnswer(result.answer);
+    }
   }, [conversation, ignoreWhitespace, project, run]);
 
   const requestDiffRevision = useCallback(async (
@@ -205,6 +211,7 @@ export function useWorkspaceReview({
     comment: string,
   ) => {
     if (!project) return;
+    const owner = `${project.id}:${conversation?.id ?? ""}`;
     const inspected = resultEvent(await run("git.selection.inspect", {
       type: "git.selection.inspect",
       payload: {
@@ -265,6 +272,7 @@ export function useWorkspaceReview({
         "The local service returned an unexpected reversal result.",
       );
     }
+    if (authorityRef.current !== owner) return;
     setGitDiff(reversed.result.diff);
     setLastDiffReversal(reversed.result.operation);
     await loadGit();
@@ -280,6 +288,7 @@ export function useWorkspaceReview({
 
   const undoDiffReversal = useCallback(async () => {
     if (!project || !lastDiffReversal) return;
+    const owner = `${project.id}:${conversation?.id ?? ""}`;
     const restored = resultEvent(await run("git.selection.undo", {
       type: "git.selection.undo",
       payload: {
@@ -294,6 +303,7 @@ export function useWorkspaceReview({
         "The local service returned an unexpected Undo result.",
       );
     }
+    if (authorityRef.current !== owner) return;
     setGitDiff(restored.result.diff);
     setLastDiffReversal(null);
     await loadGit();

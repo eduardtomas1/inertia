@@ -113,6 +113,7 @@ export type ServerEvent =
         | ({ kind: "workspace.entries" } & WorkspaceEntriesPage)
         | { kind: "workspace.file"; file: WorkspaceFilePreview }
         | { kind: "project.actions"; actions: ProjectAction[] }
+        | { kind: "conversation.created"; conversationId: string }
         | { kind: "backend.profile"; profile: ModelBackendProfileDetail }
         | { kind: "backend.profile.probe"; profile: ModelBackendProfileDetail }
         | { kind: "backend.default"; value: ModelBackendDefault | null }

@@ -35,6 +35,10 @@ export interface AttachmentImport {
 
 export interface PreviewBounds { x: number; y: number; width: number; height: number }
 export interface PreviewState { url: string; loading: boolean; canGoBack: boolean; canGoForward: boolean }
+export interface PreviewStateUpdate extends PreviewState {
+  ownerId: "primary" | "secondary";
+  contextId: string;
+}
 
 export type ProjectPathAction = "open-externally" | "reveal";
 
@@ -95,13 +99,32 @@ export interface DesktopBridge {
   importAttachments: (files: AttachmentImport[]) => Promise<DesktopAttachment[]>;
   /** Releases an unsent temporary attachment and its privileged preview registration. */
   releaseAttachment: (id: string) => Promise<void>;
+  /** Opens only a revalidated opaque PDF attachment in the platform's default app. */
+  openAttachmentExternally: (id: string) => Promise<void>;
   /** Internal file selection stays in the renderer; only scoped OS actions cross this bridge. */
   openProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
   openExternal: (url: string) => Promise<void>;
-  previewNavigate: (url: string) => Promise<PreviewState>;
-  previewCommand: (action: "back" | "forward" | "reload") => Promise<PreviewState>;
-  previewSetBounds: (bounds: PreviewBounds | null) => Promise<void>;
-  previewClose: () => Promise<void>;
+  previewNavigate: (request: {
+    ownerId: string;
+    contextId: string;
+    url: string;
+  }) => Promise<PreviewState>;
+  previewCommand: (request: {
+    ownerId: string;
+    contextId: string;
+    action: "back" | "forward" | "reload";
+  }) => Promise<PreviewState>;
+  previewSetBounds: (request: {
+    ownerId: string;
+    contextId: string;
+    bounds: PreviewBounds | null;
+  }) => Promise<void>;
+  previewClose: (request: {
+    ownerId: string;
+    contextId: string;
+  }) => Promise<void>;
+  /** Subscribes to navigation initiated inside an owned desktop preview. */
+  onPreviewState: (listener: (state: PreviewStateUpdate) => void) => () => void;
   syncThemePreference: (preference: "system" | "light" | "dark") => Promise<void>;
   /** Writes directly to Electron's privileged credential vault; plaintext is never returned. */
   setBackendCredential: (request: SetBackendCredentialRequest) => Promise<BackendCredentialState>;

@@ -90,6 +90,18 @@ describe("privileged attachment import validation", () => {
     }).displayName).toBe("image.png");
   });
 
+  it("accepts a Linux clipboard PDF with an empty declared MIME after byte verification", () => {
+    expect(validateAttachmentImport({
+      name: "linux-clipboard.pdf",
+      mimeType: "",
+      data: pdf,
+    })).toMatchObject({
+      displayName: "linux-clipboard.pdf",
+      mimeType: "application/pdf",
+      size: pdf.length,
+    });
+  });
+
   it.each([
     { name: "script.svg", mimeType: "image/svg+xml", data: Buffer.from("<svg/>") },
     { name: "archive.zip", mimeType: "application/zip", data: Buffer.from("PK") },

@@ -56,7 +56,7 @@ export function useInertiaConnection(): InertiaConnection {
   const pendingRef = useRef(new Map<string, PendingConnectionRequest>());
   const listenersRef = useRef(new Set<EventListener>());
   const projectionRef = useRef(new RuntimeProjectionSequence());
-  const detailConversationRef = useRef<string | null>(null);
+  const detailConversationRef = useRef<string[]>([]);
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [runtimeGeneration, setRuntimeGeneration] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
@@ -235,7 +235,12 @@ export function useInertiaConnection(): InertiaConnection {
       try {
         socket.send(JSON.stringify(command));
         if (command.type === "conversation.detail.load") {
-          detailConversationRef.current = command.payload.conversationId;
+          detailConversationRef.current = [
+            ...detailConversationRef.current.filter(
+              (id) => id !== command.payload.conversationId,
+            ),
+            command.payload.conversationId,
+          ].slice(-2);
         }
       } catch (sendError) {
         window.clearTimeout(timeout);

@@ -26,8 +26,15 @@ test.afterAll(async () => {
   await app.close();
 });
 
+async function ensureWorkspaceTools(): Promise<void> {
+  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: "Open workspace tools" }).click();
+  }
+}
+
 test("switches workspace tools, opens multiple terminals, and loads a safe native preview", async () => {
   await resizeWindow(1440, 920);
+  await ensureWorkspaceTools();
   await page.getByRole("tab", { name: /Changes/ }).click();
   await expect(page.getByLabel("Workspace changes")).toBeVisible();
   await page.getByRole("tab", { name: /Files/ }).click();
@@ -94,7 +101,7 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
 
   const filesTab = page.getByRole("tab", { name: /Files/ });
   if (!await filesTab.isVisible().catch(() => false)) {
-    await page.getByRole("button", { name: "Open workspace tools" }).click();
+    await ensureWorkspaceTools();
   }
   await filesTab.click();
   const panel = page.getByRole("region", { name: "Project files" });

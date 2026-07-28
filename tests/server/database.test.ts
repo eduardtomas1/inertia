@@ -736,6 +736,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       showThinking: false,
       usageDisplayMode: "expanded",
       interfaceScale: "comfortable",
+      workspaceStartupSurface: "tools",
       terminalFontSize: 17,
     });
     store.close();
@@ -750,9 +751,32 @@ describe("RuntimeStore conversation lifecycle", () => {
       showThinking: false,
       usageDisplayMode: "expanded",
       interfaceScale: "comfortable",
+      workspaceStartupSurface: "tools",
       terminalFontSize: 17,
     });
     reopened.close();
+  });
+
+  it("adds the compact summary startup without changing existing preferences", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    store.updateSettings({
+      responseDensity: "comfortable",
+      terminalFontSize: 18,
+    });
+    store.close();
+
+    const previous = new Database(databasePath);
+    previous.exec("ALTER TABLE app_state DROP COLUMN workspace_startup_surface");
+    previous.prepare("DELETE FROM schema_migrations WHERE version = 31").run();
+    previous.close();
+
+    const migrated = new RuntimeStore(databasePath, workspacePath);
+    expect(migrated.snapshot().settings).toMatchObject({
+      workspaceStartupSurface: "summary",
+      responseDensity: "comfortable",
+      terminalFontSize: 18,
+    });
+    migrated.close();
   });
 
   it("adds interface scale after the Codex binary migration without changing existing preferences", async () => {

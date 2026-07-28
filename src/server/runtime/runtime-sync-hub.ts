@@ -49,9 +49,9 @@ export class RuntimeSyncHub<Socket> {
     hydration: RuntimeSyncHydration,
   ): void {
     const subscription = {
-      conversationId: resumeRequest.kind === "resume"
-        ? resumeRequest.conversationId
-        : null,
+      conversationIds: resumeRequest.kind === "resume"
+        ? [...resumeRequest.conversationIds]
+        : [],
     };
     const replay = resumeRequest.kind === "resume"
       ? this.sequencer.replay(
@@ -98,7 +98,11 @@ export class RuntimeSyncHub<Socket> {
 
   setConversationSubscription(socket: Socket, conversationId: string): void {
     const subscription = this.clients.get(socket);
-    if (subscription) subscription.conversationId = conversationId;
+    if (!subscription) return;
+    subscription.conversationIds = [
+      ...subscription.conversationIds.filter((id) => id !== conversationId),
+      conversationId,
+    ].slice(-2);
   }
 
   disconnect(socket: Socket): void {

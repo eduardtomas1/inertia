@@ -687,6 +687,20 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         `);
       },
     });
+    migrationExtensions.push({
+      name: "PersistWorkspaceStartupSurface",
+      up: (database) => {
+        const columns = database.prepare("PRAGMA table_info(app_state)")
+          .all() as Array<{ name: string }>;
+        if (columns.some(({ name }) =>
+          name === "workspace_startup_surface")) return;
+        database.exec(`
+          ALTER TABLE app_state
+            ADD COLUMN workspace_startup_surface TEXT NOT NULL DEFAULT 'summary'
+            CHECK (workspace_startup_surface IN ('summary', 'tools'));
+        `);
+      },
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

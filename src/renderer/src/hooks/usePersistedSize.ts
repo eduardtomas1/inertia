@@ -25,19 +25,44 @@ export function usePersistedSize(
   fallback: number,
   { min, max }: PersistedSizeOptions,
 ): [number, Dispatch<SetStateAction<number>>] {
-  const [size, setSize] = useState(() => storedSize(key, fallback, min, max));
+  const [persisted, setPersisted] = useState(() => ({
+    key,
+    size: storedSize(key, fallback, min, max),
+  }));
+  const size = persisted.key === key
+    ? persisted.size
+    : storedSize(key, fallback, min, max);
 
   const updateSize = useCallback<Dispatch<SetStateAction<number>>>((next) => {
-    setSize((current) => clamp(typeof next === "function" ? next(current) : next, min, max));
-  }, [max, min]);
+    setPersisted((current) => {
+      const currentSize = current.key === key
+        ? current.size
+        : storedSize(key, fallback, min, max);
+      return {
+        key,
+        size: clamp(
+          typeof next === "function" ? next(currentSize) : next,
+          min,
+          max,
+        ),
+      };
+    });
+  }, [fallback, key, max, min]);
 
   useEffect(() => {
+    if (persisted.key !== key) {
+      setPersisted({
+        key,
+        size: storedSize(key, fallback, min, max),
+      });
+      return;
+    }
     try {
-      window.localStorage.setItem(key, String(size));
+      window.localStorage.setItem(key, String(persisted.size));
     } catch {
       // Layout persistence is best effort and never blocks interaction.
     }
-  }, [key, size]);
+  }, [fallback, key, max, min, persisted]);
 
   return [size, updateSize];
 }

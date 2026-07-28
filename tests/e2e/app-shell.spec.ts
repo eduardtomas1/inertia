@@ -73,11 +73,17 @@ test("starts without a demo and adds the first real project", async () => {
   }, workspaceDirectory);
   await page.getByRole("button", { name: "Add your first project" }).click();
   await expect(page.getByRole("heading", { name: "Start with a clear chat." })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Environment summary" })).toBeVisible();
+  await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toHaveCount(1);
   await page.locator(".project-welcome").getByRole("button", { name: "New chat", exact: true }).click();
 
-  await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
+  await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
+  await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
   const database = new Database(join(testDirectory, "data", "inertia.sqlite"));
   const firstConversation = database.prepare(`
     SELECT provider_session_id, worktree_path
@@ -701,6 +707,10 @@ test("keeps the window alive and reconnects with a rotated capability after a ru
   );
   const beforeRuntimeGeneration = await page.locator(".app-shell").getAttribute("data-runtime-generation");
   expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await page.getByRole("complementary", { name: "Workspace tools" })
+    .getByRole("tab", { name: "Terminal", exact: true })
+    .click();
   const terminal = page.locator("aside.terminal-panel").first();
   await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
   const beforeTerminalId = await terminal.getAttribute("data-terminal-id");

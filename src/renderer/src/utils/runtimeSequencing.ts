@@ -103,12 +103,14 @@ export class RuntimeProjectionSequence {
 export function runtimeResumeUrl(
   websocketUrl: string,
   cursor: RuntimeSyncCursor | null,
-  conversationId: string | null,
+  conversationIds: readonly string[],
 ): string {
   if (!cursor || !validCursor(cursor)) return websocketUrl;
   const url = new URL(websocketUrl);
   url.searchParams.set("runtimeGeneration", cursor.runtimeGeneration);
   url.searchParams.set("afterSequence", String(cursor.latestSequence));
-  if (conversationId) url.searchParams.set("conversationId", conversationId);
+  for (const conversationId of conversationIds.slice(-2)) {
+    url.searchParams.append("conversationId", conversationId);
+  }
   return url.toString();
 }

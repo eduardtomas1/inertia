@@ -73,6 +73,7 @@ export interface ConversationCommandDependencies {
   deletedConversationIds: Set<string>;
   dataDirectory: string;
   rememberDeletedConversation(conversationId: string): void;
+  broadcastSnapshot(): void;
   publicError(error: unknown): string;
   send(socket: WebSocket, event: ServerEvent): void;
 }
@@ -93,6 +94,18 @@ export function createConversationCommandHandler(
   ], async (socket, command) => {
     switch (command.type) {
       case "conversation.create": {
+        const finishCreation = (
+          conversationId: string,
+        ): "handled" | "mutation" => {
+          if (command.payload.activate !== false) return "mutation";
+          dependencies.broadcastSnapshot();
+          dependencies.send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: { kind: "conversation.created", conversationId },
+          });
+          return "handled";
+        };
         if (command.payload.modelSelection) {
           const selection = dependencies.backendProfileController
             .validateSelection(command.payload.modelSelection);
@@ -132,7 +145,7 @@ export function createConversationCommandHandler(
               `That worktree is currently on ${status.branch ?? "a detached checkout"}, not ${command.payload.branch}.`,
             );
           }
-          dependencies.store.createConversation(
+          const conversation = dependencies.store.createConversation(
             command.payload.projectId,
             command.payload.title,
             {
@@ -141,7 +154,7 @@ export function createConversationCommandHandler(
               worktreePath: status.root,
             },
           );
-          return "mutation";
+          return finishCreation(conversation.id);
         }
 
         let projectStatus: Awaited<
@@ -215,7 +228,7 @@ export function createConversationCommandHandler(
             throw error;
           }
         }
-        return "mutation";
+        return finishCreation(conversation.id);
       }
       case "conversation.select":
         dependencies.store.selectConversation(

@@ -12,7 +12,7 @@ const DEFAULT_MAX_REPLAY_EVENTS = 2_048;
 const DEFAULT_MAX_REPLAY_BYTES = 4 * 1024 * 1024;
 
 export interface RuntimeDetailSubscription {
-  conversationId: string | null;
+  conversationIds: string[];
 }
 
 export type RuntimeResumeRequest =
@@ -21,7 +21,7 @@ export type RuntimeResumeRequest =
       kind: "resume";
       runtimeGeneration: string;
       afterSequence: number;
-      conversationId: string | null;
+      conversationIds: string[];
     }
   | { kind: "invalid" };
 
@@ -88,7 +88,7 @@ export function projectRuntimeFrame(
 ): RuntimeSequencedFrame {
   if (
     frame.scope.kind === "conversation-detail"
-    && frame.scope.conversationId !== subscription.conversationId
+    && !subscription.conversationIds.includes(frame.scope.conversationId)
   ) {
     return { type: "runtime.cursor", sync: frame.sync };
   }
@@ -216,19 +216,21 @@ export function parseRuntimeResumeRequest(
       && key !== "conversationId")
     || url.searchParams.getAll("runtimeGeneration").length !== 1
     || url.searchParams.getAll("afterSequence").length !== 1
-    || url.searchParams.getAll("conversationId").length > 1
+    || url.searchParams.getAll("conversationId").length > 2
   ) {
     return { kind: "invalid" };
   }
   const runtimeGeneration = url.searchParams.get("runtimeGeneration");
   const rawSequence = url.searchParams.get("afterSequence");
-  const conversationId = url.searchParams.get("conversationId");
+  const conversationIds = url.searchParams.getAll("conversationId");
   if (
     !runtimeGeneration
     || !UUID_PATTERN.test(runtimeGeneration)
     || !rawSequence
     || !/^(?:0|[1-9]\d*)$/u.test(rawSequence)
-    || (conversationId !== null && !UUID_PATTERN.test(conversationId))
+    || conversationIds.some((conversationId) =>
+      !UUID_PATTERN.test(conversationId))
+    || new Set(conversationIds).size !== conversationIds.length
   ) {
     return { kind: "invalid" };
   }
@@ -238,6 +240,6 @@ export function parseRuntimeResumeRequest(
     kind: "resume",
     runtimeGeneration,
     afterSequence,
-    conversationId,
+    conversationIds,
   };
 }

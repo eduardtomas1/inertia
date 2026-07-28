@@ -60,7 +60,9 @@ describe("RuntimeSequencer", () => {
       snapshot: { ...snapshot(), sync },
     }));
 
-    const replay = sequencer.replay(GENERATION, 0, { conversationId: CONVERSATION_A });
+    const replay = sequencer.replay(GENERATION, 0, {
+      conversationIds: [CONVERSATION_A],
+    });
     expect(replay.kind).toBe("replay");
     if (replay.kind !== "replay") return;
     expect(replay.frames.map(({ type }) => type)).toEqual([
@@ -77,11 +79,15 @@ describe("RuntimeSequencer", () => {
     const beforeSwitch = sequencer.commit(() => detailEvent(CONVERSATION_A, "old detail"));
     const afterSwitch = sequencer.commit(() => detailEvent(CONVERSATION_B, "new detail"));
 
-    expect(projectRuntimeFrame(beforeSwitch, { conversationId: CONVERSATION_B })).toEqual({
+    expect(projectRuntimeFrame(beforeSwitch, {
+      conversationIds: [CONVERSATION_B],
+    })).toEqual({
       type: "runtime.cursor",
       sync: beforeSwitch.sync,
     });
-    expect(projectRuntimeFrame(afterSwitch, { conversationId: CONVERSATION_B })).toBe(afterSwitch);
+    expect(projectRuntimeFrame(afterSwitch, {
+      conversationIds: [CONVERSATION_B],
+    })).toBe(afterSwitch);
     expect(afterSwitch.sync.latestSequence).toBe(beforeSwitch.sync.latestSequence + 1);
   });
 
@@ -94,13 +100,13 @@ describe("RuntimeSequencer", () => {
     sequencer.commit(() => detailEvent(CONVERSATION_A, "two"));
     sequencer.commit(() => detailEvent(CONVERSATION_A, "three"));
 
-    expect(sequencer.replay("22222222-2222-4222-8222-222222222222", 3, { conversationId: null }))
+    expect(sequencer.replay("22222222-2222-4222-8222-222222222222", 3, { conversationIds: [] }))
       .toMatchObject({ kind: "refresh", reason: "generation-mismatch" });
-    expect(sequencer.replay(GENERATION, 4, { conversationId: null }))
+    expect(sequencer.replay(GENERATION, 4, { conversationIds: [] }))
       .toMatchObject({ kind: "refresh", reason: "cursor-ahead" });
-    expect(sequencer.replay(GENERATION, 0, { conversationId: null }))
+    expect(sequencer.replay(GENERATION, 0, { conversationIds: [] }))
       .toMatchObject({ kind: "refresh", reason: "cursor-too-old" });
-    expect(sequencer.replay(GENERATION, 1, { conversationId: CONVERSATION_A }))
+    expect(sequencer.replay(GENERATION, 1, { conversationIds: [CONVERSATION_A] }))
       .toMatchObject({ kind: "replay" });
   });
 
@@ -112,9 +118,11 @@ describe("RuntimeSequencer", () => {
     sequencer.commit(() => detailEvent(CONVERSATION_A, "x".repeat(1_000)));
     sequencer.commit(() => detailEvent(CONVERSATION_A, "small"));
 
-    expect(sequencer.replay(GENERATION, 0, { conversationId: CONVERSATION_A }))
+    expect(sequencer.replay(GENERATION, 0, { conversationIds: [CONVERSATION_A] }))
       .toMatchObject({ kind: "refresh", reason: "cursor-too-old" });
-    const replay = sequencer.replay(GENERATION, 1, { conversationId: CONVERSATION_A });
+    const replay = sequencer.replay(GENERATION, 1, {
+      conversationIds: [CONVERSATION_A],
+    });
     expect(replay.kind).toBe("replay");
     if (replay.kind === "replay") {
       expect(replay.frames).toHaveLength(1);
@@ -131,10 +139,28 @@ describe("runtime sequence helpers", () => {
       kind: "conversation-detail",
       conversationId: CONVERSATION_B,
     });
-    expect(projectRuntimeFrame(frame, { conversationId: CONVERSATION_A })).toEqual({
+    expect(projectRuntimeFrame(frame, {
+      conversationIds: [CONVERSATION_A],
+    })).toEqual({
       type: "runtime.cursor",
       sync: frame.sync,
     });
+  });
+
+  it("projects detail events to both bounded split subscriptions", () => {
+    const sequencer = new RuntimeSequencer({ runtimeGeneration: GENERATION });
+    const alpha = sequencer.commit(
+      () => detailEvent(CONVERSATION_A, "alpha"),
+    );
+    const beta = sequencer.commit(
+      () => detailEvent(CONVERSATION_B, "beta"),
+    );
+    const subscription = {
+      conversationIds: [CONVERSATION_A, CONVERSATION_B],
+    };
+
+    expect(projectRuntimeFrame(alpha, subscription)).toBe(alpha);
+    expect(projectRuntimeFrame(beta, subscription)).toBe(beta);
   });
 
   it("keeps provider maintenance global without disturbing detail cursors", () => {
@@ -162,7 +188,7 @@ describe("runtime sequence helpers", () => {
     const replay = sequencer.replay(
       GENERATION,
       0,
-      { conversationId: CONVERSATION_A },
+      { conversationIds: [CONVERSATION_A] },
     );
     expect(replay.kind).toBe("replay");
     if (replay.kind !== "replay") return;
@@ -183,14 +209,18 @@ describe("runtime sequence helpers", () => {
     const path = "/runtime/token";
     expect(parseRuntimeResumeRequest(path, path)).toEqual({ kind: "none" });
     expect(parseRuntimeResumeRequest(
-      `${path}?runtimeGeneration=${GENERATION}&afterSequence=42&conversationId=${CONVERSATION_A}`,
+      `${path}?runtimeGeneration=${GENERATION}&afterSequence=42&conversationId=${CONVERSATION_A}&conversationId=${CONVERSATION_B}`,
       path,
     )).toEqual({
       kind: "resume",
       runtimeGeneration: GENERATION,
       afterSequence: 42,
-      conversationId: CONVERSATION_A,
+      conversationIds: [CONVERSATION_A, CONVERSATION_B],
     });
+    expect(parseRuntimeResumeRequest(
+      `${path}?runtimeGeneration=${GENERATION}&afterSequence=42&conversationId=${CONVERSATION_A}&conversationId=${CONVERSATION_B}&conversationId=cccccccc-cccc-4ccc-8ccc-cccccccccccc`,
+      path,
+    )).toEqual({ kind: "invalid" });
     expect(parseRuntimeResumeRequest(`${path}?afterSequence=1`, path)).toEqual({ kind: "invalid" });
     expect(parseRuntimeResumeRequest(`${path}?runtimeGeneration=${GENERATION}&afterSequence=-1`, path))
       .toEqual({ kind: "invalid" });

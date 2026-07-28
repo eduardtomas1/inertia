@@ -264,6 +264,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     usageDisplayMode: state.usage_display_mode,
     interfaceScale: state.interface_scale,
     responseDensity: state.response_density,
+    workspaceStartupSurface: state.workspace_startup_surface,
     defaultCodeWrap: state.default_code_wrap === 1,
     autoCollapseWorkLog: state.auto_collapse_work_log === 1,
     showChangedFileSummaries: state.show_changed_file_summaries === 1,

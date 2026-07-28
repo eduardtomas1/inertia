@@ -83,10 +83,10 @@ describe("renderer error visibility boundary", () => {
 
   it("keeps file hydration local while surfacing an initial Git refresh failure", () => {
     const hydrationStart = workspaceToolsSource.indexOf(
-      "void Promise.allSettled([loadFiles(), loadActions()])",
+      "void Promise.allSettled([",
     );
     const hydrationEnd = workspaceToolsSource.indexOf(
-      "}, [conversation?.id",
+      "\n\n  const selectWorkspaceFile",
       hydrationStart,
     );
     const hydration = workspaceToolsSource.slice(hydrationStart, hydrationEnd);

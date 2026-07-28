@@ -21,7 +21,10 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Find models quickly through a searchable provider-aware palette, then save complete harness, backend, model, and reasoning routes as Favorites.
 - See provider-supplied thinking summaries, remaining context, and account usage through one compact context control.
 - Work with streaming conversations, resumable sessions, native plans, agent questions, image and document inputs, cancellation, and supervised approvals whenever the selected provider supports them.
+- Open any second chat beside the current one—even from another project—with its own transcript, draft, files, Git changes, terminal sessions, plan, and preview.
+- Start from a compact Environment summary of the current branch, changes, active work, delegated agents, and attached context, while keeping the full workspace tools one click away.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
+- Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
 - Search commands, projects, and threads from one keyboard-friendly palette.
 - Resize or collapse either side of the workspace whenever the conversation needs more room.
 - Choose System, Light, or Dark with a restrained glass finish and clear contrast.
@@ -42,6 +45,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - The transcript reads like one calm engineering document: a light request, an understandable workstream, a clean final answer, and a quiet supporting ledger.
 - Responses render polished Markdown with safe project links, highlighted code, copy and wrap controls, and tables that can be copied as Markdown or CSV.
 - Provider updates and compact tool activity appear in the order they happened. Only adjacent calls fold together, so a new update naturally starts the next stretch of work.
+- The Activity Center keeps the latest meaningful operations close to the active agent, folds older successful calls behind one disclosure, and keeps manual Git work or failures independently visible.
 - Reasoning summaries, approvals, questions, warnings, final answers, and turn checkpoints stay together in the same chronological turn.
 - Each completed request keeps its original agent, model backend, and model attribution together with a turn-specific before-and-after Git record, when available, that remains useful after the workspace moves on.
 - Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
@@ -52,6 +56,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 ### Keep the workspace moving
 
 - The Activity Center brings agents, checks, services, and source-control work together with the actions each run can actually support.
+- Native previews, terminals, files, and Git reviews stay scoped to their owning chat when two different projects share the split workspace.
 - Activity-first navigation surfaces work that is running, waiting for approval or input, completed in the background, unread, failed, or settled.
 - Related checkouts and worktrees can group by their real Git identity, while repository folders remain clearly labeled and independently controllable.
 - Move between branches, use isolated worktrees for parallel threads, open detected service previews, and return to the exact terminal or folder behind a run.
@@ -70,6 +75,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - See when a supported provider CLI has an update and run the official update flow without leaving Inertia.
 - Use the built-in Kimi coding profile through the Claude harness, or define a compatible custom endpoint with explicit models and routing.
 - Existing conversations keep their original execution route. Supported same-backend model changes can continue in place; changing the harness or backend opens a clearly separated new chat.
+- Choose whether Inertia opens on the compact Environment summary or the full workspace tools; fresh installs use the calmer summary.
 
 ### Provider-native, local by default
 

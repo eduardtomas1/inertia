@@ -44,6 +44,7 @@ export interface NewConversationOptions {
   reasoningEffort?: string;
   interactionMode?: InteractionMode;
   accessMode?: AccessMode;
+  activate?: boolean;
   branch?: string | null;
   worktreePath?: string | null;
 }

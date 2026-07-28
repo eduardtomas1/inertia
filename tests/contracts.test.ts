@@ -336,6 +336,22 @@ describe("client command contract", () => {
     }).success).toBe(false);
   });
 
+  it("accepts only supported workspace startup surfaces", () => {
+    const requestId = crypto.randomUUID();
+    for (const workspaceStartupSurface of ["summary", "tools"] as const) {
+      expect(clientCommandSchema.safeParse({
+        type: "settings.update",
+        requestId,
+        payload: { workspaceStartupSurface },
+      }).success).toBe(true);
+    }
+    expect(clientCommandSchema.safeParse({
+      type: "settings.update",
+      requestId,
+      payload: { workspaceStartupSurface: "terminal" },
+    }).success).toBe(false);
+  });
+
   it("accepts provider authentication terminals at their dimension boundaries", () => {
     for (const [cols, rows] of [[40, 10], [240, 80]] as const) {
       const command = {

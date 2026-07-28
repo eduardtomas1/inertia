@@ -232,6 +232,7 @@ export interface StateRow {
   usage_display_mode: AppSettings["usageDisplayMode"];
   interface_scale: AppSettings["interfaceScale"];
   response_density: AppSettings["responseDensity"];
+  workspace_startup_surface: AppSettings["workspaceStartupSurface"];
   default_code_wrap: 0 | 1;
   auto_collapse_work_log: 0 | 1;
   show_changed_file_summaries: 0 | 1;

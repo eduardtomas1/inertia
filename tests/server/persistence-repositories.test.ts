@@ -142,6 +142,33 @@ describe("RuntimeStore repository compatibility", () => {
     store.close();
   });
 
+  it("creates a secondary conversation without stealing active selection", async () => {
+    const { store, workspacePath } = await createStore();
+    const primaryProject = store.createProject("Primary", workspacePath);
+    const primary = store.createConversation(primaryProject.id, "Primary chat");
+    const secondaryProject = store.createProject(
+      "Secondary",
+      join(workspacePath, "secondary"),
+    );
+    store.selectConversation(primary.id);
+
+    const secondary = store.createConversation(
+      secondaryProject.id,
+      "Secondary chat",
+      { activate: false },
+    );
+
+    expect(secondary.projectId).toBe(secondaryProject.id);
+    expect(store.snapshot()).toMatchObject({
+      activeProjectId: primaryProject.id,
+      activeConversationId: primary.id,
+      conversations: expect.arrayContaining([
+        expect.objectContaining({ id: secondary.id }),
+      ]),
+    });
+    store.close();
+  });
+
   it("orders persisted transcript segments authoritatively and cascades project removal", async () => {
     const { store, workspacePath } = await createStore();
     const project = store.createProject("Primary", workspacePath);

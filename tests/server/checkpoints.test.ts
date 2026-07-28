@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -85,6 +86,43 @@ describe("Git checkpoints", () => {
     expect(readFileSync(join(root, "tracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("before agent\n");
     expect(readFileSync(join(root, "existing-untracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("included\n");
     expect(readFileSync(join(root, "later-untracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("keep me\n");
+  });
+
+  it("preserves out-of-cone files without materializing them in a sparse checkout", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const visibleDirectory = join(root, "visible");
+    const sparseDirectory = join(root, "sparse-only");
+    const visiblePath = join(visibleDirectory, "visible.txt");
+    const sparsePath = join(sparseDirectory, "outside.txt");
+    mkdirSync(visibleDirectory);
+    mkdirSync(sparseDirectory);
+    writeFileSync(visiblePath, "visible base\n", { flag: "wx" });
+    writeFileSync(sparsePath, "outside base\n", { flag: "wx" });
+    git(root, "add", "visible", "sparse-only");
+    git(root, "commit", "-m", "sparse paths");
+    git(root, "sparse-checkout", "init", "--cone");
+    git(root, "sparse-checkout", "set", "visible");
+    expect(existsSync(sparsePath)).toBe(false);
+    writeFileSync(visiblePath, "visible checkpoint\n");
+    const conversationId = randomUUID();
+
+    const checkpoint = await createCheckpoint(
+      root,
+      indexes,
+      conversationId,
+    );
+
+    expect(
+      git(root, "show", `${checkpoint.ref}:sparse-only/outside.txt`),
+    ).toBe("outside base");
+    writeFileSync(visiblePath, "visible after\n");
+    await restoreCheckpoint(root, checkpoint.ref, conversationId);
+    expect(readFileSync(visiblePath, "utf8")).toBe(
+      "visible checkpoint\n",
+    );
+    expect(existsSync(sparsePath)).toBe(false);
   });
 
   it("does not run repository clean filters while creating an automatic checkpoint", async () => {

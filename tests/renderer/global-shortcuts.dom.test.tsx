@@ -84,7 +84,7 @@ describe("global shortcut DOM integration", () => {
     )).toHaveLength(2);
   });
 
-  it("keeps palette focus through the complete chord released from a terminal widget", () => {
+  it("keeps palette input through the complete chord released from a terminal widget", () => {
     const terminalKeyUp = vi.fn();
     render(<ShortcutHarness onTerminalKeyUp={terminalKeyUp} />);
     const terminal = screen.getByRole("textbox", { name: "Terminal input" });
@@ -101,5 +101,10 @@ describe("global shortcut DOM integration", () => {
 
     expect(terminalKeyUp).not.toHaveBeenCalled();
     expect(search).toHaveFocus();
+
+    fireEvent.change(search, { target: { value: "settings" } });
+    expect(search).toHaveValue("settings");
+    expect(screen.getByRole("option", { name: /Open settings/u }))
+      .toHaveAttribute("aria-selected", "true");
   });
 });

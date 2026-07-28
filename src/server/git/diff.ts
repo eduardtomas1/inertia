@@ -18,7 +18,7 @@ import {
 } from "./paths";
 import {
   boundedInteger,
-  runGit,
+  runGitInspection,
   utf8Prefix,
 } from "./runner";
 import {
@@ -118,7 +118,7 @@ export async function getUnifiedDiff(
     const args = (await hasHead(root))
       ? [...baseArgs, "HEAD", "--", ...tracked]
       : [...baseArgs, "--cached", "--", ...tracked];
-    const result = await runGit(root, args, {
+    const result = await runGitInspection(root, args, {
       maxOutputBytes: maxBytes,
       truncateOutput: true,
       failureMessage: "Unable to generate the repository diff.",

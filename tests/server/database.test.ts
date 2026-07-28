@@ -1309,6 +1309,53 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.close();
   });
 
+  it("loads review notes by repository and target path for reconciliation", async () => {
+    const { store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const fingerprint = "a".repeat(64);
+    const rootTarget = store.createReviewNote({
+      conversationId: conversation.id,
+      repositoryPath: ".",
+      path: "src/target.ts",
+      hunkId: null,
+      lineIds: [],
+      targetFingerprint: fingerprint,
+      body: "Root target",
+    });
+    store.createReviewNote({
+      conversationId: conversation.id,
+      repositoryPath: ".",
+      path: "src/other.ts",
+      hunkId: null,
+      lineIds: [],
+      targetFingerprint: fingerprint,
+      body: "Root other",
+    });
+    store.createReviewNote({
+      conversationId: conversation.id,
+      repositoryPath: "modules/example",
+      path: "src/target.ts",
+      hunkId: null,
+      lineIds: [],
+      targetFingerprint: fingerprint,
+      body: "Nested target",
+    });
+
+    expect(store.reviewNotesFor(
+      conversation.id,
+      ".",
+      "src/target.ts",
+    )).toEqual([rootTarget]);
+    expect(store.reviewNotesFor(
+      conversation.id,
+      "modules/example",
+      "src/target.ts",
+    )).toEqual([
+      expect.objectContaining({ body: "Nested target" }),
+    ]);
+    store.close();
+  });
+
   it("persists reasoning summaries, context usage, and provider-aware thread defaults", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     store.updateSettings({

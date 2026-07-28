@@ -43,6 +43,17 @@ interface AttachmentRegistryRecord extends TrustedRuntimeAttachment {
   readonly extension: string;
 }
 
+export interface ValidatedAttachmentPreview {
+  readonly bytes: Buffer;
+  readonly mimeType: ChatAttachment["mimeType"];
+  readonly size: number;
+}
+
+interface ValidatedAttachmentRead {
+  readonly attachment: TrustedRuntimeAttachment;
+  readonly bytes: Buffer;
+}
+
 export interface AttachmentRegistryLimits {
   readonly maxRecords?: number;
   readonly maxBytes?: number;
@@ -265,11 +276,17 @@ export class AttachmentRegistry {
     }
   }
 
-  preview(id: string): Pick<ChatAttachment, "path" | "mimeType" | "size"> | null {
-    if (this.revokedAttachmentIds.has(id)) return null;
-    const record = this.records.get(id);
-    return record
-      ? { path: record.path, mimeType: record.mimeType, size: record.size }
+  async preview(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<ValidatedAttachmentPreview | null> {
+    const validated = await this.readValidated(id, signal);
+    return validated
+      ? {
+          bytes: validated.bytes,
+          mimeType: validated.attachment.mimeType,
+          size: validated.attachment.size,
+        }
       : null;
   }
 
@@ -277,6 +294,13 @@ export class AttachmentRegistry {
     id: string,
     signal?: AbortSignal,
   ): Promise<TrustedRuntimeAttachment | null> {
+    return (await this.readValidated(id, signal))?.attachment ?? null;
+  }
+
+  private async readValidated(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<ValidatedAttachmentRead | null> {
     assertNotAborted(signal);
     if (this.revokedAttachmentIds.has(id)) return null;
     const record = this.records.get(id);
@@ -328,17 +352,20 @@ export class AttachmentRegistry {
       ) {
         throw new Error("The registered attachment metadata no longer matches its content.");
       }
+      return {
+        attachment: {
+          id: record.id,
+          name: record.name,
+          path: canonicalPath,
+          mimeType: record.mimeType,
+          size: record.size,
+          digest: record.digest,
+        },
+        bytes,
+      };
     } finally {
       await file.close();
     }
-    return {
-      id: record.id,
-      name: record.name,
-      path: canonicalPath,
-      mimeType: record.mimeType,
-      size: record.size,
-      digest: record.digest,
-    };
   }
 
   async release(id: string): Promise<boolean> {

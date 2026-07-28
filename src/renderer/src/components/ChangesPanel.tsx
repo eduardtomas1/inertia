@@ -20,6 +20,8 @@ export type ChangesPanelProps = {
   diff: GitDiffSnapshot | null;
   selectedPath: string | null;
   summary: DiffReviewSummary | null;
+  /** Fingerprint of the diff scope used to validate `summary`, when it differs from the displayed diff. */
+  summaryFingerprint?: string;
   selectionAnswer?: DiffSelectionReviewAnswer | null;
   reviewStates?: DiffReviewState[];
   notes?: DiffReviewNote[];
@@ -116,6 +118,7 @@ export function ChangesPanel({
   diff,
   selectedPath,
   summary,
+  summaryFingerprint,
   selectionAnswer = null,
   reviewStates = [],
   notes = [],
@@ -162,7 +165,9 @@ export function ChangesPanel({
   const selectedFile = selectedPath
     ? structured.files.find((file) => file.path === selectedPath) ?? null
     : structured.files[0] ?? null;
-  const activeSummary = summary?.fingerprint === structured.fingerprint ? summary : null;
+  const activeSummary = summary?.fingerprint === (summaryFingerprint ?? structured.fingerprint)
+    ? summary
+    : null;
   const fileSummary = activeSummary?.files.find((item) => item.path === selectedFile?.path) ?? null;
   const totals = useMemo(() => files.reduce(
     (result, file) => ({ insertions: result.insertions + file.insertions, deletions: result.deletions + file.deletions }),

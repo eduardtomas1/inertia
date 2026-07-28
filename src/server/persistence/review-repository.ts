@@ -110,10 +110,30 @@ export class ReviewRepository {
     if (result.changes === 0) throw new RecordNotFoundError("Review note not found.");
   }
 
-  notesFor(conversationId: string): DiffReviewNote[] {
+  notesFor(
+    conversationId: string,
+    repositoryPath?: string,
+    targetPath?: string,
+  ): DiffReviewNote[] {
     this.context.requireConversation(conversationId);
-    return (this.context.database.prepare("SELECT * FROM diff_review_notes WHERE conversation_id = ? ORDER BY created_at ASC")
-      .all(conversationId) as DiffReviewNoteRow[]).map(reviewNoteFromRow);
+    const rows = targetPath !== undefined
+      ? this.context.database.prepare(`
+        SELECT * FROM diff_review_notes
+        WHERE conversation_id = ? AND repository_path = ? AND path = ?
+        ORDER BY created_at ASC
+      `).all(conversationId, repositoryPath ?? ".", targetPath)
+      : repositoryPath !== undefined
+        ? this.context.database.prepare(`
+          SELECT * FROM diff_review_notes
+          WHERE conversation_id = ? AND repository_path = ?
+          ORDER BY created_at ASC
+        `).all(conversationId, repositoryPath)
+        : this.context.database.prepare(`
+          SELECT * FROM diff_review_notes
+          WHERE conversation_id = ?
+          ORDER BY created_at ASC
+        `).all(conversationId);
+    return (rows as DiffReviewNoteRow[]).map(reviewNoteFromRow);
   }
 
   reconcileTargets(

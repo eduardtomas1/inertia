@@ -21,6 +21,7 @@ const png = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
 const alternatePng = Buffer.concat([png, Buffer.from([0x01])]);
+const sameSizeReplacementPng = Buffer.concat([png, Buffer.from([0x02])]);
 
 async function registry(
   limits?: AttachmentRegistryLimits,
@@ -72,6 +73,11 @@ describe("main-owned attachment registry", () => {
     });
     expect(resolved?.digest).toMatch(/^[0-9a-f]{64}$/u);
     expect(await readFile(resolved!.path)).toEqual(png);
+    await expect(attachments.preview(imported!.id)).resolves.toMatchObject({
+      bytes: png,
+      mimeType: "image/png",
+      size: png.length,
+    });
   });
 
   it("rejects content or metadata that changed after privileged import", async () => {
@@ -85,6 +91,21 @@ describe("main-owned attachment registry", () => {
 
     await expect(attachments.resolve(imported!.id)).rejects.toThrow(
       /changed|metadata|content/u,
+    );
+  });
+
+  it("rejects same-size image replacement when obtaining preview bytes", async () => {
+    const { registry: attachments } = await registry();
+    const [imported] = await attachments.import([{
+      name: "preview.png",
+      mimeType: "image/png",
+      data: alternatePng,
+    }]);
+
+    await writeFile(imported!.path, sameSizeReplacementPng);
+
+    await expect(attachments.preview(imported!.id)).rejects.toThrow(
+      /metadata|content/u,
     );
   });
 
@@ -341,7 +362,7 @@ describe("main-owned attachment registry", () => {
     );
     expect(unlinkFile).toHaveBeenCalledTimes(3);
     expect(waits).toEqual([25, 50]);
-    expect(attachments.preview(first!.id)).toBeNull();
+    await expect(attachments.preview(first!.id)).resolves.toBeNull();
     await expect(attachments.resolve(first!.id)).resolves.toBeNull();
     await expect(attachments.import([{
       name: "blocked-by-accounting.png",

@@ -533,8 +533,16 @@ export class RuntimeStore {
     this.reviewRepository.deleteNote(conversationId, noteId);
   }
 
-  reviewNotesFor(conversationId: string): DiffReviewNote[] {
-    return this.reviewRepository.notesFor(conversationId);
+  reviewNotesFor(
+    conversationId: string,
+    repositoryPath?: string,
+    targetPath?: string,
+  ): DiffReviewNote[] {
+    return this.reviewRepository.notesFor(
+      conversationId,
+      repositoryPath,
+      targetPath,
+    );
   }
 
   reconcileReviewTargets(

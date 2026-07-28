@@ -71,9 +71,11 @@ export function reconcileReviews(
     }
   }
   const notes: Record<string, string | null> = {};
-  for (const note of store.reviewNotesFor(conversationId)) {
-    if ((note.repositoryPath ?? ".") !== repositoryPath) continue;
-    if (targetPath && note.path !== targetPath) continue;
+  for (const note of store.reviewNotesFor(
+    conversationId,
+    repositoryPath,
+    targetPath,
+  )) {
     const file = structured.files.find(
       (candidate) => candidate.path === note.path,
     );

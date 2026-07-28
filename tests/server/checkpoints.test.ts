@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -50,6 +57,80 @@ describe("Git checkpoints", () => {
     expect(readFileSync(join(root, "tracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("before agent\n");
     expect(readFileSync(join(root, "existing-untracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("included\n");
     expect(readFileSync(join(root, "later-untracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("keep me\n");
+  });
+
+  it("does not run repository clean filters while creating an automatic checkpoint", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const marker = join(root, "clean-filter-invoked");
+    const filter = join(root, "hostile-clean-filter");
+    writeFileSync(
+      filter,
+      [
+        "#!/usr/bin/env node",
+        'const { writeFileSync } = require("node:fs");',
+        `writeFileSync(${JSON.stringify(marker)}, "invoked");`,
+        'process.stdin.pipe(process.stdout);',
+        "",
+      ].join("\n"),
+    );
+    chmodSync(filter, 0o755);
+    git(root, "config", "filter.hostile.clean", filter);
+    git(root, "config", "filter.hostile.required", "true");
+    writeFileSync(join(root, ".gitattributes"), "*.txt filter=hostile\n");
+    git(root, "add", ".gitattributes");
+    git(root, "commit", "-m", "attributes");
+    writeFileSync(join(root, "tracked.txt"), "checkpoint bytes\n");
+
+    git(root, "hash-object", "--path=tracked.txt", "tracked.txt");
+    expect(existsSync(marker)).toBe(true);
+    rmSync(marker);
+
+    const checkpoint = await createCheckpoint(
+      root,
+      indexes,
+      randomUUID(),
+    );
+
+    expect(existsSync(marker)).toBe(false);
+    expect(
+      git(root, "show", `${checkpoint.ref}:tracked.txt`),
+    ).toBe("checkpoint bytes");
+  });
+
+  it("does not run a repository process filter during checkpoint creation", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const marker = join(root, "process-filter-invoked");
+    const filter = join(root, "hostile-process-filter");
+    writeFileSync(
+      filter,
+      [
+        "#!/usr/bin/env node",
+        'const { writeFileSync } = require("node:fs");',
+        `writeFileSync(${JSON.stringify(marker)}, "invoked");`,
+        "",
+      ].join("\n"),
+    );
+    chmodSync(filter, 0o755);
+    writeFileSync(join(root, ".gitattributes"), "*.txt filter=hostile\n");
+    git(root, "add", ".gitattributes");
+    git(root, "commit", "-m", "attributes");
+    git(root, "config", "filter.hostile.process", filter);
+    git(root, "config", "filter.hostile.required", "true");
+    writeFileSync(join(root, "tracked.txt"), "checkpoint bytes\n");
+
+    const checkpoint = await createCheckpoint(
+      root,
+      indexes,
+      randomUUID(),
+    );
+    expect(existsSync(marker)).toBe(false);
+    expect(
+      git(root, "show", `${checkpoint.ref}:tracked.txt`),
+    ).toBe("checkpoint bytes");
   });
 
   it("creates a provider-host pull request URL without network access", async () => {

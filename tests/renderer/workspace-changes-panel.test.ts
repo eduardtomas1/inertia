@@ -3,13 +3,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  ChangesPanel,
+} from "../../src/renderer/src/components/ChangesPanel";
+import {
   WorkspaceChangesPanel,
   workspaceGitSelectedFileRevision,
 } from "../../src/renderer/src/components/WorkspaceChangesPanel";
 import type {
   ChangedFile,
+  DiffReviewSummary,
   WorkspaceGitSnapshot,
 } from "../../src/shared/contracts";
+import { parseUnifiedDiff } from "../../src/shared/diff-review";
 
 function changedFile(path: string, insertions = 2, deletions = 1): ChangedFile {
   return {
@@ -133,6 +138,72 @@ function renderWorkspaceChanges(status: WorkspaceGitSnapshot): string {
 }
 
 describe("workspace repository-grouped Changes panel", () => {
+  it("renders a repository-scoped summary while displaying a selected-file diff", () => {
+    const selectedPatch = [
+      "diff --git a/README.md b/README.md",
+      "--- a/README.md",
+      "+++ b/README.md",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+      "",
+    ].join("\n");
+    const repositoryPatch = [
+      selectedPatch,
+      "diff --git a/other.md b/other.md",
+      "--- a/other.md",
+      "+++ b/other.md",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+    const repositoryFingerprint = parseUnifiedDiff(repositoryPatch).fingerprint;
+    const selectedFingerprint = parseUnifiedDiff(selectedPatch).fingerprint;
+    const summary: DiffReviewSummary = {
+      conversationId: "conversation",
+      fingerprint: repositoryFingerprint,
+      providerId: "codex",
+      harnessId: "codex",
+      backendProfileId: null,
+      model: null,
+      overall: "Repository summary",
+      classifications: [],
+      files: [{
+        path: "README.md",
+        summary: "Selected-file summary from the repository review.",
+        classifications: [],
+        hunks: [],
+      }],
+      generatedAt: new Date(0).toISOString(),
+    };
+
+    expect(repositoryFingerprint).not.toBe(selectedFingerprint);
+    const html = renderToStaticMarkup(createElement(ChangesPanel, {
+      files: [changedFile("README.md")],
+      diff: {
+        patch: selectedPatch,
+        truncated: false,
+        files: [changedFile("README.md")],
+      },
+      selectedPath: "README.md",
+      summary,
+      summaryFingerprint: repositoryFingerprint,
+      onSelectFile: () => undefined,
+      onAsk: async () => undefined,
+      onRequestRevision: async () => undefined,
+      onRevert: async () => undefined,
+      onSetReviewState: async () => undefined,
+      onCreateNote: async () => undefined,
+      onUpdateNote: async () => undefined,
+      onDeleteNote: async () => undefined,
+      onAddTextToPrompt: () => undefined,
+      onAddToPrompt: () => undefined,
+    }));
+
+    expect(html).toContain("Selected-file summary from the repository review.");
+  });
+
   it("renders compact native repository disclosures without flattening duplicate file paths", () => {
     const html = renderWorkspaceChanges(snapshot());
 

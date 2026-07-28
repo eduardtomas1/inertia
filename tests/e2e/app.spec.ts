@@ -541,6 +541,23 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
     `${chosenId}.png`,
   );
   await expect.poll(async () => stat(selectedTempPath).then(() => true, () => false)).toBe(true);
+  const selectedBytes = await readFile(selectedTempPath);
+  const sameSizeReplacement = Buffer.from(selectedBytes);
+  const replacementIndex = sameSizeReplacement.length - 1;
+  sameSizeReplacement[replacementIndex] =
+    sameSizeReplacement[replacementIndex]! ^ 0x01;
+  await writeFile(selectedTempPath, sameSizeReplacement);
+  const replacedPreviewStatus = await electronApp.evaluate(
+    async ({ net }, url) => (await net.fetch(url)).status,
+    chosenPreviewSource!,
+  );
+  expect(replacedPreviewStatus).toBe(404);
+  await writeFile(selectedTempPath, selectedBytes);
+  const restoredPreviewStatus = await electronApp.evaluate(
+    async ({ net }, url) => (await net.fetch(url)).status,
+    chosenPreviewSource!,
+  );
+  expect(restoredPreviewStatus).toBe(200);
   await page.getByRole("textbox", { name: "Message" }).fill("Inspect the selected image.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(attachments).toHaveCount(0);

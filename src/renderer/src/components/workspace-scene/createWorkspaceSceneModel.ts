@@ -371,6 +371,7 @@ export function createWorkspaceSceneModel({
         snapshot: workspaceTools.workspaceGitStatus,
         loading: workspaceTools.toolsLoading,
         summary: workspaceTools.reviewSummary,
+        summaryFingerprint: workspaceTools.structuredDiff.fingerprint,
         selectionAnswer: workspaceTools.selectionReviewAnswer,
         reviewStates: workspaceTools.reviewStates,
         notes: workspaceTools.reviewNotes,

@@ -22,6 +22,32 @@ export interface RunGitOptions {
   failureMessage: string;
 }
 
+export type RunGitInspectionOptions = Omit<RunGitOptions, "input">;
+
+function inspectionArguments(args: readonly string[]): string[] {
+  const [command, ...rest] = args;
+  if (!command || command.startsWith("-")) {
+    throw new GitError(
+      "invalid-input",
+      "The Git inspection command is invalid.",
+    );
+  }
+  const commandArguments = command === "diff"
+    ? [
+        command,
+        ...(!rest.includes("--no-ext-diff") ? ["--no-ext-diff"] : []),
+        ...(!rest.includes("--no-textconv") ? ["--no-textconv"] : []),
+        ...rest,
+      ]
+    : [command, ...rest];
+  return [
+    "--no-pager",
+    "-c",
+    "core.fsmonitor=false",
+    ...commandArguments,
+  ];
+}
+
 export function boundedInteger(
   value: number | undefined,
   fallback: number,
@@ -185,4 +211,18 @@ export function runGit(
       }
     });
   });
+}
+
+/**
+ * Runs a read-only Git inspection without honoring repository-configured
+ * filesystem monitors or diff executables. Mutating and authenticated
+ * workflows deliberately continue to use runGit so their intended hooks and
+ * credential helpers are not changed by this boundary.
+ */
+export function runGitInspection(
+  cwd: string,
+  args: readonly string[],
+  options: RunGitInspectionOptions,
+): Promise<GitProcessResult> {
+  return runGit(cwd, inspectionArguments(args), options);
 }

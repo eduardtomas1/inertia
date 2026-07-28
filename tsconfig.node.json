@@ -33,6 +33,7 @@
     "src/renderer/src/components/ModelChooser.tsx",
     "src/renderer/src/components/ModelChooserRow.tsx",
     "src/renderer/src/components/ModelSourceRail.tsx",
+    "src/renderer/src/components/PreviewPanel.tsx",
     "src/renderer/src/components/ProviderMaintenanceNotice.tsx",
     "src/renderer/src/components/ResponseMarkdown.tsx",
     "src/renderer/src/components/ResponseTimeline.tsx",

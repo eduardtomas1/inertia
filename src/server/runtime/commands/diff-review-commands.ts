@@ -186,7 +186,10 @@ export function createDiffReviewCommandHandler(
         );
         const current = await getUnifiedDiff(
           repository.root,
-          { ignoreWhitespace: command.payload.ignoreWhitespace },
+          {
+            paths: [command.payload.path],
+            ignoreWhitespace: command.payload.ignoreWhitespace,
+          },
         );
         if (current.truncated) {
           throw new RuntimeRequestError(
@@ -230,7 +233,10 @@ export function createDiffReviewCommandHandler(
         );
         const current = await getUnifiedDiff(
           repository.root,
-          { ignoreWhitespace: command.payload.ignoreWhitespace },
+          {
+            paths: [command.payload.path],
+            ignoreWhitespace: command.payload.ignoreWhitespace,
+          },
         );
         if (current.truncated) {
           throw new RuntimeRequestError(

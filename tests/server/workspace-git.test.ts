@@ -1,6 +1,9 @@
 import {
+  chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,7 +19,7 @@ import {
   resolveWorkspaceGitRepository,
   workspaceGitFilePath,
 } from "../../src/server/workspace-git";
-import { getUnifiedDiff } from "../../src/server/git";
+import { getRepositoryStatus, getUnifiedDiff } from "../../src/server/git";
 
 const roots: string[] = [];
 
@@ -52,11 +55,69 @@ function initializeRepository(path: string, trackedFile?: string): void {
   }
 }
 
+function configuredFsmonitorHook(
+  repository: string,
+  marker: string,
+): string {
+  const hook = join(repository, "fsmonitor-hook");
+  writeFileSync(
+    hook,
+    [
+      "#!/usr/bin/env node",
+      'const { writeFileSync } = require("node:fs");',
+      `writeFileSync(${JSON.stringify(marker)}, "invoked");`,
+      'process.stdout.write("0\\\\0");',
+      "",
+    ].join("\n"),
+  );
+  chmodSync(hook, 0o755);
+  git(repository, "config", "core.fsmonitor", hook);
+  return hook;
+}
+
 afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
 describe("workspace Git repository discovery", () => {
+  it("does not invoke a repository-configured fsmonitor during status refresh", async () => {
+    const root = temporaryRoot("hostile-fsmonitor-refresh");
+    initializeRepository(root, "README.md");
+    const marker = join(root, "fsmonitor-invoked");
+    configuredFsmonitorHook(root, marker);
+
+    git(root, "status", "--porcelain");
+    expect(existsSync(marker)).toBe(true);
+    rmSync(marker);
+
+    const status = await getRepositoryStatus(root);
+
+    expect(status.root).toBe(realpathSync(root));
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("ignores a nonexistent repository fsmonitor during workspace discovery", async () => {
+    const root = temporaryRoot("missing-fsmonitor-discovery");
+    const nested = join(root, "modules", "nested");
+    initializeRepository(nested, "tracked.txt");
+    git(
+      nested,
+      "config",
+      "core.fsmonitor",
+      join(nested, "does-not-exist"),
+    );
+
+    const snapshot = await discoverWorkspaceGitRepositories(root);
+
+    expect(snapshot.partial).toBe(false);
+    expect(snapshot.repositories).toEqual([
+      expect.objectContaining({
+        repositoryPath: "modules/nested",
+        state: "ready",
+      }),
+    ]);
+  });
+
   it("finds a dirty root and distinct dirty Openbravo module repositories", async () => {
     const root = temporaryRoot("openbravo-root");
     initializeRepository(root, "README.md");

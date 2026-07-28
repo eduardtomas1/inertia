@@ -1,6 +1,6 @@
 import { DEFAULT_OUTPUT_BYTES } from "./constants";
 import { repositoryRoot } from "./paths";
-import { runGit } from "./runner";
+import { runGitInspection } from "./runner";
 import {
   GitError,
   type GitChangedFile,
@@ -148,7 +148,7 @@ export function parseNumstat(
 
 export async function hasHead(root: string): Promise<boolean> {
   try {
-    await runGit(root, ["rev-parse", "--verify", "HEAD"], {
+    await runGitInspection(root, ["rev-parse", "--verify", "HEAD"], {
       maxOutputBytes: 256,
       failureMessage: "Unable to inspect the current commit.",
     });
@@ -165,7 +165,7 @@ export async function getRepositoryStatus(
   repositoryPath: string,
 ): Promise<GitRepositoryStatus> {
   const root = await repositoryRoot(repositoryPath);
-  const statusResult = await runGit(
+  const statusResult = await runGitInspection(
     root,
     ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],
     {
@@ -175,7 +175,7 @@ export async function getRepositoryStatus(
     },
   );
   const parsed = parsePorcelain(statusResult.stdout);
-  const statsResult = await runGit(
+  const statsResult = await runGitInspection(
     root,
     (await hasHead(root))
       ? [

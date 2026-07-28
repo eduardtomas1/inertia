@@ -1283,6 +1283,99 @@ process.exit(child.status ?? 1);
     }));
   });
 
+  it("scopes review state and notes to the selected file when the repository diff exceeds its file limit", async () => {
+    const { data, workspace } = temporaryWorkspace();
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: workspace });
+    execFileSync("git", ["config", "user.email", "runtime@example.invalid"], { cwd: workspace });
+    execFileSync("git", ["config", "user.name", "Runtime Test"], { cwd: workspace });
+    for (let index = 0; index < 51; index += 1) {
+      writeFileSync(
+        join(workspace, `review-${index.toString().padStart(2, "0")}.ts`),
+        `export const value = "before-${index}";\n`,
+      );
+    }
+    execFileSync("git", ["add", "."], { cwd: workspace });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd: workspace });
+    for (let index = 0; index < 51; index += 1) {
+      writeFileSync(
+        join(workspace, `review-${index.toString().padStart(2, "0")}.ts`),
+        `export const value = "after-${index}";\n`,
+      );
+    }
+
+    expect((await getUnifiedDiff(workspace)).truncated).toBe(true);
+    const targetPath = "review-50.ts";
+    const selected = parseUnifiedDiff((await getUnifiedDiff(workspace, {
+      paths: [targetPath],
+    })).text);
+    const file = selected.files[0]!;
+    const targetFingerprint = diffFileFingerprint(file);
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: false,
+    });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
+    );
+    const conversationId = welcome.snapshot.activeConversationId!;
+
+    const stateRequestId = randomUUID();
+    send(client.socket, {
+      type: "review.state.set",
+      requestId: stateRequestId,
+      payload: {
+        conversationId,
+        scope: "file",
+        path: targetPath,
+        hunkId: null,
+        targetFingerprint,
+        reviewed: true,
+      },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === stateRequestId,
+    );
+
+    const noteRequestId = randomUUID();
+    send(client.socket, {
+      type: "review.note.create",
+      requestId: noteRequestId,
+      payload: {
+        conversationId,
+        path: targetPath,
+        hunkId: null,
+        lineIds: [],
+        targetFingerprint,
+        body: "Selected-file note in a large change set.",
+      },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === noteRequestId,
+    );
+
+    const detail = await loadConversationDetail(
+      client.socket,
+      client.events,
+      conversationId,
+    );
+    expect(detail.reviewStates).toContainEqual(expect.objectContaining({
+      path: targetPath,
+      reviewed: true,
+      stale: false,
+    }));
+    expect(detail.reviewNotes).toContainEqual(expect.objectContaining({
+      path: targetPath,
+      body: "Selected-file note in a large change set.",
+      stale: false,
+    }));
+  });
+
   it("persists review metadata and safely reverts selections in a nested repository", async () => {
     const { data, workspace } = temporaryWorkspace();
     const repositoryPath = "modules/example";

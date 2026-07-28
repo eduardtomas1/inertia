@@ -120,7 +120,7 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
             <div className="palette-group" key={group}>
               <span>{group}</span>
               {groupItems.map(({ item, index }) => (
-                <button type="button" id={`palette-${item.id}`} role="option" aria-selected={activeIndex === index} className={activeIndex === index ? "is-active" : undefined} key={item.id} onMouseEnter={() => setActiveIndex(index)} onClick={() => run(item)}>
+                <button type="button" id={`palette-${item.id}`} role="option" aria-selected={activeIndex === index} className={activeIndex === index ? "is-active" : undefined} key={item.id} onPointerMove={() => setActiveIndex(index)} onClick={() => run(item)}>
                   {item.icon}<span><strong>{item.label}</strong>{item.detail && <small>{item.detail}</small>}</span>{item.shortcut && <kbd>{item.shortcut}</kbd>}
                 </button>
               ))}

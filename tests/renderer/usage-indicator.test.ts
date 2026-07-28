@@ -215,7 +215,10 @@ describe("UsageIndicator", () => {
   });
 
   it("uses semantic, scale-aware ring styling with no idle spinner motion", () => {
-    const css = readFileSync(new URL("../../src/renderer/src/styles.css", import.meta.url), "utf8");
+    const css = readFileSync(
+      new URL("../../src/renderer/src/styles.css", import.meta.url),
+      "utf8",
+    ).replace(/\r\n?/gu, "\n");
     const ringBlock = css.match(/\.usage-context-ring\s*\{(?<body>[^}]*)\}/su)?.groups?.body ?? "";
     const refreshBlock = css.match(/\.usage-quota-refresh-indicator\s*\{(?<body>[^}]*)\}/su)?.groups?.body ?? "";
     const reducedRuleIndex = css.indexOf(

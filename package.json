@@ -169,7 +169,7 @@
     "oxlint-tsgolint": "7.0.2001",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
-    "vite": "^7.3.6",
+    "vite": "^8.1.5",
     "vitest": "^4.1.10"
   },
   "overrides": {

@@ -118,7 +118,7 @@ body:
     attributes:
       label: Last known working version
       description: Leave blank if unknown. Do not include private project history.
-      placeholder: "0.0.11"
+      placeholder: "0.0.12"
 
   - type: textarea
     id: safe_context

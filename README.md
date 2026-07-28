@@ -100,13 +100,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.11
+### Version 0.0.12
 
-This release makes Inertia's strong workflow easier to evolve safely. Codex App Server execution, backend profiles, workspace rendering, persistence, Git review, diagnostics, and updates now have clearer ownership and stronger architecture guardrails.
+This release makes evidence about a change arrive much faster. Real renderer interaction tests now cover focus, keyboard, disclosure, and terminal ownership; the 35-scenario Electron suite is split into focused feature gates; all-source coverage is measured; and structural import, cycle, facade, and size rules protect the architecture.
 
-Rootless workspaces with many nested repositories now behave like real multi-repository projects, including repository-scoped reviews and direct file diffs. Sparse checkouts, ignored files, automatic Git inspection, secure previews, Windows spacing, Linux readability, and long-running transcript performance are more dependable too.
+Node.js onboarding, private security reporting, privacy-aware bug reports, deterministic third-party notices, dependency updates, and a weekly latest-provider canary make maintenance more predictable. The release also prevents delayed terminal startup from stealing command-palette focus on Windows.
 
-Download [Inertia v0.0.11](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.11):
+Download [Inertia v0.0.12](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.12):
 
 | Platform | Download |
 | --- | --- |

@@ -40,6 +40,10 @@ function canonicalPath(path) {
     : absolute;
 }
 
+function workspacePath(workspaceRoot, file) {
+  return relative(workspaceRoot, file).replaceAll("\\", "/");
+}
+
 function isContained(directory, file) {
   const child = relative(directory, file);
   return child === ""
@@ -527,7 +531,7 @@ export function analyzeSourceArchitecture({
       syntax = moduleSyntax(file, contents);
     } catch (error) {
       failures.push(
-        `${relative(absoluteWorkspaceRoot, file)} could not be parsed: ${
+        `${workspacePath(absoluteWorkspaceRoot, file)} could not be parsed: ${
           error instanceof Error ? error.message : "unknown syntax error"
         }.`,
       );
@@ -537,7 +541,7 @@ export function analyzeSourceArchitecture({
     for (const dependency of syntax.imports) {
       if (dependency.specifier === null) {
         failures.push(
-          `${relative(absoluteWorkspaceRoot, file)}:${dependency.line} uses `
+          `${workspacePath(absoluteWorkspaceRoot, file)}:${dependency.line} uses `
           + `a non-literal ${dependency.kind} that cannot be checked for `
           + "architecture dependencies.",
         );
@@ -560,7 +564,7 @@ export function analyzeSourceArchitecture({
         });
       } else if (resolution.kind === "unresolved") {
         failures.push(
-          `${relative(absoluteWorkspaceRoot, file)}:${dependency.line} `
+          `${workspacePath(absoluteWorkspaceRoot, file)}:${dependency.line} `
           + `cannot resolve local module ${dependency.specifier}.`,
         );
       }
@@ -571,7 +575,7 @@ export function analyzeSourceArchitecture({
     const layer = sourceLayer(absoluteSourceDirectory, file);
     if (!allowedLayers.has(layer)) {
       failures.push(
-        `${relative(absoluteWorkspaceRoot, file)} belongs to unknown `
+        `${workspacePath(absoluteWorkspaceRoot, file)} belongs to unknown `
         + `source layer ${layer || "(root)"}.`,
       );
     }
@@ -584,9 +588,9 @@ export function analyzeSourceArchitecture({
       && !allowedLayers.get(fromLayer)?.has(toLayer)
     ) {
       failures.push(
-        `${relative(absoluteWorkspaceRoot, edge.from)}:${edge.line} crosses `
+        `${workspacePath(absoluteWorkspaceRoot, edge.from)}:${edge.line} crosses `
         + `source layers ${fromLayer} -> ${toLayer} via `
-        + `${relative(absoluteWorkspaceRoot, edge.to)}.`,
+        + `${workspacePath(absoluteWorkspaceRoot, edge.to)}.`,
       );
     }
   }
@@ -599,7 +603,7 @@ export function analyzeSourceArchitecture({
   for (const cycle of cycles) {
     failures.push(
       `src contains an import cycle: ${cycle
-        .map((file) => relative(absoluteWorkspaceRoot, file))
+        .map((file) => workspacePath(absoluteWorkspaceRoot, file))
         .join(" -> ")}.`,
     );
   }
@@ -622,9 +626,9 @@ export function analyzeSourceArchitecture({
         && isContained(implementationDirectory, edge.from)
       ) {
         failures.push(
-          `${relative(absoluteWorkspaceRoot, edge.from)}:${edge.line} imports `
+          `${workspacePath(absoluteWorkspaceRoot, edge.from)}:${edge.line} imports `
           + `its compatibility facade `
-          + `${relative(absoluteWorkspaceRoot, file)}.`,
+          + `${workspacePath(absoluteWorkspaceRoot, file)}.`,
         );
       }
     }
@@ -653,7 +657,7 @@ export function lineCeilingFailures({
     const lines = readFileSync(file, "utf8").split(/\r?\n/u).length;
     return lines > ceiling
       ? [
-          `${relative(absoluteWorkspaceRoot, file)} has ${lines} lines `
+          `${workspacePath(absoluteWorkspaceRoot, file)} has ${lines} lines `
           + `(${label}: ${ceiling}).`,
         ]
       : [];

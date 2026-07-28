@@ -102,12 +102,20 @@ writeFileSync(
 );
 process.stdout.write(readFileSync(${JSON.stringify(treePath)}, "utf8"));
 `);
+    const environment = { ...process.env };
+    for (const name of Object.keys(environment)) {
+      if (
+        name.toLowerCase() === "npm_execpath"
+        || name.toLowerCase() === "inertia_notices_tree_path"
+      ) {
+        delete environment[name];
+      }
+    }
 
     const result = spawnSync(process.execPath, [script], {
       encoding: "utf8",
       env: {
-        ...process.env,
-        INERTIA_NOTICES_TREE_PATH: "",
+        ...environment,
         INERTIA_NOTICES_OUTPUT: outputPath,
         npm_execpath: npmEntryPoint,
       },

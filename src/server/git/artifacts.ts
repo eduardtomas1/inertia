@@ -15,6 +15,7 @@ import {
 import {
   boundedInteger,
   runGit,
+  runGitInspection,
   utf8Prefix,
 } from "./runner";
 import {
@@ -48,7 +49,7 @@ async function canonicalGitDirectory(
   root: string,
   args: readonly string[],
 ): Promise<string> {
-  const result = await runGit(root, [...args], {
+  const result = await runGitInspection(root, [...args], {
     maxOutputBytes: MAX_PATH_LENGTH,
     failureMessage: "Unable to inspect the repository identity.",
   });
@@ -99,11 +100,11 @@ export async function captureGitArtifactState(
       root,
       ["rev-parse", "--path-format=absolute", "--git-dir"],
     ).catch(() => canonicalGitDirectory(root, ["rev-parse", "--git-dir"])),
-    runGit(root, ["rev-parse", "--verify", `${ref}^{commit}`], {
+    runGitInspection(root, ["rev-parse", "--verify", `${ref}^{commit}`], {
       maxOutputBytes: 256,
       failureMessage: "The historical Git snapshot is unavailable.",
     }).then(({ stdout }) => stdout.toString("utf8").trim()),
-    runGit(root, ["rev-parse", "--verify", "HEAD"], {
+    runGitInspection(root, ["rev-parse", "--verify", "HEAD"], {
       maxOutputBytes: 256,
       failureMessage: "Unable to inspect the current commit.",
     }).then(({ stdout }) => stdout.toString("utf8").trim()).catch(() => ""),
@@ -111,7 +112,7 @@ export async function captureGitArtifactState(
       maxOutputBytes: 256,
       failureMessage: "Unable to inspect the Git index.",
     }).then(({ stdout }) => stdout.toString("utf8").trim()).catch(() => ""),
-    runGit(
+    runGitInspection(
       root,
       ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],
       {
@@ -197,13 +198,13 @@ export async function compareGitSnapshots(
   );
   await Promise.all(
     [beforeRef, afterRef].map((ref) =>
-      runGit(root, ["rev-parse", "--verify", `${ref}^{commit}`], {
+      runGitInspection(root, ["rev-parse", "--verify", `${ref}^{commit}`], {
         maxOutputBytes: 256,
         failureMessage: "A historical Git snapshot is unavailable.",
       })),
   );
   const [names, stats, patch] = await Promise.all([
-    runGit(
+    runGitInspection(
       root,
       [
         "diff",
@@ -220,7 +221,7 @@ export async function compareGitSnapshots(
         failureMessage: "Unable to inspect historical changed files.",
       },
     ),
-    runGit(
+    runGitInspection(
       root,
       [
         "diff",
@@ -237,7 +238,7 @@ export async function compareGitSnapshots(
         failureMessage: "Unable to inspect historical change totals.",
       },
     ),
-    runGit(
+    runGitInspection(
       root,
       [
         "diff",

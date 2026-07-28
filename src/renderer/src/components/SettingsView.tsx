@@ -5,7 +5,9 @@ import {
   BrainCircuit,
   Check,
   Clock3,
+  Copy,
   Database,
+  Download,
   FileCode2,
   FolderOpen,
   GitCompareArrows,
@@ -41,6 +43,7 @@ import {
   type ProviderMaintenanceProviderId,
   type ThemePreference,
 } from "@shared/contracts";
+import type { AppUpdateStatus } from "@shared/desktop";
 import { INERTIA_VERSION } from "@shared/version";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
 import { Switch } from "./ui";
@@ -80,6 +83,11 @@ type SettingsViewProps = {
   onOpenProviderUpdateInstructions: (url: string) => void;
   onChooseCodexBinary: () => void;
   onRevealRuntimeLogs: () => Promise<string>;
+  onCopyRuntimeDiagnosticReport: () => Promise<{ copied: boolean; eventCount: number }>;
+  appUpdateStatus: AppUpdateStatus | null;
+  checkingAppUpdate: boolean;
+  onCheckAppUpdate: () => Promise<void>;
+  onOpenAppRelease: () => Promise<void>;
   onUnarchive: (conversation: Conversation) => void;
   onLoadBackendProfile: (profileId: string) => Promise<ModelBackendProfileDetail>;
   onCreateBackendProfile: (draft: ModelBackendProfileDraft) => Promise<ModelBackendProfileDetail>;
@@ -136,6 +144,11 @@ export function SettingsView({
   onOpenProviderUpdateInstructions,
   onChooseCodexBinary,
   onRevealRuntimeLogs,
+  onCopyRuntimeDiagnosticReport,
+  appUpdateStatus,
+  checkingAppUpdate,
+  onCheckAppUpdate,
+  onOpenAppRelease,
   onUnarchive,
   onLoadBackendProfile,
   onCreateBackendProfile,
@@ -151,7 +164,11 @@ export function SettingsView({
     target?.section ?? "general",
   );
   const [revealingLogs, setRevealingLogs] = useState(false);
+  const [copyingSupportReport, setCopyingSupportReport] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [logRevealStatus, setLogRevealStatus] = useState<string | null>(null);
+  const [supportReportStatus, setSupportReportStatus] = useState<string | null>(null);
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<string | null>(null);
   const defaultProvider = providers.find(({ id }) => id === settings.defaultProvider);
   const defaultModel = defaultProvider?.models.find(({ id }) => id === settings.defaultModel)
     ?? defaultProvider?.models.find(({ isDefault }) => isDefault)
@@ -170,6 +187,33 @@ export function SettingsView({
       setLogRevealStatus("The runtime log folder could not be opened.");
     } finally {
       setRevealingLogs(false);
+    }
+  };
+  const copyRuntimeSupportReport = async (): Promise<void> => {
+    if (copyingSupportReport) return;
+    setCopyingSupportReport(true);
+    setSupportReportStatus(null);
+    try {
+      const result = await onCopyRuntimeDiagnosticReport();
+      setSupportReportStatus(result.copied
+        ? `Private support summary copied · ${result.eventCount} lifecycle ${result.eventCount === 1 ? "event" : "events"}.`
+        : "The support summary could not be copied.");
+    } catch {
+      setSupportReportStatus("The support summary could not be copied.");
+    } finally {
+      setCopyingSupportReport(false);
+    }
+  };
+  const checkAppUpdate = async (): Promise<void> => {
+    if (checkingUpdate || checkingAppUpdate) return;
+    setCheckingUpdate(true);
+    setUpdateCheckStatus(null);
+    try {
+      await onCheckAppUpdate();
+    } catch {
+      setUpdateCheckStatus("The update check could not be completed.");
+    } finally {
+      setCheckingUpdate(false);
     }
   };
 
@@ -260,6 +304,26 @@ export function SettingsView({
             <section className="settings-card" aria-labelledby="terminal-heading">
               <div className="settings-card-heading"><div><TerminalSquare size={18} /></div><span><h3 id="terminal-heading">Terminal</h3><p>Keep command output comfortable to read.</p></span></div>
               <div className="range-setting"><label htmlFor="terminal-font-size">Terminal font size</label><output htmlFor="terminal-font-size">{settings.terminalFontSize}px</output><input id="terminal-font-size" type="range" min="11" max="22" step="1" value={settings.terminalFontSize} disabled={disabled} onChange={(event) => onUpdate({ terminalFontSize: Number(event.target.value) })} /><div className="range-labels"><span>Compact</span><span>Comfortable</span></div></div>
+            </section>
+
+            <section className="settings-card" aria-labelledby="application-update-heading">
+              <div className="settings-card-heading"><div><Download size={18} /></div><span><h3 id="application-update-heading">Application updates</h3><p>Check the official Inertia release without downloading or installing anything automatically.</p></span></div>
+              <div className="codex-binary-path application-update-setting">
+                <span>
+                  <strong>Inertia v{INERTIA_VERSION}</strong>
+                  <small>
+                    {updateCheckStatus
+                      ?? appUpdateStatus?.message
+                      ?? "Inertia checks quietly after launch. You stay in control of every download and install."}
+                  </small>
+                </span>
+                <div>
+                  {appUpdateStatus?.state === "available" && (
+                    <button type="button" className="secondary-button" onClick={() => { void onOpenAppRelease(); }}><Download size={14} />View release</button>
+                  )}
+                  <button type="button" className="secondary-button" disabled={checkingUpdate || checkingAppUpdate} onClick={() => { void checkAppUpdate(); }}><RefreshCw size={14} />{checkingUpdate || checkingAppUpdate ? "Checking…" : "Check now"}</button>
+                </div>
+              </div>
             </section>
           </>
         )}
@@ -397,9 +461,13 @@ export function SettingsView({
                   <strong>Runtime diagnostics</strong>
                   <small>Local-only lifecycle and failure metadata. Prompts, source, token values, and credentials are excluded. Logs rotate at 256 KB and expire after seven days.</small>
                 </span>
-                <button type="button" className="secondary-button" disabled={revealingLogs} onClick={() => { void revealRuntimeLogs(); }}><FolderOpen size={14} />{revealingLogs ? "Opening…" : "Reveal log folder"}</button>
+                <div>
+                  <button type="button" className="secondary-button" disabled={copyingSupportReport} onClick={() => { void copyRuntimeSupportReport(); }}><Copy size={14} />{copyingSupportReport ? "Copying…" : "Copy support summary"}</button>
+                  <button type="button" className="secondary-button" disabled={revealingLogs} onClick={() => { void revealRuntimeLogs(); }}><FolderOpen size={14} />{revealingLogs ? "Opening…" : "Reveal log folder"}</button>
+                </div>
               </div>
               {logRevealStatus && <p className="settings-card-note" role="status">{logRevealStatus}</p>}
+              {supportReportStatus && <p className="settings-card-note" role="status">{supportReportStatus}</p>}
             </section>
           </>
         )}

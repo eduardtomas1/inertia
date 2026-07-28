@@ -1,15 +1,55 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createCheckpoint, restoreCheckpoint } from "../../src/server/checkpoints";
+import {
+  CheckpointError,
+  createCheckpoint,
+  deleteCheckpoints,
+  restoreCheckpoint,
+} from "../../src/server/checkpoints";
 import { getPullRequestCreateUrl } from "../../src/server/git";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+function nodeFilterCommand(path: string): string {
+  const executable = process.execPath.replaceAll("\\", "/");
+  const script = path.replaceAll("\\", "/");
+  return `"${executable}" "${script}"`;
+}
+
+function writePrefixFilter(
+  path: string,
+  marker: string,
+  prefix: string,
+): void {
+  writeFileSync(
+    path,
+    [
+      'const { writeFileSync } = require("node:fs");',
+      "const chunks = [];",
+      `const prefix = Buffer.from(${JSON.stringify(prefix)});`,
+      'process.stdin.on("data", (chunk) => chunks.push(chunk));',
+      'process.stdin.on("end", () => {',
+      `  writeFileSync(${JSON.stringify(marker)}, "invoked");`,
+      "  process.stdout.write(Buffer.concat([prefix, ...chunks]));",
+      "});",
+      "",
+    ].join("\n"),
+  );
 }
 
 describe("Git checkpoints", () => {
@@ -48,9 +88,240 @@ describe("Git checkpoints", () => {
     expect(readFileSync(join(root, "later-untracked.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("keep me\n");
   });
 
+  it("preserves out-of-cone files without materializing them in a sparse checkout", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const visibleDirectory = join(root, "visible");
+    const sparseDirectory = join(root, "sparse-only");
+    const visiblePath = join(visibleDirectory, "visible.txt");
+    const sparsePath = join(sparseDirectory, "outside.txt");
+    mkdirSync(visibleDirectory);
+    mkdirSync(sparseDirectory);
+    writeFileSync(visiblePath, "visible base\n", { flag: "wx" });
+    writeFileSync(sparsePath, "outside base\n", { flag: "wx" });
+    git(root, "add", "visible", "sparse-only");
+    git(root, "commit", "-m", "sparse paths");
+    git(root, "sparse-checkout", "init", "--cone");
+    git(root, "sparse-checkout", "set", "visible");
+    expect(existsSync(sparsePath)).toBe(false);
+    writeFileSync(visiblePath, "visible checkpoint\n");
+    const conversationId = randomUUID();
+
+    const checkpoint = await createCheckpoint(
+      root,
+      indexes,
+      conversationId,
+    );
+
+    expect(
+      git(root, "show", `${checkpoint.ref}:sparse-only/outside.txt`),
+    ).toBe("outside base");
+    writeFileSync(visiblePath, "visible after\n");
+    await restoreCheckpoint(root, checkpoint.ref, conversationId);
+    expect(readFileSync(visiblePath, "utf8")).toBe(
+      "visible checkpoint\n",
+    );
+    expect(existsSync(sparsePath)).toBe(false);
+  });
+
+  it("does not run repository clean filters while creating an automatic checkpoint", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const marker = join(root, "clean-filter-invoked");
+    const filter = join(root, "hostile-clean-filter.cjs");
+    writeFileSync(
+      filter,
+      [
+        'const { writeFileSync } = require("node:fs");',
+        `writeFileSync(${JSON.stringify(marker)}, "invoked");`,
+        'process.stdin.pipe(process.stdout);',
+        "",
+      ].join("\n"),
+    );
+    if (process.platform !== "win32") chmodSync(filter, 0o755);
+    writeFileSync(join(root, ".gitattributes"), "*.txt filter=hostile\n");
+    git(root, "add", ".gitattributes");
+    git(root, "commit", "-m", "attributes");
+    git(root, "config", "filter.hostile.clean", nodeFilterCommand(filter));
+    git(root, "config", "filter.hostile.required", "true");
+    writeFileSync(join(root, "tracked.txt"), "checkpoint bytes\n");
+
+    git(root, "hash-object", "--path=tracked.txt", "tracked.txt");
+    expect(existsSync(marker)).toBe(true);
+    rmSync(marker);
+
+    const checkpoint = await createCheckpoint(
+      root,
+      indexes,
+      randomUUID(),
+    );
+
+    expect(existsSync(marker)).toBe(false);
+    expect(
+      git(root, "show", `${checkpoint.ref}:tracked.txt`),
+    ).toBe("checkpoint bytes");
+  });
+
+  it("does not run a repository process filter during checkpoint creation", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const marker = join(root, "process-filter-invoked");
+    const filter = join(root, "hostile-process-filter.cjs");
+    writeFileSync(
+      filter,
+      [
+        'const { writeFileSync } = require("node:fs");',
+        `writeFileSync(${JSON.stringify(marker)}, "invoked");`,
+        "",
+      ].join("\n"),
+    );
+    if (process.platform !== "win32") chmodSync(filter, 0o755);
+    writeFileSync(join(root, ".gitattributes"), "*.txt filter=hostile\n");
+    git(root, "add", ".gitattributes");
+    git(root, "commit", "-m", "attributes");
+    git(root, "config", "filter.hostile.process", nodeFilterCommand(filter));
+    git(root, "config", "filter.hostile.required", "true");
+    writeFileSync(join(root, "tracked.txt"), "checkpoint bytes\n");
+
+    const checkpoint = await createCheckpoint(
+      root,
+      indexes,
+      randomUUID(),
+    );
+    expect(existsSync(marker)).toBe(false);
+    expect(
+      git(root, "show", `${checkpoint.ref}:tracked.txt`),
+    ).toBe("checkpoint bytes");
+  });
+
+  it("restores exact bytes without running non-idempotent clean or smudge filters", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const cleanMarker = join(root, "clean-filter-invoked");
+    const smudgeMarker = join(root, "smudge-filter-invoked");
+    const cleanFilter = join(root, "prefix-clean-filter.cjs");
+    const smudgeFilter = join(root, "prefix-smudge-filter.cjs");
+    writePrefixFilter(cleanFilter, cleanMarker, "CLEAN:");
+    writePrefixFilter(smudgeFilter, smudgeMarker, "SMUDGE:");
+    writeFileSync(
+      join(root, ".gitattributes"),
+      "*.txt filter=prefix\n",
+    );
+    git(root, "add", ".gitattributes");
+    git(root, "commit", "-m", "attributes");
+    git(root, "config", "filter.prefix.clean", nodeFilterCommand(cleanFilter));
+    git(root, "config", "filter.prefix.smudge", nodeFilterCommand(smudgeFilter));
+    git(root, "config", "filter.prefix.required", "true");
+    const checkpointBytes = Buffer.from("checkpoint bytes\r\n");
+    writeFileSync(join(root, "tracked.txt"), checkpointBytes);
+
+    git(root, "hash-object", "--path=tracked.txt", "tracked.txt");
+    expect(existsSync(cleanMarker)).toBe(true);
+    rmSync(cleanMarker);
+
+    const conversationId = randomUUID();
+    const checkpoint = await createCheckpoint(
+      root,
+      indexes,
+      conversationId,
+    );
+    expect(existsSync(cleanMarker)).toBe(false);
+
+    writeFileSync(join(root, "tracked.txt"), "after checkpoint\n");
+    await restoreCheckpoint(root, checkpoint.ref, conversationId);
+
+    expect(readFileSync(join(root, "tracked.txt"))).toEqual(
+      checkpointBytes,
+    );
+    expect(existsSync(cleanMarker)).toBe(false);
+    expect(existsSync(smudgeMarker)).toBe(false);
+  });
+
+  it("does not run repository reference hooks for checkpoint refs", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const marker = join(root, "reference-hook-invoked");
+    const hook = join(root, ".git", "hooks", "reference-transaction");
+    writeFileSync(
+      hook,
+      [
+        "#!/usr/bin/env node",
+        'const { writeFileSync } = require("node:fs");',
+        `writeFileSync(${JSON.stringify(marker)}, "invoked");`,
+        "",
+      ].join("\n"),
+    );
+    if (process.platform !== "win32") chmodSync(hook, 0o755);
+    const conversationId = randomUUID();
+
+    await createCheckpoint(root, indexes, conversationId);
+    expect(existsSync(marker)).toBe(false);
+
+    await deleteCheckpoints(root, conversationId);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("preserves repository and configured excludes without enabling filters", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const configuredExcludes = join(indexes, "configured-excludes");
+    writeFileSync(
+      join(root, ".git", "info", "exclude"),
+      "repository-secret.txt\n",
+    );
+    writeFileSync(configuredExcludes, "configured-secret.txt\n");
+    git(root, "config", "core.excludesFile", configuredExcludes);
+    writeFileSync(join(root, "repository-secret.txt"), "private\n");
+    writeFileSync(join(root, "configured-secret.txt"), "private\n");
+    writeFileSync(join(root, "visible-untracked.txt"), "visible\n");
+
+    const checkpoint = await createCheckpoint(
+      root,
+      indexes,
+      randomUUID(),
+    );
+    const paths = git(
+      root,
+      "ls-tree",
+      "-r",
+      "--name-only",
+      checkpoint.ref,
+    ).split("\n");
+
+    expect(paths).toContain("visible-untracked.txt");
+    expect(paths).not.toContain("repository-secret.txt");
+    expect(paths).not.toContain("configured-secret.txt");
+  });
+
   it("creates a provider-host pull request URL without network access", async () => {
     const root = repository();
     git(root, "remote", "add", "origin", "git@github.com:example/inertia.git");
     await expect(getPullRequestCreateUrl(root)).resolves.toBe("https://github.com/example/inertia/compare/main?expand=1");
+  });
+
+  it("classifies a non-repository independently of the parent locale", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-not-repository-"));
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(root, indexes);
+    const previousLang = process.env.LANG;
+    const previousLocale = process.env.LC_ALL;
+    process.env.LANG = "es_ES.UTF-8";
+    process.env.LC_ALL = "es_ES.UTF-8";
+    try {
+      await expect(
+        createCheckpoint(root, indexes, randomUUID()),
+      ).rejects.toEqual(new CheckpointError("not-repository"));
+    } finally {
+      if (previousLang === undefined) delete process.env.LANG;
+      else process.env.LANG = previousLang;
+      if (previousLocale === undefined) delete process.env.LC_ALL;
+      else process.env.LC_ALL = previousLocale;
+    }
   });
 });

@@ -17,6 +17,10 @@ import {
 } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
 import { changedFiles } from "../../runtime-snapshots";
+import {
+  resolveWorkspaceGitRepository,
+  workspaceGitFilePath,
+} from "../../workspace-git";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import {
   defineRuntimeCommandHandler,
@@ -55,15 +59,20 @@ export function createDiffReviewCommandHandler(
             "Stop the active run or review before reverting selected changes.",
           );
         }
-        const path = dependencies.workspacePath(
+        const workspaceRoot = dependencies.workspacePath(
           command.payload.projectId,
           command.payload.conversationId,
         );
+        const repositoryPath = command.payload.repositoryPath ?? ".";
+        const repository = await resolveWorkspaceGitRepository(
+          workspaceRoot,
+          repositoryPath,
+        );
         const reversed = await dependencies.workspaceRuns.trackSourceControl(
-          `Revert ${command.payload.lineIds.length} selected ${command.payload.lineIds.length === 1 ? "line" : "lines"} · ${command.payload.filePath}`,
+          `Revert ${command.payload.lineIds.length} selected ${command.payload.lineIds.length === 1 ? "line" : "lines"} · ${workspaceGitFilePath(repositoryPath, command.payload.filePath)}`,
           command.payload.projectId,
           command.payload.conversationId,
-          async () => await revertDiffSelection(path, {
+          async () => await revertDiffSelection(repository.root, {
             fingerprint: command.payload.fingerprint,
             filePath: command.payload.filePath,
             hunkId: command.payload.hunkId,
@@ -75,11 +84,11 @@ export function createDiffReviewCommandHandler(
         if (command.payload.comment && command.payload.conversationId) {
           dependencies.store.createMessage(
             command.payload.conversationId,
-            `Reverted selected changes in ${command.payload.filePath}. Note: ${command.payload.comment}`,
+            `Reverted selected changes in ${workspaceGitFilePath(repositoryPath, command.payload.filePath)}. Note: ${command.payload.comment}`,
             "system",
           );
         }
-        const status = await getRepositoryStatus(path);
+        const status = await getRepositoryStatus(repository.root);
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
@@ -90,18 +99,25 @@ export function createDiffReviewCommandHandler(
               truncated: reversed.diff.truncated,
               files: changedFiles(status),
             },
-            operation: reversed.operation,
+            operation: {
+              ...reversed.operation,
+              repositoryPath,
+            },
           },
         });
         dependencies.broadcastSnapshot();
         return "handled";
       }
       case "git.selection.inspect": {
-        const path = dependencies.workspacePath(
+        const workspaceRoot = dependencies.workspacePath(
           command.payload.projectId,
           command.payload.conversationId,
         );
-        const plan = await inspectDiffSelection(path, {
+        const repository = await resolveWorkspaceGitRepository(
+          workspaceRoot,
+          command.payload.repositoryPath ?? ".",
+        );
+        const plan = await inspectDiffSelection(repository.root, {
           fingerprint: command.payload.fingerprint,
           filePath: command.payload.filePath,
           hunkId: command.payload.hunkId,
@@ -126,20 +142,24 @@ export function createDiffReviewCommandHandler(
             "Stop the active run or review before restoring the selective-revert backup.",
           );
         }
-        const path = dependencies.workspacePath(
+        const workspaceRoot = dependencies.workspacePath(
           command.payload.projectId,
           command.payload.conversationId,
+        );
+        const repository = await resolveWorkspaceGitRepository(
+          workspaceRoot,
+          command.payload.repositoryPath ?? ".",
         );
         const diff = await dependencies.workspaceRuns.trackSourceControl(
           "Undo selective reversal",
           command.payload.projectId,
           command.payload.conversationId,
           async () => await undoDiffSelection(
-            path,
+            repository.root,
             command.payload.operationId,
           ),
         );
-        const status = await getRepositoryStatus(path);
+        const status = await getRepositoryStatus(repository.root);
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
@@ -159,9 +179,17 @@ export function createDiffReviewCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
-        const current = await getUnifiedDiff(
+        const repositoryPath = command.payload.repositoryPath ?? ".";
+        const repository = await resolveWorkspaceGitRepository(
           dependencies.store.conversationPath(conversation.id),
-          { ignoreWhitespace: command.payload.ignoreWhitespace },
+          repositoryPath,
+        );
+        const current = await getUnifiedDiff(
+          repository.root,
+          {
+            paths: [command.payload.path],
+            ignoreWhitespace: command.payload.ignoreWhitespace,
+          },
         );
         if (current.truncated) {
           throw new RuntimeRequestError(
@@ -188,16 +216,27 @@ export function createDiffReviewCommandHandler(
         }
         const { ignoreWhitespace: _ignoreWhitespace, ...state } =
           command.payload;
-        dependencies.store.setReviewState(state);
+        dependencies.store.setReviewState({
+          ...state,
+          repositoryPath,
+        });
         return "mutation";
       }
       case "review.note.create": {
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
-        const current = await getUnifiedDiff(
+        const repositoryPath = command.payload.repositoryPath ?? ".";
+        const repository = await resolveWorkspaceGitRepository(
           dependencies.store.conversationPath(conversation.id),
-          { ignoreWhitespace: command.payload.ignoreWhitespace },
+          repositoryPath,
+        );
+        const current = await getUnifiedDiff(
+          repository.root,
+          {
+            paths: [command.payload.path],
+            ignoreWhitespace: command.payload.ignoreWhitespace,
+          },
         );
         if (current.truncated) {
           throw new RuntimeRequestError(
@@ -244,7 +283,10 @@ export function createDiffReviewCommandHandler(
         }
         const { ignoreWhitespace: _ignoreWhitespace, ...note } =
           command.payload;
-        dependencies.store.createReviewNote(note);
+        dependencies.store.createReviewNote({
+          ...note,
+          repositoryPath,
+        });
         return "mutation";
       }
       case "review.note.update":

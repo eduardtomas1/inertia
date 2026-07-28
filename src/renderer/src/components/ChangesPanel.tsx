@@ -20,6 +20,8 @@ export type ChangesPanelProps = {
   diff: GitDiffSnapshot | null;
   selectedPath: string | null;
   summary: DiffReviewSummary | null;
+  /** Fingerprint of the diff scope used to validate `summary`, when it differs from the displayed diff. */
+  summaryFingerprint?: string;
   selectionAnswer?: DiffSelectionReviewAnswer | null;
   reviewStates?: DiffReviewState[];
   notes?: DiffReviewNote[];
@@ -116,6 +118,7 @@ export function ChangesPanel({
   diff,
   selectedPath,
   summary,
+  summaryFingerprint,
   selectionAnswer = null,
   reviewStates = [],
   notes = [],
@@ -162,7 +165,9 @@ export function ChangesPanel({
   const selectedFile = selectedPath
     ? structured.files.find((file) => file.path === selectedPath) ?? null
     : structured.files[0] ?? null;
-  const activeSummary = summary?.fingerprint === structured.fingerprint ? summary : null;
+  const activeSummary = summary?.fingerprint === (summaryFingerprint ?? structured.fingerprint)
+    ? summary
+    : null;
   const fileSummary = activeSummary?.files.find((item) => item.path === selectedFile?.path) ?? null;
   const totals = useMemo(() => files.reduce(
     (result, file) => ({ insertions: result.insertions + file.insertions, deletions: result.deletions + file.deletions }),
@@ -235,6 +240,7 @@ export function ChangesPanel({
       if (reviewAction === "revise") await onRequestRevision(selected, comment);
       if (reviewAction === "revert") await onRevert(selected, comment);
       if (reviewAction === "note") await onCreateNote({
+        repositoryPath,
         path: file.path,
         hunkId: hunk.id,
         lineIds: selected.lineIds,
@@ -258,6 +264,7 @@ export function ChangesPanel({
   const toggleState = async (file: DiffFile, hunk?: DiffHunk) => {
     const currentReviewed = hunk ? hunkReviewed(file, hunk) : fileReviewed(file);
     await onSetReviewState({
+      repositoryPath,
       scope: hunk ? "hunk" : "file",
       path: file.path,
       hunkId: hunk?.id ?? null,
@@ -269,6 +276,7 @@ export function ChangesPanel({
     const body = window.prompt(`Add a local note for ${hunk ? "this hunk" : file.path}:`)?.trim();
     if (!body) return;
     await onCreateNote({
+      repositoryPath,
       path: file.path,
       hunkId: hunk?.id ?? null,
       lineIds: [],
@@ -281,12 +289,19 @@ export function ChangesPanel({
     if (body && body !== note.body) await onUpdateNote(note.id, body);
   };
   const notePromptText = (note: DiffReviewNote) => [
-    `Local review note for ${note.path}${note.hunkId ? ` (${note.hunkId})` : ""}${note.stale ? " [stale target]" : ""}:`,
+    `Local review note for ${repositoryPath === "." ? note.path : `${repositoryPath}/${note.path}`}${note.hunkId ? ` (${note.hunkId})` : ""}${note.stale ? " [stale target]" : ""}:`,
     note.body,
   ].join("\n");
   const requestNoteRevision = async (note: DiffReviewNote, file: DiffFile, hunk: DiffHunk) => {
     const lineIds = note.lineIds.length > 0 ? note.lineIds : hunk.lines.filter((line) => line.kind !== "meta").map((line) => line.id);
-    await onRequestRevision({ fingerprint: structured.fingerprint, file, hunk, lineIds, reference: "" }, note.body);
+    await onRequestRevision({
+      fingerprint: structured.fingerprint,
+      file,
+      hunk,
+      lineIds,
+      reference: "",
+      repositoryPath,
+    }, note.body);
   };
   const navigateHunk = (direction: -1 | 1) => {
     const all = visibleFiles.flatMap((file) => file.hunks
@@ -312,7 +327,7 @@ export function ChangesPanel({
         <div className="panel-stats" aria-label={`${toolbarInsertions} insertions and ${toolbarDeletions} deletions`}>
           <span className="stat-additions">+{toolbarInsertions}</span><span className="stat-deletions">−{toolbarDeletions}</span>
           {lastReversal && onUndoReversal && (
-            <button type="button" className="subtle-button" title={`Restore ${lastReversal.filePath} to its staged and working-tree state before the reversal`} onClick={() => void onUndoReversal()}>
+            <button type="button" className="subtle-button" title={`Restore ${repositoryPath === "." ? lastReversal.filePath : `${repositoryPath}/${lastReversal.filePath}`} to its staged and working-tree state before the reversal`} onClick={() => void onUndoReversal()}>
               <RotateCcw size={13} />Undo revert
             </button>
           )}

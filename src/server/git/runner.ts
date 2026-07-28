@@ -5,6 +5,7 @@ import {
   LOCAL_TIMEOUT_MS,
   STDERR_BYTES,
 } from "./constants";
+import { gitProcessEnvironment } from "./environment";
 import { GitError } from "./types";
 
 export interface GitProcessResult {
@@ -19,6 +20,32 @@ export interface RunGitOptions {
   truncateOutput?: boolean;
   input?: Buffer;
   failureMessage: string;
+}
+
+export type RunGitInspectionOptions = Omit<RunGitOptions, "input">;
+
+function inspectionArguments(args: readonly string[]): string[] {
+  const [command, ...rest] = args;
+  if (!command || command.startsWith("-")) {
+    throw new GitError(
+      "invalid-input",
+      "The Git inspection command is invalid.",
+    );
+  }
+  const commandArguments = command === "diff"
+    ? [
+        command,
+        ...(!rest.includes("--no-ext-diff") ? ["--no-ext-diff"] : []),
+        ...(!rest.includes("--no-textconv") ? ["--no-textconv"] : []),
+        ...rest,
+      ]
+    : [command, ...rest];
+  return [
+    "--no-pager",
+    "-c",
+    "core.fsmonitor=false",
+    ...commandArguments,
+  ];
 }
 
 export function boundedInteger(
@@ -98,12 +125,7 @@ export function runGit(
       shell: false,
       windowsHide: true,
       stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: "0",
-        GIT_ASKPASS: "",
-        LC_ALL: "C",
-      },
+      env: gitProcessEnvironment(),
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -189,4 +211,18 @@ export function runGit(
       }
     });
   });
+}
+
+/**
+ * Runs a read-only Git inspection without honoring repository-configured
+ * filesystem monitors or diff executables. Mutating and authenticated
+ * workflows deliberately continue to use runGit so their intended hooks and
+ * credential helpers are not changed by this boundary.
+ */
+export function runGitInspection(
+  cwd: string,
+  args: readonly string[],
+  options: RunGitInspectionOptions,
+): Promise<GitProcessResult> {
+  return runGit(cwd, inspectionArguments(args), options);
 }

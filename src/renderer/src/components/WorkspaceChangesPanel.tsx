@@ -10,6 +10,8 @@ import {
 
 import type {
   ChangedFile,
+  DiffReviewNote,
+  DiffReviewState,
   WorkspaceGitDiffSnapshot,
   WorkspaceGitRepositorySnapshot,
   WorkspaceGitSnapshot,
@@ -55,7 +57,10 @@ export interface WorkspaceChangesPanelProps extends ForwardedChangesProps {
   snapshot: WorkspaceGitSnapshot | null;
   loading?: boolean;
   onRefresh: () => void;
-  onLoadRepositoryDiff: (repositoryPath: string) => Promise<WorkspaceGitDiffSnapshot>;
+  onLoadRepositoryDiff: (
+    repositoryPath: string,
+    filePath?: string,
+  ) => Promise<WorkspaceGitDiffSnapshot>;
   onOpenWorkspaceFile: (path: string) => void;
 }
 
@@ -81,6 +86,68 @@ function selectionWithRepository(
   return { ...selection, repositoryPath };
 }
 
+export function workspaceGitSelectedFileRevision(
+  snapshot: WorkspaceGitSnapshot | null,
+  selection: WorkspaceGitFileIdentity | null,
+): string | null {
+  if (!snapshot || !selection) return null;
+  const entry = workspaceGitFile(snapshot, selection);
+  if (!entry) return null;
+  const { file, repository } = entry;
+  return JSON.stringify([
+    repository.repositoryPath,
+    repository.state,
+    repository.truncated,
+    file.path,
+    file.status,
+    file.indexStatus,
+    file.worktreeStatus,
+    file.staged,
+    file.unstaged,
+    file.untracked,
+    file.insertions,
+    file.deletions,
+  ]);
+}
+
+export function workspaceGitRepositoriesWithMissingReviewTargets(
+  snapshot: WorkspaceGitSnapshot | null,
+  reviewStates: readonly DiffReviewState[],
+  notes: readonly DiffReviewNote[],
+): string[] {
+  if (!snapshot) return [];
+  const activePathsByRepository = new Map<string, Set<string>>();
+  for (const targets of [reviewStates, notes]) {
+    for (const target of targets) {
+      const repositoryPath = target.repositoryPath ?? ".";
+      if (target.stale || repositoryPath === ".") continue;
+      const paths = activePathsByRepository.get(repositoryPath)
+        ?? new Set<string>();
+      paths.add(target.path);
+      activePathsByRepository.set(repositoryPath, paths);
+    }
+  }
+  return snapshot.repositories
+    .filter((repository) => {
+      const activePaths = activePathsByRepository.get(
+        repository.repositoryPath,
+      );
+      if (
+        !activePaths
+        || repository.state !== "ready"
+        || repository.truncated
+      ) {
+        return false;
+      }
+      const changedPaths = new Set(repository.files.map((file) => file.path));
+      for (const path of activePaths) {
+        if (!changedPaths.has(path)) return true;
+      }
+      return false;
+    })
+    .map((repository) => repository.repositoryPath);
+}
+
 export function WorkspaceChangesPanel({
   projectName,
   snapshot,
@@ -90,8 +157,8 @@ export function WorkspaceChangesPanel({
   onOpenWorkspaceFile,
   summary,
   selectionAnswer,
-  reviewStates,
-  notes,
+  reviewStates = [],
+  notes = [],
   lastReversal,
   onGenerateSummary,
   onCancelSummary,
@@ -115,6 +182,24 @@ export function WorkspaceChangesPanel({
   const activeRepositoryPath = activeRepository?.repositoryPath ?? null;
   const nestedRepository = activeRepositoryPath !== null && activeRepositoryPath !== ".";
   const activeFiles = activeRepository?.files ?? [];
+  const activeReviewStates = reviewStates.filter(
+    (state) => (state.repositoryPath ?? ".") === (activeRepositoryPath ?? "."),
+  );
+  const activeNotes = notes.filter(
+    (note) => (note.repositoryPath ?? ".") === (activeRepositoryPath ?? "."),
+  );
+  const selectedFileRevision = workspaceGitSelectedFileRevision(
+    snapshot,
+    effectiveSelection,
+  );
+  const missingReviewRepositories = useMemo(
+    () => workspaceGitRepositoriesWithMissingReviewTargets(
+      snapshot,
+      reviewStates,
+      notes,
+    ),
+    [notes, reviewStates, snapshot],
+  );
 
   useEffect(() => {
     if (!effectiveSelection) {
@@ -134,7 +219,21 @@ export function WorkspaceChangesPanel({
   }, [effectiveSelection, selected]);
 
   useEffect(() => {
-    if (!activeRepositoryPath || activeRepository?.state !== "ready" || activeFiles.length === 0) {
+    for (const repositoryPath of missingReviewRepositories) {
+      void onLoadRepositoryDiff(repositoryPath).catch(() => undefined);
+    }
+  }, [
+    missingReviewRepositories,
+    onLoadRepositoryDiff,
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeRepositoryPath
+      || !effectiveSelection
+      || activeRepository?.state !== "ready"
+      || activeFiles.length === 0
+    ) {
       setDiff(null);
       setDiffError(null);
       return;
@@ -142,7 +241,10 @@ export function WorkspaceChangesPanel({
     let cancelled = false;
     setDiffLoading(true);
     setDiffError(null);
-    void onLoadRepositoryDiff(activeRepositoryPath)
+    void onLoadRepositoryDiff(
+      activeRepositoryPath,
+      effectiveSelection.filePath,
+    )
       .then((nextDiff) => {
         if (cancelled) return;
         if (nextDiff.repositoryPath !== activeRepositoryPath) {
@@ -163,7 +265,15 @@ export function WorkspaceChangesPanel({
     return () => {
       cancelled = true;
     };
-  }, [activeFiles.length, activeRepository?.state, activeRepositoryPath, onLoadRepositoryDiff, snapshot]);
+  }, [
+    activeFiles.length,
+    activeRepository?.state,
+    activeRepositoryPath,
+    effectiveSelection,
+    onLoadRepositoryDiff,
+    selectedFileRevision,
+    snapshot,
+  ]);
 
   const navigator = useMemo(() => {
     if (!snapshot || snapshot.repositories.length === 0) return undefined;
@@ -296,9 +406,11 @@ export function WorkspaceChangesPanel({
         <div className="panel-notice workspace-repository-notice" role="status">
           <AlertTriangle size={14} />
           <span>
-            <strong>{snapshot.truncated ? "Repository scan was bounded." : "Some repositories could not be read."}</strong>
-            {snapshot.truncated
-              ? ` Scanned ${snapshot.scannedDirectories} folders; expand the visible repositories or refresh after narrowing the project.`
+            <strong>{snapshot.truncated ? "Repository discovery was bounded." : "Some repositories could not be read."}</strong>
+            {snapshot.discoveredRepositories > snapshot.repositories.length
+              ? ` Showing ${snapshot.repositories.length} of ${snapshot.discoveredRepositories} repository roots after scanning ${snapshot.scannedDirectories} folders. Increase this project's repository display limit from its project menu to show more.`
+              : snapshot.truncated
+                ? ` Scanned ${snapshot.scannedDirectories} folders; depth or directory safety limits left part of the workspace uninspected.`
               : " Available repository changes are still shown."}
           </span>
         </div>
@@ -311,7 +423,7 @@ export function WorkspaceChangesPanel({
       {nestedRepository && (
         <div className="panel-notice workspace-repository-notice">
           <FolderGit2 size={14} />
-          <span><strong>Reviewing {activeRepositoryPath}.</strong> Questions and prompt references keep this repository identity. Persistent marks, local notes, revisions, and selective revert remain available only for the project-root repository.</span>
+          <span><strong>Reviewing {activeRepositoryPath}.</strong> Questions, prompt references, review marks, local notes, and selective revert keep this repository identity. Agent summaries and revisions remain available only for the project-root repository because their recovery checkpoints cover that root.</span>
         </div>
       )}
     </>
@@ -342,10 +454,14 @@ export function WorkspaceChangesPanel({
       repositoryPath={activeRepositoryPath ?? "."}
       summary={nestedRepository ? null : summary}
       selectionAnswer={selectionAnswer}
-      reviewStates={nestedRepository ? [] : reviewStates}
-      notes={nestedRepository ? [] : notes}
+      reviewStates={activeReviewStates}
+      notes={activeNotes}
       loading={loading || diffLoading}
-      lastReversal={nestedRepository ? null : lastReversal}
+      lastReversal={
+        (lastReversal?.repositoryPath ?? ".") === (activeRepositoryPath ?? ".")
+          ? lastReversal
+          : null
+      }
       fileNavigator={navigator}
       compactFileNavigator={compactNavigator}
       notice={notice}
@@ -363,9 +479,9 @@ export function WorkspaceChangesPanel({
           : emptyState.detail,
       }}
       capabilities={{
-        persistentReview: !nestedRepository,
+        persistentReview: true,
         agentRevision: !nestedRepository,
-        selectiveRevert: !nestedRepository,
+        selectiveRevert: true,
       }}
       onSelectFile={(filePath) => {
         if (activeRepositoryPath) setSelected({ repositoryPath: activeRepositoryPath, filePath });

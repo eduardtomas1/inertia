@@ -1,6 +1,9 @@
 import {
+  chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,7 +19,7 @@ import {
   resolveWorkspaceGitRepository,
   workspaceGitFilePath,
 } from "../../src/server/workspace-git";
-import { getUnifiedDiff } from "../../src/server/git";
+import { getRepositoryStatus, getUnifiedDiff } from "../../src/server/git";
 
 const roots: string[] = [];
 
@@ -52,11 +55,71 @@ function initializeRepository(path: string, trackedFile?: string): void {
   }
 }
 
+function configuredFsmonitorHook(
+  repository: string,
+  marker: string,
+): string {
+  const hook = join(repository, "fsmonitor-hook");
+  writeFileSync(
+    hook,
+    [
+      "#!/usr/bin/env node",
+      'const { writeFileSync } = require("node:fs");',
+      `writeFileSync(${JSON.stringify(marker)}, "invoked");`,
+      'process.stdout.write("0\\\\0");',
+      "",
+    ].join("\n"),
+  );
+  chmodSync(hook, 0o755);
+  git(repository, "config", "core.fsmonitor", hook);
+  return hook;
+}
+
 afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
 describe("workspace Git repository discovery", () => {
+  it("does not invoke a repository-configured fsmonitor during status refresh", async () => {
+    const root = temporaryRoot("hostile-fsmonitor-refresh");
+    initializeRepository(root, "README.md");
+    const marker = join(root, "fsmonitor-invoked");
+    configuredFsmonitorHook(root, marker);
+
+    git(root, "status", "--porcelain");
+    if (process.platform !== "win32") {
+      expect(existsSync(marker)).toBe(true);
+      rmSync(marker);
+    }
+
+    const status = await getRepositoryStatus(root);
+
+    expect(realpathSync.native(status.root)).toBe(realpathSync.native(root));
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("ignores a nonexistent repository fsmonitor during workspace discovery", async () => {
+    const root = temporaryRoot("missing-fsmonitor-discovery");
+    const nested = join(root, "modules", "nested");
+    initializeRepository(nested, "tracked.txt");
+    git(
+      nested,
+      "config",
+      "core.fsmonitor",
+      join(nested, "does-not-exist"),
+    );
+
+    const snapshot = await discoverWorkspaceGitRepositories(root);
+
+    expect(snapshot.partial).toBe(false);
+    expect(snapshot.repositories).toEqual([
+      expect.objectContaining({
+        repositoryPath: "modules/nested",
+        state: "ready",
+      }),
+    ]);
+  });
+
   it("finds a dirty root and distinct dirty Openbravo module repositories", async () => {
     const root = temporaryRoot("openbravo-root");
     initializeRepository(root, "README.md");
@@ -177,6 +240,55 @@ describe("workspace Git repository discovery", () => {
     expect(repositoryLimited.truncated).toBe(true);
     expect(repositoryLimited.repositories).toHaveLength(1);
     expect(repositoryLimited.repositories[0].repositoryPath).toBe("modules/alpha");
+  });
+
+  it("finishes traversing a workspace after the repository display limit is reached", async () => {
+    const root = temporaryRoot("many-repositories");
+    for (let index = 0; index < 70; index += 1) {
+      initializeRepository(
+        join(root, "modules", `repository-${String(index).padStart(2, "0")}`),
+      );
+    }
+
+    const snapshot = await discoverWorkspaceGitRepositories(root, {
+      maxRepositories: 64,
+      maxDirectories: 1_000,
+    });
+
+    expect(snapshot.repositories).toHaveLength(64);
+    expect(snapshot.discoveredRepositories).toBe(70);
+    expect(snapshot.repositoryLimit).toBe(64);
+    expect(snapshot.scannedDirectories).toBe(72);
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.repositories.at(-1)?.repositoryPath).toBe(
+      "modules/repository-63",
+    );
+  }, 60_000);
+
+  it("loads the complete diff for one small change in a root-less nested repository", async () => {
+    const root = temporaryRoot("single-nested-diff");
+    const nested = join(root, "modules", "org.openbravo.small");
+    initializeRepository(nested, "src/Main.java");
+    writeFileSync(join(nested, "src/Main.java"), "class Main { int value = 2; }\n");
+
+    const snapshot = await discoverWorkspaceGitRepositories(root);
+    const repository = await resolveWorkspaceGitRepository(
+      root,
+      "modules/org.openbravo.small",
+    );
+    const diff = await getUnifiedDiff(repository.root, {
+      paths: ["src/Main.java"],
+    });
+
+    expect(snapshot.repositories).toHaveLength(1);
+    expect(snapshot.repositories[0]?.files).toEqual([
+      expect.objectContaining({ path: "src/Main.java" }),
+    ]);
+    expect(diff.truncated).toBe(false);
+    expect(diff.filesIncluded).toBe(1);
+    expect(diff.totalFiles).toBe(1);
+    expect(diff.text).toContain("diff --git a/src/Main.java b/src/Main.java");
+    expect(diff.text).toContain("+class Main { int value = 2; }");
   });
 
   it("keeps malformed repository markers visible as per-repository errors", async () => {

@@ -277,7 +277,6 @@ export function FinalAnswerDocument({
         defaultCodeWrap={props.defaultCodeWrap}
         streaming={presentation.markdownStreaming}
       />
-      {presentation.showCaret && <span className="streaming-caret" aria-hidden="true" />}
     </article>
   );
 }

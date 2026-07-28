@@ -63,6 +63,7 @@ type SidebarProps = {
   onOpenProject: (project: Project) => void;
   onRenameProject: (project: Project, name: string) => void;
   onSetProjectGrouping: (project: Project, groupingMode: ProjectGroupingMode | null) => void;
+  onSetProjectGitRepositoryLimit: (project: Project, limit: number) => void;
   onSidebarModeChange: (mode: AppSnapshot["settings"]["sidebarMode"]) => void;
   onRemoveProject: (project: Project) => void;
 };
@@ -110,6 +111,7 @@ export function Sidebar({
   onOpenProject,
   onRenameProject,
   onSetProjectGrouping,
+  onSetProjectGitRepositoryLimit,
   onSidebarModeChange,
   onRemoveProject,
 }: SidebarProps): React.JSX.Element {
@@ -287,6 +289,24 @@ export function Sidebar({
         >
           <span className="menu-check">{project.groupingMode === mode ? "✓" : ""}</span>
           {groupingLabel(mode)}
+        </button>
+      ))}
+      <span className="project-menu-heading"><FolderOpen size={12} />Repository display limit</span>
+      {([64, 128, 256, 512, 1024] as const).map((limit) => (
+        <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={project.gitRepositoryLimit === limit}
+          onClick={() => {
+            setProjectMenu(null);
+            onSetProjectGitRepositoryLimit(project, limit);
+          }}
+          key={limit}
+        >
+          <span className="menu-check">
+            {project.gitRepositoryLimit === limit ? "✓" : ""}
+          </span>
+          Show up to {limit} repositories
         </button>
       ))}
       <button

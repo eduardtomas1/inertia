@@ -51,12 +51,19 @@ export function ProviderAuthDialog({
   const fitRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const pendingOutputRef = useRef(new Map<string, string>());
+  const latestFontSizeRef = useRef(fontSize);
   const [instanceReady, setInstanceReady] = useState(false);
   const [sessionState, setSessionState] = useState<"starting" | "ready" | "finished" | "error">("starting");
   const [error, setError] = useState<string | null>(null);
+  const providerId = provider?.id ?? null;
+  const providerLabel = provider?.label ?? "provider";
 
   useEffect(() => {
-    if (!provider) return;
+    latestFontSizeRef.current = fontSize;
+  }, [fontSize]);
+
+  useEffect(() => {
+    if (!providerId) return;
     const mount = mountRef.current;
     if (!mount) return;
     const terminal = new Terminal({
@@ -65,7 +72,7 @@ export function ProviderAuthDialog({
       cursorBlink: true,
       cursorStyle: "bar",
       fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
-      fontSize,
+      fontSize: latestFontSizeRef.current,
       lineHeight: 1.35,
       scrollback: 2_000,
       theme: terminalTheme(),
@@ -111,7 +118,7 @@ export function ProviderAuthDialog({
       setInstanceReady(false);
       terminal.dispose();
     };
-  }, [provider?.id, sendCommand]);
+  }, [providerId, sendCommand]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -125,10 +132,10 @@ export function ProviderAuthDialog({
     update();
     if (theme === "system") media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
-  }, [fontSize, theme]);
+  }, [fontSize, instanceReady, providerId, theme]);
 
   useEffect(() => {
-    if (!provider) {
+    if (!providerId) {
       pendingOutputRef.current.clear();
       return;
     }
@@ -144,12 +151,13 @@ export function ProviderAuthDialog({
       if (event.exitCode !== 0) setError("The provider ended the connection flow before it completed.");
     }
     });
-  }, [provider?.id, subscribe]);
+  }, [providerId, subscribe]);
 
   useEffect(() => {
-    if (!provider) return;
+    if (!providerId) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
+    const pendingOutput = pendingOutputRef.current;
     requestAnimationFrame(() => dialog?.querySelector<HTMLElement>("button")?.focus());
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
@@ -168,23 +176,24 @@ export function ProviderAuthDialog({
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      pendingOutputRef.current.clear();
+      pendingOutput.clear();
       previous?.focus();
     };
-  }, [onClose, provider?.id]);
+  }, [onClose, providerId]);
 
   useEffect(() => {
-    if (!provider || !instanceReady || status !== "online") return;
+    if (!providerId || !instanceReady || status !== "online") return;
     let cancelled = false;
     const terminal = terminalRef.current;
+    const pendingOutput = pendingOutputRef.current;
     try { fitRef.current?.fit(); } catch { /* Safe defaults below. */ }
     const size = { cols: Math.max(40, terminal?.cols ?? 90), rows: Math.max(10, terminal?.rows ?? 24) };
     setSessionState("starting");
     setError(null);
     pendingOutputRef.current.clear();
     terminal?.clear();
-    terminal?.writeln(`\x1b[2mOpening ${provider.label} sign-in…\x1b[0m`);
-    void sendCommand(command({ type: "provider.auth.start", payload: { providerId: provider.id, ...size } }))
+    terminal?.writeln(`\x1b[2mOpening ${providerLabel} sign-in…\x1b[0m`);
+    void sendCommand(command({ type: "provider.auth.start", payload: { providerId, ...size } }))
       .then((event) => {
         if (event.type !== "terminal.created") throw new Error("The connection service returned an unexpected response.");
         if (cancelled) {
@@ -193,7 +202,7 @@ export function ProviderAuthDialog({
         }
         terminalIdRef.current = event.terminalId;
         const buffered = pendingOutputRef.current.get(event.terminalId);
-        pendingOutputRef.current.clear();
+        pendingOutput.clear();
         if (buffered) terminal?.write(buffered);
         setSessionState("ready");
         terminal?.focus();
@@ -208,10 +217,16 @@ export function ProviderAuthDialog({
       cancelled = true;
       const terminalId = terminalIdRef.current;
       terminalIdRef.current = null;
-      pendingOutputRef.current.clear();
+      pendingOutput.clear();
       if (terminalId) void sendCommand(command({ type: "terminal.close", payload: { terminalId } })).catch(() => undefined);
     };
-  }, [instanceReady, provider?.id, sendCommand, status]);
+  }, [
+    instanceReady,
+    providerId,
+    providerLabel,
+    sendCommand,
+    status,
+  ]);
 
   if (!provider) return null;
   return (

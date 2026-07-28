@@ -12,7 +12,7 @@
     "build": "npm run typecheck && electron-vite build",
     "preview": "electron-vite preview",
     "check:architecture": "node scripts/check-architecture.mjs",
-    "lint": "oxlint src scripts --report-unused-disable-directives",
+    "lint": "oxlint src scripts tests --react-plugin --report-unused-disable-directives --deny-warnings",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -30,6 +30,9 @@
     "dist:mac": "npm run build && electron-builder --mac --arm64 --publish never",
     "dist:win": "npm run build && electron-builder --win --x64 --publish never",
     "dist:linux": "npm run build && electron-builder --linux AppImage --x64 --publish never",
+    "dist:release:mac": "npm run build && electron-builder --config scripts/electron-builder.release.cjs --mac --arm64 --publish never",
+    "dist:release:win": "npm run build && electron-builder --config scripts/electron-builder.release.cjs --win --x64 --publish never",
+    "dist:release:linux": "npm run build && electron-builder --config scripts/electron-builder.release.cjs --linux AppImage --x64 --publish never",
     "postinstall": "electron-builder install-app-deps && node scripts/ensure-node-pty-helper.mjs"
   },
   "build": {

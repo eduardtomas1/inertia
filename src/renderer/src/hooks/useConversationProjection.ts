@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   AgentActivity,
@@ -325,12 +325,28 @@ export function useConversationProjection({
     }
     return [...merged.values()];
   }, [conversation, detail?.plans, nativePlans]);
+  const approvals = useMemo(
+    () => pendingApprovals.filter(
+      (request) => request.conversationId === conversation?.id,
+    ),
+    [conversation?.id, pendingApprovals],
+  );
+  const inputRequests = useMemo(
+    () => pendingInputs.filter(
+      (request) => request.conversationId === conversation?.id,
+    ),
+    [conversation?.id, pendingInputs],
+  );
+  const refreshDetail = useCallback(
+    () => setDetailRefresh((version) => version + 1),
+    [],
+  );
 
   return {
     conversation,
     detail,
     detailState,
-    refreshDetail: () => setDetailRefresh((version) => version + 1),
+    refreshDetail,
     turns,
     messages,
     activities,
@@ -342,8 +358,8 @@ export function useConversationProjection({
     usage,
     streamingText,
     streamingReasoning,
-    pendingApprovals,
-    pendingInputs,
+    pendingApprovals: approvals,
+    pendingInputs: inputRequests,
     nativePlans,
   };
 }

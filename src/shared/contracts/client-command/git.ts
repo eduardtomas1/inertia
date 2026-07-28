@@ -83,6 +83,7 @@ export const gitCommandSchemas = [
       type: z.literal("git.selection.inspect"),
       payload: z.object({
         ...projectWithOptionalConversation,
+        repositoryPath: z.string().min(1).max(4096).optional(),
         fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
         filePath: z.string().min(1).max(4096),
         hunkId: z.string().min(1).max(128),
@@ -97,6 +98,7 @@ export const gitCommandSchemas = [
       type: z.literal("git.selection.revert"),
       payload: z.object({
         ...projectWithOptionalConversation,
+        repositoryPath: z.string().min(1).max(4096).optional(),
         fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
         filePath: z.string().min(1).max(4096),
         hunkId: z.string().min(1).max(128),
@@ -119,6 +121,7 @@ export const gitCommandSchemas = [
       type: z.literal("git.selection.undo"),
       payload: z.object({
         ...projectWithOptionalConversation,
+        repositoryPath: z.string().min(1).max(4096).optional(),
         operationId: z.string().uuid(),
       }).strict(),
     })
@@ -143,6 +146,7 @@ export const gitCommandSchemas = [
       type: z.literal("review.state.set"),
       payload: z.object({
         conversationId: z.string().uuid(),
+        repositoryPath: z.string().min(1).max(4096).optional(),
         scope: z.enum(["file", "hunk"]),
         path: z.string().min(1).max(4096),
         hunkId: z.string().min(1).max(128).nullable(),
@@ -158,6 +162,7 @@ export const gitCommandSchemas = [
       type: z.literal("review.note.create"),
       payload: z.object({
         conversationId: z.string().uuid(),
+        repositoryPath: z.string().min(1).max(4096).optional(),
         path: z.string().min(1).max(4096),
         hunkId: z.string().min(1).max(128).nullable(),
         lineIds: z.array(z.string().min(1).max(160)).max(500),

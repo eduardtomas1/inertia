@@ -55,7 +55,7 @@ class FakeScheduler implements TurnTimerScheduler {
   }
 
   runAll(): void {
-    for (const [id, callback] of [...this.callbacks]) {
+    for (const [id, callback] of this.callbacks) {
       this.callbacks.delete(id);
       callback();
     }

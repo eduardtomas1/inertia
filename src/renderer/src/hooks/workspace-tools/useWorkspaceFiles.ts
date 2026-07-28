@@ -120,7 +120,7 @@ export function useWorkspaceFiles({
     setFilePreviewError(null);
     setFilesLoading(false);
     setFilePreviewLoading(false);
-    if (!project || !online) return;
+    if (!project?.id || !online) return;
     void Promise.allSettled([loadFiles(), loadActions()]);
   }, [conversation?.id, loadActions, loadFiles, online, project?.id]);
 

@@ -19,6 +19,7 @@ function project(overrides: Partial<Project> & Pick<Project, "id" | "name" | "pa
     repositoryRoot: null,
     repositoryRelativePath: ".",
     groupingMode: null,
+    gitRepositoryLimit: 128,
     color: "#000",
     status: "ready",
     createdAt: "2026-07-20T10:00:00.000Z",

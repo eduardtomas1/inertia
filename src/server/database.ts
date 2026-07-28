@@ -226,7 +226,7 @@ export class RuntimeStore {
 
   updateProject(
     projectId: string,
-    update: Partial<Pick<Project, "name" | "groupingMode" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">>,
+    update: Partial<Pick<Project, "name" | "groupingMode" | "gitRepositoryLimit" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">>,
   ): Project {
     return this.projectRepository.update(projectId, update);
   }
@@ -533,19 +533,34 @@ export class RuntimeStore {
     this.reviewRepository.deleteNote(conversationId, noteId);
   }
 
-  reviewNotesFor(conversationId: string): DiffReviewNote[] {
-    return this.reviewRepository.notesFor(conversationId);
+  reviewNotesFor(
+    conversationId: string,
+    repositoryPath?: string,
+    targetPath?: string,
+  ): DiffReviewNote[] {
+    return this.reviewRepository.notesFor(
+      conversationId,
+      repositoryPath,
+      targetPath,
+    );
   }
 
   reconcileReviewTargets(
     conversationId: string,
+    repositoryPath: string,
+    targetPath: string | undefined,
     targets: {
       files: Readonly<Record<string, string>>;
       hunks: Readonly<Record<string, string>>;
       notes: Readonly<Record<string, string | null>>;
     },
-  ): void {
-    this.reviewRepository.reconcileTargets(conversationId, targets);
+  ): boolean {
+    return this.reviewRepository.reconcileTargets(
+      conversationId,
+      repositoryPath,
+      targetPath,
+      targets,
+    );
   }
 
   createWorkspaceRun(

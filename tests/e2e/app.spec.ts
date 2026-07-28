@@ -9,9 +9,9 @@ import { randomUUID } from "node:crypto";
 
 import Database from "better-sqlite3";
 
+import type { DiffSelectionReviewAnswer } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
 import { nativeProviderMetadataScope } from "../../src/server/provider/metadata";
-import type { DiffSelectionReviewAnswer } from "../../src/shared/contracts";
 import {
   createKimiClaudeBackendProfile,
   createKimiClaudeModelSelection,
@@ -27,6 +27,12 @@ import {
 } from "../../src/shared/window-chrome";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../src/renderer/src/utils/interfaceScale";
 import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
+import {
+  expectComposerEndsAtDock,
+  expectComposerReadinessContained,
+  expectNoViewportOverflow as expectPageNoViewportOverflow,
+} from "./support/layout-assertions";
+import { selectionAnswerFixtureMarkup } from "./support/selection-answer-fixture";
 
 const execFileAsync = promisify(execFile);
 
@@ -57,42 +63,6 @@ function processExists(pid: number): boolean {
   }
 }
 
-function escapeFixtureHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function selectionAnswerFixtureMarkup(answer: DiffSelectionReviewAnswer): string {
-  const model = answer.modelSelection.alias ?? answer.modelSelection.modelId;
-  const lineLabel = answer.selectedLineCount === 1 ? "line" : "lines";
-  return `
-    <aside class="diff-selection-answer" aria-label="Agent answer about selected lines">
-      <header>
-        <span>
-          <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"></circle>
-            <path d="M9.1 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4" fill="none" stroke="currentColor" stroke-width="2"></path>
-            <path d="M12 18h.01" stroke="currentColor" stroke-width="2"></path>
-          </svg>
-          <strong>Agent answer</strong>
-        </span>
-        <small>${escapeFixtureHtml(answer.modelSelection.backendProfileDisplayName)} · ${escapeFixtureHtml(model)} · ${answer.selectedLineCount} selected ${lineLabel}</small>
-        <button type="button" aria-label="Dismiss selection answer" title="Dismiss selection answer" class="icon-button">
-          <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24">
-            <path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2"></path>
-          </svg>
-        </button>
-      </header>
-      <blockquote>${escapeFixtureHtml(answer.question)}</blockquote>
-      <div class="diff-selection-answer-body">${escapeFixtureHtml(answer.answer)}</div>
-    </aside>
-  `;
-}
-
 async function runtimeSnapshot(): Promise<RuntimeTestSnapshot> {
   const snapshot = await electronApp.evaluate((_electron) => {
     const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as { snapshot: () => RuntimeTestSnapshot } | undefined;
@@ -114,77 +84,7 @@ async function resizeWindow(width: number, height: number): Promise<void> {
 }
 
 async function expectNoViewportOverflow(): Promise<void> {
-  const measurements = await page.evaluate(() => ({
-    innerWidth: window.innerWidth,
-    innerHeight: window.innerHeight,
-    documentWidth: document.documentElement.scrollWidth,
-    documentHeight: document.documentElement.scrollHeight,
-    bodyWidth: document.body.scrollWidth,
-    bodyHeight: document.body.scrollHeight,
-  }));
-
-  expect(measurements.documentWidth).toBeLessThanOrEqual(measurements.innerWidth + 1);
-  expect(measurements.bodyWidth).toBeLessThanOrEqual(measurements.innerWidth + 1);
-  expect(measurements.documentHeight).toBeLessThanOrEqual(measurements.innerHeight + 1);
-  expect(measurements.bodyHeight).toBeLessThanOrEqual(measurements.innerHeight + 1);
-}
-
-async function expectComposerEndsAtDock(composer: Locator): Promise<void> {
-  await expect(composer).toBeVisible();
-  const layout = await composer.evaluate((dock) => {
-    const shell = dock.parentElement;
-    const region = shell?.parentElement;
-    const dockBounds = dock.getBoundingClientRect();
-    const shellBounds = shell?.getBoundingClientRect();
-    const shellStyle = shell ? getComputedStyle(shell) : null;
-    return {
-      directDockOnly: shell?.children.length === 1
-        && shell.firstElementChild === dock
-        && shell.lastElementChild === dock,
-      directShellOnly: region?.children.length === 1
-        && region.firstElementChild === shell
-        && region.lastElementChild === shell,
-      bottomPadding: Number.parseFloat(shellStyle?.paddingBottom ?? "NaN"),
-      bottomGap: shellBounds ? shellBounds.bottom - dockBounds.bottom : Number.NaN,
-      detachedContextRows: region?.querySelectorAll(
-        ":scope > .provider-readiness, :scope > .composer-usage, :scope > .composer-footer, :scope > .composer-note",
-      ).length ?? -1,
-    };
-  });
-
-  expect(layout.directDockOnly).toBe(true);
-  expect(layout.directShellOnly).toBe(true);
-  expect(layout.bottomPadding).toBeGreaterThanOrEqual(8);
-  expect(layout.bottomPadding).toBeLessThanOrEqual(14);
-  expect(Math.abs(layout.bottomGap - layout.bottomPadding))
-    .toBeLessThanOrEqual(1);
-  expect(layout.detachedContextRows).toBe(0);
-}
-
-async function expectComposerReadinessContained(composer: Locator): Promise<void> {
-  const readiness = composer.locator(".provider-readiness");
-  if (await readiness.count() === 0) return;
-  await expect(readiness).toBeVisible();
-  await expect(readiness).not.toContainText("needs attention");
-  await expect(readiness).toHaveAttribute(
-    "data-route-repair",
-    /^(?:add-key|connect|install|none|probe|refresh)$/u,
-  );
-  const geometry = await readiness.evaluate((element) => {
-    const bounds = element.getBoundingClientRect();
-    const composerBounds = element.closest<HTMLElement>(".composer")
-      ?.getBoundingClientRect();
-    return {
-      insideInline: Boolean(
-        composerBounds
-        && bounds.left >= composerBounds.left - 1
-        && bounds.right <= composerBounds.right + 1,
-      ),
-      fits: element.scrollWidth <= element.clientWidth + 1,
-    };
-  });
-  expect(geometry.insideInline).toBe(true);
-  expect(geometry.fits).toBe(true);
+  await expectPageNoViewportOverflow(page);
 }
 
 test.beforeAll(async () => {
@@ -327,7 +227,7 @@ test("starts without a demo and adds the first real project", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps Send and Stop clear across submission, cancellation, theme, and scale states", async ({}, testInfo) => {
+test("keeps Send and Stop clear across submission, cancellation, theme, and scale states", async ({ browserName: _browserName }, testInfo) => {
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const initialStore = new RuntimeStore(databasePath, workspaceDirectory, {
     recoverInterruptedRuns: false,
@@ -558,7 +458,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
   expect(rendererErrors).toEqual([]);
 });
 
-test("previews, validates, removes, and cleans up secure composer attachments", async ({}, testInfo) => {
+test("previews, validates, removes, and cleans up secure composer attachments", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   await electronApp.evaluate(({ dialog }, paths) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({
@@ -641,6 +541,23 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
     `${chosenId}.png`,
   );
   await expect.poll(async () => stat(selectedTempPath).then(() => true, () => false)).toBe(true);
+  const selectedBytes = await readFile(selectedTempPath);
+  const sameSizeReplacement = Buffer.from(selectedBytes);
+  const replacementIndex = sameSizeReplacement.length - 1;
+  sameSizeReplacement[replacementIndex] =
+    sameSizeReplacement[replacementIndex]! ^ 0x01;
+  await writeFile(selectedTempPath, sameSizeReplacement);
+  const replacedPreviewStatus = await electronApp.evaluate(
+    async ({ net }, url) => (await net.fetch(url)).status,
+    chosenPreviewSource!,
+  );
+  expect(replacedPreviewStatus).toBe(404);
+  await writeFile(selectedTempPath, selectedBytes);
+  const restoredPreviewStatus = await electronApp.evaluate(
+    async ({ net }, url) => (await net.fetch(url)).status,
+    chosenPreviewSource!,
+  );
+  expect(restoredPreviewStatus).toBe(200);
   await page.getByRole("textbox", { name: "Message" }).fill("Inspect the selected image.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(attachments).toHaveCount(0);
@@ -758,7 +675,7 @@ test("opens a settled chat directly and does not redirect when Work filters hide
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps every ordinary New chat entry point isolated from the viewed chat", async ({}, testInfo) => {
+test("keeps every ordinary New chat entry point isolated from the viewed chat", async ({ browserName: _browserName }, testInfo) => {
   type ConversationRow = {
     id: string;
     provider_id: string;
@@ -1020,7 +937,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("manages backend profiles across the responsive theme and scale matrix", async ({}, testInfo) => {
+test("manages backend profiles across the responsive theme and scale matrix", async ({ browserName: _browserName }, testInfo) => {
   const openBackends = async (): Promise<void> => {
     await page.getByRole("button", { name: "Model backends", exact: true }).click();
     await expect(page.getByRole("heading", {
@@ -1262,11 +1179,18 @@ test("changes the visible theme on every quick-toggle click", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("reveals the fixed local runtime diagnostics directory from settings", async () => {
+test("keeps runtime support and application update checks explicit in settings", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Archive & data", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Local data" })).toBeVisible();
   await expect(page.getByText("Local-only lifecycle and failure metadata.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Copy support summary" }).click();
+  await expect(page.getByText("Private support summary copied", { exact: false })).toBeVisible();
+  const supportSummary = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
+  expect(supportSummary).toContain("Inertia support summary");
+  expect(supportSummary).toContain("Privacy: prompts, source, project paths");
+  expect(supportSummary).not.toContain(workspaceDirectory);
+  expect(supportSummary).not.toContain("sample.ts");
   await page.getByRole("button", { name: "Reveal log folder" }).click();
   await expect(page.getByText("Runtime log folder opened.", { exact: true })).toBeVisible();
 
@@ -1275,11 +1199,16 @@ test("reveals the fixed local runtime diagnostics directory from settings", asyn
   if (process.platform !== "win32") {
     expect((await stat(logDirectory)).mode & 0o777).toBe(0o700);
   }
+  await page.getByRole("button", { name: "General", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Application updates" })).toBeVisible();
+  await page.getByRole("button", { name: "Check now" }).click();
+  await expect(page.getByText("Inertia is up to date.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Install", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Go to workspace" }).click();
   expect(rendererErrors).toEqual([]);
 });
 
-test("persists composer usage modes without losing the followed transcript", async ({}, testInfo) => {
+test("persists composer usage modes without losing the followed transcript", async ({ browserName: _browserName }, testInfo) => {
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const usageDatabase = new Database(databasePath, { readonly: true });
   const usageState = usageDatabase.prepare(
@@ -1521,7 +1450,7 @@ test("persists composer usage modes without losing the followed transcript", asy
   expect(rendererErrors).toEqual([]);
 });
 
-test("applies every interface scale live and remains usable at common Linux display scales", async ({}, testInfo) => {
+test("applies every interface scale live and remains usable at common Linux display scales", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const terminalFontSize = await page.locator("aside.terminal-panel").first().getAttribute("data-terminal-font-size");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -1624,7 +1553,7 @@ test("applies every interface scale live and remains usable at common Linux disp
       const shell = page.locator(".app-shell");
       const originalClassName = await shell.getAttribute("class") ?? "";
       await shell.evaluate((element) => {
-        for (const className of [...element.classList]) {
+        for (const className of element.classList) {
           if (className.startsWith("platform-")) {
             element.classList.remove(className);
           }
@@ -1701,7 +1630,7 @@ test("switches between Projects and Work and manages chat history", async () => 
   expect(rendererErrors).toEqual([]);
 });
 
-test("uses the anchored model chooser and enforces authoritative route boundaries", async ({}, testInfo) => {
+test("uses the anchored model chooser and enforces authoritative route boundaries", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   if (await page.getByRole("textbox", { name: "Message" }).count() === 0) {
     await expect.poll(
@@ -2226,7 +2155,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps the composer as one cohesive dock across themes and responsive splits", async ({}, testInfo) => {
+test("keeps the composer as one cohesive dock across themes and responsive splits", async ({ browserName: _browserName }, testInfo) => {
   if (await page.getByRole("textbox", { name: "Message" }).count() === 0) {
     await expect.poll(
       async () => (await runtimeSnapshot()).phase,
@@ -3028,7 +2957,7 @@ test("contains commit dialog focus and restores its trigger", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps the macOS brand in the native titlebar row and navigates it home", async ({}, testInfo) => {
+test("keeps the macOS brand in the native titlebar row and navigates it home", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const shell = page.locator(".app-shell");
   const brand = page.getByRole("button", { name: "Go to workspace" });
@@ -3171,7 +3100,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   expect(rendererErrors).toEqual([]);
 });
 
-test("navigates the project file hierarchy lazily with an accessible keyboard tree", async ({}, testInfo) => {
+test("navigates the project file hierarchy lazily with an accessible keyboard tree", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const addProject = page.getByRole("button", { name: "Add your first project" });
   if (await addProject.isVisible().catch(() => false)) {
@@ -3295,7 +3224,7 @@ test("adds a selected diff range to the next agent prompt", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps a contextual selection answer readable and dismissible across responsive layouts", async ({}, testInfo) => {
+test("keeps a contextual selection answer readable and dismissible across responsive layouts", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   await page.getByRole("tab", { name: /Changes/ }).click();
   const hunkHeader = page.locator(".diff-hunk-header").first();
@@ -3343,7 +3272,6 @@ test("keeps a contextual selection answer readable and dismissible across respon
 
   const card = page.getByLabel("Agent answer about selected lines");
   const answerBody = card.locator(".diff-selection-answer-body");
-  const metadata = card.locator("header small");
   const dismiss = card.getByRole("button", { name: "Dismiss selection answer" });
   await expect(card).toContainText(longBackendName);
   await expect(card).toContainText(longModelName);
@@ -3521,7 +3449,7 @@ test("keeps seen distinct from explicit acknowledgement and preserves dismissed 
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps delegated-agent traces compact while the active composer accepts a parent follow-up", async ({}, testInfo) => {
+test("keeps delegated-agent traces compact while the active composer accepts a parent follow-up", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const store = new RuntimeStore(databasePath, workspaceDirectory, {
@@ -4282,7 +4210,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
   }
 });
 
-test("presents the Quiet Ledger states as one calm, responsive conversation", async ({}, testInfo) => {
+test("presents the Quiet Ledger states as one calm, responsive conversation", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const store = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
@@ -4856,6 +4784,75 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       glyphAnimation: "none",
     });
     await page.emulateMedia({ reducedMotion: "no-preference" });
+
+    await publishFixtureEvent({
+      type: "agent.text",
+      conversationId: conversation.id,
+      runId: active.turn.runId,
+      turnId: active.turn.id,
+      text: "The live caret stays attached to this final paragraph.",
+    });
+    const streamingMarkdown = activeTurn.locator(
+      ".turn-commentary-row.is-streaming .response-markdown",
+    );
+    await expect(streamingMarkdown).toHaveCount(1);
+    const paragraphCaret = await streamingMarkdown.evaluate((element) => {
+      const last = element.lastElementChild;
+      const caret = last ? getComputedStyle(last, "::after") : null;
+      return {
+        lastTag: last?.tagName ?? null,
+        caretContent: caret?.content ?? null,
+        caretDisplay: caret?.display ?? null,
+        duplicateCaret: element.parentElement?.querySelector(
+          ":scope > .streaming-caret",
+        ) !== null,
+      };
+    });
+    expect(paragraphCaret).toEqual({
+      lastTag: "P",
+      caretContent: '""',
+      caretDisplay: "inline-block",
+      duplicateCaret: false,
+    });
+    await publishFixtureEvent({
+      type: "agent.activity",
+      activity: {
+        id: "activity-stream-boundary",
+        conversationId: conversation.id,
+        runId: active.turn.runId,
+        turnId: active.turn.id,
+        kind: "status",
+        title: "Streaming paragraph captured",
+        detail: null,
+        status: "completed",
+        createdAt: activeAt(16),
+      },
+    });
+    await publishFixtureEvent({
+      type: "agent.text",
+      conversationId: conversation.id,
+      runId: active.turn.runId,
+      turnId: active.turn.id,
+      text: "```ts\nconst verified = true;\n```",
+    });
+    const codeCaret = await streamingMarkdown.evaluate((element) => {
+      const last = element.lastElementChild;
+      const code = last?.querySelector("pre code") ?? null;
+      const caret = code ? getComputedStyle(code, "::after") : null;
+      return {
+        lastClass: last?.className ?? null,
+        caretContent: caret?.content ?? null,
+        duplicateCaret: element.parentElement?.querySelector(
+          ":scope > .streaming-caret",
+        ) !== null,
+      };
+    });
+    expect(codeCaret).toEqual({
+      lastClass: "response-code-block",
+      caretContent: '""',
+      duplicateCaret: false,
+    });
+    await captureElementScenario("streaming-caret-code", activeTurn);
 
     await publishFixtureEvent({
       type: "agent.approval.requested",

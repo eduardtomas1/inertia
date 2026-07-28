@@ -1,11 +1,12 @@
 import { constants, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   app,
   BrowserWindow,
   WebContentsView,
+  clipboard,
   dialog,
   ipcMain,
   net,
@@ -30,6 +31,10 @@ import {
   KIMI_CLAUDE_BUILTIN_PROFILE_ID,
 } from "../shared/claude-backend-profiles.js";
 import { parseOpenProjectPathRequest } from "../shared/desktop.js";
+import {
+  previewNavigationTarget,
+  safeHttpUrl,
+} from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import {
   validateSelectedAttachmentStats,
@@ -39,6 +44,7 @@ import {
   cleanupOrphanedAttachments,
   type AttachmentStorageReservation,
 } from "./attachment-registry.js";
+import { AppUpdateService } from "./app-update.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
   CredentialVault,
@@ -62,6 +68,8 @@ const IPC = {
   selectDirectory: "inertia:select-directory",
   selectCodexExecutable: "inertia:select-codex-executable",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
+  copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
+  checkAppUpdate: "inertia:check-app-update",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   releaseAttachment: "inertia:release-attachment",
@@ -96,6 +104,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
+let appUpdateService: AppUpdateService | null = null;
 let credentialVault: CredentialVault | null = null;
 let trustedRendererUrl = "";
 let stoppingRuntime = false;
@@ -155,11 +164,9 @@ function registerAppProtocol(): void {
       if (requestedPath.includes("\0")) throw new Error();
       const previewId = /^attachment-preview\/([0-9a-f-]{36})$/iu.exec(requestedPath)?.[1];
       if (previewId) {
-        const preview = attachmentRegistry().preview(previewId);
+        const preview = await attachmentRegistry().preview(previewId);
         if (!preview || chatAttachmentKind(preview.mimeType) !== "image") throw new Error();
-        const info = await stat(preview.path);
-        if (!info.isFile() || info.size !== preview.size) throw new Error();
-        return new Response(await readFile(preview.path), {
+        return new Response(new Uint8Array(preview.bytes).buffer, {
           status: 200,
           headers: {
             "Content-Type": preview.mimeType,
@@ -204,22 +211,6 @@ function saveWindowState(window: BrowserWindow): void {
   }
 }
 
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
-}
-
-function safeHttpUrl(value: unknown): URL {
-  if (typeof value !== "string" || value.length === 0 || value.length > 4096) throw new Error("Invalid URL");
-  const url = new URL(value);
-  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
-    throw new Error("Only safe HTTP and HTTPS URLs can be opened");
-  }
-  if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
-    throw new Error("Remote previews must use HTTPS");
-  }
-  return url;
-}
-
 function previewState(): { url: string; loading: boolean; canGoBack: boolean; canGoForward: boolean } {
   const contents = previewView?.webContents;
   return {
@@ -244,7 +235,16 @@ function ensurePreview(): WebContentsView {
   const view = new WebContentsView({ webPreferences: { partition: "inertia-preview", contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, allowRunningInsecureContent: false } });
   view.setBackgroundColor("#17171b");
   view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  view.webContents.on("will-navigate", (event, url) => { try { safeHttpUrl(url); } catch { event.preventDefault(); } });
+  view.webContents.on("will-navigate", (event, url) => {
+    try {
+      const target = previewNavigationTarget(url);
+      if (target.kind === "external") {
+        event.preventDefault();
+      }
+    } catch {
+      event.preventDefault();
+    }
+  });
   view.webContents.session.setPermissionCheckHandler(() => false);
   view.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   view.webContents.session.on("will-download", (event, item) => {
@@ -365,6 +365,32 @@ function registerIpcHandlers(): void {
     // manager. Production always asks the OS to reveal this fixed local path.
     if (process.env.NODE_ENV === "test") return "";
     return await shell.openPath(directory);
+  });
+
+  ipcMain.handle(IPC.copyRuntimeDiagnosticReport, (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    const diagnostics = runtimeDiagnostics
+      ?? new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
+    runtimeDiagnostics = diagnostics;
+    const report = diagnostics.supportReport({
+      version: app.getVersion(),
+      platform: process.platform,
+      architecture: process.arch,
+      runtime: runtimeSupervisor?.snapshot() ?? null,
+    });
+    clipboard.writeText(report.text);
+    diagnostics.record("report.copy");
+    return { copied: true, eventCount: report.eventCount };
+  });
+
+  ipcMain.handle(IPC.checkAppUpdate, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const [force] = args;
+    if (typeof force !== "boolean") {
+      throw new Error("Invalid update check request");
+    }
+    if (!appUpdateService) throw new Error("Update checks are unavailable.");
+    return await appUpdateService.check(force);
   });
 
   ipcMain.handle(IPC.selectAttachments, async (event, ...args) => {
@@ -494,9 +520,13 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.previewNavigate, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    const url = safeHttpUrl(args[0]);
+    const target = previewNavigationTarget(args[0]);
+    if (target.kind === "external") {
+      await shell.openExternal(target.url.toString());
+      return previewState();
+    }
     const view = ensurePreview();
-    await view.webContents.loadURL(url.toString());
+    await view.webContents.loadURL(target.url.toString());
     return previewState();
   });
 
@@ -684,6 +714,19 @@ function finishQuitAfterCleanup(): void {
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
   runtimeDiagnostics.record("app.start");
+  const testUpdateVersion = process.env.NODE_ENV === "test"
+    && typeof process.env.INERTIA_TEST_APP_UPDATE_VERSION === "string"
+    && /^v?\d+\.\d+\.\d+$/u.test(process.env.INERTIA_TEST_APP_UPDATE_VERSION)
+      ? process.env.INERTIA_TEST_APP_UPDATE_VERSION
+      : app.getVersion();
+  appUpdateService = new AppUpdateService({
+    currentVersion: app.getVersion(),
+    fetch: process.env.NODE_ENV === "test"
+      ? async () => new Response(JSON.stringify({
+          tag_name: `v${testUpdateVersion.replace(/^v/u, "")}`,
+        }))
+      : net.fetch as typeof globalThis.fetch,
+  });
   nativeTheme.on("updated", () => {
     if (windowThemePreference !== "system") return;
     mainWindow?.setBackgroundColor(

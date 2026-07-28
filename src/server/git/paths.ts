@@ -10,7 +10,7 @@ import {
   MAX_DIFF_FILES,
   MAX_PATH_LENGTH,
 } from "./constants";
-import { runGit } from "./runner";
+import { runGit, runGitInspection } from "./runner";
 import { GitError } from "./types";
 
 export function isContained(root: string, target: string): boolean {
@@ -44,7 +44,7 @@ async function requireDirectory(path: string): Promise<string> {
 
 export async function repositoryRoot(repositoryPath: string): Promise<string> {
   const directory = await requireDirectory(repositoryPath);
-  const result = await runGit(
+  const result = await runGitInspection(
     directory,
     ["rev-parse", "--show-toplevel"],
     {

@@ -100,7 +100,7 @@ test.afterAll(async () => {
   if (fixtureRoot) await rm(fixtureRoot, { recursive: true, force: true });
 });
 
-test("discovers and reviews dirty nested Openbravo repositories without a root Git repository", async ({}, testInfo) => {
+test("discovers and reviews dirty nested Openbravo repositories without a root Git repository", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   await page.getByRole("tab", { name: /Changes/ }).click();
 

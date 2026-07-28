@@ -10,6 +10,10 @@ const css = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
 );
+const appSource = readFileSync(
+  new URL("../../src/renderer/src/App.tsx", import.meta.url),
+  "utf8",
+);
 const activitySource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
   "utf8",
@@ -177,6 +181,23 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(quietLedgerReducedMotion).toContain("animation: none");
     expect(quietLedgerReducedMotion).toContain("opacity: 1");
     expect(quietLedgerReducedMotion).toContain("transform: none");
+  });
+
+  it("pauses live timers and paint-heavy wash work while the document is inactive", () => {
+    expect(activitySource).toContain('document.visibilityState !== "visible"');
+    expect(activitySource).toContain("!document.hasFocus()");
+    expect(activitySource).toContain('document.addEventListener("visibilitychange", synchronize)');
+    expect(activitySource).toContain('window.addEventListener("blur", synchronize)');
+    expect(appSource).toContain("function useDocumentActive()");
+    expect(appSource).toContain('data-document-active={documentActive ? "true" : "false"}');
+    expect(activitySource).toContain("memo(function ActivityRow");
+    expect(activitySource).toContain("memo(function ActivityGroup");
+    expect(activitySource).toContain("const durableStream = useMemo(");
+    expect(activitySource).toContain("instead of sorting the complete workstream");
+    expect(css).toContain('data-document-active="false"');
+    expect(css).toContain("animation-play-state: paused");
+    expect(css).toContain("will-change: auto");
+    expect(css).toContain("contain: paint");
   });
 
   it("keeps completion on the same keyed row and leaves follow/virtualization behavior untouched", () => {

@@ -22,6 +22,22 @@ import {
   type DatabaseMigrationDefinition,
 } from "./catalog";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
+import { quotedSqlIdentifier } from "./sql-identifiers";
+
+const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const;
+const MODEL_SELECTION_COLUMNS = [
+  "model_selection_json",
+  "continuation_identity_json",
+] as const;
+const TURN_ASSOCIATION_TABLES = [
+  "messages",
+  "activities",
+  "agent_reasonings",
+  "agent_plans",
+  "thread_usage",
+  "checkpoints",
+] as const;
+const TURN_ASSOCIATION_COLUMNS = ["turn_id"] as const;
 
 export function migrateRuntimeDatabase(database: Database.Database): void {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
@@ -231,16 +247,24 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
       name: "PersistTurnModelSelection",
       up: (database) => {
         const addColumn = (
-          table: "conversations" | "agent_turns",
-          column: "model_selection_json" | "continuation_identity_json",
+          table: (typeof MODEL_SELECTION_TABLES)[number],
+          column: (typeof MODEL_SELECTION_COLUMNS)[number],
           maximum: number,
         ): void => {
-          const columns = database.prepare(`PRAGMA table_info(${table})`)
+          const tableSql = quotedSqlIdentifier(table, MODEL_SELECTION_TABLES);
+          const columnSql = quotedSqlIdentifier(
+            column,
+            MODEL_SELECTION_COLUMNS,
+          );
+          if (!Number.isSafeInteger(maximum) || maximum < 1) {
+            throw new Error("The migration column limit is invalid.");
+          }
+          const columns = database.prepare(`PRAGMA table_info(${tableSql})`)
             .all() as Array<{ name: string }>;
           if (columns.some(({ name }) => name === column)) return;
           database.exec(`
-            ALTER TABLE ${table} ADD COLUMN ${column} TEXT
-              CHECK (${column} IS NULL OR length(${column}) <= ${maximum});
+            ALTER TABLE ${tableSql} ADD COLUMN ${columnSql} TEXT
+              CHECK (${columnSql} IS NULL OR length(${columnSql}) <= ${maximum});
           `);
         };
         addColumn("conversations", "model_selection_json", 65_536);
@@ -573,6 +597,96 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
           ON subagent_traces(parent_trace_id, created_at ASC);
       `,
     });
+    migrationExtensions.push({
+      name: "PersistProjectGitRepositoryLimit",
+      up: (database) => {
+        const columns = database.prepare("PRAGMA table_info(projects)")
+          .all() as Array<{ name: string }>;
+        if (columns.some(({ name }) => name === "git_repository_limit")) return;
+        database.exec(`
+          ALTER TABLE projects
+            ADD COLUMN git_repository_limit INTEGER NOT NULL DEFAULT 128
+            CHECK (git_repository_limit BETWEEN 16 AND 1024);
+        `);
+      },
+    });
+    migrationExtensions.push({
+      name: "ScopeDiffReviewTargetsByRepository",
+      up: (database) => {
+        const stateColumns = database.prepare(
+          "PRAGMA table_info(diff_review_states)",
+        ).all() as Array<{ name: string; pk: number }>;
+        const hasStateRepository = stateColumns.some(
+          ({ name }) => name === "repository_path",
+        );
+        const repositoryInStateKey = stateColumns.some(
+          ({ name, pk }) => name === "repository_path" && pk > 0,
+        );
+        if (!repositoryInStateKey) {
+          database.exec(`
+            CREATE TABLE diff_review_states_v30 (
+              conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+              repository_path TEXT NOT NULL DEFAULT '.'
+                CHECK (length(repository_path) BETWEEN 1 AND 4096),
+              scope TEXT NOT NULL CHECK (scope IN ('file', 'hunk')),
+              path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 4096),
+              hunk_id TEXT NOT NULL DEFAULT '' CHECK (length(hunk_id) <= 128),
+              target_fingerprint TEXT NOT NULL CHECK (length(target_fingerprint) = 64),
+              reviewed INTEGER NOT NULL CHECK (reviewed IN (0, 1)),
+              stale INTEGER NOT NULL DEFAULT 0 CHECK (stale IN (0, 1)),
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY (conversation_id, repository_path, scope, path, hunk_id)
+            );
+          `);
+          database.exec(hasStateRepository
+            ? `
+              INSERT INTO diff_review_states_v30 (
+                conversation_id, repository_path, scope, path, hunk_id,
+                target_fingerprint, reviewed, stale, updated_at
+              )
+              SELECT
+                conversation_id, repository_path, scope, path, hunk_id,
+                target_fingerprint, reviewed, stale, updated_at
+              FROM diff_review_states;
+            `
+            : `
+              INSERT INTO diff_review_states_v30 (
+                conversation_id, repository_path, scope, path, hunk_id,
+                target_fingerprint, reviewed, stale, updated_at
+              )
+              SELECT
+                conversation_id, '.', scope, path, hunk_id,
+                target_fingerprint, reviewed, stale, updated_at
+              FROM diff_review_states;
+            `);
+          database.exec(`
+            DROP TABLE diff_review_states;
+            ALTER TABLE diff_review_states_v30 RENAME TO diff_review_states;
+          `);
+        }
+        database.exec(`
+          DROP INDEX IF EXISTS diff_review_states_conversation_idx;
+          CREATE INDEX diff_review_states_conversation_idx
+            ON diff_review_states(conversation_id, repository_path, stale, reviewed);
+        `);
+
+        const noteColumns = database.prepare(
+          "PRAGMA table_info(diff_review_notes)",
+        ).all() as Array<{ name: string }>;
+        if (!noteColumns.some(({ name }) => name === "repository_path")) {
+          database.exec(`
+            ALTER TABLE diff_review_notes
+              ADD COLUMN repository_path TEXT NOT NULL DEFAULT '.'
+              CHECK (length(repository_path) BETWEEN 1 AND 4096);
+          `);
+        }
+        database.exec(`
+          DROP INDEX IF EXISTS diff_review_notes_conversation_idx;
+          CREATE INDEX diff_review_notes_conversation_idx
+            ON diff_review_notes(conversation_id, repository_path, path, hunk_id);
+        `);
+      },
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,
@@ -605,8 +719,13 @@ function ensureTurnAssociationColumns(database: Database.Database): void {
       ["checkpoints", "turn_id"],
     ] as const;
     for (const [table, column] of associations) {
-      const columns = database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      const tableSql = quotedSqlIdentifier(table, TURN_ASSOCIATION_TABLES);
+      const columnSql = quotedSqlIdentifier(
+        column,
+        TURN_ASSOCIATION_COLUMNS,
+      );
+      const columns = database.prepare(`PRAGMA table_info(${tableSql})`).all() as Array<{ name: string }>;
       if (columns.some(({ name }) => name === column)) continue;
-      database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT REFERENCES agent_turns(id) ON DELETE SET NULL`);
+      database.exec(`ALTER TABLE ${tableSql} ADD COLUMN ${columnSql} TEXT REFERENCES agent_turns(id) ON DELETE SET NULL`);
     }
   }

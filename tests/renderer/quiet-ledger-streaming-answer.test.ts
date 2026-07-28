@@ -214,7 +214,8 @@ describe("Quiet Ledger streaming answer handoff", () => {
     expect(liveHtml).toContain('aria-label="Live agent update"');
     expect(liveHtml).toContain("response-code-block");
     expect(liveHtml).toContain("some &lt;unsafe&gt; code");
-    expect(liveHtml.match(/streaming-caret/gu)).toHaveLength(1);
+    expect(liveHtml.match(/response-markdown is-streaming/gu)).toHaveLength(1);
+    expect(liveHtml).not.toContain('class="streaming-caret"');
 
     expect(activeTerminalHtml).not.toContain("turn-final-answer-document");
     expect(activeTerminalHtml).not.toContain("Authoritative persisted answer");
@@ -293,7 +294,8 @@ describe("Quiet Ledger streaming answer handoff", () => {
       `data-assistant-commentary-id="live-commentary:${turn.id}"`,
     );
     expect(html.match(/turn-commentary-row is-streaming/gu)).toHaveLength(1);
-    expect(html.match(/streaming-caret/gu)).toHaveLength(1);
+    expect(html.match(/response-markdown is-streaming/gu)).toHaveLength(1);
+    expect(html).not.toContain('class="streaming-caret"');
     expect(html).not.toContain("turn-final-answer-document");
   });
 
@@ -371,7 +373,8 @@ describe("Quiet Ledger streaming answer handoff", () => {
     );
     expect(commentary).not.toContain("aria-live");
     expect(commentary).not.toContain('role="status"');
-    expect(commentary).toContain('class="streaming-caret" aria-hidden="true"');
+    expect(commentary).toContain("response-markdown is-streaming");
+    expect(commentary).not.toContain('class="streaming-caret"');
 
     const workstreamSource = readFileSync(
       new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),

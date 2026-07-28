@@ -33,6 +33,7 @@ test-results/
 electron-builder.env
 *.key
 *.pem
+*.p8
 *.p12
 *.pfx
 *.mobileprovision

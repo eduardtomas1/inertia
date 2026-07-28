@@ -22,6 +22,7 @@ const project: Project = {
   repositoryRoot: "/workspace/inertia",
   repositoryRelativePath: ".",
   groupingMode: null,
+  gitRepositoryLimit: 128,
   color: "#5661d8",
   status: "ready",
   createdAt: "2026-07-25T10:00:00.000Z",

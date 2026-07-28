@@ -6,6 +6,8 @@ const IPC = {
   selectDirectory: "inertia:select-directory",
   selectCodexExecutable: "inertia:select-codex-executable",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
+  copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
+  checkAppUpdate: "inertia:check-app-update",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   releaseAttachment: "inertia:release-attachment",
@@ -27,6 +29,14 @@ const bridge: DesktopBridge = Object.freeze({
   selectDirectory: () => ipcRenderer.invoke(IPC.selectDirectory) as Promise<string | null>,
   selectCodexExecutable: () => ipcRenderer.invoke(IPC.selectCodexExecutable) as Promise<string | null>,
   revealRuntimeLogs: () => ipcRenderer.invoke(IPC.revealRuntimeLogs) as Promise<string>,
+  copyRuntimeDiagnosticReport: () =>
+    ipcRenderer.invoke(IPC.copyRuntimeDiagnosticReport) as ReturnType<
+      DesktopBridge["copyRuntimeDiagnosticReport"]
+    >,
+  checkAppUpdate: (force = false) =>
+    ipcRenderer.invoke(IPC.checkAppUpdate, force === true) as ReturnType<
+      DesktopBridge["checkAppUpdate"]
+    >,
   selectAttachments: () => ipcRenderer.invoke(IPC.selectAttachments) as ReturnType<DesktopBridge["selectAttachments"]>,
   importAttachments: (files: Parameters<DesktopBridge["importAttachments"]>[0]) => ipcRenderer.invoke(IPC.importAttachments, files) as ReturnType<DesktopBridge["importAttachments"]>,
   releaseAttachment: (id: string) => ipcRenderer.invoke(IPC.releaseAttachment, id) as Promise<void>,

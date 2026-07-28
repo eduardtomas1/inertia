@@ -175,9 +175,10 @@ export function Composer({
     else window.localStorage.removeItem(key);
   }, [conversation.id, message]);
 
+  const mentionQuery = mentionMatch?.[1] ?? null;
   useEffect(() => {
-    if (mentionMatch?.[1]) onMentionQuery(mentionMatch[1]);
-  }, [mentionMatch?.[1], onMentionQuery]);
+    if (mentionQuery) onMentionQuery(mentionQuery);
+  }, [mentionQuery, onMentionQuery]);
 
   useTextareaAutosize(textareaRef, message);
 

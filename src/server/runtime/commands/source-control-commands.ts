@@ -148,7 +148,10 @@ export function createSourceControlCommandHandler(
           command.payload.projectId,
           command.payload.conversationId,
         );
-        const status = await discoverWorkspaceGitRepositories(path);
+        const status = await discoverWorkspaceGitRepositories(path, {
+          maxRepositories: dependencies.store
+            .project(command.payload.projectId).gitRepositoryLimit,
+        });
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
@@ -173,6 +176,17 @@ export function createSourceControlCommandHandler(
           ),
           ignoreWhitespace: command.payload.ignoreWhitespace,
         });
+        const reviewMetadataChanged = Boolean(
+          command.payload.conversationId
+          && !diff.truncated
+          && reconcileReviews(
+            dependencies.store,
+            command.payload.conversationId!,
+            diff.text,
+            command.payload.repositoryPath,
+            command.payload.path,
+          ),
+        );
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
@@ -180,12 +194,16 @@ export function createSourceControlCommandHandler(
             kind: "git.workspace.diff",
             diff: {
               repositoryPath: command.payload.repositoryPath,
+              reviewMetadataChanged,
               patch: diff.text,
               truncated: diff.truncated,
               files: changedFiles(repository.status),
             },
           },
         });
+        if (reviewMetadataChanged) {
+          dependencies.broadcastSnapshot();
+        }
         return "handled";
       }
       case "git.turn.diff": {

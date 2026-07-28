@@ -72,6 +72,9 @@ export interface WorkspaceGitSnapshot {
   deletions: number;
   scannedDirectories: number;
   skippedDirectories: number;
+  /** Git markers found before applying the project's display limit. */
+  discoveredRepositories: number;
+  repositoryLimit: number;
   partial: boolean;
   truncated: boolean;
   issues: WorkspaceGitIssue[];
@@ -79,6 +82,8 @@ export interface WorkspaceGitSnapshot {
 
 export interface WorkspaceGitDiffSnapshot extends GitDiffSnapshot {
   repositoryPath: string;
+  /** True only when reconciliation changed persisted review metadata. */
+  reviewMetadataChanged?: boolean;
 }
 
 export type TurnGitArtifactStatus = "pending" | "ready" | "partial" | "unavailable" | "failed";
@@ -188,6 +193,7 @@ export interface DiffReversalPlan {
 
 export interface DiffReversalOperation {
   id: string;
+  repositoryPath?: string;
   filePath: string;
   selectedLineCount: number;
   affectedLayers: GitDiffLayer[];
@@ -257,6 +263,8 @@ export type DiffReviewScope = "file" | "hunk";
 
 export interface DiffReviewState {
   conversationId: string;
+  /** Workspace-relative Git root. Missing only on legacy in-memory values. */
+  repositoryPath?: string;
   scope: DiffReviewScope;
   path: string;
   hunkId: string | null;
@@ -269,6 +277,8 @@ export interface DiffReviewState {
 export interface DiffReviewNote {
   id: string;
   conversationId: string;
+  /** Workspace-relative Git root. Missing only on legacy in-memory values. */
+  repositoryPath?: string;
   path: string;
   hunkId: string | null;
   lineIds: string[];

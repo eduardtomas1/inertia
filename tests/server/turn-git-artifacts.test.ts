@@ -362,6 +362,48 @@ describe("turn Git artifacts", () => {
     runtime.store.close();
   });
 
+  it("treats a root-less workspace with nested repositories as expected root absence", async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "inertia-turn-artifacts-nested-root-"),
+    );
+    const data = join(root, "data");
+    const projectRoot = join(root, "workspace");
+    const nested = join(projectRoot, "modules", "example");
+    mkdirSync(data);
+    mkdirSync(nested, { recursive: true });
+    git(nested, ["init"]);
+    writeFileSync(join(nested, "tracked.txt"), "before\n");
+    git(nested, ["add", "tracked.txt"]);
+    git(nested, [
+      "-c",
+      "user.name=Inertia Test",
+      "-c",
+      "user.email=test@inertia.local",
+      "commit",
+      "-m",
+      "Initial",
+    ]);
+    roots.push(root);
+    const store = new RuntimeStore(
+      join(data, "inertia.sqlite"),
+      projectRoot,
+    );
+    const project = store.createProject("Nested", projectRoot);
+    const conversation = store.createConversation(project.id, "Nested Git");
+    const turn = beginTurn(store, conversation.id, "turn-nested-git");
+    const manager = new TurnGitArtifactManager(store, data);
+
+    await manager.captureBefore({ turn, checkpointId: null });
+
+    expect(store.turnGitArtifact(turn.id)).toMatchObject({
+      status: "unavailable",
+      completeness: "unavailable",
+      absenceReason: "not-repository",
+      failureReason: "This workspace is not a Git repository.",
+    });
+    store.close();
+  });
+
   it("does not scan nested Openbravo module repositories when the selected root is not Git", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-openbravo-artifacts-"));
     const data = join(root, "data");

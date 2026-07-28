@@ -102,6 +102,7 @@ export const appCommandSchemas = [
         projectId: z.string().uuid(),
         name: z.string().trim().min(1).max(80).optional(),
         groupingMode: z.enum(["repository", "repository-path", "separate"]).nullable().optional(),
+        gitRepositoryLimit: z.number().int().min(16).max(1_024).optional(),
       }).strict(),
     })
     .strict(),

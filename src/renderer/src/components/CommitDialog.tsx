@@ -1,11 +1,12 @@
 import { GitCommitHorizontal, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DiffReviewState, GitStatusSnapshot, StructuredDiff } from "@shared/contracts";
-import { diffFileFingerprint, diffHunkFingerprint } from "@shared/diff-review";
+import { unreviewedCommitHunks } from "../lib/commitReview";
 import { IconButton, LoadingMark } from "./ui";
 
 type CommitDialogProps = {
   open: boolean;
+  repositoryPath: string;
   status: GitStatusSnapshot | null;
   diff: StructuredDiff;
   reviewStates: DiffReviewState[];
@@ -14,7 +15,7 @@ type CommitDialogProps = {
   onCommit: (message: string, push: boolean, paths: string[]) => Promise<void>;
 };
 
-export function CommitDialog({ open, status, diff, reviewStates, busy, onClose, onCommit }: CommitDialogProps): React.JSX.Element | null {
+export function CommitDialog({ open, repositoryPath, status, diff, reviewStates, busy, onClose, onCommit }: CommitDialogProps): React.JSX.Element | null {
   const [message, setMessage] = useState("");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -31,17 +32,15 @@ export function CommitDialog({ open, status, diff, reviewStates, busy, onClose, 
       if (previous?.isConnected) previous.focus();
     };
   }, [open]);
-  const unreviewedHunks = useMemo(() => diff.files
-    .filter((file) => selectedPaths.includes(file.path))
-    .flatMap((file) => file.hunks.filter((hunk) => {
-      const fileFingerprint = diffFileFingerprint(file);
-      const fingerprint = diffHunkFingerprint(file, hunk);
-      return !reviewStates.some((state) => {
-        if (state.path !== file.path || !state.reviewed || state.stale) return false;
-        if (state.scope === "file") return state.targetFingerprint === fileFingerprint;
-        return state.hunkId === hunk.id && state.targetFingerprint === fingerprint;
-      });
-    })), [diff.files, reviewStates, selectedPaths]);
+  const unreviewedHunks = useMemo(
+    () => unreviewedCommitHunks(
+      diff,
+      selectedPaths,
+      reviewStates,
+      repositoryPath,
+    ),
+    [diff, repositoryPath, reviewStates, selectedPaths],
+  );
   if (!open) return null;
   const submit = async (push: boolean) => {
     if (!message.trim() || busy || selectedPaths.length === 0) return;

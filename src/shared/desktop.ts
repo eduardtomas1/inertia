@@ -4,6 +4,20 @@ export interface RuntimeConnection {
   websocketUrl: string;
 }
 
+export type AppUpdateState = "available" | "current" | "unavailable";
+export type AppUpdateFreshness = "fresh" | "cached" | "unavailable";
+
+export interface AppUpdateStatus {
+  state: AppUpdateState;
+  freshness: AppUpdateFreshness;
+  currentVersion: string;
+  latestVersion: string | null;
+  releaseUrl: string | null;
+  checkedAt: string | null;
+  lastAttemptedAt: string;
+  message: string;
+}
+
 export interface DesktopAttachment {
   id: string;
   name: string;
@@ -73,6 +87,10 @@ export interface DesktopBridge {
   selectCodexExecutable: () => Promise<string | null>;
   /** Reveals Inertia's fixed local diagnostics directory; no caller-supplied path is accepted. */
   revealRuntimeLogs: () => Promise<string>;
+  /** Copies a fixed, allowlisted lifecycle summary. Prompts, source, paths, and credentials are excluded. */
+  copyRuntimeDiagnosticReport: () => Promise<{ copied: boolean; eventCount: number }>;
+  /** Reads only the latest public GitHub release metadata; updates are never downloaded or installed. */
+  checkAppUpdate: (force?: boolean) => Promise<AppUpdateStatus>;
   selectAttachments: () => Promise<DesktopAttachment[]>;
   importAttachments: (files: AttachmentImport[]) => Promise<DesktopAttachment[]>;
   /** Releases an unsent temporary attachment and its privileged preview registration. */

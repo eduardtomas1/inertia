@@ -148,6 +148,7 @@ export function useWorkspaceReview({
       type: "review.state.set",
       payload: {
         conversationId: conversation.id,
+        repositoryPath: state.repositoryPath ?? ".",
         scope: state.scope,
         path: state.path,
         hunkId: state.hunkId,
@@ -169,6 +170,7 @@ export function useWorkspaceReview({
       type: "review.note.create",
       payload: {
         conversationId: conversation.id,
+        repositoryPath: note.repositoryPath ?? ".",
         path: note.path,
         hunkId: note.hunkId,
         lineIds: note.lineIds,
@@ -208,6 +210,7 @@ export function useWorkspaceReview({
       payload: {
         projectId: project.id,
         ...(conversation ? { conversationId: conversation.id } : {}),
+        repositoryPath: selection.repositoryPath ?? ".",
         fingerprint: selection.fingerprint,
         filePath: selection.file.path,
         hunkId: selection.hunk.id,
@@ -222,13 +225,17 @@ export function useWorkspaceReview({
     }
     const plan = inspected.result.plan;
     if (confirmDestructiveActions) {
+      const selectedRepositoryPath = selection.repositoryPath ?? ".";
+      const displayPath = selectedRepositoryPath === "."
+        ? plan.filePath
+        : `${selectedRepositoryPath}/${plan.filePath}`;
       const layers = plan.affectedLayers.map((layer) =>
         layer === "index" ? "Git index (staged)" : "working tree"
       ).join(" and ");
       const confirmed = window.confirm([
         `Revert ${plan.changedLineCount} changed ${
           plan.changedLineCount === 1 ? "line" : "lines"
-        } in ${plan.filePath}?`,
+        } in ${displayPath}?`,
         "",
         `Hunk: ${plan.hunkHeader}`,
         `Selected lines: ${plan.selectedLineCount}`,
@@ -243,6 +250,7 @@ export function useWorkspaceReview({
       payload: {
         projectId: project.id,
         ...(conversation ? { conversationId: conversation.id } : {}),
+        repositoryPath: selection.repositoryPath ?? ".",
         fingerprint: selection.fingerprint,
         filePath: selection.file.path,
         hunkId: selection.hunk.id,
@@ -277,6 +285,7 @@ export function useWorkspaceReview({
       payload: {
         projectId: project.id,
         ...(conversation ? { conversationId: conversation.id } : {}),
+        repositoryPath: lastDiffReversal.repositoryPath ?? ".",
         operationId: lastDiffReversal.id,
       },
     }));

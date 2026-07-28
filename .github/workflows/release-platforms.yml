@@ -33,15 +33,15 @@ jobs:
           - label: macOS arm64
             runner: macos-15
             platform: macos-arm64
-            dist_script: dist:mac
+            dist_script: dist:release:mac
           - label: Windows x64
             runner: windows-2025
             platform: windows-x64
-            dist_script: dist:win
+            dist_script: dist:release:win
           - label: Linux x64
             runner: ubuntu-24.04
             platform: linux-x64
-            dist_script: dist:linux
+            dist_script: dist:release:linux
     env:
       CI: "true"
 
@@ -96,9 +96,45 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm exec -- playwright test
 
-      - name: Build release package
+      - name: Prepare temporary macOS notarization key
+        if: runner.os == 'macOS'
+        env:
+          APPLE_API_KEY_BASE64: ${{ secrets.MACOS_APPLE_API_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${APPLE_API_KEY_BASE64:-}" ]]; then
+            exit 0
+          fi
+          key_path="$RUNNER_TEMP/inertia-notarization-key.p8"
+          printf '%s' "$APPLE_API_KEY_BASE64" | base64 -D > "$key_path"
+          chmod 600 "$key_path"
+          echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
+
+      - name: Build macOS release package
+        if: runner.os == 'macOS'
         env:
           DIST_SCRIPT: ${{ matrix.dist_script }}
+          INERTIA_RELEASE_PLATFORM: ${{ matrix.platform }}
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.MACOS_APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.MACOS_APPLE_API_ISSUER }}
+        run: npm run "$DIST_SCRIPT"
+
+      - name: Build Windows release package
+        if: runner.os == 'Windows'
+        env:
+          DIST_SCRIPT: ${{ matrix.dist_script }}
+          INERTIA_RELEASE_PLATFORM: ${{ matrix.platform }}
+          WIN_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: npm run "$DIST_SCRIPT"
+
+      - name: Build Linux release package
+        if: runner.os == 'Linux'
+        env:
+          DIST_SCRIPT: ${{ matrix.dist_script }}
+          INERTIA_RELEASE_PLATFORM: ${{ matrix.platform }}
         run: npm run "$DIST_SCRIPT"
 
       - name: Validate Linux AppImage identity, icons, and runtime resource
@@ -151,6 +187,25 @@ jobs:
           set -euo pipefail
           mac_app="release/mac-arm64/Inertia.app"
           codesign --verify --deep --strict --verbose=2 "$mac_app"
+          if [[ -n "${CSC_LINK:-}" ]]; then
+            codesign --display --verbose=2 "$mac_app" 2>&1 | grep -q "Authority=Developer ID Application:"
+            xcrun stapler validate "$mac_app"
+          fi
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+
+      - name: Verify Windows Authenticode signature when configured
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
+            $signature = Get-AuthenticodeSignature "release/Inertia.Setup.$((Get-Content package.json | ConvertFrom-Json).version).exe"
+            if ($signature.Status -ne "Valid") {
+              throw "The Windows release signature is not valid: $($signature.Status)"
+            }
+          }
 
       - name: Stage exact release assets and checksums
         env:

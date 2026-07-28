@@ -9,6 +9,8 @@
   "rules": {
     "no-debugger": "error",
     "no-control-regex": "off",
-    "no-unused-vars": "error"
+    "no-unused-vars": "error",
+    "react/exhaustive-deps": "error",
+    "react/rules-of-hooks": "error"
   }
 }

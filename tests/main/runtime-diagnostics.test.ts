@@ -121,4 +121,137 @@ describe("runtime diagnostics", () => {
     diagnostics.ensureDirectory();
     expect(statSync(directory).mode & 0o777).toBe(0o700);
   });
+
+  it("builds a bounded support summary from allowlisted lifecycle fields only", () => {
+    const root = fixture();
+    const directory = runtimeDiagnosticsDirectory(root);
+    const diagnostics = new RuntimeDiagnostics(directory, {
+      now: Date.now,
+    });
+    diagnostics.record("runtime.failure", {
+      phase: "restarting",
+      generation: 7,
+      restartAttempt: 2,
+      restartScheduled: true,
+      message:
+        "prompt=private source=/Users/alice/project.ts token=secret credential=hunter2 exited unexpectedly (code 9)",
+      providerOutput: "must never appear",
+      websocketUrl: "ws://127.0.0.1/private-capability",
+    });
+
+    const report = diagnostics.supportReport({
+      version: "0.0.10",
+      platform: "darwin",
+      architecture: "arm64",
+      runtime: {
+        phase: "restarting",
+        generation: 7,
+        pid: 1234,
+        websocketUrl: "ws://127.0.0.1/private-capability",
+        lastError: "private runtime error",
+        restartAttempt: 2,
+        restartScheduled: true,
+      },
+    });
+
+    expect(report.eventCount).toBe(1);
+    expect(report.text).toContain("Version: 0.0.10");
+    expect(report.text).toContain("Platform: darwin");
+    expect(report.text).toContain("Runtime: restarting");
+    expect(report.text).toContain("Runtime generation: 7");
+    expect(report.text).toContain("Runtime process exited unexpectedly (code 9).");
+    expect(report.text).not.toContain("private");
+    expect(report.text).not.toContain("alice");
+    expect(report.text).not.toContain("project.ts");
+    expect(report.text).not.toContain("hunter2");
+    expect(report.text).not.toContain("providerOutput");
+    expect(report.text).not.toContain("127.0.0.1");
+    expect(report.text).not.toContain("1234");
+    expect(Buffer.byteLength(report.text)).toBeLessThanOrEqual(64 * 1_024);
+  });
+
+  it("ignores malformed and unrecognized diagnostic records in support summaries", () => {
+    const root = fixture();
+    const directory = runtimeDiagnosticsDirectory(root);
+    const diagnostics = new RuntimeDiagnostics(directory);
+    diagnostics.ensureDirectory();
+    writeFileSync(
+      join(directory, "runtime.log"),
+      [
+        "not-json",
+        JSON.stringify({ at: new Date().toISOString(), event: "provider.output", message: "secret output" }),
+        JSON.stringify({ at: "invalid", event: "app.start" }),
+        JSON.stringify({ at: new Date().toISOString(), event: "app.start" }),
+      ].join("\n"),
+      { mode: 0o600 },
+    );
+
+    const report = diagnostics.supportReport({
+      version: "0.0.10",
+      platform: "linux",
+      architecture: "x64",
+      runtime: null,
+    });
+    expect(report.eventCount).toBe(1);
+    expect(report.text).toContain("app.start");
+    expect(report.text).not.toContain("provider.output");
+    expect(report.text).not.toContain("secret output");
+  });
+
+  it("keeps long-session support summaries to the newest bounded lifecycle window", () => {
+    const root = fixture();
+    const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root), {
+      maxFileBytes: 4 * 1_024 * 1_024,
+    });
+    for (let generation = 1; generation <= 500; generation += 1) {
+      diagnostics.record("runtime.state", {
+        phase: "ready",
+        generation,
+        restartAttempt: 0,
+      });
+    }
+
+    const report = diagnostics.supportReport({
+      version: "0.0.10",
+      platform: "linux",
+      architecture: "x64",
+      runtime: null,
+    });
+
+    expect(report.eventCount).toBe(120);
+    expect(report.text).toContain("generation=500");
+    expect(report.text).toContain("generation=381");
+    expect(report.text).not.toContain("generation=380 ·");
+    expect(Buffer.byteLength(report.text)).toBeLessThanOrEqual(64 * 1_024);
+  });
+
+  it("applies the support-summary limit in UTF-8 bytes without splitting characters", () => {
+    const root = fixture();
+    const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root), {
+      maxFileBytes: 4 * 1_024 * 1_024,
+    });
+    for (let generation = 1; generation <= 120; generation += 1) {
+      diagnostics.record("runtime.state", {
+        phase: "ready",
+        generation,
+        message: "🌟".repeat(400),
+      });
+    }
+
+    const report = diagnostics.supportReport({
+      version: "0.0.10",
+      platform: "darwin",
+      architecture: "arm64",
+      runtime: null,
+    });
+
+    expect(report.eventCount).toBeGreaterThan(0);
+    expect(report.eventCount).toBeLessThan(120);
+    expect(Buffer.byteLength(report.text, "utf8")).toBeLessThanOrEqual(64 * 1_024);
+    expect(report.text).not.toContain("\uFFFD");
+    expect(report.text).toContain("generation=120");
+    expect(report.text).not.toContain("generation=1 ·");
+    expect(report.text).toContain(`(${report.eventCount} of 120 copied)`);
+    expect(report.text).toContain("Privacy: prompts, source, project paths");
+  });
 });

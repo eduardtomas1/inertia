@@ -309,7 +309,7 @@ export function ResponseMarkdown({
 }: ResponseMarkdownProps): React.JSX.Element {
   const renderedContent = streaming ? stabilizeStreamingMarkdown(content) : content;
   return (
-    <div className="response-markdown">
+    <div className={`response-markdown${streaming ? " is-streaming" : ""}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, preserveCodeMeta]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}

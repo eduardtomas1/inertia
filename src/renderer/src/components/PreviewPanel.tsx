@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PreviewBounds } from "@shared/desktop";
+import {
+  previewNavigationTarget,
+  type PreviewNavigationTarget,
+} from "@shared/preview-url";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe2, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
 
@@ -16,15 +20,23 @@ export type PreviewPanelProps = {
   onBoundsChange?: (bounds: PreviewBounds | null) => void;
 };
 
-function safePreviewUrl(input: string): { value: string; parsed: URL } | { error: string } {
+export function safePreviewUrl(
+  input: string,
+): {
+  value: string;
+  parsed: URL;
+  target: PreviewNavigationTarget["kind"];
+} | { error: string } {
   const trimmed = input.trim();
   if (!trimmed) return { error: "Enter a URL to preview." };
 
   const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(trimmed);
-  const candidate = hasScheme
-    ? trimmed
-    : /^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:\/|$)/i.test(trimmed)
-      ? `http://${trimmed}`
+  const literalLoopbackWithoutScheme =
+    /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(trimmed);
+  const candidate = literalLoopbackWithoutScheme
+    ? `http://${trimmed}`
+    : hasScheme
+      ? trimmed
       : `https://${trimmed}`;
 
   try {
@@ -35,9 +47,18 @@ function safePreviewUrl(input: string): { value: string; parsed: URL } | { error
     if (parsed.username || parsed.password) {
       return { error: "Addresses containing credentials are not supported." };
     }
-    return { value: parsed.toString(), parsed };
-  } catch {
-    return { error: "Enter a valid HTTP or HTTPS address." };
+    const target = previewNavigationTarget(parsed.toString());
+    return {
+      value: target.url.toString(),
+      parsed: target.url,
+      target: target.kind,
+    };
+  } catch (error) {
+    return {
+      error: error instanceof Error
+        ? error.message
+        : "Enter a valid HTTP or HTTPS address.",
+    };
   }
 }
 
@@ -85,7 +106,11 @@ export function PreviewPanel({
     }
     setValidationError(null);
     setDraftUrl(result.value);
-    onNavigate(result.value);
+    if (result.target === "embed") {
+      onNavigate(result.value);
+    } else {
+      onOpenExternal(result.value);
+    }
   };
 
   const openExternal = () => {

@@ -748,6 +748,48 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 2 });
   });
 
+  it("survives a sustained crash-and-reconnect loop without leaking children or timers", () => {
+    const crashCount = 64;
+    const { children, supervisor } = createHarness({ stableUptimeMs: 60_000 });
+    supervisor.start();
+
+    for (let cycle = 0; cycle < crashCount; cycle += 1) {
+      const child = children[cycle];
+      expect(child).toBeDefined();
+      child!.spawn();
+      child!.message({
+        type: "runtime.ready",
+        websocketUrl: `ws://127.0.0.1:${41_100 + cycle}/runtime/${cycle % 2 === 0 ? "a".repeat(43) : "b".repeat(43)}`,
+      });
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "ready",
+        generation: cycle + 1,
+        pid: 10_000 + cycle,
+      });
+      child!.exit(9);
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "restarting",
+        generation: cycle + 1,
+        pid: null,
+        restartScheduled: true,
+      });
+      vi.advanceTimersByTime(runtimeRestartDelayMs(cycle));
+      expect(children).toHaveLength(cycle + 2);
+    }
+
+    const recovered = children[crashCount]!;
+    recovered.spawn();
+    recovered.message({ type: "runtime.ready", websocketUrl: secondUrl });
+    expect(supervisor.connection()).toEqual({ websocketUrl: secondUrl });
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "ready",
+      generation: crashCount + 1,
+      pid: 10_000 + crashCount,
+      restartScheduled: false,
+    });
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
   it("uses bounded exponential backoff and resets it only after stable readiness", () => {
     expect([0, 1, 2, 3, 4, 5, 20].map(runtimeRestartDelayMs)).toEqual([500, 1_000, 2_000, 4_000, 8_000, 8_000, 8_000]);
     const { children, supervisor } = createHarness({ stableUptimeMs: 2_000 });

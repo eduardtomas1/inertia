@@ -55,6 +55,7 @@ export function projectFromRow(row: ProjectRow): Project {
     repositoryRoot: row.repository_root,
     repositoryRelativePath: row.repository_relative_path || ".",
     groupingMode: row.grouping_mode,
+    gitRepositoryLimit: row.git_repository_limit,
     color: row.color,
     status: row.status,
     createdAt: row.created_at,

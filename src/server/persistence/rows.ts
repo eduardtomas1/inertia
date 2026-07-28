@@ -33,6 +33,7 @@ export interface ProjectRow {
   repository_root: string | null;
   repository_relative_path: string;
   grouping_mode: ProjectGroupingMode | null;
+  git_repository_limit: number;
   color: string;
   status: Project["status"];
   created_at: string;
@@ -279,6 +280,7 @@ export interface DiffReviewSummaryRow {
 
 export interface DiffReviewStateRow {
   conversation_id: string;
+  repository_path: string;
   scope: DiffReviewState["scope"];
   path: string;
   hunk_id: string;
@@ -291,6 +293,7 @@ export interface DiffReviewStateRow {
 export interface DiffReviewNoteRow {
   id: string;
   conversation_id: string;
+  repository_path: string;
   path: string;
   hunk_id: string;
   line_ids_json: string;

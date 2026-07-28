@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowDown,
   ArrowRight,
@@ -178,29 +184,34 @@ export function ChatWorkspace({
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
   const contentSignal = `${turns.length}:${turns.at(-1)?.updatedAt ?? ""}:${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${subagents.length}:${subagents.at(-1)?.updatedAt ?? ""}:${plans.length}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
 
-  const scrollToLatest = (behavior: ScrollBehavior = "smooth"): void => {
+  const scrollToLatest = useCallback((
+    behavior: ScrollBehavior = "smooth",
+  ): void => {
     const element = scrollRef.current;
     if (!element) return;
     followingRef.current = true;
     setShowJump(false);
     element.scrollTo({ top: element.scrollHeight, behavior });
     onLatestContentVisibilityChange?.(true);
-  };
+  }, [onLatestContentVisibilityChange]);
 
   useLayoutEffect(() => {
     scrollToLatest("auto");
-  }, [conversation?.id]);
+  }, [conversation?.id, scrollToLatest]);
 
   useEffect(
     () => () => onLatestContentVisibilityChange?.(false),
     [onLatestContentVisibilityChange],
   );
 
+  const followBehavior: ScrollBehavior = streamingText ? "auto" : "smooth";
   useEffect(() => {
     if (!followingRef.current) return;
-    const frame = window.requestAnimationFrame(() => scrollToLatest(streamingText ? "auto" : "smooth"));
+    const frame = window.requestAnimationFrame(
+      () => scrollToLatest(followBehavior),
+    );
     return () => window.cancelAnimationFrame(frame);
-  }, [contentSignal]);
+  }, [contentSignal, followBehavior, scrollToLatest]);
 
   useEffect(() => {
     const content = timelineRef.current;
@@ -210,7 +221,7 @@ export function ChatWorkspace({
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [conversation?.id]);
+  }, [conversation?.id, scrollToLatest]);
 
   useEffect(() => {
     const composer = composerRegionRef.current;
@@ -220,7 +231,7 @@ export function ChatWorkspace({
     });
     observer.observe(composer);
     return () => observer.disconnect();
-  }, [conversation?.id]);
+  }, [conversation?.id, scrollToLatest]);
 
   const onTranscriptScroll = (): void => {
     const element = scrollRef.current;

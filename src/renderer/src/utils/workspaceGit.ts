@@ -1,8 +1,13 @@
 import type {
   ChangedFile,
+  Project,
   WorkspaceGitRepositorySnapshot,
   WorkspaceGitSnapshot,
 } from "@shared/contracts";
+
+export function workspaceGitRefreshIdentity(project: Project | null): string {
+  return project ? `${project.id}:${project.gitRepositoryLimit}` : "";
+}
 
 export interface WorkspaceGitFileIdentity {
   repositoryPath: string;

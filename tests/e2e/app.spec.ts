@@ -3959,10 +3959,10 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       expect(probe).not.toBeNull();
       if (!probe) return;
       const button = page.locator(`[data-turn-id="${probe.sourceId}"]`).locator(selector);
+      await button.focus();
       const before = await page.locator(`[data-turn-id="${probe.anchorId}"]`).evaluate(
         (element) => element.getBoundingClientRect().top,
       );
-      await button.focus();
       await button.press("Enter");
       await expect(button).toHaveAttribute("aria-expanded", "true");
       if (expectedExpandedContent) {

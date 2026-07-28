@@ -99,19 +99,6 @@ function runtimeFailureSummary(value: unknown): string | undefined {
   return "Runtime lifecycle failure detail omitted.";
 }
 
-function truncateUtf8(value: string, maximumBytes: number): string {
-  if (Buffer.byteLength(value, "utf8") <= maximumBytes) return value;
-  let bytes = 0;
-  let result = "";
-  for (const character of value) {
-    const size = Buffer.byteLength(character, "utf8");
-    if (bytes + size > maximumBytes) break;
-    result += character;
-    bytes += size;
-  }
-  return result;
-}
-
 export class RuntimeDiagnostics {
   readonly directory: string;
   private readonly activePath: string;
@@ -194,7 +181,7 @@ export class RuntimeDiagnostics {
     this.ensureDirectory();
     const events = this.readEvents().slice(-120);
     const runtime = input.runtime;
-    const lines = [
+    const preface = [
       "Inertia support summary",
       `Generated: ${new Date(this.now()).toISOString()}`,
       `Version: ${sanitizeRuntimeDiagnosticText(input.version) ?? "unknown"}`,
@@ -205,14 +192,28 @@ export class RuntimeDiagnostics {
       `Restart attempt: ${runtime?.restartAttempt ?? 0}`,
       `Restart scheduled: ${runtime?.restartScheduled === true ? "yes" : "no"}`,
       "",
-      `Recent lifecycle events (${events.length}):`,
-      ...(events.length > 0 ? events : ["No lifecycle events recorded."]),
-      "",
+    ];
+    const footer = [
       "Privacy: prompts, source, project paths, token values, credentials, connection capabilities, and provider output are excluded.",
     ];
+    const render = (selected: string[]): string => [
+      ...preface,
+      selected.length === events.length
+        ? `Recent lifecycle events (${selected.length}):`
+        : `Recent lifecycle events (${selected.length} of ${events.length} copied):`,
+      ...(selected.length > 0 ? selected : ["No lifecycle events recorded."]),
+      "",
+      ...footer,
+    ].join("\n");
+    let selected: string[] = [];
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const candidate = [events[index]!, ...selected];
+      if (Buffer.byteLength(render(candidate), "utf8") > 64 * 1_024) break;
+      selected = candidate;
+    }
     return {
-      text: truncateUtf8(lines.join("\n"), 64 * 1_024),
-      eventCount: events.length,
+      text: render(selected),
+      eventCount: selected.length,
     };
   }
 

@@ -230,8 +230,12 @@ describe("runtime diagnostics", () => {
     const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root), {
       maxFileBytes: 4 * 1_024 * 1_024,
     });
-    for (let index = 0; index < 120; index += 1) {
-      diagnostics.record("app.start", { message: "🌟".repeat(400) });
+    for (let generation = 1; generation <= 120; generation += 1) {
+      diagnostics.record("runtime.state", {
+        phase: "ready",
+        generation,
+        message: "🌟".repeat(400),
+      });
     }
 
     const report = diagnostics.supportReport({
@@ -241,8 +245,13 @@ describe("runtime diagnostics", () => {
       runtime: null,
     });
 
-    expect(report.eventCount).toBe(120);
+    expect(report.eventCount).toBeGreaterThan(0);
+    expect(report.eventCount).toBeLessThan(120);
     expect(Buffer.byteLength(report.text, "utf8")).toBeLessThanOrEqual(64 * 1_024);
     expect(report.text).not.toContain("\uFFFD");
+    expect(report.text).toContain("generation=120");
+    expect(report.text).not.toContain("generation=1 ·");
+    expect(report.text).toContain(`(${report.eventCount} of 120 copied)`);
+    expect(report.text).toContain("Privacy: prompts, source, project paths");
   });
 });

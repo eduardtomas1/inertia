@@ -9,6 +9,13 @@ async function source(path: string): Promise<string> {
   return readFile(join(repositoryRoot, path), "utf8");
 }
 
+function workflowStep(workflow: string, name: string): string {
+  const marker = `      - name: ${name}`;
+  const start = workflow.indexOf(marker);
+  const end = workflow.indexOf("\n      - name:", start + marker.length);
+  return workflow.slice(start, end < 0 ? undefined : end);
+}
+
 describe("cross-platform packaged behavior contract", () => {
   it("keeps build, Electron E2E, fuse verification, and native smoke on all three CI platforms", async () => {
     const workflow = await source(".github/workflows/ci.yml");
@@ -113,6 +120,21 @@ describe("cross-platform packaged behavior contract", () => {
     expect(workflow).toContain("MACOS_APPLE_API_KEY_BASE64");
     expect(workflow).toContain("WINDOWS_CSC_LINK");
     expect(workflow).not.toContain("BEGIN PRIVATE KEY");
+
+    const macBuild = workflowStep(workflow, "Build macOS release package");
+    expect(macBuild).toContain("if: runner.os == 'macOS'");
+    expect(macBuild).toContain("MACOS_CSC_LINK");
+    expect(macBuild).not.toContain("WINDOWS_CSC_LINK");
+
+    const windowsBuild = workflowStep(workflow, "Build Windows release package");
+    expect(windowsBuild).toContain("if: runner.os == 'Windows'");
+    expect(windowsBuild).toContain("WINDOWS_CSC_LINK");
+    expect(windowsBuild).not.toContain("MACOS_CSC_LINK");
+
+    const linuxBuild = workflowStep(workflow, "Build Linux release package");
+    expect(linuxBuild).toContain("if: runner.os == 'Linux'");
+    expect(linuxBuild).not.toContain("_CSC_");
+    expect(linuxBuild).not.toContain("APPLE_API_");
   });
 
   it("runs the real Kimi suite only when its CI secret is explicitly available", async () => {

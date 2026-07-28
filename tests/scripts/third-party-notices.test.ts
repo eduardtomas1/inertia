@@ -84,6 +84,43 @@ describe("third-party notice generation", () => {
     expect(output).toContain("Use is subject to these terms.");
   });
 
+  it("runs npm's JavaScript entry point through Node without a platform shell", () => {
+    const { outputPath, treePath } = fixture([{
+      name: "portable-package",
+      version: "1.0.0",
+      license: "MIT",
+      files: { LICENSE: "Portable license" },
+    }]);
+    const root = dirname(treePath);
+    const npmEntryPoint = join(root, "npm-cli.js");
+    const invocationPath = join(root, "npm-invocation.json");
+    writeFileSync(npmEntryPoint, `
+const { readFileSync, writeFileSync } = require("node:fs");
+writeFileSync(
+  ${JSON.stringify(invocationPath)},
+  JSON.stringify({ execPath: process.execPath, arguments: process.argv.slice(2) }),
+);
+process.stdout.write(readFileSync(${JSON.stringify(treePath)}, "utf8"));
+`);
+
+    const result = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        INERTIA_NOTICES_TREE_PATH: "",
+        INERTIA_NOTICES_OUTPUT: outputPath,
+        npm_execpath: npmEntryPoint,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(readFileSync(invocationPath, "utf8"))).toEqual({
+      execPath: process.execPath,
+      arguments: ["ls", "--omit=dev", "--all", "--json", "--long"],
+    });
+    expect(readFileSync(outputPath, "utf8")).toContain("portable-package@1.0.0");
+  });
+
   it("fails closed when referenced license material is missing", () => {
     const { outputPath, treePath } = fixture([{
       name: "broken-package",

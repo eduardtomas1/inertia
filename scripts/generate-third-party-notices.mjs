@@ -16,10 +16,20 @@ const outputPath = resolve(
     ?? join(repositoryRoot, "resources", "generated", "THIRD_PARTY_NOTICES.txt"),
 );
 const fixtureTreePath = process.env.INERTIA_NOTICES_TREE_PATH;
-const packageManager = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function fail(message) {
   throw new Error(`Third-party notice generation failed: ${message}`);
+}
+
+function npmEntryPoint() {
+  const entryPoint = process.env.npm_execpath;
+  if (
+    typeof entryPoint !== "string"
+    || basename(entryPoint).toLowerCase() !== "npm-cli.js"
+  ) {
+    fail("run this generator through npm so its JavaScript entry point is available");
+  }
+  return resolve(entryPoint);
 }
 
 function productionTree() {
@@ -27,8 +37,8 @@ function productionTree() {
     return JSON.parse(readFileSync(resolve(fixtureTreePath), "utf8"));
   }
   const output = execFileSync(
-    packageManager,
-    ["ls", "--omit=dev", "--all", "--json", "--long"],
+    process.execPath,
+    [npmEntryPoint(), "ls", "--omit=dev", "--all", "--json", "--long"],
     {
       cwd: repositoryRoot,
       encoding: "utf8",

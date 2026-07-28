@@ -385,7 +385,15 @@ export async function createAppFixture(
           { timeout: 5_000 },
         ).toBe(false);
       }
-      await rm(testDirectory, { recursive: true, force: true });
+      // Windows can retain the closed SQLite handle for a brief interval after
+      // the utility process exits. Use Node's bounded EBUSY/EPERM retry path
+      // so successful scenarios are not reported as product failures.
+      await rm(testDirectory, {
+        recursive: true,
+        force: true,
+        maxRetries: 8,
+        retryDelay: 100,
+      });
     },
   };
 }

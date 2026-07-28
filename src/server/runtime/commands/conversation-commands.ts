@@ -85,6 +85,7 @@ export function createConversationCommandHandler(
     "conversation.create",
     "conversation.select",
     "conversation.detail.load",
+    "conversation.detail.subscription",
     "conversation.update",
     "conversation.archive",
     "conversation.unarchive",
@@ -237,7 +238,7 @@ export function createConversationCommandHandler(
         return "mutation";
       case "conversation.detail.load": {
         const { conversationId } = command.payload;
-        dependencies.runtimeSync.setConversationSubscription(
+        dependencies.runtimeSync.ensureConversationSubscription(
           socket,
           conversationId,
         );
@@ -292,6 +293,17 @@ export function createConversationCommandHandler(
         }
         return "handled";
       }
+      case "conversation.detail.subscription":
+        dependencies.runtimeSync.setConversationSubscription(
+          socket,
+          command.payload.owner,
+          command.payload.conversationId,
+        );
+        dependencies.send(socket, {
+          type: "request.ok",
+          requestId: command.requestId,
+        });
+        return "handled";
       case "conversation.update": {
         const { conversationId, ...update } = command.payload;
         const current = dependencies.store.conversation(conversationId);

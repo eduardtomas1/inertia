@@ -30,6 +30,7 @@ import { useConversationProjection } from "./hooks/useConversationProjection";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
 import { useActivityActions } from "./hooks/useActivityActions";
+import { useActivityActionRouter } from "./hooks/useActivityActionRouter";
 import {
   useStableActions,
   useStableController,
@@ -132,6 +133,7 @@ export default function App(): React.JSX.Element {
   const [splitConversationId, setSplitConversationId] = useState<string | null>(
     () => readSplitConversationId(window.localStorage),
   );
+  const [secondaryPaneFirst, setSecondaryPaneFirst] = useState(false);
   const [sendingConversationIds, setSendingConversationIds] = useState(
     () => new Set<string>(),
   );
@@ -204,6 +206,7 @@ export default function App(): React.JSX.Element {
   const updateSplitConversationId = useCallback(
     (conversationId: string | null) => {
       setSplitConversationId(conversationId);
+      setSecondaryPaneFirst(false);
       persistSplitConversationId(window.localStorage, conversationId);
     },
     [],
@@ -241,6 +244,9 @@ export default function App(): React.JSX.Element {
   } = workspaceLayout;
   const primaryPaneLayout = useConversationPaneLayout(
     connection.snapshot?.activeConversationId ?? null,
+  );
+  const secondaryPaneLayout = useConversationPaneLayout(
+    splitConversation?.id ?? null,
   );
   const primarySceneLayout = splitConversation
     ? primaryPaneLayout
@@ -456,14 +462,6 @@ export default function App(): React.JSX.Element {
       showStartupSurface(effectiveWorkspaceStartupSurface);
     } catch { /* The toast carries the error. */ }
   };
-  const splitSwapBlocked = Boolean(
-    sendingConversationIds.size > 0
-    || conversation?.status === "running"
-    || conversation?.status === "needs-input"
-    || splitConversation?.status === "running"
-    || splitConversation?.status === "needs-input",
-  );
-
   const selectProject = (nextProject: Project) => {
     if (nextProject.id === project?.id) return;
     void run("project.select", {
@@ -473,13 +471,16 @@ export default function App(): React.JSX.Element {
   };
   const selectConversation = useCallback((nextConversation: Conversation) => {
     if (nextConversation.id === conversation?.id) return;
-    if (
-      nextConversation.id === splitConversation?.id
-      && splitSwapBlocked
-    ) {
-      document.querySelector<HTMLElement>(
-        "#secondary-conversation-pane textarea",
-      )?.focus({ preventScroll: true });
+    if (nextConversation.id === splitConversation?.id) {
+      // A split-pane promotion is visual only. Retargeting the primary and
+      // secondary controllers would tear down conversation-owned terminals,
+      // previews, attachments, and tool state.
+      setSecondaryPaneFirst(true);
+      window.setTimeout(() => {
+        document.querySelector<HTMLElement>(
+          "#secondary-conversation-pane textarea",
+        )?.focus({ preventScroll: true });
+      }, 0);
       return;
     }
     const nextSplitConversationId = splitConversationAfterPrimaryChange(
@@ -487,6 +488,7 @@ export default function App(): React.JSX.Element {
       nextConversation,
       splitConversation,
     );
+    setSecondaryPaneFirst(false);
     const selectionGeneration =
       conversationSelectionGenerationRef.current + 1;
     conversationSelectionGenerationRef.current = selectionGeneration;
@@ -510,7 +512,6 @@ export default function App(): React.JSX.Element {
     conversation,
     run,
     splitConversation,
-    splitSwapBlocked,
     updateSplitConversationId,
   ]);
   const openConversationInSplit = (nextConversation: Conversation): void => {
@@ -525,7 +526,10 @@ export default function App(): React.JSX.Element {
     setView("workspace");
     setSidebarOpen(false);
   };
-  const activateActivityContext = (activity: WorkspaceRun, tool?: WorkspacePanelTab) => {
+  const activatePrimaryActivityContext = (
+    activity: WorkspaceRun,
+    tool?: WorkspacePanelTab,
+  ) => {
     const targetConversation = connection.snapshot?.conversations.find(({ id }) => id === activity.conversationId);
     const targetProject = connection.snapshot?.projects.find(({ id }) => id === activity.projectId);
     if (targetConversation) selectConversation(targetConversation);
@@ -544,7 +548,7 @@ export default function App(): React.JSX.Element {
       setActiveTool: sceneSetActiveTool,
       setActivityOpen,
       setActionError,
-      activateContext: activateActivityContext,
+      activateContext: activatePrimaryActivityContext,
       openProjectPath,
       navigatePreview,
     }),
@@ -552,9 +556,9 @@ export default function App(): React.JSX.Element {
   const {
     runProjectAction,
     openActivityLocation,
-    openActivityPreview,
+    openActivityPreview: openPrimaryActivityPreview,
     stopActivity,
-    rerunActivity,
+    rerunActivity: rerunPrimaryActivity,
     markActivitySeen,
     acknowledgeActivity,
     dismissActivity,
@@ -840,10 +844,11 @@ export default function App(): React.JSX.Element {
     workspaceSceneActions,
     workspaceTools,
   ]);
-  const splitScene = useSplitWorkspaceScene({
+  const splitWorkspace = useSplitWorkspaceScene({
     conversation,
     project,
     splitConversation,
+    layout: secondaryPaneLayout,
     snapshotProjects: connection.snapshot?.projects ?? [],
     settings,
     connection,
@@ -853,6 +858,7 @@ export default function App(): React.JSX.Element {
     busyAction,
     setBusyAction,
     setActionError,
+    setActivityOpen,
     gitRefreshVersion,
     request,
     actions: {
@@ -871,16 +877,37 @@ export default function App(): React.JSX.Element {
       updateConversationById,
     },
     sendingConversationIds,
-    splitSwapBlocked,
+    secondaryPaneFirst,
     primaryToolsOpen: primaryPaneLayout.activeTool !== null,
     onTogglePrimaryTools: primaryPaneLayout.toggleWorkspaceTools,
-    onMakeSecondaryPrimary: () => {
-      if (splitConversation) selectConversation(splitConversation);
-    },
+    onSwapPanes: () => setSecondaryPaneFirst((current) => !current),
     onCloseSecondary: () => updateSplitConversationId(null),
     onSecondaryConversationCreated: updateSplitConversationId,
     onTerminal: () => setGitRefreshVersion((version) => version + 1),
   });
+  const routedActivityActions = useActivityActionRouter({
+    secondaryConversationId: splitConversation?.id ?? null,
+    primary: {
+      activateContext: activatePrimaryActivityContext,
+      openActivityPreview: openPrimaryActivityPreview,
+      rerunActivity: rerunPrimaryActivity,
+    },
+    secondary: {
+      activateContext: (_activity, tool) => {
+        setView("workspace");
+        setSidebarOpen(false);
+        if (tool) secondaryPaneLayout.setActiveTool(tool);
+      },
+      openActivityPreview:
+        splitWorkspace.activityActions.openActivityPreview,
+      rerunActivity: splitWorkspace.activityActions.rerunActivity,
+    },
+  });
+  const {
+    activateContext: activateActivityContext,
+    openActivityPreview,
+    rerunActivity,
+  } = routedActivityActions;
   const visibleWorkspaceScene = useMemo<WorkspaceSceneProps>(() => ({
     ...workspaceScene,
     chat: {
@@ -889,11 +916,11 @@ export default function App(): React.JSX.Element {
         ? sendingConversationIds.has(conversation.id)
         : false,
     },
-    splitScene,
+    splitScene: splitWorkspace.scene,
   }), [
     conversation,
     sendingConversationIds,
-    splitScene,
+    splitWorkspace.scene,
     workspaceScene,
   ]);
 

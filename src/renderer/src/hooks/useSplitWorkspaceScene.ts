@@ -35,7 +35,9 @@ import {
 import { planFromText } from "../utils/planFromText";
 import { useActivityActions } from "./useActivityActions";
 import type { useBackendProfiles } from "./useBackendProfiles";
-import { useConversationPaneLayout } from "./useConversationPaneLayout";
+import type {
+  ConversationPaneLayout,
+} from "./useConversationPaneLayout";
 import { useConversationProjection } from "./useConversationProjection";
 import { useDesktopTools } from "./useDesktopTools";
 import type { useInertiaConnection } from "./useInertiaConnection";
@@ -50,6 +52,12 @@ type Connection = ReturnType<typeof useInertiaConnection>;
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
 type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
+type ActivityActions = ReturnType<typeof useActivityActions>;
+
+export interface SplitWorkspaceSceneController {
+  scene: WorkspaceSceneProps["splitScene"];
+  activityActions: ActivityActions;
+}
 
 interface SplitWorkspaceActions
   extends Pick<
@@ -82,6 +90,7 @@ interface UseSplitWorkspaceSceneOptions {
   conversation: Conversation | null;
   project: Project | null;
   splitConversation: Conversation | null;
+  layout: ConversationPaneLayout;
   snapshotProjects: Project[];
   settings: AppSettings;
   connection: Connection;
@@ -91,14 +100,15 @@ interface UseSplitWorkspaceSceneOptions {
   busyAction: string | null;
   setBusyAction: Dispatch<SetStateAction<string | null>>;
   setActionError: Dispatch<SetStateAction<string | null>>;
+  setActivityOpen: (open: boolean) => void;
   gitRefreshVersion: number;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   actions: SplitWorkspaceActions;
   sendingConversationIds: ReadonlySet<string>;
-  splitSwapBlocked: boolean;
+  secondaryPaneFirst: boolean;
   primaryToolsOpen: boolean;
   onTogglePrimaryTools: () => void;
-  onMakeSecondaryPrimary: () => void;
+  onSwapPanes: () => void;
   onCloseSecondary: () => void;
   onSecondaryConversationCreated: (conversationId: string) => void;
   onTerminal: () => void;
@@ -113,6 +123,7 @@ export function useSplitWorkspaceScene({
   conversation,
   project,
   splitConversation,
+  layout,
   snapshotProjects,
   settings,
   connection,
@@ -122,18 +133,19 @@ export function useSplitWorkspaceScene({
   busyAction,
   setBusyAction,
   setActionError,
+  setActivityOpen,
   gitRefreshVersion,
   request,
   actions,
   sendingConversationIds,
-  splitSwapBlocked,
+  secondaryPaneFirst,
   primaryToolsOpen,
   onTogglePrimaryTools,
-  onMakeSecondaryPrimary,
+  onSwapPanes,
   onCloseSecondary,
   onSecondaryConversationCreated,
   onTerminal,
-}: UseSplitWorkspaceSceneOptions): WorkspaceSceneProps["splitScene"] {
+}: UseSplitWorkspaceSceneOptions): SplitWorkspaceSceneController {
   const splitProject = useMemo(
     () => splitConversation
       ? snapshotProjects.find(
@@ -153,7 +165,6 @@ export function useSplitWorkspaceScene({
     onOpenPlan: () => undefined,
     onTerminal,
   }));
-  const layout = useConversationPaneLayout(splitConversation?.id ?? null);
   const run = useCallback(async (
     key: string,
     command: CommandWithoutId,
@@ -212,9 +223,11 @@ export function useSplitWorkspaceScene({
     request,
     run,
     setActiveTool: layout.setActiveTool,
-    setActivityOpen: () => undefined,
+    setActivityOpen,
     setActionError,
-    activateContext: () => undefined,
+    activateContext: (_activity, tool) => {
+      if (tool) layout.setActiveTool(tool);
+    },
     openProjectPath: actions.openProjectPath,
     navigatePreview: desktopTools.navigatePreview,
   }));
@@ -351,7 +364,7 @@ export function useSplitWorkspaceScene({
     tools,
   ]);
 
-  return useMemo(() => {
+  const scene = useMemo(() => {
     if (!splitConversation || !splitProject) return null;
     return {
       secondary: {
@@ -369,13 +382,10 @@ export function useSplitWorkspaceScene({
       secondaryProjectName: splitProject.name,
       primaryToolsOpen,
       secondaryToolsOpen: layout.activeTool !== null,
+      secondaryFirst: secondaryPaneFirst,
       onTogglePrimaryTools,
       onToggleSecondaryTools: layout.toggleWorkspaceTools,
-      canMakeSecondaryPrimary: !splitSwapBlocked,
-      makeSecondaryPrimaryUnavailableReason: splitSwapBlocked
-        ? "Wait for both active turns to settle before swapping the chats."
-        : undefined,
-      onMakeSecondaryPrimary,
+      onSwapPanes,
       onCloseSecondary,
     };
   }, [
@@ -384,13 +394,17 @@ export function useSplitWorkspaceScene({
     layout.toggleWorkspaceTools,
     model,
     onCloseSecondary,
-    onMakeSecondaryPrimary,
+    onSwapPanes,
     onTogglePrimaryTools,
     primaryToolsOpen,
     project?.name,
+    secondaryPaneFirst,
     sendingConversationIds,
     splitConversation,
     splitProject,
-    splitSwapBlocked,
   ]);
+  return useMemo(() => ({
+    scene,
+    activityActions,
+  }), [activityActions, scene]);
 }

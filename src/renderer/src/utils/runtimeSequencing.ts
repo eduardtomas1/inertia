@@ -7,6 +7,37 @@ export interface RuntimeProjectionState extends RuntimeSyncCursor {
 
 export type RuntimeFrameDecision = "apply" | "ignore" | "gap" | "generation-mismatch";
 export type RuntimeCompletionDecision = "completed" | "ignore" | "gap" | "generation-mismatch";
+export type RuntimeDetailSubscriptionOwner = "primary" | "secondary";
+
+/**
+ * Tracks the conversations owned by the two mounted workspace panes. Keeping
+ * this state beside the socket makes reconnect URLs represent current pane
+ * ownership rather than whichever detail requests happened most recently.
+ */
+export class RuntimeDetailSubscriptions {
+  private readonly conversations: Record<
+    RuntimeDetailSubscriptionOwner,
+    string | null
+  > = {
+    primary: null,
+    secondary: null,
+  };
+
+  set(
+    owner: RuntimeDetailSubscriptionOwner,
+    conversationId: string | null,
+  ): void {
+    this.conversations[owner] = conversationId;
+  }
+
+  conversationIds(): string[] {
+    return [
+      this.conversations.primary,
+      this.conversations.secondary,
+    ].filter((id, index, ids): id is string =>
+      id !== null && ids.indexOf(id) === index);
+  }
+}
 
 function validCursor(cursor: RuntimeSyncCursor): boolean {
   return (

@@ -157,6 +157,74 @@ function renderProjection(
 }
 
 describe("useConversationProjection pending interactions", () => {
+  it("subscribes and unsubscribes the mounted secondary pane explicitly", () => {
+    const source = createEventSource();
+    const request = vi.fn(
+      async (_command: CommandWithoutId): Promise<ServerEvent> => ({
+        type: "request.ok",
+        requestId: crypto.randomUUID(),
+      }),
+    );
+    const initialProps: {
+      enabled: boolean;
+      targetConversationId: string | null;
+    } = {
+      enabled: true,
+      targetConversationId: secondaryId,
+    };
+    const hook = renderHook(
+      (props: {
+        enabled: boolean;
+        targetConversationId: string | null;
+      }) => useConversationProjection({
+        snapshot,
+        status: "offline",
+        request,
+        subscribe: source.subscribe,
+        targetConversationId: props.targetConversationId,
+        enabled: props.enabled,
+        autoOpenPlan: false,
+        onOpenPlan: vi.fn(),
+        onTerminal: vi.fn(),
+      }),
+      {
+        initialProps,
+      },
+    );
+
+    expect(request).toHaveBeenLastCalledWith({
+      type: "conversation.detail.subscription",
+      payload: {
+        owner: "secondary",
+        conversationId: secondaryId,
+      },
+    });
+
+    hook.rerender({
+      enabled: false,
+      targetConversationId: null,
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      type: "conversation.detail.subscription",
+      payload: {
+        owner: "secondary",
+        conversationId: null,
+      },
+    });
+
+    hook.rerender({
+      enabled: true,
+      targetConversationId: primaryId,
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      type: "conversation.detail.subscription",
+      payload: {
+        owner: "secondary",
+        conversationId: primaryId,
+      },
+    });
+  });
+
   it("retains hydrated requests while a secondary pane is closed and reopened", () => {
     const source = createEventSource();
     const hook = renderProjection(source, {

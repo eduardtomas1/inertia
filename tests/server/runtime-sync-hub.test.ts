@@ -195,7 +195,11 @@ describe("runtime sync hub", () => {
     });
     expect(JSON.stringify(runtime.events.get("b"))).not.toContain("private-a");
 
-    runtime.hub.setConversationSubscription("b", CONVERSATION_A);
+    runtime.hub.setConversationSubscription(
+      "b",
+      "secondary",
+      CONVERSATION_A,
+    );
     runtime.events.get("b")!.length = 0;
     runtime.hub.broadcast({
       type: "agent.text",
@@ -221,7 +225,11 @@ describe("runtime sync hub", () => {
       event: { type: "agent.text", text: "now-visible" },
     });
 
-    runtime.hub.setConversationSubscription("b", CONVERSATION_C);
+    runtime.hub.setConversationSubscription(
+      "b",
+      "primary",
+      CONVERSATION_C,
+    );
     runtime.events.get("b")!.length = 0;
     runtime.hub.broadcast({
       type: "agent.text",
@@ -246,6 +254,109 @@ describe("runtime sync hub", () => {
       sync: { latestSequence: 5 },
       event: { type: "agent.text", text: "visible-c" },
     });
+  });
+
+  it("removes a closed secondary pane before subscribing its replacement", () => {
+    const runtime = fixture();
+    runtime.hub.connect("split", {
+      kind: "resume",
+      runtimeGeneration: GENERATION,
+      afterSequence: 0,
+      conversationIds: [CONVERSATION_A, CONVERSATION_B],
+    }, {
+      snapshot,
+      approvals: [],
+      inputs: [],
+      plans: [],
+    });
+    runtime.events.get("split")!.length = 0;
+
+    runtime.hub.setConversationSubscription(
+      "split",
+      "primary",
+      CONVERSATION_A,
+    );
+    runtime.hub.setConversationSubscription("split", "secondary", null);
+    runtime.hub.setConversationSubscription(
+      "split",
+      "secondary",
+      CONVERSATION_C,
+    );
+
+    for (const [conversationId, text] of [
+      [CONVERSATION_A, "still-visible-a"],
+      [CONVERSATION_B, "closed-b"],
+      [CONVERSATION_C, "visible-c"],
+    ] as const) {
+      runtime.hub.broadcast({
+        type: "agent.text",
+        conversationId,
+        runId: "run",
+        turnId: "turn",
+        text,
+      });
+    }
+
+    expect(runtime.events.get("split")).toMatchObject([
+      {
+        type: "runtime.event",
+        event: { type: "agent.text", text: "still-visible-a" },
+      },
+      {
+        type: "runtime.cursor",
+      },
+      {
+        type: "runtime.event",
+        event: { type: "agent.text", text: "visible-c" },
+      },
+    ]);
+    expect(JSON.stringify(runtime.events.get("split"))).not.toContain(
+      "closed-b",
+    );
+  });
+
+  it("keeps legacy detail loads from evicting the primary subscription", () => {
+    const runtime = fixture();
+    runtime.hub.connect("legacy", { kind: "none" }, {
+      snapshot,
+      approvals: [],
+      inputs: [],
+      plans: [],
+    });
+    runtime.events.get("legacy")!.length = 0;
+
+    runtime.hub.ensureConversationSubscription("legacy", CONVERSATION_A);
+    runtime.hub.ensureConversationSubscription("legacy", CONVERSATION_B);
+    runtime.hub.ensureConversationSubscription("legacy", CONVERSATION_C);
+
+    for (const [conversationId, text] of [
+      [CONVERSATION_A, "primary-a"],
+      [CONVERSATION_B, "replaced-b"],
+      [CONVERSATION_C, "secondary-c"],
+    ] as const) {
+      runtime.hub.broadcast({
+        type: "agent.text",
+        conversationId,
+        runId: "run",
+        turnId: "turn",
+        text,
+      });
+    }
+
+    expect(runtime.events.get("legacy")).toMatchObject([
+      {
+        type: "runtime.event",
+        event: { type: "agent.text", text: "primary-a" },
+      },
+      { type: "runtime.cursor" },
+      {
+        type: "runtime.event",
+        event: { type: "agent.text", text: "secondary-c" },
+      },
+    ]);
+    expect(JSON.stringify(runtime.events.get("legacy"))).not.toContain(
+      "replaced-b",
+    );
   });
 
   it("replays compatible cursors, refreshes incompatible generations, and tears down all clients", () => {

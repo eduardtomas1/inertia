@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useEffect, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -16,6 +17,27 @@ function matchMedia(matches: boolean): typeof window.matchMedia {
     removeListener: vi.fn(),
     dispatchEvent: vi.fn(),
   }));
+}
+
+function PaneResource({
+  name,
+  onUnmount,
+}: {
+  name: string;
+  onUnmount: () => void;
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(`${name} attachment`);
+  useEffect(() => onUnmount, [onUnmount]);
+  return (
+    <label>
+      {name}
+      <textarea
+        aria-label={`${name} pending resource`}
+        value={draft}
+        onChange={(event) => setDraft(event.currentTarget.value)}
+      />
+    </label>
+  );
 }
 
 describe("ConversationSplitView", () => {
@@ -48,9 +70,10 @@ describe("ConversationSplitView", () => {
         secondaryProjectName="Windows app"
         primaryToolsOpen={false}
         secondaryToolsOpen={false}
+        secondaryFirst={false}
         onTogglePrimaryTools={() => undefined}
         onToggleSecondaryTools={() => undefined}
-        onMakeSecondaryPrimary={makePrimary}
+        onSwapPanes={makePrimary}
         onCloseSecondary={close}
       />,
     );
@@ -66,7 +89,7 @@ describe("ConversationSplitView", () => {
     })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", {
-      name: "Make Windows focus the primary chat",
+      name: "Move Windows focus to the primary position",
     }));
     fireEvent.click(screen.getByRole("button", {
       name: "Close split chat Windows focus",
@@ -74,6 +97,72 @@ describe("ConversationSplitView", () => {
 
     expect(makePrimary).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("reorders mounted conversation resources without retargeting them", async () => {
+    const primaryUnmounted = vi.fn();
+    const secondaryUnmounted = vi.fn();
+
+    function Harness(): React.JSX.Element {
+      const [secondaryFirst, setSecondaryFirst] = useState(false);
+      return (
+        <ConversationSplitView
+          primary={(
+            <PaneResource name="Primary" onUnmount={primaryUnmounted} />
+          )}
+          secondary={(
+            <PaneResource name="Secondary" onUnmount={secondaryUnmounted} />
+          )}
+          primaryTitle="Provider routing"
+          secondaryTitle="Windows focus"
+          primaryProjectName="Inertia"
+          secondaryProjectName="Windows app"
+          primaryToolsOpen
+          secondaryToolsOpen={false}
+          secondaryFirst={secondaryFirst}
+          onTogglePrimaryTools={() => undefined}
+          onToggleSecondaryTools={() => undefined}
+          onSwapPanes={() => setSecondaryFirst((current) => !current)}
+          onCloseSecondary={() => undefined}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.change(screen.getByRole("textbox", {
+      name: "Primary pending resource",
+    }), { target: { value: "primary terminal and attachment" } });
+    fireEvent.change(screen.getByRole("textbox", {
+      name: "Secondary pending resource",
+    }), { target: { value: "secondary preview and attachment" } });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Move Windows focus to the primary position",
+    }));
+
+    expect(screen.getByRole("region", {
+      name: "Primary chat: Windows app · Windows focus",
+    })).toContainElement(screen.getByRole("textbox", {
+      name: "Secondary pending resource",
+    }));
+    expect(screen.getByRole("region", {
+      name: "Second chat: Inertia · Provider routing",
+    })).toContainElement(screen.getByRole("textbox", {
+      name: "Primary pending resource",
+    }));
+    expect(screen.getByRole("textbox", {
+      name: "Primary pending resource",
+    })).toHaveValue("primary terminal and attachment");
+    expect(screen.getByRole("textbox", {
+      name: "Secondary pending resource",
+    })).toHaveValue("secondary preview and attachment");
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", {
+        name: "Secondary pending resource",
+      })).toHaveFocus();
+    });
+    expect(primaryUnmounted).not.toHaveBeenCalled();
+    expect(secondaryUnmounted).not.toHaveBeenCalled();
   });
 
   it("supports keyboard resizing and persists the committed percentage", () => {
@@ -87,9 +176,10 @@ describe("ConversationSplitView", () => {
         secondaryProjectName="Beta"
         primaryToolsOpen={false}
         secondaryToolsOpen={false}
+        secondaryFirst={false}
         onTogglePrimaryTools={() => undefined}
         onToggleSecondaryTools={() => undefined}
-        onMakeSecondaryPrimary={() => undefined}
+        onSwapPanes={() => undefined}
         onCloseSecondary={() => undefined}
       />,
     );
@@ -120,9 +210,10 @@ describe("ConversationSplitView", () => {
         secondaryProjectName="Beta"
         primaryToolsOpen={false}
         secondaryToolsOpen={false}
+        secondaryFirst={false}
         onTogglePrimaryTools={() => undefined}
         onToggleSecondaryTools={() => undefined}
-        onMakeSecondaryPrimary={() => undefined}
+        onSwapPanes={() => undefined}
         onCloseSecondary={() => undefined}
       />,
     );

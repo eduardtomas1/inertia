@@ -6,6 +6,7 @@ import type {
   ServerEvent,
 } from "@shared/contracts";
 import {
+  RuntimeDetailSubscriptions,
   runtimeResumeUrl,
   RuntimeProjectionSequence,
 } from "../utils/runtimeSequencing";
@@ -56,7 +57,7 @@ export function useInertiaConnection(): InertiaConnection {
   const pendingRef = useRef(new Map<string, PendingConnectionRequest>());
   const listenersRef = useRef(new Set<EventListener>());
   const projectionRef = useRef(new RuntimeProjectionSequence());
-  const detailConversationRef = useRef<string[]>([]);
+  const detailSubscriptionsRef = useRef(new RuntimeDetailSubscriptions());
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [runtimeGeneration, setRuntimeGeneration] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
@@ -99,7 +100,7 @@ export function useInertiaConnection(): InertiaConnection {
         const socket = new WebSocket(runtimeResumeUrl(
           websocketUrl,
           resumeCursor,
-          detailConversationRef.current,
+          detailSubscriptionsRef.current.conversationIds(),
         ));
         socketRef.current = socket;
 
@@ -220,6 +221,12 @@ export function useInertiaConnection(): InertiaConnection {
   }, [rejectPending]);
 
   const sendCommand = useCallback((command: ClientCommand): Promise<ServerEvent> => {
+    if (command.type === "conversation.detail.subscription") {
+      detailSubscriptionsRef.current.set(
+        command.payload.owner,
+        command.payload.conversationId,
+      );
+    }
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error("The local service is reconnecting. Try again in a moment."));
@@ -234,14 +241,6 @@ export function useInertiaConnection(): InertiaConnection {
       pendingRef.current.set(command.requestId, { resolve, reject, timeout });
       try {
         socket.send(JSON.stringify(command));
-        if (command.type === "conversation.detail.load") {
-          detailConversationRef.current = [
-            ...detailConversationRef.current.filter(
-              (id) => id !== command.payload.conversationId,
-            ),
-            command.payload.conversationId,
-          ].slice(-2);
-        }
       } catch (sendError) {
         window.clearTimeout(timeout);
         pendingRef.current.delete(command.requestId);

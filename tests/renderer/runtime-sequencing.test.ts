@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  RuntimeDetailSubscriptions,
   runtimeResumeUrl,
   RuntimeProjectionSequence,
 } from "../../src/renderer/src/utils/runtimeSequencing";
@@ -8,6 +9,8 @@ import {
 const GENERATION_A = "11111111-1111-4111-8111-111111111111";
 const GENERATION_B = "22222222-2222-4222-8222-222222222222";
 const CONVERSATION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const CONVERSATION_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const CONVERSATION_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 describe("RuntimeProjectionSequence", () => {
   it("ignores duplicates and requires a refresh for a live gap", () => {
@@ -64,5 +67,30 @@ describe("RuntimeProjectionSequence", () => {
       [CONVERSATION],
     ))
       .toBe("ws://127.0.0.1:4312/runtime/token");
+  });
+
+  it("builds reconnect ownership from mounted panes rather than recent loads", () => {
+    const subscriptions = new RuntimeDetailSubscriptions();
+    subscriptions.set("primary", CONVERSATION);
+    subscriptions.set("secondary", CONVERSATION_B);
+    subscriptions.set("secondary", null);
+    subscriptions.set("secondary", CONVERSATION_C);
+
+    expect(subscriptions.conversationIds()).toEqual([
+      CONVERSATION,
+      CONVERSATION_C,
+    ]);
+    const resumed = new URL(runtimeResumeUrl(
+      "ws://127.0.0.1:4312/runtime/token",
+      { runtimeGeneration: GENERATION_A, latestSequence: 23 },
+      subscriptions.conversationIds(),
+    ));
+    expect(resumed.searchParams.getAll("conversationId")).toEqual([
+      CONVERSATION,
+      CONVERSATION_C,
+    ]);
+
+    subscriptions.set("secondary", CONVERSATION);
+    expect(subscriptions.conversationIds()).toEqual([CONVERSATION]);
   });
 });

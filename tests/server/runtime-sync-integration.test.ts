@@ -142,6 +142,41 @@ describe("runtime incremental synchronization", () => {
     expect(second.sync.latestSequence).toBe(first.sync.latestSequence + 1);
   });
 
+  it("acknowledges explicit mounted-pane subscription lifecycle updates", async () => {
+    const runtime = await runtimeFixture();
+    const client = await connect(runtime.websocketUrl);
+    await client.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
+    );
+    await client.next(
+      (event): event is Extract<
+        ServerEvent,
+        { type: "runtime.sync.completed" }
+      > => event.type === "runtime.sync.completed",
+    );
+    const conversationId = randomUUID();
+
+    for (const [owner, mountedConversationId] of [
+      ["primary", conversationId],
+      ["primary", null],
+    ] as const) {
+      const requestId = randomUUID();
+      send(client.socket, {
+        type: "conversation.detail.subscription",
+        requestId,
+        payload: {
+          owner,
+          conversationId: mountedConversationId,
+        },
+      });
+      await client.next(
+        (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+          event.type === "request.ok" && event.requestId === requestId,
+      );
+    }
+  });
+
   it("reconnects from the last accepted cursor and resets an incompatible generation", async () => {
     const runtime = await runtimeFixture();
     const firstClient = await connect(runtime.websocketUrl);

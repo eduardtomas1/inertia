@@ -148,8 +148,11 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   );
   await expect(primarySession).toHaveAttribute("data-terminal-id", /.+/u);
   await expect(secondarySession).toHaveAttribute("data-terminal-id", /.+/u);
-  expect(await primarySession.getAttribute("data-terminal-id"))
-    .not.toBe(await secondarySession.getAttribute("data-terminal-id"));
+  const primaryTerminalId =
+    await primarySession.getAttribute("data-terminal-id");
+  const secondaryTerminalId =
+    await secondarySession.getAttribute("data-terminal-id");
+  expect(primaryTerminalId).not.toBe(secondaryTerminalId);
   await expect(primaryTerminal.getByText("Inertia", { exact: true }))
     .toBeVisible();
   await expect(secondaryTerminal.getByText("Companion", { exact: true }))
@@ -266,9 +269,9 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     exact: true,
   }).click();
 
-  await secondary.getByRole("button", {
-    name: `Make ${secondaryTitle} the primary chat`,
-  }).click();
+  await sidebar.locator("button.conversation-row")
+    .filter({ hasText: secondaryTitle })
+    .click();
   primary = page.getByRole("region", {
     name: `Primary chat: Companion · ${secondaryTitle}`,
   });
@@ -277,6 +280,19 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   });
   await expect(primary).toBeVisible();
   await expect(secondary).toBeVisible();
+  await expect(primary).toHaveAttribute(
+    "id",
+    "secondary-conversation-pane",
+  );
+  await expect(secondary).toHaveAttribute(
+    "id",
+    "primary-conversation-pane",
+  );
+  const promotedBounds = await primary.boundingBox();
+  const demotedBounds = await secondary.boundingBox();
+  expect(promotedBounds).not.toBeNull();
+  expect(demotedBounds).not.toBeNull();
+  expect(promotedBounds!.x).toBeLessThan(demotedBounds!.x);
   await expect(primary.getByRole("textbox", { name: "Message" }))
     .toHaveValue("Draft owned by Companion");
   await expect(secondary.getByRole("textbox", { name: "Message" }))
@@ -289,6 +305,27 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     secondary.getByRole("complementary", { name: "Workspace tools" })
       .getByText("Inertia", { exact: true }),
   ).toBeVisible();
+  await expect(
+    primary.locator(".terminal-panel[data-terminal-id]"),
+  ).toHaveAttribute(
+    "data-terminal-id",
+    secondaryTerminalId ?? "",
+  );
+  await expect(
+    secondary.locator(".terminal-panel[data-terminal-id]"),
+  ).toHaveAttribute(
+    "data-terminal-id",
+    primaryTerminalId ?? "",
+  );
+  await expect(secondary.getByRole("button", {
+    name: "Preview attachment preview.png",
+  })).toBeVisible();
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ webContents }, urls) => urls.every((url) =>
+      webContents.getAllWebContents().some((contents) =>
+        contents.getURL() === url)),
+    [primaryPreviewUrl, secondaryPreviewUrl],
+  )).toBe(true);
 
   await app.resizeWindow(760, 820);
   await expect(page.getByRole("separator", {
@@ -311,13 +348,13 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     contentType: "image/png",
   });
 
-  await secondary.getByRole("button", {
-    name: `Close split chat ${primaryTitle}`,
+  await primary.getByRole("button", {
+    name: `Close split chat ${secondaryTitle}`,
   }).click();
   await expect(split).toHaveCount(0);
   await expect(page.getByRole("main")).toHaveCount(1);
   await expect(page.getByRole("heading", {
-    name: secondaryTitle,
+    name: primaryTitle,
     level: 1,
   })).toBeVisible();
   expect(app.rendererErrors).toEqual([]);

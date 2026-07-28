@@ -10440,7 +10440,14 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   overflow: hidden;
 }
 
-.conversation-split-pane.is-secondary {
+.conversation-split-pane.is-primary-position {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.conversation-split-pane.is-secondary-position {
+  grid-column: 3;
+  grid-row: 1;
   border-left: 1px solid var(--execution-separator);
 }
 
@@ -10540,6 +10547,8 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .conversation-split-resize-handle {
+  grid-column: 2;
+  grid-row: 1;
   align-self: stretch;
 }
 
@@ -10562,7 +10571,22 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     minmax(0, calc(100% - var(--conversation-split-percent) - 7px));
 }
 
-.conversation-split-view.is-stacked .conversation-split-pane.is-secondary {
+.conversation-split-view.is-stacked
+  .conversation-split-pane.is-primary-position {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.conversation-split-view.is-stacked
+  .conversation-split-pane.is-secondary-position {
+  grid-column: 1;
+  grid-row: 3;
   border-top: 1px solid var(--execution-separator);
   border-left: 0;
+}
+
+.conversation-split-view.is-stacked
+  .conversation-split-resize-handle {
+  grid-column: 1;
+  grid-row: 2;
 }

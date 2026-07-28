@@ -226,7 +226,7 @@ describe("client command contract", () => {
     }).success).toBe(false);
   });
 
-  it("accepts only one UUID-scoped conversation detail target", () => {
+  it("accepts UUID-scoped conversation detail loads and pane subscriptions", () => {
     const command = {
       type: "conversation.detail.load",
       requestId: crypto.randomUUID(),
@@ -236,6 +236,27 @@ describe("client command contract", () => {
     expect(clientCommandSchema.safeParse({
       ...command,
       payload: { conversationId: "all", includeAll: true },
+    }).success).toBe(false);
+
+    const subscription = {
+      type: "conversation.detail.subscription",
+      requestId: crypto.randomUUID(),
+      payload: {
+        owner: "secondary",
+        conversationId: crypto.randomUUID(),
+      },
+    };
+    expect(clientCommandSchema.parse(subscription)).toEqual(subscription);
+    expect(clientCommandSchema.parse({
+      ...subscription,
+      payload: { owner: "secondary", conversationId: null },
+    })).toMatchObject({
+      type: "conversation.detail.subscription",
+      payload: { owner: "secondary", conversationId: null },
+    });
+    expect(clientCommandSchema.safeParse({
+      ...subscription,
+      payload: { owner: "background", conversationId: crypto.randomUUID() },
     }).success).toBe(false);
   });
 

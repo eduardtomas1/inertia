@@ -76,6 +76,9 @@ export function useConversationProjection({
       ? snapshot?.activeConversationId ?? null
       : targetConversationId
     : null;
+  const subscriptionOwner = targetConversationId === undefined
+    ? "primary"
+    : "secondary";
   const conversation = useMemo(
     () => snapshot?.conversations.find(({ id }) =>
       id === conversationId) ?? null,
@@ -101,6 +104,32 @@ export function useConversationProjection({
       ? mergeConversationShell(detailState.detail, conversation)
       : detailState.detail;
   }, [conversation, detailState]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const setSubscription = (nextConversationId: string | null): void => {
+      void request({
+        type: "conversation.detail.subscription",
+        payload: {
+          owner: subscriptionOwner,
+          conversationId: nextConversationId,
+        },
+      }).catch(() => undefined);
+    };
+    setSubscription(conversationId);
+    return () => setSubscription(null);
+  }, [conversationId, request, subscriptionOwner]);
+
+  useEffect(() => {
+    if (status !== "online" || !conversationId) return;
+    void request({
+      type: "conversation.detail.subscription",
+      payload: {
+        owner: subscriptionOwner,
+        conversationId,
+      },
+    }).catch(() => undefined);
+  }, [conversationId, request, status, subscriptionOwner]);
 
   useEffect(() => {
     if (!conversationId) {

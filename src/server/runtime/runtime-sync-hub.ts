@@ -22,13 +22,22 @@ export interface RuntimeSyncHydration {
   plans: Iterable<AgentPlan>;
 }
 
+type RuntimeSubscriptionOwner = "primary" | "secondary";
+
+interface RuntimeClientSubscription extends RuntimeDetailSubscription {
+  mountedConversations: Record<
+    RuntimeSubscriptionOwner,
+    string | null
+  >;
+}
+
 /**
  * Owns synchronization state for connected renderer sockets: subscriptions,
  * monotonic publication, replay, fresh hydration, and connection teardown.
  * Socket admission and command execution remain in the protocol layer.
  */
 export class RuntimeSyncHub<Socket> {
-  private readonly clients = new Map<Socket, RuntimeDetailSubscription>();
+  private readonly clients = new Map<Socket, RuntimeClientSubscription>();
 
   constructor(
     private readonly send: (socket: Socket, event: ServerEvent) => void,
@@ -48,10 +57,15 @@ export class RuntimeSyncHub<Socket> {
     resumeRequest: RuntimeResumeRequest,
     hydration: RuntimeSyncHydration,
   ): void {
-    const subscription = {
-      conversationIds: resumeRequest.kind === "resume"
-        ? [...resumeRequest.conversationIds]
-        : [],
+    const resumedConversationIds = resumeRequest.kind === "resume"
+      ? [...resumeRequest.conversationIds]
+      : [];
+    const subscription: RuntimeClientSubscription = {
+      conversationIds: resumedConversationIds,
+      mountedConversations: {
+        primary: resumedConversationIds[0] ?? null,
+        secondary: resumedConversationIds[1] ?? null,
+      },
     };
     const replay = resumeRequest.kind === "resume"
       ? this.sequencer.replay(
@@ -96,13 +110,40 @@ export class RuntimeSyncHub<Socket> {
     });
   }
 
-  setConversationSubscription(socket: Socket, conversationId: string): void {
+  setConversationSubscription(
+    socket: Socket,
+    owner: RuntimeSubscriptionOwner,
+    conversationId: string | null,
+  ): void {
     const subscription = this.clients.get(socket);
     if (!subscription) return;
+    subscription.mountedConversations[owner] = conversationId;
     subscription.conversationIds = [
-      ...subscription.conversationIds.filter((id) => id !== conversationId),
-      conversationId,
-    ].slice(-2);
+      subscription.mountedConversations.primary,
+      subscription.mountedConversations.secondary,
+    ].filter((id, index, ids): id is string =>
+      id !== null && ids.indexOf(id) === index);
+  }
+
+  /**
+   * Keeps detail.load compatible with older renderers and direct protocol
+   * clients. Explicit pane ownership remains authoritative; an unowned load
+   * fills an empty slot or replaces only the secondary slot, so it can never
+   * evict the visible primary conversation.
+   */
+  ensureConversationSubscription(
+    socket: Socket,
+    conversationId: string,
+  ): void {
+    const subscription = this.clients.get(socket);
+    if (
+      !subscription
+      || subscription.conversationIds.includes(conversationId)
+    ) return;
+    const owner = subscription.mountedConversations.primary === null
+      ? "primary"
+      : "secondary";
+    this.setConversationSubscription(socket, owner, conversationId);
   }
 
   disconnect(socket: Socket): void {

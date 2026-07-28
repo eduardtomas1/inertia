@@ -145,6 +145,16 @@ export const appCommandSchemas = [
   z
     .object({
       ...requestBase,
+      type: z.literal("conversation.detail.subscription"),
+      payload: z.object({
+        owner: z.enum(["primary", "secondary"]),
+        conversationId: z.string().uuid().nullable(),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("conversation.update"),
       payload: z
         .object({

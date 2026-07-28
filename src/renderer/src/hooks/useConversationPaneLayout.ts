@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -43,6 +44,27 @@ function initialTool(storageKey: string): WorkspacePanelTab {
     ?? "terminal";
 }
 
+interface PersistedPaneToolState {
+  key: string;
+  activeTool: WorkspacePanelTab | null;
+  lastTool: WorkspacePanelTab;
+}
+
+function storedPaneToolState(
+  key: string,
+  toolStorageKey: string,
+  openStorageKey: string,
+): PersistedPaneToolState {
+  const lastTool = initialTool(toolStorageKey);
+  return {
+    key,
+    activeTool: window.localStorage.getItem(openStorageKey) === "true"
+      ? lastTool
+      : null,
+    lastTool,
+  };
+}
+
 /**
  * Owns the tool surface inside one split pane. Pane state is intentionally
  * scoped by conversation so swapping or reopening a split never transfers a
@@ -57,10 +79,13 @@ export function useConversationPaneLayout(
     `inertia:layout:split-pane-open:${conversationId ?? "empty"}:v1`;
   const heightStorageKey =
     `inertia:layout:split-pane-height:${conversationId ?? "empty"}:v1`;
-  const [activeTool, setActiveToolState] =
-    useState<WorkspacePanelTab | null>(null);
-  const activeToolRef = useRef<WorkspacePanelTab | null>(null);
-  const lastToolRef = useRef<WorkspacePanelTab>(initialTool(toolStorageKey));
+  const ownerKey = conversationId ?? "empty";
+  const [persistedToolState, setPersistedToolState] = useState(() =>
+    storedPaneToolState(ownerKey, toolStorageKey, openStorageKey));
+  const toolState = persistedToolState.key === ownerKey
+    ? persistedToolState
+    : storedPaneToolState(ownerKey, toolStorageKey, openStorageKey);
+  const activeTool = toolState.activeTool;
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = usePersistedSize(
     heightStorageKey,
@@ -69,35 +94,43 @@ export function useConversationPaneLayout(
   );
 
   useEffect(() => {
-    const nextLastTool = initialTool(toolStorageKey);
-    const nextActive = window.localStorage.getItem(openStorageKey) === "true"
-      ? nextLastTool
-      : null;
-    activeToolRef.current = nextActive;
-    lastToolRef.current = nextLastTool;
-    setActiveToolState(nextActive);
-  }, [openStorageKey, toolStorageKey]);
-
-  const setActiveTool = useMemo<Dispatch<
-    SetStateAction<WorkspacePanelTab | null>
-  >>(() => (update) => {
-    const next = typeof update === "function"
-      ? update(activeToolRef.current)
-      : update;
-    activeToolRef.current = next;
-    setActiveToolState(next);
-    window.localStorage.setItem(openStorageKey, String(next !== null));
-    if (next) {
-      lastToolRef.current = next;
-      window.localStorage.setItem(toolStorageKey, next);
+    if (persistedToolState.key !== ownerKey) {
+      setPersistedToolState(
+        storedPaneToolState(ownerKey, toolStorageKey, openStorageKey),
+      );
     }
-  }, [openStorageKey, toolStorageKey]);
+  }, [
+    openStorageKey,
+    ownerKey,
+    persistedToolState.key,
+    toolStorageKey,
+  ]);
 
-  const toggleWorkspaceTools = useMemo(() => () => {
+  const setActiveTool = useCallback<Dispatch<
+    SetStateAction<WorkspacePanelTab | null>
+  >>((update) => {
+    setPersistedToolState((current) => {
+      const owned = current.key === ownerKey
+        ? current
+        : storedPaneToolState(ownerKey, toolStorageKey, openStorageKey);
+      const next = typeof update === "function"
+        ? update(owned.activeTool)
+        : update;
+      window.localStorage.setItem(openStorageKey, String(next !== null));
+      if (next) window.localStorage.setItem(toolStorageKey, next);
+      return {
+        key: ownerKey,
+        activeTool: next,
+        lastTool: next ?? owned.lastTool,
+      };
+    });
+  }, [openStorageKey, ownerKey, toolStorageKey]);
+
+  const toggleWorkspaceTools = useCallback(() => {
     setActiveTool(
-      activeToolRef.current ? null : lastToolRef.current,
+      activeTool ? null : toolState.lastTool,
     );
-  }, [setActiveTool]);
+  }, [activeTool, setActiveTool, toolState.lastTool]);
 
   return useMemo(() => ({
     activeTool,

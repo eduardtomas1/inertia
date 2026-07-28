@@ -53,11 +53,10 @@ export interface WorkspaceSceneProps {
     secondaryProjectName: string;
     primaryToolsOpen: boolean;
     secondaryToolsOpen: boolean;
+    secondaryFirst: boolean;
     onTogglePrimaryTools: () => void;
     onToggleSecondaryTools: () => void;
-    canMakeSecondaryPrimary?: boolean;
-    makeSecondaryPrimaryUnavailableReason?: string;
-    onMakeSecondaryPrimary: () => void;
+    onSwapPanes: () => void;
     onCloseSecondary: () => void;
   } | null;
   resizeHandle: ComponentProps<typeof PaneResizeHandle> | null;
@@ -171,13 +170,10 @@ function WorkspaceSceneView({
           secondaryProjectName={splitScene.secondaryProjectName}
           primaryToolsOpen={splitScene.primaryToolsOpen}
           secondaryToolsOpen={splitScene.secondaryToolsOpen}
+          secondaryFirst={splitScene.secondaryFirst}
           onTogglePrimaryTools={splitScene.onTogglePrimaryTools}
           onToggleSecondaryTools={splitScene.onToggleSecondaryTools}
-          canMakeSecondaryPrimary={splitScene.canMakeSecondaryPrimary}
-          makeSecondaryPrimaryUnavailableReason={
-            splitScene.makeSecondaryPrimaryUnavailableReason
-          }
-          onMakeSecondaryPrimary={splitScene.onMakeSecondaryPrimary}
+          onSwapPanes={splitScene.onSwapPanes}
           onCloseSecondary={splitScene.onCloseSecondary}
         />
       ) : detailState ? (

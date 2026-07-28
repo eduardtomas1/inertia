@@ -106,13 +106,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.12
+### Version 0.0.13
 
-This release makes evidence about a change arrive much faster. Real renderer interaction tests now cover focus, keyboard, disclosure, and terminal ownership; the 35-scenario Electron suite is split into focused feature gates; all-source coverage is measured; and structural import, cycle, facade, and size rules protect the architecture.
+This release turns the workspace into a calmer control surface. The new Environment summary keeps Git state, active work, delegated agents, and recent context close without opening a permanent tool panel. Activity is more concise, provider-reported quota limits can notify before they run out, and image or PDF attachments have useful previews before sending.
 
-Node.js onboarding, private security reporting, privacy-aware bug reports, deterministic third-party notices, dependency updates, and a weekly latest-provider canary make maintenance more predictable. The release also prevents delayed terminal startup from stealing command-palette focus on Windows.
+Two chats can now share the window even when they belong to different projects. Each side retains its own files, Git review, terminal sessions, plan, preview, draft, provider route, approvals, questions, and changed-file state; visually promoting a pane never transfers or destroys those resources.
 
-Download [Inertia v0.0.12](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.12):
+Download [Inertia v0.0.13](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.13):
 
 | Platform | Download |
 | --- | --- |

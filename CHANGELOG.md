@@ -4,10 +4,12 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.13 — 2026-07-28
+
 ### Two chats, two complete workspaces
 
 - Any second chat can open beside the current one, even when it belongs to another project. Each pane keeps its own draft, provider route, transcript, files, Git review, changed-file context, terminal sessions, plan, preview, and actions.
-- Split chats can be resized side by side or stacked in a narrow window, swapped when both are safe to move, and closed without transferring one provider's context into the other.
+- Split chats can be resized side by side or stacked in a narrow window. Promoting a chat changes only its visual position, preserving both conversations' terminals, previews, attachments, drafts, and provider context.
 - Workspace tools move below each split chat so both projects retain usable height. Each pane remembers its own selected tool and size, while terminals stay alive after their first activation as the user moves between Changes, Files, Plan, and Preview.
 - Conversation detail subscriptions, pending approvals and questions, delayed Git/files/review responses, reversible Undo handles, activity actions, and native preview requests now carry explicit pane ownership so closing or switching one project cannot lose its controls or replace or navigate the other.
 
@@ -27,7 +29,7 @@ The useful changes in each Inertia release, in plain language.
 
 ### Release confidence
 
-- The release candidate passes architecture checks, standard and type-aware lint, four TypeScript projects, 1,144 unit and integration tests, 114 portable provider tests, 37 Electron end-to-end scenarios, packaged-app smoke, Electron fuse verification, strict macOS bundle verification, and the production dependency audit.
+- The release candidate passes architecture checks, standard and type-aware lint, four TypeScript projects, 1,154 unit and integration tests, 114 portable provider tests, 37 Electron end-to-end scenarios, packaged-app smoke, Electron fuse verification, strict macOS bundle verification, and the production dependency audit.
 - Cross-platform coverage includes wide and stacked split chats, different project roots, independent terminal IDs and working directories, dual native previews, attachment modal ownership, compact startup, quota thresholds, activity grouping, reconnect sequencing, and accessible focus restoration.
 
 ## 0.0.12 — 2026-07-28

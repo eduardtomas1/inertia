@@ -137,6 +137,39 @@ describe("Git checkpoints", () => {
     ).toBe("checkpoint bytes");
   });
 
+  it("preserves repository and configured excludes without enabling filters", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const configuredExcludes = join(indexes, "configured-excludes");
+    writeFileSync(
+      join(root, ".git", "info", "exclude"),
+      "repository-secret.txt\n",
+    );
+    writeFileSync(configuredExcludes, "configured-secret.txt\n");
+    git(root, "config", "core.excludesFile", configuredExcludes);
+    writeFileSync(join(root, "repository-secret.txt"), "private\n");
+    writeFileSync(join(root, "configured-secret.txt"), "private\n");
+    writeFileSync(join(root, "visible-untracked.txt"), "visible\n");
+
+    const checkpoint = await createCheckpoint(
+      root,
+      indexes,
+      randomUUID(),
+    );
+    const paths = git(
+      root,
+      "ls-tree",
+      "-r",
+      "--name-only",
+      checkpoint.ref,
+    ).split("\n");
+
+    expect(paths).toContain("visible-untracked.txt");
+    expect(paths).not.toContain("repository-secret.txt");
+    expect(paths).not.toContain("configured-secret.txt");
+  });
+
   it("creates a provider-host pull request URL without network access", async () => {
     const root = repository();
     git(root, "remote", "add", "origin", "git@github.com:example/inertia.git");

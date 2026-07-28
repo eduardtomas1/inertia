@@ -9,12 +9,15 @@ export class CheckpointError extends Error {}
 
 type RunResult = { stdout: Buffer; stderr: Buffer };
 
+const MAX_CHECKPOINT_PATH_BYTES = 16 * 1024 * 1024;
+
 function runGit(
   cwd: string,
   args: string[],
   environment: NodeJS.ProcessEnv = process.env,
   input?: Buffer,
   acceptedExitCodes: readonly number[] = [0],
+  maxStdoutBytes = 1024 * 1024,
 ): Promise<RunResult> {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn("git", args, {
@@ -28,6 +31,7 @@ function runGit(
     const stderr: Buffer[] = [];
     let stdoutBytes = 0;
     let stderrBytes = 0;
+    let stdoutLimitExceeded = false;
     const timer = setTimeout(() => { child.kill("SIGKILL"); rejectRun(new CheckpointError("Checkpoint operation timed out.")); }, 20_000);
     timer.unref();
     if (input && child.stdin) {
@@ -35,10 +39,18 @@ function runGit(
       child.stdin.end(input);
     }
     child.stdout!.on("data", (chunk: Buffer) => {
-      if (stdoutBytes >= 1024 * 1024) return;
-      const part = chunk.subarray(0, 1024 * 1024 - stdoutBytes);
+      if (stdoutBytes >= maxStdoutBytes) {
+        stdoutLimitExceeded = true;
+        child.kill("SIGKILL");
+        return;
+      }
+      const part = chunk.subarray(0, maxStdoutBytes - stdoutBytes);
       stdout.push(part);
       stdoutBytes += part.length;
+      if (part.length < chunk.length) {
+        stdoutLimitExceeded = true;
+        child.kill("SIGKILL");
+      }
     });
     child.stderr!.on("data", (chunk: Buffer) => {
       if (stderrBytes >= 16 * 1024) return;
@@ -53,7 +65,9 @@ function runGit(
         stdout: Buffer.concat(stdout),
         stderr: Buffer.concat(stderr),
       };
-      if (code !== null && acceptedExitCodes.includes(code)) resolveRun(result);
+      if (stdoutLimitExceeded) {
+        rejectRun(new CheckpointError("The checkpoint contains too many file paths."));
+      } else if (code !== null && acceptedExitCodes.includes(code)) resolveRun(result);
       else rejectRun(new CheckpointError(result.stderr.toString("utf8").toLowerCase().includes("not a git repository") ? "not-repository" : "Git could not create the checkpoint."));
     });
   });
@@ -169,6 +183,22 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
   try {
     let head: string | null = null;
     try { head = (await runGit(repositoryPath, checkpointGitArguments(["rev-parse", "--verify", "HEAD"]))).stdout.toString("utf8").trim(); } catch { /* Repositories without a first commit are supported. */ }
+    const includedPaths = (
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments([
+          "ls-files",
+          "--cached",
+          "--others",
+          "--exclude-standard",
+          "-z",
+        ]),
+        process.env,
+        undefined,
+        [0],
+        MAX_CHECKPOINT_PATH_BYTES,
+      )
+    ).stdout;
     isolated = await checkpointEnvironment(
       repositoryPath,
       storageDirectory,
@@ -177,11 +207,19 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
     );
     const environment = isolated.environment;
     await runGit(repositoryPath, head ? ["read-tree", head] : ["read-tree", "--empty"], environment);
-    await runGit(
-      repositoryPath,
-      checkpointGitArguments(["add", "-A", "--", "."]),
-      environment,
-    );
+    if (includedPaths.length > 0) {
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments([
+          "add",
+          "-A",
+          "--pathspec-from-file=-",
+          "--pathspec-file-nul",
+        ]),
+        environment,
+        includedPaths,
+      );
+    }
     const tree = (await runGit(repositoryPath, ["write-tree"], environment)).stdout.toString("utf8").trim();
     const commitArgs = ["commit-tree", tree, "-m", "Inertia checkpoint"];
     if (head) commitArgs.push("-p", head);

@@ -88,8 +88,13 @@ export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
   content: string;
   attachments?: ChatAttachment[];
+  activateConversation?: boolean;
   executionContext?: PersistedTurnExecutionContext;
   requestedAt?: string;
+}
+
+export interface CreateMessageOptions {
+  activateConversation?: boolean;
 }
 
 export interface AgentTurnSettlementUpdate

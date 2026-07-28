@@ -620,6 +620,7 @@ export default function App(): React.JSX.Element {
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
+    activate = true,
   ): Promise<void> => {
     setSendingConversationIds((current) => {
       const next = new Set(current);
@@ -633,6 +634,7 @@ export default function App(): React.JSX.Element {
         conversationId: targetConversationId,
         content,
         attachments,
+        activate,
         ...(context ? { context } : {}),
       },
     };

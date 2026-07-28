@@ -13,6 +13,7 @@ import {
 import type { PersistenceContext } from "./context";
 import { RecordNotFoundError } from "./errors";
 import type { MessageRow } from "./rows";
+import type { CreateMessageOptions } from "./types";
 
 type TranscriptPersistenceContext = Pick<
   PersistenceContext,
@@ -33,6 +34,7 @@ export class TranscriptRepository {
     attachments: ChatAttachment[] = [],
     turnId: string | null = null,
     createdAt?: string,
+    options: CreateMessageOptions = {},
   ): ChatMessage {
     const conversation = this.context.requireConversation(conversationId);
     if (turnId) {
@@ -55,7 +57,7 @@ export class TranscriptRepository {
         WHERE id = ?
       `).run(now, role, now, conversationId);
       this.context.touchProject(conversation.project_id, now);
-      if (role === "user") {
+      if (role === "user" && options.activateConversation !== false) {
         this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1")
           .run(conversation.project_id, conversationId);
       }

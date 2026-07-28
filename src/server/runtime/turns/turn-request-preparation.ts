@@ -129,6 +129,7 @@ export function prepareTurnRequest(
     runId,
     content: assembled.visibleContent,
     attachments,
+    activateConversation: request.activateConversation,
     executionContext: assembled.persistence,
     providerId: route.providerId,
     modelSelection,

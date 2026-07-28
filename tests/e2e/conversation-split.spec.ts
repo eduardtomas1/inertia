@@ -91,6 +91,16 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
 
+  await secondary.getByRole("button", { name: "Send message" }).click();
+  await expect(split).toBeVisible();
+  await expect(primary).toBeVisible();
+  await expect(secondary).toBeVisible();
+  await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
+  await expect(
+    secondary.getByText("Draft owned by Companion", { exact: true }),
+  ).toBeVisible();
+  await secondaryMessage.fill("Draft owned by Companion");
+
   const primaryFiles = await openPaneTool(primary, primaryTitle, "Files");
   await expect(
     primaryFiles.getByRole("treeitem", { name: "sample.ts", exact: true }),

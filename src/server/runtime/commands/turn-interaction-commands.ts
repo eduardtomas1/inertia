@@ -215,6 +215,7 @@ export function createTurnInteractionCommandHandler(
                 conversationId: conversation.id,
                 content: command.payload.content,
                 attachments,
+                activateConversation: command.payload.activate,
                 context: command.payload.context,
                 checkpointId,
               })
@@ -231,6 +232,9 @@ export function createTurnInteractionCommandHandler(
               command.payload.content,
               "user",
               attachments,
+              null,
+              undefined,
+              { activateConversation: command.payload.activate },
             );
             attachmentOwnershipAccepted = true;
           }

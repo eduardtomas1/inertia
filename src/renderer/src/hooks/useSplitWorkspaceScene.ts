@@ -79,6 +79,7 @@ interface SplitWorkspaceActions
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
+    activate?: boolean,
   ) => Promise<void>;
   updateConversationById: (
     conversationId: string,
@@ -298,6 +299,7 @@ export function useSplitWorkspaceScene({
           content,
           attachments,
           context,
+          false,
         )
       : Promise.resolve(),
     updateConversation: (

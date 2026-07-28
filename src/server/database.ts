@@ -62,6 +62,7 @@ import type {
   BeginAgentTurnInput,
   CompleteTurnGitArtifactInput,
   CreateAgentTurnInput,
+  CreateMessageOptions,
   CreateTurnGitArtifactInput,
   NewConversationOptions,
   RuntimeStoreSnapshot,
@@ -79,6 +80,7 @@ export type {
   BeginAgentTurnInput,
   CompleteTurnGitArtifactInput,
   CreateAgentTurnInput,
+  CreateMessageOptions,
   CreateTurnGitArtifactInput,
   NewConversationOptions,
   RuntimeStoreSnapshot,
@@ -154,6 +156,7 @@ export class RuntimeStore {
         attachments,
         turnId,
         createdAt,
+        options,
       ) => this.createMessage(
         conversationId,
         content,
@@ -161,6 +164,7 @@ export class RuntimeStore {
         attachments,
         turnId,
         createdAt,
+        options,
       ),
       database: this.database,
       requireAgentTurn: (turnId) => this.requireAgentTurn(turnId),
@@ -360,6 +364,7 @@ export class RuntimeStore {
     attachments: ChatAttachment[] = [],
     turnId: string | null = null,
     createdAt?: string,
+    options?: CreateMessageOptions,
   ): ChatMessage {
     return this.transcriptRepository.createMessage(
       conversationId,
@@ -368,6 +373,7 @@ export class RuntimeStore {
       attachments,
       turnId,
       createdAt,
+      options,
     );
   }
 

@@ -122,6 +122,7 @@ export interface QueueTurnRequest {
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];
   context?: TurnRequestContext;
+  activateConversation?: boolean;
   /** Server-constructed only. Renderer command schemas never accept this. */
   internalInstructions?: readonly HiddenProviderInstruction[];
   checkpointId?: string | null;

@@ -3048,7 +3048,9 @@ test("opens the command palette and manages a thread", async () => {
   await terminalInput.focus();
   await page.keyboard.press("Control+K");
   const search = page.getByRole("combobox", { name: "Search commands, projects, and threads" });
+  await expect(search).toBeFocused();
   await search.fill("settings");
+  await expect(search).toHaveValue("settings");
   const settingsOption = page.getByRole("option", { name: /Open settings/ });
   await expect(settingsOption).toHaveAttribute("aria-selected", "true");
   if (process.platform === "win32") await settingsOption.click();

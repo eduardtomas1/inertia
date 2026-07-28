@@ -1,5 +1,5 @@
 import { Folder, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
 import { IconButton } from "./ui";
@@ -47,7 +47,6 @@ function filterItems(items: PaletteItem[], query: string): PaletteItem[] {
 export function CommandPalette({ open, projects, conversations, onClose, onSelectProject, onSelectConversation, onNewThread, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const allItems = useMemo(() => {
     const actions: PaletteItem[] = [
@@ -63,12 +62,6 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
     return [...actions, ...projectItems, ...threadItems];
   }, [conversations, onAddProject, onNewThread, onOpenSettings, onSelectConversation, onSelectProject, projects]);
   const items = useMemo(() => filterItems(allItems, query), [allItems, query]);
-
-  useEffect(() => {
-    if (!open) return;
-    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 0);
-    return () => window.clearTimeout(focusTimer);
-  }, [open]);
 
   useEffect(() => setActiveIndex((current) => Math.min(current, Math.max(0, items.length - 1))), [items.length]);
   if (!open) return null;
@@ -91,7 +84,7 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
         <div className="palette-search">
           <Search size={17} />
           <input
-            ref={inputRef}
+            autoFocus
             value={query}
             onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
             onKeyDown={(event) => {

@@ -8,7 +8,9 @@ const source = readFileSync(
 );
 
 describe("command palette selection", () => {
-  it("resets search selection and does not let stationary-pointer reflow override it", () => {
+  it("focuses synchronously, resets search selection, and ignores stationary-pointer reflow", () => {
+    expect(source).toContain("autoFocus");
+    expect(source).not.toContain("focusTimer");
     expect(source).toContain(
       "setQuery(event.target.value); setActiveIndex(0);",
     );

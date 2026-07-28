@@ -51,4 +51,21 @@ describe("global shortcuts", () => {
     dispose();
     expect(remove).toHaveBeenCalledTimes(1);
   });
+
+  it("owns handled chords instead of forwarding them into focused widgets", () => {
+    const target = new EventTarget();
+    const current = { current: actions(vi.fn()) };
+    const dispose = installGlobalShortcuts(
+      target as unknown as Parameters<typeof installGlobalShortcuts>[0],
+      current,
+    );
+    const event = new ShortcutEvent("k");
+
+    target.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(event.cancelBubble).toBe(true);
+    expect(current.current.setPaletteOpen).toHaveBeenCalledWith(true);
+    dispose();
+  });
 });

@@ -44,16 +44,20 @@ export function installGlobalShortcuts(
     const key = event.key.toLowerCase();
     if (key === "k") {
       event.preventDefault();
+      event.stopPropagation();
       actions.current.setPaletteOpen(true);
     } else if (key === "n") {
       event.preventDefault();
+      event.stopPropagation();
       actions.current.createConversation();
     } else if (key === "j") {
       event.preventDefault();
+      event.stopPropagation();
       actions.current.setActiveTool((tool) =>
         tool === "terminal" ? null : "terminal");
     } else if (key === "b") {
       event.preventDefault();
+      event.stopPropagation();
       if (actions.current.mobileNavigation) {
         actions.current.setSidebarOpen(true);
       } else {

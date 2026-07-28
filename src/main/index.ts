@@ -5,7 +5,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   app,
   BrowserWindow,
-  WebContentsView,
   clipboard,
   dialog,
   ipcMain,
@@ -32,7 +31,6 @@ import {
 } from "../shared/claude-backend-profiles.js";
 import { parseOpenProjectPathRequest } from "../shared/desktop.js";
 import {
-  previewNavigationTarget,
   safeHttpUrl,
 } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
@@ -53,6 +51,10 @@ import {
   backendSecretReferenceForProfile,
 } from "./credential-vault.js";
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
+import {
+  PreviewBroker,
+  hardenDesktopSession,
+} from "./preview-broker.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
 import {
   WINDOW_APPEARANCE_FILENAME,
@@ -73,12 +75,14 @@ const IPC = {
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   releaseAttachment: "inertia:release-attachment",
+  openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
   openExternal: "inertia:open-external",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
+  previewState: "inertia:preview-state",
   syncThemePreference: "inertia:sync-theme-preference",
   setBackendCredential: "inertia:set-backend-credential",
   clearBackendCredential: "inertia:clear-backend-credential",
@@ -109,8 +113,11 @@ let credentialVault: CredentialVault | null = null;
 let trustedRendererUrl = "";
 let stoppingRuntime = false;
 let packageSmokeFilePath: string | null = null;
-let previewView: WebContentsView | null = null;
-let previewBounds: Electron.Rectangle | null = null;
+const previewBroker = new PreviewBroker({
+  getWindow: () => mainWindow,
+  openExternal: async (url) => shell.openExternal(url),
+  stateChannel: IPC.previewState,
+});
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
 let attachmentCleanup: Promise<void> = Promise.resolve();
@@ -165,7 +172,13 @@ function registerAppProtocol(): void {
       const previewId = /^attachment-preview\/([0-9a-f-]{36})$/iu.exec(requestedPath)?.[1];
       if (previewId) {
         const preview = await attachmentRegistry().preview(previewId);
-        if (!preview || chatAttachmentKind(preview.mimeType) !== "image") throw new Error();
+        if (
+          !preview
+          || (
+            chatAttachmentKind(preview.mimeType) !== "image"
+            && preview.mimeType !== "application/pdf"
+          )
+        ) throw new Error();
         return new Response(new Uint8Array(preview.bytes).buffer, {
           status: 200,
           headers: {
@@ -209,52 +222,6 @@ function saveWindowState(window: BrowserWindow): void {
   } catch {
     // Window-state persistence is best effort and never blocks shutdown.
   }
-}
-
-function previewState(): { url: string; loading: boolean; canGoBack: boolean; canGoForward: boolean } {
-  const contents = previewView?.webContents;
-  return {
-    url: contents?.getURL() ?? "",
-    loading: contents?.isLoading() ?? false,
-    canGoBack: contents?.navigationHistory.canGoBack() ?? false,
-    canGoForward: contents?.navigationHistory.canGoForward() ?? false,
-  };
-}
-
-function closePreview(): void {
-  const view = previewView;
-  previewView = null;
-  if (!view) return;
-  mainWindow?.contentView.removeChildView(view);
-  if (!view.webContents.isDestroyed()) view.webContents.close();
-}
-
-function ensurePreview(): WebContentsView {
-  if (previewView) return previewView;
-  if (!mainWindow) throw new Error("The preview window is unavailable");
-  const view = new WebContentsView({ webPreferences: { partition: "inertia-preview", contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, allowRunningInsecureContent: false } });
-  view.setBackgroundColor("#17171b");
-  view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  view.webContents.on("will-navigate", (event, url) => {
-    try {
-      const target = previewNavigationTarget(url);
-      if (target.kind === "external") {
-        event.preventDefault();
-      }
-    } catch {
-      event.preventDefault();
-    }
-  });
-  view.webContents.session.setPermissionCheckHandler(() => false);
-  view.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  view.webContents.session.on("will-download", (event, item) => {
-    event.preventDefault();
-    item.cancel();
-  });
-  mainWindow.contentView.addChildView(view);
-  previewView = view;
-  if (previewBounds) view.setBounds(previewBounds);
-  return view;
 }
 
 function rendererLocation(): { target: string; isUrl: boolean } {
@@ -498,6 +465,20 @@ function registerIpcHandlers(): void {
     await attachmentRegistry().release(value);
   });
 
+  ipcMain.handle(IPC.openAttachmentExternally, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    const [value] = args;
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+      throw new Error("Invalid attachment.");
+    }
+    const attachment = await attachmentRegistry().resolve(value);
+    if (!attachment || attachment.mimeType !== "application/pdf") {
+      throw new Error("The PDF attachment is unavailable.");
+    }
+    const openError = await shell.openPath(attachment.path);
+    if (openError) throw new Error("The platform PDF app could not open the attachment.");
+  });
+
   ipcMain.handle(IPC.openProjectPath, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     const request = parseOpenProjectPathRequest(args[0]);
@@ -520,49 +501,22 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.previewNavigate, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    const target = previewNavigationTarget(args[0]);
-    if (target.kind === "external") {
-      await shell.openExternal(target.url.toString());
-      return previewState();
-    }
-    const view = ensurePreview();
-    await view.webContents.loadURL(target.url.toString());
-    return previewState();
+    return previewBroker.navigate(args[0]);
   });
 
   ipcMain.handle(IPC.previewCommand, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    const [action] = args;
-    const contents = previewView?.webContents;
-    if (!contents || (action !== "back" && action !== "forward" && action !== "reload")) return previewState();
-    if (action === "back" && contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack();
-    if (action === "forward" && contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward();
-    if (action === "reload") contents.reload();
-    return previewState();
+    return previewBroker.command(args[0]);
   });
 
   ipcMain.handle(IPC.previewSetBounds, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    const [value] = args;
-    if (value === null) {
-      previewBounds = { x: 0, y: 0, width: 0, height: 0 };
-      previewView?.setBounds(previewBounds);
-      return;
-    }
-    if (typeof value !== "object" || !value) throw new Error("Invalid preview bounds");
-    const candidate = value as Partial<Electron.Rectangle>;
-    if (![candidate.x, candidate.y, candidate.width, candidate.height].every((entry) => Number.isInteger(entry))) throw new Error("Invalid preview bounds");
-    const content = mainWindow?.getContentBounds();
-    if (!content) return;
-    const x = Math.max(0, Math.min(candidate.x as number, content.width));
-    const y = Math.max(0, Math.min(candidate.y as number, content.height));
-    previewBounds = { x, y, width: Math.max(0, Math.min(candidate.width as number, content.width - x)), height: Math.max(0, Math.min(candidate.height as number, content.height - y)) };
-    previewView?.setBounds(previewBounds);
+    previewBroker.setBounds(args[0]);
   });
 
   ipcMain.handle(IPC.previewClose, (event, ...args) => {
-    assertTrustedIpc(event, args.length);
-    closePreview();
+    assertTrustedIpc(event, args.length, 1);
+    previewBroker.closeRequest(args[0]);
   });
 
   ipcMain.handle(IPC.syncThemePreference, (event, ...args) => {
@@ -665,15 +619,12 @@ async function createWindow(): Promise<void> {
     }
   });
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
-  window.webContents.session.setPermissionCheckHandler(() => false);
-  window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => {
-    callback(false);
-  });
+  hardenDesktopSession(window.webContents.session);
 
   window.once("ready-to-show", () => window.show());
   window.on("close", () => saveWindowState(window));
   window.on("closed", () => {
-    closePreview();
+    previewBroker.close();
     if (mainWindow === window) {
       mainWindow = null;
     }
@@ -865,6 +816,11 @@ if (!hasSingleInstanceLock) {
     stoppingRuntime = true;
     recordPackageSmokeStage("before-quit");
     if (mainWindow) saveWindowState(mainWindow);
+    // Native preview WebContentsViews can keep Electron's first quit pass
+    // alive even after the supervised runtime has stopped. Destroy them
+    // before asynchronous cleanup, rather than waiting for BrowserWindow's
+    // `closed` event that this quit sequence itself is trying to reach.
+    previewBroker.close();
     const supervisorToStop = runtimeSupervisor;
     runtimeDiagnostics?.record("app.stop");
 

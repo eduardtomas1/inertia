@@ -1,7 +1,9 @@
-import { useState } from "react";
-import { Activity, ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Info, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, Settings, SunMoon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Activity, ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { conversationContextMismatch } from "../lib/newConversation";
+import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
+import { EnvironmentSummary } from "./EnvironmentSummary";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { IconButton } from "./ui";
 
@@ -19,8 +21,11 @@ type WorkspaceHeaderProps = {
   activityOpen: boolean;
   activeRunCount: number;
   attentionRunCount: number;
+  environmentSummary: EnvironmentSummarySnapshot;
+  environmentOpen: boolean;
   onOpenSidebar: () => void;
   onToggleTools: () => void;
+  onSetEnvironmentOpen: (open: boolean) => void;
   onCycleTheme: () => void;
   onOpenSettings: () => void;
   onOpenProject: () => void;
@@ -51,8 +56,11 @@ export function WorkspaceHeader({
   activityOpen,
   activeRunCount,
   attentionRunCount,
+  environmentSummary,
+  environmentOpen,
   onOpenSidebar,
   onToggleTools,
+  onSetEnvironmentOpen,
   onCycleTheme,
   onOpenSettings,
   onOpenProject,
@@ -69,6 +77,7 @@ export function WorkspaceHeader({
   onToggleActivity,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | null>(null);
+  const environmentAnchorRef = useRef<HTMLDivElement>(null);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
   const eyebrow = view === "settings" ? "Personalize your workspace" : project?.name && conversation ? project.name : "Inertia";
   const activityBadgeCount = attentionRunCount || activeRunCount;
@@ -81,6 +90,29 @@ export function WorkspaceHeader({
   const canCreateInWorktree = Boolean(conversation?.worktreePath);
   const canCreateOnBranch = !canCreateInWorktree && Boolean(gitStatus?.branch);
   const canCreateIsolatedWorktree = Boolean(gitStatus?.branch);
+
+  useEffect(() => {
+    if (!environmentOpen) return;
+    const closeOnPointerDown = (event: PointerEvent): void => {
+      if (
+        event.target instanceof Node
+        && !environmentAnchorRef.current?.contains(event.target)
+      ) {
+        onSetEnvironmentOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      onSetEnvironmentOpen(false);
+      environmentAnchorRef.current?.querySelector("button")?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [environmentOpen, onSetEnvironmentOpen]);
 
   return (
     <header className="workspace-header drag-region">
@@ -96,7 +128,7 @@ export function WorkspaceHeader({
           <>
             {actions.length > 0 && (
               <div className="header-popover-anchor">
-                <button type="button" className="header-button" aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
+                <button type="button" className="header-button" aria-expanded={menu === "action"} onClick={() => { onSetEnvironmentOpen(false); setMenu(menu === "action" ? null : "action"); }}>
                   <Plus size={14} /><span>Add action</span>
                 </button>
                 {menu === "action" && (
@@ -114,7 +146,7 @@ export function WorkspaceHeader({
                   className={`header-button${contextMismatch ? " has-context-mismatch" : ""}`}
                   aria-expanded={menu === "branch"}
                   aria-label={contextMismatch ? `Checkout context differs, current branch ${gitStatus.branch ?? "detached"}` : undefined}
-                  onClick={() => { const next = menu === "branch" ? null : "branch"; setMenu(next); if (next) onRefreshBranches(); }}
+                  onClick={() => { onSetEnvironmentOpen(false); const next = menu === "branch" ? null : "branch"; setMenu(next); if (next) onRefreshBranches(); }}
                 >
                   <GitBranch size={14} /><span>{gitStatus.branch ?? "Detached"}</span>{contextMismatch && <span className="checkout-context-dot" aria-hidden="true" />}<ChevronDown size={12} />
                 </button>
@@ -178,6 +210,31 @@ export function WorkspaceHeader({
             {gitStatus?.hasRemote && <button type="button" className="header-button" onClick={onOpenPullRequest} disabled={busy}><GitPullRequest size={14} /><span>Pull request</span></button>}
           </>
         )}
+        <div
+          className="header-popover-anchor environment-summary-anchor"
+          ref={environmentAnchorRef}
+        >
+          <IconButton
+            label={environmentOpen ? "Close environment summary" : "Open environment summary"}
+            aria-expanded={environmentOpen}
+            aria-controls="environment-summary-popover"
+            aria-pressed={environmentOpen}
+            onClick={() => {
+              setMenu(null);
+              onSetEnvironmentOpen(!environmentOpen);
+            }}
+          >
+            <ListFilter size={17} />
+          </IconButton>
+          {environmentOpen && (
+            <div
+              className="environment-summary-popover"
+              id="environment-summary-popover"
+            >
+              <EnvironmentSummary summary={environmentSummary} />
+            </div>
+          )}
+        </div>
         <IconButton
           label={activityLabel}
           className={`activity-center-button${attentionRunCount > 0 ? " has-attention" : ""}`}

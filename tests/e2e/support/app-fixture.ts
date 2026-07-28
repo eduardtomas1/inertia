@@ -30,6 +30,7 @@ export interface AppFixture {
   page: Page;
   testDirectory: string;
   workspaceDirectory: string;
+  secondWorkspaceDirectory: string | null;
   attachmentImagePath: string;
   attachmentDocumentPath: string;
   malformedAttachmentPath: string;
@@ -45,6 +46,7 @@ interface AppFixtureOptions {
   name: string;
   initialState: "empty" | "conversation";
   seedAssistantCodeBlock?: boolean;
+  seedSecondProject?: boolean;
 }
 
 export function processExists(pid: number): boolean {
@@ -161,6 +163,11 @@ async function createWorkspace(testDirectory: string): Promise<{
       "utf8",
     ),
     writeFile(
+      join(workspaceDirectory, "context.txt"),
+      "ALPHA_CONTEXT\n",
+      "utf8",
+    ),
+    writeFile(
       join(
         workspaceDirectory,
         "src",
@@ -200,11 +207,54 @@ async function createWorkspace(testDirectory: string): Promise<{
   };
 }
 
+async function createSecondWorkspace(
+  testDirectory: string,
+): Promise<string> {
+  const workspaceDirectory = join(testDirectory, "Companion");
+  await mkdir(workspaceDirectory, { recursive: true });
+  await writeFile(
+    join(workspaceDirectory, "beta-only.ts"),
+    "export const project = 'BETA_BASE';\n",
+    "utf8",
+  );
+  await writeFile(
+    join(workspaceDirectory, "context.txt"),
+    "BETA_CONTEXT\n",
+    "utf8",
+  );
+  await execFileAsync("git", ["init", "-q"], { cwd: workspaceDirectory });
+  await execFileAsync("git", ["add", "."], { cwd: workspaceDirectory });
+  await execFileAsync(
+    "git",
+    [
+      "-c",
+      "user.name=Inertia",
+      "-c",
+      "user.email=test@inertia.local",
+      "commit",
+      "-qm",
+      "fixture",
+    ],
+    { cwd: workspaceDirectory },
+  );
+  await writeFile(
+    join(workspaceDirectory, "beta-only.ts"),
+    [
+      "export const project = 'BETA_BASE';",
+      "export const marker = 'BETA_CHANGE';",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  return workspaceDirectory;
+}
+
 function seedConversation(
   testDirectory: string,
   workspaceDirectory: string,
   name: string,
   seedAssistantCodeBlock: boolean,
+  secondWorkspaceDirectory: string | null,
 ): void {
   const store = new RuntimeStore(
     join(testDirectory, "data", "inertia.sqlite"),
@@ -213,6 +263,17 @@ function seedConversation(
   );
   const project = store.createProject("Inertia", workspaceDirectory);
   const conversation = store.createConversation(project.id, `${name} fixture`);
+  if (secondWorkspaceDirectory) {
+    const secondProject = store.createProject(
+      "Companion",
+      secondWorkspaceDirectory,
+    );
+    store.createConversation(
+      secondProject.id,
+      `${name} companion`,
+    );
+    store.selectConversation(conversation.id);
+  }
   if (seedAssistantCodeBlock) {
     store.createMessage(
       conversation.id,
@@ -237,6 +298,9 @@ export async function createAppFixture(
     join(tmpdir(), `inertia-${options.name}-`),
   );
   const workspace = await createWorkspace(testDirectory);
+  const secondWorkspaceDirectory = options.seedSecondProject
+    ? await createSecondWorkspace(testDirectory)
+    : null;
   if (options.initialState === "conversation") {
     await mkdir(join(testDirectory, "data"), { recursive: true });
     seedConversation(
@@ -244,6 +308,7 @@ export async function createAppFixture(
       workspace.workspaceDirectory,
       options.name,
       options.seedAssistantCodeBlock ?? false,
+      secondWorkspaceDirectory,
     );
   }
   const rendererErrors: string[] = [];
@@ -296,16 +361,23 @@ export async function createAppFixture(
     page,
     testDirectory,
     ...workspace,
+    secondWorkspaceDirectory,
     rendererErrors,
     previewUrl: preview.url,
     runtimeSnapshot,
     resizeWindow,
     expectNoViewportOverflow: () => expectPageNoViewportOverflow(page),
     close: async () => {
-      await page.evaluate(() => window.inertia.previewClose()).catch(() => undefined);
       preview.server.closeAllConnections();
       await new Promise<void>((resolve) => preview.server.close(() => resolve()));
       const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid ?? null;
+      await electronApp.evaluate(() => {
+        const runtime = Reflect.get(
+          globalThis,
+          "__inertiaTestRuntime",
+        ) as { quit?: () => unknown } | undefined;
+        runtime?.quit?.();
+      }).catch(() => undefined);
       await electronApp.close();
       if (runtimePid) {
         await expect.poll(
@@ -313,7 +385,15 @@ export async function createAppFixture(
           { timeout: 5_000 },
         ).toBe(false);
       }
-      await rm(testDirectory, { recursive: true, force: true });
+      // Windows can retain the closed SQLite handle for a brief interval after
+      // the utility process exits. Use Node's bounded EBUSY/EPERM retry path
+      // so successful scenarios are not reported as product failures.
+      await rm(testDirectory, {
+        recursive: true,
+        force: true,
+        maxRetries: 8,
+        retryDelay: 100,
+      });
     },
   };
 }

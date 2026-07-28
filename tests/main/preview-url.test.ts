@@ -55,13 +55,17 @@ describe("main preview URL boundary", () => {
       new URL("../../src/main/index.ts", import.meta.url),
       "utf8",
     );
-    const previewStart = main.indexOf("function ensurePreview()");
-    const previewEnd = main.indexOf("\nfunction rendererLocation", previewStart);
-    const embeddedBoundary = main.slice(previewStart, previewEnd);
+    const broker = await readFile(
+      new URL("../../src/main/preview-broker.ts", import.meta.url),
+      "utf8",
+    );
+    const previewStart = broker.indexOf("#ensure(");
+    const embeddedBoundary = broker.slice(previewStart);
     expect(embeddedBoundary).toContain(
       'setWindowOpenHandler(() => ({ action: "deny" }))',
     );
     expect(embeddedBoundary).toContain('on("will-navigate"');
+    expect(embeddedBoundary).toContain('on("will-redirect"');
     expect(embeddedBoundary).toContain("event.preventDefault()");
     expect(embeddedBoundary).not.toContain("shell.openExternal");
 
@@ -71,7 +75,34 @@ describe("main preview URL boundary", () => {
       ipcStart,
     );
     const explicitIpc = main.slice(ipcStart, ipcEnd);
-    expect(explicitIpc).toContain('target.kind === "external"');
-    expect(explicitIpc).toContain("await shell.openExternal");
+    expect(explicitIpc).toContain("previewBroker.navigate");
+    expect(broker).toContain('target.kind === "external"');
+    expect(broker).toContain("this.options.openExternal");
+  });
+
+  it("bounds preview ownership to the two conversation panes", async () => {
+    const broker = await readFile(
+      new URL("../../src/main/preview-broker.ts", import.meta.url),
+      "utf8",
+    );
+    const ownerStart = broker.indexOf("function previewOwner(");
+    const ownerEnd = broker.indexOf("\nfunction previewContext", ownerStart);
+    const ownerBoundary = broker.slice(ownerStart, ownerEnd);
+
+    expect(ownerBoundary).toContain('value !== "primary"');
+    expect(ownerBoundary).toContain('value !== "secondary"');
+    expect(ownerBoundary).not.toContain("RegExp");
+  });
+
+  it("hardens each shared session once and cancels download fallbacks", async () => {
+    const broker = await readFile(
+      new URL("../../src/main/preview-broker.ts", import.meta.url),
+      "utf8",
+    );
+    expect(broker).toContain("new WeakSet<Session>()");
+    expect(broker).toContain("if (hardenedSessions.has(session)) return");
+    expect(broker).toContain('session.on("will-download"');
+    expect(broker).toContain("event.preventDefault()");
+    expect(broker).toContain("item.cancel()");
   });
 });

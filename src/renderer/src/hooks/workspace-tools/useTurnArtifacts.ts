@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Conversation,
   Project,
@@ -37,14 +37,29 @@ export function useTurnArtifacts({
   const [historicalSelectedPath, setHistoricalSelectedPath] =
     useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
+  const authorityRef = useRef(authority);
+  const requestGenerationRef = useRef(0);
+  authorityRef.current = authority;
 
   useEffect(() => {
+    requestGenerationRef.current += 1;
     setHistoricalDiff(null);
     setHistoricalSelectedPath(null);
-  }, [conversation?.id]);
+    setLoading(false);
+  }, [conversation?.id, project?.id]);
 
-  const openTurnDiff = useCallback(async (turnId: string, path?: string) => {
+  const openTurnDiff = useCallback(async (
+    turnId: string,
+    path?: string,
+  ) => {
     if (!project || !conversation) return;
+    const owner = `${project.id}:${conversation.id}`;
+    const generation = ++requestGenerationRef.current;
+    const ownsResponse = (): boolean => (
+      authorityRef.current === owner
+      && requestGenerationRef.current === generation
+    );
     setLoading(true);
     try {
       const event = resultEvent(await request({
@@ -61,6 +76,7 @@ export function useTurnArtifacts({
           "The local service returned an unexpected historical diff.",
         );
       }
+      if (!ownsResponse()) return;
       setHistoricalDiff(event.result.diff);
       setHistoricalSelectedPath(
         path && event.result.diff.files.some((file) => file.path === path)
@@ -69,13 +85,13 @@ export function useTurnArtifacts({
       );
       setActiveTool("changes");
     } catch (error) {
-      setActionError(
+      if (ownsResponse()) setActionError(
         error instanceof Error
           ? error.message
           : "The historical diff could not be opened.",
       );
     } finally {
-      setLoading(false);
+      if (ownsResponse()) setLoading(false);
     }
   }, [conversation, project, request, setActionError, setActiveTool]);
 
@@ -84,6 +100,12 @@ export function useTurnArtifacts({
     laterTurnId: string,
   ) => {
     if (!project || !conversation) return;
+    const owner = `${project.id}:${conversation.id}`;
+    const generation = ++requestGenerationRef.current;
+    const ownsResponse = (): boolean => (
+      authorityRef.current === owner
+      && requestGenerationRef.current === generation
+    );
     setLoading(true);
     try {
       const event = resultEvent(await request({
@@ -100,25 +122,26 @@ export function useTurnArtifacts({
           "The local service returned an unexpected turn comparison.",
         );
       }
+      if (!ownsResponse()) return;
       setHistoricalDiff(event.result.diff);
       setHistoricalSelectedPath(event.result.diff.files[0]?.path ?? null);
       setActiveTool("changes");
     } catch (error) {
-      setActionError(
+      if (ownsResponse()) setActionError(
         error instanceof Error
           ? error.message
           : "The turn comparison could not be opened.",
       );
     } finally {
-      setLoading(false);
+      if (ownsResponse()) setLoading(false);
     }
   }, [conversation, project, request, setActionError, setActiveTool]);
 
   const openTurnFile = useCallback((path: string) => {
-    if (!project) return;
+    if (!project || !conversation) return;
     openProjectPath({
       projectId: project.id,
-      ...(conversation ? { conversationId: conversation.id } : {}),
+      conversationId: conversation.id,
       relativePath: path,
       action: "open-externally",
     });

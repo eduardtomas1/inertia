@@ -23,6 +23,13 @@ export interface ConversationProjectionOptions {
   status: ConnectionStatus;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
+  /**
+   * Loads a specific conversation without changing the runtime's active
+   * conversation. `undefined` preserves the primary-workspace behavior.
+   */
+  targetConversationId?: string | null;
+  /** Keeps the secondary pane dormant until a split conversation exists. */
+  enabled?: boolean;
   autoOpenPlan: boolean;
   onOpenPlan: (conversationId: string) => void;
   onTerminal: () => void;
@@ -33,6 +40,8 @@ export function useConversationProjection({
   status,
   request,
   subscribe,
+  targetConversationId,
+  enabled = true,
   autoOpenPlan,
   onOpenPlan,
   onTerminal,
@@ -62,11 +71,28 @@ export function useConversationProjection({
   terminalCallbackRef.current = onTerminal;
   openPlanCallbackRef.current = onOpenPlan;
 
+  const conversationId = enabled
+    ? targetConversationId === undefined
+      ? snapshot?.activeConversationId ?? null
+      : targetConversationId
+    : null;
+  const subscriptionOwner = targetConversationId === undefined
+    ? "primary"
+    : "secondary";
   const conversation = useMemo(
     () => snapshot?.conversations.find(({ id }) =>
-      id === snapshot.activeConversationId) ?? null,
-    [snapshot],
+      id === conversationId) ?? null,
+    [conversationId, snapshot],
   );
+  useEffect(() => {
+    if (enabled) return;
+    setStreamingText("");
+    setStreamingReasoning("");
+    setLiveUsage({});
+    setLiveActivities({});
+    setLiveSubagents({});
+    setNativePlans({});
+  }, [enabled]);
   const detail = useMemo(() => {
     if (
       detailState?.state !== "ready"
@@ -80,7 +106,32 @@ export function useConversationProjection({
   }, [conversation, detailState]);
 
   useEffect(() => {
-    const conversationId = snapshot?.activeConversationId ?? null;
+    if (!conversationId) return;
+    const setSubscription = (nextConversationId: string | null): void => {
+      void request({
+        type: "conversation.detail.subscription",
+        payload: {
+          owner: subscriptionOwner,
+          conversationId: nextConversationId,
+        },
+      }).catch(() => undefined);
+    };
+    setSubscription(conversationId);
+    return () => setSubscription(null);
+  }, [conversationId, request, subscriptionOwner]);
+
+  useEffect(() => {
+    if (status !== "online" || !conversationId) return;
+    void request({
+      type: "conversation.detail.subscription",
+      payload: {
+        owner: subscriptionOwner,
+        conversationId,
+      },
+    }).catch(() => undefined);
+  }, [conversationId, request, status, subscriptionOwner]);
+
+  useEffect(() => {
     if (!conversationId) {
       requestGenerationRef.current += 1;
       setDetailState(null);
@@ -137,8 +188,8 @@ export function useConversationProjection({
     conversation?.latestTurn?.updatedAt,
     conversation?.updatedAt,
     detailRefresh,
+    conversationId,
     request,
-    snapshot?.activeConversationId,
     status,
   ]);
 
@@ -168,35 +219,51 @@ export function useConversationProjection({
     }
     if (event.type === "agent.approval.requested") {
       setPendingApprovals((current) => [
-        ...current.filter(({ id }) => id !== event.request.id),
+        ...current.filter(({ id, conversationId }) =>
+          id !== event.request.id
+          || conversationId !== event.request.conversationId),
         event.request,
       ]);
-      if (event.request.conversationId === conversation?.id) {
+      if (
+        enabled
+        && event.request.conversationId === conversation?.id
+      ) {
         setStreamingText("");
       }
       return;
     }
     if (event.type === "agent.approval.resolved") {
       setPendingApprovals((current) =>
-        current.filter(({ id }) => id !== event.requestId));
+        current.filter(({ id, conversationId }) =>
+          id !== event.requestId
+          || conversationId !== event.conversationId));
       return;
     }
     if (event.type === "agent.input.requested") {
       setPendingInputs((current) => [
-        ...current.filter(({ id }) => id !== event.request.id),
+        ...current.filter(({ id, conversationId }) =>
+          id !== event.request.id
+          || conversationId !== event.request.conversationId),
         event.request,
       ]);
-      if (event.request.conversationId === conversation?.id) {
+      if (
+        enabled
+        && event.request.conversationId === conversation?.id
+      ) {
         setStreamingText("");
       }
       return;
     }
     if (event.type === "agent.input.resolved") {
       setPendingInputs((current) =>
-        current.filter(({ id }) => id !== event.requestId));
+        current.filter(({ id, conversationId }) =>
+          id !== event.requestId
+          || conversationId !== event.conversationId));
       return;
     }
+    if (!enabled) return;
     if (event.type === "agent.plan.updated") {
+      if (event.plan.conversationId !== conversation?.id) return;
       setNativePlans((current) => ({
         ...current,
         [event.plan.conversationId]: event.plan,
@@ -210,6 +277,7 @@ export function useConversationProjection({
       return;
     }
     if (event.type === "agent.usage") {
+      if (event.usage.conversationId !== conversation?.id) return;
       setLiveUsage((current) => ({
         ...current,
         [event.usage.conversationId]: event.usage,
@@ -217,6 +285,7 @@ export function useConversationProjection({
       return;
     }
     if (event.type === "agent.activity") {
+      if (event.activity.conversationId !== conversation?.id) return;
       setLiveActivities((current) => {
         const existing = current[event.activity.conversationId] ?? [];
         return {
@@ -233,6 +302,7 @@ export function useConversationProjection({
       return;
     }
     if (event.type === "agent.subagent.updated") {
+      if (event.trace.conversationId !== conversation?.id) return;
       setLiveSubagents((current) => {
         const existing = current[event.trace.conversationId] ?? [];
         return {
@@ -269,7 +339,7 @@ export function useConversationProjection({
       setStreamingReasoning("");
       terminalCallbackRef.current();
     }
-  }), [autoOpenPlan, conversation, subscribe]);
+  }), [autoOpenPlan, conversation, enabled, subscribe]);
 
   useEffect(() => {
     setStreamingText("");

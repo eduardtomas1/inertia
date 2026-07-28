@@ -28,15 +28,33 @@ export interface ActivityRunSummary {
   activeCount: number;
 }
 
+export interface ActivityRunOperationGroup {
+  all: WorkspaceRun[];
+  visible: WorkspaceRun[];
+  hiddenCount: number;
+}
+
+export interface ActivityRunPresentation {
+  sections: ActivityRunSection[];
+  operationsByAgentRun: ReadonlyMap<string, ActivityRunOperationGroup>;
+  summary: ActivityRunSummary;
+}
+
+const VISIBLE_AGENT_OPERATIONS = 3;
+
 function compareStartedAtDescending(a: WorkspaceRun, b: WorkspaceRun): number {
   return b.startedAt.localeCompare(a.startedAt);
+}
+
+function compareStartedAtAscending(a: WorkspaceRun, b: WorkspaceRun): number {
+  return a.startedAt.localeCompare(b.startedAt);
 }
 
 export function activityRunNeedsAttention(run: WorkspaceRun, _now = Date.now()): boolean {
   return workspaceRunAttentionView(run).needsAttention;
 }
 
-export function activityRunSections(runs: readonly WorkspaceRun[], _now = Date.now()): ActivityRunSection[] {
+function sectionsForRuns(runs: readonly WorkspaceRun[]): ActivityRunSection[] {
   const attention = runs
     .filter((run) => workspaceRunAttentionView(run).bucket === "attention")
     .sort((a, b) => {
@@ -58,11 +76,97 @@ export function activityRunSections(runs: readonly WorkspaceRun[], _now = Date.n
   return sections.filter(({ runs: sectionRuns }) => sectionRuns.length > 0);
 }
 
-export function activityRunSummary(runs: readonly WorkspaceRun[], _now = Date.now()): ActivityRunSummary {
+function containingAgentRun(
+  operation: WorkspaceRun,
+  agentRuns: readonly WorkspaceRun[],
+): WorkspaceRun | null {
+  if (
+    operation.kind === "agent"
+    || operation.kind === "source-control"
+    || operation.actionId !== null
+    || operation.conversationId === null
+    || operation.status === "failed"
+  ) return null;
+  const operationStartedAt = Date.parse(operation.startedAt);
+  if (!Number.isFinite(operationStartedAt)) return null;
+  return agentRuns.find((agent) => {
+    if (
+      agent.projectId !== operation.projectId
+      || agent.conversationId !== operation.conversationId
+    ) return false;
+    const agentStartedAt = Date.parse(agent.startedAt);
+    const agentFinishedAt = agent.finishedAt
+      ? Date.parse(agent.finishedAt)
+      : Number.POSITIVE_INFINITY;
+    return Number.isFinite(agentStartedAt)
+      && operationStartedAt >= agentStartedAt
+      && operationStartedAt <= agentFinishedAt;
+  }) ?? null;
+}
+
+function operationGroup(operations: WorkspaceRun[]): ActivityRunOperationGroup {
+  const all = [...operations].sort(compareStartedAtAscending);
+  const visible = all.slice(-VISIBLE_AGENT_OPERATIONS);
   return {
-    attentionCount: runs.filter((run) => workspaceRunAttentionView(run).needsAttention).length,
-    activeCount: runs.filter(({ status }) => status === "running" || status === "waiting").length,
+    all,
+    visible,
+    hiddenCount: Math.max(0, all.length - visible.length),
   };
+}
+
+/**
+ * Provider command projections are already durable check/service WorkspaceRuns.
+ * Group only those action-less child runs whose time range belongs to one
+ * agent run. Source-control work is independently user-owned even without an
+ * action ID, while explicit project actions and failures retain their own
+ * controls and attention state.
+ */
+export function activityRunPresentation(
+  runs: readonly WorkspaceRun[],
+  _now = Date.now(),
+): ActivityRunPresentation {
+  const agentRuns = runs
+    .filter(({ kind }) => kind === "agent")
+    .sort(compareStartedAtDescending);
+  const groupedIds = new Set<string>();
+  const grouped = new Map<string, WorkspaceRun[]>();
+
+  for (const operation of runs) {
+    const owner = containingAgentRun(operation, agentRuns);
+    if (!owner) continue;
+    groupedIds.add(operation.id);
+    const operations = grouped.get(owner.id) ?? [];
+    operations.push(operation);
+    grouped.set(owner.id, operations);
+  }
+
+  const primaryRuns = runs.filter(({ id }) => !groupedIds.has(id));
+  return {
+    sections: sectionsForRuns(primaryRuns),
+    operationsByAgentRun: new Map(
+      [...grouped].map(([runId, operations]) => [
+        runId,
+        operationGroup(operations),
+      ]),
+    ),
+    summary: {
+      attentionCount: primaryRuns.filter((run) =>
+        workspaceRunAttentionView(run).needsAttention).length,
+      activeCount: primaryRuns.filter(({ status }) =>
+        status === "running" || status === "waiting").length,
+    },
+  };
+}
+
+export function activityRunSections(
+  runs: readonly WorkspaceRun[],
+  now = Date.now(),
+): ActivityRunSection[] {
+  return activityRunPresentation(runs, now).sections;
+}
+
+export function activityRunSummary(runs: readonly WorkspaceRun[], _now = Date.now()): ActivityRunSummary {
+  return activityRunPresentation(runs, _now).summary;
 }
 
 export function activityWaitingKind(

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   activityRunActions,
+  activityRunPresentation,
   activityRunSections,
   activityRunSummary,
   activityStatusLabel,
@@ -209,5 +210,106 @@ describe("Runs control model", () => {
     expect(activityWaitingKind(waiting, [conversation("input")])).toBe("input");
     expect(activityStatusLabel(waiting, Date.parse("2026-07-23T10:00:08.000Z"), "input"))
       .toBe("Waiting for input · 8s");
+  });
+
+  it("groups only bounded, action-less operations under their owning agent", () => {
+    const agent = run({
+      id: "11111111-1111-4111-8111-111111111201",
+      kind: "agent",
+      actionId: null,
+      label: "Codex · GPT-5",
+      startedAt: "2026-07-23T10:00:00.000Z",
+    });
+    const operations = Array.from({ length: 6 }, (_, index) => run({
+      id: `11111111-1111-4111-8111-${String(index + 300).padStart(12, "0")}`,
+      kind: index % 2 === 0 ? "check" : "service",
+      actionId: null,
+      label: `Operation ${index + 1}`,
+      status: index === 5 ? "running" : "succeeded",
+      canStop: false,
+      startedAt: `2026-07-23T10:00:0${index + 1}.000Z`,
+      finishedAt: index === 5
+        ? null
+        : `2026-07-23T10:00:0${index + 1}.500Z`,
+    }));
+    const explicitAction = run({
+      id: "11111111-1111-4111-8111-111111111401",
+      actionId: "typecheck",
+      label: "Explicit typecheck",
+      startedAt: "2026-07-23T10:00:07.000Z",
+    });
+    const presentation = activityRunPresentation([
+      agent,
+      ...operations,
+      explicitAction,
+    ]);
+
+    expect(presentation.sections.flatMap(({ runs }) => runs)
+      .map(({ id }) => id)).toEqual([explicitAction.id, agent.id]);
+    expect(presentation.operationsByAgentRun.get(agent.id)).toMatchObject({
+      hiddenCount: 3,
+      visible: [
+        expect.objectContaining({ label: "Operation 4" }),
+        expect.objectContaining({ label: "Operation 5" }),
+        expect.objectContaining({ label: "Operation 6" }),
+      ],
+    });
+    expect(presentation.summary).toEqual({
+      attentionCount: 0,
+      activeCount: 2,
+    });
+  });
+
+  it("keeps independently running source-control work outside agent groups", () => {
+    const agent = run({
+      id: "11111111-1111-4111-8111-111111111451",
+      kind: "agent",
+      actionId: null,
+      startedAt: "2026-07-23T10:00:00.000Z",
+    });
+    const sourceControl = run({
+      id: "11111111-1111-4111-8111-111111111452",
+      kind: "source-control",
+      actionId: null,
+      label: "Push changes",
+      startedAt: "2026-07-23T10:00:02.000Z",
+    });
+    const presentation = activityRunPresentation([agent, sourceControl]);
+
+    expect(presentation.operationsByAgentRun.get(agent.id)).toBeUndefined();
+    expect(presentation.sections.find(({ id }) => id === "active")?.runs)
+      .toEqual([sourceControl, agent]);
+    expect(presentation.summary).toEqual({
+      attentionCount: 0,
+      activeCount: 2,
+    });
+  });
+
+  it("keeps failed operations independent so warnings and controls stay visible", () => {
+    const agent = run({
+      id: "11111111-1111-4111-8111-111111111501",
+      kind: "agent",
+      actionId: null,
+      startedAt: "2026-07-23T10:00:00.000Z",
+    });
+    const failure = run({
+      id: "11111111-1111-4111-8111-111111111502",
+      actionId: null,
+      status: "failed",
+      attentionState: "unseen",
+      canStop: false,
+      startedAt: "2026-07-23T10:00:02.000Z",
+      finishedAt: "2026-07-23T10:00:03.000Z",
+    });
+    const presentation = activityRunPresentation([agent, failure]);
+    expect(presentation.operationsByAgentRun.get(agent.id)).toBeUndefined();
+    expect(presentation.sections[0]).toMatchObject({
+      id: "attention",
+      runs: [expect.objectContaining({ id: failure.id })],
+    });
+    expect(presentation.summary).toEqual({
+      attentionCount: 1,
+      activeCount: 1,
+    });
   });
 });

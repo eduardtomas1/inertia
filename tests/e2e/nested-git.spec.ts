@@ -102,6 +102,9 @@ test.afterAll(async () => {
 
 test("discovers and reviews dirty nested Openbravo repositories without a root Git repository", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
+  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: "Open workspace tools" }).click();
+  }
   await page.getByRole("tab", { name: /Changes/ }).click();
 
   const changes = page.getByLabel("Workspace changes");

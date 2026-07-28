@@ -55,8 +55,17 @@ export function formatAttachmentSize(bytes: number): string {
   return `${(bytes / (1_024 * 1_024)).toFixed(1)} MB`;
 }
 
+export type AttachmentPreviewKind = "image" | "pdf";
+
+export function attachmentPreviewKind(
+  attachment: Pick<ChatAttachment, "mimeType">,
+): AttachmentPreviewKind | null {
+  if (chatAttachmentKind(attachment.mimeType) === "image") return "image";
+  return attachment.mimeType === "application/pdf" ? "pdf" : null;
+}
+
 export function attachmentPreviewUrl(attachment: ChatAttachment): string | null {
-  if (chatAttachmentKind(attachment.mimeType) !== "image") return null;
+  if (!attachmentPreviewKind(attachment)) return null;
   return `inertia://bundle/attachment-preview/${encodeURIComponent(attachment.id)}`;
 }
 

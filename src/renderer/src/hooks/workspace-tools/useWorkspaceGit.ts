@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Conversation,
   GitBranchInfo,
@@ -16,6 +16,8 @@ import {
 import { workspaceGitRefreshIdentity } from "../../utils/workspaceGit";
 
 interface WorkspaceGitOptions {
+  enabled: boolean;
+  loadOnMount: boolean;
   project: Project | null;
   conversation: Conversation | null;
   online: boolean;
@@ -35,6 +37,8 @@ export function useWorkspaceGit({
   request,
   run,
   setActionError,
+  enabled,
+  loadOnMount,
 }: WorkspaceGitOptions) {
   const [gitStatus, setGitStatus] = useState<GitStatusSnapshot | null>(null);
   const [gitDiff, setGitDiff] = useState<GitDiffSnapshot | null>(null);
@@ -43,9 +47,19 @@ export function useWorkspaceGit({
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const projectRefreshIdentity = workspaceGitRefreshIdentity(project);
+  const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
+  const authorityRef = useRef(authority);
+  const requestGenerationRef = useRef(0);
+  authorityRef.current = authority;
 
   const loadGit = useCallback(async () => {
     if (!project?.id) return;
+    const owner = `${project.id}:${conversation?.id ?? ""}`;
+    const generation = ++requestGenerationRef.current;
+    const ownsResponse = (): boolean => (
+      authorityRef.current === owner
+      && requestGenerationRef.current === generation
+    );
     const [event, workspaceEvent] = await Promise.all([
       request({
         type: "git.refresh",
@@ -68,6 +82,7 @@ export function useWorkspaceGit({
     if (workspaceEvent.result.kind !== "git.workspace.status") {
       throw new Error("Unexpected workspace Git response.");
     }
+    if (!ownsResponse()) return;
     setGitStatus(event.result.status);
     setWorkspaceGitStatus(workspaceEvent.result.status);
     if (!event.result.status.isRepository) {
@@ -83,7 +98,7 @@ export function useWorkspaceGit({
         ignoreWhitespace,
       },
     }));
-    if (diffEvent.result.kind === "git.diff") {
+    if (ownsResponse() && diffEvent.result.kind === "git.diff") {
       setGitDiff(diffEvent.result.diff);
     }
   }, [
@@ -94,11 +109,18 @@ export function useWorkspaceGit({
   ]);
 
   useEffect(() => {
+    requestGenerationRef.current += 1;
     setGitStatus(null);
     setGitDiff(null);
     setWorkspaceGitStatus(null);
     setBranches([]);
-    if (!projectRefreshIdentity || !project?.id || !online) {
+    if (
+      !enabled
+      || !loadOnMount
+      || !projectRefreshIdentity
+      || !project?.id
+      || !online
+    ) {
       setLoading(false);
       return;
     }
@@ -120,8 +142,10 @@ export function useWorkspaceGit({
     };
   }, [
     conversation?.id,
+    enabled,
     loadGit,
     online,
+    loadOnMount,
     project?.id,
     projectRefreshIdentity,
     refreshVersion,
@@ -153,11 +177,15 @@ export function useWorkspaceGit({
 
   const loadBranches = useCallback(() => {
     if (!project || !gitStatus?.isRepository) return;
+    const owner = `${project.id}:${conversation?.id ?? ""}`;
     void request({
       type: "git.branches",
       payload: { projectId: project.id },
     }).then(resultEvent).then((event) => {
-      if (event.result.kind === "git.branches") {
+      if (
+        authorityRef.current === owner
+        && event.result.kind === "git.branches"
+      ) {
         setBranches(event.result.branches);
       }
     }).catch((error) => {
@@ -167,7 +195,13 @@ export function useWorkspaceGit({
           : "Branches could not be loaded.",
       );
     });
-  }, [gitStatus?.isRepository, project, request, setActionError]);
+  }, [
+    conversation?.id,
+    gitStatus?.isRepository,
+    project,
+    request,
+    setActionError,
+  ]);
 
   const mutateBranch = useCallback((
     type: "git.branch.create" | "git.branch.switch",

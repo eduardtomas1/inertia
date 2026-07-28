@@ -52,6 +52,7 @@ describe("shared contracts boundary", () => {
       "conversation.create",
       "conversation.select",
       "conversation.detail.load",
+      "conversation.detail.subscription",
       "conversation.update",
       "conversation.archive",
       "conversation.unarchive",

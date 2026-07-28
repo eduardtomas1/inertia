@@ -17,34 +17,30 @@ import {
   type WorkspaceRun,
 } from "@shared/contracts";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
-import { CommitDialog } from "./components/CommitDialog";
-import { AppNavigationOverlays } from "./components/AppNavigationOverlays";
-import { AppStatusOverlays } from "./components/AppStatusOverlays";
-import { PaneResizeHandle } from "./components/PaneResizeHandle";
-import { Sidebar } from "./components/Sidebar";
-import { WorkspaceHeader } from "./components/WorkspaceHeader";
-import {
-  WorkspaceScene,
-  type WorkspacePanelTab,
+import { AppLayout } from "./components/AppLayout";
+import type {
+  WorkspaceSceneProps,
+  WorkspacePanelTab,
 } from "./components/WorkspaceScene";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
+import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
 import { useActivityActions } from "./hooks/useActivityActions";
+import { useActivityActionRouter } from "./hooks/useActivityActionRouter";
 import {
   useStableActions,
   useStableController,
 } from "./hooks/useStableController";
 import { useAppUpdate } from "./app-update";
 import { useWorkspaceTools } from "./hooks/useWorkspaceTools";
+import { useConversationPaneLayout } from "./hooks/useConversationPaneLayout";
+import { useSplitWorkspaceScene } from "./hooks/useSplitWorkspaceScene";
 import { useTheme } from "./hooks/useTheme";
-import {
-  SIDEBAR_MIN_WIDTH,
-  useWorkspaceLayout,
-} from "./hooks/useWorkspaceLayout";
+import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { activityRunSummary } from "./utils/activityCenter";
 import { shouldMarkWorkspaceRunSeen } from "./utils/attentionVisibility";
 import {
@@ -57,11 +53,21 @@ import { projectNameFromPath } from "./lib/format";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import {
   commandRefreshesConversationDetail,
-  resultEvent,
   withRequestId,
   type CommandWithoutId,
 } from "./lib/runtimeCommands";
 import { planFromText } from "./utils/planFromText";
+import { buildEnvironmentSummary } from "./utils/environmentSummary";
+import {
+  finishLegacyWorkspaceStartupMigration,
+  readLegacyWorkspaceStartup,
+} from "./utils/workspaceStartup";
+import {
+  persistSplitConversationId,
+  readSplitConversationId,
+  resolvedSplitConversation,
+  splitConversationAfterPrimaryChange,
+} from "./utils/splitConversation";
 import {
   createWorkspaceSceneModel,
 } from "./components/workspace-scene/createWorkspaceSceneModel";
@@ -98,6 +104,9 @@ export default function App(): React.JSX.Element {
   const connection = useStableController(useInertiaConnection());
   const sendCommand = connection.sendCommand;
   const appUpdate = useStableController(useAppUpdate());
+  const providerQuotaNotices = useStableController(
+    useProviderQuotaNotices(connection.snapshot?.providers ?? []),
+  );
   const documentActive = useDocumentActive();
   const providerMaintenance = useStableController(
     useProviderMaintenance(
@@ -121,7 +130,19 @@ export default function App(): React.JSX.Element {
   const [latestContentVisible, setLatestContentVisible] = useState(false);
   const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
   const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
+  const [splitConversationId, setSplitConversationId] = useState<string | null>(
+    () => readSplitConversationId(window.localStorage),
+  );
+  const [secondaryPaneFirst, setSecondaryPaneFirst] = useState(false);
+  const [sendingConversationIds, setSendingConversationIds] = useState(
+    () => new Set<string>(),
+  );
+  const splitSelectionTransitionsRef = useRef(0);
+  const conversationSelectionGenerationRef = useRef(0);
   const pendingSeenRunsRef = useRef(new Set<string>());
+  const legacyWorkspaceStartupMigrationRef = useRef(false);
+  const [legacyWorkspaceStartup] = useState(() =>
+    readLegacyWorkspaceStartup(window.localStorage));
   const settings = useMemo(
     () => connection.snapshot?.settings ?? {
       ...defaultSettings,
@@ -175,22 +196,66 @@ export default function App(): React.JSX.Element {
     () => connection.snapshot?.projects.find((item) => item.id === connection.snapshot?.activeProjectId) ?? null,
     [connection.snapshot],
   );
-  const workspaceLayout = useWorkspaceLayout(view, Boolean(project));
+  const splitConversation = useMemo(
+    () => resolvedSplitConversation(
+      connection.snapshot,
+      splitConversationId,
+    ),
+    [connection.snapshot, splitConversationId],
+  );
+  const updateSplitConversationId = useCallback(
+    (conversationId: string | null) => {
+      setSplitConversationId(conversationId);
+      setSecondaryPaneFirst(false);
+      persistSplitConversationId(window.localStorage, conversationId);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (
+      splitSelectionTransitionsRef.current > 0
+      || !connection.snapshot
+      || !splitConversationId
+      || splitConversation
+    ) {
+      return;
+    }
+    updateSplitConversationId(null);
+  }, [
+    connection.snapshot,
+    splitConversation,
+    splitConversationId,
+    updateSplitConversationId,
+  ]);
+  const effectiveWorkspaceStartupSurface = legacyWorkspaceStartup?.surface
+    ?? settings.workspaceStartupSurface;
+  const workspaceLayout = useWorkspaceLayout(view, Boolean(project), {
+    startupSurface: effectiveWorkspaceStartupSurface,
+    startupReady: Boolean(connection.snapshot),
+    initialTool: legacyWorkspaceStartup?.tool,
+  });
   const {
     sidebarOpen,
     setSidebarOpen,
-    sidebarCollapsed,
     setSidebarCollapsed,
-    activeTool,
-    setActiveTool,
+    toggleWorkspaceTools,
+    showStartupSurface,
     mobileNavigation,
-    toolsVisible,
-    appShellRef,
-    workspaceBodyRef,
-    appShellStyle,
-    workspaceBodyStyle,
-    sidebar: sidebarLayout,
   } = workspaceLayout;
+  const primaryPaneLayout = useConversationPaneLayout(
+    connection.snapshot?.activeConversationId ?? null,
+  );
+  const secondaryPaneLayout = useConversationPaneLayout(
+    splitConversation?.id ?? null,
+  );
+  const primarySceneLayout = splitConversation
+    ? primaryPaneLayout
+    : workspaceLayout;
+  const sceneActiveTool = primarySceneLayout.activeTool;
+  const sceneSetActiveTool = primarySceneLayout.setActiveTool;
+  const sceneToggleWorkspaceTools = splitConversation
+    ? primaryPaneLayout.toggleWorkspaceTools
+    : toggleWorkspaceTools;
   const conversationProjection = useStableController(
     useConversationProjection({
       snapshot: connection.snapshot,
@@ -200,7 +265,7 @@ export default function App(): React.JSX.Element {
       autoOpenPlan: settings.autoOpenPlan,
       onOpenPlan: (conversationId) => {
         if (conversationId === connection.snapshot?.activeConversationId) {
-          setActiveTool("plan");
+          sceneSetActiveTool("plan");
         }
       },
       onTerminal: () => setGitRefreshVersion((version) => version + 1),
@@ -212,6 +277,7 @@ export default function App(): React.JSX.Element {
     detailState: conversationDetailState,
     refreshDetail,
     messages,
+    subagents,
     streamingText,
     nativePlans,
   } = conversationProjection;
@@ -294,15 +360,20 @@ export default function App(): React.JSX.Element {
       request,
       run,
       setActionError,
-      setActiveTool,
+      setActiveTool: sceneSetActiveTool,
       openProjectPath,
+      loadFilesOnMount: sceneActiveTool === "files",
     }),
   );
   const backendProfileActions = useStableController(
     useBackendProfiles({ request, run }),
   );
   const desktopTools = useStableController(
-    useDesktopTools({ setActionError }),
+    useDesktopTools({
+      setActionError,
+      previewOwnerId: "primary",
+      previewContextId: conversation?.id ?? null,
+    }),
   );
   const { navigatePreview } = desktopTools;
   const {
@@ -315,7 +386,29 @@ export default function App(): React.JSX.Element {
     mutateBranch,
     commit,
     projectActions,
+    workspaceGitStatus,
   } = workspaceTools;
+  const environmentSummary = useMemo(() => buildEnvironmentSummary({
+    projectId: project?.id ?? null,
+    projectName: project?.name ?? null,
+    conversationId: conversation?.id ?? null,
+    connectionStatus: connection.status,
+    gitStatus,
+    workspaceGitStatus,
+    runs: connection.snapshot?.runs ?? [],
+    subagents,
+    messages,
+  }), [
+    connection.snapshot?.runs,
+    connection.status,
+    conversation?.id,
+    gitStatus,
+    messages,
+    project?.id,
+    project?.name,
+    subagents,
+    workspaceGitStatus,
+  ]);
 
   useEffect(() => {
     const run = visibleConversationRun;
@@ -364,26 +457,86 @@ export default function App(): React.JSX.Element {
       const path = await window.inertia.selectDirectory();
       if (!path) return;
       await run("project.create", { type: "project.create", payload: { name: projectNameFromPath(path), path } });
-      setView("workspace"); setSidebarOpen(false); setActiveTool("terminal");
+      setView("workspace");
+      setSidebarOpen(false);
+      showStartupSurface(effectiveWorkspaceStartupSurface);
     } catch { /* The toast carries the error. */ }
   };
-
   const selectProject = (nextProject: Project) => {
     if (nextProject.id === project?.id) return;
-    void run("project.select", { type: "project.select", payload: { projectId: nextProject.id } }).catch(() => undefined);
+    void run("project.select", {
+      type: "project.select",
+      payload: { projectId: nextProject.id },
+    }).then(() => updateSplitConversationId(null)).catch(() => undefined);
   };
-  const selectConversation = (nextConversation: Conversation) => {
+  const selectConversation = useCallback((nextConversation: Conversation) => {
     if (nextConversation.id === conversation?.id) return;
-    void run("conversation.select", { type: "conversation.select", payload: { conversationId: nextConversation.id } }).catch(() => undefined);
+    if (nextConversation.id === splitConversation?.id) {
+      // A split-pane promotion is visual only. Retargeting the primary and
+      // secondary controllers would tear down conversation-owned terminals,
+      // previews, attachments, and tool state.
+      setSecondaryPaneFirst(true);
+      window.setTimeout(() => {
+        document.querySelector<HTMLElement>(
+          "#secondary-conversation-pane textarea",
+        )?.focus({ preventScroll: true });
+      }, 0);
+      return;
+    }
+    const nextSplitConversationId = splitConversationAfterPrimaryChange(
+      conversation,
+      nextConversation,
+      splitConversation,
+    );
+    setSecondaryPaneFirst(false);
+    const selectionGeneration =
+      conversationSelectionGenerationRef.current + 1;
+    conversationSelectionGenerationRef.current = selectionGeneration;
+    splitSelectionTransitionsRef.current += 1;
+    void run("conversation.select", {
+      type: "conversation.select",
+      payload: { conversationId: nextConversation.id },
+    }).then(() => {
+      if (
+        selectionGeneration === conversationSelectionGenerationRef.current
+      ) {
+        updateSplitConversationId(nextSplitConversationId);
+      }
+    }).catch(() => undefined).finally(() => {
+      splitSelectionTransitionsRef.current = Math.max(
+        0,
+        splitSelectionTransitionsRef.current - 1,
+      );
+    });
+  }, [
+    conversation,
+    run,
+    splitConversation,
+    updateSplitConversationId,
+  ]);
+  const openConversationInSplit = (nextConversation: Conversation): void => {
+    if (
+      !conversation
+      || nextConversation.id === conversation.id
+      || nextConversation.archivedAt !== null
+    ) {
+      return;
+    }
+    updateSplitConversationId(nextConversation.id);
+    setView("workspace");
+    setSidebarOpen(false);
   };
-  const activateActivityContext = (activity: WorkspaceRun, tool?: WorkspacePanelTab) => {
+  const activatePrimaryActivityContext = (
+    activity: WorkspaceRun,
+    tool?: WorkspacePanelTab,
+  ) => {
     const targetConversation = connection.snapshot?.conversations.find(({ id }) => id === activity.conversationId);
     const targetProject = connection.snapshot?.projects.find(({ id }) => id === activity.projectId);
     if (targetConversation) selectConversation(targetConversation);
     else if (targetProject) selectProject(targetProject);
     setView("workspace");
     setSidebarOpen(false);
-    if (tool) setActiveTool(tool);
+    if (tool) sceneSetActiveTool(tool);
   };
   const activityActions = useStableController(
     useActivityActions({
@@ -392,10 +545,10 @@ export default function App(): React.JSX.Element {
       conversationId: conversation?.id ?? null,
       request,
       run,
-      setActiveTool,
+      setActiveTool: sceneSetActiveTool,
       setActivityOpen,
       setActionError,
-      activateContext: activateActivityContext,
+      activateContext: activatePrimaryActivityContext,
       openProjectPath,
       navigatePreview,
     }),
@@ -403,9 +556,9 @@ export default function App(): React.JSX.Element {
   const {
     runProjectAction,
     openActivityLocation,
-    openActivityPreview,
+    openActivityPreview: openPrimaryActivityPreview,
     stopActivity,
-    rerunActivity,
+    rerunActivity: rerunPrimaryActivity,
     markActivitySeen,
     acknowledgeActivity,
     dismissActivity,
@@ -443,7 +596,7 @@ export default function App(): React.JSX.Element {
   useGlobalShortcuts({
     createConversation: () => createConversation(),
     mobileNavigation,
-    setActiveTool,
+    setActiveTool: sceneSetActiveTool,
     setPaletteOpen,
     setSidebarCollapsed,
     setSidebarOpen,
@@ -462,21 +615,52 @@ export default function App(): React.JSX.Element {
     setView("workspace");
     setSidebarOpen(false);
   };
-  const sendMessage = async (
+  const sendMessageToConversation = useCallback(async (
+    targetConversationId: string,
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
-  ) => {
-    if (!conversation) return;
-    await run("message.send", {
-      type: "message.send",
+  ): Promise<void> => {
+    setSendingConversationIds((current) => {
+      const next = new Set(current);
+      next.add(targetConversationId);
+      return next;
+    });
+    setActionError(null);
+    const command = {
+      type: "message.send" as const,
       payload: {
-        conversationId: conversation.id,
+        conversationId: targetConversationId,
         content,
         attachments,
         ...(context ? { context } : {}),
       },
-    });
+    };
+    try {
+      await sendCommand(withRequestId(command));
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "The message could not be sent.",
+      );
+      throw error;
+    } finally {
+      setSendingConversationIds((current) => {
+        const next = new Set(current);
+        next.delete(targetConversationId);
+        return next;
+      });
+    }
+  }, [sendCommand]);
+  const sendMessage = (
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+  ): Promise<void> => {
+    return conversation
+      ? sendMessageToConversation(conversation.id, content, attachments, context)
+      : Promise.resolve();
   };
   const respondToApproval = async (request: AgentApprovalRequest, decision: AgentApprovalDecision) => {
     await run("agent.approval.respond", {
@@ -490,8 +674,10 @@ export default function App(): React.JSX.Element {
       payload: { conversationId: request.conversationId, requestId: request.id, answers },
     });
   };
-  const updateConversation = (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => {
-    if (!conversation) return;
+  const updateConversationById = useCallback((
+    targetConversationId: string,
+    update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>,
+  ): void => {
     const { modelSelection, ...legacyUpdate } = update;
     const payload = modelSelection
       ? {
@@ -503,11 +689,53 @@ export default function App(): React.JSX.Element {
           },
         }
       : legacyUpdate;
-    void run("conversation.update", { type: "conversation.update", payload: { conversationId: conversation.id, ...payload } }).catch(() => undefined);
+    void run(`conversation.update:${targetConversationId}`, {
+      type: "conversation.update",
+      payload: {
+        conversationId: targetConversationId,
+        ...payload,
+      },
+    }).catch(() => undefined);
+  }, [run]);
+  const updateConversation = (
+    update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>,
+  ): void => {
+    if (conversation) updateConversationById(conversation.id, update);
   };
   const updateSettings = async (updates: Partial<AppSettings>): Promise<void> => {
-    await run("settings.update", { type: "settings.update", payload: updates }).catch(() => undefined);
+    try {
+      await run("settings.update", {
+        type: "settings.update",
+        payload: updates,
+      });
+      if (updates.workspaceStartupSurface) {
+        showStartupSurface(updates.workspaceStartupSurface);
+      }
+    } catch {
+      // The shared action error already explains the failed update.
+    }
   };
+  useEffect(() => {
+    if (
+      !connection.snapshot
+      || !legacyWorkspaceStartup
+      || legacyWorkspaceStartupMigrationRef.current
+    ) return;
+    legacyWorkspaceStartupMigrationRef.current = true;
+    void request({
+      type: "settings.update",
+      payload: {
+        workspaceStartupSurface: legacyWorkspaceStartup.surface,
+      },
+    }).then(() => {
+      finishLegacyWorkspaceStartupMigration(
+        window.localStorage,
+        legacyWorkspaceStartup,
+      );
+    }).catch(() => {
+      legacyWorkspaceStartupMigrationRef.current = false;
+    });
+  }, [connection.snapshot, legacyWorkspaceStartup, request]);
   const chooseCodexBinary = async (): Promise<void> => {
     const path = await window.inertia.selectCodexExecutable();
     if (path) await updateSettings({ codexBinaryPath: path });
@@ -582,7 +810,7 @@ export default function App(): React.JSX.Element {
     connection,
     providerMaintenance,
     projection: conversationProjection,
-    layout: workspaceLayout,
+    layout: primarySceneLayout,
     workspaceTools,
     backendProfileActions,
     desktopTools,
@@ -612,233 +840,158 @@ export default function App(): React.JSX.Element {
     settings,
     settingsTarget,
     view,
-    workspaceLayout,
+    primarySceneLayout,
     workspaceSceneActions,
     workspaceTools,
   ]);
+  const splitWorkspace = useSplitWorkspaceScene({
+    conversation,
+    project,
+    splitConversation,
+    layout: secondaryPaneLayout,
+    snapshotProjects: connection.snapshot?.projects ?? [],
+    settings,
+    connection,
+    providerMaintenance,
+    backendProfileActions,
+    appUpdate,
+    busyAction,
+    setBusyAction,
+    setActionError,
+    setActivityOpen,
+    gitRefreshVersion,
+    request,
+    actions: {
+      importProject,
+      createConversation,
+      respondToApproval,
+      respondToInput,
+      updateSettings,
+      chooseCodexBinary,
+      refreshProvider,
+      connectProvider,
+      openProviderSetup,
+      openBackendSetup,
+      openProjectPath,
+      sendMessageToConversation,
+      updateConversationById,
+    },
+    sendingConversationIds,
+    secondaryPaneFirst,
+    primaryToolsOpen: primaryPaneLayout.activeTool !== null,
+    onTogglePrimaryTools: primaryPaneLayout.toggleWorkspaceTools,
+    onSwapPanes: () => setSecondaryPaneFirst((current) => !current),
+    onCloseSecondary: () => updateSplitConversationId(null),
+    onSecondaryConversationCreated: updateSplitConversationId,
+    onTerminal: () => setGitRefreshVersion((version) => version + 1),
+  });
+  const routedActivityActions = useActivityActionRouter({
+    secondaryConversationId: splitConversation?.id ?? null,
+    primary: {
+      activateContext: activatePrimaryActivityContext,
+      openActivityPreview: openPrimaryActivityPreview,
+      rerunActivity: rerunPrimaryActivity,
+    },
+    secondary: {
+      activateContext: (_activity, tool) => {
+        setView("workspace");
+        setSidebarOpen(false);
+        if (tool) secondaryPaneLayout.setActiveTool(tool);
+      },
+      openActivityPreview:
+        splitWorkspace.activityActions.openActivityPreview,
+      rerunActivity: splitWorkspace.activityActions.rerunActivity,
+    },
+  });
+  const {
+    activateContext: activateActivityContext,
+    openActivityPreview,
+    rerunActivity,
+  } = routedActivityActions;
+  const visibleWorkspaceScene = useMemo<WorkspaceSceneProps>(() => ({
+    ...workspaceScene,
+    chat: {
+      ...workspaceScene.chat,
+      sending: conversation
+        ? sendingConversationIds.has(conversation.id)
+        : false,
+    },
+    splitScene: splitWorkspace.scene,
+  }), [
+    conversation,
+    sendingConversationIds,
+    splitWorkspace.scene,
+    workspaceScene,
+  ]);
 
   return (
-    <div
-      ref={appShellRef}
-      className={`app-shell platform-${platform}${
-        sidebarCollapsed && !mobileNavigation ? " is-sidebar-collapsed" : ""
-      }`}
-      data-interface-scale={settings.interfaceScale}
-      data-runtime-generation={connection.runtimeGeneration ?? undefined}
-      data-connection-status={connection.status}
-      data-document-active={documentActive ? "true" : "false"}
-      style={appShellStyle}
-    >
-      {(mobileNavigation || !sidebarCollapsed) && <Sidebar
-        snapshot={connection.snapshot}
-        connectionStatus={connection.status}
-        view={view}
-        open={sidebarOpen}
-        busy={busyAction === "project.create"}
-        onClose={() => setSidebarOpen(false)}
-        onViewChange={setView}
-        onImportProject={() => void importProject()}
-        onSelectProject={selectProject}
-        onSelectConversation={selectConversation}
-        onCreateConversation={createConversation}
-        onRenameConversation={(thread, title) => {
-          void run("conversation.update", {
-            type: "conversation.update",
-            payload: { conversationId: thread.id, title },
-          }).catch(() => undefined);
-        }}
-        onArchiveConversation={(thread) => { void run("conversation.archive", { type: "conversation.archive", payload: { conversationId: thread.id } }).catch(() => undefined); }}
-        onSettleConversation={(thread) => { void run("conversation.settle", { type: "conversation.settle", payload: { conversationId: thread.id } }).catch(() => undefined); }}
-        onRestoreConversation={(thread) => { void run("conversation.unsettle", { type: "conversation.unsettle", payload: { conversationId: thread.id } }).catch(() => undefined); }}
-        onDeleteConversation={(thread) => {
-          const confirmed = !settings.confirmDestructiveActions
-            || window.confirm(`Delete “${thread.title}”? This cannot be undone.`);
-          if (confirmed) {
-            void run("conversation.delete", {
-              type: "conversation.delete",
-              payload: { conversationId: thread.id },
-            }).catch(() => undefined);
-          }
-        }}
-        onAcknowledgeRun={acknowledgeActivity}
-        onDismissRun={dismissActivity}
-        onOpenProject={(item) => openProjectPath({ projectId: item.id, relativePath: ".", action: "open-externally" })}
-        onRenameProject={(item, name) => { void run("project.update", { type: "project.update", payload: { projectId: item.id, name } }).catch(() => undefined); }}
-        onSetProjectGrouping={(item, groupingMode) => {
-          void run("project.update", {
-            type: "project.update",
-            payload: { projectId: item.id, groupingMode },
-          }).catch(() => undefined);
-        }}
-        onSetProjectGitRepositoryLimit={(item, gitRepositoryLimit) => {
-          void run("project.update", {
-            type: "project.update",
-            payload: { projectId: item.id, gitRepositoryLimit },
-          }).catch(() => undefined);
-        }}
-        onSidebarModeChange={(sidebarMode) => {
-          void updateSettings({ sidebarMode });
-        }}
-        onRemoveProject={(item) => {
-          const confirmed = !settings.confirmDestructiveActions
-            || window.confirm(
-              `Remove “${item.name}” from Inertia? Files on disk will not be deleted.`,
-            );
-          if (confirmed) {
-            void run("project.remove", {
-              type: "project.remove",
-              payload: { projectId: item.id },
-            }).catch(() => undefined);
-          }
-        }}
-      />}
-
-      {!mobileNavigation && !sidebarCollapsed && (
-        <PaneResizeHandle
-          label="Resize project navigation"
-          controls="main-workspace"
-          containerRef={appShellRef}
-          orientation="vertical"
-          value={sidebarLayout.value}
-          min={SIDEBAR_MIN_WIDTH}
-          max={sidebarLayout.max}
-          defaultValue={276}
-          onChange={sidebarLayout.onChange}
-          onCommit={sidebarLayout.onCommit}
-          valueText={(value) => `${value} pixels for project navigation`}
-          className="sidebar-resize-handle"
-        />
-      )}
-
-      <section
-        className="workspace-shell"
-        id="main-workspace"
-        inert={mobileNavigation && sidebarOpen ? true : undefined}
-      >
-        <div className="workspace-frame">
-          <WorkspaceHeader
-            project={project}
-            conversation={conversation}
-            view={view}
-            activeTool={activeTool}
-            sidebarCollapsed={sidebarCollapsed}
-            theme={settings.theme}
-            gitStatus={gitStatus}
-            branches={branches}
-            actions={projectActions}
-            busy={Boolean(busyAction)}
-            activityOpen={activityOpen}
-            activeRunCount={runsSummary.activeCount}
-            attentionRunCount={runsSummary.attentionCount}
-            onOpenSidebar={() => {
-              if (mobileNavigation) setSidebarOpen(true);
-              else setSidebarCollapsed((collapsed) => !collapsed);
-            }}
-            onToggleTools={() => setActiveTool((tool) => tool ? null : "terminal")}
-            onCycleTheme={cycleTheme}
-            onOpenSettings={() => setView("settings")}
-            onToggleActivity={() => setActivityOpen((open) => !open)}
-            onOpenProject={() => { if (project) openProjectPath({ projectId: project.id, relativePath: ".", action: "open-externally" }); }} onRefreshBranches={loadBranches}
-            onSwitchBranch={(name) => mutateBranch("git.branch.switch", name)}
-            onCreateBranch={(name) => mutateBranch("git.branch.create", name)}
-            onCommit={() => setCommitDialogOpen(true)}
-            onRunAction={runProjectAction}
-            onCreateConversationOnBranch={(branch) => createConversation(project, { kind: "branch", branch })}
-            onCreateConversationInWorktree={() => {
-              if (conversation?.worktreePath) {
-                createConversation(project, { kind: "worktree", branch: gitStatus?.branch ?? conversation.branch, path: conversation.worktreePath });
-              }
-            }}
-            onCreateConversationInIsolatedWorktree={() => createConversation(project, { kind: "isolated-worktree" })}
-            onOpenPullRequest={() => {
-              if (!project) return;
-              void run("git.pr.open", {
-                type: "git.pr.open",
-                payload: {
-                  projectId: project.id,
-                  conversationId: conversation?.id,
-                },
-              }).then(resultEvent).then((event) => {
-                if (event.result.kind === "external.url") {
-                  return window.inertia.openExternal(event.result.url);
-                }
-              }).catch(() => undefined);
-            }}
-            onPull={() => {
-              if (!project) return;
-              void run("git.pull", {
-                type: "git.pull",
-                payload: {
-                  projectId: project.id,
-                  conversationId: conversation?.id,
-                },
-              }).then(() => loadGit()).catch(() => undefined);
-            }}
-          />
-
-          <div
-            ref={workspaceBodyRef}
-            id="workspace-content"
-            className={toolsVisible ? "workspace-body has-tools" : "workspace-body"}
-            style={workspaceBodyStyle}
-          >
-            <WorkspaceScene {...workspaceScene} />
-          </div>
-        </div>
-      </section>
-
-      <CommitDialog
-        open={commitDialogOpen}
-        repositoryPath="."
-        status={gitStatus}
-        reviewStates={reviewStates}
-        diff={structuredDiff}
-        busy={busyAction === "git.commit" || busyAction === "git.push"}
-        onClose={() => setCommitDialogOpen(false)}
-        onCommit={async (...args) => {
-          await commit(...args);
-          setCommitDialogOpen(false);
-        }}
-      />
-      <AppNavigationOverlays
-        snapshot={connection.snapshot}
-        activityOpen={activityOpen}
-        paletteOpen={paletteOpen}
-        now={activityNow}
-        setActivityOpen={setActivityOpen}
-        setPaletteOpen={setPaletteOpen}
-        setWorkspaceView={() => setView("workspace")}
-        selectProject={selectProject}
-        selectConversation={selectConversation}
-        createConversation={() => createConversation()}
-        importProject={importProject}
-        activateActivityContext={activateActivityContext}
-        openActivityLocation={openActivityLocation}
-        openActivityPreview={openActivityPreview}
-        stopActivity={stopActivity}
-        rerunActivity={rerunActivity}
-        markActivitySeen={markActivitySeen}
-        acknowledgeActivity={acknowledgeActivity}
-        dismissActivity={dismissActivity}
-        openSettings={() => setView("settings")}
-      />
-      <AppStatusOverlays
-        providerAuth={{
-          provider: authProvider,
-          status: connection.status,
-          theme: settings.theme,
-          fontSize: settings.terminalFontSize,
-          sendCommand,
-          subscribe: connection.subscribe,
-          onClose: closeProviderAuth,
-        }}
-        appUpdate={appUpdate}
-        error={visibleError}
-        onDismissError={() => {
-          setActionError(null);
-          connection.clearError();
-        }}
-      />
-    </div>
+    <AppLayout
+      platform={platform}
+      documentActive={documentActive}
+      settings={settings}
+      connection={connection}
+      appUpdate={appUpdate}
+      providerQuotaNotices={providerQuotaNotices}
+      workspaceLayout={workspaceLayout}
+      view={view}
+      setView={setView}
+      busyAction={busyAction}
+      visibleError={visibleError}
+      setActionError={setActionError}
+      commitDialogOpen={commitDialogOpen}
+      setCommitDialogOpen={setCommitDialogOpen}
+      paletteOpen={paletteOpen}
+      setPaletteOpen={setPaletteOpen}
+      activityOpen={activityOpen}
+      setActivityOpen={setActivityOpen}
+      activityNow={activityNow}
+      project={project}
+      conversation={conversation}
+      splitConversationId={splitConversation?.id ?? null}
+      sceneActiveTool={sceneActiveTool}
+      sceneToggleWorkspaceTools={sceneToggleWorkspaceTools}
+      environmentSummary={environmentSummary}
+      runsSummary={runsSummary}
+      gitStatus={gitStatus}
+      branches={branches}
+      projectActions={projectActions}
+      reviewStates={reviewStates}
+      structuredDiff={structuredDiff}
+      scene={visibleWorkspaceScene}
+      providerAuth={{
+        provider: authProvider,
+        status: connection.status,
+        theme: settings.theme,
+        fontSize: settings.terminalFontSize,
+        sendCommand,
+        subscribe: connection.subscribe,
+        onClose: closeProviderAuth,
+      }}
+      actions={{
+        run,
+        importProject,
+        selectProject,
+        selectConversation,
+        openConversationInSplit,
+        closeConversationSplit: () => updateSplitConversationId(null),
+        createConversation,
+        updateSettings,
+        openProjectPath,
+        cycleTheme,
+        loadBranches,
+        mutateBranch,
+        loadGit,
+        commit,
+        runProjectAction,
+        activateActivityContext,
+        openActivityLocation,
+        openActivityPreview,
+        stopActivity,
+        rerunActivity,
+        markActivitySeen,
+        acknowledgeActivity,
+        dismissActivity,
+      }}
+    />
   );
 }

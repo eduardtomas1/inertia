@@ -39,7 +39,7 @@ describe("Minimal Workstream conversation canvas", () => {
   });
 
   it("keeps optional workspace tools secondary without a permanent divider rail", () => {
-    const panel = cssBlock(css, ".workspace-panel {");
+    const panel = cssBlock(css, "\n.workspace-panel {\n");
     const tabs = cssBlock(css, ".workspace-panel-tabs {");
     const scopedTabs = cssBlock(css, ".workspace-panel > .workspace-panel-tabs {");
 

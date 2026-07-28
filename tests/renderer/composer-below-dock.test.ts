@@ -32,7 +32,7 @@ describe("composer below-dock cleanup", () => {
     );
     expect(chatWorkspaceSource).toContain("<ProviderMaintenanceNotice");
     expect(chatWorkspaceSource).toMatch(
-      /<div ref=\{composerRegionRef\} className="composer-region">[\s\S]*?<Composer[\s\S]*?\/>\s*<\/div>\s*<\/main>/u,
+      /<div ref=\{composerRegionRef\} className="composer-region">[\s\S]*?<Composer[\s\S]*?\/>\s*<\/div>\s*<\/Root>/u,
     );
     expect(`${composerSource}\n${inputSource}\n${toolbarSource}`).not.toMatch(
       /composer-(?:footer|note|helper|usage-strip|spacer)/u,

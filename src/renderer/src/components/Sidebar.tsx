@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleDot,
+  Columns2,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -52,6 +53,9 @@ type SidebarProps = {
   onImportProject: () => void;
   onSelectProject: (project: Project) => void;
   onSelectConversation: (conversation: Conversation) => void;
+  splitConversationId: string | null;
+  onOpenConversationInSplit: (conversation: Conversation) => void;
+  onCloseConversationSplit: () => void;
   onCreateConversation: (project: Project) => void;
   onRenameConversation: (conversation: Conversation, title: string) => void;
   onArchiveConversation: (conversation: Conversation) => void;
@@ -100,6 +104,9 @@ export function Sidebar({
   onImportProject,
   onSelectProject,
   onSelectConversation,
+  splitConversationId,
+  onOpenConversationInSplit,
+  onCloseConversationSplit,
   onCreateConversation,
   onRenameConversation,
   onArchiveConversation,
@@ -331,9 +338,34 @@ export function Sidebar({
     const canSettle = !hasActiveWork && conversation.status !== "running" && conversation.status !== "needs-input";
     const thread = sidebarThreadView(conversation, snapshot?.activeConversationId ?? null, snapshot?.runs ?? []);
     const runAttention = thread.run ? workspaceRunAttentionView(thread.run) : null;
+    const isSplitConversation = splitConversationId === conversation.id;
+    const canOpenInSplit = Boolean(
+      snapshot?.activeConversationId
+      && snapshot.activeConversationId !== conversation.id
+    );
     return (
       <div className="conversation-menu" role="menu">
         <button type="button" role="menuitem" onClick={() => { setRenameDraft(conversation.title); setRenaming(conversation.id); setConversationMenu(null); }}><Pencil size={13} />Rename</button>
+        {isSplitConversation ? (
+          <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onCloseConversationSplit(); }}>
+            <Columns2 size={13} />Remove from split view
+          </button>
+        ) : (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canOpenInSplit}
+            title={canOpenInSplit
+              ? undefined
+              : "Choose another chat first."}
+            onClick={() => {
+              setConversationMenu(null);
+              onOpenConversationInSplit(conversation);
+            }}
+          >
+            <Columns2 size={13} />Add this chat to split view
+          </button>
+        )}
         {thread.run && thread.needsAttention && runAttention?.canAcknowledge && (
           <button type="button" role="menuitem" onClick={() => { setConversationMenu(null); onAcknowledgeRun(thread.run!); }}>
             <CheckCircle2 size={13} />Acknowledge
@@ -385,6 +417,7 @@ export function Sidebar({
           `is-${variant}`,
           `status-${model.status}`,
           isActive && "is-active",
+          splitConversationId === conversation.id && "is-split",
           model.unread && "is-unread",
         )}
         key={conversation.id}
@@ -584,12 +617,26 @@ export function Sidebar({
                               {renaming === conversation.id ? renameForm(conversation) : (
                                 <button
                                   type="button"
-                                  className={clsx("conversation-row", snapshot?.activeConversationId === conversation.id && view === "workspace" && "is-active")}
+                                  className={clsx(
+                                    "conversation-row",
+                                    snapshot?.activeConversationId === conversation.id
+                                      && view === "workspace"
+                                      && "is-active",
+                                    splitConversationId === conversation.id
+                                      && "is-split",
+                                  )}
                                   data-sidebar-nav
                                   onClick={() => activateConversation(conversation)}
                                 >
                                   <span className={clsx("thread-status-dot", `is-${thread.status}`)} title={statusLabels[thread.status]} />
                                   <span className="conversation-title">{conversation.title}</span>
+                                  {splitConversationId === conversation.id && (
+                                    <Columns2
+                                      className="conversation-split-mark"
+                                      size={11}
+                                      aria-label="Open in split view"
+                                    />
+                                  )}
                                   {thread.unread && <span className="conversation-unread" aria-label="Unread completed work" />}
                                   {!compact && <span className="conversation-time">{formatRelativeTime(conversation.updatedAt)}</span>}
                                 </button>

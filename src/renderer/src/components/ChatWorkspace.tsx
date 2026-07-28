@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -50,6 +51,7 @@ import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 
 type ChatWorkspaceProps = {
+  embedded?: boolean;
   project: Project | null;
   conversation: Conversation | null;
   turns: AgentTurn[];
@@ -114,6 +116,7 @@ type ChatWorkspaceProps = {
 };
 
 export function ChatWorkspace({
+  embedded = false,
   project,
   conversation,
   turns,
@@ -176,6 +179,8 @@ export function ChatWorkspace({
   onClearPromptContext,
   onLatestContentVisibilityChange,
 }: ChatWorkspaceProps): React.JSX.Element {
+  const Root = embedded ? "section" : "main";
+  const keyboardHelpId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
@@ -244,16 +249,16 @@ export function ChatWorkspace({
 
   if (loading) {
     return (
-      <main className="chat-workspace centered-state" aria-busy="true">
+      <Root className="chat-workspace centered-state" aria-busy="true">
         <LoadingMark label="Loading workspace" />
         <p>Preparing your local workspace…</p>
-      </main>
+      </Root>
     );
   }
 
   if (!project) {
     return (
-      <main className="chat-workspace welcome-workspace">
+      <Root className="chat-workspace welcome-workspace">
         <section className="welcome-card" aria-labelledby="welcome-title">
           <div className="welcome-mark"><img src="./inertia-logo.png" alt="" /></div>
           <span className="welcome-kicker">A calmer place to build</span>
@@ -262,13 +267,13 @@ export function ChatWorkspace({
           <button type="button" className="primary-button" onClick={onAddProject}><FolderPlus size={16} /><span>Add your first project</span><ArrowRight size={15} /></button>
           <div className="welcome-features"><div><Code2 size={17} /><span>Project-aware</span></div><div><TerminalSquare size={17} /><span>Local terminal</span></div><div><ShieldCheck size={17} /><span>Local by default</span></div></div>
         </section>
-      </main>
+      </Root>
     );
   }
 
   if (!conversation) {
     return (
-      <main className="chat-workspace welcome-workspace">
+      <Root className="chat-workspace welcome-workspace">
         <section className="project-welcome" aria-labelledby="project-welcome-title">
           <span className="project-welcome-icon"><MessageSquarePlus size={22} /></span>
           <span className="welcome-kicker">{project.name}</span>
@@ -277,22 +282,22 @@ export function ChatWorkspace({
           <button type="button" className="primary-button" onClick={onCreateConversation}><MessageSquarePlus size={16} /><span>New chat</span></button>
           <code className="project-path-display">{project.path}</code>
         </section>
-      </main>
+      </Root>
     );
   }
 
   return (
-    <main className={clsx("chat-workspace", `response-density-${responseDensity}`)}>
+    <Root className={clsx("chat-workspace", `response-density-${responseDensity}`)}>
       <div
         ref={scrollRef}
         className="message-scroll"
         aria-label="Thread transcript"
-        aria-describedby="transcript-keyboard-help"
+        aria-describedby={keyboardHelpId}
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+Home Alt+End Alt+G"
         tabIndex={0}
         onScroll={onTranscriptScroll}
       >
-        <span id="transcript-keyboard-help" className="visually-hidden">
+        <span id={keyboardHelpId} className="visually-hidden">
           Use Alt plus Up or Down to move between turns, Alt plus Home for the request,
           Alt plus End for the final answer, and Alt plus G for the turn artifact.
         </span>
@@ -386,6 +391,6 @@ export function ChatWorkspace({
           onClearPromptContext={onClearPromptContext}
         />
       </div>
-    </main>
+    </Root>
   );
 }

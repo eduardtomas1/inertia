@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DesktopBridge, RuntimeConnection } from "../shared/desktop.js";
+import type {
+  DesktopBridge,
+  PreviewStateUpdate,
+  RuntimeConnection,
+} from "../shared/desktop.js";
 
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -11,12 +15,14 @@ const IPC = {
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
   releaseAttachment: "inertia:release-attachment",
+  openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
   openExternal: "inertia:open-external",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
+  previewState: "inertia:preview-state",
   syncThemePreference: "inertia:sync-theme-preference",
   setBackendCredential: "inertia:set-backend-credential",
   clearBackendCredential: "inertia:clear-backend-credential",
@@ -40,13 +46,30 @@ const bridge: DesktopBridge = Object.freeze({
   selectAttachments: () => ipcRenderer.invoke(IPC.selectAttachments) as ReturnType<DesktopBridge["selectAttachments"]>,
   importAttachments: (files: Parameters<DesktopBridge["importAttachments"]>[0]) => ipcRenderer.invoke(IPC.importAttachments, files) as ReturnType<DesktopBridge["importAttachments"]>,
   releaseAttachment: (id: string) => ipcRenderer.invoke(IPC.releaseAttachment, id) as Promise<void>,
+  openAttachmentExternally: (id: string) =>
+    ipcRenderer.invoke(IPC.openAttachmentExternally, id) as Promise<void>,
   openProjectPath: (request: Parameters<DesktopBridge["openProjectPath"]>[0]) =>
     ipcRenderer.invoke(IPC.openProjectPath, request) as Promise<string>,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
-  previewNavigate: (url: string) => ipcRenderer.invoke(IPC.previewNavigate, url) as ReturnType<DesktopBridge["previewNavigate"]>,
-  previewCommand: (action: "back" | "forward" | "reload") => ipcRenderer.invoke(IPC.previewCommand, action) as ReturnType<DesktopBridge["previewCommand"]>,
-  previewSetBounds: (bounds: Parameters<DesktopBridge["previewSetBounds"]>[0]) => ipcRenderer.invoke(IPC.previewSetBounds, bounds) as Promise<void>,
-  previewClose: () => ipcRenderer.invoke(IPC.previewClose) as Promise<void>,
+  previewNavigate: (request: Parameters<DesktopBridge["previewNavigate"]>[0]) =>
+    ipcRenderer.invoke(IPC.previewNavigate, request) as ReturnType<
+      DesktopBridge["previewNavigate"]
+    >,
+  previewCommand: (request: Parameters<DesktopBridge["previewCommand"]>[0]) =>
+    ipcRenderer.invoke(IPC.previewCommand, request) as ReturnType<
+      DesktopBridge["previewCommand"]
+    >,
+  previewSetBounds: (request: Parameters<DesktopBridge["previewSetBounds"]>[0]) =>
+    ipcRenderer.invoke(IPC.previewSetBounds, request) as Promise<void>,
+  previewClose: (request: Parameters<DesktopBridge["previewClose"]>[0]) =>
+    ipcRenderer.invoke(IPC.previewClose, request) as Promise<void>,
+  onPreviewState: (listener: (state: PreviewStateUpdate) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: PreviewStateUpdate) => {
+      listener(state);
+    };
+    ipcRenderer.on(IPC.previewState, handler);
+    return () => ipcRenderer.removeListener(IPC.previewState, handler);
+  },
   syncThemePreference: (preference: Parameters<DesktopBridge["syncThemePreference"]>[0]) => ipcRenderer.invoke(IPC.syncThemePreference, preference) as Promise<void>,
   setBackendCredential: (request: Parameters<DesktopBridge["setBackendCredential"]>[0]) =>
     ipcRenderer.invoke(IPC.setBackendCredential, request) as ReturnType<DesktopBridge["setBackendCredential"]>,

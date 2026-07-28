@@ -38,6 +38,15 @@ type Connection = ReturnType<typeof useInertiaConnection>;
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
 type ConversationProjection = ReturnType<typeof useConversationProjection>;
 type WorkspaceLayout = ReturnType<typeof useWorkspaceLayout>;
+type WorkspaceSceneLayout = Pick<
+  WorkspaceLayout,
+  | "activeTool"
+  | "setActiveTool"
+  | "stackedTools"
+  | "toolsVisible"
+  | "workspaceBodyRef"
+  | "tools"
+>;
 type WorkspaceTools = ReturnType<typeof useWorkspaceTools>;
 type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type DesktopTools = ReturnType<typeof useDesktopTools>;
@@ -45,7 +54,7 @@ type ActivityActions = ReturnType<typeof useActivityActions>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 type PlanSteps = ComponentProps<typeof PlanPanel>["steps"];
 
-interface WorkspaceSceneActions {
+export interface WorkspaceSceneActions {
   importProject: () => Promise<void>;
   createConversation: (
     targetProject?: Project | null,
@@ -108,7 +117,7 @@ export interface WorkspaceSceneModelInput {
   connection: Connection;
   providerMaintenance: ProviderMaintenance;
   projection: ConversationProjection;
-  layout: WorkspaceLayout;
+  layout: WorkspaceSceneLayout;
   workspaceTools: WorkspaceTools;
   backendProfileActions: BackendProfileActions;
   desktopTools: DesktopTools;

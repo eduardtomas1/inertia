@@ -1,6 +1,14 @@
-import { memo, type ComponentProps, type JSX } from "react";
+import {
+  memo,
+  useRef,
+  type ComponentProps,
+  type CSSProperties,
+  type JSX,
+  type RefObject,
+} from "react";
 
 import { ChatWorkspace } from "./ChatWorkspace";
+import { ConversationSplitView } from "./ConversationSplitView";
 import { ConversationDetailState } from "./ConversationDetailState";
 import { FilesPanel } from "./FilesPanel";
 import { HistoricalDiffPanel } from "./HistoricalDiffPanel";
@@ -12,7 +20,7 @@ import { TerminalPanel } from "./TerminalPanel";
 import { WorkspaceChangesPanel } from "./WorkspaceChangesPanel";
 import { WorkspacePanel, type WorkspacePanelTab } from "./WorkspacePanel";
 
-interface WorkspaceToolScene {
+export interface WorkspaceToolScene {
   activeTool: WorkspacePanelTab | null;
   panel: Omit<ComponentProps<typeof WorkspacePanel>, "children">;
   historicalDiff: ComponentProps<typeof HistoricalDiffPanel> | null;
@@ -25,13 +33,106 @@ interface WorkspaceToolScene {
   preview: ComponentProps<typeof PreviewPanel>;
 }
 
+export interface ConversationPaneScene {
+  detailState: ComponentProps<typeof ConversationDetailState> | null;
+  chat: ComponentProps<typeof ChatWorkspace>;
+  resizeHandle: ComponentProps<typeof PaneResizeHandle> | null;
+  tools: WorkspaceToolScene | null;
+}
+
 export interface WorkspaceSceneProps {
   view: "workspace" | "settings";
   settings: ComponentProps<typeof SettingsView>;
   detailState: ComponentProps<typeof ConversationDetailState> | null;
   chat: ComponentProps<typeof ChatWorkspace>;
+  splitScene?: {
+    secondary: ConversationPaneScene;
+    primaryTitle: string;
+    secondaryTitle: string;
+    primaryProjectName: string;
+    secondaryProjectName: string;
+    primaryToolsOpen: boolean;
+    secondaryToolsOpen: boolean;
+    secondaryFirst: boolean;
+    onTogglePrimaryTools: () => void;
+    onToggleSecondaryTools: () => void;
+    onSwapPanes: () => void;
+    onCloseSecondary: () => void;
+  } | null;
   resizeHandle: ComponentProps<typeof PaneResizeHandle> | null;
   tools: WorkspaceToolScene | null;
+}
+
+function WorkspaceToolSurface({
+  resizeHandle,
+  tools,
+}: Pick<ConversationPaneScene, "resizeHandle" | "tools">): JSX.Element {
+  const terminalLifecycleRef = useRef({
+    key: null as string | null,
+    activated: false,
+  });
+  if (terminalLifecycleRef.current.key !== (tools?.terminalKey ?? null)) {
+    terminalLifecycleRef.current = {
+      key: tools?.terminalKey ?? null,
+      activated: tools?.activeTool === "terminal",
+    };
+  } else if (tools?.activeTool === "terminal") {
+    terminalLifecycleRef.current.activated = true;
+  }
+  return (
+    <>
+      {resizeHandle && <PaneResizeHandle {...resizeHandle} />}
+      {tools && (
+        <WorkspacePanel {...tools.panel}>
+          {tools.activeTool === "changes" && (
+            tools.historicalDiff
+              ? <HistoricalDiffPanel {...tools.historicalDiff} />
+              : <WorkspaceChangesPanel {...tools.changes} />
+          )}
+          {tools.activeTool === "files" && (
+            <FilesPanel key={tools.filesKey} {...tools.files} />
+          )}
+          {terminalLifecycleRef.current.activated && (
+            <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
+          )}
+          {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
+          {tools.activeTool === "preview" && (
+            <PreviewPanel {...tools.preview} />
+          )}
+        </WorkspacePanel>
+      )}
+    </>
+  );
+}
+
+function ConversationPane({
+  detailState,
+  chat,
+  resizeHandle,
+  tools,
+}: ConversationPaneScene): JSX.Element {
+  const containerRef = resizeHandle?.containerRef as
+    | RefObject<HTMLDivElement | null>
+    | undefined;
+  const style = resizeHandle
+    ? {
+        "--conversation-pane-tools-height": `${resizeHandle.value}px`,
+      } as CSSProperties
+    : undefined;
+  return (
+    <div
+      ref={containerRef}
+      className={`conversation-pane-workspace${tools ? " has-tools" : ""}`}
+      style={style}
+    >
+      <div className="conversation-pane-chat">
+        {detailState
+          ? <ConversationDetailState {...detailState} embedded />
+          : <ChatWorkspace {...chat} embedded />}
+      </div>
+      <WorkspaceToolSurface resizeHandle={resizeHandle} tools={tools} />
+    </div>
+  );
 }
 
 /**
@@ -44,6 +145,7 @@ function WorkspaceSceneView({
   settings,
   detailState,
   chat,
+  splitScene = null,
   resizeHandle,
   tools,
 }: WorkspaceSceneProps): JSX.Element {
@@ -51,28 +153,37 @@ function WorkspaceSceneView({
     <>
       {view === "settings" ? (
         <SettingsView {...settings} />
+      ) : splitScene ? (
+        <ConversationSplitView
+          primary={(
+            <ConversationPane
+              detailState={detailState}
+              chat={chat}
+              resizeHandle={resizeHandle}
+              tools={tools}
+            />
+          )}
+          secondary={<ConversationPane {...splitScene.secondary} />}
+          primaryTitle={splitScene.primaryTitle}
+          secondaryTitle={splitScene.secondaryTitle}
+          primaryProjectName={splitScene.primaryProjectName}
+          secondaryProjectName={splitScene.secondaryProjectName}
+          primaryToolsOpen={splitScene.primaryToolsOpen}
+          secondaryToolsOpen={splitScene.secondaryToolsOpen}
+          secondaryFirst={splitScene.secondaryFirst}
+          onTogglePrimaryTools={splitScene.onTogglePrimaryTools}
+          onToggleSecondaryTools={splitScene.onToggleSecondaryTools}
+          onSwapPanes={splitScene.onSwapPanes}
+          onCloseSecondary={splitScene.onCloseSecondary}
+        />
       ) : detailState ? (
         <ConversationDetailState {...detailState} />
       ) : (
         <ChatWorkspace {...chat} />
       )}
 
-      {resizeHandle && <PaneResizeHandle {...resizeHandle} />}
-
-      {tools && (
-        <WorkspacePanel {...tools.panel}>
-          {tools.activeTool === "changes" && (
-            tools.historicalDiff
-              ? <HistoricalDiffPanel {...tools.historicalDiff} />
-              : <WorkspaceChangesPanel {...tools.changes} />
-          )}
-          {tools.activeTool === "files" && (
-            <FilesPanel key={tools.filesKey} {...tools.files} />
-          )}
-          <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
-          {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
-          {tools.activeTool === "preview" && <PreviewPanel {...tools.preview} />}
-        </WorkspacePanel>
+      {!splitScene && (
+        <WorkspaceToolSurface resizeHandle={resizeHandle} tools={tools} />
       )}
     </>
   );

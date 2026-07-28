@@ -120,6 +120,7 @@ export const appCommandSchemas = [
           reasoningEffort: z.string().trim().max(40).optional(),
           interactionMode: interactionModeSchema.optional(),
           accessMode: accessModeSchema.optional(),
+          activate: z.boolean().optional(),
           useWorktree: z.boolean().optional(),
           branch: z.string().trim().min(1).max(255).nullable().optional(),
           worktreePath: z.string().min(1).max(4096).nullable().optional(),
@@ -139,6 +140,16 @@ export const appCommandSchemas = [
       ...requestBase,
       type: z.literal("conversation.detail.load"),
       payload: z.object({ conversationId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("conversation.detail.subscription"),
+      payload: z.object({
+        owner: z.enum(["primary", "secondary"]),
+        conversationId: z.string().uuid().nullable(),
+      }).strict(),
     })
     .strict(),
   z
@@ -195,6 +206,7 @@ export const configurationCommandSchemas = [
           usageDisplayMode: z.enum(["expanded", "compact", "hidden"]).optional(),
           interfaceScale: z.enum(["compact", "default", "comfortable", "large"]).optional(),
           responseDensity: z.enum(["compact", "default", "comfortable"]).optional(),
+          workspaceStartupSurface: z.enum(["summary", "tools"]).optional(),
           defaultCodeWrap: z.boolean().optional(),
           autoCollapseWorkLog: z.boolean().optional(),
           showChangedFileSummaries: z.boolean().optional(),

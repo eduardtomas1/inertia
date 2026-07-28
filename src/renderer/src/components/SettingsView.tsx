@@ -263,6 +263,13 @@ export function SettingsView({
                   <button type="button" role="radio" aria-checked={settings.sidebarMode === "activity"} className={clsx(settings.sidebarMode === "activity" && "is-active")} disabled={disabled} onClick={() => onUpdate({ sidebarMode: "activity" })}>Work</button>
                 </div>
               </div>
+              <div className="response-density-setting">
+                <span><strong>Workspace startup</strong><small>Begin with a compact environment summary or open the last workspace tool.</small></span>
+                <div role="radiogroup" aria-label="Workspace startup surface">
+                  <button type="button" role="radio" aria-checked={settings.workspaceStartupSurface === "summary"} className={clsx(settings.workspaceStartupSurface === "summary" && "is-active")} disabled={disabled} onClick={() => onUpdate({ workspaceStartupSurface: "summary" })}>Summary</button>
+                  <button type="button" role="radio" aria-checked={settings.workspaceStartupSurface === "tools"} className={clsx(settings.workspaceStartupSurface === "tools" && "is-active")} disabled={disabled} onClick={() => onUpdate({ workspaceStartupSurface: "tools" })}>Workspace tools</button>
+                </div>
+              </div>
               <div className="response-density-setting project-grouping-setting">
                 <span><strong>Logical project grouping</strong><small>Use canonical Git identity and normalized paths, never display names.</small></span>
                 <div role="radiogroup" aria-label="Logical project grouping">

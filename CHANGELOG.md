@@ -4,6 +4,32 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+### Two chats, two complete workspaces
+
+- Any second chat can open beside the current one, even when it belongs to another project. Each pane keeps its own draft, provider route, transcript, files, Git review, changed-file context, terminal sessions, plan, preview, and actions.
+- Split chats can be resized side by side or stacked in a narrow window, swapped when both are safe to move, and closed without transferring one provider's context into the other.
+- Workspace tools move below each split chat so both projects retain usable height. Each pane remembers its own selected tool and size, while terminals stay alive after their first activation as the user moves between Changes, Files, Plan, and Preview.
+- Conversation detail subscriptions, pending approvals and questions, delayed Git/files/review responses, reversible Undo handles, activity actions, and native preview requests now carry explicit pane ownership so closing or switching one project cannot lose its controls or replace or navigate the other.
+
+### A useful workspace summary without permanent tool weight
+
+- A compact Environment summary is the default workspace surface, bringing the current project, Git branch and changes, active work, delegated agents, and recent context into one calm disclosure.
+- Files, Changes, Terminal, Plan, and Preview remain one click away but start compacted on a fresh install. Settings can restore the previous tools-first startup for users who prefer it.
+- Activity now groups only the latest meaningful provider operations beneath the owning agent run, keeps manual source-control work independent, and leaves the complete bounded history available on demand.
+- Provider-reported five-hour and weekly limits can notify at 25%, 15%, and 5% remaining. Notifications are route-scoped, deduplicated, freshness-aware, and remain silent when a provider does not report an authoritative quota.
+
+### Attachments and previews that behave like desktop tools
+
+- Pasted and selected images open in a larger accessible preview before sending, while PDFs have an embedded preview plus an explicit external fallback for Linux environments without a usable Chromium PDF viewer.
+- Every pending attachment can still be removed individually. Clipboard MIME recovery, opaque attachment capabilities, digest verification, bounded reads, cleanup, and provider input ownership remain enforced.
+- Two native project previews can run independently at once. Navigation, history, bounds, redirects, downloads, permissions, modal occlusion, conversation changes, and shutdown are now brokered by owner and conversation context.
+- Closing Inertia destroys native previews before the supervised runtime settles, preserving live terminal sessions during normal use without delaying application shutdown.
+
+### Release confidence
+
+- The release candidate passes architecture checks, standard and type-aware lint, four TypeScript projects, 1,144 unit and integration tests, 114 portable provider tests, 37 Electron end-to-end scenarios, packaged-app smoke, Electron fuse verification, strict macOS bundle verification, and the production dependency audit.
+- Cross-platform coverage includes wide and stacked split chats, different project roots, independent terminal IDs and working directories, dual native previews, attachment modal ownership, compact startup, quota thresholds, activity grouping, reconnect sequencing, and accessible focus restoration.
+
 ## 0.0.12 — 2026-07-28
 
 ### Faster evidence that a change is safe

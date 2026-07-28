@@ -11,6 +11,7 @@ import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
+import { useWorkspaceMentions } from "./useWorkspaceMentions";
 
 type WorkspaceEntriesResult = Extract<
   Extract<ServerEvent, { type: "request.result" }>["result"],
@@ -18,6 +19,8 @@ type WorkspaceEntriesResult = Extract<
 >;
 
 interface WorkspaceFilesOptions {
+  enabled: boolean;
+  loadOnMount: boolean;
   project: Project | null;
   conversation: Conversation | null;
   online: boolean;
@@ -31,9 +34,10 @@ export function useWorkspaceFiles({
   online,
   request,
   setActionError,
+  enabled,
+  loadOnMount,
 }: WorkspaceFilesOptions) {
   const [workspaceEntries, setWorkspaceEntries] = useState<WorkspaceEntry[]>([]);
-  const [mentionResults, setMentionResults] = useState<WorkspaceEntry[]>([]);
   const [entriesTruncated, setEntriesTruncated] = useState(false);
   const [filePreview, setFilePreview] =
     useState<WorkspaceFilePreview | null>(null);
@@ -45,6 +49,8 @@ export function useWorkspaceFiles({
   const [projectActions, setProjectActions] = useState<ProjectAction[]>([]);
   const fileListRequestGenerationRef = useRef(0);
   const filePreviewRequestGenerationRef = useRef(0);
+  const actionsRequestGenerationRef = useRef(0);
+  const mentions = useWorkspaceMentions({ project, conversation, request });
 
   const requestWorkspaceEntries = useCallback(async (options: {
     directory?: string;
@@ -93,6 +99,7 @@ export function useWorkspaceFiles({
 
   const loadActions = useCallback(async () => {
     if (!project?.id) return;
+    const generation = ++actionsRequestGenerationRef.current;
     try {
       const event = resultEvent(await request({
         type: "project.actions",
@@ -101,17 +108,23 @@ export function useWorkspaceFiles({
           conversationId: conversation?.id,
         },
       }));
-      if (event.result.kind === "project.actions") {
+      if (
+        actionsRequestGenerationRef.current === generation
+        && event.result.kind === "project.actions"
+      ) {
         setProjectActions(event.result.actions);
       }
     } catch {
-      setProjectActions([]);
+      if (actionsRequestGenerationRef.current === generation) {
+        setProjectActions([]);
+      }
     }
   }, [conversation?.id, project?.id, request]);
 
   useEffect(() => {
     fileListRequestGenerationRef.current += 1;
     filePreviewRequestGenerationRef.current += 1;
+    actionsRequestGenerationRef.current += 1;
     setWorkspaceEntries([]);
     setFilePreview(null);
     setSelectedFile(null);
@@ -120,9 +133,20 @@ export function useWorkspaceFiles({
     setFilePreviewError(null);
     setFilesLoading(false);
     setFilePreviewLoading(false);
-    if (!project?.id || !online) return;
-    void Promise.allSettled([loadFiles(), loadActions()]);
-  }, [conversation?.id, loadActions, loadFiles, online, project?.id]);
+    if (!enabled || !project?.id || !online) return;
+    void Promise.allSettled([
+      ...(loadOnMount ? [loadFiles()] : []),
+      loadActions(),
+    ]);
+  }, [
+    conversation?.id,
+    enabled,
+    loadActions,
+    loadFiles,
+    loadOnMount,
+    online,
+    project?.id,
+  ]);
 
   const selectWorkspaceFile = useCallback((path: string) => {
     if (!project) return;
@@ -159,28 +183,9 @@ export function useWorkspaceFiles({
     });
   }, [conversation?.id, project, request, setActionError]);
 
-  const searchMentions = useCallback((query: string) => {
-    if (!project || !query.trim()) {
-      setMentionResults([]);
-      return;
-    }
-    void request({
-      type: "workspace.entries",
-      payload: {
-        projectId: project.id,
-        conversationId: conversation?.id,
-        query: query.trim(),
-      },
-    }).then(resultEvent).then((event) => {
-      if (event.result.kind === "workspace.entries") {
-        setMentionResults(event.result.entries.slice(0, 8));
-      }
-    }).catch(() => setMentionResults([]));
-  }, [conversation?.id, project, request]);
-
   return {
     workspaceEntries,
-    mentionResults,
+    mentionResults: mentions.mentionResults,
     entriesTruncated,
     filePreview,
     selectedFile,
@@ -192,6 +197,6 @@ export function useWorkspaceFiles({
     requestWorkspaceEntries,
     loadFiles,
     selectWorkspaceFile,
-    searchMentions,
+    searchMentions: mentions.searchMentions,
   };
 }

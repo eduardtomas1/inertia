@@ -14,6 +14,7 @@ import { RuntimeSyncHub } from "../../src/server/runtime/runtime-sync-hub";
 const GENERATION = "11111111-1111-4111-8111-111111111111";
 const CONVERSATION_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CONVERSATION_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const CONVERSATION_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 function snapshot(sync: AppSnapshot["sync"]): AppSnapshot {
   return {
@@ -165,7 +166,7 @@ describe("runtime sync hub", () => {
         kind: "resume",
         runtimeGeneration: GENERATION,
         afterSequence: 0,
-        conversationId,
+        conversationIds: [conversationId],
       }, {
         snapshot,
         approvals: [],
@@ -194,7 +195,19 @@ describe("runtime sync hub", () => {
     });
     expect(JSON.stringify(runtime.events.get("b"))).not.toContain("private-a");
 
-    runtime.hub.setConversationSubscription("b", CONVERSATION_A);
+    runtime.hub.setConversationSubscription(
+      "b",
+      "secondary",
+      CONVERSATION_A,
+    );
+    runtime.events.get("b")!.length = 0;
+    runtime.hub.broadcast({
+      type: "agent.text",
+      conversationId: CONVERSATION_B,
+      runId: "run",
+      turnId: "turn",
+      text: "still-visible-b",
+    });
     runtime.hub.broadcast({
       type: "agent.text",
       conversationId: CONVERSATION_A,
@@ -202,11 +215,148 @@ describe("runtime sync hub", () => {
       turnId: "turn",
       text: "now-visible",
     });
+    expect(runtime.events.get("b")?.[0]).toMatchObject({
+      type: "runtime.event",
+      event: { type: "agent.text", text: "still-visible-b" },
+    });
     expect(runtime.events.get("b")?.[1]).toMatchObject({
       type: "runtime.event",
-      sync: { latestSequence: 2 },
+      sync: { latestSequence: 3 },
       event: { type: "agent.text", text: "now-visible" },
     });
+
+    runtime.hub.setConversationSubscription(
+      "b",
+      "primary",
+      CONVERSATION_C,
+    );
+    runtime.events.get("b")!.length = 0;
+    runtime.hub.broadcast({
+      type: "agent.text",
+      conversationId: CONVERSATION_B,
+      runId: "run",
+      turnId: "turn",
+      text: "evicted-b",
+    });
+    runtime.hub.broadcast({
+      type: "agent.text",
+      conversationId: CONVERSATION_C,
+      runId: "run",
+      turnId: "turn",
+      text: "visible-c",
+    });
+    expect(runtime.events.get("b")?.[0]).toMatchObject({
+      type: "runtime.cursor",
+      sync: { latestSequence: 4 },
+    });
+    expect(runtime.events.get("b")?.[1]).toMatchObject({
+      type: "runtime.event",
+      sync: { latestSequence: 5 },
+      event: { type: "agent.text", text: "visible-c" },
+    });
+  });
+
+  it("removes a closed secondary pane before subscribing its replacement", () => {
+    const runtime = fixture();
+    runtime.hub.connect("split", {
+      kind: "resume",
+      runtimeGeneration: GENERATION,
+      afterSequence: 0,
+      conversationIds: [CONVERSATION_A, CONVERSATION_B],
+    }, {
+      snapshot,
+      approvals: [],
+      inputs: [],
+      plans: [],
+    });
+    runtime.events.get("split")!.length = 0;
+
+    runtime.hub.setConversationSubscription(
+      "split",
+      "primary",
+      CONVERSATION_A,
+    );
+    runtime.hub.setConversationSubscription("split", "secondary", null);
+    runtime.hub.setConversationSubscription(
+      "split",
+      "secondary",
+      CONVERSATION_C,
+    );
+
+    for (const [conversationId, text] of [
+      [CONVERSATION_A, "still-visible-a"],
+      [CONVERSATION_B, "closed-b"],
+      [CONVERSATION_C, "visible-c"],
+    ] as const) {
+      runtime.hub.broadcast({
+        type: "agent.text",
+        conversationId,
+        runId: "run",
+        turnId: "turn",
+        text,
+      });
+    }
+
+    expect(runtime.events.get("split")).toMatchObject([
+      {
+        type: "runtime.event",
+        event: { type: "agent.text", text: "still-visible-a" },
+      },
+      {
+        type: "runtime.cursor",
+      },
+      {
+        type: "runtime.event",
+        event: { type: "agent.text", text: "visible-c" },
+      },
+    ]);
+    expect(JSON.stringify(runtime.events.get("split"))).not.toContain(
+      "closed-b",
+    );
+  });
+
+  it("keeps legacy detail loads from evicting the primary subscription", () => {
+    const runtime = fixture();
+    runtime.hub.connect("legacy", { kind: "none" }, {
+      snapshot,
+      approvals: [],
+      inputs: [],
+      plans: [],
+    });
+    runtime.events.get("legacy")!.length = 0;
+
+    runtime.hub.ensureConversationSubscription("legacy", CONVERSATION_A);
+    runtime.hub.ensureConversationSubscription("legacy", CONVERSATION_B);
+    runtime.hub.ensureConversationSubscription("legacy", CONVERSATION_C);
+
+    for (const [conversationId, text] of [
+      [CONVERSATION_A, "primary-a"],
+      [CONVERSATION_B, "replaced-b"],
+      [CONVERSATION_C, "secondary-c"],
+    ] as const) {
+      runtime.hub.broadcast({
+        type: "agent.text",
+        conversationId,
+        runId: "run",
+        turnId: "turn",
+        text,
+      });
+    }
+
+    expect(runtime.events.get("legacy")).toMatchObject([
+      {
+        type: "runtime.event",
+        event: { type: "agent.text", text: "primary-a" },
+      },
+      { type: "runtime.cursor" },
+      {
+        type: "runtime.event",
+        event: { type: "agent.text", text: "secondary-c" },
+      },
+    ]);
+    expect(JSON.stringify(runtime.events.get("legacy"))).not.toContain(
+      "replaced-b",
+    );
   });
 
   it("replays compatible cursors, refreshes incompatible generations, and tears down all clients", () => {
@@ -216,7 +366,7 @@ describe("runtime sync hub", () => {
       kind: "resume",
       runtimeGeneration: GENERATION,
       afterSequence: 0,
-      conversationId: null,
+      conversationIds: [],
     }, {
       snapshot,
       approvals: [],
@@ -233,7 +383,7 @@ describe("runtime sync hub", () => {
       kind: "resume",
       runtimeGeneration: "22222222-2222-4222-8222-222222222222",
       afterSequence: 1,
-      conversationId: null,
+      conversationIds: [],
     }, {
       snapshot,
       approvals: [],

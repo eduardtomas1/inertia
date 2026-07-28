@@ -94,7 +94,7 @@ describe("workspace Git repository discovery", () => {
 
     const status = await getRepositoryStatus(root);
 
-    expect(status.root).toBe(realpathSync(root));
+    expect(realpathSync.native(status.root)).toBe(realpathSync.native(root));
     expect(existsSync(marker)).toBe(false);
   });
 

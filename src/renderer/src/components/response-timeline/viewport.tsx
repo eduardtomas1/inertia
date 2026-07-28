@@ -98,7 +98,11 @@ function useTimelineEstimateLayout(
   onBeforeLayoutChange: () => void,
 ): TimelineEstimateLayout {
   const [layout, setLayout] = useState(DEFAULT_TIMELINE_ESTIMATE_LAYOUT);
-  useLayoutEffect(() => {
+  useEffect(() => {
+    // The timeline element is owned by the parent ChatWorkspace. React runs
+    // child layout effects before attaching an ancestor host ref on mount, so
+    // registering from a layout effect can permanently miss this element.
+    // Passive effects run after every host ref has been attached.
     const timelineElement = timelineElementRef?.current;
     if (!timelineElement) return;
     const workspace = timelineElement.closest<HTMLElement>(".chat-workspace");

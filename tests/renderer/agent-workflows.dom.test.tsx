@@ -1,9 +1,14 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { useAgentWorkflows } from "../../src/renderer/src/hooks/useAgentWorkflows";
+import {
+  agentWorkflowRouteIdentity,
+  useAgentWorkflows,
+} from "../../src/renderer/src/hooks/useAgentWorkflows";
 import type {
   AgentWorkflowState,
+  Conversation,
+  Project,
   ServerEvent,
 } from "../../src/shared/contracts";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
@@ -32,6 +37,29 @@ function workflow(
 }
 
 describe("useAgentWorkflows", () => {
+  it("binds workflow capabilities to the effective workspace path", () => {
+    const route = {
+      modelSelection: {
+        harnessId: "codex-app-server",
+        backendProfileId: "builtin:openai",
+        backendConfigurationRevision: 2,
+      },
+      providerSessionId: "thread-1",
+      worktreePath: null,
+    } as Conversation;
+    const project = {
+      path: "/workspace/project",
+    } as Project;
+
+    expect(agentWorkflowRouteIdentity(route, project)).toContain(
+      "\0/workspace/project",
+    );
+    expect(agentWorkflowRouteIdentity(
+      { ...route, worktreePath: "/workspace/worktrees/feature" },
+      project,
+    )).toContain("\0/workspace/worktrees/feature");
+  });
+
   it("reloads capability state when a provider session appears in place", async () => {
     let native = false;
     const request = vi.fn(async (

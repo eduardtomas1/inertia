@@ -345,6 +345,72 @@ describe("AgentWorkflowController", () => {
     );
   });
 
+  it("does not merge a stale refresh after the provider session rotates", async () => {
+    let settleRefresh!: (value: Record<string, unknown>) => void;
+    controlRequest.mockImplementation(() =>
+      new Promise<Record<string, unknown>>((resolve) => {
+        settleRefresh = resolve;
+      }));
+    const current = conversation();
+    const runtime = harness({ current, goals: [nativeGoal()] });
+
+    const refreshing = runtime.controller.refresh("conversation-1");
+    await vi.waitFor(() => expect(settleRefresh).toBeTypeOf("function"));
+    expect(controlRequest).toHaveBeenLastCalledWith("thread/goal/get", {
+      threadId: "thread-1",
+    });
+    current.providerSessionId = "thread-2";
+    const replacement = nativeGoal({
+      providerSessionId: "thread-2",
+      objective: "Replacement thread goal",
+    });
+    runtime.goals.splice(0, runtime.goals.length, replacement);
+    settleRefresh({ goal: providerGoal("thread-1") });
+
+    await expect(refreshing).resolves.toMatchObject({
+      goals: [replacement],
+    });
+    expect(runtime.goals).toEqual([replacement]);
+  });
+
+  it("does not merge a stale mutation after the provider session rotates", async () => {
+    let settleUpdate!: (value: Record<string, unknown>) => void;
+    controlRequest.mockImplementation(() =>
+      new Promise<Record<string, unknown>>((resolve) => {
+        settleUpdate = resolve;
+      }));
+    const current = conversation();
+    const runtime = harness({ current, goals: [nativeGoal()] });
+
+    const updating = runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      status: "paused",
+    });
+    await vi.waitFor(() => expect(settleUpdate).toBeTypeOf("function"));
+    expect(controlRequest).toHaveBeenLastCalledWith("thread/goal/set", {
+      threadId: "thread-1",
+      status: "paused",
+    });
+    current.providerSessionId = "thread-2";
+    const replacement = nativeGoal({
+      providerSessionId: "thread-2",
+      objective: "Replacement thread goal",
+    });
+    runtime.goals.splice(0, runtime.goals.length, replacement);
+    settleUpdate({
+      goal: {
+        ...providerGoal("thread-1"),
+        status: "paused",
+      },
+    });
+
+    await expect(updating).rejects.toThrow(
+      "thread changed before the goal could be updated",
+    );
+    expect(runtime.goals).toEqual([replacement]);
+  });
+
   it("preserves the persisted goal when refresh returns malformed data", async () => {
     const persisted = nativeGoal();
     controlRequest.mockResolvedValue({
@@ -451,6 +517,38 @@ describe("AgentWorkflowController", () => {
       name: "review",
       path: skillPath,
     }]);
+  });
+
+  it("does not advertise malformed Codex skill references", async () => {
+    const validSkill = {
+      name: "valid-review",
+      path: "/workspace/project/.codex/skills/review/SKILL.md",
+      description: "Review this project.",
+      scope: "repo",
+      enabled: true,
+    };
+    controlRequest.mockResolvedValue({
+      data: [{
+        cwd: "/workspace/project",
+        skills: [
+          validSkill,
+          { ...validSkill, name: "invalid skill" },
+          { ...validSkill, path: ".codex/skills/review/SKILL.md" },
+        ],
+        errors: [],
+      }],
+    });
+    const runtime = harness();
+
+    await expect(runtime.controller.listSkills(
+      "conversation-1",
+      false,
+    )).resolves.toEqual([
+      expect.objectContaining({ name: "valid-review" }),
+    ]);
+    expect(runtime.controller.state("conversation-1").skills).toEqual([
+      expect.objectContaining({ name: "valid-review" }),
+    ]);
   });
 
   it("force-revalidates an opaque skill immediately before provider use", async () => {

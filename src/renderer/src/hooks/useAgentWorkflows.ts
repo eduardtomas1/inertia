@@ -11,6 +11,8 @@ import type {
   AgentGoalStatus,
   AgentSkillSummary,
   AgentWorkflowState,
+  Conversation,
+  Project,
   ServerEvent,
 } from "@shared/contracts";
 import { resultEvent, type CommandWithoutId } from "../lib/runtimeCommands";
@@ -48,6 +50,20 @@ function publicMessage(error: unknown): string {
   return error instanceof Error
     ? error.message
     : "Agent workflows could not be loaded.";
+}
+
+export function agentWorkflowRouteIdentity(
+  conversation: Conversation | null,
+  project: Project | null,
+): string | null {
+  if (!conversation || !project) return null;
+  return [
+    conversation.modelSelection.harnessId,
+    conversation.modelSelection.backendProfileId,
+    conversation.modelSelection.backendConfigurationRevision,
+    conversation.providerSessionId ?? "new-thread",
+    conversation.worktreePath ?? project.path,
+  ].join("\0");
 }
 
 export function useAgentWorkflows({

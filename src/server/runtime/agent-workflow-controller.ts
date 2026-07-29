@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isAbsolute } from "node:path";
 
 import type {
   AgentGoal,
@@ -19,6 +20,7 @@ import { RuntimeRequestError } from "../runtime-errors";
 
 const MAX_SKILLS = 128;
 const SKILL_CAPABILITY_TTL_MS = 30 * 60 * 1_000;
+const CODEX_SKILL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
 
 interface PrivateSkillCapability {
   summary: AgentSkillSummary;
@@ -270,17 +272,18 @@ export class AgentWorkflowController {
       isNativeCodexConversation(conversation)
       && conversation.providerSessionId
     ) {
+      const providerSessionId = conversation.providerSessionId;
       await this.withNativeGoalOperation(
         conversationId,
-        conversation.providerSessionId,
+        providerSessionId,
         async () => {
           if (!this.hasNativeGoalSession(
             conversationId,
-            conversation.providerSessionId!,
+            providerSessionId,
           )) return;
           const observed = this.nativeGoal(
             conversationId,
-            conversation.providerSessionId!,
+            providerSessionId,
           );
           const context = await this.providers.codexControlContext(
             this.store.conversationPath(conversationId),
@@ -288,9 +291,13 @@ export class AgentWorkflowController {
           const response = await withCodexControlClient(
             context,
             ({ request }) => request("thread/goal/get", {
-              threadId: conversation.providerSessionId!,
+              threadId: providerSessionId,
             }),
           );
+          if (!this.hasNativeGoalSession(
+            conversationId,
+            providerSessionId,
+          )) return;
           if (response.goal === undefined) {
             throw new RuntimeRequestError(
               "Codex returned a malformed goal response.",
@@ -298,7 +305,7 @@ export class AgentWorkflowController {
           }
           const parsed = parseCodexGoal(
             conversationId,
-            conversation.providerSessionId!,
+            providerSessionId,
             response.goal,
             this.clock().toISOString(),
           );
@@ -311,14 +318,14 @@ export class AgentWorkflowController {
             observed,
             this.nativeGoal(
               conversationId,
-              conversation.providerSessionId!,
+              providerSessionId,
             ),
           )) {
             this.store.clearAgentGoal(
               conversationId,
               "codex-native",
               this.clock().toISOString(),
-              conversation.providerSessionId!,
+              providerSessionId,
             );
           }
         },
@@ -388,6 +395,14 @@ export class AgentWorkflowController {
           context,
           ({ request }) => request("thread/goal/set", params),
         );
+        if (!this.hasNativeGoalSession(
+          input.conversationId,
+          providerSessionId,
+        )) {
+          throw new RuntimeRequestError(
+            "The Codex thread changed before the goal could be updated.",
+          );
+        }
         const parsed = parseCodexGoal(
           input.conversationId,
           providerSessionId,
@@ -650,7 +665,14 @@ export class AgentWorkflowController {
         const path = exactBoundedString(skill?.path, 4_096);
         const description = boundedDisplayString(skill?.description, 1_000);
         const scope = skillScope(skill?.scope);
-        if (!name || !path || !description || !scope) return null;
+        if (
+          !name
+          || !CODEX_SKILL_NAME_PATTERN.test(name)
+          || !path
+          || !isAbsolute(path)
+          || !description
+          || !scope
+        ) return null;
         const identityKey =
           `${conversationId}\0${routeKey}\0codex\0${path}`;
         const interfaceValue = objectValue(skill?.interface);

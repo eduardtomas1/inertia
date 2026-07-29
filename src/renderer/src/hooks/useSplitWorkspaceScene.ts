@@ -34,7 +34,10 @@ import {
 } from "../lib/runtimeCommands";
 import { planFromText } from "../utils/planFromText";
 import { useActivityActions } from "./useActivityActions";
-import { useAgentWorkflows } from "./useAgentWorkflows";
+import {
+  agentWorkflowRouteIdentity,
+  useAgentWorkflows,
+} from "./useAgentWorkflows";
 import type { useBackendProfiles } from "./useBackendProfiles";
 import type {
   ConversationPaneLayout,
@@ -170,14 +173,10 @@ export function useSplitWorkspaceScene({
   }));
   const workflow = useStableController(useAgentWorkflows({
     conversationId: splitConversation?.id ?? null,
-    routeIdentity: splitConversation
-      ? [
-          splitConversation.modelSelection.harnessId,
-          splitConversation.modelSelection.backendProfileId,
-          splitConversation.modelSelection.backendConfigurationRevision,
-          splitConversation.providerSessionId ?? "new-thread",
-        ].join("\0")
-      : null,
+    routeIdentity: agentWorkflowRouteIdentity(
+      splitConversation,
+      splitProject,
+    ),
     status: connection.status,
     enabled: Boolean(splitConversation),
     request,

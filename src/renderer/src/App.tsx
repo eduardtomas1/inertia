@@ -20,7 +20,10 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
-import { useAgentWorkflows } from "./hooks/useAgentWorkflows";
+import {
+  agentWorkflowRouteIdentity,
+  useAgentWorkflows,
+} from "./hooks/useAgentWorkflows";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
 import { useDraftConversation } from "./hooks/useDraftConversation";
@@ -254,14 +257,7 @@ export default function App(): React.JSX.Element {
   } = conversationProjection;
   const agentWorkflows = useStableController(useAgentWorkflows({
     conversationId: conversation?.id ?? null,
-    routeIdentity: conversation
-      ? [
-          conversation.modelSelection.harnessId,
-          conversation.modelSelection.backendProfileId,
-          conversation.modelSelection.backendConfigurationRevision,
-          conversation.providerSessionId ?? "new-thread",
-        ].join("\0")
-      : null,
+    routeIdentity: agentWorkflowRouteIdentity(conversation, project),
     status: connection.status,
     request,
     subscribe: connection.subscribe,

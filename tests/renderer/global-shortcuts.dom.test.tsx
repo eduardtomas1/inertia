@@ -16,6 +16,7 @@ function ShortcutHarness({ onTerminalKeyUp }: {
   useGlobalShortcuts({
     createConversation: vi.fn(),
     mobileNavigation: false,
+    suspended: false,
     setActiveTool: vi.fn(),
     setPaletteOpen,
     setSidebarCollapsed: vi.fn(),
@@ -51,6 +52,7 @@ function StableListenerHarness(): React.JSX.Element {
   useGlobalShortcuts({
     createConversation: vi.fn(),
     mobileNavigation: false,
+    suspended: false,
     setActiveTool: vi.fn(),
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
@@ -61,6 +63,29 @@ function StableListenerHarness(): React.JSX.Element {
       Unrelated update {count}
     </button>
   );
+}
+
+function SuspendedShortcutHarness({
+  createConversation,
+  setActiveTool,
+  setPaletteOpen,
+  setSidebarCollapsed,
+}: {
+  createConversation: () => void;
+  setActiveTool: () => void;
+  setPaletteOpen: () => void;
+  setSidebarCollapsed: () => void;
+}): React.JSX.Element {
+  useGlobalShortcuts({
+    createConversation,
+    mobileNavigation: false,
+    suspended: true,
+    setActiveTool,
+    setPaletteOpen,
+    setSidebarCollapsed,
+    setSidebarOpen: vi.fn(),
+  });
+  return <textarea aria-label="Duo prompt" />;
 }
 
 describe("global shortcut DOM integration", () => {
@@ -106,5 +131,39 @@ describe("global shortcut DOM integration", () => {
     expect(search).toHaveValue("settings");
     expect(screen.getByRole("option", { name: /Open settings/u }))
       .toHaveAttribute("aria-selected", "true");
+  });
+
+  it("consumes app shortcuts without acting while a modal owns focus", () => {
+    const createConversation = vi.fn();
+    const setActiveTool = vi.fn();
+    const setPaletteOpen = vi.fn();
+    const setSidebarCollapsed = vi.fn();
+    render(
+      <SuspendedShortcutHarness
+        createConversation={createConversation}
+        setActiveTool={setActiveTool}
+        setPaletteOpen={setPaletteOpen}
+        setSidebarCollapsed={setSidebarCollapsed}
+      />,
+    );
+    const prompt = screen.getByRole("textbox", { name: "Duo prompt" });
+    prompt.focus();
+
+    for (const key of ["b", "j", "k", "n"]) {
+      const event = new KeyboardEvent("keydown", {
+        key,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      prompt.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      fireEvent.keyUp(prompt, { key, ctrlKey: true });
+    }
+
+    expect(createConversation).not.toHaveBeenCalled();
+    expect(setActiveTool).not.toHaveBeenCalled();
+    expect(setPaletteOpen).not.toHaveBeenCalled();
+    expect(setSidebarCollapsed).not.toHaveBeenCalled();
   });
 });

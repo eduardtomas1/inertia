@@ -23,6 +23,7 @@ import {
   SquarePen,
   Trash2,
   X,
+  Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import type { AppSnapshot, Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
@@ -59,6 +60,7 @@ type SidebarProps = {
   onOpenConversationInSplit: (conversation: Conversation) => void;
   onCloseConversationSplit: () => void;
   onCreateConversation: (project: Project) => void;
+  onOpenMultiSpawn: () => void;
   onRenameConversation: (conversation: Conversation, title: string) => void;
   onArchiveConversation: (conversation: Conversation) => void;
   onSettleConversation: (conversation: Conversation) => void;
@@ -110,6 +112,7 @@ export function Sidebar({
   onOpenConversationInSplit,
   onCloseConversationSplit,
   onCreateConversation,
+  onOpenMultiSpawn,
   onRenameConversation,
   onArchiveConversation,
   onSettleConversation,
@@ -497,18 +500,28 @@ export function Sidebar({
         </div>
 
         {snapshot && snapshot.projects.length > 0 && (
-          <button
-            type="button"
-            className="new-chat-button"
-            disabled={connectionStatus !== "online"}
-            onClick={() => {
-              const targetProject = snapshot.projects.find((project) => project.id === snapshot.activeProjectId)
-                ?? snapshot.projects[0];
-              if (targetProject) onCreateConversation(targetProject);
-            }}
-          >
-            <SquarePen size={16} /><span>New chat</span>
-          </button>
+          <div className="new-chat-actions">
+            <button
+              type="button"
+              className="new-chat-button"
+              disabled={connectionStatus !== "online"}
+              onClick={() => {
+                const targetProject = snapshot.projects.find((project) => project.id === snapshot.activeProjectId)
+                  ?? snapshot.projects[0];
+                if (targetProject) onCreateConversation(targetProject);
+              }}
+            >
+              <SquarePen size={16} /><span>New chat</span>
+            </button>
+            <IconButton
+              label="Launch two chats"
+              className="multi-spawn-button"
+              disabled={connectionStatus !== "online"}
+              onClick={onOpenMultiSpawn}
+            >
+              <Zap size={15} fill="currentColor" />
+            </IconButton>
+          </div>
         )}
 
         <button type="button" className={clsx("sidebar-destination", view === "workspace" && "is-active")} aria-current={view === "workspace" ? "page" : undefined} onClick={() => navigate("workspace")}>

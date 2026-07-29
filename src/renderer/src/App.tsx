@@ -17,10 +17,7 @@ import {
 } from "@shared/contracts";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { AppLayout } from "./components/AppLayout";
-import type {
-  WorkspaceSceneProps,
-  WorkspacePanelTab,
-} from "./components/WorkspaceScene";
+import type { WorkspacePanelTab, WorkspaceSceneProps } from "./components/WorkspaceScene";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
@@ -31,23 +28,17 @@ import { useDesktopTools } from "./hooks/useDesktopTools";
 import { useDraftConversation } from "./hooks/useDraftConversation";
 import { useActivityActions } from "./hooks/useActivityActions";
 import { useActivityActionRouter } from "./hooks/useActivityActionRouter";
-import {
-  useStableActions,
-  useStableController,
-} from "./hooks/useStableController";
+import { useStableActions, useStableController } from "./hooks/useStableController";
 import { useAppUpdate } from "./app-update";
 import { useWorkspaceTools } from "./hooks/useWorkspaceTools";
 import { useConversationPaneLayout } from "./hooks/useConversationPaneLayout";
 import { useSplitWorkspaceScene } from "./hooks/useSplitWorkspaceScene";
+import { useMultiSpawn } from "./hooks/useMultiSpawn";
 import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { activityRunSummary } from "./utils/activityCenter";
-import { shouldMarkWorkspaceRunSeen } from "./utils/attentionVisibility";
-import {
-  buildNewConversationPayload,
-  type NewConversationLocation,
-  withNewConversationModelSelection,
-} from "./lib/newConversation";
+import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
+import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
 import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import {
@@ -58,22 +49,15 @@ import {
 import { planFromText } from "./utils/planFromText";
 import { buildEnvironmentSummary } from "./utils/environmentSummary";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
-import {
-  finishLegacyWorkspaceStartupMigration,
-  readLegacyWorkspaceStartup,
-} from "./utils/workspaceStartup";
+import { finishLegacyWorkspaceStartupMigration, readLegacyWorkspaceStartup } from "./utils/workspaceStartup";
 import {
   persistSplitConversationId,
   readSplitConversationId,
   resolvedSplitConversation,
   splitConversationAfterPrimaryChange,
 } from "./utils/splitConversation";
-import {
-  createWorkspaceSceneModel,
-} from "./components/workspace-scene/createWorkspaceSceneModel";
-import {
-  createWorkspaceTurnActions,
-} from "./components/workspace-scene/createWorkspaceTurnActions";
+import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
+import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
 
 function useDocumentActive(): boolean {
   const [active, setActive] = useState(
@@ -413,6 +397,19 @@ export default function App(): React.JSX.Element {
   const updateConversation = draftConversation.updateConversation;
   const clearDraftConversation = draftConversation.clear;
   const discardDraftConversation = draftConversation.discard;
+  const multiSpawn = useMultiSpawn({
+    snapshot: connection.snapshot,
+    settings,
+    run,
+    sendMessage: sendMessageToConversation,
+    splitSelectionTransitionsRef,
+    updateSplitConversationId,
+    showWorkspace: () => setView("workspace"),
+    closeSidebar: () => setSidebarOpen(false),
+    focusWorkspace: () => window.requestAnimationFrame(() => document.getElementById("main-workspace")?.focus({ preventScroll: true })),
+    discardDraftConversation,
+    setActionError,
+  });
   const workspaceToolsUnavailableReason = draftWorkspaceToolsUnavailableReason(draftConversation.requiresWorkspaceMaterialization);
   const workspaceToolsUnavailable = Boolean(workspaceToolsUnavailableReason);
   const workspaceTools = useStableController(
@@ -489,11 +486,12 @@ export default function App(): React.JSX.Element {
         documentFocused: document.hasFocus(),
         workspaceVisible: view === "workspace",
         latestContentVisible,
-        obstructed: activityOpen
-          || paletteOpen
-          || commitDialogOpen
-          || authProviderId !== null
-          || (mobileNavigation && sidebarOpen),
+        obstructed: workspaceAttentionObstructed({
+          activityOpen, paletteOpen, commitDialogOpen,
+          authProviderOpen: authProviderId !== null,
+          multiSpawnOpen: multiSpawn.open,
+          mobileSidebarOpen: mobileNavigation && sidebarOpen,
+        }),
       },
     );
     if (!shouldMark) return;
@@ -511,7 +509,7 @@ export default function App(): React.JSX.Element {
     commitDialogOpen,
     conversation?.id,
     latestContentVisible,
-    mobileNavigation,
+    mobileNavigation, multiSpawn.open,
     paletteOpen,
     request,
     sidebarOpen,
@@ -665,7 +663,7 @@ export default function App(): React.JSX.Element {
   };
   useGlobalShortcuts({
     createConversation: () => createConversation(),
-    mobileNavigation,
+    mobileNavigation, suspended: multiSpawn.open,
     setActiveTool: sceneSetActiveTool,
     setPaletteOpen,
     setSidebarCollapsed,
@@ -958,6 +956,7 @@ export default function App(): React.JSX.Element {
       projectActions={projectActions}
       reviewStates={reviewStates}
       structuredDiff={structuredDiff}
+      multiSpawn={multiSpawn}
       scene={visibleWorkspaceScene}
       providerAuth={{
         provider: authProvider,
@@ -975,6 +974,8 @@ export default function App(): React.JSX.Element {
         selectConversation,
         openConversationInSplit,
         closeConversationSplit: () => updateSplitConversationId(null),
+        openProviderSetup,
+        openBackendSetup,
         createConversation,
         updateSettings,
         openProjectPath,

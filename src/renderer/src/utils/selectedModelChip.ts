@@ -12,6 +12,7 @@ export type SelectedModelChipGlyph =
 export type SelectedModelChipRoute = Pick<
   ModelSearchRoute,
   | "alias"
+  | "backendConfigurationRevision"
   | "backendProfileId"
   | "backendProfileName"
   | "displayName"

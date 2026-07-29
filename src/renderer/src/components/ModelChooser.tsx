@@ -103,6 +103,26 @@ function favoriteKeyForRoute(
   return modelFavoriteKey(route);
 }
 
+function activeKeyForRoute(
+  route: {
+    harnessId: string;
+    backendProfileId: string;
+    backendConfigurationRevision?: number;
+    modelId: string;
+    reasoningEffort?: string | null;
+  },
+): string {
+  return JSON.stringify([
+    modelFavoriteKey({
+      harnessId: route.harnessId,
+      backendProfileId: route.backendProfileId,
+      modelId: route.modelId,
+      reasoningEffort: route.reasoningEffort ?? null,
+    }),
+    route.backendConfigurationRevision ?? null,
+  ]);
+}
+
 /**
  * Search operates across discovered routes and saved favorite variants. A
  * favorite keeps its full reasoning identity while an exact discovered
@@ -211,12 +231,7 @@ export function ModelChooser({
     () => new Map(shortcuts.map((binding) => [binding.routeKey, binding])),
     [shortcuts],
   );
-  const selectedKey = modelFavoriteKey({
-    harnessId: selectedRoute.harnessId,
-    backendProfileId: selectedRoute.backendProfileId,
-    modelId: selectedRoute.modelId,
-    reasoningEffort: selectedRoute.reasoningEffort ?? null,
-  });
+  const selectedKey = activeKeyForRoute(selectedRoute);
 
   const close = useCallback((restoreFocus = true): void => {
     setOpen(false);
@@ -238,7 +253,7 @@ export function ModelChooser({
   useEffect(() => {
     if (!open) return;
     const selectedIndex = results.items.findIndex((route) =>
-      favoriteKeyForRoute(route) === selectedKey);
+      activeKeyForRoute(route) === selectedKey);
     setActiveIndex(selectedIndex >= 0 && results.items[selectedIndex]?.selectable
       ? selectedIndex
       : nextModelChooserIndex(results.items, -1, "Home"));
@@ -336,7 +351,7 @@ export function ModelChooser({
     : undefined;
   const chooserRows = results.items.map((route) =>
     modelChooserRowFromRoute(route, {
-      active: favoriteKeyForRoute(route) === selectedKey,
+      active: activeKeyForRoute(route) === selectedKey,
       favorite: favoriteKeys.includes(favoriteKeyForRoute(route)),
       shortcut: shortcutsByRoute.get(route.key) ?? null,
       compatibility: route.rowCompatibility,

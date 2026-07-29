@@ -145,9 +145,12 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   ).toHaveCount(0);
 
   const primaryChanges = await openPaneTool(primary, primaryTitle, "Changes");
-  await expect(primaryChanges.getByText("sample.ts", { exact: true }))
+  const primaryChangedFiles = primaryChanges.getByRole("navigation", {
+    name: "Git repositories and changed files",
+  });
+  await expect(primaryChangedFiles.getByText("sample.ts", { exact: true }))
     .toBeVisible();
-  await expect(primaryChanges.getByText("beta-only.ts", { exact: true }))
+  await expect(primaryChangedFiles.getByText("beta-only.ts", { exact: true }))
     .toHaveCount(0);
 
   const secondaryChanges = await openPaneTool(
@@ -155,9 +158,12 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     secondaryTitle,
     "Changes",
   );
-  await expect(secondaryChanges.getByText("beta-only.ts", { exact: true }))
+  const secondaryChangedFiles = secondaryChanges.getByRole("navigation", {
+    name: "Git repositories and changed files",
+  });
+  await expect(secondaryChangedFiles.getByText("beta-only.ts", { exact: true }))
     .toBeVisible();
-  await expect(secondaryChanges.getByText("sample.ts", { exact: true }))
+  await expect(secondaryChangedFiles.getByText("sample.ts", { exact: true }))
     .toHaveCount(0);
 
   const primaryTerminal = await openPaneTool(

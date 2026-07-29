@@ -663,7 +663,7 @@ export default function App(): React.JSX.Element {
   };
   useGlobalShortcuts({
     createConversation: () => createConversation(),
-    mobileNavigation,
+    mobileNavigation, suspended: multiSpawn.open,
     setActiveTool: sceneSetActiveTool,
     setPaletteOpen,
     setSidebarCollapsed,

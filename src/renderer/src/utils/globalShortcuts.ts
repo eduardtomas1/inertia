@@ -8,6 +8,7 @@ export type WorkspaceShortcutTool =
 export interface GlobalShortcutActions {
   createConversation: () => void;
   mobileNavigation: boolean;
+  suspended: boolean;
   setActiveTool: (
     update: WorkspaceShortcutTool
       | null
@@ -47,6 +48,15 @@ export function installGlobalShortcuts(
     const key = event.key.toLowerCase();
     if (!(event.metaKey || event.ctrlKey)) {
       ownedKeyUps.delete(key);
+      return;
+    }
+    if (
+      actions.current.suspended
+      && ["b", "j", "k", "n"].includes(key)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      ownedKeyUps.add(key);
       return;
     }
     if (key === "k") {

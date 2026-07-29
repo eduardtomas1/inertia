@@ -304,6 +304,29 @@ describe("multi-spawn", () => {
       .toBe("gpt-5.5");
   });
 
+  it("resolves an out-of-box provider default to its advertised model", () => {
+    render(
+      <MultiSpawnDialog
+        open
+        snapshot={snapshot}
+        settings={{ ...settings, defaultModel: "" }}
+        submitting={false}
+        error={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn(async () => undefined)}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(2);
+    expect(screen.queryByText("Model route unavailable")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+      target: { value: "Compare the default route." },
+    });
+    expect(screen.getByRole("button", { name: "Launch duo" })).toBeEnabled();
+  });
+
   it("does not reset an open setup when provider metadata refreshes", () => {
     const props = {
       open: true,

@@ -264,6 +264,41 @@ export function selectionFromPreset(
   });
 }
 
+function concreteDefaultSelection(
+  snapshot: AppSnapshot,
+  routes: readonly ComposerModelRoute[],
+  fallback: ModelSelection,
+): ModelSelection {
+  if (fallback.modelId !== "provider-default") {
+    return cloneSelection(fallback);
+  }
+  const profile = snapshot.backendProfiles?.find(({ id, harnessId }) =>
+    id === fallback.backendProfileId
+    && harnessId === fallback.harnessId);
+  const providerId = legacyProviderIdForHarness(fallback.harnessId);
+  const provider = snapshot.providers.find(({ id }) => id === providerId);
+  const defaultModelId = profile?.routing.primaryModelId
+    ?? provider?.models.find(({ isDefault }) => isDefault)?.id
+    ?? provider?.models[0]?.id;
+  if (!defaultModelId) return cloneSelection(fallback);
+  const route = routes.find((candidate) =>
+    candidate.selectable
+    && candidate.harnessId === fallback.harnessId
+    && candidate.backendProfileId === fallback.backendProfileId
+    && candidate.modelId === defaultModelId);
+  if (!route) return cloneSelection(fallback);
+  const reasoningEffort = (
+    fallback.reasoningEffort === null
+    || route.reasoningOptions.includes(fallback.reasoningEffort)
+  )
+    ? fallback.reasoningEffort
+    : route.selection.reasoningEffort;
+  return cloneSelection({
+    ...route.selection,
+    reasoningEffort,
+  });
+}
+
 export function initialMultiSpawnDraft(input: {
   snapshot: AppSnapshot;
   settings: AppSettings;
@@ -278,6 +313,12 @@ export function initialMultiSpawnDraft(input: {
     input.settings,
     input.activeProjectId,
   );
+  const routes = input.routesForSelection(fallback);
+  const resolvedFallback = concreteDefaultSelection(
+    input.snapshot,
+    routes,
+    fallback,
+  );
   const side = (
     index: 0 | 1,
     defaultTitle: string,
@@ -285,11 +326,11 @@ export function initialMultiSpawnDraft(input: {
     const saved = input.preset?.sides[index];
     const selection = saved
       ? selectionFromPreset(
-          input.routesForSelection(fallback),
+          routes,
           saved.route,
-          fallback,
+          resolvedFallback,
         )
-      : cloneSelection(fallback);
+      : cloneSelection(resolvedFallback);
     return {
       projectId: input.activeProjectId,
       title: saved?.title ?? defaultTitle,

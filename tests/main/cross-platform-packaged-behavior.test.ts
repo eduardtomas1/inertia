@@ -43,6 +43,12 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain('process.platform === "linux"');
     expect(smoke).toContain("runtimePid === mainPid");
     expect(smoke).toContain("runtime-stopped");
+    expect(smoke.indexOf('"before-quit"')).toBeLessThan(
+      smoke.indexOf("const exit = await withTimeout("),
+    );
+    expect(smoke).toContain(
+      "The packaged app did not finish shutdown after before-quit.",
+    );
     expect(smoke).toContain("process-group cleanup");
     expect(smoke).toContain("Packaged Codex Ω (profile)");
     expect(smoke).toContain('join(root, "codex-bin")');
@@ -92,9 +98,9 @@ describe("cross-platform packaged behavior contract", () => {
       "Retaining temporary attachments because runtime process exit was not confirmed",
     );
     expect(main.indexOf('recordPackageSmokeStage("app-exit")')).toBeLessThan(
-      main.indexOf("app.exit(0)"),
+      main.indexOf("process.exit(0)"),
     );
-    expect(main).not.toContain("process.exit(0)");
+    expect(main).not.toContain("app.exit(0)");
     expect(main).toContain("attachmentReservation = orphanReservation");
     expect(main).toContain(
       "reservedRecords: attachmentReservation.records",

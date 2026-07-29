@@ -234,10 +234,15 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
   });
 }
 
-async function requireLifecycleMarker(markerPath, stage, mainPid) {
+async function requireLifecycleMarker(
+  markerPath,
+  stage,
+  mainPid,
+  timeoutMs = 2_000,
+) {
   const value = await waitUntil(
     () => readJsonIfPresent(`${markerPath}.${stage}.json`),
-    2_000,
+    timeoutMs,
     `${stage} lifecycle marker`,
   );
   if (value.stage !== stage || value.pid !== mainPid) throw new Error(`Invalid ${stage} lifecycle marker.`);
@@ -314,13 +319,21 @@ try {
   const runtimeWasObserved = processExists(readiness.runtimePid);
   if (packagedCodex) await requirePackagedCodex(readiness.websocketUrl, packagedCodex.command);
 
+  // Provider discovery deliberately keeps the packaged app alive before
+  // shutdown. Start the exit deadline only after Electron begins quitting so
+  // that dwell time cannot consume the process-tree cleanup budget.
+  await requireLifecycleMarker(
+    markerPath,
+    "before-quit",
+    readiness.mainPid,
+    EXIT_TIMEOUT_MS,
+  );
   const exit = await withTimeout(
     exitResult,
     EXIT_TIMEOUT_MS,
-    "The packaged app did not finish its smoke-test shutdown.",
+    "The packaged app did not finish shutdown after before-quit.",
   );
   if (exit.error) throw exit.error;
-  await requireLifecycleMarker(markerPath, "before-quit", readiness.mainPid);
   await requireLifecycleMarker(markerPath, "runtime-stopped", readiness.mainPid);
   await requireLifecycleMarker(markerPath, "app-exit", readiness.mainPid);
 

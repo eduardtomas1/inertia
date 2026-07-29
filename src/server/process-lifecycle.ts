@@ -108,13 +108,20 @@ function boundedWaitMs(value: number | undefined): number {
   return Math.max(1, Math.min(Math.trunc(value), 30_000));
 }
 
+function directChildResourcesAreClosed(child: ChildProcess): boolean {
+  if (child.exitCode === null && child.signalCode === null) return false;
+  return child.stdio.every((stream) =>
+    stream === null || stream === undefined || stream.closed
+  );
+}
+
 function observeDirectChildClose(
   child: ChildProcess,
 ): (waitMs: number) => Promise<boolean> {
-  // Preserve the settled-child fast path for callers that enter after exit.
-  // Live children register before termination so an `exit` event cannot be
-  // mistaken for the later `close` event that releases stdio resources.
-  let closed = child.exitCode !== null || child.signalCode !== null;
+  // An exit code alone is not enough: Node may set it before child stdio and
+  // executable resources have closed. Preserve the settled-child fast path
+  // only when every public stdio stream is already closed.
+  let closed = directChildResourcesAreClosed(child);
   let finishWait: ((closed: boolean) => void) | undefined;
   const onClose = (): void => {
     closed = true;

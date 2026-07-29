@@ -14,11 +14,13 @@ function fakeChild(pid = 4_242) {
     pid: number;
     exitCode: number | null;
     signalCode: NodeJS.Signals | null;
+    stdio: Array<{ closed: boolean } | null>;
     kill: ReturnType<typeof vi.fn>;
   };
   child.pid = pid;
   child.exitCode = null;
   child.signalCode = null;
+  child.stdio = [null, null, null];
   child.kill = vi.fn(() => true);
   return child;
 }
@@ -186,6 +188,54 @@ describe("provider process-tree termination", () => {
 
     child.emit("close", 1);
     await expect(termination).resolves.toBe(true);
+  });
+
+  it("waits when a Windows child exited before entry but its stdio remains open", async () => {
+    const child = fakeChild();
+    const taskkill = fakeTaskkill();
+    const stdout = { closed: false };
+    child.exitCode = 1;
+    child.stdio[1] = stdout;
+    let settled = false;
+
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "win32",
+        spawnProcess: vi.fn(() => taskkill) as never,
+        waitMs: 100,
+      },
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    taskkill.emit("close", 0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    stdout.closed = true;
+    child.emit("close", 1);
+    await expect(termination).resolves.toBe(true);
+  });
+
+  it("accepts a Windows child whose process and stdio closed before entry", async () => {
+    const child = fakeChild();
+    const taskkill = fakeTaskkill();
+    child.exitCode = 0;
+    child.stdio[1] = { closed: true };
+    queueMicrotask(() => taskkill.emit("close", 0));
+
+    await expect(terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "win32",
+        spawnProcess: vi.fn(() => taskkill) as never,
+        waitMs: 25,
+      },
+    )).resolves.toBe(true);
   });
 
   it("awaits POSIX process-group disappearance", async () => {

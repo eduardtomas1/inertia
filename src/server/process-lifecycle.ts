@@ -29,6 +29,10 @@ export type ProcessTreeTerminator = (
   force: boolean,
 ) => Promise<boolean>;
 
+export type OwnedProcessTreeTermination = (
+  force: boolean,
+) => Promise<void>;
+
 export class ProcessTreeTerminationError extends Error {
   readonly code = "process-tree-termination-unconfirmed";
 
@@ -51,6 +55,37 @@ export async function requireProcessTreeTermination(
     throw new ProcessTreeTerminationError(subject, { cause });
   }
   if (!confirmed) throw new ProcessTreeTerminationError(subject);
+}
+
+/**
+ * Owns one process-tree shutdown sequence for one child.
+ *
+ * Every caller receives the same promise. A graceful request may be upgraded
+ * to a force request, but the force attempt never races the graceful attempt.
+ * Failure is reported only after the final force attempt cannot be confirmed.
+ */
+export function createOwnedProcessTreeTermination(
+  child: ChildProcess,
+  subject: string,
+  terminate: ProcessTreeTerminator = terminateProcessTreeAndWait,
+): OwnedProcessTreeTermination {
+  let forceRequested = false;
+  let termination: Promise<void> | undefined;
+
+  return (force) => {
+    forceRequested ||= force;
+    termination ??= (async () => {
+      if (!forceRequested) {
+        try {
+          if (await terminate(child, false)) return;
+        } catch {
+          // The final force attempt below owns the authoritative result.
+        }
+      }
+      await requireProcessTreeTermination(terminate, child, true, subject);
+    })();
+    return termination;
+  };
 }
 
 function killDirectChild(child: ChildProcess, force: boolean): void {

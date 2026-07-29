@@ -71,7 +71,7 @@ function createHarness(options: {
   attachmentRequestTimeoutMs?: number;
 } = {}) {
   const children: FakeUtilityProcess[] = [];
-  const forceKill = vi.fn();
+  const forceKill = vi.fn(() => true);
   const supervisor = new RuntimeSupervisor({
     workerOptions: {
       dataDirectory,
@@ -996,6 +996,25 @@ describe("RuntimeSupervisor", () => {
     expect(children).toHaveLength(1);
     expect(children[0].killCalls).toBe(0);
     expect(forceKill).not.toHaveBeenCalled();
+    expect(supervisor.snapshot().phase).toBe("stopped");
+  });
+
+  it("reports shutdown as unconfirmed when forced tree termination cannot be verified", async () => {
+    const { children, forceKill, supervisor } = createHarness();
+    forceKill.mockReturnValue(false);
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const stopped = supervisor.stop();
+    vi.advanceTimersByTime(1_000);
+    expect(forceKill).toHaveBeenCalledWith(10_000);
+    expect(supervisor.snapshot().lastError).toBe(
+      "The runtime process tree could not be confirmed stopped.",
+    );
+
+    children[0].exit(0);
+    await expect(stopped).resolves.toBe(false);
     expect(supervisor.snapshot().phase).toBe("stopped");
   });
 

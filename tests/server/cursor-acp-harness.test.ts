@@ -1,12 +1,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {
   createCursorAcpHarness,
   parseCursorQuestionRequest,
 } from "../../src/server/provider/cursor-acp-harness";
+import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
   portableFixtureRoot,
   portableNodeExecutable,
@@ -16,6 +17,26 @@ import {
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
+
+function completingCursorAgent(root: string, name: string): string {
+  const command = portableNodeExecutable(root, name);
+  writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+let promptId;
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-cleanup-session", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    promptId = message.id;
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "cursor-cleanup-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done" } } } });
+    return send({ jsonrpc: "2.0", id: promptId, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+  return command;
+}
 
 describe.sequential("Cursor ACP harness", () => {
   const roots: string[] = [];
@@ -296,6 +317,96 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{ method?: string }>;
     expect(messages.some(({ method }) => method === "session/load")).toBe(true);
     expect(messages.some(({ method }) => method === "session/new")).toBe(false);
+  });
+
+  it("publishes the terminal ACP status only after owned cleanup settles", async () => {
+    const root = portableFixtureRoot("cursor ACP cleanup barrier");
+    roots.push(root);
+    const command = completingCursorAgent(root, "cursor-cleanup-agent");
+    let markCleanupStarted!: () => void;
+    const cleanupStarted = new Promise<void>((resolve) => {
+      markCleanupStarted = resolve;
+    });
+    let releaseCleanup!: () => void;
+    const cleanupGate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([
+        createCursorAcpHarness({
+          terminateProcessTree: async (child, force) => {
+            expect(force).toBe(true);
+            markCleanupStarted();
+            await cleanupGate;
+            return await terminateProcessTreeAndWait(child, true);
+          },
+        }),
+      ]),
+    );
+    const statuses: string[] = [];
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-cleanup-barrier",
+      cwd: root,
+      prompt: "Complete after cleanup",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onStatus: ({ status }) => statuses.push(status),
+    });
+    let settled = false;
+    void result.then(() => {
+      settled = true;
+    });
+
+    await cleanupStarted;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    expect(statuses).not.toContain("completed");
+
+    releaseCleanup();
+    await expect(result).resolves.toMatchObject({
+      status: "completed",
+      text: "Done",
+    });
+    expect(statuses.at(-1)).toBe("completed");
+  });
+
+  it("maps unconfirmed ACP cleanup to one failed terminal result", async () => {
+    const root = portableFixtureRoot("cursor ACP cleanup failure");
+    roots.push(root);
+    const command = completingCursorAgent(root, "cursor-cleanup-failure-agent");
+    const terminateProcessTree = vi.fn(async (child, _force: boolean) => {
+      await terminateProcessTreeAndWait(child, true);
+      return false;
+    });
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([
+        createCursorAcpHarness({ terminateProcessTree }),
+      ]),
+    );
+    const statuses: string[] = [];
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-cleanup-failure",
+      cwd: root,
+      prompt: "Fail cleanup",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onStatus: ({ status }) => statuses.push(status),
+    })).resolves.toMatchObject({
+      status: "failed",
+      error: "Cursor ACP process tree could not be confirmed stopped.",
+    });
+    expect(statuses).not.toContain("completed");
+    expect(statuses.at(-1)).toBe("failed");
+    expect(terminateProcessTree.mock.calls.map(([, force]) => force)).toEqual([
+      true,
+    ]);
   });
 
   it("cancels through ACP and closes the owned process socket", async () => {

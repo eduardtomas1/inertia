@@ -102,31 +102,39 @@ describe("runtime process-tree termination", () => {
       error: undefined,
     }));
     const kill = vi.fn();
+    const environment = {
+      SystemRoot: "C:\\Windows",
+      PATH: "",
+    };
 
-    forceKillRuntimeProcessTree(100, {
+    const confirmed = forceKillRuntimeProcessTree(100, {
       platform: "win32",
+      environment,
       kill,
       spawnProcessSync: spawnProcessSync as never,
     });
 
     expect(spawnProcessSync).toHaveBeenCalledWith(
-      "taskkill.exe",
+      "C:\\Windows\\System32\\taskkill.exe",
       ["/pid", "100", "/t", "/f"],
       {
+        env: environment,
         timeout: 2_000,
         shell: false,
         windowsHide: true,
         stdio: "ignore",
       },
     );
+    expect(confirmed).toBe(true);
     expect(kill).not.toHaveBeenCalled();
   });
 
-  it("falls back to a direct Windows kill when taskkill fails", () => {
+  it("reports Windows tree cleanup as unconfirmed when taskkill fails", () => {
     const kill = vi.fn();
 
-    forceKillRuntimeProcessTree(100, {
+    const confirmed = forceKillRuntimeProcessTree(100, {
       platform: "win32",
+      environment: { SystemRoot: "C:\\Windows" },
       kill,
       spawnProcessSync: vi.fn(() => ({
         status: 1,
@@ -134,8 +142,80 @@ describe("runtime process-tree termination", () => {
       })) as never,
     });
 
+    expect(confirmed).toBe(false);
     expect(kill).toHaveBeenCalledWith(100, "SIGKILL");
   });
+
+  it("does not search PATH when the trusted Windows system root is unavailable", () => {
+    const kill = vi.fn();
+    const spawnProcessSync = vi.fn();
+
+    const confirmed = forceKillRuntimeProcessTree(100, {
+      platform: "win32",
+      environment: { PATH: "C:\\untrusted" },
+      kill,
+      spawnProcessSync: spawnProcessSync as never,
+    });
+
+    expect(confirmed).toBe(false);
+    expect(spawnProcessSync).not.toHaveBeenCalled();
+    expect(kill).toHaveBeenCalledWith(100, "SIGKILL");
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "force-stops a real Windows utility process and its provider descendant with PATH scrubbed",
+    async () => {
+      const parent = spawn(
+        process.execPath,
+        [
+          "-e",
+          [
+            "const { spawn } = require('node:child_process');",
+            "const child = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'],",
+            "  { stdio: 'ignore', windowsHide: true });",
+            "process.stdout.write(String(child.pid) + '\\n');",
+            "setInterval(() => undefined, 1000);",
+          ].join("\n"),
+        ],
+        {
+          stdio: ["ignore", "pipe", "ignore"],
+          windowsHide: true,
+        },
+      );
+      const chunks: Buffer[] = [];
+      parent.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      while (!Buffer.concat(chunks).toString("utf8").includes("\n")) {
+        await Promise.race([
+          once(parent.stdout, "data"),
+          new Promise((_, reject) => setTimeout(
+            () => reject(new Error("Descendant PID was not reported.")),
+            5_000,
+          )),
+        ]);
+      }
+      const descendantPid = Number(
+        Buffer.concat(chunks).toString("utf8").trim(),
+      );
+      expect(descendantPid).toBeGreaterThan(1);
+      try {
+        const confirmed = forceKillRuntimeProcessTree(parent.pid!, {
+          environment: {
+            ...process.env,
+            PATH: "",
+          },
+        });
+        expect(confirmed).toBe(true);
+        await Promise.all([
+          waitForProcessExit(parent.pid!),
+          waitForProcessExit(descendantPid),
+        ]);
+      } finally {
+        try { process.kill(parent.pid!, "SIGKILL"); } catch { /* Gone. */ }
+        try { process.kill(descendantPid, "SIGKILL"); } catch { /* Gone. */ }
+      }
+    },
+    10_000,
+  );
 
   it.skipIf(process.platform === "win32")(
     "force-stops a real utility-shaped process and its detached provider descendant",

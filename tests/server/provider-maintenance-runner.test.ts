@@ -31,6 +31,8 @@ function fakeChild(
   const child = new EventEmitter() as ChildProcessWithoutNullStreams;
   Object.assign(child, {
     pid: 4_242,
+    exitCode: null,
+    signalCode: null,
     stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),
@@ -59,6 +61,7 @@ describe("provider maintenance runner", () => {
       options: SpawnOptionsWithoutStdio;
     }> = [];
     const progress: Array<string | null> = [];
+    const terminateProcessTree = vi.fn(async () => true);
     const spawn = vi.fn((command, args, options) => {
       calls.push({ command, args, options });
       const child = fakeChild();
@@ -78,6 +81,7 @@ describe("provider maintenance runner", () => {
       },
       signal: new AbortController().signal,
       spawn,
+      terminateProcessTree,
       onProgress: (value) => progress.push(value.output),
     });
 
@@ -95,6 +99,7 @@ describe("provider maintenance runner", () => {
     });
     expect(calls[0]?.options.env).not.toHaveProperty("OPENAI_API_KEY");
     expect(calls[0]?.options.env).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
   it("routes Windows npm.cmd through a quoted cmd.exe invocation without generic shell mode", async () => {
@@ -154,12 +159,9 @@ describe("provider maintenance runner", () => {
       environment: { PATH: "/tools", HOME: "/home/ada" },
       signal: abort.signal,
       spawn: () => child,
-      processLifecycle: {
-        platform: "linux",
-        killProcess: vi.fn((_pid, signal) => {
-          queueMicrotask(() => child.emit("close", null, signal));
-          return true as const;
-        }),
+      terminateProcessTree: async () => {
+        queueMicrotask(() => child.emit("close", null, "SIGTERM"));
+        return true;
       },
     });
     abort.abort();
@@ -174,15 +176,20 @@ describe("provider maintenance runner", () => {
   it("escalates to SIGKILL and settles when a child ignores cancellation", async () => {
     const abort = new AbortController();
     const child = fakeChild();
+    const terminateProcessTree = vi.fn(async (
+      _ownedChild,
+      force: boolean,
+    ) => {
+      if (!force) return false;
+      queueMicrotask(() => child.emit("close", null, "SIGKILL"));
+      return true;
+    });
     const promise = runProviderMaintenanceAction(action(), {
       environment: { PATH: "/tools", HOME: "/home/ada" },
       signal: abort.signal,
       killGraceMs: 100,
       spawn: () => child,
-      processLifecycle: {
-        platform: "linux",
-        killProcess: vi.fn(() => true as const),
-      },
+      terminateProcessTree,
     });
     abort.abort();
 
@@ -190,7 +197,68 @@ describe("provider maintenance runner", () => {
       status: "cancelled",
       signal: "SIGKILL",
     });
+    expect(terminateProcessTree.mock.calls.map(([, force]) => force)).toEqual([
+      false,
+      true,
+    ]);
     expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("does not publish cancellation before the owned cleanup barrier settles", async () => {
+    const abort = new AbortController();
+    const child = fakeChild();
+    let confirmTermination!: (confirmed: boolean) => void;
+    const termination = new Promise<boolean>((resolve) => {
+      confirmTermination = resolve;
+    });
+    const promise = runProviderMaintenanceAction(action(), {
+      environment: { PATH: "/tools", HOME: "/home/ada" },
+      signal: abort.signal,
+      spawn: () => child,
+      terminateProcessTree: async () => await termination,
+    });
+    let settled = false;
+    void promise.then(() => {
+      settled = true;
+    });
+
+    abort.abort();
+    child.emit("close", null, "SIGTERM");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    confirmTermination(true);
+    await expect(promise).resolves.toMatchObject({
+      status: "cancelled",
+      signal: "SIGTERM",
+    });
+  });
+
+  it("reports unconfirmed owned cleanup as a failed maintenance result", async () => {
+    const abort = new AbortController();
+    const terminateProcessTree = vi.fn(async (
+      _child: unknown,
+      _force: boolean,
+    ) => false);
+    const promise = runProviderMaintenanceAction(action(), {
+      environment: { PATH: "/tools", HOME: "/home/ada" },
+      signal: abort.signal,
+      spawn: () => fakeChild(),
+      terminateProcessTree,
+    });
+
+    abort.abort();
+
+    await expect(promise).resolves.toMatchObject({
+      status: "failed",
+      exitCode: null,
+      signal: null,
+      message: "Provider update process tree could not be confirmed stopped.",
+    });
+    expect(terminateProcessTree.mock.calls.map(([, force]) => force)).toEqual([
+      false,
+      true,
+    ]);
   });
 
   it("cancels a Windows batch updater by terminating the cmd.exe process tree", async () => {
@@ -259,7 +327,11 @@ describe("provider maintenance runner", () => {
       const child = fakeChild();
       const taskkillSpawn = vi.fn(() => {
         const taskkill = fakeTaskkill();
-        queueMicrotask(() => taskkill.emit("close", 0));
+        const attempt = taskkillSpawn.mock.calls.length;
+        queueMicrotask(() => {
+          taskkill.emit("close", 0);
+          if (attempt === 2) child.emit("close", null, "SIGKILL");
+        });
         return taskkill;
       });
       const promise = runProviderMaintenanceAction(action({
@@ -282,7 +354,7 @@ describe("provider maintenance runner", () => {
         },
       });
 
-      await vi.advanceTimersByTimeAsync(1_100);
+      await vi.advanceTimersByTimeAsync(1_300);
 
       await expect(promise).resolves.toMatchObject({
         status: "timed-out",

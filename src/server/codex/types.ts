@@ -11,6 +11,7 @@ import type {
   ProviderActivityEvent,
   ProviderRunFailure,
 } from "../provider/contracts";
+import type { ProcessTreeTerminator } from "../process-lifecycle";
 
 export interface CodexUsageSnapshot {
   usedTokens: number | null;
@@ -44,6 +45,8 @@ export interface CodexAppServerOptions {
     maxFrameBytes: number;
     maxProtocolBytes: number;
   };
+  /** Test seam for the owned App Server process-tree lifecycle. */
+  terminateProcessTree?: ProcessTreeTerminator;
   onText?: (text: string) => void;
   onActivity?: (
     kind: "system" | "turn" | "tool" | "command" | "reasoning",

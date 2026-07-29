@@ -7,8 +7,10 @@ import { homedir } from "node:os";
 
 import { environmentValue } from "../environment";
 import {
-  terminateProcessTree,
-  type ProcessLifecycleDependencies,
+  createOwnedProcessTreeTermination,
+  terminateProcessTreeAndWait,
+  type AwaitableProcessLifecycleDependencies,
+  type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import { sanitizeProviderActivityDetail } from "./activity-detail";
 import { providerProcessInvocation } from "./process";
@@ -44,7 +46,9 @@ export interface ProviderMaintenanceRunnerOptions {
     args: readonly string[],
     options: SpawnOptionsWithoutStdio,
   ) => ChildProcessWithoutNullStreams;
-  processLifecycle?: Partial<ProcessLifecycleDependencies>;
+  processLifecycle?: AwaitableProcessLifecycleDependencies;
+  /** Test seam for the owned updater process-tree lifecycle. */
+  terminateProcessTree?: ProcessTreeTerminator;
   onProgress?: (progress: ProviderMaintenanceRunProgress) => void;
 }
 
@@ -155,10 +159,13 @@ export async function runProviderMaintenanceAction(
     let output = "";
     let outputTruncated = false;
     let settled = false;
+    let finalizing = false;
     let cancelled = options.signal.aborted;
     let timedOut = false;
     let timeout: NodeJS.Timeout | undefined;
-    let hardKill: NodeJS.Timeout | undefined;
+    let termination: Promise<void> | undefined;
+    let terminateOwnedProcessTree:
+      ReturnType<typeof createOwnedProcessTreeTermination> | undefined;
 
     const progress = (): void => {
       options.onProgress?.({
@@ -172,45 +179,54 @@ export async function runProviderMaintenanceAction(
       signal: NodeJS.Signals | null,
       message: string,
     ): void => {
-      if (settled) return;
-      settled = true;
-      if (timeout) clearTimeout(timeout);
-      if (hardKill) clearTimeout(hardKill);
-      options.signal.removeEventListener("abort", cancel);
-      resolveRun({
-        status,
-        exitCode,
-        signal,
-        message,
-        output: publicOutput(output),
-        outputTruncated,
-      });
+      if (settled || finalizing) return;
+      finalizing = true;
+      void (async () => {
+        if (termination) {
+          try {
+            await termination;
+          } catch {
+            status = "failed";
+            exitCode = child.exitCode ?? exitCode;
+            signal = child.signalCode ?? signal;
+            message =
+              "Provider update process tree could not be confirmed stopped.";
+          }
+        }
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        options.signal.removeEventListener("abort", cancel);
+        resolveRun({
+          status,
+          exitCode,
+          signal,
+          message,
+          output: publicOutput(output),
+          outputTruncated,
+        });
+      })();
     };
     const terminate = (): void => {
-      if (!child || child.killed) return;
-      try {
-        terminateProcessTree(child, false, processLifecycle);
-      } catch {
-        // The process may already have exited between the state check and kill.
-      }
-      hardKill = setTimeout(() => {
-        try {
-          terminateProcessTree(child, true, processLifecycle);
-        } catch {
-          // The process may already have exited.
-        }
-        finish(
+      if (!terminateOwnedProcessTree || termination) return;
+      termination = terminateOwnedProcessTree(false);
+      void termination.then(
+        () => finish(
           cancelled ? "cancelled" : timedOut ? "timed-out" : "failed",
-          null,
-          "SIGKILL",
+          child.exitCode,
+          child.signalCode,
           cancelled
             ? "Provider update cancelled."
             : timedOut
               ? "Provider update timed out."
-              : "Provider update process did not stop cleanly.",
-        );
-      }, killGraceMs);
-      hardKill.unref();
+              : "Provider update process stopped.",
+        ),
+        () => finish(
+          "failed",
+          child.exitCode,
+          child.signalCode,
+          "Provider update process tree could not be confirmed stopped.",
+        ),
+      );
     };
     const cancel = (): void => {
       cancelled = true;
@@ -237,6 +253,17 @@ export async function runProviderMaintenanceAction(
       );
       return;
     }
+    terminateOwnedProcessTree = createOwnedProcessTreeTermination(
+      child,
+      "Provider update process tree",
+      options.terminateProcessTree ?? (
+        async (ownedChild, force) =>
+          await terminateProcessTreeAndWait(ownedChild, force, {
+            ...processLifecycle,
+            waitMs: killGraceMs,
+          })
+      ),
+    );
 
     const append = (chunk: Buffer): void => {
       const next = appendOutput(output, chunk);
@@ -247,6 +274,7 @@ export async function runProviderMaintenanceAction(
     child.stdout.on("data", append);
     child.stderr.on("data", append);
     child.once("error", () => {
+      terminate();
       finish(
         cancelled ? "cancelled" : "failed",
         null,

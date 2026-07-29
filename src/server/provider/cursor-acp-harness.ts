@@ -19,7 +19,10 @@ import type {
 
 import type { ProviderModel } from "../../shared/contracts";
 import { INERTIA_VERSION } from "../../shared/version";
-import { terminateProcessTree } from "../process-lifecycle";
+import {
+  createOwnedProcessTreeTermination,
+  type ProcessTreeTerminator,
+} from "../process-lifecycle";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -68,17 +71,28 @@ interface PendingApproval { resolve: (decision: AgentApprovalDecision) => void; 
 interface PendingInput { resolve: (answers: Record<string, string[]>) => void; settled: boolean }
 interface CursorContextUsage { usedTokens: number | null; maxTokens: number | null }
 
-export function createCursorAcpHarness(): AgentHarness {
+export interface CursorAcpHarnessOptions {
+  /** Test seam for the owned ACP process-tree lifecycle. */
+  terminateProcessTree?: ProcessTreeTerminator;
+}
+
+export function createCursorAcpHarness(
+  options: CursorAcpHarnessOptions = {},
+): AgentHarness {
   return {
     id: "cursor-acp",
     providerId: "cursor",
     capabilities: CURSOR_ACP_CAPABILITIES,
     supports: (input) => input.providerId === "cursor",
-    start: startCursorRun,
+    start: (startOptions) =>
+      startCursorRun(startOptions, options.terminateProcessTree),
   };
 }
 
-function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
+function startCursorRun(
+  options: AgentHarnessStartOptions,
+  terminateProcessTree?: ProcessTreeTerminator,
+): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
     "cursor",
@@ -209,8 +223,17 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
     Readable.toWeb(wireGuard) as ReadableStream<Uint8Array>,
   );
+  const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
+    child,
+    "Cursor ACP process tree",
+    terminateProcessTree,
+  );
+  const requestProcessTermination = (force: boolean): void => {
+    // The public result below always awaits this same memoized promise.
+    void terminateOwnedProcessTree(force).catch(() => undefined);
+  };
 
-  const result = client.connectWith(stream, async (context): Promise<ProviderRunResult> => {
+  const providerResult = client.connectWith(stream, async (context): Promise<ProviderRunResult> => {
     activeContext = context;
     const initialized = await context.request(acp.methods.agent.initialize, {
       protocolVersion: 1,
@@ -255,13 +278,33 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     const diagnostic = stderr.toString().trim();
     const message = safeError(error, diagnostic ? `Cursor ACP stopped: ${diagnostic}` : "Cursor ACP stopped unexpectedly.");
     return finish("failed", message);
-  }).finally(() => {
+  });
+  const result = providerResult.then(async (outcome): Promise<ProviderRunResult> => {
     cancelPending();
-    terminateProcessTree(child, true);
+    try {
+      // ACP has already produced its terminal response, so no graceful wait
+      // window remains useful. Reuse any earlier cancellation request.
+      await terminateOwnedProcessTree(true);
+    } catch {
+      const error = "Cursor ACP process tree could not be confirmed stopped.";
+      emitter.status("failed", error);
+      return {
+        ...outcome,
+        status: "failed",
+        exitCode: child.exitCode,
+        signal: child.signalCode,
+        error,
+      };
+    }
+    emitter.status(outcome.status, outcome.error);
+    return {
+      ...outcome,
+      exitCode: child.exitCode,
+      signal: child.signalCode,
+    };
   });
 
   function finish(status: ProviderRunResult["status"], error?: string): ProviderRunResult {
-    emitter.status(status, error);
     return {
       providerId: "cursor",
       conversationId,
@@ -281,10 +324,13 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
     emitter.status("cancelling");
     cancelPending();
     if (!force && sessionId && activeContext) {
-      void activeContext.notify(acp.methods.agent.session.cancel, { sessionId }).catch(() => terminateProcessTree(child, false));
+      void activeContext.notify(
+        acp.methods.agent.session.cancel,
+        { sessionId },
+      ).catch(() => requestProcessTermination(true));
       return;
     }
-    terminateProcessTree(child, force);
+    requestProcessTermination(force);
   };
 
   return {

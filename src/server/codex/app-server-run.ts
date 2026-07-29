@@ -35,7 +35,9 @@ import {
 } from "../provider/activity-detail";
 import type { ProviderRunFailure } from "../provider/contracts";
 import { providerProcessInvocation } from "../provider/process";
-import { terminateProcessTree } from "../process-lifecycle";
+import {
+  createOwnedProcessTreeTermination,
+} from "../process-lifecycle";
 
 interface PendingClientRequest {
   method: string;
@@ -84,6 +86,11 @@ export function startCodexAppServerRun(
   let continuationError: CodexAppServerResult["continuationError"];
   let resolveResult!: (result: CodexAppServerResult) => void;
   let events: CodexAppServerEvents;
+  const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
+    child,
+    "Codex App Server process tree",
+    options.terminateProcessTree,
+  );
 
   const result = new Promise<CodexAppServerResult>((resolve) => {
     resolveResult = resolve;
@@ -172,9 +179,6 @@ export function startCodexAppServerRun(
       clearTimeout(transportCloseTimer);
       transportCloseTimer = undefined;
     }
-    const finalFailure = status === "failed"
-      ? settledFailure(exitCode, signal)
-      : undefined;
     settled = true;
     phase = "settled";
     decoder?.stop();
@@ -182,23 +186,65 @@ export function startCodexAppServerRun(
       "Codex App Server stopped before responding.",
     );
     events?.settleInteractions();
-    resolveResult({
-      status,
-      ...(providerThreadId ? { sessionId: providerThreadId } : {}),
-      text: resultText.toString(),
-      textTruncated: resultText.truncated,
-      exitCode,
-      signal,
-      ...((lastError || diagnostic.toString())
-        ? { diagnostic: lastError ?? diagnostic.toString() }
-        : {}),
-      ...(finalFailure ? { failure: finalFailure } : {}),
-      ...(compatibilityError ? { compatibilityError } : {}),
-      ...(continuationError ? { continuationError } : {}),
-    });
-    if (child.exitCode === null && child.signalCode === null) {
-      terminateProcessTree(child, false);
-    }
+    void (async () => {
+      let finalStatus = status;
+      try {
+        // A terminal App Server turn has no further process work to preserve.
+        // Use the same owned promise as cancellation, but avoid adding a
+        // graceful-wait window after the provider has already settled.
+        await terminateOwnedProcessTree(true);
+      } catch (error) {
+        finalStatus = "failed";
+        rememberFailure(
+          "process-exit",
+          "Codex App Server process tree could not be confirmed stopped.",
+          error instanceof Error ? error.message : undefined,
+        );
+      }
+      const finalFailure = finalStatus === "failed"
+        ? settledFailure(
+            child.exitCode ?? exitCode,
+            child.signalCode ?? signal,
+          )
+        : undefined;
+      resolveResult({
+        status: finalStatus,
+        ...(providerThreadId ? { sessionId: providerThreadId } : {}),
+        text: resultText.toString(),
+        textTruncated: resultText.truncated,
+        exitCode: child.exitCode ?? exitCode,
+        signal: child.signalCode ?? signal,
+        ...((lastError || diagnostic.toString())
+          ? { diagnostic: lastError ?? diagnostic.toString() }
+          : {}),
+        ...(finalFailure ? { failure: finalFailure } : {}),
+        ...(compatibilityError ? { compatibilityError } : {}),
+        ...(continuationError ? { continuationError } : {}),
+      });
+    })();
+  };
+
+  const requestProcessTermination = (force: boolean): void => {
+    void terminateOwnedProcessTree(force).then(
+      () => {
+        if (!settled) {
+          finish(
+            cancelRequested ? "cancelled" : "failed",
+            child.exitCode,
+            child.signalCode,
+          );
+        }
+      },
+      (error: unknown) => {
+        if (settled) return;
+        rememberFailure(
+          "process-exit",
+          "Codex App Server process tree could not be confirmed stopped.",
+          error instanceof Error ? error.message : undefined,
+        );
+        finish("failed", child.exitCode, child.signalCode);
+      },
+    );
   };
 
   const request = (
@@ -236,14 +282,14 @@ export function startCodexAppServerRun(
     cancelRequested = true;
     events.settleInteractions();
     if (force || !spawned || !providerThreadId || !activeTurnId) {
-      terminateProcessTree(child, force);
+      requestProcessTermination(force);
       return;
     }
     void request("turn/interrupt", {
       threadId: providerThreadId,
       turnId: activeTurnId,
     }).catch(() => {
-      if (!settled) terminateProcessTree(child, true);
+      if (!settled) requestProcessTermination(true);
     });
   };
 

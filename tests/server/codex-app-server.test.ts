@@ -1,6 +1,6 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { join, normalize } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ProviderManager,
@@ -938,6 +938,77 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
     await closed;
     expect(run.child.exitCode !== null || run.child.signalCode !== null).toBe(true);
+  });
+
+  it("does not settle a terminal App Server result before owned cleanup completes", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "terminal-then-exit";
+    let markCleanupStarted!: () => void;
+    const cleanupStarted = new Promise<void>((resolve) => {
+      markCleanupStarted = resolve;
+    });
+    let releaseCleanup!: () => void;
+    const cleanupGate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Wait for authoritative cleanup",
+      planMode: false,
+      access: "full",
+      terminateProcessTree: async (child, force) => {
+        expect(force).toBe(true);
+        markCleanupStarted();
+        await cleanupGate;
+        return await terminateProcessTreeAndWait(child, true);
+      },
+    });
+    let settled = false;
+    void run.result.then(() => {
+      settled = true;
+    });
+
+    await cleanupStarted;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    releaseCleanup();
+    await expect(run.result).resolves.toMatchObject({
+      status: "completed",
+    });
+  });
+
+  it("maps unconfirmed App Server cleanup to a failed process result", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "terminal-then-exit";
+    const terminateProcessTree = vi.fn(async (child, force: boolean) => {
+      await terminateProcessTreeAndWait(child, force);
+      return false;
+    });
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: process.env,
+      cwd: fake.root,
+      prompt: "Fail cleanup authoritatively",
+      planMode: false,
+      access: "full",
+      terminateProcessTree,
+    });
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        reason: "process-exit",
+        message:
+          "Codex App Server process tree could not be confirmed stopped.",
+      },
+    });
+    expect(terminateProcessTree).toHaveBeenCalledOnce();
+    expect(terminateProcessTree.mock.calls[0]?.[1]).toBe(true);
   });
 
   it.each([

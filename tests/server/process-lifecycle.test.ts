@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createOwnedProcessTreeTermination,
   ProcessTreeTerminationError,
   requireProcessTreeTermination,
   terminateProcessTree,
@@ -36,6 +37,65 @@ function fakeTaskkill() {
 }
 
 describe("provider process-tree termination", () => {
+  it("shares one graceful-to-force termination sequence without overlapping attempts", async () => {
+    const child = fakeChild();
+    let finishGraceful!: (confirmed: boolean) => void;
+    const graceful = new Promise<boolean>((resolve) => {
+      finishGraceful = resolve;
+    });
+    let activeAttempts = 0;
+    let maximumActiveAttempts = 0;
+    const terminate = vi.fn(async (_child, force: boolean) => {
+      activeAttempts += 1;
+      maximumActiveAttempts = Math.max(maximumActiveAttempts, activeAttempts);
+      try {
+        return force ? true : await graceful;
+      } finally {
+        activeAttempts -= 1;
+      }
+    });
+    const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
+      child as never,
+      "Provider process tree",
+      terminate,
+    );
+
+    const gracefulRequest = terminateOwnedProcessTree(false);
+    const forcedRequest = terminateOwnedProcessTree(true);
+
+    expect(gracefulRequest).toBe(forcedRequest);
+    expect(terminate).toHaveBeenCalledTimes(1);
+    expect(terminate).toHaveBeenNthCalledWith(1, child, false);
+
+    finishGraceful(false);
+    await expect(gracefulRequest).resolves.toBeUndefined();
+
+    expect(terminate).toHaveBeenCalledTimes(2);
+    expect(terminate).toHaveBeenNthCalledWith(2, child, true);
+    expect(maximumActiveAttempts).toBe(1);
+  });
+
+  it("shares one typed failure when forced termination cannot be confirmed", async () => {
+    const child = fakeChild();
+    const terminate = vi.fn(async () => false);
+    const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
+      child as never,
+      "Provider process tree",
+      terminate,
+    );
+
+    const first = terminateOwnedProcessTree(true);
+    const second = terminateOwnedProcessTree(true);
+
+    expect(first).toBe(second);
+    await expect(first).rejects.toMatchObject({
+      code: "process-tree-termination-unconfirmed",
+      message: "Provider process tree could not be confirmed stopped.",
+    } satisfies Partial<ProcessTreeTerminationError>);
+    expect(terminate).toHaveBeenCalledOnce();
+    expect(terminate).toHaveBeenCalledWith(child, true);
+  });
+
   it("rejects an unconfirmed process-tree termination", async () => {
     const child = fakeChild();
     const terminate = vi.fn(async () => false);

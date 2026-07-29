@@ -1,6 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
-import { terminateProcessTree } from "../process-lifecycle";
+import {
+  createOwnedProcessTreeTermination,
+  type ProcessTreeTerminator,
+} from "../process-lifecycle";
 import {
   buildProviderInvocation,
   normalizeProviderLine,
@@ -117,6 +120,8 @@ export interface CliAgentHarnessOptions {
   supports?: (input: AgentHarnessStartOptions["input"]) => boolean;
   /** Arguments inserted before the provider CLI arguments (for native test launchers). */
   prefixArgs?: readonly string[];
+  /** Test seam for the owned CLI process-tree lifecycle. */
+  terminateProcessTree?: ProcessTreeTerminator;
 }
 
 export function createCliAgentHarness(
@@ -129,7 +134,13 @@ export function createCliAgentHarness(
     providerId,
     capabilities: CLI_AGENT_HARNESS_CAPABILITIES[providerId],
     supports: options.supports ?? ((input) => input.providerId === providerId),
-    start: (startOptions) => startCliRun(harnessId, providerId, startOptions, options.prefixArgs ?? []),
+    start: (startOptions) => startCliRun(
+      harnessId,
+      providerId,
+      startOptions,
+      options.prefixArgs ?? [],
+      options.terminateProcessTree,
+    ),
   };
 }
 
@@ -138,6 +149,7 @@ function startCliRun(
   providerId: ProviderId,
   options: AgentHarnessStartOptions,
   prefixArgs: readonly string[],
+  terminateProcessTree?: ProcessTreeTerminator,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
@@ -213,64 +225,104 @@ function startCliRun(
 
   let cancelRequested = false;
   let settled = false;
+  let finalizing = false;
+  let terminationRequested = false;
   let resolveResult!: (result: ProviderRunResult) => void;
   const result = new Promise<ProviderRunResult>((resolve) => {
     resolveResult = resolve;
   });
+  const providerLabel = `${providerId.slice(0, 1).toUpperCase()}${providerId.slice(1)}`;
+  const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
+    child,
+    `${providerLabel} CLI process tree`,
+    terminateProcessTree,
+  );
 
   const finish = (exitCode: number | null, signal: NodeJS.Signals | null): void => {
-    if (settled) return;
-    settled = true;
+    if (settled || finalizing) return;
+    finalizing = true;
+    void (async () => {
+      if (terminationRequested) {
+        try {
+          await terminateOwnedProcessTree(false);
+        } catch {
+          const message =
+            `${providerLabel} CLI process tree could not be confirmed stopped.`;
+          settled = true;
+          emitter.status("failed", message);
+          resolveResult({
+            providerId,
+            conversationId,
+            status: "failed",
+            sessionId: parserState.sessionId,
+            text: resultText.toString(),
+            textTruncated: resultText.truncated,
+            exitCode: child.exitCode ?? exitCode,
+            signal: child.signalCode ?? signal,
+            error: message,
+          });
+          return;
+        }
+      }
+      settled = true;
 
-    if (cancelRequested) {
-      emitter.status("cancelled");
+      if (cancelRequested) {
+        emitter.status("cancelled");
+        resolveResult({
+          providerId,
+          conversationId,
+          status: "cancelled",
+          sessionId: parserState.sessionId,
+          text: resultText.toString(),
+          textTruncated: resultText.truncated,
+          exitCode: child.exitCode ?? exitCode,
+          signal: child.signalCode ?? signal,
+        });
+        return;
+      }
+
+      if (spawnError || exitCode !== 0 || parserState.hadErrorEvent) {
+        const message = providerFailureMessage(
+          providerId,
+          spawnError,
+          stderr.toString(),
+          parserState.failureText,
+          options.input.backendProfile,
+        );
+        emitter.status("failed", message);
+        resolveResult({
+          providerId,
+          conversationId,
+          status: "failed",
+          sessionId: parserState.sessionId,
+          text: resultText.toString(),
+          textTruncated: resultText.truncated,
+          exitCode,
+          signal,
+          error: message,
+        });
+        return;
+      }
+
+      emitter.status("completed");
       resolveResult({
         providerId,
         conversationId,
-        status: "cancelled",
+        status: "completed",
         sessionId: parserState.sessionId,
         text: resultText.toString(),
         textTruncated: resultText.truncated,
         exitCode,
         signal,
       });
-      return;
-    }
-
-    if (spawnError || exitCode !== 0 || parserState.hadErrorEvent) {
-      const message = providerFailureMessage(
-        providerId,
-        spawnError,
-        stderr.toString(),
-        parserState.failureText,
-        options.input.backendProfile,
-      );
-      emitter.status("failed", message);
-      resolveResult({
-        providerId,
-        conversationId,
-        status: "failed",
-        sessionId: parserState.sessionId,
-        text: resultText.toString(),
-        textTruncated: resultText.truncated,
-        exitCode,
-        signal,
-        error: message,
-      });
-      return;
-    }
-
-    emitter.status("completed");
-    resolveResult({
-      providerId,
-      conversationId,
-      status: "completed",
-      sessionId: parserState.sessionId,
-      text: resultText.toString(),
-      textTruncated: resultText.truncated,
-      exitCode,
-      signal,
-    });
+    })();
+  };
+  const requestProcessTermination = (force: boolean): void => {
+    terminationRequested = true;
+    void terminateOwnedProcessTree(force).then(
+      () => finish(child.exitCode, child.signalCode),
+      () => finish(child.exitCode, child.signalCode),
+    );
   };
 
   child.once("spawn", () => emitter.status("running"));
@@ -288,6 +340,7 @@ function startCliRun(
   });
   child.once("error", (error: NodeJS.ErrnoException) => {
     spawnError = error;
+    requestProcessTermination(true);
     finish(null, null);
   });
   child.once("close", finish);
@@ -296,11 +349,7 @@ function startCliRun(
     child.stdin.end(invocation.stdin);
   } catch (error) {
     spawnError = error instanceof Error ? (error as NodeJS.ErrnoException) : undefined;
-    try {
-      child.kill();
-    } catch {
-      // The close/error event will settle the public result.
-    }
+    requestProcessTermination(true);
   }
 
   const cancel = (force: boolean): void => {
@@ -309,7 +358,7 @@ function startCliRun(
       cancelRequested = true;
       emitter.status("cancelling");
     }
-    terminateProcessTree(child, force);
+    requestProcessTermination(force);
   };
 
   return {

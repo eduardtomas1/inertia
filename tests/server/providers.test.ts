@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { delimiter, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { providerEnvironment } from "../../src/server/environment";
 import { AgentHarnessRegistry, detectProvider, ProviderManager, type ProviderId } from "../../src/server/providers";
@@ -530,6 +530,96 @@ setInterval(() => {}, 1000);
       expect(result).toMatchObject({ status: "completed", text: fixture.expectedText, sessionId: fixture.sessionId });
       await manager.disposeAll();
     }
+  });
+
+  it("does not terminate a CLI process after an ordinary one-shot success", async () => {
+    const root = temporaryRoot();
+    const { command, program } = nodeProgram(root, "successful-codex-cli", `
+console.log(JSON.stringify({ type: "turn.started", thread_id: "cli-session" }));
+console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "CLI response" } }));
+console.log(JSON.stringify({ type: "turn.completed" }));
+`);
+    const terminateProcessTree = vi.fn(async () => true);
+    const manager = new ProviderManager(
+      { commands: { codex: command } },
+      new AgentHarnessRegistry([
+        createCliAgentHarness("codex", {
+          prefixArgs: [program],
+          terminateProcessTree,
+        }),
+      ]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      harnessId: "codex-cli",
+      conversationId: "successful-cli",
+      cwd: root,
+      prompt: "Respond",
+      interactionMode: "build",
+      access: "full",
+    }))).resolves.toMatchObject({
+      status: "completed",
+      text: "CLI response",
+      sessionId: "cli-session",
+    });
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    await manager.disposeAll();
+  });
+
+  it("maps unconfirmed CLI cancellation cleanup to one failed terminal result", async () => {
+    const root = temporaryRoot();
+    const { command, program } = nodeProgram(root, "stalled-codex-cli", `
+console.log(JSON.stringify({ type: "turn.started", thread_id: "cli-session" }));
+setInterval(() => {}, 1000);
+`);
+    const terminateProcessTree = vi.fn(async (child, _force: boolean) => {
+      await terminateProcessTreeAndWait(child, true);
+      return false;
+    });
+    const manager = new ProviderManager(
+      { commands: { codex: command } },
+      new AgentHarnessRegistry([
+        createCliAgentHarness("codex", {
+          prefixArgs: [program],
+          terminateProcessTree,
+        }),
+      ]),
+    );
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => {
+      markRunning = resolve;
+    });
+    const statuses: string[] = [];
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      harnessId: "codex-cli",
+      conversationId: "failed-cli-cleanup",
+      cwd: root,
+      prompt: "Wait",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onStatus: ({ status }) => {
+        statuses.push(status);
+        if (status === "running") markRunning();
+      },
+    });
+
+    await running;
+    expect(manager.cancel("failed-cli-cleanup")).toBe(true);
+
+    await expect(result).resolves.toMatchObject({
+      status: "failed",
+      error: "Codex CLI process tree could not be confirmed stopped.",
+    });
+    expect(statuses).not.toContain("cancelled");
+    expect(statuses.at(-1)).toBe("failed");
+    expect(terminateProcessTree.mock.calls.map(([, force]) => force)).toEqual([
+      false,
+      true,
+    ]);
+    await manager.disposeAll();
   });
 
   it("requests real partial messages from Claude without duplicating the final assistant event", async () => {

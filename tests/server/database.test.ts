@@ -973,6 +973,138 @@ describe("RuntimeStore conversation lifecycle", () => {
     reopened.close();
   });
 
+  it("rolls back every recovery projection when recovery cannot finish", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const project = store.snapshot().projects[0]!;
+    const conversation = store.createConversation(
+      project.id,
+      "Interrupted atomic recovery",
+    );
+    store.updateConversation(conversation.id, {
+      status: "needs-input",
+      attentionKind: "approval",
+    });
+    const userMessage = store.createMessage(
+      conversation.id,
+      "Recover every authoritative projection atomically.",
+    );
+    const turn = store.createAgentTurn({
+      id: "turn-atomic-recovery",
+      conversationId: conversation.id,
+      runId: "run-atomic-recovery",
+      userMessageId: userMessage.id,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "legacy:codex:codex-app-server",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "running",
+      startedAt: turn.requestedAt,
+      updatedAt: turn.requestedAt,
+    });
+    const activity = store.addActivity({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      kind: "command",
+      title: "Interrupted command",
+      detail: null,
+      status: "running",
+    });
+    const reasoning = store.createReasoning(
+      conversation.id,
+      turn.runId,
+      turn.id,
+    );
+    const subagent = store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      providerId: "codex",
+      providerTaskId: "task-atomic-recovery",
+      providerAgentId: "agent-atomic-recovery",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-atomic-recovery",
+      providerRole: "reviewer",
+      providerName: "Atomic Recovery Reviewer",
+      status: "running",
+      description: "Verify recovery transaction boundaries.",
+      progress: "Waiting for recovery.",
+      result: null,
+      sequence: 4,
+      updatedAt: turn.requestedAt,
+    })?.trace;
+    expect(subagent).toBeDefined();
+    const workspaceRun = store.createWorkspaceRun({
+      kind: "agent",
+      projectId: project.id,
+      conversationId: conversation.id,
+      id: turn.runId,
+      actionId: null,
+      label: "Interrupted agent",
+      detail: null,
+      status: "waiting",
+      port: null,
+    });
+    store.close();
+
+    const database = new Database(databasePath);
+    database.exec(`
+      CREATE TRIGGER reject_recovery_activity
+      BEFORE INSERT ON activities
+      WHEN NEW.kind = 'error'
+      BEGIN
+        SELECT RAISE(ABORT, 'injected recovery failure');
+      END
+    `);
+    database.close();
+
+    const reopened = new RuntimeStore(
+      databasePath,
+      workspacePath,
+      { recoverInterruptedRuns: false },
+    );
+    expect(() => reopened.recoverInterruptedRuns())
+      .toThrow(/injected recovery failure/iu);
+    expect(reopened.conversation(conversation.id)).toMatchObject({
+      status: "needs-input",
+      attentionKind: "approval",
+    });
+    expect(reopened.workspaceRun(workspaceRun.id)).toMatchObject({
+      status: "waiting",
+      finishedAt: null,
+    });
+    expect(reopened.agentTurn(turn.id)).toMatchObject({
+      status: "running",
+      completedAt: null,
+      terminalReason: null,
+    });
+    expect(reopened.subagentTrace(subagent!.id)).toMatchObject({
+      status: "running",
+      sequence: 4,
+    });
+    expect(reopened.snapshot().activities).toContainEqual(
+      expect.objectContaining({
+        id: activity.id,
+        status: "running",
+      }),
+    );
+    expect(reopened.snapshot().reasonings).toContainEqual(
+      expect.objectContaining({
+        id: reasoning.id,
+        status: "running",
+      }),
+    );
+    reopened.close();
+  });
+
   it("preserves a nullable legacy plan across restart", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     const project = store.snapshot().projects[0];

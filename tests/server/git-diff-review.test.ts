@@ -422,6 +422,59 @@ describe("safe selected diff reversal", () => {
     expect(readRegistry(root).operations.at(-1)?.status).toBe("failed");
   });
 
+  it("does not reconcile a live reversal during concurrent inspection", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    git(root, "add", "example.txt");
+    const selection = await selectionFor(
+      root,
+      (line) => line.kind === "addition" && line.content === "delta",
+    );
+    const plan = await inspectDiffSelection(root, selection);
+    let signalIndexUpdated!: () => void;
+    const indexUpdated = new Promise<void>((resolve) => {
+      signalIndexUpdated = resolve;
+    });
+    let resumeApply!: () => void;
+    const applyGate = new Promise<void>((resolve) => {
+      resumeApply = resolve;
+    });
+    const applying = revertDiffSelection(
+      root,
+      { ...selection, expected: plan.validation },
+      {
+        afterIndexUpdated: async () => {
+          signalIndexUpdated();
+          await applyGate;
+        },
+      },
+    );
+    await indexUpdated;
+
+    let inspectionSettled = false;
+    const inspecting = inspectDiffSelection(root, selection)
+      .finally(() => {
+        inspectionSettled = true;
+      });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    expect(inspectionSettled).toBe(false);
+
+    resumeApply();
+    await expect(applying).resolves.toMatchObject({
+      operation: { filePath: "example.txt" },
+    });
+    await expect(inspecting).rejects.toThrow(
+      /no longer changed|complete diff changed/iu,
+    );
+    expect(readFileSync(join(root, "example.txt"), "utf8"))
+      .toBe("alpha\nbeta\ngamma\n");
+    expect(git(root, "show", ":example.txt"))
+      .toBe("alpha\nbeta\ngamma\n");
+    expect(readRegistry(root).operations.at(-1)?.status).toBe("applied");
+  });
+
   it("recovers Undo from the persisted registry after module restart", async () => {
     const root = repository();
     writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");

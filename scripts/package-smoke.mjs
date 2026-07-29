@@ -16,6 +16,20 @@ function sleep(milliseconds) {
   return new Promise((settle) => setTimeout(settle, milliseconds));
 }
 
+async function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function isExecutableFile(path) {
   try {
     const value = await stat(path);
@@ -300,10 +314,11 @@ try {
   const runtimeWasObserved = processExists(readiness.runtimePid);
   if (packagedCodex) await requirePackagedCodex(readiness.websocketUrl, packagedCodex.command);
 
-  const exit = await Promise.race([
+  const exit = await withTimeout(
     exitResult,
-    sleep(EXIT_TIMEOUT_MS).then(() => { throw new Error("The packaged app did not finish its smoke-test shutdown."); }),
-  ]);
+    EXIT_TIMEOUT_MS,
+    "The packaged app did not finish its smoke-test shutdown.",
+  );
   if (exit.error) throw exit.error;
   await requireLifecycleMarker(markerPath, "before-quit", readiness.mainPid);
   await requireLifecycleMarker(markerPath, "runtime-stopped", readiness.mainPid);
@@ -322,6 +337,28 @@ try {
   const detail = error instanceof Error ? error.message : String(error);
   if (stdout.trim()) console.error(`Packaged app stdout:\n${stdout.trim()}`);
   if (stderr.trim()) console.error(`Packaged app stderr:\n${stderr.trim()}`);
+  if (readiness) {
+    const lifecycle = Object.fromEntries(await Promise.all(
+      ["before-quit", "runtime-stopped", "app-exit"].map(async (stage) => [
+        stage,
+        Boolean(await readJsonIfPresent(`${markerPath}.${stage}.json`)),
+      ]),
+    ));
+    console.error("Packaged app lifecycle:", {
+      mainAlive: processExists(readiness.mainPid),
+      runtimeAlive: processExists(readiness.runtimePid),
+      lifecycle,
+      ...(process.platform !== "win32"
+        ? {
+            mainProcess: spawnSync(
+              "ps",
+              ["-o", "pid=,ppid=,state=,command=", "-p", String(readiness.mainPid)],
+              { encoding: "utf8" },
+            ).stdout.trim(),
+          }
+        : {}),
+    });
+  }
   throw new Error(`Packaged smoke failed: ${detail}`, { cause: error });
 } finally {
   const mainPid = child?.pid ?? null;

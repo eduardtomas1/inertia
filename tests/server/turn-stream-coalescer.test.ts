@@ -139,6 +139,10 @@ class ControlledProvider implements TurnProviderRuntime {
     return true;
   }
 
+  async stopOwned(): Promise<"settled"> {
+    return "settled";
+  }
+
   isRunning(): boolean {
     return this.input !== null;
   }
@@ -276,6 +280,11 @@ function providerIdentity(runtime: ControllerRuntime) {
 async function flushPromises(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function closeRuntime(runtime: ControllerRuntime): Promise<void> {
+  await runtime.controller.dispose();
+  runtime.store.close();
 }
 
 afterEach(async () => {
@@ -633,7 +642,7 @@ describe("TurnController coalesced streaming", () => {
 
     runtime.controller.cancel(runtime.conversationId);
     await flushPromises();
-    runtime.store.close();
+    await closeRuntime(runtime);
   });
 
   it("flushes live durable state before a fresh renderer hydration", async () => {
@@ -672,7 +681,7 @@ describe("TurnController coalesced streaming", () => {
     );
     runtime.controller.cancel(runtime.conversationId);
     await flushPromises();
-    runtime.store.close();
+    await closeRuntime(runtime);
   });
 
   it("persists assistant prose on both sides of provider work as separate ordered messages", async () => {
@@ -762,7 +771,7 @@ describe("TurnController coalesced streaming", () => {
       .filter((message) => message.turnId === turn.id && message.role === "assistant")
       .map(({ id, content }) => ({ id, content }))).toEqual(persistedAtSettlement);
     expect(runtime.events.filter(({ type }) => type === "agent.completed")).toHaveLength(1);
-    runtime.store.close();
+    await closeRuntime(runtime);
   });
 
   it("coalesces hundreds of interleaved deltas and drains both channels before approval", async () => {
@@ -854,7 +863,7 @@ describe("TurnController coalesced streaming", () => {
       status: "completed",
     }));
     expect(runtime.scheduler.timers).toHaveLength(0);
-    runtime.store.close();
+    await closeRuntime(runtime);
   });
 
   it("flushes exact assistant and reasoning content when completion beats the timers", async () => {
@@ -896,7 +905,7 @@ describe("TurnController coalesced streaming", () => {
       expect.objectContaining({ type: "agent.completed" }),
     ]);
     expect(runtime.scheduler.timers).toHaveLength(0);
-    runtime.store.close();
+    await closeRuntime(runtime);
   });
 
   it("persists an authoritative terminal correction without appending it as a delta", async () => {
@@ -928,7 +937,7 @@ describe("TurnController coalesced streaming", () => {
     expect(runtime.events.filter(({ type }) => type === "agent.text")).toHaveLength(1);
     expect(runtime.events.filter(({ type }) => type === "agent.completed")).toHaveLength(1);
     expect(runtime.scheduler.timers).toHaveLength(0);
-    runtime.store.close();
+    await closeRuntime(runtime);
   });
 
   it("flushes pending text before a cancellation wins a terminal race", async () => {
@@ -970,7 +979,7 @@ describe("TurnController coalesced streaming", () => {
       text: "stale",
     })).toBe(false);
     expect(runtime.scheduler.timers).toHaveLength(0);
-    runtime.store.close();
+    await closeRuntime(runtime);
   });
 
   it("drains pending channels before runtime shutdown interrupts the turn", async () => {
@@ -1012,7 +1021,7 @@ describe("TurnController coalesced streaming", () => {
       expect.objectContaining({ type: "agent.failed" }),
     ]);
     expect(runtime.scheduler.timers).toHaveLength(0);
-    runtime.store.close();
+    await closeRuntime(runtime);
   });
 
   it("drains pending channels before a runtime crash interrupts the turn", async () => {
@@ -1059,7 +1068,7 @@ describe("TurnController coalesced streaming", () => {
       expect.objectContaining({ type: "agent.failed" }),
     ]);
     expect(runtime.scheduler.timers).toHaveLength(0);
-    runtime.store.close();
+    await closeRuntime(runtime);
   });
 
   it("settles a timer persistence error exactly once without leaking a timer exception", async () => {
@@ -1090,6 +1099,6 @@ describe("TurnController coalesced streaming", () => {
     expect(runtime.scheduler.timers).toHaveLength(0);
     runtime.provider.emit({ ...identity, type: "text", text: "late" });
     expect(runtime.events.filter(({ type }) => type === "agent.failed")).toHaveLength(1);
-    runtime.store.close();
+    await closeRuntime(runtime);
   });
 });

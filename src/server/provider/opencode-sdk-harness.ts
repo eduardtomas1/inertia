@@ -1,11 +1,9 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createServer } from "node:net";
 
 import {
-  createOpencodeClient,
   type Agent,
   type Event,
   type Model,
@@ -27,12 +25,25 @@ import {
 import type { ProviderRunResult } from "./contracts";
 import type {
   AgentApprovalDecision,
-  AgentInputRequest,
   AgentPlanStep,
 } from "./interactions";
 import { providerActivityDetailSections } from "./activity-detail";
 import { CappedProviderBuffer } from "./io";
-
+import {
+  createOwnedOpenCodeClient,
+  ownedOpenCodeCredentials,
+  ownedOpenCodeEnvironment,
+  openCodeInteractionId,
+  openCodeOptionId,
+  openCodeQuestionPayload,
+  openCodeQuestionId,
+  openCodeQuestions,
+} from "./opencode-boundary";
+import {
+  startOwnedOpenCodeServer,
+  waitForOpenCodeHealth,
+  withOpenCodeRequestDeadline,
+} from "./opencode-owned-server";
 const MAX_EVENT_CHARS = 1024 * 1024;
 const MAX_RUN_EVENT_CHARS = 32 * 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
@@ -44,12 +55,12 @@ const MAX_RETAINED_PART_CHARS = 8 * 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_SERVER_OUTPUT_CHARS = 32 * 1024;
 const START_TIMEOUT_MS = 10_000;
+const INITIALIZATION_TIMEOUT_MS = 30_000;
 const METADATA_PROVIDER_TIMEOUT_MS = 10_000;
 const CANCEL_FORCE_MS = 2_000;
 const RUN_DEADLINE_MS = 4 * 60 * 60 * 1_000;
 const EVENT_INACTIVITY_DEADLINE_MS = 30 * 60 * 1_000;
 const MIN_DEADLINE_MS = 25;
-
 export const OPENCODE_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
   session: { resume: "native", identity: "session" },
@@ -102,6 +113,12 @@ export interface OpenCodeSdkHarnessOptions {
    * window. Events for other sessions do not reset this deadline.
    */
   eventInactivityDeadlineMs?: number;
+  /**
+   * May shorten, but never extend, the production provider/session
+   * initialization deadline. Primarily useful for deterministic lifecycle
+   * verification.
+   */
+  initializationTimeoutMs?: number;
   terminateProcessTree?: ProcessTreeTerminator;
 }
 
@@ -122,6 +139,7 @@ export interface OpenCodeSdkMetadataOptions {
 interface OpenCodeRunDeadlines {
   runDeadlineMs: number;
   eventInactivityDeadlineMs: number;
+  initializationTimeoutMs: number;
 }
 
 export function createOpenCodeSdkHarness(
@@ -171,13 +189,17 @@ export async function readOpenCodeSdkModels(
   );
   const terminateOwnedProcessTree = options.terminateProcessTree ?? terminateProcessTreeAndWait;
   const output = new CappedProviderBuffer(MAX_SERVER_OUTPUT_CHARS);
-  const port = await availablePort();
-  const started = await startOwnedServer(
-    executable, cwd, environment, port, output, terminateOwnedProcessTree,
+  const credentials = ownedOpenCodeCredentials(environment);
+  const started = await startOwnedOpenCodeServer(
+    executable,
+    cwd,
+    ownedOpenCodeEnvironment(environment, credentials),
+    output,
+    terminateOwnedProcessTree,
   );
-  const client = createOpencodeClient({ baseUrl: started.url, directory: cwd, throwOnError: true });
+  const client = createOwnedOpenCodeClient(started.url, cwd, credentials);
   try {
-    await waitForHealth(client, started.child, healthTimeoutMs);
+    await waitForOpenCodeHealth(client, started.child, healthTimeoutMs);
     const response = await withOpenCodeRequestDeadline(
       providerTimeoutMs,
       "Timed out waiting for the OpenCode provider catalog.",
@@ -323,19 +345,49 @@ function startOpenCodeRun(
   const result = (async (): Promise<ProviderRunResult> => {
     let outcome: { status: ProviderRunResult["status"]; error?: string };
     try {
-      const port = await availablePort();
-      const started = await startOwnedServer(
-        options.executable, options.input.cwd, options.environment, port, serverOutput, terminateOwnedProcessTree,
+      const credentials = ownedOpenCodeCredentials(options.environment);
+      const started = await startOwnedOpenCodeServer(
+        options.executable,
+        options.input.cwd,
+        ownedOpenCodeEnvironment(options.environment, credentials),
+        serverOutput,
+        terminateOwnedProcessTree,
+        eventAbort.signal,
       );
       child = started.child;
+      if (cancelRequested) throw new Error("OpenCode startup was cancelled.");
       if (terminalError) throw new Error(terminalError);
-      client = createOpencodeClient({ baseUrl: started.url, directory: options.input.cwd, throwOnError: true });
-      await waitForHealth(client, child);
+      client = createOwnedOpenCodeClient(started.url, options.input.cwd, credentials);
+      await waitForOpenCodeHealth(
+        client,
+        child,
+        START_TIMEOUT_MS,
+        eventAbort.signal,
+      );
 
-      const [providerData, agents] = await Promise.all([
-        client.provider.list({ directory: options.input.cwd }, { throwOnError: true }),
-        client.app.agents({ directory: options.input.cwd }, { throwOnError: true }),
-      ]);
+      const initialize = async <T>(
+        label: string,
+        operation: (signal: AbortSignal) => Promise<T>,
+      ): Promise<T> => await withOpenCodeRequestDeadline(
+        deadlines.initializationTimeoutMs,
+        `Timed out waiting for OpenCode ${label}.`,
+        operation,
+        eventAbort.signal,
+      );
+
+      const [providerData, agents] = await initialize(
+        "provider and agent discovery",
+        async (signal) => await Promise.all([
+          client!.provider.list(
+            { directory: options.input.cwd },
+            { signal, throwOnError: true },
+          ),
+          client!.app.agents(
+            { directory: options.input.cwd },
+            { signal, throwOnError: true },
+          ),
+        ]),
+      );
       const discoveredModels = openCodeModels(providerData.data.all, providerData.data.default);
       if (discoveredModels.length > 0) {
         emitter.rich({ type: "metadata", metadata: { models: discoveredModels }, source: "provider", complete: true });
@@ -347,21 +399,46 @@ function startOpenCodeRun(
       }
 
       if (sessionId) {
-        await client.session.get({ sessionID: sessionId, directory: options.input.cwd }, { throwOnError: true });
-        await client.session.update({ sessionID: sessionId, directory: options.input.cwd, permission: openCodePermissions(options.input.access) }, { throwOnError: true });
+        await initialize(
+          "session resume",
+          async (signal) => await client!.session.get(
+            { sessionID: sessionId!, directory: options.input.cwd },
+            { signal, throwOnError: true },
+          ),
+        );
+        await initialize(
+          "session permission update",
+          async (signal) => await client!.session.update(
+            {
+              sessionID: sessionId!,
+              directory: options.input.cwd,
+              permission: openCodePermissions(options.input.access),
+            },
+            { signal, throwOnError: true },
+          ),
+        );
       } else {
-        const created = await client.session.create({
-          directory: options.input.cwd,
-          ...(selectedModel ? { model: { id: selectedModel.id, providerID: selectedModel.providerID, ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}) } } : {}),
-          ...(agent ? { agent: agent.name } : {}),
-          permission: openCodePermissions(options.input.access),
-        }, { throwOnError: true });
+        const created = await initialize(
+          "session creation",
+          async (signal) => await client!.session.create({
+            directory: options.input.cwd,
+            ...(selectedModel ? { model: { id: selectedModel.id, providerID: selectedModel.providerID, ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}) } } : {}),
+            ...(agent ? { agent: agent.name } : {}),
+            permission: openCodePermissions(options.input.access),
+          }, { signal, throwOnError: true }),
+        );
         sessionId = created.data.id;
         emitter.session(created.data.id);
       }
       if (!sessionId) throw new Error("OpenCode did not return a session ID.");
 
-      const session = await client.session.get({ sessionID: sessionId, directory: options.input.cwd }, { throwOnError: true });
+      const session = await initialize(
+        "active session",
+        async (signal) => await client!.session.get(
+          { sessionID: sessionId!, directory: options.input.cwd },
+          { signal, throwOnError: true },
+        ),
+      );
       const effectiveModel = selectedModel ?? (session.data.model ? findOpenCodeModel(session.data.model.providerID, session.data.model.id, providerData.data.all) : undefined);
       if (options.input.reasoningEffort && (!effectiveModel || !effectiveModel.variants?.[options.input.reasoningEffort])) {
         throw new Error(`The active OpenCode model does not advertise reasoning variant '${options.input.reasoningEffort}'.`);
@@ -493,93 +570,6 @@ function startOpenCodeRun(
   };
 }
 
-async function startOwnedServer(
-  executable: string,
-  cwd: string,
-  environment: NodeJS.ProcessEnv,
-  port: number,
-  output: CappedProviderBuffer,
-  terminateOwnedProcessTree: ProcessTreeTerminator,
-): Promise<{ child: ChildProcessWithoutNullStreams; url: string }> {
-  const child = spawn(executable, ["serve", "--hostname=127.0.0.1", `--port=${port}`], {
-    cwd,
-    env: environment,
-    detached: process.platform !== "win32",
-    shell: false,
-    windowsHide: true,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  child.stdin.end();
-  child.stdout.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
-  child.stderr.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("Timed out waiting for the OpenCode server to start.")), START_TIMEOUT_MS);
-      timer.unref();
-      child.once("spawn", () => { clearTimeout(timer); resolve(); });
-      child.once("error", (error) => { clearTimeout(timer); reject(error); });
-    });
-  } catch (error) {
-    await requireProcessTreeTermination(
-      terminateOwnedProcessTree, child, true, "OpenCode startup process tree",
-    );
-    throw error;
-  }
-  return { child, url: `http://127.0.0.1:${port}` };
-}
-
-async function waitForHealth(
-  client: OpencodeClient,
-  child: ChildProcessWithoutNullStreams,
-  timeoutMs = START_TIMEOUT_MS,
-): Promise<void> {
-  await withOpenCodeRequestDeadline(
-    timeoutMs,
-    "Timed out waiting for the OpenCode server health check.",
-    async (signal) => {
-      let lastError: unknown;
-      while (!signal.aborted) {
-        if (child.exitCode !== null || child.signalCode !== null) {
-          throw new Error("OpenCode server exited during startup.");
-        }
-        try {
-          await client.global.health({ signal, throwOnError: true });
-          return;
-        } catch (error) {
-          if (signal.aborted) throw error;
-          lastError = error;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 75));
-      }
-      throw new Error(safeError(
-        lastError,
-        "Timed out waiting for the OpenCode server health check.",
-      ));
-    },
-  );
-}
-
-async function withOpenCodeRequestDeadline<T>(
-  timeoutMs: number,
-  timeoutMessage: string,
-  operation: (signal: AbortSignal) => Promise<T>,
-): Promise<T> {
-  const controller = new AbortController();
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(new Error(timeoutMessage));
-    }, timeoutMs);
-    timer.unref();
-  });
-  try {
-    return await Promise.race([operation(controller.signal), deadline]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 async function pumpOpenCodeEvents(
   stream: AsyncGenerator<Event>,
   sessionId: string,
@@ -620,6 +610,11 @@ function openCodeRunDeadlines(
       options.eventInactivityDeadlineMs,
       EVENT_INACTIVITY_DEADLINE_MS,
       "eventInactivityDeadlineMs",
+    ),
+    initializationTimeoutMs: shortenedDeadline(
+      options.initializationTimeoutMs,
+      INITIALIZATION_TIMEOUT_MS,
+      "initializationTimeoutMs",
     ),
   };
 }
@@ -700,8 +695,7 @@ function handleOpenCodeEvent(
     const todos = Array.isArray(properties.todos) ? properties.todos : [];
     emitter.rich({ type: "plan", explanation: null, steps: todos.flatMap(todoStep) });
   } else if (event.type === "permission.asked" || event.type === "permission.v2.asked") {
-    const nativeId = stringValue(properties.id);
-    if (!nativeId) return;
+    const nativeId = openCodeInteractionId(properties.id, "permission");
     const permission = stringValue(properties.permission) ?? stringValue(properties.action) ?? "tool";
     if (options.input.access === "full" || (options.input.access === "auto-edit" && permission === "edit")) {
       void client.permission.reply({ requestID: nativeId, reply: "once" }, { throwOnError: true }).catch(onFailure);
@@ -727,9 +721,8 @@ function handleOpenCodeEvent(
       },
     });
   } else if (event.type === "question.asked" || event.type === "question.v2.asked") {
-    const nativeId = stringValue(properties.id);
-    const questions = Array.isArray(properties.questions) ? properties.questions.filter(isQuestionInfo) : [];
-    if (!nativeId || questions.length === 0) return;
+    const nativeId = openCodeInteractionId(properties.id, "question");
+    const questions = openCodeQuestionPayload(properties.questions);
     const requestId = randomUUID();
     if (inputs.size >= MAX_PENDING_INTERACTIONS) {
       throw new Error("OpenCode exceeded the bounded question budget.");
@@ -914,34 +907,6 @@ function emitOpenCodeUsageSnapshot(state: OpenCodeUsageState, emit: ReturnType<t
   });
 }
 
-function openCodeQuestions(requestId: string, questions: QuestionInfo[]): AgentInputRequest {
-  return {
-    requestId,
-    autoResolutionMs: null,
-    questions: questions.slice(0, 3).map((question, index) => ({
-      id: openCodeQuestionId(index),
-      header: bounded(question.header),
-      question: bounded(question.question),
-      isOther: question.custom !== false,
-      isSecret: false,
-      allowMultiple: question.multiple === true,
-      options: question.options.slice(0, 20).map((option, optionIndex) => ({
-        id: openCodeOptionId(optionIndex),
-        label: bounded(option.label),
-        description: bounded(option.description),
-      })),
-    })),
-  };
-}
-
-function openCodeQuestionId(index: number): string {
-  return `question-${index + 1}`;
-}
-
-function openCodeOptionId(index: number): string {
-  return `option-${index + 1}`;
-}
-
 function todoStep(value: unknown): AgentPlanStep[] {
   const todo = objectValue(value);
   const content = stringValue(todo?.content);
@@ -955,28 +920,10 @@ function openCodeEventSessionId(event: Event): string | undefined {
   return stringValue(properties.sessionID) ?? stringValue(objectValue(properties.info)?.sessionID);
 }
 
-function isQuestionInfo(value: unknown): value is QuestionInfo {
-  const question = objectValue(value);
-  return typeof question?.question === "string" && typeof question.header === "string" && Array.isArray(question.options);
-}
-
 function emitOpenCodeText(value: string, buffer: CappedProviderBuffer, emit: (value: string) => void): void {
   const safe = bounded(value);
   buffer.append(safe);
   emit(safe);
-}
-
-async function availablePort(): Promise<number> {
-  return await new Promise<number>((resolve, reject) => {
-    const server = createServer();
-    server.unref();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close((error) => error ? reject(error) : port > 0 ? resolve(port) : reject(new Error("Could not reserve a local OpenCode port.")));
-    });
-  });
 }
 
 function imageMime(path: string): string {

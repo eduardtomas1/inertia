@@ -83,6 +83,8 @@ describe("main-owned attachment registry", () => {
     }]);
     await attachments.dispose();
     await removeAttachmentStorageSession(storage.directory);
+    await expect(removeAttachmentStorageSession(storage.directory))
+      .resolves.toBeUndefined();
     await expect(readdir(root)).resolves.toEqual([]);
   });
 

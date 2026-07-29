@@ -1,8 +1,4 @@
-import type {
-  Dispatch,
-  RefObject,
-  SetStateAction,
-} from "react";
+import type { RefObject } from "react";
 import { MessageSquarePlus, RefreshCw, X } from "lucide-react";
 import clsx from "clsx";
 import type {
@@ -43,7 +39,7 @@ export interface ComposerInputZoneProps {
   onCreateRouteConversation: () => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   message: string;
-  setMessage: Dispatch<SetStateAction<string>>;
+  onMessageChange: (message: string) => void;
   onImportAttachments: (files: File[]) => Promise<void>;
   onSubmit: () => Promise<void>;
   running: boolean;
@@ -53,7 +49,7 @@ export interface ComposerInputZoneProps {
   messageFits: boolean;
   mentionMatch: RegExpExecArray | null;
   mentionResults: WorkspaceEntry[];
-  setFileReferences: Dispatch<SetStateAction<string[]>>;
+  onAddFileReference: (path: string) => void;
   slashMatch: RegExpExecArray | null;
   onUpdateConversation: (
     update: Partial<Pick<Conversation, "interactionMode">>,
@@ -78,7 +74,7 @@ export function ComposerInputZone({
   onCreateRouteConversation,
   textareaRef,
   message,
-  setMessage,
+  onMessageChange,
   onImportAttachments,
   onSubmit,
   running,
@@ -88,7 +84,7 @@ export function ComposerInputZone({
   messageFits,
   mentionMatch,
   mentionResults,
-  setFileReferences,
+  onAddFileReference,
   slashMatch,
   onUpdateConversation,
 }: ComposerInputZoneProps): React.JSX.Element {
@@ -188,7 +184,7 @@ export function ComposerInputZone({
         <textarea
           ref={textareaRef}
           value={message}
-          onChange={(event) => setMessage(event.target.value)}
+          onChange={(event) => onMessageChange(event.target.value)}
           onPaste={(event) => {
             if (!running && event.clipboardData.files.length > 0) {
               event.preventDefault();
@@ -230,14 +226,12 @@ export function ComposerInputZone({
               aria-selected="false"
               key={entry.path}
               onClick={() => {
-                setMessage((current) => current.replace(
+                onMessageChange(message.replace(
                   /@[^\s@]*$/u,
                   `@${entry.path}${entry.kind === "directory" ? "/" : " "}`,
                 ));
                 if (entry.kind === "file") {
-                  setFileReferences((current) => [
-                    ...new Set([...current, entry.path]),
-                  ]);
+                  onAddFileReference(entry.path);
                 }
               }}
             >
@@ -268,7 +262,7 @@ export function ComposerInputZone({
                 onUpdateConversation({
                   interactionMode: item.mode as InteractionMode,
                 });
-                setMessage("");
+                onMessageChange("");
               }}
             >
               <span>/{item.id}</span>

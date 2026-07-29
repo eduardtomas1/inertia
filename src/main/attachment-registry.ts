@@ -312,8 +312,12 @@ export async function createAttachmentStorageSession(
 export async function removeAttachmentStorageSession(
   directory: string,
 ): Promise<void> {
-  const canonical = await securePrivateDirectory(resolve(directory));
-  await rmdir(canonical);
+  try {
+    const canonical = await securePrivateDirectory(resolve(directory));
+    await rmdir(canonical);
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") throw error;
+  }
 }
 
 function assertNotAborted(signal?: AbortSignal): void {

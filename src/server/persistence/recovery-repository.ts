@@ -39,7 +39,7 @@ export class RecoveryRepository {
     const now = latestTurnTimestamp && latestTurnTimestamp > wallClockNow
       ? latestTurnTimestamp
       : wallClockNow;
-    this.database.prepare(`
+    const markWorkspaceRuns = this.database.prepare(`
       UPDATE workspace_runs
       SET status = 'failed',
           attention_state = 'unseen',
@@ -53,8 +53,8 @@ export class RecoveryRepository {
           ),
           finished_at = ?
       WHERE status IN ('running', 'waiting')
-    `).run(now);
-    this.database.prepare(`
+    `);
+    const markSubagents = this.database.prepare(`
       UPDATE subagent_traces
       SET status = 'lost',
           sequence = sequence + 1,
@@ -67,8 +67,7 @@ export class RecoveryRepository {
             'waiting-for-approval', 'waiting-for-input'
           )
         )
-    `).run(now, now);
-    if (interrupted.length === 0) return;
+    `);
 
     const markConversation = this.database.prepare(
       "UPDATE conversations SET status = 'failed', attention_kind = NULL, updated_at = ? WHERE id = ?",
@@ -116,6 +115,8 @@ export class RecoveryRepository {
       LIMIT 1
     `);
     this.database.transaction(() => {
+      markWorkspaceRuns.run(now);
+      markSubagents.run(now, now);
       for (const { id } of interrupted) {
         markConversation.run(now, id);
         const interruptedRunId = interruptedRunByConversation.get(id);

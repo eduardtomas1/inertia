@@ -41,6 +41,10 @@ export interface TurnProviderRuntime {
   harnessIdFor(input: ProviderRunInput): string;
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks): Promise<ProviderRunResult>;
   cancel(conversationId: string): boolean;
+  stopOwned(
+    conversationId: string,
+    identity: { runId: string; turnId: string | null },
+  ): Promise<"missing" | "identity-mismatch" | "settled" | "force-detached">;
   isRunning(conversationId: string): boolean;
   respondToApproval(
     conversationId: string,

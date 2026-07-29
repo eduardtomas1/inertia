@@ -91,6 +91,10 @@ describe("cross-platform packaged behavior contract", () => {
     expect(quitHandler).toContain(
       "Retaining temporary attachments because runtime process exit was not confirmed",
     );
+    expect(main.indexOf('recordPackageSmokeStage("app-exit")')).toBeLessThan(
+      main.indexOf("process.exit(0)"),
+    );
+    expect(main).not.toContain("app.exit(0)");
     expect(main).toContain("attachmentReservation = orphanReservation");
     expect(main).toContain(
       "reservedRecords: attachmentReservation.records",

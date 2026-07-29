@@ -46,6 +46,7 @@ import {
   registryOperation,
   reversalController,
 } from "./reversal-registry-adapter";
+import { withReversalRepositoryLock } from "./reversal-lock";
 import type {
   RuntimeSecureFileBroker,
   SecureFileRootCapability,
@@ -367,6 +368,21 @@ export async function inspectDiffSelection(
   retainedRoot?: SecureFileRootCapability,
 ): Promise<DiffReversalPlan> {
   const root = retainedRoot?.root ?? await repositoryRoot(repositoryPath);
+  return withReversalRepositoryLock(root, () =>
+    inspectDiffSelectionLocked(
+      root,
+      selection,
+      secureFiles,
+      retainedRoot,
+    ));
+}
+
+async function inspectDiffSelectionLocked(
+  root: string,
+  selection: GitDiffSelection,
+  secureFiles: RuntimeSecureFileBroker,
+  retainedRoot?: SecureFileRootCapability,
+): Promise<DiffReversalPlan> {
   const secureRoot = retainedRoot ?? await secureFiles.authorizeRoot(root);
   await secureFiles.verifyRoot(secureRoot);
   const controller = await reversalController(root);
@@ -408,6 +424,23 @@ export async function revertDiffSelection(
   retainedRoot?: SecureFileRootCapability,
 ): Promise<GitDiffReversalResult> {
   const root = retainedRoot?.root ?? await repositoryRoot(repositoryPath);
+  return withReversalRepositoryLock(root, () =>
+    revertDiffSelectionLocked(
+      root,
+      selection,
+      secureFiles,
+      testHooks,
+      retainedRoot,
+    ));
+}
+
+async function revertDiffSelectionLocked(
+  root: string,
+  selection: GitDiffSelection,
+  secureFiles: RuntimeSecureFileBroker,
+  testHooks?: ReversalTestHooks,
+  retainedRoot?: SecureFileRootCapability,
+): Promise<GitDiffReversalResult> {
   const secureRoot = retainedRoot ?? await secureFiles.authorizeRoot(root);
   await secureFiles.verifyRoot(secureRoot);
   const controller = await reversalController(root);
@@ -561,6 +594,21 @@ export async function undoDiffSelection(
   retainedRoot?: SecureFileRootCapability,
 ): Promise<GitUnifiedDiff> {
   const root = retainedRoot?.root ?? await repositoryRoot(repositoryPath);
+  return withReversalRepositoryLock(root, () =>
+    undoDiffSelectionLocked(
+      root,
+      operationId,
+      secureFiles,
+      retainedRoot,
+    ));
+}
+
+async function undoDiffSelectionLocked(
+  root: string,
+  operationId: string,
+  secureFiles: RuntimeSecureFileBroker,
+  retainedRoot?: SecureFileRootCapability,
+): Promise<GitUnifiedDiff> {
   const secureRoot = retainedRoot ?? await secureFiles.authorizeRoot(root);
   await secureFiles.verifyRoot(secureRoot);
   const controller = await reversalController(root);

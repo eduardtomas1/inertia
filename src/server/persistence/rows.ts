@@ -1,5 +1,6 @@
 import type {
   AccessMode,
+  AgentGoal,
   AgentActivity,
   AgentReasoning,
   AgentTurnAssociation,
@@ -188,6 +189,20 @@ export interface AgentPlanRow {
   turn_id: string | null;
   explanation: string | null;
   steps_json: string;
+}
+
+export interface AgentGoalRow {
+  conversation_id: string;
+  source: AgentGoal["source"];
+  provider_session_id: string | null;
+  objective: string;
+  status: AgentGoal["status"];
+  token_budget: number | null;
+  tokens_used: number | null;
+  time_used_seconds: number | null;
+  created_at: string;
+  updated_at: string;
+  synchronized_at: string | null;
 }
 
 export interface AgentReasoningRow {

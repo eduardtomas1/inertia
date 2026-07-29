@@ -78,6 +78,10 @@ import {
   createTurnInteractionCommandHandler,
 } from "./runtime/commands/turn-interaction-commands";
 import {
+  createAgentWorkflowCommandHandler,
+} from "./runtime/commands/agent-workflow-commands";
+import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
+import {
   attachRuntimeWebSocketBoundary,
 } from "./runtime/websocket-boundary";
 import {
@@ -201,6 +205,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     ...backendProfileController.providerManagerOptions(),
   }, options.agentHarnessRegistry);
   backendProfileController.attachProviderManager(providers);
+  const agentWorkflows = new AgentWorkflowController(store, providers);
   const attachmentResolver = options.attachmentRoot && options.attachments
     ? new TrustedAttachmentResolver(
         resolve(options.attachmentRoot),
@@ -416,6 +421,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
       },
+      onNativeGoalSynchronized: ({ conversationId, providerSessionId }) => {
+        return agentWorkflows.acknowledgeNativeGoalSynchronization(
+          conversationId,
+          providerSessionId,
+        );
+      },
       captureGitBefore: async (input) => {
         await turnGitArtifacts.captureBefore(input);
         broadcastSnapshot();
@@ -457,6 +468,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
 
   const dispatchCommand = createRuntimeCommandExecutor({
     handlers: [
+      createAgentWorkflowCommandHandler({
+        workflows: agentWorkflows,
+        broadcast,
+        send,
+      }),
       createProviderCommandHandler({
         providers,
         providerMaintenance,
@@ -490,6 +506,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         dataDirectory,
         enableProviders,
         attachmentResolver,
+        workflows: agentWorkflows,
         providerInfo: () => providerInfo,
         broadcastSnapshot,
         send,

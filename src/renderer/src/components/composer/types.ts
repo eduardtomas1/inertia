@@ -1,4 +1,6 @@
 import type {
+  AgentSkillSummary,
+  AgentWorkflowSkillsCapability,
   AgentTurn,
   ChatAttachment,
   Conversation,
@@ -25,12 +27,21 @@ export interface ComposerProps {
   mentionResults: WorkspaceEntry[];
   usage: ThreadUsageSnapshot | null;
   usageDisplayMode: UsageDisplayMode;
+  skills: AgentSkillSummary[];
+  skillsCapability: AgentWorkflowSkillsCapability | null;
+  selectedSkillIds: readonly string[];
+  skillsLoading: boolean;
+  skillsError: string | null;
   promptContext?: string | null;
   onSend: (
     message: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
+    skillIds?: readonly string[],
   ) => Promise<void>;
+  onListSkills: (forceReload?: boolean) => Promise<void>;
+  onToggleSkill: (skill: AgentSkillSummary) => void;
+  onClearSelectedSkills: () => void;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -58,7 +69,14 @@ export interface ComposerProps {
   onClearPromptContext?: () => void;
 }
 
-export type ComposerMenu = "reasoning" | "mode" | "access" | "action" | "stash" | "more";
+export type ComposerMenu =
+  | "reasoning"
+  | "mode"
+  | "access"
+  | "action"
+  | "skills"
+  | "stash"
+  | "more";
 export type MoreSection = "actions" | "reasoning" | "mode" | "access";
 
 export interface PendingModelRoute {

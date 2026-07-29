@@ -16,6 +16,7 @@ import type {
   ProviderInteractionMode,
   ProviderRunInput,
 } from "../../src/server/provider/contracts";
+import type { ProviderSkillInput } from "../../src/shared/contracts";
 
 interface NativeProviderRunInput {
   providerId: ProviderId;
@@ -31,6 +32,7 @@ interface NativeProviderRunInput {
   access: ProviderAccessMode;
   sessionId?: string;
   imagePaths?: readonly string[];
+  skills?: readonly ProviderSkillInput[];
 }
 
 export function nativeProviderRunFields(

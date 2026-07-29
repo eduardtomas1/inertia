@@ -111,6 +111,12 @@ describe("composer setting control family", () => {
       /\.composer-options\s*\{[^}]*position:\s*relative;[^}]*flex:\s*0 1 auto/su,
     );
     expect(css).toMatch(
+      /\.composer-skills-popover\s*\{[^}]*right:\s*auto;[^}]*left:\s*8px;[^}]*width:\s*min\([^}]*calc\(100% - 16px\)[^}]*calc\(100cqw - 16px\)[^}]*max-width:\s*min\([^}]*calc\(100% - 16px\)[^}]*calc\(100cqw - 16px\)/su,
+    );
+    expect(css).toMatch(
+      /\.composer-skills-control\s*\{[^}]*position:\s*static/su,
+    );
+    expect(css).toMatch(
       /\.composer-more-layer\s*\{[^}]*right:\s*0/su,
     );
     expect(css).toMatch(

@@ -32,6 +32,19 @@ export interface TurnProviderEventProjectorOptions {
   ): boolean;
 }
 
+function projectedNativeGoalMatches(
+  goal: ReturnType<RuntimeStore["mergeNativeAgentGoal"]>["goal"],
+  eventGoal: Extract<ProviderEvent, { type: "goal-updated" }>["goal"],
+): boolean {
+  return goal?.objective === eventGoal.objective
+    && goal.status === eventGoal.status
+    && goal.tokenBudget === eventGoal.tokenBudget
+    && goal.tokensUsed === eventGoal.tokensUsed
+    && goal.timeUsedSeconds === eventGoal.timeUsedSeconds
+    && goal.createdAt === eventGoal.createdAt
+    && goal.updatedAt === eventGoal.updatedAt;
+}
+
 /**
  * Projects an already identity-validated normalized provider event. Transport
  * acceptance and failure settlement remain controller responsibilities.
@@ -118,6 +131,75 @@ export class TurnProviderEventProjector {
         this.options.hooks.broadcast({
           type: "agent.plan.updated",
           plan,
+        });
+        break;
+      }
+      case "goal-updated": {
+        const expectedSessionId = active.sessionAfter
+          ?? active.providerInput.sessionId
+          ?? active.conversation.providerSessionId;
+        if (
+          event.providerId !== "codex"
+          || active.turn.harnessId !== "codex-app-server"
+          || !expectedSessionId
+          || event.sessionId !== expectedSessionId
+        ) break;
+        const synchronizedAt = this.options.now();
+        const persisted = this.options.store.mergeNativeAgentGoal({
+          conversationId: active.conversation.id,
+          source: "codex-native",
+          providerSessionId: event.sessionId,
+          ...event.goal,
+          synchronizedAt,
+        });
+        const recovered = (
+          persisted.goal?.providerSessionId === event.sessionId
+          && projectedNativeGoalMatches(persisted.goal, event.goal)
+        )
+          ? this.options.hooks.onNativeGoalSynchronized?.({
+            conversationId: active.conversation.id,
+            providerSessionId: event.sessionId,
+          }) ?? false
+          : false;
+        if ((!persisted.changed && !recovered) || !persisted.goal) break;
+        this.options.hooks.broadcast({
+          type: "agent.goal.updated",
+          goal: persisted.goal,
+        });
+        break;
+      }
+      case "goal-cleared": {
+        const expectedSessionId = active.sessionAfter
+          ?? active.providerInput.sessionId
+          ?? active.conversation.providerSessionId;
+        if (
+          event.providerId !== "codex"
+          || active.turn.harnessId !== "codex-app-server"
+          || !expectedSessionId
+          || event.sessionId !== expectedSessionId
+        ) break;
+        const changed = this.options.store.clearAgentGoal(
+          active.conversation.id,
+          "codex-native",
+          this.options.now(),
+          event.sessionId,
+        );
+        const nativeGoalRemains = this.options.store
+          .agentGoals(active.conversation.id)
+          .some((goal) =>
+            goal.source === "codex-native"
+            && goal.providerSessionId === event.sessionId);
+        const recovered = !nativeGoalRemains
+          ? this.options.hooks.onNativeGoalSynchronized?.({
+            conversationId: active.conversation.id,
+            providerSessionId: event.sessionId,
+          }) ?? false
+          : false;
+        if (!changed && !recovered) break;
+        this.options.hooks.broadcast({
+          type: "agent.goal.cleared",
+          conversationId: active.conversation.id,
+          source: "codex-native",
         });
         break;
       }

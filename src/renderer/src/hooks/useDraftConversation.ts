@@ -77,6 +77,7 @@ export function useDraftConversation({
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
+    skillIds?: readonly string[],
     activate?: boolean,
   ) => Promise<void>;
   persistedConversationId: string | null;
@@ -352,6 +353,7 @@ export function useDraftConversation({
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
+    skillIds?: readonly string[],
   ): Promise<boolean> => {
     const sendingDraft = draftRef.current;
     if (!sendingDraft) return false;
@@ -401,6 +403,7 @@ export function useDraftConversation({
         content,
         attachments,
         context,
+        skillIds,
         stillOwnsDraft,
       );
       forgetPersistedMaterializedDraftConversation(conversationId);
@@ -432,6 +435,7 @@ export function useDraftConversation({
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
+    skillIds?: readonly string[],
   ): Promise<void> => {
     const current = draftRef.current;
     if (current?.materialized) {
@@ -446,6 +450,7 @@ export function useDraftConversation({
           content,
           attachments,
           context,
+          skillIds,
           true,
         );
         forgetPersistedMaterializedDraftConversation(
@@ -482,10 +487,11 @@ export function useDraftConversation({
         content,
         attachments,
         context,
+        skillIds,
       );
       return;
     }
-    await materializeAndSend(content, attachments, context);
+    await materializeAndSend(content, attachments, context, skillIds);
   };
 
   const updateConversation = (change: ConversationUpdate): void => {

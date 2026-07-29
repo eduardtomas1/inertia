@@ -1,23 +1,19 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-
 import type { ProviderModel, ProviderRateLimit, ProviderReasoningOption } from "../shared/contracts";
-import { INERTIA_VERSION } from "../shared/version";
 import {
-  JsonLineDecoder,
-  type JsonLineDecoderFailure,
-} from "./codex/protocol";
-import {
-  requireProcessTreeTermination,
-  terminateProcessTreeAndWait,
   type ProcessTreeTerminator,
 } from "./process-lifecycle";
-import { providerProcessInvocation } from "./provider/process";
 import { clampProviderPercent, providerTimestamp } from "./provider/usage-values";
+import {
+  CODEX_CONTROL_MAX_FRAME_BYTES,
+  CODEX_CONTROL_MAX_PROTOCOL_BYTES,
+  withCodexControlClient,
+} from "./codex/control-client";
 
 type JsonObject = Record<string, unknown>;
 
-export const CODEX_METADATA_MAX_FRAME_BYTES = 4 * 1024 * 1024;
-export const CODEX_METADATA_MAX_PROTOCOL_BYTES = 16 * 1024 * 1024;
+export const CODEX_METADATA_MAX_FRAME_BYTES = CODEX_CONTROL_MAX_FRAME_BYTES;
+export const CODEX_METADATA_MAX_PROTOCOL_BYTES =
+  CODEX_CONTROL_MAX_PROTOCOL_BYTES;
 
 export interface CodexMetadata {
   models?: ProviderModel[];
@@ -26,13 +22,6 @@ export interface CodexMetadata {
 
 export interface CodexMetadataDependencies {
   terminateProcessTree?: ProcessTreeTerminator;
-}
-
-interface PendingRequest {
-  method: string;
-  resolve: (value: JsonObject) => void;
-  reject: (error: Error) => void;
-  timer: NodeJS.Timeout;
 }
 
 function objectValue(value: unknown): JsonObject | undefined {
@@ -131,119 +120,16 @@ export async function readCodexMetadata(
   fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
   dependencies: CodexMetadataDependencies = {},
 ): Promise<CodexMetadata> {
-  const terminateProcessTree = dependencies.terminateProcessTree
-    ?? terminateProcessTreeAndWait;
-  const invocation = providerProcessInvocation(executable, ["app-server"], environment);
-  const child: ChildProcessWithoutNullStreams = spawn(invocation.command, invocation.args, {
+  return await withCodexControlClient({
+    executable,
+    environment,
     cwd,
-    env: environment,
-    detached: process.platform !== "win32",
-    shell: false,
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-    windowsHide: true,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  const pending = new Map<number, PendingRequest>();
-  let nextId = 1;
-  let closed = false;
-  let protocolFailure: Error | undefined;
-  let termination: Promise<void> | undefined;
-  let decoder: JsonLineDecoder;
-  child.stdin.on("error", () => {
-    // Spawn/exit handling rejects the active requests with a bounded public error.
-  });
-  child.stderr.resume();
-
-  const rejectPending = (error: Error): void => {
-    for (const request of pending.values()) {
-      clearTimeout(request.timer);
-      request.reject(error);
-    }
-    pending.clear();
-  };
-
-  const stopProcessTree = (): Promise<void> => {
-    termination ??= requireProcessTreeTermination(
-      terminateProcessTree,
-      child,
-      true,
-      "Codex metadata process tree",
-    );
-    return termination;
-  };
-
-  const close = async (): Promise<void> => {
-    if (!closed) {
-      closed = true;
-      decoder.stop();
-      rejectPending(new Error("Codex metadata discovery was interrupted."));
-    }
-    await stopProcessTree();
-  };
-
-  const request = (method: string, params: JsonObject): Promise<JsonObject> => new Promise((resolve, reject) => {
-    const id = nextId++;
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error(`${method} timed out.`));
-    }, timeoutMs);
-    timer.unref();
-    pending.set(id, { method, resolve, reject, timer });
-    child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
-  });
-
-  const handleLine = (line: string): void => {
-    let parsed: unknown;
-    try { parsed = JSON.parse(line); } catch { return; }
-    const message = objectValue(parsed);
-    const id = typeof message?.id === "number" ? message.id : undefined;
-    if (id === undefined) return;
-    const active = pending.get(id);
-    if (!active) return;
-    pending.delete(id);
-    clearTimeout(active.timer);
-    const error = objectValue(message?.error);
-    if (error) active.reject(new Error(stringValue(error.message, 500) ?? `${active.method} failed.`));
-    else active.resolve(objectValue(message?.result) ?? {});
-  };
-
-  const failProtocol = (failure: JsonLineDecoderFailure): void => {
-    if (protocolFailure) return;
-    protocolFailure = new Error(
-      failure === "malformed-utf8"
-        ? "Codex metadata returned invalid UTF-8."
-        : "Codex metadata exceeded Inertia's protocol safety limit.",
-    );
-    decoder.stop();
-    rejectPending(protocolFailure);
-    void stopProcessTree().catch(() => undefined);
-  };
-
-  decoder = new JsonLineDecoder(
-    CODEX_METADATA_MAX_FRAME_BYTES,
-    handleLine,
-    failProtocol,
-    CODEX_METADATA_MAX_PROTOCOL_BYTES,
-  );
-  child.stdout.on("data", (chunk: Buffer) => decoder.push(chunk));
-  child.stdout.once("end", () => decoder.end());
-
-  const processError = new Promise<never>((_, reject) => {
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (!closed && code !== 0) reject(new Error("Codex metadata process exited early."));
-    });
-  });
-
-  try {
-    await Promise.race([
-      request("initialize", {
-        clientInfo: { name: "inertia", title: "Inertia", version: INERTIA_VERSION },
-        capabilities: { experimentalApi: true, requestAttestation: false },
-      }),
-      processError,
-    ]);
-    child.stdin.write(`${JSON.stringify({ method: "initialized" })}\n`);
+    timeoutMs,
+    processLabel: "Codex metadata process tree",
+    ...(dependencies.terminateProcessTree
+      ? { terminateProcessTree: dependencies.terminateProcessTree }
+      : {}),
+  }, async ({ request }) => {
     const readModels = async (): Promise<ProviderModel[]> => {
       const models: ProviderModel[] = [];
       let cursor: string | null = null;
@@ -262,12 +148,9 @@ export async function readCodexMetadata(
         ? request("account/rateLimits/read", {}).then(parseCodexRateLimits).catch(() => undefined)
         : Promise.resolve(undefined),
     ]);
-    if (protocolFailure) throw protocolFailure;
     return {
       ...(modelsResult === undefined ? {} : { models: modelsResult }),
       ...(limitsResult === undefined ? {} : { rateLimits: limitsResult }),
     };
-  } finally {
-    await close();
-  }
+  });
 }

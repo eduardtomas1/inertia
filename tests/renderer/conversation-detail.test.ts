@@ -70,6 +70,7 @@ const detail: ConversationDetail = {
   reasonings: [],
   usage: [],
   plans: [],
+  goals: [],
   checkpoints: [],
   reviewSummaries: [],
   reviewStates: [],

@@ -1,5 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ProviderRateLimit } from "../../shared/contracts";
+import type { ProviderSkillInput } from "../../shared/contracts";
 import type {
   AgentApprovalDecision,
   AgentApprovalRequest,
@@ -9,6 +10,7 @@ import type {
 import type {
   CodexResponsesHarnessConfiguration,
   ProviderActivityEvent,
+  ProviderGoalSnapshot,
   ProviderRunFailure,
 } from "../provider/contracts";
 import type { ProcessTreeTerminator } from "../process-lifecycle";
@@ -36,6 +38,10 @@ export interface CodexAppServerOptions {
   reasoningEffort?: string;
   sessionId?: string;
   imagePaths?: readonly string[];
+  skills?: readonly Extract<
+    ProviderSkillInput,
+    { source: "codex-native" }
+  >[];
   planMode: boolean;
   access: "supervised" | "auto-edit" | "full";
   /** Testable bound for one JSON-RPC response; defaults to 30 seconds. */
@@ -61,6 +67,8 @@ export interface CodexAppServerOptions {
   onInputRequest?: (request: AgentInputRequest) => void;
   onInputResolved?: (requestId: string) => void;
   onPlan?: (explanation: string | null, steps: AgentPlanStep[]) => void;
+  onGoalUpdated?: (threadId: string, goal: ProviderGoalSnapshot) => void;
+  onGoalCleared?: (threadId: string) => void;
   onReasoning?: (text: string) => void;
   onUsage?: (usage: CodexUsageSnapshot) => void;
   onRateLimits?: (rateLimits: ProviderRateLimit[], complete: boolean) => void;

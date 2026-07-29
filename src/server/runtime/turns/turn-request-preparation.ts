@@ -108,6 +108,7 @@ export function prepareTurnRequest(
     access: conversation.accessMode,
     sessionId: canResume ? conversation.providerSessionId! : undefined,
     imagePaths: assembled.imagePaths,
+    skills: request.skills,
   } satisfies ActiveTurn["providerInput"];
   const harnessId = dependencies.providers.harnessIdFor(providerInput);
   if (harnessId !== route.harnessId) {

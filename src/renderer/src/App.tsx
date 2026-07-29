@@ -5,14 +5,11 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AppSettings,
-  type ChatAttachment,
   type Conversation,
   type ModelSelection,
   type Project,
   type ProviderId,
   type ProviderMaintenanceProviderId,
-  type ServerEvent,
-  type TurnRequestContext,
   type WorkspaceRun,
 } from "@shared/contracts";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
@@ -23,6 +20,11 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
+import {
+  agentWorkflowRouteIdentity,
+  agentWorkflowTargetConversation,
+  useAgentWorkflows,
+} from "./hooks/useAgentWorkflows";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
 import { useDraftConversation } from "./hooks/useDraftConversation";
@@ -34,6 +36,7 @@ import { useWorkspaceTools } from "./hooks/useWorkspaceTools";
 import { useConversationPaneLayout } from "./hooks/useConversationPaneLayout";
 import { useSplitWorkspaceScene } from "./hooks/useSplitWorkspaceScene";
 import { useMultiSpawn } from "./hooks/useMultiSpawn";
+import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
 import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { activityRunSummary } from "./utils/activityCenter";
@@ -41,11 +44,7 @@ import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./util
 import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
 import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
-import {
-  commandRefreshesConversationDetail,
-  withRequestId,
-  type CommandWithoutId,
-} from "./lib/runtimeCommands";
+import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { planFromText } from "./utils/planFromText";
 import { buildEnvironmentSummary } from "./utils/environmentSummary";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
@@ -113,9 +112,6 @@ export default function App(): React.JSX.Element {
     () => readSplitConversationId(window.localStorage),
   );
   const [secondaryPaneFirst, setSecondaryPaneFirst] = useState(false);
-  const [sendingConversationIds, setSendingConversationIds] = useState(
-    () => new Set<string>(),
-  );
   const splitSelectionTransitionsRef = useRef(0);
   const conversationSelectionGenerationRef = useRef(0);
   const pendingSeenRunsRef = useRef(new Set<string>());
@@ -296,95 +292,18 @@ export default function App(): React.JSX.Element {
     return planFromText(text, conversation?.status ?? "idle");
   }, [conversation, messages, nativePlans, streamingText]);
 
-  const run = useCallback(async (key: string, command: CommandWithoutId): Promise<ServerEvent> => {
-    setBusyAction(key);
-    setActionError(null);
-    try {
-      const event = await sendCommand(withRequestId(command));
-      if (commandRefreshesConversationDetail(command, event)) {
-        refreshDetail();
-      }
-      return event;
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : "That action could not be completed.");
-      throw error;
-    } finally {
-      setBusyAction((current) => current === key ? null : current);
-    }
-  }, [refreshDetail, sendCommand]);
-  const openProjectPath = useCallback((
-    pathRequest: Parameters<typeof window.inertia.openProjectPath>[0],
-  ) => {
-    void window.inertia.openProjectPath(pathRequest)
-      .then((error) => {
-        if (error) setActionError(error);
-      })
-      .catch((error) => {
-        setActionError(
-          error instanceof Error
-            ? error.message
-            : "The project path could not be opened.",
-        );
-      });
-  }, []);
-  const sendMessageToConversation = useCallback(async (
-    targetConversationId: string,
-    content: string,
-    attachments: ChatAttachment[],
-    context?: TurnRequestContext,
-    activate = true,
-  ): Promise<void> => {
-    setSendingConversationIds((current) =>
-      new Set(current).add(targetConversationId));
-    setActionError(null);
-    try {
-      await sendCommand(withRequestId({
-        type: "message.send",
-        payload: {
-          conversationId: targetConversationId,
-          content,
-          attachments,
-          activate,
-          ...(context ? { context } : {}),
-        },
-      }));
-    } catch (error) {
-      setActionError(error instanceof Error
-        ? error.message
-        : "The message could not be sent.");
-      throw error;
-    } finally {
-      setSendingConversationIds((current) => {
-        const next = new Set(current);
-        next.delete(targetConversationId);
-        return next;
-      });
-    }
-  }, [sendCommand]);
-  const updateConversationById = useCallback((
-    targetConversationId: string,
-    update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>,
-  ): void => {
-    const { modelSelection, ...legacyUpdate } = update;
-    void run(`conversation.update:${targetConversationId}`, {
-      type: "conversation.update",
-      payload: {
-        conversationId: targetConversationId,
-        ...legacyUpdate,
-        ...(modelSelection
-          ? {
-              modelSelection: {
-                ...modelSelection,
-                providerOptions: { ...modelSelection.providerOptions },
-                capabilities: modelSelection.capabilities.map(
-                  (capability) => ({ ...capability }),
-                ),
-              },
-            }
-          : {}),
-      },
-    }).catch(() => undefined);
-  }, [run]);
+  const {
+    run,
+    openProjectPath,
+    sendMessageToConversation,
+    updateConversationById,
+    sendingConversationIds,
+  } = useAppRuntimeActions({
+    sendCommand,
+    refreshDetail,
+    setBusyAction,
+    setActionError,
+  });
   const draftConversation = useDraftConversation({
     snapshot: connection.snapshot,
     settings,
@@ -397,6 +316,17 @@ export default function App(): React.JSX.Element {
   const updateConversation = draftConversation.updateConversation;
   const clearDraftConversation = draftConversation.clear;
   const discardDraftConversation = draftConversation.discard;
+  const workflowConversation = agentWorkflowTargetConversation(
+    conversation,
+    draftConversation.conversation,
+  );
+  const agentWorkflows = useStableController(useAgentWorkflows({
+    conversationId: workflowConversation?.id ?? null,
+    routeIdentity: agentWorkflowRouteIdentity(workflowConversation, project),
+    status: connection.status,
+    request,
+    subscribe: connection.subscribe,
+  }));
   const multiSpawn = useMultiSpawn({
     snapshot: connection.snapshot,
     settings,
@@ -782,6 +712,11 @@ export default function App(): React.JSX.Element {
       createConversation,
       createConversationForSelection,
       sendMessage,
+      listSkills: agentWorkflows.listSkills,
+      toggleSkill: agentWorkflows.toggleSkill,
+      clearSelectedSkills: agentWorkflows.clearSelectedSkills,
+      setGoal: agentWorkflows.setGoal,
+      clearGoal: agentWorkflows.clearGoal,
       respondToApproval,
       respondToInput,
       updateConversation,
@@ -813,6 +748,7 @@ export default function App(): React.JSX.Element {
     activityActions,
     appUpdate,
     planSteps,
+    workflow: agentWorkflows,
     detailLoading,
     selectedMaintenanceStatus,
     selectedMaintenanceOperation,
@@ -830,6 +766,7 @@ export default function App(): React.JSX.Element {
     detailLoading,
     draftConversation.conversation,
     planSteps,
+    agentWorkflows,
     project,
     providerMaintenance,
     selectedMaintenanceOperation,

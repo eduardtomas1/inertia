@@ -12,6 +12,7 @@ import type {
   KnownHarnessId,
   ModelBackendProfile,
   ModelSelection,
+  ProviderSkillInput,
   ProviderId,
   ProviderInfo,
   RuntimeMutationEvent,
@@ -107,6 +108,10 @@ export interface TurnControllerHooks {
   broadcastSnapshot(): void;
   providerInfo(): readonly ProviderInfo[];
   applyProviderMetadata?(event: ProviderMetadataEvent): void;
+  onNativeGoalSynchronized?(input: {
+    conversationId: string;
+    providerSessionId: string;
+  }): boolean;
   captureStructuredContext?(input: TurnStructuredContextCapture): unknown;
   onStructuredContextCaptured?(record: TurnStructuredContextRecord): void | Promise<void>;
   onStreamingPersisted?(input: {
@@ -131,6 +136,8 @@ export interface QueueTurnRequest {
   /** Server-constructed only. Renderer command schemas never accept this. */
   internalInstructions?: readonly HiddenProviderInstruction[];
   checkpointId?: string | null;
+  /** Privileged provider-native skill references resolved from opaque IDs. */
+  skills?: readonly ProviderSkillInput[];
   rendererOwnerId?: string | null;
   onSettled?: (
     status: AgentTurnTerminalStatus,

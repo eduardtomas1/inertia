@@ -9,6 +9,8 @@ import {
 import clsx from "clsx";
 import type {
   AgentTurn,
+  AgentSkillSummary,
+  AgentWorkflowSkillsCapability,
   Conversation,
   ModelBackendProfileView,
   ProjectAction,
@@ -39,6 +41,7 @@ import {
 import type { ComposerMenuController } from "./useComposerMenus";
 import type { PromptStashEntry } from "../../utils/promptStash";
 import { PromptStashMenu } from "./PromptStashMenu";
+import { ComposerSkillsMenu } from "./ComposerSkillsMenu";
 
 export interface ComposerToolbarProps {
   actions: ProjectAction[];
@@ -47,6 +50,14 @@ export interface ComposerToolbarProps {
   attachmentCount: number;
   onChooseAttachments: () => Promise<void>;
   onRunAction: (action: ProjectAction) => void;
+  skills: readonly AgentSkillSummary[];
+  skillsCapability: AgentWorkflowSkillsCapability | null;
+  selectedSkillIds: readonly string[];
+  skillsLoading: boolean;
+  skillsError: string | null;
+  onListSkills: (forceReload?: boolean) => Promise<void>;
+  onToggleSkill: (skill: AgentSkillSummary) => void;
+  onClearSelectedSkills: () => void;
   promptStash: readonly PromptStashEntry[];
   canStashPrompt: boolean;
   promptStashBlockedReason: string | null;
@@ -89,6 +100,14 @@ export function ComposerToolbar({
   attachmentCount,
   onChooseAttachments,
   onRunAction,
+  skills,
+  skillsCapability,
+  selectedSkillIds,
+  skillsLoading,
+  skillsError,
+  onListSkills,
+  onToggleSkill,
+  onClearSelectedSkills,
   promptStash,
   canStashPrompt,
   promptStashBlockedReason,
@@ -149,6 +168,19 @@ export function ComposerToolbar({
           onStash={onStashPrompt}
           onRestore={onRestorePrompt}
           onRemove={onRemoveStashedPrompt}
+        />
+        <ComposerSkillsMenu
+          skills={skills}
+          capability={skillsCapability}
+          selectedSkillIds={selectedSkillIds}
+          loading={skillsLoading}
+          error={skillsError}
+          disabled={disabled}
+          running={running}
+          menuController={menuController}
+          onList={onListSkills}
+          onToggle={onToggleSkill}
+          onClear={onClearSelectedSkills}
         />
         {actions.length > 0 && (
           <div className="popover-anchor composer-action-control">

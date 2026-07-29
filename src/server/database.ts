@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 
 import {
   type AgentActivity,
+  type AgentGoal,
   type AgentPlan,
   type AgentReasoning,
   type AgentTurn,
@@ -36,6 +37,10 @@ import {
   type SanitizedTurnExecutionManifest,
 } from "./runtime/turns/request-context";
 import { BackendProfileRepository } from "./persistence/backend-profile-repository";
+import {
+  AgentWorkflowRepository,
+  type NativeAgentGoalMergeResult,
+} from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import { RecordNotFoundError } from "./persistence/errors";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
@@ -93,6 +98,7 @@ export type {
 export class RuntimeStore {
   private readonly database: Database.Database;
   private readonly backendProfileRepository: BackendProfileRepository;
+  private readonly agentWorkflowRepository: AgentWorkflowRepository;
   private readonly conversationRepository: ConversationRepository;
   private readonly executionLedgerRepository: ExecutionLedgerRepository;
   private readonly gitArtifactRepository: GitArtifactRepository;
@@ -115,6 +121,11 @@ export class RuntimeStore {
     this.backendProfileRepository = new BackendProfileRepository({
       database: this.database,
       requireProject: (projectId) => this.requireProject(projectId),
+    });
+    this.agentWorkflowRepository = new AgentWorkflowRepository({
+      database: this.database,
+      requireConversation: (conversationId) =>
+        this.requireConversation(conversationId),
     });
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
@@ -139,6 +150,8 @@ export class RuntimeStore {
     this.executionLedgerRepository = new ExecutionLedgerRepository({
       assertAgentTurnIdentity: (conversationId, runId, turnId) =>
         this.assertAgentTurnIdentity(conversationId, runId, turnId),
+      conversationPath: (conversationId) =>
+        this.conversationRepository.path(conversationId),
       database: this.database,
       requireAgentTurn: (turnId) => this.requireAgentTurn(turnId),
       requireConversation: (conversationId) => this.requireConversation(conversationId),
@@ -422,6 +435,38 @@ export class RuntimeStore {
 
   clearAgentPlan(conversationId: string, runId: string, turnId: string | null): void {
     this.executionLedgerRepository.clearAgentPlan(conversationId, runId, turnId);
+  }
+
+  agentGoals(conversationId: string): AgentGoal[] {
+    return this.agentWorkflowRepository.goals(conversationId);
+  }
+
+  upsertAgentGoal(goal: AgentGoal): AgentGoal {
+    return this.agentWorkflowRepository.upsert(goal);
+  }
+
+  mergeNativeAgentGoal(
+    goal: AgentGoal,
+    authoritativeMutation = false,
+  ): NativeAgentGoalMergeResult {
+    return this.agentWorkflowRepository.mergeNative(
+      goal,
+      authoritativeMutation,
+    );
+  }
+
+  clearAgentGoal(
+    conversationId: string,
+    source: AgentGoal["source"],
+    tombstoneAt?: string,
+    providerSessionId?: string,
+  ): boolean {
+    return this.agentWorkflowRepository.clear(
+      conversationId,
+      source,
+      tombstoneAt,
+      providerSessionId,
+    );
   }
 
   addActivity(

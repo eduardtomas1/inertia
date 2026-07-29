@@ -11,8 +11,11 @@ import {
   UNREADABLE_RUNTIME_RESPONSE,
 } from "../../src/renderer/src/utils/connectionMessages";
 
-const appSource = readFileSync(
-  new URL("../../src/renderer/src/App.tsx", import.meta.url),
+const runtimeActionsSource = readFileSync(
+  new URL(
+    "../../src/renderer/src/hooks/useAppRuntimeActions.ts",
+    import.meta.url,
+  ),
   "utf8",
 ).replace(/\r\n?/gu, "\n");
 const workspaceToolsSource = readFileSync(
@@ -119,16 +122,16 @@ describe("renderer error visibility boundary", () => {
   });
 
   it("still promotes explicitly invoked action failures to the user-facing toast", () => {
-    const runStart = appSource.indexOf("const run = useCallback");
-    const runEnd = appSource.indexOf(
+    const runStart = runtimeActionsSource.indexOf("const run = useCallback");
+    const runEnd = runtimeActionsSource.indexOf(
       "const openProjectPath = useCallback",
       runStart,
     );
-    const run = appSource.slice(runStart, runEnd);
+    const run = runtimeActionsSource.slice(runStart, runEnd);
 
     expect(run).toContain("setActionError(null)");
-    expect(run).toContain(
-      'setActionError(error instanceof Error ? error.message : "That action could not be completed.")',
+    expect(run).toMatch(
+      /setActionError\(\s*error instanceof Error\s*\?\s*error\.message\s*:\s*"That action could not be completed\.",?\s*\)/u,
     );
   });
 });

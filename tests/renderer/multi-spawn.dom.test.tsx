@@ -775,6 +775,7 @@ describe("multi-spawn", () => {
       "Compare this change.",
       [],
       undefined,
+      undefined,
       false,
     );
   });

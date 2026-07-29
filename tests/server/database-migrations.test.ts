@@ -271,6 +271,9 @@ describe("published database fixtures", () => {
       expect((inspection.prepare(
         "SELECT COUNT(*) AS count FROM checkpoints WHERE turn_id IS NULL",
       ).get() as { count: number }).count).toBe(1);
+      expect((inspection.prepare(
+        "SELECT auto_open_plan AS autoOpenPlan FROM app_state WHERE id = 1",
+      ).get() as { autoOpenPlan: number }).autoOpenPlan).toBe(0);
       expect(inspection.pragma("foreign_key_check")).toEqual([]);
       inspection.close();
 

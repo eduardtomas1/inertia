@@ -87,6 +87,13 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       ...(options.input.reasoningEffort ? { reasoningEffort: options.input.reasoningEffort } : {}),
       ...(options.input.sessionId ? { sessionId: options.input.sessionId } : {}),
       ...(options.input.imagePaths ? { imagePaths: options.input.imagePaths } : {}),
+      ...(options.input.skills
+        ? {
+            skills: options.input.skills.filter(
+              (skill) => skill.source === "codex-native",
+            ),
+          }
+        : {}),
       planMode: options.input.interactionMode === "plan",
       access: options.input.access,
       onText: emitter.text,
@@ -98,6 +105,8 @@ function startCodexRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       onInputRequest: (request) => emitter.codex({ type: "input", request }),
       onInputResolved: (requestId) => emitter.codex({ type: "input-resolved", requestId }),
       onPlan: (explanation, steps) => emitter.codex({ type: "plan", explanation, steps }),
+      onGoalUpdated: emitter.goalUpdated,
+      onGoalCleared: emitter.goalCleared,
       onReasoning: (text) => emitter.codex({ type: "reasoning-summary", text }),
       onUsage: (usage) => emitter.codex({ type: "usage", usage }),
       onRateLimits: (rateLimits, complete) => emitter.codex({ type: "metadata", metadata: { rateLimits }, source: "provider", complete }),

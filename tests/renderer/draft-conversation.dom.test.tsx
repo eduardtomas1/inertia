@@ -138,6 +138,7 @@ describe("useDraftConversation", () => {
       "Start with the current implementation.",
       [],
       undefined,
+      undefined,
       true,
     );
     expect(hook.result.current.conversation).toBeNull();
@@ -395,6 +396,7 @@ describe("useDraftConversation", () => {
       conversationId,
       "Keep working in the chat I left.",
       [],
+      undefined,
       undefined,
       false,
     );

@@ -1,4 +1,5 @@
 import type {
+  AgentGoalStatus,
   ContinuationIdentity,
   HarnessBackendCompatibility,
   KnownHarnessId,
@@ -6,6 +7,7 @@ import type {
   ModelSelection,
   ProviderModel,
   ProviderRateLimit,
+  ProviderSkillInput,
   SubagentTraceStatus,
   ThreadUsageSnapshot,
 } from "../../shared/contracts";
@@ -70,6 +72,7 @@ interface ProviderRunRequest {
   access: ProviderAccessMode;
   sessionId?: string;
   imagePaths?: readonly string[];
+  skills?: readonly ProviderSkillInput[];
 }
 
 export type ProviderRunInput = ProviderRunRequest &
@@ -176,6 +179,29 @@ export interface ProviderPlanEvent extends ProviderEventBase {
   steps: AgentPlanStep[];
 }
 
+export interface ProviderGoalSnapshot {
+  objective: string;
+  status: AgentGoalStatus;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A provider-authored update to the current goal for one native session. */
+export interface ProviderGoalUpdatedEvent extends ProviderEventBase {
+  type: "goal-updated";
+  sessionId: string;
+  goal: ProviderGoalSnapshot;
+}
+
+/** A provider-authored removal of the current goal for one native session. */
+export interface ProviderGoalClearedEvent extends ProviderEventBase {
+  type: "goal-cleared";
+  sessionId: string;
+}
+
 export interface ProviderReasoningEvent extends ProviderEventBase {
   type: "reasoning-summary";
   text: string;
@@ -228,6 +254,8 @@ export type ProviderEvent =
   | ProviderInputEvent
   | ProviderInputResolvedEvent
   | ProviderPlanEvent
+  | ProviderGoalUpdatedEvent
+  | ProviderGoalClearedEvent
   | ProviderReasoningEvent
   | ProviderUsageEvent
   | ProviderMetadataEvent
@@ -244,6 +272,8 @@ export interface ProviderRunCallbacks {
   onInput?: (event: ProviderInputEvent) => void;
   onInputResolved?: (event: ProviderInputResolvedEvent) => void;
   onPlan?: (event: ProviderPlanEvent) => void;
+  onGoalUpdated?: (event: ProviderGoalUpdatedEvent) => void;
+  onGoalCleared?: (event: ProviderGoalClearedEvent) => void;
   onReasoning?: (event: ProviderReasoningEvent) => void;
   onUsage?: (event: ProviderUsageEvent) => void;
   onMetadata?: (event: ProviderMetadataEvent) => void;

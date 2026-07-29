@@ -263,6 +263,19 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     sequence: 3,
     updatedAt: new Date(Date.now() - 6_000).toISOString(),
   });
+  store.upsertAgentGoal({
+    conversationId: conversation.id,
+    source: "inertia-local",
+    providerSessionId: null,
+    objective: "Keep delegated work truthful and reviewable",
+    status: "active",
+    tokenBudget: null,
+    tokensUsed: null,
+    timeUsedSeconds: null,
+    createdAt: requestedAt,
+    updatedAt: startedAt,
+    synchronizedAt: null,
+  });
   store.updateSettings({
     theme: "dark",
     interfaceScale: "default",
@@ -276,6 +289,80 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       name: "Delegated agent trace fixture",
       level: 1,
     })).toBeVisible();
+
+    if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+      await page.getByRole("button", { name: "Open workspace tools" }).click();
+    }
+    await page.getByRole("tab", { name: /Goal/ }).click();
+    const goalPanel = page.getByRole("region", {
+      name: "Goals and agent workflows",
+    });
+    await expect(goalPanel).toBeVisible();
+    await expect(goalPanel.getByText("Inertia local", { exact: true }))
+      .toBeVisible();
+    await expect(goalPanel.getByText(
+      "Keep delegated work truthful and reviewable",
+      { exact: true },
+    )).toBeVisible();
+    await expect(goalPanel.getByText(
+      "Latest conversation plan · not linked to this goal",
+      { exact: true },
+    )).toHaveCount(0);
+    await expect(goalPanel.getByText("Evidence Scout", { exact: true }))
+      .toBeVisible();
+    await expect(goalPanel.getByText("Policy Reader", { exact: true }))
+      .toBeVisible();
+    await expect(goalPanel.getByText("Build Verifier", { exact: true }))
+      .toBeVisible();
+    await goalPanel.getByRole("button", { name: "Complete" }).click();
+    await expect(goalPanel.getByText("Complete", { exact: true })).toBeVisible();
+    const goalWideScreenshot = testInfo.outputPath(
+      "goal-workflows-wide-dark.png",
+    );
+    await page.screenshot({
+      animations: "disabled",
+      path: goalWideScreenshot,
+    });
+    await testInfo.attach("goal-workflows-wide-dark", {
+      path: goalWideScreenshot,
+      contentType: "image/png",
+    });
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = "light";
+    });
+    const goalLightScreenshot = testInfo.outputPath(
+      "goal-workflows-wide-light.png",
+    );
+    await page.screenshot({
+      animations: "disabled",
+      path: goalLightScreenshot,
+    });
+    await testInfo.attach("goal-workflows-wide-light", {
+      path: goalLightScreenshot,
+      contentType: "image/png",
+    });
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = "dark";
+    });
+
+    await resizeWindow(760, 800);
+    await expect(goalPanel).toBeVisible();
+    await expectNoViewportOverflow();
+    const goalNarrowScreenshot = testInfo.outputPath(
+      "goal-workflows-narrow-dark.png",
+    );
+    await page.screenshot({
+      animations: "disabled",
+      path: goalNarrowScreenshot,
+    });
+    await testInfo.attach("goal-workflows-narrow-dark", {
+      path: goalNarrowScreenshot,
+      contentType: "image/png",
+    });
+    await page.locator(".workspace-panel").getByRole("button", {
+      name: "Close workspace tools",
+    }).click();
+    await resizeWindow(1440, 920);
 
     const disclosure = page.locator(".subagent-disclosure");
     await expect(disclosure.getByText("3 delegated tasks · 1 active", {

@@ -63,6 +63,8 @@ function detailConversationId(event: ConversationRuntimeMutationEvent): string {
       return event.request.conversationId;
     case "agent.plan.updated":
       return event.plan.conversationId;
+    case "agent.goal.updated":
+      return event.goal.conversationId;
     default:
       return event.conversationId;
   }

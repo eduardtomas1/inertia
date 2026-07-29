@@ -701,6 +701,48 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         `);
       },
     });
+    migrationExtensions.push({
+      name: "PersistAgentGoals",
+      up: `
+        CREATE TABLE IF NOT EXISTS agent_goals (
+          conversation_id TEXT NOT NULL
+            REFERENCES conversations(id) ON DELETE CASCADE,
+          source TEXT NOT NULL
+            CHECK (source IN ('codex-native', 'inertia-local')),
+          provider_session_id TEXT,
+          objective TEXT NOT NULL
+            CHECK (length(objective) BETWEEN 1 AND 4000),
+          status TEXT NOT NULL
+            CHECK (status IN (
+              'active', 'paused', 'blocked', 'usageLimited',
+              'budgetLimited', 'complete'
+            )),
+          token_budget INTEGER
+            CHECK (token_budget IS NULL OR token_budget BETWEEN 1 AND 1000000000),
+          tokens_used INTEGER
+            CHECK (tokens_used IS NULL OR tokens_used BETWEEN 0 AND 1000000000000),
+          time_used_seconds INTEGER
+            CHECK (time_used_seconds IS NULL OR time_used_seconds BETWEEN 0 AND 315360000),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synchronized_at TEXT,
+          PRIMARY KEY (conversation_id, source),
+          CHECK (
+            (source = 'codex-native' AND provider_session_id IS NOT NULL)
+            OR (source = 'inertia-local' AND provider_session_id IS NULL)
+          ),
+          CHECK (created_at <= updated_at)
+        );
+        CREATE INDEX IF NOT EXISTS agent_goals_status_updated_idx
+          ON agent_goals(status, updated_at DESC);
+      `,
+    });
+    migrationExtensions.push({
+      name: "DisableAutomaticPlanPanelReveal",
+      up: `
+        UPDATE app_state SET auto_open_plan = 0;
+      `,
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

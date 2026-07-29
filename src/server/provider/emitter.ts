@@ -4,6 +4,7 @@ import type {
   ProviderActivityPhase,
   ProviderEvent,
   ProviderEventBase,
+  ProviderGoalSnapshot,
   ProviderId,
   ProviderMetadataEvent,
   ProviderRunCallbacks,
@@ -41,6 +42,8 @@ export interface ProviderEmitter {
   ) => void;
   status: (status: ProviderRunStatus, message?: string) => void;
   session: (sessionId: string) => void;
+  goalUpdated: (sessionId: string, goal: ProviderGoalSnapshot) => void;
+  goalCleared: (sessionId: string) => void;
   approval: (request: AgentApprovalRequest) => void;
   approvalResolved: (requestId: string, decision: AgentApprovalDecision | "cancelled") => void;
   input: (request: AgentInputRequest) => void;
@@ -97,6 +100,12 @@ export function createProviderEmitter(
       case "plan":
         safeCallback(() => callbacks.onPlan?.(providerEvent));
         break;
+      case "goal-updated":
+        safeCallback(() => callbacks.onGoalUpdated?.(providerEvent));
+        break;
+      case "goal-cleared":
+        safeCallback(() => callbacks.onGoalCleared?.(providerEvent));
+        break;
       case "reasoning-summary":
         safeCallback(() => callbacks.onReasoning?.(providerEvent));
         break;
@@ -127,6 +136,17 @@ export function createProviderEmitter(
     }),
     status: (status, message) => event({ ...base, type: "status", status, ...(message ? { message } : {}) }),
     session: (sessionId) => event({ ...base, type: "session", sessionId }),
+    goalUpdated: (sessionId, goal) => event({
+      ...base,
+      type: "goal-updated",
+      sessionId,
+      goal,
+    }),
+    goalCleared: (sessionId) => event({
+      ...base,
+      type: "goal-cleared",
+      sessionId,
+    }),
     approval: (request) => event({ ...base, type: "approval", request }),
     approvalResolved: (requestId, decision) => event({ ...base, type: "approval-resolved", requestId, decision }),
     input: (request) => event({ ...base, type: "input", request }),

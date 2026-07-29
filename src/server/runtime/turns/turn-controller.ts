@@ -403,7 +403,12 @@ export class TurnController {
     traceId: string,
   ): Promise<boolean> {
     const active = this.activeByConversation.get(conversationId);
-    if (!active || active.settled || !this.providers.stopSubagent) return false;
+    if (
+      !active
+      || active.settled
+      || !active.acceptingProviderEvents
+      || !this.providers.stopSubagent
+    ) return false;
     let trace: SubagentTrace;
     try {
       trace = this.store.subagentTrace(traceId);
@@ -418,11 +423,62 @@ export class TurnController {
       || !trace.providerTaskId
       || !["spawned", "running", "waiting"].includes(trace.status)
     ) return false;
-    return await this.providers.stopSubagent(
+    const accepted = await this.providers.stopSubagent(
       conversationId,
       trace.providerTaskId,
       { runId: active.turn.runId, turnId: active.turn.id },
     );
+    if (!accepted) return false;
+    const currentActive = this.activeByConversation.get(conversationId);
+    if (
+      currentActive !== active
+      || currentActive.settled
+      || !currentActive.acceptingProviderEvents
+      || currentActive.turn.runId !== trace.runId
+      || currentActive.turn.id !== trace.turnId
+    ) return false;
+    let currentTrace: SubagentTrace;
+    try {
+      currentTrace = this.store.subagentTrace(traceId);
+    } catch {
+      return false;
+    }
+    if (
+      currentTrace.conversationId !== trace.conversationId
+      || currentTrace.runId !== trace.runId
+      || currentTrace.turnId !== trace.turnId
+      || currentTrace.providerId !== trace.providerId
+      || currentTrace.providerTaskId !== trace.providerTaskId
+      || !["spawned", "running", "waiting"].includes(currentTrace.status)
+    ) return false;
+    const stopped = this.store.upsertSubagentTrace({
+      conversationId: currentTrace.conversationId,
+      runId: currentTrace.runId,
+      turnId: currentTrace.turnId,
+      providerId: currentTrace.providerId,
+      providerTaskId: currentTrace.providerTaskId,
+      providerAgentId: currentTrace.providerAgentId,
+      parentProviderAgentId: currentTrace.parentProviderAgentId,
+      parentProviderToolUseId: currentTrace.parentProviderToolUseId,
+      providerToolUseId: currentTrace.providerToolUseId,
+      providerRole: currentTrace.providerRole,
+      providerName: currentTrace.providerName,
+      status: "cancelled",
+      description: currentTrace.description,
+      progress: "Stopped by the user.",
+      result: currentTrace.result,
+      // A successful SDK stop acknowledgement is authoritative. Reserve the
+      // terminal sequence so a delayed provider replay cannot resurrect it.
+      sequence: 2_147_483_647,
+      updatedAt: this.now(),
+    });
+    if (stopped?.changed) {
+      this.hooks.broadcast({
+        type: "agent.subagent.updated",
+        trace: stopped.trace,
+      });
+    }
+    return true;
   }
 
   respondToApproval(

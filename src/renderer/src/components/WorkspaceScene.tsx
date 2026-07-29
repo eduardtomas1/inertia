@@ -12,6 +12,7 @@ import { ConversationSplitView } from "./ConversationSplitView";
 import { ConversationDetailState } from "./ConversationDetailState";
 import { FilesPanel } from "./FilesPanel";
 import { HistoricalDiffPanel } from "./HistoricalDiffPanel";
+import { GoalPanel } from "./GoalPanel";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { PlanPanel } from "./PlanPanel";
 import { PreviewPanel } from "./PreviewPanel";
@@ -29,6 +30,7 @@ export interface WorkspaceToolScene {
   filesKey: string;
   terminal: ComponentProps<typeof TerminalPanel>;
   terminalKey: string;
+  goal: ComponentProps<typeof GoalPanel>;
   plan: ComponentProps<typeof PlanPanel>;
   preview: ComponentProps<typeof PreviewPanel>;
 }
@@ -95,6 +97,7 @@ function WorkspaceToolSurface({
           {terminalLifecycleRef.current.activated && (
             <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
           )}
+          {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
           {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
           {tools.activeTool === "preview" && (
             <PreviewPanel {...tools.preview} />

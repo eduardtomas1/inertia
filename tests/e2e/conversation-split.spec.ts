@@ -24,7 +24,7 @@ test.afterAll(async () => {
 async function openPaneTool(
   pane: Locator,
   chatTitle: string,
-  tab: "Changes" | "Files" | "Terminal" | "Preview",
+  tab: "Changes" | "Files" | "Terminal" | "Goal" | "Preview",
 ): Promise<Locator> {
   const tools = pane.getByRole("complementary", { name: "Workspace tools" });
   if (!await tools.isVisible().catch(() => false)) {
@@ -120,6 +120,46 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     secondary.getByText("Draft owned by Companion", { exact: true }),
   ).toBeVisible();
   await secondaryMessage.fill("Draft owned by Companion");
+
+  const primaryGoal = await openPaneTool(primary, primaryTitle, "Goal");
+  const secondaryGoal = await openPaneTool(
+    secondary,
+    secondaryTitle,
+    "Goal",
+  );
+  await expect(primaryGoal.getByRole("region", {
+    name: "Goals and agent workflows",
+  })).toBeVisible();
+  await expect(secondaryGoal.getByRole("region", {
+    name: "Goals and agent workflows",
+  })).toBeVisible();
+  await expect(primaryGoal.getByText("Inertia local goal", { exact: true }))
+    .toBeVisible();
+  await expect(secondaryGoal.getByText("Inertia local goal", { exact: true }))
+    .toBeVisible();
+  const goalDuplicateIds = await page.locator("[id]").evaluateAll(
+    (elements) => {
+      const counts = new Map<string, number>();
+      for (const element of elements) {
+        counts.set(element.id, (counts.get(element.id) ?? 0) + 1);
+      }
+      return [...counts.entries()]
+        .filter(([, count]) => count > 1)
+        .map(([id]) => id);
+    },
+  );
+  expect(goalDuplicateIds).toEqual([]);
+  const goalSplitScreenshot = testInfo.outputPath(
+    "cross-project-split-goals.png",
+  );
+  await page.screenshot({
+    animations: "disabled",
+    path: goalSplitScreenshot,
+  });
+  await testInfo.attach("cross-project-split-goals", {
+    path: goalSplitScreenshot,
+    contentType: "image/png",
+  });
 
   const primaryFiles = await openPaneTool(primary, primaryTitle, "Files");
   await expect(

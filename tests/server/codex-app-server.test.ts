@@ -6,6 +6,8 @@ import {
   ProviderManager,
   type ProviderAccessMode,
   type ProviderApprovalEvent,
+  type ProviderGoalClearedEvent,
+  type ProviderGoalUpdatedEvent,
   type ProviderSubagentEvent,
 } from "../../src/server/providers";
 import { startCodexAppServerRun } from "../../src/server/codex-app-server";
@@ -119,6 +121,29 @@ const requestInput = () => send({
   },
 });
 const complete = () => {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-events") {
+    const goal = {
+      threadId,
+      objective: "Ship native goals safely",
+      status: "active",
+      tokenBudget: 40000,
+      tokensUsed: 1250,
+      timeUsedSeconds: 42,
+      createdAt: 1800000000,
+      updatedAt: 1800000010,
+    };
+    send({ method: "thread/goal/updated", params: { threadId, turnId, goal } });
+    send({ method: "thread/goal/updated", params: {
+      threadId,
+      goal: { ...goal, status: "invented" },
+    } });
+    send({ method: "thread/goal/updated", params: {
+      threadId: "thread-unrelated",
+      goal: { ...goal, threadId: "thread-unrelated" },
+    } });
+    send({ method: "thread/goal/cleared", params: { threadId: "thread-unrelated" } });
+    send({ method: "thread/goal/cleared", params: { threadId } });
+  }
   send({ method: "turn/plan/updated", params: { threadId, turnId, explanation: "A native plan", plan: [{ step: "Inspect", status: "completed" }, { step: "Implement", status: "inProgress" }] } });
   send({ method: "item/reasoning/summaryTextDelta", params: { threadId, turnId, itemId: "reasoning-1", summaryIndex: 0, delta: "Checking the safest path." } });
   send({ method: "item/started", params: { threadId, turnId, item: { id: "command-1", type: "commandExecution", command: "npm test" } } });
@@ -223,6 +248,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt"
       || process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed"
     ) return;
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-events") {
+      return complete();
+    }
     if (message.params.approvalPolicy === "never") {
       requestInput();
       return;
@@ -396,6 +424,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       access: "supervised",
       sessionId: "thread-existing",
       imagePaths: [join(fake.root, "reference.png")],
+      skills: [{
+        source: "codex-native",
+        name: "security-review",
+        path: join(fake.root, ".agents", "skills", "security-review", "SKILL.md"),
+      }],
       reasoningEffort: "high",
     }), {
       onApproval: (event) => {
@@ -456,7 +489,22 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(turn.params).toEqual({
       threadId: "thread-existing",
       input: [
-        { type: "text", text: "Work carefully", text_elements: [] },
+        {
+          type: "text",
+          text: "$security-review\n\nWork carefully",
+          text_elements: [],
+        },
+        {
+          type: "skill",
+          name: "security-review",
+          path: join(
+            fake.root,
+            ".agents",
+            "skills",
+            "security-review",
+            "SKILL.md",
+          ),
+        },
         { type: "localImage", path: join(fake.root, "reference.png") },
       ],
       approvalPolicy: "untrusted",
@@ -549,6 +597,54 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
     expect(messages.find(({ id }) => id === "approval-rpc")).toMatchObject({ result: { decision: "decline" } });
     await manager.disposeAll();
+  });
+
+  it("emits only valid current-thread native goal notifications", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "goal-events";
+    const manager = trackedManager(fake.command);
+    const updates: ProviderGoalUpdatedEvent[] = [];
+    const clears: ProviderGoalClearedEvent[] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-goals",
+      cwd: fake.root,
+      prompt: "Track the native goal",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-goals",
+    }), {
+      onGoalUpdated: (event) => updates.push(event),
+      onGoalCleared: (event) => clears.push(event),
+    });
+
+    expect(result).toMatchObject({
+      status: "completed",
+      sessionId: "thread-goals",
+    });
+    expect(updates).toEqual([expect.objectContaining({
+      providerId: "codex",
+      conversationId: "conversation-goals",
+      sessionId: "thread-goals",
+      type: "goal-updated",
+      goal: {
+        objective: "Ship native goals safely",
+        status: "active",
+        tokenBudget: 40_000,
+        tokensUsed: 1_250,
+        timeUsedSeconds: 42,
+        createdAt: "2027-01-15T08:00:00.000Z",
+        updatedAt: "2027-01-15T08:00:10.000Z",
+      },
+    })]);
+    expect(clears).toEqual([expect.objectContaining({
+      providerId: "codex",
+      conversationId: "conversation-goals",
+      sessionId: "thread-goals",
+      type: "goal-cleared",
+    })]);
   });
 
   it("keeps full access on App Server while streaming rich plan-turn state", async () => {

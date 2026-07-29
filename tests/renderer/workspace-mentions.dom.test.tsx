@@ -180,7 +180,15 @@ describe("useWorkspaceMentions", () => {
           mentionResults={mentions.mentionResults}
           usage={null}
           usageDisplayMode="compact"
+          skills={[]}
+          skillsCapability={null}
+          selectedSkillIds={[]}
+          skillsLoading={false}
+          skillsError={null}
           onSend={async () => undefined}
+          onListSkills={async () => undefined}
+          onToggleSkill={() => undefined}
+          onClearSelectedSkills={() => undefined}
           onUpdateConversation={() => undefined}
           onCreateConversationForSelection={async () => undefined}
           onChooseAttachments={async () => []}

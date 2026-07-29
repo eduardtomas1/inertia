@@ -9,7 +9,11 @@ import {
   type ProviderInfo,
   type ServerEvent,
 } from "../../../shared/contracts";
-import { CheckpointError, createCheckpoint } from "../../checkpoints";
+import {
+  CheckpointError,
+  createCheckpoint,
+  deleteCheckpoint,
+} from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import { getRepositoryStatus, GitError } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -17,6 +21,7 @@ import type { BackendProfileController } from "../backends/backend-profile-contr
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
+import type { AgentWorkflowController } from "../agent-workflow-controller";
 import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import {
   defineRuntimeCommandHandler,
@@ -34,6 +39,7 @@ export interface TurnInteractionCommandDependencies {
   dataDirectory: string;
   enableProviders: boolean;
   attachmentResolver: TrustedAttachmentResolver | null;
+  workflows: AgentWorkflowController;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -62,9 +68,10 @@ export function createTurnInteractionCommandHandler(
           if (
             command.payload.attachments.length > 0
             || command.payload.context !== undefined
+            || (command.payload.skillIds?.length ?? 0) > 0
           ) {
             throw new RuntimeRequestError(
-              "Follow-ups while the agent is working support text only.",
+              "Follow-ups while the agent is working support text only and cannot add skills.",
             );
           }
           const followedUp = await dependencies.turns.steer(
@@ -171,7 +178,32 @@ export function createTurnInteractionCommandHandler(
             throw error;
           }
         }
+        let resolvedSkills: Awaited<
+          ReturnType<AgentWorkflowController["resolveTurnSkills"]>
+        >;
+        try {
+          resolvedSkills = await dependencies.workflows.resolveTurnSkills(
+            conversation.id,
+            command.payload.skillIds ?? [],
+          );
+        } catch (error) {
+          await relinquishAttachments();
+          throw error;
+        }
         let checkpointId: string | null = null;
+        let capturedCheckpoint: {
+          repositoryPath: string;
+          ref: string;
+        } | null = null;
+        let pendingCheckpoint: {
+          repositoryPath: string;
+          ref: string;
+          label: string;
+          turnIndex: number;
+          filesChanged: number;
+          insertions: number;
+          deletions: number;
+        } | null = null;
         if (dependencies.enableProviders) {
           try {
             const path = dependencies.store.conversationPath(conversation.id);
@@ -181,19 +213,30 @@ export function createTurnInteractionCommandHandler(
               join(dependencies.dataDirectory, "checkpoint-indexes"),
               conversation.id,
             );
+            capturedCheckpoint = {
+              repositoryPath: path,
+              ref: captured.ref,
+            };
             const turnIndex = dependencies.store.checkpointCount(
               conversation.id,
             ) + 1;
-            checkpointId = dependencies.store.addCheckpoint({
-              conversationId: conversation.id,
+            pendingCheckpoint = {
+              repositoryPath: path,
               ref: captured.ref,
               label: `Before turn ${turnIndex}`,
               turnIndex,
               filesChanged: status.files.length,
               insertions: status.insertions,
               deletions: status.deletions,
-            }).id;
+            };
           } catch (error) {
+            if (capturedCheckpoint && !pendingCheckpoint) {
+              await deleteCheckpoint(
+                capturedCheckpoint.repositoryPath,
+                capturedCheckpoint.ref,
+                conversation.id,
+              ).catch(() => undefined);
+            }
             if (
               !(
                 error instanceof CheckpointError
@@ -210,6 +253,21 @@ export function createTurnInteractionCommandHandler(
         }
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
         try {
+          dependencies.workflows.assertTurnSkillsCurrent(
+            conversation.id,
+            resolvedSkills.routeKey,
+          );
+          if (pendingCheckpoint) {
+            checkpointId = dependencies.store.addCheckpoint({
+              conversationId: conversation.id,
+              ref: pendingCheckpoint.ref,
+              label: pendingCheckpoint.label,
+              turnIndex: pendingCheckpoint.turnIndex,
+              filesChanged: pendingCheckpoint.filesChanged,
+              insertions: pendingCheckpoint.insertions,
+              deletions: pendingCheckpoint.deletions,
+            }).id;
+          }
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
                 conversationId: conversation.id,
@@ -218,9 +276,17 @@ export function createTurnInteractionCommandHandler(
                 activateConversation: command.payload.activate,
                 context: command.payload.context,
                 checkpointId,
+                skills: resolvedSkills.inputs,
               })
             : null;
         } catch (error) {
+          if (pendingCheckpoint && checkpointId === null) {
+            await deleteCheckpoint(
+              pendingCheckpoint.repositoryPath,
+              pendingCheckpoint.ref,
+              conversation.id,
+            ).catch(() => undefined);
+          }
           await relinquishAttachments();
           throw error;
         }

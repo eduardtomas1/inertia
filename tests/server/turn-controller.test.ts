@@ -24,6 +24,7 @@ import {
 } from "../../src/shared/model-routing";
 import type {
   ProviderEvent,
+  ProviderGoalSnapshot,
   ProviderRunCallbacks,
   ProviderRunInput,
   ProviderRunResult,
@@ -406,6 +407,137 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
+  it("persists and broadcasts only native goals for the active Codex thread", async () => {
+    const synchronizedSessions: string[] = [];
+    let recoverRefreshWarning = false;
+    const runtime = await testRuntime({
+      onNativeGoalSynchronized: ({ providerSessionId }) => {
+        synchronizedSessions.push(providerSessionId);
+        const recovered = recoverRefreshWarning;
+        recoverRefreshWarning = false;
+        return recovered;
+      },
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Track the provider-owned objective.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const base = identity(runtime);
+    runtime.provider.emit({
+      ...base,
+      type: "session",
+      sessionId: "thread-goal-1",
+    });
+    runtime.provider.emit({
+      ...base,
+      type: "goal-updated",
+      providerId: "codex",
+      sessionId: "thread-other",
+      goal: {
+        objective: "Ignore an unrelated thread",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: 0,
+        timeUsedSeconds: 0,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z",
+      },
+    });
+    expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([]);
+
+    const authoritativeGoal = {
+      objective: "Keep the workflow authoritative",
+      status: "active" as const,
+      tokenBudget: 12_000,
+      tokensUsed: 250,
+      timeUsedSeconds: 9,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:09.000Z",
+    };
+    const emitGoal = (goal: ProviderGoalSnapshot) => runtime.provider.emit({
+      ...base,
+      type: "goal-updated",
+      providerId: "codex",
+      sessionId: "thread-goal-1",
+      goal,
+    });
+    emitGoal(authoritativeGoal);
+    expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([
+      expect.objectContaining({
+        source: "codex-native",
+        providerSessionId: "thread-goal-1",
+        objective: "Keep the workflow authoritative",
+      }),
+    ]);
+    expect(runtime.events).toContainEqual(expect.objectContaining({
+      type: "agent.goal.updated",
+      goal: expect.objectContaining({
+        providerSessionId: "thread-goal-1",
+      }),
+    }));
+    expect(synchronizedSessions).toEqual(["thread-goal-1"]);
+    recoverRefreshWarning = true;
+    emitGoal(authoritativeGoal);
+    expect(runtime.events.filter((event) =>
+      event.type === "agent.goal.updated")).toHaveLength(2);
+    emitGoal({
+      ...authoritativeGoal,
+      status: "complete",
+      tokensUsed: 300,
+      timeUsedSeconds: 10,
+    });
+    expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([
+      expect.objectContaining({
+        status: "complete",
+        tokensUsed: 300,
+        timeUsedSeconds: 10,
+      }),
+    ]);
+    expect(runtime.events.filter((event) =>
+      event.type === "agent.goal.updated")).toHaveLength(3);
+
+    runtime.provider.emit({
+      ...base,
+      type: "goal-cleared",
+      providerId: "codex",
+      sessionId: "thread-goal-1",
+    });
+    expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([]);
+    expect(runtime.events).toContainEqual({
+      type: "agent.goal.cleared",
+      conversationId: runtime.conversationId,
+      source: "codex-native",
+    });
+    expect(synchronizedSessions).toEqual([
+      "thread-goal-1",
+      "thread-goal-1",
+      "thread-goal-1",
+      "thread-goal-1",
+    ]);
+    recoverRefreshWarning = true;
+    runtime.provider.emit({
+      ...base,
+      type: "goal-cleared",
+      providerId: "codex",
+      sessionId: "thread-goal-1",
+    });
+    expect(runtime.events.filter((event) =>
+      event.type === "agent.goal.cleared")).toHaveLength(2);
+    runtime.provider.emit({
+      ...base,
+      type: "goal-cleared",
+      providerId: "codex",
+      sessionId: "thread-goal-1",
+    });
+    expect(runtime.events.filter((event) =>
+      event.type === "agent.goal.cleared")).toHaveLength(2);
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
   it("persists ordered delegated-agent traces, rejects regressions, and stops only an exact live Claude task", async () => {
     const runtime = await testRuntime({}, {
       modelSelection: nativeModelSelection({
@@ -431,9 +563,12 @@ describe("TurnController authoritative lifecycle", () => {
       providerRole: "researcher",
       providerName: "Evidence",
       status: "running",
-      description: "Check Bearer abcdefghijklmnop",
-      progress: "Reading the repository",
-      result: null,
+      description:
+        `Check \u001b[31mghp_abcdefghijklmnopqrstuvwxyz in ${runtime.workspace}/private`,
+      progress:
+        "password=hunter2 Cookie=session-value system_prompt=hidden",
+      result:
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQifQ.abcdefghijklmnop",
     });
     let trace = runtime.store.conversationDetail(
       runtime.conversationId,
@@ -443,8 +578,13 @@ describe("TurnController authoritative lifecycle", () => {
       providerRole: "researcher",
       status: "running",
       sequence: 1,
-      description: "Check [redacted]",
+      description: "Check [redacted] in <workspace>/private",
     });
+    expect(trace?.description).not.toContain("\u001b");
+    expect(trace?.progress).toBe(
+      "password=[redacted] Cookie=[redacted] system_prompt=[redacted]",
+    );
+    expect(trace?.result).toBe("[redacted]");
     expect(await runtime.controller.stopSubagent(
       runtime.conversationId,
       trace!.id,
@@ -467,7 +607,7 @@ describe("TurnController authoritative lifecycle", () => {
       progress: null,
       result: "stale",
     });
-    expect(runtime.store.subagentTrace(trace!.id).status).toBe("running");
+    expect(runtime.store.subagentTrace(trace!.id).status).toBe("cancelled");
     runtime.provider.emit({
       ...base,
       type: "subagent",
@@ -502,16 +642,224 @@ describe("TurnController authoritative lifecycle", () => {
     });
     trace = runtime.store.subagentTrace(trace!.id);
     expect(trace).toMatchObject({
-      providerAgentId: "agent-1",
-      status: "completed",
-      sequence: 2,
-      result: "Verified",
+      providerAgentId: null,
+      status: "cancelled",
+      sequence: 2_147_483_647,
+      progress: "Stopped by the user.",
     });
     expect(runtime.events.filter((event) =>
       event.type === "agent.subagent.updated")).toHaveLength(2);
 
     runtime.provider.resolve();
     await flushPromises();
+    runtime.store.close();
+  });
+
+  it("marks a delegated trace cancelled only after the provider acknowledges stop", async () => {
+    const runtime = await testRuntime({}, {
+      modelSelection: nativeModelSelection({
+        providerId: "claude",
+        modelId: "provider-default",
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Delegate cancellable work.",
+    });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: "task-deferred-stop",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-deferred-stop",
+      providerRole: "researcher",
+      providerName: "Evidence",
+      status: "running",
+      description: "Wait for explicit acknowledgement.",
+      progress: null,
+      result: null,
+    });
+    const trace = runtime.store.conversationDetail(
+      runtime.conversationId,
+    )!.subagents[0]!;
+    let acknowledgeStop!: (accepted: boolean) => void;
+    const stopSubagent = vi.spyOn(runtime.provider, "stopSubagent")
+      .mockImplementation(async () =>
+        await new Promise<boolean>((resolve) => {
+          acknowledgeStop = resolve;
+        }));
+
+    const rejectedStop = runtime.controller.stopSubagent(
+      runtime.conversationId,
+      trace.id,
+    );
+    await flushPromises();
+    expect(runtime.store.subagentTrace(trace.id).status).toBe("running");
+    acknowledgeStop(false);
+    await expect(rejectedStop).resolves.toBe(false);
+    expect(runtime.store.subagentTrace(trace.id).status).toBe("running");
+
+    const acceptedStop = runtime.controller.stopSubagent(
+      runtime.conversationId,
+      trace.id,
+    );
+    await flushPromises();
+    expect(runtime.store.subagentTrace(trace.id).status).toBe("running");
+    acknowledgeStop(true);
+    await expect(acceptedStop).resolves.toBe(true);
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({
+      status: "cancelled",
+      progress: "Stopped by the user.",
+    });
+    expect(stopSubagent).toHaveBeenCalledTimes(2);
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("preserves terminal subagent state when it settles before stop acknowledgement", async () => {
+    const runtime = await testRuntime({}, {
+      modelSelection: nativeModelSelection({
+        providerId: "claude",
+        modelId: "provider-default",
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Delegate work that may finish while stopping.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const base = identity(runtime);
+    runtime.provider.emit({
+      ...base,
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: "task-finishes-during-stop",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-finishes-during-stop",
+      providerRole: "researcher",
+      providerName: "Evidence",
+      status: "running",
+      description: "Finish before the stop acknowledgement.",
+      progress: null,
+      result: null,
+    });
+    const trace = runtime.store.conversationDetail(
+      runtime.conversationId,
+    )!.subagents[0]!;
+    let acknowledgeStop!: (accepted: boolean) => void;
+    vi.spyOn(runtime.provider, "stopSubagent")
+      .mockImplementation(async () =>
+        await new Promise<boolean>((resolve) => {
+          acknowledgeStop = resolve;
+        }));
+
+    const stopping = runtime.controller.stopSubagent(
+      runtime.conversationId,
+      trace.id,
+    );
+    await flushPromises();
+    runtime.provider.emit({
+      ...base,
+      type: "subagent",
+      sequence: 2,
+      providerTaskId: "task-finishes-during-stop",
+      providerAgentId: "agent-finished",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-finishes-during-stop",
+      providerRole: "researcher",
+      providerName: "Evidence",
+      status: "completed",
+      description: "Finish before the stop acknowledgement.",
+      progress: "Finished.",
+      result: "Verified.",
+    });
+    acknowledgeStop(true);
+
+    await expect(stopping).resolves.toBe(false);
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({
+      status: "completed",
+      sequence: 2,
+      providerAgentId: "agent-finished",
+      progress: "Finished.",
+      result: "Verified.",
+    });
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("preserves settlement-owned subagent state when the parent settles before stop acknowledgement", async () => {
+    const runtime = await testRuntime({}, {
+      modelSelection: nativeModelSelection({
+        providerId: "claude",
+        modelId: "provider-default",
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Delegate work until the parent settles.",
+    });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: "task-parent-settles",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-parent-settles",
+      providerRole: "researcher",
+      providerName: "Evidence",
+      status: "waiting",
+      description: "Wait for the parent result.",
+      progress: "Waiting.",
+      result: null,
+    });
+    const trace = runtime.store.conversationDetail(
+      runtime.conversationId,
+    )!.subagents[0]!;
+    let acknowledgeStop!: (accepted: boolean) => void;
+    vi.spyOn(runtime.provider, "stopSubagent")
+      .mockImplementation(async () =>
+        await new Promise<boolean>((resolve) => {
+          acknowledgeStop = resolve;
+        }));
+
+    const stopping = runtime.controller.stopSubagent(
+      runtime.conversationId,
+      trace.id,
+    );
+    await flushPromises();
+    runtime.provider.resolve({
+      status: "completed",
+      text: "The parent completed first.",
+    });
+    await flushPromises();
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({
+      status: "lost",
+      sequence: 2,
+      progress: "Waiting.",
+    });
+    acknowledgeStop(true);
+
+    await expect(stopping).resolves.toBe(false);
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({
+      status: "lost",
+      sequence: 2,
+      progress: "Waiting.",
+    });
+
     runtime.store.close();
   });
 

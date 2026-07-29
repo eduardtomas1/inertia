@@ -1,4 +1,9 @@
 import type {
+  AgentGoal,
+  AgentWorkflowState,
+  AgentSkillSummary,
+} from "./agent-workflows";
+import type {
   ModelBackendDefault,
   ModelBackendProfileDetail,
 } from "../backend-profile-settings";
@@ -64,6 +69,12 @@ export type RuntimeMutationEvent =
   | { type: "agent.input.requested"; request: AgentInputRequest }
   | { type: "agent.input.resolved"; conversationId: string; runId: string; turnId: string; requestId: string }
   | { type: "agent.plan.updated"; plan: AgentPlan }
+  | { type: "agent.goal.updated"; goal: AgentGoal }
+  | {
+      type: "agent.goal.cleared";
+      conversationId: string;
+      source: AgentGoal["source"];
+    }
   | { type: "agent.completed"; conversationId: string; runId: string; turnId: string }
   | { type: "agent.failed"; conversationId: string; runId: string; turnId: string; message: string };
 
@@ -120,6 +131,13 @@ export type ServerEvent =
         | { kind: "backend.default"; value: ModelBackendDefault | null }
         | { kind: "provider.maintenance"; providers: ProviderMaintenanceStatus[] }
         | { kind: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
+        | { kind: "agent.workflow"; workflow: AgentWorkflowState }
+        | {
+            kind: "agent.skills";
+            conversationId: string;
+            skills: AgentSkillSummary[];
+            skillDiscovery: AgentWorkflowState["skillDiscovery"];
+          }
         | { kind: "worktree.created"; path: string; branch: string }
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }

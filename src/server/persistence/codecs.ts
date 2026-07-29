@@ -1,5 +1,6 @@
 import {
   type AgentActivity,
+  type AgentGoal,
   type AgentPlan,
   type AgentReasoning,
   type AgentTurn,
@@ -33,6 +34,7 @@ import { providerTimestamp, validateProviderUsage } from "../provider/usage-valu
 import type {
   ActivityRow,
   AgentPlanRow,
+  AgentGoalRow,
   AgentReasoningRow,
   AgentTurnRow,
   CheckpointRow,
@@ -449,6 +451,22 @@ export function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
     sequence: row.sequence,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function agentGoalFromRow(row: AgentGoalRow): AgentGoal {
+  return {
+    conversationId: row.conversation_id,
+    source: row.source,
+    providerSessionId: row.provider_session_id,
+    objective: row.objective,
+    status: row.status,
+    tokenBudget: row.token_budget,
+    tokensUsed: row.tokens_used,
+    timeUsedSeconds: row.time_used_seconds,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    synchronizedAt: row.synchronized_at,
   };
 }
 

@@ -9,6 +9,7 @@ import {
   type PermissionResult,
   type Query,
   type SDKUserMessage,
+  type SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
@@ -46,6 +47,8 @@ const MAX_INPUT_QUESTIONS = 4;
 const MAX_INPUT_OPTIONS = 4;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
+const CLAUDE_STOP_TASK_TIMEOUT_MS = 2_000;
+const MIN_CLAUDE_STOP_TASK_TIMEOUT_MS = 25;
 
 export const CLAUDE_AGENT_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -69,6 +72,25 @@ type ClaudeQueryFactory = (params: { prompt: string | AsyncIterable<SDKUserMessa
 
 export interface ClaudeAgentSdkHarnessOptions {
   createQuery?: ClaudeQueryFactory;
+  /**
+   * May shorten, but never extend, the production delegated-task stop
+   * acknowledgement deadline. Primarily useful for deterministic tests.
+   */
+  stopTaskTimeoutMs?: number;
+}
+
+function claudeStopTaskTimeout(value: number | undefined): number {
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value < 1
+  ) {
+    return CLAUDE_STOP_TASK_TIMEOUT_MS;
+  }
+  return Math.max(
+    MIN_CLAUDE_STOP_TASK_TIMEOUT_MS,
+    Math.min(value, CLAUDE_STOP_TASK_TIMEOUT_MS),
+  );
 }
 
 function claudeModels(models: Awaited<ReturnType<Query["supportedModels"]>>): ProviderModel[] {
@@ -178,6 +200,57 @@ export async function readClaudeAgentSdkModels(
   return (await readClaudeAgentSdkMetadata(executable, environment, cwd, timeoutMs, createQuery, ["models"])).models ?? [];
 }
 
+export async function readClaudeAgentSdkSkills(
+  executable: string,
+  environment: NodeJS.ProcessEnv,
+  cwd: string,
+  forceReload = false,
+  timeoutMs = 6_000,
+  createQuery: ClaudeQueryFactory = claudeQuery,
+): Promise<SlashCommand[]> {
+  const abortController = new AbortController();
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  async function* dormantPrompt(): AsyncIterable<SDKUserMessage> {
+    await hold;
+    yield* [] as SDKUserMessage[];
+  }
+  const query = createQuery({
+    prompt: dormantPrompt(),
+    options: {
+      abortController,
+      cwd,
+      env: environment,
+      pathToClaudeCodeExecutable: executable,
+    },
+  });
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        abortController.abort();
+        reject(new Error("Claude skill discovery timed out."));
+      }, timeoutMs);
+      timer.unref();
+    });
+    const skills = forceReload
+      ? query.reloadSkills().then((result) => result.skills)
+      : query.supportedCommands();
+    return await Promise.race([skills, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    release();
+    abortController.abort();
+    try {
+      query.close();
+    } catch {
+      // The SDK subprocess may already have exited.
+    }
+  }
+}
+
 interface PendingApproval {
   resolve: (decision: AgentApprovalDecision) => void;
   settled: boolean;
@@ -189,16 +262,27 @@ interface PendingInput {
 }
 
 export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOptions = {}): AgentHarness {
+  const stopTaskTimeoutMs = claudeStopTaskTimeout(
+    options.stopTaskTimeoutMs,
+  );
   return {
     id: "claude-agent-sdk",
     providerId: "claude",
     capabilities: CLAUDE_AGENT_SDK_CAPABILITIES,
     supports: (input) => input.providerId === "claude",
-    start: (startOptions) => startClaudeRun(startOptions, options.createQuery ?? claudeQuery),
+    start: (startOptions) => startClaudeRun(
+      startOptions,
+      options.createQuery ?? claudeQuery,
+      stopTaskTimeoutMs,
+    ),
   };
 }
 
-function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQueryFactory): AgentHarnessRun {
+function startClaudeRun(
+  options: AgentHarnessStartOptions,
+  createQuery: ClaudeQueryFactory,
+  stopTaskTimeoutMs: number,
+): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
     "claude",
@@ -364,6 +448,12 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
           ...(options.input.sessionId ? { resume: options.input.sessionId } : {}),
           ...(options.input.model ? { model: options.input.model } : {}),
           ...(claudeEffort(options.input.reasoningEffort) ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
+          ...(options.input.skills?.length
+            ? {
+                skills: options.input.skills.flatMap((skill) =>
+                  skill.source === "claude-native" ? [skill.name] : []),
+              }
+            : {}),
         },
       });
       if (usesNativeAnthropic) {
@@ -581,11 +671,21 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
           || cancelRequested
           || !subagentTracker.isLiveTask(providerTaskId)
         ) return false;
+        let timer: NodeJS.Timeout | undefined;
         try {
-          await query.stopTask(providerTaskId);
-          return true;
-        } catch {
-          return false;
+          const deadline = new Promise<false>((resolve) => {
+            timer = setTimeout(() => resolve(false), stopTaskTimeoutMs);
+            timer.unref();
+          });
+          return await Promise.race([
+            query.stopTask(providerTaskId).then(
+              () => true as const,
+              () => false as const,
+            ),
+            deadline,
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
         }
       },
     },

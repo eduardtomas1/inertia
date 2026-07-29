@@ -1,8 +1,22 @@
 import { useId, type ReactNode } from "react";
-import { Files, GitCompareArrows, Globe2, ListChecks, TerminalSquare, X } from "lucide-react";
+import {
+  Files,
+  Flag,
+  GitCompareArrows,
+  Globe2,
+  ListChecks,
+  TerminalSquare,
+  X,
+} from "lucide-react";
 import { IconButton } from "./ui";
 
-export type WorkspacePanelTab = "changes" | "files" | "terminal" | "plan" | "preview";
+export type WorkspacePanelTab =
+  | "changes"
+  | "files"
+  | "terminal"
+  | "goal"
+  | "plan"
+  | "preview";
 
 export type WorkspacePanelProps = {
   activeTab: WorkspacePanelTab;
@@ -18,11 +32,19 @@ const tabMeta: Record<WorkspacePanelTab, { label: string; icon: React.JSX.Elemen
   changes: { label: "Changes", icon: <GitCompareArrows size={15} aria-hidden="true" /> },
   files: { label: "Files", icon: <Files size={15} aria-hidden="true" /> },
   terminal: { label: "Terminal", icon: <TerminalSquare size={15} aria-hidden="true" /> },
+  goal: { label: "Goal", icon: <Flag size={15} aria-hidden="true" /> },
   plan: { label: "Plan", icon: <ListChecks size={15} aria-hidden="true" /> },
   preview: { label: "Preview", icon: <Globe2 size={15} aria-hidden="true" /> },
 };
 
-const defaultTabs: readonly WorkspacePanelTab[] = ["changes", "files", "terminal", "plan", "preview"];
+const defaultTabs: readonly WorkspacePanelTab[] = [
+  "changes",
+  "files",
+  "terminal",
+  "goal",
+  "plan",
+  "preview",
+];
 
 export function WorkspacePanel({
   activeTab,

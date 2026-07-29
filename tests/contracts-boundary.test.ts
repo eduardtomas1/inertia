@@ -4,6 +4,7 @@ import * as attachmentExports from "../src/shared/attachments";
 import * as backendProfileExports from "../src/shared/backend-profile-settings";
 import * as facadeExports from "../src/shared/contracts";
 import * as agentExports from "../src/shared/contracts/agent";
+import * as agentWorkflowExports from "../src/shared/contracts/agent-workflows";
 import * as appExports from "../src/shared/contracts/app";
 import * as clientCommandExports from "../src/shared/contracts/client-command";
 import * as eventExports from "../src/shared/contracts/events";
@@ -20,6 +21,7 @@ describe("shared contracts boundary", () => {
       ...attachmentExports,
       ...providerMaintenanceExports,
       ...agentExports,
+      ...agentWorkflowExports,
       ...appExports,
       ...clientCommandExports,
       ...eventExports,
@@ -62,6 +64,10 @@ describe("shared contracts boundary", () => {
       "conversation.unsettle",
       "conversation.delete",
       "message.send",
+      "agent.workflow.load",
+      "agent.goal.set",
+      "agent.goal.clear",
+      "agent.skills.list",
       "agent.stop",
       "agent.subagent.stop",
       "activity.stop",

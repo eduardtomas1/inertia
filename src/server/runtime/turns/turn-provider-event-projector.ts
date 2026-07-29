@@ -139,7 +139,16 @@ export class TurnProviderEventProjector {
           ...event.goal,
           synchronizedAt,
         });
-        if (!persisted.changed || !persisted.goal) break;
+        const recovered = (
+          persisted.goal?.providerSessionId === event.sessionId
+          && persisted.goal.updatedAt === event.goal.updatedAt
+        )
+          ? this.options.hooks.onNativeGoalSynchronized?.({
+            conversationId: active.conversation.id,
+            providerSessionId: event.sessionId,
+          }) ?? false
+          : false;
+        if ((!persisted.changed && !recovered) || !persisted.goal) break;
         this.options.hooks.broadcast({
           type: "agent.goal.updated",
           goal: persisted.goal,
@@ -162,7 +171,18 @@ export class TurnProviderEventProjector {
           this.options.now(),
           event.sessionId,
         );
-        if (!changed) break;
+        const nativeGoalRemains = this.options.store
+          .agentGoals(active.conversation.id)
+          .some((goal) =>
+            goal.source === "codex-native"
+            && goal.providerSessionId === event.sessionId);
+        const recovered = !nativeGoalRemains
+          ? this.options.hooks.onNativeGoalSynchronized?.({
+            conversationId: active.conversation.id,
+            providerSessionId: event.sessionId,
+          }) ?? false
+          : false;
+        if (!changed && !recovered) break;
         this.options.hooks.broadcast({
           type: "agent.goal.cleared",
           conversationId: active.conversation.id,

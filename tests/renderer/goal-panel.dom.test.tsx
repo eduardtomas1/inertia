@@ -67,6 +67,7 @@ function workflow(
       available: true,
       label: "Codex skills",
     },
+    goalRefreshWarning: null,
     skillDiscovery: {
       truncated: false,
       warningCount: 0,
@@ -222,6 +223,30 @@ describe("GoalPanel", () => {
     expect(screen.getByText(
       "This route does not expose structured skill input.",
     )).toBeInTheDocument();
+  });
+
+  it("keeps local goals and skills visible when native refresh degrades", () => {
+    const refreshWarning =
+      "Codex native goal could not be refreshed. Showing saved goal data; local goals and skills remain available.";
+    renderPanel({
+      workflow: workflow({
+        goals: [goal({
+          source: "inertia-local",
+          providerSessionId: null,
+          objective: "Keep local evidence visible",
+          synchronizedAt: null,
+        })],
+        goalRefreshWarning: refreshWarning,
+      }),
+    });
+
+    expect(screen.getByText(refreshWarning)).toHaveAttribute(
+      "role",
+      "status",
+    );
+    expect(screen.getByText("Keep local evidence visible"))
+      .toBeInTheDocument();
+    expect(screen.getByText("security-review")).toBeInTheDocument();
   });
 
   it("creates, resumes, completes and clears only through explicit callbacks", async () => {

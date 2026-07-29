@@ -89,6 +89,7 @@ export interface AgentWorkflowState {
   goalCapability: AgentWorkflowGoalCapability;
   skills: AgentSkillSummary[];
   skillsCapability: AgentWorkflowSkillsCapability;
+  goalRefreshWarning: string | null;
   skillDiscovery: {
     truncated: boolean;
     warningCount: number;

@@ -421,6 +421,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
       },
+      onNativeGoalSynchronized: ({ conversationId, providerSessionId }) => {
+        return agentWorkflows.acknowledgeNativeGoalSynchronization(
+          conversationId,
+          providerSessionId,
+        );
+      },
       captureGitBefore: async (input) => {
         await turnGitArtifacts.captureBefore(input);
         broadcastSnapshot();

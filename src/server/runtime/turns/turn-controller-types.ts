@@ -108,6 +108,10 @@ export interface TurnControllerHooks {
   broadcastSnapshot(): void;
   providerInfo(): readonly ProviderInfo[];
   applyProviderMetadata?(event: ProviderMetadataEvent): void;
+  onNativeGoalSynchronized?(input: {
+    conversationId: string;
+    providerSessionId: string;
+  }): boolean;
   captureStructuredContext?(input: TurnStructuredContextCapture): unknown;
   onStructuredContextCaptured?(record: TurnStructuredContextRecord): void | Promise<void>;
   onStreamingPersisted?(input: {

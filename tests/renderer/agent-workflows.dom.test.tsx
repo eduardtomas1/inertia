@@ -28,6 +28,7 @@ function workflow(
       available: true,
       label: "Codex skills",
     },
+    goalRefreshWarning: null,
     skillDiscovery: {
       truncated: false,
       warningCount: 0,
@@ -237,6 +238,87 @@ describe("useAgentWorkflows", () => {
         refresh: true,
       },
     });
+  });
+
+  it("clears a native refresh warning when an authoritative goal event arrives", async () => {
+    let emit!: (event: ServerEvent) => void;
+    const request = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result",
+      requestId: "request-1",
+      result: {
+        kind: "agent.workflow",
+        workflow: {
+          ...workflow({
+            kind: "codex-native",
+            available: true,
+            label: "Codex native goal",
+          }),
+          goalRefreshWarning: "Saved goal data is being shown.",
+        },
+      },
+    }));
+    const subscribe = vi.fn((
+      listener: (event: ServerEvent) => void,
+    ) => {
+      emit = listener;
+      return () => undefined;
+    });
+    const hook = renderHook(() => useAgentWorkflows({
+      conversationId: "conversation-1",
+      routeIdentity: "codex-app-server\0thread-1",
+      status: "online",
+      request,
+      subscribe,
+    }));
+    await waitFor(() =>
+      expect(hook.result.current.state?.goalRefreshWarning)
+        .toBe("Saved goal data is being shown."));
+
+    act(() => emit({
+      type: "agent.goal.updated",
+      goal: {
+        conversationId: "conversation-1",
+        source: "inertia-local",
+        providerSessionId: null,
+        objective: "Keep the local goal visible too",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: null,
+        timeUsedSeconds: null,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:02.000Z",
+        synchronizedAt: null,
+      },
+    }));
+    expect(hook.result.current.state?.goalRefreshWarning)
+      .toBe("Saved goal data is being shown.");
+
+    act(() => emit({
+      type: "agent.goal.updated",
+      goal: {
+        conversationId: "conversation-1",
+        source: "codex-native",
+        providerSessionId: "thread-1",
+        objective: "Use the recovered native goal",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: 4,
+        timeUsedSeconds: 3,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:03.000Z",
+        synchronizedAt: "2030-01-01T00:00:03.000Z",
+      },
+    }));
+
+    expect(hook.result.current.state?.goalRefreshWarning).toBeNull();
+    expect(hook.result.current.state?.goals).toEqual([
+      expect.objectContaining({
+        objective: "Keep the local goal visible too",
+      }),
+      expect.objectContaining({
+        objective: "Use the recovered native goal",
+      }),
+    ]);
   });
 
   it("never applies a delayed skills response to a newly selected conversation", async () => {

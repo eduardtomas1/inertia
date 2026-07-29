@@ -21,6 +21,8 @@ import { RuntimeRequestError } from "../runtime-errors";
 const MAX_SKILLS = 128;
 const SKILL_CAPABILITY_TTL_MS = 30 * 60 * 1_000;
 const CODEX_SKILL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
+const NATIVE_GOAL_REFRESH_WARNING =
+  "Codex native goal could not be refreshed. Showing saved goal data; local goals and skills remain available.";
 
 interface PrivateSkillCapability {
   summary: AgentSkillSummary;
@@ -205,6 +207,10 @@ export class AgentWorkflowController {
   private readonly skillIdsByPath = new Map<string, string>();
   private readonly skillDiscovery =
     new Map<string, RouteBoundSkillDiscoveryState>();
+  private readonly nativeGoalRefreshWarnings =
+    new Map<string, { providerSessionId: string; message: string }>();
+  private readonly nativeGoalSynchronizationGenerations =
+    new Map<string, { providerSessionId: string; generation: number }>();
   private readonly nativeGoalOperations = new Map<string, Promise<void>>();
   private readonly skillDiscoveryFlights =
     new Map<string, SkillDiscoveryFlight>();
@@ -224,6 +230,18 @@ export class AgentWorkflowController {
       this.store.conversationPath(conversationId),
     );
     const currentSkillDiscovery = this.skillDiscovery.get(conversationId);
+    const nativeGoalRefreshWarning =
+      this.nativeGoalRefreshWarnings.get(conversationId);
+    if (
+      nativeGoalRefreshWarning
+      && (
+        !native
+        || nativeGoalRefreshWarning.providerSessionId
+          !== conversation.providerSessionId
+      )
+    ) {
+      this.nativeGoalRefreshWarnings.delete(conversationId);
+    }
     const goals = this.store.agentGoals(conversationId).filter((goal) => {
       if (goal.source === "inertia-local") return true;
       if (
@@ -277,6 +295,12 @@ export class AgentWorkflowController {
             reason:
               "This route does not expose safe structured skill invocation.",
           },
+      goalRefreshWarning:
+        native
+        && nativeGoalRefreshWarning?.providerSessionId
+          === conversation.providerSessionId
+          ? nativeGoalRefreshWarning.message
+          : null,
       skillDiscovery: currentSkillDiscovery?.routeKey === currentSkillRouteKey
         ? currentSkillDiscovery.state
         : EMPTY_SKILL_DISCOVERY,
@@ -303,15 +327,38 @@ export class AgentWorkflowController {
             conversationId,
             providerSessionId,
           );
-          const context = await this.providers.codexControlContext(
-            this.store.conversationPath(conversationId),
-          );
-          const response = await withCodexControlClient(
-            context,
-            ({ request }) => request("thread/goal/get", {
-              threadId: providerSessionId,
-            }),
-          );
+          const synchronizationGeneration =
+            this.nativeGoalSynchronizationGeneration(
+              conversationId,
+              providerSessionId,
+            );
+          let response: JsonObject;
+          try {
+            const context = await this.providers.codexControlContext(
+              this.store.conversationPath(conversationId),
+            );
+            response = await withCodexControlClient(
+              context,
+              ({ request }) => request("thread/goal/get", {
+                threadId: providerSessionId,
+              }),
+            );
+          } catch {
+            if (this.hasNativeGoalSession(
+              conversationId,
+              providerSessionId,
+            ) && synchronizationGeneration
+              === this.nativeGoalSynchronizationGeneration(
+                conversationId,
+                providerSessionId,
+              )) {
+              this.nativeGoalRefreshWarnings.set(conversationId, {
+                providerSessionId,
+                message: NATIVE_GOAL_REFRESH_WARNING,
+              });
+            }
+            return;
+          }
           if (!this.hasNativeGoalSession(
             conversationId,
             providerSessionId,
@@ -346,10 +393,36 @@ export class AgentWorkflowController {
               providerSessionId,
             );
           }
+          this.nativeGoalRefreshWarnings.delete(conversationId);
         },
       );
     }
     return this.state(conversationId);
+  }
+
+  acknowledgeNativeGoalSynchronization(
+    conversationId: string,
+    providerSessionId: string,
+  ): boolean {
+    const warning = this.nativeGoalRefreshWarnings.get(conversationId);
+    const warningMatches = warning?.providerSessionId === providerSessionId;
+    const conversation = this.store.conversation(conversationId);
+    if (
+      !isNativeCodexConversation(conversation)
+      || conversation.providerSessionId !== providerSessionId
+    ) return false;
+    const synchronization =
+      this.nativeGoalSynchronizationGenerations.get(conversationId);
+    this.nativeGoalSynchronizationGenerations.set(conversationId, {
+      providerSessionId,
+      generation: synchronization?.providerSessionId === providerSessionId
+        ? synchronization.generation + 1
+        : 1,
+    });
+    if (warningMatches) {
+      this.nativeGoalRefreshWarnings.delete(conversationId);
+    }
+    return warningMatches;
   }
 
   async setGoal(input: {
@@ -438,6 +511,7 @@ export class AgentWorkflowController {
             "The Codex goal changed before the update could be stored.",
           );
         }
+        this.nativeGoalRefreshWarnings.delete(input.conversationId);
         return stored;
       },
     );
@@ -472,12 +546,14 @@ export class AgentWorkflowController {
             conversationId,
             providerSessionId,
           )) return false;
-          return this.store.clearAgentGoal(
+          const cleared = this.store.clearAgentGoal(
             conversationId,
             source,
             this.clock().toISOString(),
             providerSessionId,
           );
+          this.nativeGoalRefreshWarnings.delete(conversationId);
+          return cleared;
         },
       );
     }
@@ -514,6 +590,17 @@ export class AgentWorkflowController {
       && left.tokenBudget === right.tokenBudget
       && left.tokensUsed === right.tokensUsed
       && left.timeUsedSeconds === right.timeUsedSeconds;
+  }
+
+  private nativeGoalSynchronizationGeneration(
+    conversationId: string,
+    providerSessionId: string,
+  ): number {
+    const synchronization = this.nativeGoalSynchronizationGenerations
+      .get(conversationId);
+    return synchronization?.providerSessionId === providerSessionId
+      ? synchronization.generation
+      : 0;
   }
 
   private async withNativeGoalOperation<T>(

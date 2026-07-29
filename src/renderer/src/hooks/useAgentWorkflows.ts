@@ -155,6 +155,9 @@ export function useAgentWorkflows({
             source !== event.goal.source),
           event.goal,
         ],
+        goalRefreshWarning: event.goal.source === "codex-native"
+          ? null
+          : current.goalRefreshWarning,
         refreshedAt: event.goal.updatedAt,
       } : current);
       return;
@@ -167,6 +170,9 @@ export function useAgentWorkflows({
         ...current,
         goals: current.goals.filter(({ source }) =>
           source !== event.source),
+        goalRefreshWarning: event.source === "codex-native"
+          ? null
+          : current.goalRefreshWarning,
       } : current);
     }
   }), [activeConversationId, load, status, subscribe]);

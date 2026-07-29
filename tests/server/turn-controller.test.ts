@@ -407,7 +407,16 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it("persists and broadcasts only native goals for the active Codex thread", async () => {
-    const runtime = await testRuntime();
+    const synchronizedSessions: string[] = [];
+    let recoverRefreshWarning = false;
+    const runtime = await testRuntime({
+      onNativeGoalSynchronized: ({ providerSessionId }) => {
+        synchronizedSessions.push(providerSessionId);
+        const recovered = recoverRefreshWarning;
+        recoverRefreshWarning = false;
+        return recovered;
+      },
+    });
     const queued = runtime.controller.queue({
       conversationId: runtime.conversationId,
       content: "Track the provider-owned objective.",
@@ -464,6 +473,25 @@ describe("TurnController authoritative lifecycle", () => {
         providerSessionId: "thread-goal-1",
       }),
     }));
+    expect(synchronizedSessions).toEqual(["thread-goal-1"]);
+    recoverRefreshWarning = true;
+    runtime.provider.emit({
+      ...base,
+      type: "goal-updated",
+      providerId: "codex",
+      sessionId: "thread-goal-1",
+      goal: {
+        objective: "Keep the workflow authoritative",
+        status: "active",
+        tokenBudget: 12_000,
+        tokensUsed: 250,
+        timeUsedSeconds: 9,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:09.000Z",
+      },
+    });
+    expect(runtime.events.filter((event) =>
+      event.type === "agent.goal.updated")).toHaveLength(2);
 
     runtime.provider.emit({
       ...base,
@@ -477,6 +505,12 @@ describe("TurnController authoritative lifecycle", () => {
       conversationId: runtime.conversationId,
       source: "codex-native",
     });
+    expect(synchronizedSessions).toEqual([
+      "thread-goal-1",
+      "thread-goal-1",
+      "thread-goal-1",
+    ]);
+    recoverRefreshWarning = true;
     runtime.provider.emit({
       ...base,
       type: "goal-cleared",
@@ -484,7 +518,15 @@ describe("TurnController authoritative lifecycle", () => {
       sessionId: "thread-goal-1",
     });
     expect(runtime.events.filter((event) =>
-      event.type === "agent.goal.cleared")).toHaveLength(1);
+      event.type === "agent.goal.cleared")).toHaveLength(2);
+    runtime.provider.emit({
+      ...base,
+      type: "goal-cleared",
+      providerId: "codex",
+      sessionId: "thread-goal-1",
+    });
+    expect(runtime.events.filter((event) =>
+      event.type === "agent.goal.cleared")).toHaveLength(2);
 
     runtime.provider.resolve();
     await flushPromises();

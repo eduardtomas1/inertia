@@ -747,6 +747,11 @@ export function GoalPanel({
             )}
           </div>
         )}
+        {workflow?.goalRefreshWarning && (
+          <p className="goal-panel-capability-note" role="status">
+            {workflow.goalRefreshWarning}
+          </p>
+        )}
         <section className="goal-panel-section" aria-labelledby={currentHeadingId}>
           <header className="goal-panel-section-heading">
             <div>

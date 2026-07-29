@@ -438,6 +438,133 @@ describe("AgentWorkflowController", () => {
     );
   });
 
+  it("degrades a failed native goal refresh without hiding local goals or skills", async () => {
+    const localGoal = nativeGoal({
+      source: "inertia-local",
+      providerSessionId: null,
+      objective: "Keep the local workflow visible",
+      synchronizedAt: null,
+    });
+    const skillPath =
+      "/workspace/project/.codex/skills/review/SKILL.md";
+    controlRequest.mockImplementation(async (method: string) => {
+      if (method === "thread/goal/get") {
+        throw new Error(
+          "Method unavailable with provider-owned diagnostic details",
+        );
+      }
+      if (method === "skills/list") {
+        return {
+          data: [{
+            cwd: "/workspace/project",
+            skills: [{
+              name: "review",
+              path: skillPath,
+              description: "Review this project.",
+              scope: "repo",
+              enabled: true,
+            }],
+            errors: [],
+          }],
+        };
+      }
+      throw new Error(`Unexpected control request: ${method}`);
+    });
+    const current = conversation();
+    const runtime = harness({
+      current,
+      goals: [nativeGoal(), localGoal],
+    });
+
+    const degraded = await runtime.controller.refresh("conversation-1");
+
+    expect(degraded.goals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "codex-native" }),
+      expect.objectContaining({
+        source: "inertia-local",
+        objective: "Keep the local workflow visible",
+      }),
+    ]));
+    expect(degraded.goalRefreshWarning).toBe(
+      "Codex native goal could not be refreshed. Showing saved goal data; local goals and skills remain available.",
+    );
+    expect(degraded.goalRefreshWarning).not.toContain("provider-owned");
+    await expect(runtime.controller.listSkills(
+      "conversation-1",
+      false,
+    )).resolves.toEqual([
+      expect.objectContaining({ name: "review" }),
+    ]);
+    expect(runtime.controller.state("conversation-1")).toEqual(
+      expect.objectContaining({
+        goalRefreshWarning: degraded.goalRefreshWarning,
+        skills: [expect.objectContaining({ name: "review" })],
+      }),
+    );
+    current.providerId = "claude";
+    current.modelSelection = {
+      ...current.modelSelection,
+      harnessId: "claude-agent-sdk",
+      backendProfileId: "builtin:anthropic",
+    };
+    expect(runtime.controller.state("conversation-1").goalRefreshWarning)
+      .toBeNull();
+    current.providerId = "codex";
+    current.modelSelection = {
+      ...current.modelSelection,
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+    };
+    expect(runtime.controller.state("conversation-1").goalRefreshWarning)
+      .toBeNull();
+
+    await runtime.controller.refresh("conversation-1");
+    expect(runtime.controller.state("conversation-1").goalRefreshWarning)
+      .toBe(degraded.goalRefreshWarning);
+    runtime.controller.acknowledgeNativeGoalSynchronization(
+      "conversation-1",
+      "thread-1",
+    );
+    expect(runtime.controller.state("conversation-1").goalRefreshWarning)
+      .toBeNull();
+  });
+
+  it("does not install a stale warning after a live goal event wins the refresh race", async () => {
+    let rejectRefresh!: (error: Error) => void;
+    const refreshResponse = new Promise<Record<string, unknown>>(
+      (_resolve, reject) => {
+        rejectRefresh = reject;
+      },
+    );
+    controlRequest.mockImplementation(async (method: string) => {
+      if (method === "thread/goal/get") return await refreshResponse;
+      throw new Error(`Unexpected control request: ${method}`);
+    });
+    const runtime = harness({ goals: [nativeGoal()] });
+
+    const callsBeforeRefresh = controlRequest.mock.calls.length;
+    const refresh = runtime.controller.refresh("conversation-1");
+    await vi.waitFor(() => {
+      expect(controlRequest).toHaveBeenCalledTimes(callsBeforeRefresh + 1);
+      expect(controlRequest).toHaveBeenNthCalledWith(
+        callsBeforeRefresh + 1,
+        "thread/goal/get",
+        { threadId: "thread-1" },
+      );
+    });
+    expect(runtime.controller.acknowledgeNativeGoalSynchronization(
+      "conversation-1",
+      "thread-1",
+    )).toBe(false);
+    rejectRefresh(new Error("The older refresh failed."));
+
+    await expect(refresh).resolves.toEqual(expect.objectContaining({
+      goalRefreshWarning: null,
+    }));
+    expect(runtime.controller.state("conversation-1").goalRefreshWarning)
+      .toBeNull();
+  });
+
   it("does not clear a replacement thread after the provider request settles", async () => {
     let settleClear!: () => void;
     const clearResponse = new Promise<Record<string, unknown>>((resolve) => {

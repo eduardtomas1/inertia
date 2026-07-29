@@ -672,9 +672,12 @@ function focusMainWindow(): void {
 
 function finishQuitAfterCleanup(): void {
   recordPackageSmokeStage("app-exit");
-  // `stoppingRuntime` lets this second quit pass through before-quit after the
-  // owned runtime has settled, preserving Electron's normal shutdown sequence.
-  app.quit();
+  // The first quit pass already saved window state, closed native previews,
+  // stopped the utility runtime, and disposed owned attachments. Exit directly
+  // so a platform window teardown cannot leave the main process stranded after
+  // its privileged resources are gone.
+  setTimeout(() => process.exit(0), 1_000).unref();
+  app.exit(0);
 }
 
 async function bootstrap(): Promise<void> {

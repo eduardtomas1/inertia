@@ -19,7 +19,11 @@ import {
 } from "../../src/shared/claude-backend-profiles";
 import { continuationIdentityForSelection } from "../../src/shared/model-routing";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
-import { createClaudeAgentSdkHarness, readClaudeAgentSdkModels } from "../../src/server/provider/claude-agent-sdk-harness";
+import {
+  claudeQuestions,
+  createClaudeAgentSdkHarness,
+  readClaudeAgentSdkModels,
+} from "../../src/server/provider/claude-agent-sdk-harness";
 import {
   claudeBackendProfileRegistrations,
   createClaudeBackendLaunchResolver,
@@ -37,6 +41,65 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 describe("Claude Agent SDK harness", () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
+
+  it("preserves the SDK question contract without silently truncating prompts", () => {
+    const questions = Array.from({ length: 4 }, (_, questionIndex) => ({
+      header: `Question ${questionIndex + 1}`,
+      question: `Prompt ${questionIndex + 1}`,
+      options: Array.from({ length: 4 }, (_, optionIndex) => ({
+        label: `Option ${optionIndex + 1}`,
+        description: `Description ${optionIndex + 1}`,
+      })),
+    }));
+
+    const request = claudeQuestions("request-1", "tool-1", { questions });
+    expect(request.questions).toHaveLength(4);
+    expect(request.questions[3]).toMatchObject({
+      id: "tool-1:question:4",
+      question: "Prompt 4",
+      options: [{ id: "option-1" }, { id: "option-2" }, { id: "option-3" }, { id: "option-4" }],
+    });
+    expect(() => claudeQuestions("request-2", "tool-2", {
+      questions: [...questions, questions[0]],
+    })).toThrow("more than 4 questions");
+    expect(() => claudeQuestions("request-3", "tool-3", {
+      questions: [{
+        ...questions[0],
+        options: [...questions[0]!.options, questions[0]!.options[0]],
+      }],
+    })).toThrow("more than 4 options");
+  });
+
+  it("fails and cleans up a run that floods bounded provider events", async () => {
+    const root = portableFixtureRoot("Claude SDK event flood");
+    roots.push(root);
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          for (let index = 0; index < 8_193; index += 1) {
+            yield claudeSystem("status", { index });
+          }
+        })(),
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-event-flood",
+      cwd: root,
+      prompt: "Flood",
+      interactionMode: "build",
+      access: "full",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: "Claude exceeded the bounded event budget for this run.",
+    });
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
 
   it("uses structured prompts and bridges native approvals, questions, plans, thinking, and usage", async () => {
     const root = portableFixtureRoot("Claude SDK");

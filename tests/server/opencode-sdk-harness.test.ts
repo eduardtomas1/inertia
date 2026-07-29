@@ -30,7 +30,7 @@ function lifecycleServerSource(root: string, capturePath: string, scenario: Life
 const http = require("node:http");
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-const port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
+let port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
 const scenario = ${JSON.stringify(scenario)};
 const captured = [];
 const sessionID = "opencode-lifecycle-session";
@@ -86,7 +86,12 @@ const server = http.createServer((req, res) => {
     return json(res, { error: "not found" }, 404);
   });
 });
-server.listen(port, "127.0.0.1", save);
+server.listen(port, "127.0.0.1", () => {
+  const address = server.address();
+  port = typeof address === "object" && address ? address.port : 0;
+  save();
+  console.log("opencode server listening on http://127.0.0.1:" + port);
+});
 `;
 }
 
@@ -95,7 +100,7 @@ function permissionDecisionServerSource(root: string, capturePath: string): stri
 const http = require("node:http");
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-const port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
+let port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
 const captured = [];
 const sessionID = "opencode-permission-session";
 let events;
@@ -132,7 +137,12 @@ const server = http.createServer((req, res) => {
     return json(res, { error: "not found" }, 404);
   });
 });
-server.listen(port, "127.0.0.1", save);
+server.listen(port, "127.0.0.1", () => {
+  const address = server.address();
+  port = typeof address === "object" && address ? address.port : 0;
+  save();
+  console.log("opencode server listening on http://127.0.0.1:" + port);
+});
 `;
 }
 
@@ -144,7 +154,7 @@ function stalledMetadataServerSource(
 const http = require("node:http");
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-const port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
+let port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
 const captured = [];
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
 const json = (res, value) => {
@@ -163,7 +173,12 @@ const server = http.createServer((req, res) => {
   res.writeHead(404);
   res.end();
 });
-server.listen(port, "127.0.0.1", save);
+server.listen(port, "127.0.0.1", () => {
+  const address = server.address();
+  port = typeof address === "object" && address ? address.port : 0;
+  save();
+  console.log("opencode server listening on http://127.0.0.1:" + port);
+});
 `;
 }
 
@@ -182,7 +197,7 @@ describe.sequential("OpenCode SDK harness", () => {
 const http = require("node:http");
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-const port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
+let port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
 const captured = [];
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(captured));
 const sessionID = "55555555-5555-4555-8555-555555555555";
@@ -227,7 +242,11 @@ const server = http.createServer((req, res) => {
     return json(res, { error: "not found" }, 404);
   });
 });
-server.listen(port, "127.0.0.1", () => console.log("opencode server listening on http://127.0.0.1:" + port));
+server.listen(port, "127.0.0.1", () => {
+  const address = server.address();
+  port = typeof address === "object" && address ? address.port : 0;
+  console.log("opencode server listening on http://127.0.0.1:" + port);
+});
 `);
     const models = await readOpenCodeSdkModels(command, process.env, root);
     expect(models).toEqual([expect.objectContaining({

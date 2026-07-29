@@ -195,6 +195,22 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
       return setImmediate(() => process.exit(9));
     }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "unsupported-input") {
+      return send({
+        id: "input-rpc",
+        method: "item/tool/requestUserInput",
+        params: {
+          threadId,
+          turnId,
+          itemId: "input-item",
+          questions: Array.from({ length: 4 }, (_, index) => ({
+            id: "question-" + index,
+            question: "Prompt " + index,
+            options: [{ id: "safe", label: "Safe" }],
+          })),
+        },
+      });
+    }
     send({ method: "turn/completed", params: { threadId, turn: { id: "orphan-turn", status: "completed", items: [], error: null } } });
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "steer-and-collab") {
       send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-1", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-1"], prompt: "Inspect the tests", model: null, reasoningEffort: null, agentsStates: { "child-1": { status: "pendingInit", message: null } } } } });
@@ -259,7 +275,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     if (message.result.decision !== "cancel") requestInput();
     return;
   }
-  if (message.id === "input-rpc") return complete();
+  if (message.id === "input-rpc") {
+    if (message.error && process.env.INERTIA_APP_SERVER_SCENARIO === "unsupported-input") return;
+    return complete();
+  }
   if (message.method === "turn/steer") {
     send({ id: message.id, result: {} });
     send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
@@ -1101,6 +1120,38 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const messages = captured(fake.capturePath);
     expect(messages.find(({ id }) => id === "approval-rpc")).toMatchObject({ error: { code: -32602 } });
     expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(true);
+    await manager.disposeAll();
+  });
+
+  it("interrupts an unrepresentable Codex input request without exposing a partial prompt", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "unsupported-input";
+    const manager = trackedManager(fake.command, 500);
+    const inputs: string[] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-unsupported-input",
+      cwd: fake.root,
+      prompt: "Ask safely",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onInput: (event) => inputs.push(event.request.requestId),
+    });
+
+    expect(result).toMatchObject({ status: "cancelled" });
+    expect(inputs).toEqual([]);
+    const messages = captured(fake.capturePath);
+    expect(messages.find(({ id }) => id === "input-rpc")).toMatchObject({
+      error: {
+        code: -32602,
+        message: "Codex sent a user-input request this client could not safely represent.",
+      },
+    });
+    expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(true);
+    expect(manager.activeConversationIds()).toEqual([]);
     await manager.disposeAll();
   });
 

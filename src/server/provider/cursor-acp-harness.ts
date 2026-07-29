@@ -34,13 +34,17 @@ import type {
   AgentPlanStep,
 } from "./interactions";
 import { providerActivityDetailSections } from "./activity-detail";
-import { CappedProviderBuffer } from "./io";
+import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_INPUT_QUESTIONS = 3;
+const MAX_INPUT_OPTIONS = 20;
+const MAX_RUN_EVENTS = 8_192;
+const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 
 export const CURSOR_ACP_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -191,7 +195,15 @@ function startCursorRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   child.once("error", (error) => stderr.append(safeError(error, "Cursor ACP could not be started.")));
   child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk.toString("utf8")));
   child.stdin.on("error", () => { /* Connection failure is surfaced by the ACP SDK. */ });
-  const wireGuard = new BoundedJsonLineTransform(MAX_WIRE_LINE_BYTES);
+  const wireGuard = new BoundedJsonLineTransform(
+    MAX_WIRE_LINE_BYTES,
+    new ProviderRunEventBudget(
+      "Cursor ACP",
+      MAX_WIRE_LINE_BYTES,
+      MAX_RUN_EVENTS,
+      MAX_RUN_EVENT_BYTES,
+    ),
+  );
   child.stdout.pipe(wireGuard);
   const stream = acp.ndJsonStream(
     Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
@@ -549,18 +561,25 @@ interface CursorPlanParams { toolCallId: string; plan: string; todos: CursorTodo
 interface CursorTodosParams { toolCallId: string; todos: CursorTodo[]; merge: boolean }
 interface CursorTodo { id?: string; content?: string; title?: string; status?: string }
 
-function parseCursorQuestionRequest(value: unknown): CursorQuestionParams {
+export function parseCursorQuestionRequest(value: unknown): CursorQuestionParams {
   const record = requireObject(value, "Cursor question request");
   const rawQuestions = requireArray(record.questions, "questions");
+  if (rawQuestions.length > MAX_INPUT_QUESTIONS) {
+    throw new Error(`Cursor sent more than ${MAX_INPUT_QUESTIONS} questions.`);
+  }
   return {
     toolCallId: requireString(record.toolCallId, "toolCallId"),
     ...(typeof record.title === "string" ? { title: bounded(record.title) } : {}),
-    questions: rawQuestions.slice(0, 3).map((raw) => {
+    questions: rawQuestions.map((raw, questionIndex) => {
       const question = requireObject(raw, "question");
+      const rawOptions = requireArray(question.options, "question.options");
+      if (rawOptions.length > MAX_INPUT_OPTIONS) {
+        throw new Error(`Cursor sent more than ${MAX_INPUT_OPTIONS} options for question ${questionIndex + 1}.`);
+      }
       return {
         id: requireNativeId(question.id, "question.id", 120),
         prompt: requireString(question.prompt, "question.prompt"),
-        options: requireArray(question.options, "question.options").slice(0, 20).map((rawOption) => {
+        options: rawOptions.map((rawOption) => {
           const option = requireObject(rawOption, "question option");
           return {
             id: requireNativeId(option.id, "option.id", 160),
@@ -627,7 +646,12 @@ function cursorTodoSteps(todos: CursorTodo[], fallback?: string): AgentPlanStep[
 
 class BoundedJsonLineTransform extends Transform {
   private pending = Buffer.alloc(0);
-  constructor(private readonly maxLineBytes: number) { super(); }
+  constructor(
+    private readonly maxLineBytes: number,
+    private readonly eventBudget: ProviderRunEventBudget,
+  ) {
+    super();
+  }
   override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
     try {
       this.pending = Buffer.concat([this.pending, chunk]);
@@ -649,6 +673,7 @@ class BoundedJsonLineTransform extends Transform {
     if (line.length > this.maxLineBytes) throw new Error("Cursor ACP sent an oversized JSON-RPC frame.");
     const parsed: unknown = JSON.parse(line.toString("utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Cursor ACP sent a malformed JSON-RPC frame.");
+    this.eventBudget.observeBytes(line.byteLength);
     this.push(Buffer.concat([line, Buffer.from("\n")]));
   }
 }

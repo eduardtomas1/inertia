@@ -244,6 +244,24 @@ describe("Codex protocol seams", () => {
     expect(codexInputAnswers(request!, { target: [""] })).toBeUndefined();
   });
 
+  it("rejects user-input payloads that cannot be represented without truncation", () => {
+    const question = (index: number, optionCount = 1) => ({
+      id: `question-${index}`,
+      question: `Prompt ${index}`,
+      options: Array.from({ length: optionCount }, (_, optionIndex) => ({
+        id: `option-${optionIndex}`,
+        label: `Option ${optionIndex}`,
+      })),
+    });
+
+    expect(parseCodexInputRequest("item/tool/requestUserInput", {
+      questions: [question(1), question(2), question(3), question(4)],
+    })).toBeUndefined();
+    expect(parseCodexInputRequest("item/tool/requestUserInput", {
+      questions: [question(1, 4)],
+    })).toBeUndefined();
+  });
+
   it("keeps plan, reasoning, and usage projections independently testable", () => {
     expect(parseCodexPlan({
       explanation: "Do it safely",

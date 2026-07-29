@@ -14,7 +14,7 @@ import {
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import type { ProviderModel, ProviderRateLimit } from "../../shared/contracts";
 import { providerActivityDetailSections } from "./activity-detail";
-import { CappedProviderBuffer } from "./io";
+import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -42,6 +42,10 @@ import { clampProviderPercent, providerTimestamp } from "./usage-values";
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_INPUT_QUESTIONS = 4;
+const MAX_INPUT_OPTIONS = 4;
+const MAX_RUN_EVENTS = 8_192;
+const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 
 export const CLAUDE_AGENT_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -205,6 +209,12 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
     options.input.cwd,
   );
   const text = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
+  const eventBudget = new ProviderRunEventBudget(
+    "Claude",
+    MAX_EVENT_TEXT_CHARS,
+    MAX_RUN_EVENTS,
+    MAX_RUN_EVENT_BYTES,
+  );
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
   const abortController = new AbortController();
@@ -363,6 +373,7 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
       let sawStreamText = false;
       let sawOutputText = false;
       for await (const message of query) {
+        eventBudget.observe(message);
         const record = message as unknown as Record<string, unknown>;
         if (typeof record.session_id === "string" && record.session_id !== sessionId) {
           sessionId = record.session_id;
@@ -637,17 +648,23 @@ function imageMediaType(path: string): "image/jpeg" | "image/png" | "image/gif" 
   }
 }
 
-function claudeQuestions(requestId: string, toolUseId: string, input: Record<string, unknown>): AgentInputRequest {
+export function claudeQuestions(requestId: string, toolUseId: string, input: Record<string, unknown>): AgentInputRequest {
   const questions = Array.isArray(input.questions) ? input.questions : [];
+  if (questions.length > MAX_INPUT_QUESTIONS) {
+    throw new Error(`Claude sent more than ${MAX_INPUT_QUESTIONS} questions.`);
+  }
   const identityPrefix = (toolUseId || requestId).slice(0, 96);
   return {
     requestId,
     autoResolutionMs: null,
-    questions: questions.slice(0, 3).flatMap((value, index) => {
+    questions: questions.flatMap((value, index) => {
       const question = objectValue(value);
       if (!question) return [];
       const text = bounded(stringValue(question.question) ?? `Question ${index + 1}`);
       const options = Array.isArray(question.options) ? question.options : [];
+      if (options.length > MAX_INPUT_OPTIONS) {
+        throw new Error(`Claude sent more than ${MAX_INPUT_OPTIONS} options for question ${index + 1}.`);
+      }
       return [{
         id: `${identityPrefix}:question:${index + 1}`,
         header: bounded(stringValue(question.header) ?? `Question ${index + 1}`),
@@ -655,7 +672,7 @@ function claudeQuestions(requestId: string, toolUseId: string, input: Record<str
         isOther: true,
         isSecret: false,
         allowMultiple: question.multiSelect === true || question.allowMultiple === true,
-        options: options.slice(0, 20).flatMap((option, optionIndex) => {
+        options: options.flatMap((option, optionIndex) => {
           const item = objectValue(option);
           return item ? [{
             id: `option-${optionIndex + 1}`,

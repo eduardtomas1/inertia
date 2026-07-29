@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
-import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
+import {
+  createCursorAcpHarness,
+  parseCursorQuestionRequest,
+} from "../../src/server/provider/cursor-acp-harness";
 import {
   portableFixtureRoot,
   portableNodeExecutable,
@@ -17,6 +20,68 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 describe.sequential("Cursor ACP harness", () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
+
+  it("rejects question payloads the interaction surface cannot represent", () => {
+    const question = (index: number, optionCount = 1) => ({
+      id: `question-${index}`,
+      prompt: `Prompt ${index}`,
+      options: Array.from({ length: optionCount }, (_, optionIndex) => ({
+        id: `option-${optionIndex}`,
+        label: `Option ${optionIndex}`,
+      })),
+    });
+
+    expect(parseCursorQuestionRequest({
+      toolCallId: "tool-1",
+      questions: [question(1), question(2), question(3)],
+    }).questions).toHaveLength(3);
+    expect(() => parseCursorQuestionRequest({
+      toolCallId: "tool-2",
+      questions: [question(1), question(2), question(3), question(4)],
+    })).toThrow("more than 3 questions");
+    expect(() => parseCursorQuestionRequest({
+      toolCallId: "tool-3",
+      questions: [question(1, 21)],
+    })).toThrow("more than 20 options");
+  });
+
+  it("fails and terminates an ACP process that floods bounded events", async () => {
+    const root = portableFixtureRoot("cursor ACP event flood");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const sessionId = "55555555-5555-4555-8555-555555555555";
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    for (let index = 0; index < 8_200; index += 1) {
+      send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "current_mode_update", currentModeId: "build" } } });
+    }
+  }
+});
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-event-flood",
+      cwd: root,
+      prompt: "Flood",
+      interactionMode: "build",
+      access: "full",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: "Cursor ACP exceeded the bounded event budget for this run.",
+    });
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
 
   it("negotiates capabilities and bridges ACP permissions, questions, plans, thinking, usage, and images", async () => {
     const root = portableFixtureRoot("cursor ACP");

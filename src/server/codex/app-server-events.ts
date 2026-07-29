@@ -16,7 +16,11 @@ import {
   type JsonObject,
   type RpcId,
 } from "./protocol";
-import { codexInputAnswers, parseCodexInputRequest } from "./questions";
+import {
+  codexInputAnswers,
+  isCodexInputRequestMethod,
+  parseCodexInputRequest,
+} from "./questions";
 import { completedReasoningSummary } from "./reasoning";
 import { parseCodexTokenUsage } from "./usage";
 import { parseCodexRateLimits } from "../codex-metadata";
@@ -218,6 +222,22 @@ export class CodexAppServerEvents {
         request: requestedInput,
       });
       this.host.options.onInputRequest?.(requestedInput);
+      return;
+    }
+    if (isCodexInputRequestMethod(method)) {
+      const message =
+        "Codex sent a user-input request this client could not safely represent.";
+      this.host.writeMessage({
+        id,
+        error: { code: -32602, message },
+      });
+      this.host.setLastError(message);
+      this.emitActivity(
+        "system",
+        "failed",
+        "Codex requested an unsupported user-input shape",
+      );
+      this.host.cancel();
       return;
     }
 

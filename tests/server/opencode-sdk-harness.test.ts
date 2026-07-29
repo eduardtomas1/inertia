@@ -18,6 +18,7 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 type LifecycleScenario =
   | "resume"
   | "cancel"
+  | "stuck-cancel"
   | "oversized"
   | "event-flood"
   | "slow"
@@ -78,6 +79,7 @@ const server = http.createServer((req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/abort") {
       json(res, true);
+      if (scenario === "stuck-cancel") return;
       return setTimeout(() => sendEvent({ type: "session.idle", properties: { sessionID } }), 10);
     }
     return json(res, { error: "not found" }, 404);
@@ -535,6 +537,38 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     );
     expect(manager.activeConversationIds()).toEqual([]);
   });
+
+  it("forces bounded cleanup when OpenCode never acknowledges cancellation", async () => {
+    const root = portableFixtureRoot("OpenCode stuck cancellation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "stuck-cancel"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => { markRunning = resolve; });
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-stuck-cancel",
+      cwd: root,
+      prompt: "Wait",
+      interactionMode: "build",
+      access: "supervised",
+    }), { onStatus: ({ status }) => { if (status === "running") markRunning(); } });
+
+    await running;
+    expect(manager.cancel("opencode-stuck-cancel")).toBe(true);
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as { port: number };
+    await waitFor(
+      "the unresponsive OpenCode server port to close",
+      async () => !(await loopbackPortIsOpen(capture.port)),
+    );
+    expect(manager.activeConversationIds()).toEqual([]);
+  }, 10_000);
 
   it("fails and cleans up a slow event stream at the inactivity deadline", async () => {
     const root = portableFixtureRoot("OpenCode inactive stream");

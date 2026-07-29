@@ -86,6 +86,7 @@ describe.sequential("Codex App Server runtime", () => {
     writeNodeSubcommand(root, "app-server", `
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const path = require("node:path");
 const readline = require("node:readline");
 const capture = (value) => fs.appendFileSync(process.env.INERTIA_APP_SERVER_CAPTURE, JSON.stringify(value) + "\\n");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
@@ -227,8 +228,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
               network: null,
               fileSystem: {
                 read: process.env.INERTIA_APP_SERVER_SCENARIO === "permission-overflow"
-                  ? Array.from({ length: 13 }, (_, index) => process.cwd() + "/generated-" + index)
-                  : [process.cwd() + "/generated"],
+                  ? Array.from({ length: 13 }, (_, index) => path.join(process.cwd(), "generated-" + index))
+                  : [path.join(process.cwd(), "generated")],
                 write: null,
                 entries: [],
               },
@@ -245,7 +246,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           networkApprovalContext: { host: "registry.npmjs.org", protocol: "https" },
           additionalPermissions: {
             network: { enabled: true },
-            fileSystem: { read: [process.cwd() + "/fixtures"], write: [process.cwd() + "/coverage"], entries: [] },
+            fileSystem: { read: [path.join(process.cwd(), "fixtures")], write: [path.join(process.cwd(), "coverage")], entries: [] },
           },
         };
     return send({ id: "approval-rpc", method: approvalMethod, params });

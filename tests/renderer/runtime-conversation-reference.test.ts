@@ -12,7 +12,7 @@ import {
 const appSource = readFileSync(
   new URL("../../src/renderer/src/App.tsx", import.meta.url),
   "utf8",
-);
+).replaceAll("\r\n", "\n");
 const sceneSource = readFileSync(
   new URL(
     "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts",

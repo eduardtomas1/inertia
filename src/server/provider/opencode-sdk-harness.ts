@@ -234,6 +234,11 @@ function startOpenCodeRun(
   let cancelForceTimer: NodeJS.Timeout | undefined;
   let runDeadlineTimer: NodeJS.Timeout | undefined;
   let eventInactivityTimer: NodeJS.Timeout | undefined;
+  let interruptRun!: (error: Error) => void;
+  const runInterrupted = new Promise<never>((_resolve, reject) => {
+    interruptRun = reject;
+  });
+  void runInterrupted.catch(() => undefined);
 
   const clearDeadlineTimers = (): void => {
     if (runDeadlineTimer) clearTimeout(runDeadlineTimer);
@@ -246,6 +251,7 @@ function startOpenCodeRun(
     terminalError = message;
     eventAbort.abort();
     if (child) terminateProcessTree(child, true);
+    interruptRun(new Error(message));
   };
   const armEventInactivityDeadline = (): void => {
     if (cancelRequested || terminalError) return;
@@ -385,7 +391,7 @@ function startOpenCodeRun(
         ),
         isDone: (event) => event.type === "session.idle" || event.type === "session.error",
       });
-      await Promise.all([
+      await Promise.race([Promise.all([
         client.session.promptAsync({
           sessionID: sessionId,
           directory: options.input.cwd,
@@ -398,7 +404,7 @@ function startOpenCodeRun(
           ],
         }, { throwOnError: true }),
         pump,
-      ]);
+      ]), runInterrupted]);
       outcome = cancelRequested
         ? { status: "cancelled" }
         : terminalError
@@ -459,6 +465,7 @@ function startOpenCodeRun(
       cancelForceTimer ??= setTimeout(() => {
         eventAbort.abort();
         if (child) terminateProcessTree(child, true);
+        interruptRun(new Error("OpenCode cancellation did not settle before the force deadline."));
       }, CANCEL_FORCE_MS);
       cancelForceTimer.unref();
       void client.session.abort({ sessionID: sessionId, directory: options.input.cwd }, { throwOnError: true }).catch(() => {
@@ -469,6 +476,7 @@ function startOpenCodeRun(
     if (cancelForceTimer) clearTimeout(cancelForceTimer);
     eventAbort.abort();
     if (child) terminateProcessTree(child, force);
+    if (force) interruptRun(new Error("OpenCode cancellation was forced."));
   };
 
   return {

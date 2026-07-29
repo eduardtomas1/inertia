@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
-import { constants as fsConstants, type Dirent } from "node:fs";
+import { constants as fsConstants } from "node:fs";
 import {
   lstat,
   open,
-  opendir,
   realpath,
   stat,
 } from "node:fs/promises";
@@ -22,6 +21,20 @@ import {
   type SecureFileRead,
   type SecureFileRootCapability,
 } from "./secure-files";
+import {
+  compareWorkspaceEntries,
+  describeStableWorkspaceEntry,
+  openStableWorkspaceDirectory,
+  workspaceDirentKind,
+  type WorkspaceEntry,
+  type WorkspaceEntryIdentity,
+  type WorkspaceEntryKind,
+} from "./workspace-traversal";
+
+export type {
+  WorkspaceEntry,
+  WorkspaceEntryKind,
+} from "./workspace-traversal";
 
 const MAX_PATH_LENGTH = 4_096;
 const DEFAULT_LIST_LIMIT = 500;
@@ -78,17 +91,6 @@ export class WorkspaceError extends Error {
     this.name = "WorkspaceError";
     this.code = code;
   }
-}
-
-export type WorkspaceEntryKind = "file" | "directory" | "symlink" | "other";
-
-export interface WorkspaceEntry {
-  name: string;
-  path: string;
-  kind: WorkspaceEntryKind;
-  size: number | null;
-  modifiedAt: string | null;
-  hidden: boolean;
 }
 
 export interface WorkspaceEntryList {
@@ -280,7 +282,7 @@ async function secureExistingPath(
 ): Promise<{
   absolute: string;
   relativePath: string;
-  identity: { dev: number; ino: number };
+  identity: WorkspaceEntryIdentity;
 }> {
   const normalized = validateRelativePath(relativePath, expected === "directory");
   const absolute = resolve(root, normalized);
@@ -318,69 +320,33 @@ async function secureExistingPath(
   }
 }
 
-function entryKind(info: Awaited<ReturnType<typeof lstat>>): WorkspaceEntryKind {
-  if (info.isSymbolicLink()) return "symlink";
-  if (info.isDirectory()) return "directory";
-  if (info.isFile()) return "file";
-  return "other";
-}
-
 async function describeEntry(
   root: string,
+  parentAbsolute: string,
+  parentIdentity: WorkspaceEntryIdentity,
   absolute: string,
   name: string,
   observedKind: WorkspaceEntryKind,
-): Promise<{ entry: WorkspaceEntry; identity: { dev: number; ino: number } } | null> {
-  const info = await lstat(absolute);
-  const kind = entryKind(info);
-  if (observedKind !== "other" && kind !== observedKind) return null;
+): Promise<{ entry: WorkspaceEntry; identity: WorkspaceEntryIdentity } | null> {
+  const described = await describeStableWorkspaceEntry(
+    root,
+    parentAbsolute,
+    parentIdentity,
+    absolute,
+    observedKind,
+  );
+  if (!described) return null;
   return {
     entry: {
       name,
       path: slashPath(relative(root, absolute)),
-      kind,
-      size: kind === "file" ? info.size : null,
-      modifiedAt: Number.isFinite(info.mtimeMs) ? info.mtime.toISOString() : null,
+      kind: described.kind,
+      size: described.size,
+      modifiedAt: described.modifiedAt,
       hidden: name.startsWith("."),
     },
-    identity: { dev: info.dev, ino: info.ino },
+    identity: described.identity,
   };
-}
-
-async function openStableDirectory(
-  root: string,
-  absolute: string,
-  identity: { dev: number; ino: number },
-) {
-  const before = await lstat(absolute);
-  if (before.isSymbolicLink() || !before.isDirectory() || !sameIdentity(before, identity)) return null;
-  if (!isContained(root, await realpath(absolute))) return null;
-  const handle = await opendir(absolute);
-  try {
-    const after = await lstat(absolute);
-    if (
-      !after.isSymbolicLink()
-      && after.isDirectory()
-      && sameIdentity(after, identity)
-      && isContained(root, await realpath(absolute))
-    ) return handle;
-  } catch (error) {
-    await handle.close();
-    throw error;
-  }
-  await handle.close();
-  return null;
-}
-
-function direntKind(child: Dirent): WorkspaceEntryKind {
-  return child.isSymbolicLink() ? "symlink" : child.isDirectory() ? "directory" : child.isFile() ? "file" : "other";
-}
-
-function compareEntries(left: WorkspaceEntry, right: WorkspaceEntry): number {
-  if (left.kind === "directory" && right.kind !== "directory") return -1;
-  if (left.kind !== "directory" && right.kind === "directory") return 1;
-  return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" })
-    || left.path.localeCompare(right.path, undefined, { numeric: true, sensitivity: "variant" });
 }
 
 export async function listWorkspaceEntries(
@@ -395,7 +361,11 @@ export async function listWorkspaceEntries(
     const entries: WorkspaceEntry[] = [];
     const children: Array<{ absolute: string; name: string; kind: WorkspaceEntryKind }> = [];
     let truncated = false;
-    const directoryHandle = await openStableDirectory(root, target.absolute, target.identity);
+    const directoryHandle = await openStableWorkspaceDirectory(
+      root,
+      target.absolute,
+      target.identity,
+    );
     if (!directoryHandle) throw new WorkspaceError("unsafe-link", "The workspace folder changed while it was listed.");
     for await (const child of directoryHandle) {
       if (!options.includeHidden && child.name.startsWith(".")) continue;
@@ -406,7 +376,7 @@ export async function listWorkspaceEntries(
       children.push({
         absolute: resolve(target.absolute, child.name),
         name: child.name,
-        kind: direntKind(child),
+        kind: workspaceDirentKind(child),
       });
     }
     // Bound metadata fan-out so large directories remain responsive without
@@ -416,12 +386,19 @@ export async function listWorkspaceEntries(
         children.slice(offset, offset + 32)
           .map(async ({ absolute, name, kind }) => {
             await options.afterEntryObserved?.(slashPath(relative(root, absolute)));
-            return describeEntry(root, absolute, name, kind);
+            return describeEntry(
+              root,
+              target.absolute,
+              target.identity,
+              absolute,
+              name,
+              kind,
+            );
           }),
       );
       entries.push(...described.flatMap((result) => result ? [result.entry] : []));
     }
-    entries.sort(compareEntries);
+    entries.sort(compareWorkspaceEntries);
     return { directory: target.relativePath === "." ? "" : target.relativePath, entries, truncated };
   } catch (error) {
     if (error instanceof WorkspaceError) throw error;
@@ -429,7 +406,11 @@ export async function listWorkspaceEntries(
   }
 }
 
-type SearchQueueEntry = { absolute: string; depth: number; identity: { dev: number; ino: number } };
+type SearchQueueEntry = {
+  absolute: string;
+  depth: number;
+  identity: WorkspaceEntryIdentity;
+};
 
 export async function searchWorkspaceEntries(
   workspacePath: string,
@@ -458,7 +439,11 @@ export async function searchWorkspaceEntries(
   try {
     for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
       const directory = queue[queueIndex];
-      const directoryHandle = await openStableDirectory(root, directory.absolute, directory.identity);
+      const directoryHandle = await openStableWorkspaceDirectory(
+        root,
+        directory.absolute,
+        directory.identity,
+      );
       if (!directoryHandle) continue;
       for await (const child of directoryHandle) {
         if (visitedEntries >= maxVisited || entries.length >= maxResults) {
@@ -469,13 +454,20 @@ export async function searchWorkspaceEntries(
         const hidden = child.name.startsWith(".");
         if (hidden && !options.includeHidden) continue;
         const absolute = resolve(directory.absolute, child.name);
-        const kind = direntKind(child);
+        const kind = workspaceDirentKind(child);
         const projectPath = slashPath(relative(root, absolute));
         const matches = projectPath.toLocaleLowerCase().includes(needle);
         const traversable = kind === "directory" && !ignored.has(child.name);
         if (!matches && !traversable) continue;
         await options.afterEntryObserved?.(projectPath);
-        const described = await describeEntry(root, absolute, child.name, kind);
+        const described = await describeEntry(
+          root,
+          directory.absolute,
+          directory.identity,
+          absolute,
+          child.name,
+          kind,
+        );
         if (!described) continue;
         if (matches) entries.push(described.entry);
         if (described.entry.kind === "directory" && directory.depth < maxDepth && !ignored.has(child.name)) {
@@ -493,7 +485,7 @@ export async function searchWorkspaceEntries(
     if (error instanceof WorkspaceError) throw error;
     throw new WorkspaceError("operation-failed", "Unable to search this workspace.");
   }
-  entries.sort(compareEntries);
+  entries.sort(compareWorkspaceEntries);
   return { entries, visitedEntries, truncated };
 }
 

@@ -206,6 +206,58 @@ describe("workspace file hierarchy", () => {
     expect(result.entries).toEqual([]);
   });
 
+  it("does not list a child through a replaced parent directory", async () => {
+    const root = await temporaryDirectory();
+    const outside = await temporaryDirectory();
+    const parent = join(root, "nested");
+    await mkdir(parent);
+    await writeFile(join(parent, "inside.ts"), "inside");
+    await writeFile(join(outside, "inside.ts"), "outside");
+    let swapped = false;
+
+    const page = await listWorkspaceEntries(root, "nested", {
+      afterEntryObserved: async (path) => {
+        if (path !== "nested/inside.ts" || swapped) return;
+        swapped = true;
+        await rename(parent, join(root, "nested-moved"));
+        await symlink(
+          outside,
+          parent,
+          process.platform === "win32" ? "junction" : "dir",
+        );
+      },
+    });
+
+    expect(swapped).toBe(true);
+    expect(page.entries).toEqual([]);
+  });
+
+  it("does not return a matching child through a replaced search directory", async () => {
+    const root = await temporaryDirectory();
+    const outside = await temporaryDirectory();
+    const parent = join(root, "nested");
+    await mkdir(parent);
+    await writeFile(join(parent, "needle.ts"), "inside");
+    await writeFile(join(outside, "needle.ts"), "outside");
+    let swapped = false;
+
+    const result = await searchWorkspaceEntries(root, "needle", {
+      afterEntryObserved: async (path) => {
+        if (path !== "nested/needle.ts" || swapped) return;
+        swapped = true;
+        await rename(parent, join(root, "nested-moved"));
+        await symlink(
+          outside,
+          parent,
+          process.platform === "win32" ? "junction" : "dir",
+        );
+      },
+    });
+
+    expect(swapped).toBe(true);
+    expect(result.entries).toEqual([]);
+  });
+
   it.skipIf(process.platform === "win32")(
     "preserves POSIX filename characters through listing, reading, and editing",
     async () => {

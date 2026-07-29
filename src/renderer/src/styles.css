@@ -13,11 +13,11 @@
   --surface-muted: #ececf0;
   --surface-hover: #e5e5e9;
   --text: #202124;
-  --text-soft: #585b61;
-  --text-muted: #6b6e75;
-  --border: rgba(32, 33, 36, 0.12);
-  --border-strong: rgba(32, 33, 36, 0.2);
-  --panel-border: rgba(32, 33, 36, 0.17);
+  --text-soft: #51545a;
+  --text-muted: #64676e;
+  --border: rgba(32, 33, 36, 0.15);
+  --border-strong: rgba(32, 33, 36, 0.25);
+  --panel-border: rgba(32, 33, 36, 0.21);
   --accent: #4239cc;
   --accent-hover: #3830ad;
   --accent-soft: #e2e1fb;
@@ -25,14 +25,14 @@
   --accent-strong: #2e288f;
   --danger: #a54943;
   --danger-soft: #f0dcda;
-  --warning: #a87532;
-  --blue: #4a7191;
-  --status-working: #39789b;
-  --status-approval: #a87532;
-  --status-input: #6658b4;
+  --warning: #875b22;
+  --blue: #3d6687;
+  --status-working: #326b89;
+  --status-approval: #875b22;
+  --status-input: #5e50aa;
   --status-failed: #a54943;
-  --status-completed: #4f7d62;
-  --status-idle: #6b6e75;
+  --status-completed: #446f54;
+  --status-idle: #64676e;
   --terminal-bg: #fcfcfd;
   --terminal-fg: #25262a;
   --terminal-selection: #d6d8f1;
@@ -49,6 +49,21 @@
   --font-sans: "Inter Variable", Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --surface-subtle: color-mix(in srgb, var(--surface) 72%, var(--surface-muted));
+  --focus-ring: var(--accent);
+  --focus-ring-soft: color-mix(in srgb, var(--focus-ring) 28%, transparent);
+  --interactive-border: var(--border-strong);
+  --interactive-border-hover: color-mix(in srgb, var(--accent) 46%, var(--border-strong));
+  --selected-surface: color-mix(in srgb, var(--accent-soft) 58%, var(--surface));
+  --selected-surface-strong: color-mix(in srgb, var(--accent-soft) 72%, var(--surface));
+  --approval-surface: color-mix(in srgb, var(--status-approval) 8%, var(--surface));
+  --question-surface: color-mix(in srgb, var(--status-input) 8%, var(--surface));
+  --warning-surface: color-mix(in srgb, var(--warning) 8%, var(--surface));
+  --failure-surface: color-mix(in srgb, var(--status-failed) 8%, var(--surface));
+  --success-surface: color-mix(in srgb, var(--status-completed) 8%, var(--surface));
+  --disabled-opacity: 0.62;
+  --text-faint: color-mix(in srgb, var(--text-muted) 72%, var(--surface));
+  --success: var(--status-completed);
+  --mono: var(--font-mono);
   --ui-font-main: 14px;
   --ui-font-secondary: 11.5px;
   --ui-font-micro: 9.5px;
@@ -70,7 +85,7 @@
   --workspace-tools-surface: var(--surface);
   --workspace-tools-separator: color-mix(in srgb, var(--panel-border) 78%, transparent);
   --composer-surface: var(--surface-strong);
-  --composer-border: color-mix(in srgb, var(--border-strong) 78%, transparent);
+  --composer-border: var(--interactive-border);
   --composer-shadow:
     0 8px 24px -22px color-mix(in srgb, var(--text) 22%, transparent),
     0 1px 4px -3px color-mix(in srgb, var(--text) 14%, transparent);
@@ -85,7 +100,7 @@
   --composer-setting-separator: color-mix(in srgb, var(--panel-border) 48%, transparent);
   --composer-setting-hover: color-mix(in srgb, var(--surface-hover) 64%, transparent);
   --composer-setting-open: color-mix(in srgb, var(--surface-hover) 86%, transparent);
-  --composer-setting-focus: color-mix(in srgb, var(--accent) 48%, transparent);
+  --composer-setting-focus: var(--focus-ring);
   --composer-preview-size: calc(var(--composer-control-height) + 2px);
   --execution-text: var(--text-soft);
   --execution-muted-text: var(--text-muted);
@@ -213,11 +228,11 @@
   --surface-muted: #212228;
   --surface-hover: #2d2e36;
   --text: #f1f1f2;
-  --text-soft: #b9b9be;
-  --text-muted: #85868e;
-  --border: rgba(241, 241, 242, 0.12);
-  --border-strong: rgba(241, 241, 242, 0.2);
-  --panel-border: rgba(241, 241, 242, 0.16);
+  --text-soft: #c2c3c8;
+  --text-muted: #94959e;
+  --border: rgba(241, 241, 242, 0.14);
+  --border-strong: rgba(241, 241, 242, 0.24);
+  --panel-border: rgba(241, 241, 242, 0.19);
   --accent: #9aa2ff;
   --accent-hover: #aeb4ff;
   --accent-soft: #2b2d4c;
@@ -282,11 +297,11 @@ button:not(:disabled) {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.48;
+  opacity: var(--disabled-opacity);
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -363,7 +378,7 @@ textarea {
 
 .icon-button:not(:disabled):hover {
   color: var(--text);
-  border-color: var(--border);
+  border-color: var(--interactive-border);
   background: var(--surface-hover);
 }
 
@@ -1436,7 +1451,7 @@ textarea {
   align-items: center;
   gap: 6px;
   padding: 0 9px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--interactive-border);
   border-radius: var(--radius-medium);
   color: var(--text-soft);
   background: var(--surface-strong);
@@ -1447,7 +1462,7 @@ textarea {
 }
 
 .header-button:not(:disabled):hover {
-  border-color: var(--border-strong);
+  border-color: var(--interactive-border-hover);
   color: var(--text);
   background: var(--surface-hover);
 }
@@ -2303,18 +2318,20 @@ textarea {
 
 .agent-request-card {
   --agent-request-accent: var(--approval-accent);
+  --agent-request-surface: var(--approval-surface);
   container-type: inline-size;
   margin-top: 7px;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-inline-start: 2px solid var(--agent-request-accent);
   border-radius: var(--radius-medium);
-  background: color-mix(in srgb, var(--agent-request-accent) 3%, var(--surface));
+  background: var(--agent-request-surface);
   box-shadow: none;
 }
 
 .agent-request-card.is-question {
   --agent-request-accent: var(--question-accent);
+  --agent-request-surface: var(--question-surface);
 }
 
 .agent-request-heading {
@@ -2709,10 +2726,10 @@ textarea {
 .composer-suggestion-menu button small { flex: 0 0 auto; color: var(--text-muted); font-size: 7.5px; text-transform: capitalize; }
 
 .composer:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-color: var(--interactive-border-hover);
   box-shadow:
     0 6px 18px -18px color-mix(in srgb, var(--text) 18%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--accent) 6%, transparent);
+    0 0 0 2px var(--focus-ring-soft);
 }
 
 .composer textarea {
@@ -2784,7 +2801,7 @@ textarea {
 }
 
 .composer-attachment-open:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -2864,7 +2881,7 @@ textarea {
 }
 
 .composer-attachment-remove:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -2967,7 +2984,7 @@ textarea {
 
 .attachment-preview-close:focus-visible,
 .attachment-preview-footer button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 62%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -4186,10 +4203,15 @@ textarea {
   font-weight: 580;
 }
 
-.workspace-panel-tab:hover,
-.workspace-panel-tab.is-active {
+.workspace-panel-tab:hover {
   color: var(--text);
   background: var(--surface-hover);
+}
+
+.workspace-panel-tab.is-active {
+  color: var(--text);
+  background: var(--selected-surface);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent) 54%, transparent);
 }
 
 .workspace-panel-tab.is-active { font-weight: 640; }
@@ -4321,9 +4343,14 @@ textarea {
 }
 
 .change-file-button:hover,
+.file-entry.is-file:hover { color: var(--text); background: var(--surface-hover); }
+
 .change-file-button.is-selected,
-.file-entry.is-file:hover,
-.file-entry.is-selected { color: var(--text); background: var(--surface-hover); }
+.file-entry.is-selected {
+  color: var(--text);
+  background: var(--selected-surface);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 62%, transparent);
+}
 
 .change-file-leading { display: flex; align-items: center; gap: 3px; color: var(--text-muted); }
 .change-file-status { width: 13px; color: var(--accent-strong); font-size: 7px; font-weight: 720; text-align: center; }
@@ -4487,8 +4514,13 @@ textarea {
 }
 
 .workspace-repository-files > li:hover,
-.workspace-repository-files > li:has(.workspace-repository-file.is-selected) {
+.workspace-repository-files > li:hover {
   background: var(--surface-hover);
+}
+
+.workspace-repository-files > li:has(.workspace-repository-file.is-selected) {
+  background: var(--selected-surface);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 62%, transparent);
 }
 
 .workspace-repository-file {
@@ -5444,8 +5476,13 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .settings-navigation nav { display: grid; gap: 3px; }
 .settings-navigation nav button { display: flex; min-height: 37px; align-items: center; gap: 9px; padding: 0 10px; border-radius: var(--radius-medium); color: var(--text-muted); background: transparent; font-size: 9.5px; text-align: left; }
 .settings-navigation nav button:hover,
-.settings-navigation nav button.is-active { color: var(--text); background: var(--surface-hover); }
-.settings-navigation nav button.is-active { font-weight: 630; }
+.settings-navigation nav button.is-active { color: var(--text); }
+.settings-navigation nav button:hover { background: var(--surface-hover); }
+.settings-navigation nav button.is-active {
+  background: var(--selected-surface);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 54%, transparent);
+  font-weight: 630;
+}
 .settings-navigation nav button > small { min-width: 17px; margin-left: auto; padding: 2px 4px; border-radius: 999px; color: var(--text-muted); background: var(--surface-muted); font-size: 7px; text-align: center; }
 .settings-navigation > p { margin: auto 8px 0; color: var(--text-muted); font-size: 7.5px; line-height: 1.55; }
 
@@ -6604,10 +6641,10 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   align-items: center;
   gap: 9px;
   padding: 7px;
-  border: 1px solid color-mix(in srgb, var(--warning) 24%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--warning) 44%, var(--border));
   border-radius: 11px;
   color: var(--text);
-  background: color-mix(in srgb, var(--surface-strong) 95%, transparent);
+  background: color-mix(in srgb, var(--warning-surface) 94%, transparent);
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
   box-shadow: var(--shadow), var(--glass-inset);
@@ -6620,7 +6657,8 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .provider-quota-notice.is-5 {
-  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--border));
+  background: color-mix(in srgb, var(--failure-surface) 94%, transparent);
 }
 
 .provider-quota-notice.is-5 > svg {
@@ -6672,10 +6710,10 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   align-items: center;
   gap: 9px;
   padding: 7px 7px 7px 12px;
-  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--danger) 52%, var(--border));
   border-radius: 12px;
   color: var(--text);
-  background: color-mix(in srgb, var(--danger-soft) 42%, var(--surface-strong));
+  background: var(--failure-surface);
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
   box-shadow: var(--shadow), var(--glass-inset);
@@ -9873,17 +9911,17 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .model-chooser-row:hover {
-  background: color-mix(in srgb, var(--surface-hover) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-hover) 84%, transparent);
 }
 
 .model-chooser-row:has(.model-chooser-row-option:focus-visible) {
-  outline: 2px solid color-mix(in srgb, var(--accent) 68%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
-  background: color-mix(in srgb, var(--accent-soft) 42%, transparent);
+  background: var(--selected-surface-strong);
 }
 
 .model-chooser-row.is-active {
-  background: color-mix(in srgb, var(--accent-soft) 34%, transparent);
+  background: var(--selected-surface);
 }
 
 .model-chooser-row.is-disabled {
@@ -10051,7 +10089,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .model-chooser-row-favorite:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 68%, transparent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -10119,15 +10157,15 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .model-source-rail-item:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
-  outline: 2px solid color-mix(in srgb, var(--accent) 48%, transparent);
+  border-color: var(--interactive-border-hover);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 .model-source-rail-item.is-selected {
-  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
   color: var(--text);
-  background: color-mix(in srgb, var(--accent-soft) 48%, transparent);
+  background: var(--selected-surface);
   box-shadow: inset 2px 0 0 var(--accent-strong);
 }
 
@@ -10241,7 +10279,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   align-items: center;
   gap: 5px;
   padding: 3px 8px 3px 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--interactive-border);
   border-radius: 999px;
   color: var(--text-soft);
   background: color-mix(in srgb, var(--surface) 84%, transparent);
@@ -10249,22 +10287,22 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .selected-model-chip:hover {
-  border-color: var(--border-strong);
+  border-color: var(--interactive-border-hover);
   color: var(--text);
   background: var(--surface-hover);
 }
 
 .selected-model-chip:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
-  outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
+  border-color: var(--interactive-border-hover);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
 .selected-model-chip.is-open,
 .selected-model-chip[aria-expanded="true"] {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-color: var(--interactive-border-hover);
   color: var(--text);
-  background: color-mix(in srgb, var(--accent-soft) 54%, var(--surface));
+  background: var(--selected-surface-strong);
 }
 
 .selected-model-chip:disabled {
@@ -10434,7 +10472,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .model-chooser-result.is-navigated > .model-chooser-row {
-  background: color-mix(in srgb, var(--accent-soft) 48%, transparent);
+  background: var(--selected-surface-strong);
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 72%, transparent);
 }
 

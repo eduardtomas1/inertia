@@ -564,25 +564,42 @@ interface CursorTodo { id?: string; content?: string; title?: string; status?: s
 export function parseCursorQuestionRequest(value: unknown): CursorQuestionParams {
   const record = requireObject(value, "Cursor question request");
   const rawQuestions = requireArray(record.questions, "questions");
+  if (rawQuestions.length === 0) {
+    throw new Error("Cursor sent an empty question request.");
+  }
   if (rawQuestions.length > MAX_INPUT_QUESTIONS) {
     throw new Error(`Cursor sent more than ${MAX_INPUT_QUESTIONS} questions.`);
   }
+  const questionIds = new Set<string>();
   return {
     toolCallId: requireString(record.toolCallId, "toolCallId"),
     ...(typeof record.title === "string" ? { title: bounded(record.title) } : {}),
     questions: rawQuestions.map((raw, questionIndex) => {
       const question = requireObject(raw, "question");
+      const questionId = requireNativeId(question.id, "question.id", 120);
+      if (questionIds.has(questionId)) {
+        throw new Error(`Cursor sent duplicate question ID '${questionId}'.`);
+      }
+      questionIds.add(questionId);
       const rawOptions = requireArray(question.options, "question.options");
       if (rawOptions.length > MAX_INPUT_OPTIONS) {
         throw new Error(`Cursor sent more than ${MAX_INPUT_OPTIONS} options for question ${questionIndex + 1}.`);
       }
+      const optionIds = new Set<string>();
       return {
-        id: requireNativeId(question.id, "question.id", 120),
+        id: questionId,
         prompt: requireString(question.prompt, "question.prompt"),
         options: rawOptions.map((rawOption) => {
           const option = requireObject(rawOption, "question option");
+          const optionId = requireNativeId(option.id, "option.id", 160);
+          if (optionIds.has(optionId)) {
+            throw new Error(
+              `Cursor sent duplicate option ID '${optionId}' for question ${questionIndex + 1}.`,
+            );
+          }
+          optionIds.add(optionId);
           return {
-            id: requireNativeId(option.id, "option.id", 160),
+            id: optionId,
             label: requireString(option.label, "option.label"),
           };
         }),

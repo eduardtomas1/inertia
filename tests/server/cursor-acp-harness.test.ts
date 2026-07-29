@@ -43,6 +43,24 @@ describe.sequential("Cursor ACP harness", () => {
       toolCallId: "tool-3",
       questions: [question(1, 21)],
     })).toThrow("more than 20 options");
+    expect(() => parseCursorQuestionRequest({
+      toolCallId: "tool-empty",
+      questions: [],
+    })).toThrow("empty question request");
+    expect(() => parseCursorQuestionRequest({
+      toolCallId: "tool-duplicate-question",
+      questions: [question(1), question(1)],
+    })).toThrow("duplicate question ID");
+    expect(() => parseCursorQuestionRequest({
+      toolCallId: "tool-duplicate-option",
+      questions: [{
+        ...question(1),
+        options: [
+          { id: "same", label: "One" },
+          { id: "same", label: "Two" },
+        ],
+      }],
+    })).toThrow("duplicate option ID");
   });
 
   it("fails and terminates an ACP process that floods bounded events", async () => {

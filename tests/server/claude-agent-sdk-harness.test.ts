@@ -68,6 +68,36 @@ describe("Claude Agent SDK harness", () => {
         options: [...questions[0]!.options, questions[0]!.options[0]],
       }],
     })).toThrow("more than 4 options");
+    expect(() => claudeQuestions("request-empty", "tool-empty", {
+      questions: [],
+    })).toThrow("empty question request");
+    expect(() => claudeQuestions("request-4", "tool-4", {
+      questions: [questions[0], null],
+    })).toThrow("invalid question at position 2");
+    expect(() => claudeQuestions("request-5", "tool-5", {
+      questions: [
+        questions[0],
+        { ...questions[1], question: questions[0]!.question },
+      ],
+    })).toThrow("duplicate question prompts");
+    expect(() => claudeQuestions("request-6", "tool-6", {
+      questions: [{
+        ...questions[0],
+        question: "x".repeat(1024 * 1024 + 1),
+      }],
+    })).toThrow("invalid question 1");
+    expect(() => claudeQuestions("request-7", "tool-7", {
+      questions: [{
+        ...questions[0],
+        options: [
+          questions[0]!.options[0],
+          {
+            ...questions[0]!.options[1],
+            label: questions[0]!.options[0]!.label,
+          },
+        ],
+      }],
+    })).toThrow("duplicate option label");
   });
 
   it("fails and cleans up a run that floods bounded provider events", async () => {

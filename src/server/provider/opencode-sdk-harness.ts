@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -39,6 +39,11 @@ import {
   openCodeQuestionId,
   openCodeQuestions,
 } from "./opencode-boundary";
+import {
+  startOwnedOpenCodeServer,
+  waitForOpenCodeHealth,
+  withOpenCodeRequestDeadline,
+} from "./opencode-owned-server";
 const MAX_EVENT_CHARS = 1024 * 1024;
 const MAX_RUN_EVENT_CHARS = 32 * 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
@@ -50,6 +55,7 @@ const MAX_RETAINED_PART_CHARS = 8 * 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_SERVER_OUTPUT_CHARS = 32 * 1024;
 const START_TIMEOUT_MS = 10_000;
+const INITIALIZATION_TIMEOUT_MS = 30_000;
 const METADATA_PROVIDER_TIMEOUT_MS = 10_000;
 const CANCEL_FORCE_MS = 2_000;
 const RUN_DEADLINE_MS = 4 * 60 * 60 * 1_000;
@@ -107,6 +113,12 @@ export interface OpenCodeSdkHarnessOptions {
    * window. Events for other sessions do not reset this deadline.
    */
   eventInactivityDeadlineMs?: number;
+  /**
+   * May shorten, but never extend, the production provider/session
+   * initialization deadline. Primarily useful for deterministic lifecycle
+   * verification.
+   */
+  initializationTimeoutMs?: number;
   terminateProcessTree?: ProcessTreeTerminator;
 }
 
@@ -127,6 +139,7 @@ export interface OpenCodeSdkMetadataOptions {
 interface OpenCodeRunDeadlines {
   runDeadlineMs: number;
   eventInactivityDeadlineMs: number;
+  initializationTimeoutMs: number;
 }
 
 export function createOpenCodeSdkHarness(
@@ -177,7 +190,7 @@ export async function readOpenCodeSdkModels(
   const terminateOwnedProcessTree = options.terminateProcessTree ?? terminateProcessTreeAndWait;
   const output = new CappedProviderBuffer(MAX_SERVER_OUTPUT_CHARS);
   const credentials = ownedOpenCodeCredentials(environment);
-  const started = await startOwnedServer(
+  const started = await startOwnedOpenCodeServer(
     executable,
     cwd,
     ownedOpenCodeEnvironment(environment, credentials),
@@ -186,7 +199,7 @@ export async function readOpenCodeSdkModels(
   );
   const client = createOwnedOpenCodeClient(started.url, cwd, credentials);
   try {
-    await waitForHealth(client, started.child, healthTimeoutMs);
+    await waitForOpenCodeHealth(client, started.child, healthTimeoutMs);
     const response = await withOpenCodeRequestDeadline(
       providerTimeoutMs,
       "Timed out waiting for the OpenCode provider catalog.",
@@ -333,22 +346,48 @@ function startOpenCodeRun(
     let outcome: { status: ProviderRunResult["status"]; error?: string };
     try {
       const credentials = ownedOpenCodeCredentials(options.environment);
-      const started = await startOwnedServer(
+      const started = await startOwnedOpenCodeServer(
         options.executable,
         options.input.cwd,
         ownedOpenCodeEnvironment(options.environment, credentials),
         serverOutput,
         terminateOwnedProcessTree,
+        eventAbort.signal,
       );
       child = started.child;
+      if (cancelRequested) throw new Error("OpenCode startup was cancelled.");
       if (terminalError) throw new Error(terminalError);
       client = createOwnedOpenCodeClient(started.url, options.input.cwd, credentials);
-      await waitForHealth(client, child);
+      await waitForOpenCodeHealth(
+        client,
+        child,
+        START_TIMEOUT_MS,
+        eventAbort.signal,
+      );
 
-      const [providerData, agents] = await Promise.all([
-        client.provider.list({ directory: options.input.cwd }, { throwOnError: true }),
-        client.app.agents({ directory: options.input.cwd }, { throwOnError: true }),
-      ]);
+      const initialize = async <T>(
+        label: string,
+        operation: (signal: AbortSignal) => Promise<T>,
+      ): Promise<T> => await withOpenCodeRequestDeadline(
+        deadlines.initializationTimeoutMs,
+        `Timed out waiting for OpenCode ${label}.`,
+        operation,
+        eventAbort.signal,
+      );
+
+      const [providerData, agents] = await initialize(
+        "provider and agent discovery",
+        async (signal) => await Promise.all([
+          client!.provider.list(
+            { directory: options.input.cwd },
+            { signal, throwOnError: true },
+          ),
+          client!.app.agents(
+            { directory: options.input.cwd },
+            { signal, throwOnError: true },
+          ),
+        ]),
+      );
       const discoveredModels = openCodeModels(providerData.data.all, providerData.data.default);
       if (discoveredModels.length > 0) {
         emitter.rich({ type: "metadata", metadata: { models: discoveredModels }, source: "provider", complete: true });
@@ -360,21 +399,46 @@ function startOpenCodeRun(
       }
 
       if (sessionId) {
-        await client.session.get({ sessionID: sessionId, directory: options.input.cwd }, { throwOnError: true });
-        await client.session.update({ sessionID: sessionId, directory: options.input.cwd, permission: openCodePermissions(options.input.access) }, { throwOnError: true });
+        await initialize(
+          "session resume",
+          async (signal) => await client!.session.get(
+            { sessionID: sessionId!, directory: options.input.cwd },
+            { signal, throwOnError: true },
+          ),
+        );
+        await initialize(
+          "session permission update",
+          async (signal) => await client!.session.update(
+            {
+              sessionID: sessionId!,
+              directory: options.input.cwd,
+              permission: openCodePermissions(options.input.access),
+            },
+            { signal, throwOnError: true },
+          ),
+        );
       } else {
-        const created = await client.session.create({
-          directory: options.input.cwd,
-          ...(selectedModel ? { model: { id: selectedModel.id, providerID: selectedModel.providerID, ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}) } } : {}),
-          ...(agent ? { agent: agent.name } : {}),
-          permission: openCodePermissions(options.input.access),
-        }, { throwOnError: true });
+        const created = await initialize(
+          "session creation",
+          async (signal) => await client!.session.create({
+            directory: options.input.cwd,
+            ...(selectedModel ? { model: { id: selectedModel.id, providerID: selectedModel.providerID, ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}) } } : {}),
+            ...(agent ? { agent: agent.name } : {}),
+            permission: openCodePermissions(options.input.access),
+          }, { signal, throwOnError: true }),
+        );
         sessionId = created.data.id;
         emitter.session(created.data.id);
       }
       if (!sessionId) throw new Error("OpenCode did not return a session ID.");
 
-      const session = await client.session.get({ sessionID: sessionId, directory: options.input.cwd }, { throwOnError: true });
+      const session = await initialize(
+        "active session",
+        async (signal) => await client!.session.get(
+          { sessionID: sessionId!, directory: options.input.cwd },
+          { signal, throwOnError: true },
+        ),
+      );
       const effectiveModel = selectedModel ?? (session.data.model ? findOpenCodeModel(session.data.model.providerID, session.data.model.id, providerData.data.all) : undefined);
       if (options.input.reasoningEffort && (!effectiveModel || !effectiveModel.variants?.[options.input.reasoningEffort])) {
         throw new Error(`The active OpenCode model does not advertise reasoning variant '${options.input.reasoningEffort}'.`);
@@ -506,128 +570,6 @@ function startOpenCodeRun(
   };
 }
 
-async function startOwnedServer(
-  executable: string,
-  cwd: string,
-  environment: NodeJS.ProcessEnv,
-  output: CappedProviderBuffer,
-  terminateOwnedProcessTree: ProcessTreeTerminator,
-): Promise<{ child: ChildProcessWithoutNullStreams; url: string }> {
-  const child = spawn(executable, [
-    "serve", "--hostname=127.0.0.1", "--port=0",
-  ], {
-    cwd,
-    env: environment,
-    detached: process.platform !== "win32",
-    shell: false,
-    windowsHide: true,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  child.stdin.end();
-  let startupOutput = "";
-  let resolveReady!: (url: string) => void; let rejectReady!: (error: Error) => void;
-  let startupSettled = false;
-  const ready = new Promise<string>((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
-  });
-  const settleStartup = (action: () => void): void => {
-    if (startupSettled) return;
-    startupSettled = true;
-    action();
-  };
-  child.stdout.on("data", (chunk: Buffer) => {
-    const value = chunk.toString("utf8");
-    output.append(value);
-    startupOutput = `${startupOutput}${value}`.slice(-4_096);
-    const match =
-      /opencode server listening on http:\/\/127\.0\.0\.1:(\d{1,5})/u.exec(startupOutput);
-    const port = Number(match?.[1]);
-    if (match && Number.isSafeInteger(port) && port > 0 && port <= 65_535) {
-      settleStartup(() => resolveReady(`http://127.0.0.1:${port}`));
-    }
-  });
-  child.stderr.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
-  let startupTimer: NodeJS.Timeout | undefined;
-  try {
-    startupTimer = setTimeout(() => {
-      settleStartup(() => rejectReady(
-        new Error("Timed out waiting for the OpenCode server to start."),
-      ));
-    }, START_TIMEOUT_MS);
-    startupTimer.unref();
-    child.once("error", (error) => {
-      settleStartup(() => rejectReady(error));
-    });
-    child.once("close", () => {
-      settleStartup(() => rejectReady(
-        new Error("OpenCode server exited during startup."),
-      ));
-    });
-    const url = await ready;
-    clearTimeout(startupTimer);
-    return { child, url };
-  } catch (error) {
-    if (startupTimer) clearTimeout(startupTimer);
-    await requireProcessTreeTermination(
-      terminateOwnedProcessTree, child, true, "OpenCode startup process tree",
-    );
-    throw error;
-  }
-}
-
-async function waitForHealth(
-  client: OpencodeClient,
-  child: ChildProcessWithoutNullStreams,
-  timeoutMs = START_TIMEOUT_MS,
-): Promise<void> {
-  await withOpenCodeRequestDeadline(
-    timeoutMs,
-    "Timed out waiting for the OpenCode server health check.",
-    async (signal) => {
-      let lastError: unknown;
-      while (!signal.aborted) {
-        if (child.exitCode !== null || child.signalCode !== null) {
-          throw new Error("OpenCode server exited during startup.");
-        }
-        try {
-          await client.global.health({ signal, throwOnError: true });
-          return;
-        } catch (error) {
-          if (signal.aborted) throw error;
-          lastError = error;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 75));
-      }
-      throw new Error(safeError(
-        lastError,
-        "Timed out waiting for the OpenCode server health check.",
-      ));
-    },
-  );
-}
-
-async function withOpenCodeRequestDeadline<T>(
-  timeoutMs: number,
-  timeoutMessage: string,
-  operation: (signal: AbortSignal) => Promise<T>,
-): Promise<T> {
-  const controller = new AbortController();
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(new Error(timeoutMessage));
-    }, timeoutMs);
-    timer.unref();
-  });
-  try {
-    return await Promise.race([operation(controller.signal), deadline]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 async function pumpOpenCodeEvents(
   stream: AsyncGenerator<Event>,
   sessionId: string,
@@ -668,6 +610,11 @@ function openCodeRunDeadlines(
       options.eventInactivityDeadlineMs,
       EVENT_INACTIVITY_DEADLINE_MS,
       "eventInactivityDeadlineMs",
+    ),
+    initializationTimeoutMs: shortenedDeadline(
+      options.initializationTimeoutMs,
+      INITIALIZATION_TIMEOUT_MS,
+      "initializationTimeoutMs",
     ),
   };
 }

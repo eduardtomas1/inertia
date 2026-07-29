@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto";
 
-import { boundedText, objectValue, type JsonObject } from "./protocol";
+import { objectValue, type JsonObject } from "./protocol";
 import type { AgentInputQuestion, AgentInputRequest } from "../provider/interactions";
 
 const MAX_INPUT_QUESTIONS = 3;
 const MAX_INPUT_OPTIONS = 3;
+const MAX_QUESTION_ID_CHARS = 120;
+const MAX_QUESTION_HEADER_CHARS = 120;
+const MAX_QUESTION_TEXT_CHARS = 1_000;
+const MAX_OPTION_ID_CHARS = 160;
+const MAX_OPTION_LABEL_CHARS = 160;
+const MAX_OPTION_DESCRIPTION_CHARS = 500;
+const MAX_AUTO_RESOLUTION_MS = 24 * 60 * 60 * 1_000;
 const CODEX_INPUT_REQUEST_METHOD = "item/tool/requestUserInput";
 
 export function isCodexInputRequestMethod(method: string): boolean {
@@ -13,31 +20,58 @@ export function isCodexInputRequestMethod(method: string): boolean {
 
 export function parseCodexInputRequest(method: string, params: JsonObject): AgentInputRequest | undefined {
   if (!isCodexInputRequestMethod(method) || !Array.isArray(params.questions)) return undefined;
-  if (params.questions.length > MAX_INPUT_QUESTIONS) return undefined;
+  if (
+    params.questions.length === 0
+    || params.questions.length > MAX_INPUT_QUESTIONS
+  ) return undefined;
   const questions: AgentInputQuestion[] = [];
+  const questionIds = new Set<string>();
   for (const value of params.questions) {
     const question = objectValue(value);
-    if (!question) continue;
-    const id = boundedText(question.id, 120);
-    const prompt = boundedText(question.question, 1_000);
-    if (!id || !prompt) continue;
+    if (!question) return undefined;
+    const id = strictText(question.id, MAX_QUESTION_ID_CHARS);
+    const prompt = strictText(question.question, MAX_QUESTION_TEXT_CHARS);
+    if (!id || !prompt || questionIds.has(id)) return undefined;
+    questionIds.add(id);
+    const header = question.header === undefined
+      ? "Question"
+      : strictText(question.header, MAX_QUESTION_HEADER_CHARS);
+    if (!header) return undefined;
+    if (
+      !optionalBoolean(question.isOther)
+      || !optionalBoolean(question.isSecret)
+      || !optionalBoolean(question.allowMultiple)
+    ) return undefined;
     const options: AgentInputQuestion["options"] = [];
-    if (Array.isArray(question.options)) {
+    const optionIds = new Set<string>();
+    if (question.options !== undefined) {
+      if (!Array.isArray(question.options)) return undefined;
       if (question.options.length > MAX_INPUT_OPTIONS) return undefined;
       for (const rawOption of question.options) {
         const option = objectValue(rawOption);
-        const label = boundedText(option?.label, 160);
-        if (!label) continue;
+        if (!option) return undefined;
+        const label = strictText(option.label, MAX_OPTION_LABEL_CHARS);
+        if (!label) return undefined;
+        const optionId = option.id === undefined
+          ? label
+          : strictText(option.id, MAX_OPTION_ID_CHARS);
+        const description = option.description === undefined
+          ? ""
+          : strictText(option.description, MAX_OPTION_DESCRIPTION_CHARS, true);
+        if (!optionId || description === undefined || optionIds.has(optionId)) {
+          return undefined;
+        }
+        optionIds.add(optionId);
         options.push({
-          id: boundedText(option?.id, 160) ?? label,
+          id: optionId,
           label,
-          description: boundedText(option?.description, 500) ?? "",
+          description,
         });
       }
     }
     questions.push({
       id,
-      header: boundedText(question.header, 120) ?? "Question",
+      header,
       question: prompt,
       isOther: question.isOther === true,
       isSecret: question.isSecret === true,
@@ -45,11 +79,35 @@ export function parseCodexInputRequest(method: string, params: JsonObject): Agen
       options,
     });
   }
-  if (questions.length === 0) return undefined;
-  const autoResolutionMs = typeof params.autoResolutionMs === "number" && Number.isFinite(params.autoResolutionMs)
-    ? Math.max(0, Math.min(Math.trunc(params.autoResolutionMs), 24 * 60 * 60 * 1_000))
+  const rawAutoResolutionMs = params.autoResolutionMs;
+  if (
+    rawAutoResolutionMs !== undefined
+    && rawAutoResolutionMs !== null
+    && (
+      !Number.isSafeInteger(rawAutoResolutionMs)
+      || (rawAutoResolutionMs as number) < 0
+      || (rawAutoResolutionMs as number) > MAX_AUTO_RESOLUTION_MS
+    )
+  ) return undefined;
+  const autoResolutionMs = typeof rawAutoResolutionMs === "number"
+    ? rawAutoResolutionMs
     : null;
   return { requestId: randomUUID(), questions, autoResolutionMs };
+}
+
+function strictText(
+  value: unknown,
+  maxChars: number,
+  allowEmpty = false,
+): string | undefined {
+  if (typeof value !== "string" || value.includes("\0")) return undefined;
+  const text = value.trim();
+  if ((!allowEmpty && !text) || text.length > maxChars) return undefined;
+  return text;
+}
+
+function optionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === "boolean";
 }
 
 export function codexInputAnswers(

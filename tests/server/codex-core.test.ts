@@ -260,6 +260,27 @@ describe("Codex protocol seams", () => {
     expect(parseCodexInputRequest("item/tool/requestUserInput", {
       questions: [question(1, 4)],
     })).toBeUndefined();
+    expect(parseCodexInputRequest("item/tool/requestUserInput", {
+      questions: [question(1), null],
+    })).toBeUndefined();
+    expect(parseCodexInputRequest("item/tool/requestUserInput", {
+      questions: [question(1), { ...question(2), id: "question-1" }],
+    })).toBeUndefined();
+    expect(parseCodexInputRequest("item/tool/requestUserInput", {
+      questions: [{
+        ...question(1),
+        question: "x".repeat(1_001),
+      }],
+    })).toBeUndefined();
+    expect(parseCodexInputRequest("item/tool/requestUserInput", {
+      questions: [{
+        ...question(1),
+        options: [
+          { id: "same", label: "One" },
+          { id: "same", label: "Two" },
+        ],
+      }],
+    })).toBeUndefined();
   });
 
   it("keeps plan, reasoning, and usage projections independently testable", () => {

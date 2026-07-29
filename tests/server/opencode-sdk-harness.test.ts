@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -170,6 +170,35 @@ const server = http.createServer((req, res) => {
     return json(res, { healthy: true, version: "1.18.4" });
   }
   if (url.pathname === "/provider") return;
+  res.writeHead(404);
+  res.end();
+});
+server.listen(port, "127.0.0.1", () => {
+  const address = server.address();
+  port = typeof address === "object" && address ? address.port : 0;
+  save();
+  console.log("opencode server listening on http://127.0.0.1:" + port);
+});
+`;
+}
+
+function stalledRunInitializationServerSource(capturePath: string): string {
+  return `
+const http = require("node:http");
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+let port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
+const captured = [];
+const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, "http://127.0.0.1");
+  captured.push(url.pathname);
+  save();
+  if (url.pathname === "/global/health") {
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ healthy: true, version: "1.18.4" }));
+  }
+  if (url.pathname === "/provider" || url.pathname === "/agent") return;
   res.writeHead(404);
   res.end();
 });
@@ -384,6 +413,84 @@ server.listen(port, "127.0.0.1", () => {
     expect(capture.captured).toEqual(expect.arrayContaining(expectedPaths));
     await waitFor(
       `the stalled OpenCode metadata ${stage} server to close`,
+      async () => !(await loopbackPortIsOpen(capture.port)),
+    );
+  });
+
+  it("cancels and kills the owned process while startup readiness is pending", async () => {
+    const root = portableFixtureRoot("OpenCode cancelled startup");
+    roots.push(root);
+    const markerPath = join(root, "startup-marker.txt");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", `
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(markerPath)}, "started");
+setTimeout(() => fs.appendFileSync(${JSON.stringify(markerPath)}, ":still-running"), 500);
+setTimeout(() => console.log("opencode server listening on http://127.0.0.1:65530"), 5_000);
+`);
+    const manager = new ProviderManager(
+      { commands: { opencode: command }, cancelGraceMs: 100 },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-cancelled-startup",
+      cwd: root,
+      prompt: "Cancel before startup",
+      interactionMode: "build",
+      access: "supervised",
+    }));
+
+    await waitFor("the delayed OpenCode process to start", () => existsSync(markerPath));
+    const cancelledAt = Date.now();
+    expect(manager.cancel("opencode-cancelled-startup")).toBe(true);
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    expect(Date.now() - cancelledAt).toBeLessThan(2_000);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(readFileSync(markerPath, "utf8")).toBe("started");
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("bounds provider and session initialization before prompting", async () => {
+    const root = portableFixtureRoot("OpenCode stalled initialization");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      stalledRunInitializationServerSource(capturePath),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        initializationTimeoutMs: 100,
+      })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-stalled-initialization",
+      cwd: root,
+      prompt: "Do not prompt",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("provider and agent discovery"),
+    });
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      port: number;
+      captured: string[];
+    };
+    expect(capture.captured).toEqual(expect.arrayContaining([
+      "/global/health",
+      "/provider",
+      "/agent",
+    ]));
+    expect(capture.captured.some((path) => path.includes("/session"))).toBe(false);
+    await waitFor(
+      "the stalled initialization server to close",
       async () => !(await loopbackPortIsOpen(capture.port)),
     );
   });

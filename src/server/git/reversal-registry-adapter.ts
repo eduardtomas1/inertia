@@ -26,6 +26,7 @@ import {
   fileStateMatches,
   hashObject,
 } from "./reversal-files";
+import { withReversalRepositoryLock } from "./reversal-lock";
 import { runGit } from "./runner";
 import { GitError } from "./types";
 
@@ -295,6 +296,14 @@ export async function cleanupReversalOperations(
   secureFiles: RuntimeSecureFileBroker,
 ): Promise<void> {
   const root = await repositoryRoot(repositoryPath);
+  await withReversalRepositoryLock(root, () =>
+    cleanupReversalOperationsLocked(root, secureFiles));
+}
+
+async function cleanupReversalOperationsLocked(
+  root: string,
+  secureFiles: RuntimeSecureFileBroker,
+): Promise<void> {
   const secureRoot = await secureFiles.authorizeRoot(root);
   const controller = await reversalController(root);
   await maintainReversalOperations(

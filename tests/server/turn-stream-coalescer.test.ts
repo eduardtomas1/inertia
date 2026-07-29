@@ -21,13 +21,16 @@ import type {
 } from "../../src/server/provider/contracts";
 import {
   TurnController,
+  type TurnControllerHooks,
   type TurnProviderRuntime,
   type TurnTimerScheduler,
 } from "../../src/server/runtime/turns/turn-controller";
+import { RuntimeSyncHub } from "../../src/server/runtime/runtime-sync-hub";
 import {
   TurnStreamCoalescer,
   type StreamDeltaFlush,
 } from "../../src/server/runtime/turns/turn-stream-coalescer";
+import { TurnStreamChannel } from "../../src/server/runtime/turns/turn-stream-channel";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
 const directories: string[] = [];
@@ -56,6 +59,40 @@ class ManualScheduler implements TurnTimerScheduler {
 
   shortTimerCount(): number {
     return [...this.timers.values()].filter(({ delayMs }) => delayMs < 1_000).length;
+  }
+}
+
+class ClockScheduler implements TurnTimerScheduler {
+  private sequence = 0;
+  private now = 0;
+  private readonly timers = new Map<
+    number,
+    { callback: () => void; dueAt: number }
+  >();
+
+  setTimeout(callback: () => void, delayMs: number): number {
+    const id = ++this.sequence;
+    this.timers.set(id, { callback, dueAt: this.now + delayMs });
+    return id;
+  }
+
+  clearTimeout(handle: unknown): void {
+    this.timers.delete(handle as number);
+  }
+
+  advance(delayMs: number): void {
+    const target = this.now + delayMs;
+    while (true) {
+      const next = [...this.timers.entries()]
+        .filter(([, timer]) => timer.dueAt <= target)
+        .sort((left, right) =>
+          left[1].dueAt - right[1].dueAt || left[0] - right[0])[0];
+      if (!next) break;
+      this.timers.delete(next[0]);
+      this.now = next[1].dueAt;
+      next[1].callback();
+    }
+    this.now = target;
   }
 }
 
@@ -123,6 +160,8 @@ class ControlledProvider implements TurnProviderRuntime {
 
 interface ControllerRuntime {
   store: RuntimeStore;
+  databasePath: string;
+  workspacePath: string;
   provider: ControlledProvider;
   scheduler: ManualScheduler;
   controller: TurnController;
@@ -163,13 +202,19 @@ function providerInfo(): ProviderInfo {
   };
 }
 
-async function controllerRuntime(): Promise<ControllerRuntime> {
+async function controllerRuntime(
+  hookOverrides: Partial<Pick<
+    TurnControllerHooks,
+    "broadcast" | "broadcastSnapshot"
+  >> = {},
+): Promise<ControllerRuntime> {
   const directory = await mkdtemp(join(tmpdir(), "inertia-stream-coalescer-"));
   directories.push(directory);
   const workspace = join(directory, "workspace");
   await mkdir(workspace);
+  const databasePath = join(directory, "inertia.sqlite");
   const store = new RuntimeStore(
-    join(directory, "inertia.sqlite"),
+    databasePath,
     workspace,
     { recoverInterruptedRuns: false },
   );
@@ -188,8 +233,8 @@ async function controllerRuntime(): Promise<ControllerRuntime> {
     new Map<string, AgentInputRequest>(),
     new Map<string, AgentPlan>(),
     {
-      broadcast: (event) => events.push(event),
-      broadcastSnapshot: () => undefined,
+      broadcast: hookOverrides.broadcast ?? ((event) => events.push(event)),
+      broadcastSnapshot: hookOverrides.broadcastSnapshot ?? (() => undefined),
       providerInfo: () => [providerInfo()],
     },
     {
@@ -207,6 +252,8 @@ async function controllerRuntime(): Promise<ControllerRuntime> {
   );
   return {
     store,
+    databasePath,
+    workspacePath: workspace,
     provider,
     scheduler,
     controller,
@@ -329,7 +376,305 @@ describe("TurnStreamCoalescer", () => {
   });
 });
 
+describe("TurnStreamChannel performance cadence", () => {
+  it("reduces rewrites for a time-distributed stream without adding visible lag", () => {
+    const oldScheduler = new ClockScheduler();
+    const oldFlushes: string[] = [];
+    const oldChannel = new TurnStreamCoalescer({
+      scheduler: oldScheduler,
+      onFlush: ({ delta }) => oldFlushes.push(delta),
+      onTimerError: (error) => {
+        throw error;
+      },
+    });
+    const nextScheduler = new ClockScheduler();
+    const projected: string[] = [];
+    const persisted: string[] = [];
+    const nextChannel = new TurnStreamChannel({
+      scheduler: nextScheduler,
+      onProjectionFlush: ({ delta }) => projected.push(delta),
+      onPersistenceFlush: ({ delta }) => persisted.push(delta),
+      onTimerError: (error) => {
+        throw error;
+      },
+    });
+    const chunk = "0123456789".repeat(10);
+
+    for (let index = 0; index < 100; index += 1) {
+      oldChannel.append(chunk);
+      nextChannel.append(chunk);
+      oldScheduler.advance(10);
+      nextScheduler.advance(10);
+    }
+    oldChannel.flush();
+    nextChannel.flush();
+
+    expect(projected.join("")).toBe(chunk.repeat(100));
+    expect(persisted).toEqual(projected);
+    expect(projected.length).toBeLessThan(oldFlushes.length);
+    expect(projected).toHaveLength(6);
+    expect(oldFlushes).toHaveLength(11);
+  });
+
+  it("keeps projection responsive while reducing sustained persistence rewrites", () => {
+    const scheduler = new ManualScheduler();
+    const projected: string[] = [];
+    const persisted: string[] = [];
+    const channel = new TurnStreamChannel({
+      scheduler,
+      onProjectionFlush: ({ delta }) => projected.push(delta),
+      onPersistenceFlush: ({ delta }) => persisted.push(delta),
+      onTimerError: (error) => {
+        throw error;
+      },
+    });
+
+    for (let index = 0; index < 100_000; index += 1) channel.append("x");
+    channel.flush();
+
+    expect(projected.join("")).toBe("x".repeat(100_000));
+    expect(persisted.join("")).toBe("x".repeat(100_000));
+    expect(projected).toHaveLength(7);
+    expect(persisted).toHaveLength(7);
+    expect(persisted.length).toBeLessThan(
+      Math.ceil(100_000 / 1_024) / 10,
+    );
+    expect(scheduler.timers).toHaveLength(0);
+  });
+
+  it("flushes durable state before every live and terminal projection", () => {
+    const scheduler = new ManualScheduler();
+    const order: string[] = [];
+    const channel = new TurnStreamChannel({
+      scheduler,
+      onProjectionFlush: () => order.push("projected"),
+      onPersistenceFlush: () => order.push("persisted"),
+      onTimerError: (error) => {
+        throw error;
+      },
+    });
+
+    channel.append("terminal");
+    scheduler.runThrough(24);
+
+    expect(order).toEqual(["persisted", "projected"]);
+    channel.append(" suffix");
+    channel.flush();
+    expect(order).toEqual([
+      "persisted",
+      "projected",
+      "persisted",
+      "projected",
+    ]);
+  });
+
+  it("does not publish a suffix when its durable flush fails", () => {
+    const scheduler = new ManualScheduler();
+    const projected: string[] = [];
+    const channel = new TurnStreamChannel({
+      scheduler,
+      onProjectionFlush: ({ delta }) => projected.push(delta),
+      onPersistenceFlush: () => {
+        throw new Error("disk unavailable");
+      },
+      onTimerError: () => undefined,
+    });
+
+    channel.append("not visible yet");
+    scheduler.runThrough(24);
+
+    expect(projected).toEqual([]);
+    expect(channel.hasPending).toBe(true);
+  });
+});
+
 describe("TurnController coalesced streaming", () => {
+  it("reopens every suffix that was visible before an abrupt runtime loss", async () => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Persist before projecting.",
+    });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({
+      ...providerIdentity(runtime),
+      type: "text",
+      text: "This visible prefix must survive.",
+    });
+    runtime.scheduler.runThrough(24);
+    expect(runtime.events).toContainEqual(expect.objectContaining({
+      type: "agent.text",
+      text: "This visible prefix must survive.",
+    }));
+
+    // Deliberately bypass TurnController.dispose(): this models a utility
+    // process disappearing after projection rather than a graceful shutdown.
+    runtime.store.close();
+    const reopened = new RuntimeStore(
+      runtime.databasePath,
+      runtime.workspacePath,
+      { recoverInterruptedRuns: false },
+    );
+    expect(reopened.conversationDetail(runtime.conversationId)?.messages)
+      .toContainEqual(expect.objectContaining({
+        turnId: queued.turn.id,
+        content: "This visible prefix must survive.",
+      }));
+    reopened.close();
+  });
+
+  it("hydrates an already projected live suffix exactly once for each renderer", async () => {
+    const deliveries = new Map<string, ServerEvent[]>();
+    const hub = new RuntimeSyncHub<string>((socket, event) => {
+      const events = deliveries.get(socket) ?? [];
+      events.push(event);
+      deliveries.set(socket, events);
+    });
+    let runtime!: ControllerRuntime;
+    runtime = await controllerRuntime({
+      broadcast: (event) => hub.broadcast(event),
+      broadcastSnapshot: () => hub.broadcastSnapshot((sync) => ({
+        ...runtime.store.shellSnapshot([providerInfo()]),
+        sync,
+      })),
+    });
+    const hydration = () => ({
+      beforeFreshSnapshot: () =>
+        runtime.controller.flushActiveStreamsForHydration(),
+      snapshot: (sync: ReturnType<typeof hub.cursor>) => ({
+        ...runtime.store.shellSnapshot([providerInfo()]),
+        sync,
+      }),
+      approvals: [],
+      inputs: [],
+      plans: [],
+    });
+
+    hub.connect("existing", { kind: "none" }, hydration());
+    hub.setConversationSubscription(
+      "existing",
+      "primary",
+      runtime.conversationId,
+    );
+    deliveries.set("existing", []);
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Reconnect during live projection.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+    runtime.provider.emit({
+      ...identity,
+      type: "text",
+      text: "Durable before visible.",
+    });
+    runtime.provider.emit({
+      ...identity,
+      type: "reasoning-summary",
+      text: "Reasoning is durable too.",
+    });
+    runtime.scheduler.runThrough(24);
+
+    const existingLive = deliveries.get("existing")?.filter(
+      (event) => event.type === "runtime.event"
+        && (
+          event.event.type === "agent.text"
+          || event.event.type === "agent.reasoning"
+        ),
+    ) ?? [];
+    expect(existingLive).toHaveLength(2);
+    expect(existingLive.map((frame) =>
+      frame.type === "runtime.event" ? frame.event.type : null,
+    )).toEqual(["agent.text", "agent.reasoning"]);
+
+    hub.connect("fresh", { kind: "none" }, hydration());
+    expect(deliveries.get("fresh")?.some(
+      (event) => event.type === "server.welcome",
+    )).toBe(true);
+    const freshDetail = runtime.store.conversationDetail(
+      runtime.conversationId,
+    );
+    expect(freshDetail?.messages).toContainEqual(
+      expect.objectContaining({
+        turnId: queued.turn.id,
+        content: "Durable before visible.",
+      }),
+    );
+    expect(freshDetail?.reasonings).toContainEqual(
+      expect.objectContaining({
+        turnId: queued.turn.id,
+        content: "Reasoning is durable too.",
+      }),
+    );
+    expect(deliveries.get("existing")?.filter(
+      (event) => event.type === "runtime.event"
+        && (
+          event.event.type === "agent.text"
+          || event.event.type === "agent.reasoning"
+        ),
+    )).toHaveLength(2);
+
+    hub.setConversationSubscription(
+      "fresh",
+      "primary",
+      runtime.conversationId,
+    );
+    runtime.provider.emit({ ...identity, type: "text", text: " Next." });
+    runtime.scheduler.runThrough(240);
+    for (const socket of ["existing", "fresh"]) {
+      const suffixes = deliveries.get(socket)?.filter(
+        (event): event is Extract<ServerEvent, { type: "runtime.event" }> =>
+          event.type === "runtime.event"
+          && event.event.type === "agent.text"
+          && event.event.text === " Next.",
+      ) ?? [];
+      expect(suffixes).toHaveLength(1);
+    }
+
+    runtime.controller.cancel(runtime.conversationId);
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("flushes live durable state before a fresh renderer hydration", async () => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Reconnect while this answer is streaming.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+
+    runtime.provider.emit({
+      ...identity,
+      type: "text",
+      text: "Visible before the reconnect.",
+    });
+    runtime.scheduler.runThrough(24);
+    expect(runtime.events).toContainEqual(expect.objectContaining({
+      type: "agent.text",
+      text: "Visible before the reconnect.",
+    }));
+    expect(runtime.store.snapshot().messages).toContainEqual(
+      expect.objectContaining({
+        turnId: queued.turn.id,
+        content: "Visible before the reconnect.",
+      }),
+    );
+
+    runtime.controller.flushActiveStreamsForHydration();
+
+    expect(runtime.store.snapshot().messages).toContainEqual(
+      expect.objectContaining({
+        turnId: queued.turn.id,
+        content: "Visible before the reconnect.",
+      }),
+    );
+    runtime.controller.cancel(runtime.conversationId);
+    await flushPromises();
+    runtime.store.close();
+  });
+
   it("persists assistant prose on both sides of provider work as separate ordered messages", async () => {
     const runtime = await controllerRuntime();
     const queued = runtime.controller.queue({
@@ -732,7 +1077,7 @@ describe("TurnController coalesced streaming", () => {
     });
 
     runtime.provider.emit({ ...identity, type: "text", text: "uncommitted text" });
-    expect(() => runtime.scheduler.runThrough(24)).not.toThrow();
+    expect(() => runtime.scheduler.runThrough(120)).not.toThrow();
     await flushPromises();
 
     expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({

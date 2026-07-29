@@ -7925,6 +7925,12 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   text-wrap: pretty;
 }
 
+.turn-commentary-row .response-markdown.is-plain-stream > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .turn-commentary-row.is-streaming {
   padding-bottom: 3px;
 }

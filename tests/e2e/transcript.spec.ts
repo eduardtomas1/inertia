@@ -43,6 +43,11 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
   const previousConversationId = snapshot.activeConversationId;
   const originalTheme = snapshot.settings.theme;
   const conversation = store.createConversation(snapshot.activeProjectId, "Long transcript fixture");
+  const weightedConversation = store.createConversation(
+    snapshot.activeProjectId,
+    "Weighted transcript fixture",
+    { activate: false },
+  );
   const fixturePrefix = `virtual-e2e-${randomUUID()}`;
   const baseTime = Date.now() - 180_000;
   for (let index = 0; index < 120; index += 1) {
@@ -121,9 +126,95 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       updatedAt: completedAt,
     });
   }
+  const weightedDetail = `weighted-detail-${"x".repeat(2_762)}`;
+  for (let index = 0; index < 36; index += 1) {
+    const requestedAt = new Date(baseTime + index * 1_000).toISOString();
+    const completedAt = new Date(baseTime + index * 1_000 + 500).toISOString();
+    const id = `${fixturePrefix}-weighted-${String(index).padStart(2, "0")}`;
+    const { turn } = store.beginAgentTurn({
+      id,
+      conversationId: weightedConversation.id,
+      runId: `${fixturePrefix}-weighted-run-${index}`,
+      content: `Weighted request ${index}`,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server",
+      model: "gpt-5.6",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 1,
+      association: "authoritative",
+      requestedAt,
+    });
+    const commentaryCount = index < 29 ? 3 : 2;
+    for (let commentary = 0; commentary < commentaryCount; commentary += 1) {
+      store.createMessage(
+        weightedConversation.id,
+        `Commentary ${index}.${commentary}`,
+        "assistant",
+        [],
+        turn.id,
+        completedAt,
+      );
+    }
+    for (let activity = 0; activity < 34; activity += 1) {
+      store.addActivity({
+        conversationId: weightedConversation.id,
+        runId: turn.runId,
+        turnId: turn.id,
+        kind: "command",
+        title: `Weighted command ${index}.${activity}`,
+        detail: activity === 0 && index === 0
+          ? `CLOSED_WEIGHTED_SENTINEL\n${weightedDetail}`
+          : weightedDetail,
+        status: "completed",
+      });
+    }
+    const answer = store.createMessage(
+      weightedConversation.id,
+      `Weighted answer ${index}`,
+      "assistant",
+      [],
+      null,
+      completedAt,
+    );
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "completed",
+      startedAt: requestedAt,
+      completedAt,
+      updatedAt: completedAt,
+      terminalAssistantMessageId: answer.id,
+      terminalReason: "provider-completed",
+    });
+  }
+  store.selectConversation(weightedConversation.id);
   store.close();
 
   try {
+    await page.reload();
+    await expect(page.getByRole("heading", {
+      name: "Weighted transcript fixture",
+      level: 1,
+    })).toBeVisible();
+    const weightedTranscript = page.getByLabel("Thread transcript");
+    const weightedVirtualWindow = weightedTranscript.getByRole("feed", {
+      name: "36 conversation turns",
+    });
+    await expect(weightedVirtualWindow).toBeVisible();
+    await expect.poll(
+      () => weightedVirtualWindow.locator(".response-virtual-item").count(),
+    ).toBeLessThan(24);
+    expect(await page.locator("body").textContent())
+      .not.toContain("CLOSED_WEIGHTED_SENTINEL");
+
+    const selectLong = new RuntimeStore(
+      databasePath,
+      workspaceDirectory,
+      { recoverInterruptedRuns: false },
+    );
+    selectLong.selectConversation(conversation.id);
+    selectLong.close();
     await page.reload();
     await expect(page.getByRole("heading", { name: "Long transcript fixture", level: 1 })).toBeVisible();
     const navigation = page.getByRole("complementary", { name: "Project navigation", exact: true });
@@ -454,6 +545,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     cleanup.updateSettings({ theme: originalTheme });
     cleanup.selectConversation(previousConversationId);
     cleanup.deleteConversation(conversation.id);
+    cleanup.deleteConversation(weightedConversation.id);
     cleanup.close();
     await page.emulateMedia({ colorScheme: "no-preference" });
     await page.reload();

@@ -199,10 +199,10 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     });
     const codeCaret = await streamingMarkdown.evaluate((element) => {
       const last = element.lastElementChild;
-      const code = last?.querySelector("pre code") ?? null;
-      const caret = code ? getComputedStyle(code, "::after") : null;
+      const caret = last ? getComputedStyle(last, "::after") : null;
       return {
-        lastClass: last?.className ?? null,
+        lastTag: last?.tagName ?? null,
+        literalText: last?.textContent ?? null,
         caretContent: caret?.content ?? null,
         duplicateCaret: element.parentElement?.querySelector(
           ":scope > .streaming-caret",
@@ -210,7 +210,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       };
     });
     expect(codeCaret).toEqual({
-      lastClass: "response-code-block",
+      lastTag: "P",
+      literalText: "```ts\nconst verified = true;\n```",
       caretContent: '""',
       duplicateCaret: false,
     });

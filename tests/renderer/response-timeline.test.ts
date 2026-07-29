@@ -359,10 +359,8 @@ describe("authoritative response timeline", () => {
     expect(html).toContain("reference.png");
     expect(html).toContain("Run details");
     expect(html).toContain("Terminal answer stays visible");
-    expect(html).toContain("Working note");
-    expect(html).toContain("<dt>Harness ID</dt><dd><code>codex-app-server</code>");
-    expect(html).toContain("<dt>Backend profile ID</dt><dd><code>native:codex:app-server</code>");
-    expect(html).toContain("<dt>Exact model ID</dt><dd><code>gpt-5.6</code>");
+    expect(html).not.toContain("Working note");
+    expect(html).not.toContain("<dt>Harness ID</dt>");
     expect(html).toContain("Changed by this turn");
     expect(html).toContain("Open exact turn diff");
     expect(html).toContain("src/history.ts");
@@ -372,7 +370,6 @@ describe("authoritative response timeline", () => {
       .toBeGreaterThan(html.indexOf('data-turn-layer="agent-execution"'));
     expect(html.indexOf('data-turn-layer="supporting-ledger"'))
       .toBeGreaterThan(html.indexOf('data-turn-layer="final-answer"'));
-    expect(html.indexOf("Terminal answer stays visible")).toBeLessThan(html.indexOf("Working note"));
   });
 
   it("keeps active commentary in the execution stream and reserves the answer document for persistence", () => {
@@ -532,8 +529,8 @@ describe("authoritative response timeline", () => {
     const details = html.slice(detailsStart, detailsEnd);
     expect(html).toContain('aria-expanded="false"');
     expect(details).not.toContain("Provider heartbeat");
-    expect(details).toContain("Private working summary");
-    expect(details).toContain("Keep the live surface quiet");
+    expect(details).not.toContain("Private working summary");
+    expect(details).not.toContain("Keep the live surface quiet");
     expect(details).not.toContain("Checking the existing presentation.");
 
     const failedIndex = html.indexOf("Build failed");
@@ -937,20 +934,7 @@ describe("authoritative response timeline", () => {
     expect(runDetails).toContain(
       'id="turn-run-details-turn-footer" aria-labelledby="turn-run-details-turn-footer-label" hidden=""',
     );
-    expect(runDetails).toContain("<dt>Harness ID</dt><dd><code>vendor-harness-v2</code>");
-    expect(runDetails).toContain("<dt>Backend profile ID</dt><dd><code>custom:acme</code>");
-    expect(runDetails).toContain("<dt>Exact model ID</dt><dd><code>acme/code-pro</code>");
-    expect(runDetails).toContain("<dt>Requested alias</dt><dd><code>Code Pro</code>");
-    expect(runDetails).toContain("<dt>Reasoning level</dt><dd><code>medium</code>");
-    expect(runDetails).toContain("<dt>Interaction mode</dt><dd><code>build</code>");
-    expect(runDetails).toContain("<dt>Access mode</dt><dd><code>auto-edit</code>");
-    expect(runDetails).toContain("<dt>Queue duration</dt><dd>5s</dd>");
-    expect(runDetails).toContain("<dt>Execution duration</dt><dd>7s</dd>");
-    expect(runDetails).toContain("<dt>Historical association</dt><dd>Authoritative</dd>");
-    expect(runDetails).toContain(
-      "<dt>Session continuation</dt><dd>Resumed existing session</dd>",
-    );
-    expect(runDetails).toContain("<dt>Artifact completeness</dt><dd>Partial</dd>");
+    expect(runDetails).not.toContain("<dt>");
     expect(html).not.toContain("provider-session-before-secret");
     expect(html).not.toContain("provider-session-after-secret");
     expect(html).not.toContain("legacy-harness-projection");

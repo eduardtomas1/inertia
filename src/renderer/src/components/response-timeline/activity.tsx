@@ -121,6 +121,7 @@ export const ActivityRow = memo(function ActivityRow({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
+  const [detailExpanded, setDetailExpanded] = useState(false);
   const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
   const interrupted = isInterruptedActivity(activity);
   const attentionSeverity = activityAttentionSeverity(activity);
@@ -210,7 +211,11 @@ export const ActivityRow = memo(function ActivityRow({
         )}
       </span>
       {showDisclosure && (
-        <details className="agent-activity-technical">
+        <details
+          className="agent-activity-technical"
+          open={detailExpanded}
+          onToggle={(event) => setDetailExpanded(event.currentTarget.open)}
+        >
           <summary {...anchorToggleHandlers}>
             <span>
               {activity.kind === "error" || interrupted
@@ -221,7 +226,7 @@ export const ActivityRow = memo(function ActivityRow({
             </span>
             <ChevronDown size={11} aria-hidden="true" />
           </summary>
-          <pre>{detailPresentation.full}</pre>
+          {detailExpanded && <pre>{detailPresentation.full}</pre>}
         </details>
       )}
     </div>
@@ -261,15 +266,25 @@ const CommentaryRow = memo(function CommentaryRow({
       aria-label={entry.streaming ? "Live agent update" : "Agent update"}
       data-assistant-commentary-id={entry.message?.id ?? entry.id}
     >
-      <ResponseMarkdown
-        content={entry.content}
-        projectRoot={projectRoot}
-        projectId={projectId}
-        conversationId={conversationId}
-        defaultCodeWrap={defaultCodeWrap}
-        streaming={entry.streaming}
-        onOpenProjectFile={onOpenProjectFile}
-      />
+      {entry.streaming
+        ? (
+            <div
+              className="response-markdown is-streaming is-plain-stream"
+              data-stream-renderer="plain-text"
+            >
+              <p>{entry.content}</p>
+            </div>
+          )
+        : (
+            <ResponseMarkdown
+              content={entry.content}
+              projectRoot={projectRoot}
+              projectId={projectId}
+              conversationId={conversationId}
+              defaultCodeWrap={defaultCodeWrap}
+              onOpenProjectFile={onOpenProjectFile}
+            />
+          )}
     </article>
   );
 });
@@ -608,15 +623,15 @@ export function WorkLog({
               <small>{supplementalCount}</small>
               <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
             </summary>
-            <div className="turn-work-details" id={detailsId}>
-              {includesReasoning && (
+            <div className="turn-work-details" id={detailsId} hidden={!expanded}>
+              {expanded && includesReasoning && (
                 <div className="turn-reasoning-detail">
                   <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
                   <p>{reasoningContent}<span className="streaming-caret" aria-hidden="true" /></p>
                 </div>
               )}
-              {turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
-              {supplementalActivities.map((activity) => (
+              {expanded && turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
+              {expanded && supplementalActivities.map((activity) => (
                 <ActivityRow activity={activity} visibility="details" key={activity.id} />
               ))}
             </div>
@@ -666,20 +681,23 @@ export function WorkLog({
             <small>{expanded ? "Hide details" : "Details"}</small>
             <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
           </summary>
-          <SettledWorkDetails
-            id={detailsId}
-            entries={stream}
-            turn={turn}
-            reasoningContent={reasoningContent}
-            includesReasoning={includesReasoning}
-            projectRoot={projectRoot}
-            projectId={projectId}
-            conversationId={conversationId}
-            defaultCodeWrap={defaultCodeWrap}
-            onOpenProjectFile={onOpenProjectFile}
-            onBeforeToggle={onBeforeToggle}
-            onAfterToggle={onAfterToggle}
-          />
+          <div id={detailsId} hidden={!expanded}>
+            {expanded && (
+              <SettledWorkDetails
+                entries={stream}
+                turn={turn}
+                reasoningContent={reasoningContent}
+                includesReasoning={includesReasoning}
+                projectRoot={projectRoot}
+                projectId={projectId}
+                conversationId={conversationId}
+                defaultCodeWrap={defaultCodeWrap}
+                onOpenProjectFile={onOpenProjectFile}
+                onBeforeToggle={onBeforeToggle}
+                onAfterToggle={onAfterToggle}
+              />
+            )}
+          </div>
         </details>
       )}
       {!hasFoldableDetails && (

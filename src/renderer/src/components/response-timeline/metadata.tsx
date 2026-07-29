@@ -259,18 +259,18 @@ export function TurnMetadata({
         aria-labelledby={detailsLabelId}
         hidden={!detailsExpanded}
       >
-        {presentation.details.map((detail) => (
-          <div key={detail.label}>
-            <dt>{detail.label}</dt>
-            <dd>{detail.technical ? <code>{detail.value}</code> : detail.value}</dd>
-          </div>
+        {detailsExpanded && presentation.details.map((detail) => (
+            <div key={detail.label}>
+              <dt>{detail.label}</dt>
+              <dd>{detail.technical ? <code>{detail.value}</code> : detail.value}</dd>
+            </div>
         ))}
-        {settledWorkDetails && (
-          <div className="turn-run-work-details">
-            <dt>Execution transcript</dt>
-            <dd>{settledWorkDetails}</dd>
-          </div>
-        )}
+          {detailsExpanded && settledWorkDetails && (
+            <div className="turn-run-work-details">
+              <dt>Execution transcript</dt>
+              <dd>{settledWorkDetails}</dd>
+            </div>
+          )}
       </dl>
     </footer>
   );

@@ -147,7 +147,9 @@ export class TranscriptRepository {
   updateMessageContent(messageId: string, content: string): void {
     const message = this.context.database.prepare("SELECT conversation_id FROM messages WHERE id = ?").get(messageId) as { conversation_id: string } | undefined;
     if (!message) throw new RecordNotFoundError("Message not found.");
-    this.context.database.prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, messageId);
-    this.context.database.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), message.conversation_id);
+    this.context.database.transaction(() => {
+      this.context.database.prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, messageId);
+      this.context.database.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), message.conversation_id);
+    })();
   }
 }

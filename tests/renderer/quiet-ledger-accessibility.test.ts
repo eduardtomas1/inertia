@@ -245,7 +245,7 @@ describe("Quiet Ledger transcript accessibility", () => {
     expect(html).toContain('aria-controls="turn-run-details-turn-accessibility"');
     expect(html).toContain('aria-controls="turn-changed-files-details-artifact-accessibility"');
     expect(html).toContain('id="turn-changed-files-details-artifact-accessibility"');
-    expect(html).toContain('class="visually-hidden">Completed: </span>');
+    expect(html).not.toContain('class="visually-hidden">Completed: </span>');
 
     const styles = readFileSync(
       new URL("../../src/renderer/src/styles.css", import.meta.url),

@@ -17,6 +17,7 @@ import {
   buildResponseTimeline,
   buildTimelineMinimapMarkers,
   estimateTimelineRowSize,
+  estimateTimelineRenderWeight,
   resolveTimelineKeyboardIntent,
   shouldAdjustTimelineScrollPosition,
   shouldConsolidateSettledWorkIntoRunDetails,
@@ -323,7 +324,11 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     }
     return result;
   }, [timeline]);
-  const virtualized = shouldVirtualizeTimeline(timeline.length);
+  const renderWeight = useMemo(
+    () => estimateTimelineRenderWeight(timeline),
+    [timeline],
+  );
+  const virtualized = shouldVirtualizeTimeline(timeline.length, renderWeight);
   const estimateLayout = useTimelineEstimateLayout(
     props.timelineElementRef,
     props.conversationId,

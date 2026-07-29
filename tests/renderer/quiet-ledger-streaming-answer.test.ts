@@ -212,9 +212,10 @@ describe("Quiet Ledger streaming answer handoff", () => {
     expect(liveHtml).not.toContain("turn-final-answer-document");
     expect(liveHtml).toContain("turn-commentary-row is-streaming");
     expect(liveHtml).toContain('aria-label="Live agent update"');
-    expect(liveHtml).toContain("response-code-block");
+    expect(liveHtml).toContain('data-stream-renderer="plain-text"');
+    expect(liveHtml).not.toContain("response-code-block");
     expect(liveHtml).toContain("some &lt;unsafe&gt; code");
-    expect(liveHtml.match(/response-markdown is-streaming/gu)).toHaveLength(1);
+    expect(liveHtml.match(/response-markdown is-streaming is-plain-stream/gu)).toHaveLength(1);
     expect(liveHtml).not.toContain('class="streaming-caret"');
 
     expect(activeTerminalHtml).not.toContain("turn-final-answer-document");

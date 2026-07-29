@@ -74,12 +74,12 @@ describe("Minimal Workstream activity lines", () => {
     );
     expect(html).toContain("<details");
     expect(html).toContain("Full command output");
-    expect(html).toContain("<pre>npm test -- activity-lines</pre>");
+    expect(html).not.toContain("<pre>");
     expect(html).toContain("Working:");
     expect(html).toContain("lucide-circle-dot");
   });
 
-  it("limits huge output to three preview lines while preserving bounded full detail", () => {
+  it("limits huge output to three preview lines without mounting closed full detail", () => {
     const html = renderToStaticMarkup(createElement(ActivityRow, {
       activity: activity({
         detail: [
@@ -98,10 +98,11 @@ describe("Minimal Workstream activity lines", () => {
     expect(html).not.toContain(
       '<small class="agent-activity-detail-preview"><span class="visually-hidden">Technical output preview: </span>Command:\nnpm test\nOutput:\nfirst result',
     );
-    expect(html).toContain("first result");
-    expect(html).toContain("third result");
+    expect(html).not.toContain("first result");
+    expect(html).not.toContain("third result");
     expect(html).toContain("Full command output");
     expect(html).toContain("Technical output preview:");
+    expect(html).not.toContain("<pre>");
   });
 
   it("keeps completed work quiet while warning and error truth override a completed check", () => {

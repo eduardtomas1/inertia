@@ -16,6 +16,7 @@ import {
 } from "../runtime-sequencing";
 
 export interface RuntimeSyncHydration {
+  beforeFreshSnapshot?(): void;
   snapshot: (sync: RuntimeSyncCursor) => AppSnapshot;
   approvals: Iterable<AgentApprovalRequest>;
   inputs: Iterable<AgentInputRequest>;
@@ -75,6 +76,12 @@ export class RuntimeSyncHub<Socket> {
         )
       : null;
 
+    // Flush live state before owning a fresh socket. Existing clients receive
+    // any final transient suffix, while the new client receives that same
+    // suffix exactly once through its durable snapshot.
+    if (replay?.kind !== "replay") {
+      hydration.beforeFreshSnapshot?.();
+    }
     // Own the socket before the first frame is sent. A synchronous close or
     // response to server.welcome must observe an already registered client.
     this.clients.set(socket, subscription);

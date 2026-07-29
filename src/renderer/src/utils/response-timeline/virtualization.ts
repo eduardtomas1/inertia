@@ -25,11 +25,65 @@ import {
 } from "../userRequestPresentation";
 
 export const TIMELINE_VIRTUALIZATION_MIN_ROWS = 40;
+export const TIMELINE_VIRTUALIZATION_MIN_WEIGHT = 40;
 export const TIMELINE_MINIMAP_MIN_GUTTER = 48;
 export const TIMELINE_MINIMAP_MAX_MARKERS = 48;
 
-export function shouldVirtualizeTimeline(rowCount: number): boolean {
-  return Number.isFinite(rowCount) && rowCount >= TIMELINE_VIRTUALIZATION_MIN_ROWS;
+/**
+ * Row count alone misses short-but-expensive histories. A turn containing
+ * hundreds of activities or megabytes of bounded diagnostics can cost more to
+ * mount than dozens of ordinary answers, so the viewport also considers a
+ * cheap structural weight derived from already-projected data.
+ */
+export function estimateTimelineRenderWeight(
+  timeline: readonly ResponseTimelineItem[],
+): number {
+  let weight = 0;
+  for (const item of timeline) {
+    if (item.kind === "compatibility") {
+      const textChars = item.compatibility.messages.reduce(
+        (total, message) => total + message.content.length,
+        0,
+      );
+      const detailChars = item.compatibility.activities.reduce(
+        (total, activity) => total + (activity.detail?.length ?? 0),
+        0,
+      );
+      weight += 1
+        + item.compatibility.messages.length / 8
+        + item.compatibility.activities.length / 24
+        + textChars / 40_000
+        + detailChars / 50_000;
+      continue;
+    }
+    const turn = item.turn;
+    const messageChars = turn.assistantMessages.reduce(
+      (total, message) => total + message.content.length,
+      turn.userMessage.content.length,
+    );
+    const detailChars = turn.activities.reduce(
+      (total, activity) => total + (activity.detail?.length ?? 0),
+      0,
+    );
+    weight += 1
+      + turn.assistantMessages.length / 8
+      + turn.activities.length / 24
+      + messageChars / 40_000
+      + detailChars / 50_000;
+  }
+  return weight;
+}
+
+export function shouldVirtualizeTimeline(
+  rowCount: number,
+  renderWeight = rowCount,
+): boolean {
+  return Number.isFinite(rowCount)
+    && Number.isFinite(renderWeight)
+    && (
+      rowCount >= TIMELINE_VIRTUALIZATION_MIN_ROWS
+      || renderWeight >= TIMELINE_VIRTUALIZATION_MIN_WEIGHT
+    );
 }
 
 export function shouldShowTimelineMinimap(rowCount: number, sideGutter: number): boolean {

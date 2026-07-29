@@ -33,6 +33,7 @@ export {
 export {
   buildTimelineMinimapMarkers,
   estimateCompletedTurnSpacing,
+  estimateTimelineRenderWeight,
   estimateTimelineRowSize,
   resolveTimelineKeyboardIntent,
   shouldAdjustTimelineScrollPosition,
@@ -43,6 +44,7 @@ export {
   TIMELINE_MINIMAP_MAX_MARKERS,
   TIMELINE_MINIMAP_MIN_GUTTER,
   TIMELINE_VIRTUALIZATION_MIN_ROWS,
+  TIMELINE_VIRTUALIZATION_MIN_WEIGHT,
   type TimelineKeyboardIntent,
   type TimelineMinimapMarker,
   type TimelineRowEstimateOptions,

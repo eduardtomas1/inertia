@@ -165,6 +165,29 @@ export class TurnController {
     return [...this.activeByConversation.keys()];
   }
 
+  /**
+   * A fresh renderer cannot replay transient projection events. Persist the
+   * bounded live suffix and drain its projected delta before hydration so the
+   * new renderer receives each character exactly once through its snapshot.
+   */
+  flushActiveStreamsForHydration(): void {
+    for (const active of this.activeByConversation.values()) {
+      if (active.settled) continue;
+      try {
+        active.assistantStream.flush();
+        active.reasoningStream.flush();
+      } catch (error) {
+        this.providers.cancel(active.conversation.id);
+        this.settle(
+          active,
+          "failed",
+          "stream-persistence-failed",
+          this.publicError(error),
+        );
+      }
+    }
+  }
+
   queue(request: QueueTurnRequest): QueuedTurn {
     if (this.closing) throw new Error("The local runtime is shutting down.");
     if (this.activeByConversation.has(request.conversationId)) {

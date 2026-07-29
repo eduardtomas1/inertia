@@ -339,6 +339,9 @@ export function useDraftConversation({
 
   return {
     conversation: draft?.conversation ?? null,
+    requiresWorkspaceMaterialization: Boolean(
+      draft?.payload.useWorktree && !draft.payload.worktreePath,
+    ),
     start,
     importProject,
     clear,

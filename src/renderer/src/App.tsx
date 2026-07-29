@@ -57,6 +57,7 @@ import {
 } from "./lib/runtimeCommands";
 import { planFromText } from "./utils/planFromText";
 import { buildEnvironmentSummary } from "./utils/environmentSummary";
+import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
 import {
   finishLegacyWorkspaceStartupMigration,
   readLegacyWorkspaceStartup,
@@ -342,22 +343,6 @@ export default function App(): React.JSX.Element {
         );
       });
   }, []);
-  const workspaceTools = useStableController(
-    useWorkspaceTools({
-      project,
-      conversation,
-      detail: conversationDetail,
-      online: connection.status === "online",
-      ignoreWhitespace: settings.ignoreWhitespace,
-      confirmDestructiveActions: settings.confirmDestructiveActions,
-      refreshVersion: gitRefreshVersion,
-      request,
-      run,
-      setActionError,
-      setActiveTool: sceneSetActiveTool,
-      loadFilesOnMount: sceneActiveTool === "files",
-    }),
-  );
   const sendMessageToConversation = useCallback(async (
     targetConversationId: string,
     content: string,
@@ -429,6 +414,26 @@ export default function App(): React.JSX.Element {
   const updateConversation = draftConversation.updateConversation;
   const clearDraftConversation = draftConversation.clear;
   const discardDraftConversation = draftConversation.discard;
+  const workspaceToolsUnavailableReason = draftWorkspaceToolsUnavailableReason(draftConversation.requiresWorkspaceMaterialization);
+  const workspaceToolsUnavailable = Boolean(workspaceToolsUnavailableReason);
+  const workspaceTools = useStableController(
+    useWorkspaceTools({
+      enabled: !workspaceToolsUnavailable,
+      project,
+      conversation,
+      detail: conversationDetail,
+      online: connection.status === "online",
+      ignoreWhitespace: settings.ignoreWhitespace,
+      confirmDestructiveActions: settings.confirmDestructiveActions,
+      refreshVersion: gitRefreshVersion,
+      request,
+      run,
+      setActionError,
+      setActiveTool: sceneSetActiveTool,
+      loadFilesOnMount:
+        !workspaceToolsUnavailable && sceneActiveTool === "files",
+    }),
+  );
   const backendProfileActions = useStableController(
     useBackendProfiles({ request, run }),
   );
@@ -800,6 +805,7 @@ export default function App(): React.JSX.Element {
     busyAction,
     project,
     draftConversation: draftConversation.conversation,
+    workspaceToolsUnavailable,
     connection,
     providerMaintenance,
     projection: conversationProjection,
@@ -837,6 +843,7 @@ export default function App(): React.JSX.Element {
     primarySceneLayout,
     workspaceSceneActions,
     workspaceTools,
+    workspaceToolsUnavailable,
   ]);
   const splitWorkspace = useSplitWorkspaceScene({
     conversation,
@@ -942,8 +949,9 @@ export default function App(): React.JSX.Element {
       project={project}
       conversation={conversation}
       splitConversationId={splitConversation?.id ?? null}
-      sceneActiveTool={sceneActiveTool}
+      sceneActiveTool={workspaceToolsUnavailable ? null : sceneActiveTool}
       sceneToggleWorkspaceTools={sceneToggleWorkspaceTools}
+      workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
       environmentSummary={environmentSummary}
       runsSummary={runsSummary}
       gitStatus={gitStatus}

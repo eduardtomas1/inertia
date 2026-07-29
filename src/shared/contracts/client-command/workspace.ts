@@ -45,6 +45,7 @@ export const workspaceCommandSchemas = [
         projectId: z.string().uuid(),
         conversationId: z.string().uuid().optional(),
         path: workspaceFilePathSchema,
+        authorityRef: z.string().uuid(),
         expectedDigest: z.string().regex(/^[a-f0-9]{64}$/u),
         content: z
           .string()

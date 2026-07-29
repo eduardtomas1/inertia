@@ -17,6 +17,7 @@ import type { useAppUpdate } from "../app-update";
 import type { useInertiaConnection } from "../hooks/useInertiaConnection";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
 import type { useWorkspaceLayout } from "../hooks/useWorkspaceLayout";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { ActivityRunSummary } from "../utils/activityCenter";
@@ -108,6 +109,7 @@ interface AppLayoutProps {
   splitConversationId: string | null;
   sceneActiveTool: WorkspacePanelTab | null;
   sceneToggleWorkspaceTools: () => void;
+  workspaceToolsUnavailableReason: string | null;
   environmentSummary: EnvironmentSummarySnapshot;
   runsSummary: ActivityRunSummary;
   gitStatus: GitStatusSnapshot | null;
@@ -145,6 +147,7 @@ export function AppLayout({
   splitConversationId,
   sceneActiveTool,
   sceneToggleWorkspaceTools,
+  workspaceToolsUnavailableReason,
   environmentSummary,
   runsSummary,
   gitStatus,
@@ -172,6 +175,11 @@ export function AppLayout({
     workspaceBodyStyle,
     sidebar: sidebarLayout,
   } = workspaceLayout;
+  useNativePreviewSuspension(
+    Boolean(visibleError)
+      || providerQuotaNotices.notices.length > 0
+      || Boolean(appUpdate.visible && appUpdate.status),
+  );
 
   return (
     <div
@@ -322,6 +330,7 @@ export function AppLayout({
               else setSidebarCollapsed((collapsed) => !collapsed);
             }}
             onToggleTools={sceneToggleWorkspaceTools}
+            workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
             onSetEnvironmentOpen={setEnvironmentOpen}
             onCycleTheme={actions.cycleTheme}
             onOpenSettings={() => setView("settings")}

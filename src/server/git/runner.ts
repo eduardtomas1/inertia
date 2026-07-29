@@ -5,6 +5,11 @@ import {
   LOCAL_TIMEOUT_MS,
   STDERR_BYTES,
 } from "./constants";
+import {
+  requireProcessTreeTermination,
+  terminateProcessTreeAndWait,
+  type ProcessTreeTerminator,
+} from "../process-lifecycle";
 import { gitProcessEnvironment } from "./environment";
 import { GitError } from "./types";
 
@@ -23,6 +28,10 @@ export interface RunGitOptions {
 }
 
 export type RunGitInspectionOptions = Omit<RunGitOptions, "input">;
+
+export interface GitRunnerDependencies {
+  terminateProcessTree?: ProcessTreeTerminator;
+}
 
 function inspectionArguments(args: readonly string[]): string[] {
   const [command, ...rest] = args;
@@ -115,14 +124,18 @@ export function runGit(
   cwd: string,
   args: readonly string[],
   options: RunGitOptions,
+  dependencies: GitRunnerDependencies = {},
 ): Promise<GitProcessResult> {
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES;
   const timeoutMs = options.timeoutMs ?? LOCAL_TIMEOUT_MS;
+  const terminateProcessTree = dependencies.terminateProcessTree
+    ?? terminateProcessTreeAndWait;
 
   return new Promise((resolveProcess, rejectProcess) => {
     const child = spawn("git", [...args], {
       cwd,
       shell: false,
+      detached: process.platform !== "win32",
       windowsHide: true,
       stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
       env: gitProcessEnvironment(),
@@ -133,6 +146,7 @@ export function runGit(
     let stderrBytes = 0;
     let truncated = false;
     let settled = false;
+    let termination: Promise<void> | undefined;
 
     const finish = (
       error?: GitError,
@@ -145,9 +159,39 @@ export function runGit(
       else if (result) resolveProcess(result);
     };
 
+    const bufferedResult = (): GitProcessResult => ({
+      stdout: Buffer.concat(stdout),
+      stderr: Buffer.concat(stderr),
+      truncated,
+    });
+
+    const terminateAndFinish = (error?: GitError): void => {
+      if (settled || termination) return;
+      termination = requireProcessTreeTermination(
+        terminateProcessTree,
+        child,
+        true,
+        "Git process tree",
+      );
+      void termination.then(
+        () => {
+          if (error) finish(error);
+          else finish(undefined, bufferedResult());
+        },
+        () => {
+          finish(new GitError(
+            "operation-failed",
+            "Git stopped responding, and its process tree could not be confirmed stopped.",
+          ));
+        },
+      );
+    };
+
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(new GitError("timeout", "Git took too long to complete the operation."));
+      terminateAndFinish(new GitError(
+        "timeout",
+        "Git took too long to complete the operation.",
+      ));
     }, timeoutMs);
     timer.unref();
     if (options.input && child.stdin) {
@@ -166,7 +210,12 @@ export function runGit(
       if (remaining > 0) stdout.push(chunk.subarray(0, remaining));
       stdoutBytes = maxOutputBytes;
       truncated = true;
-      child.kill("SIGKILL");
+      terminateAndFinish(options.truncateOutput
+        ? undefined
+        : new GitError(
+            "output-limit",
+            "Git returned more data than this application can safely process.",
+          ));
     });
     child.stderr!.on("data", (chunk: Buffer) => {
       if (stderrBytes >= STDERR_BYTES) return;
@@ -175,6 +224,7 @@ export function runGit(
       stderrBytes += part.length;
     });
     child.on("error", (error: NodeJS.ErrnoException) => {
+      if (termination) return;
       if (error.code === "ENOENT") {
         finish(
           new GitError(
@@ -187,11 +237,8 @@ export function runGit(
       }
     });
     child.on("close", (code) => {
-      const result = {
-        stdout: Buffer.concat(stdout),
-        stderr: Buffer.concat(stderr),
-        truncated,
-      };
+      if (termination) return;
+      const result = bufferedResult();
       if (truncated && !options.truncateOutput) {
         finish(
           new GitError(

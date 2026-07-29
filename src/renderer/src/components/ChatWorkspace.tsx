@@ -44,6 +44,7 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { shouldFollowTimeline } from "../utils/responseTimeline";
 import { Composer } from "./Composer";
 import { ResponseTimeline } from "./ResponseTimeline";
@@ -179,6 +180,9 @@ export function ChatWorkspace({
   onClearPromptContext,
   onLatestContentVisibilityChange,
 }: ChatWorkspaceProps): React.JSX.Element {
+  useNativePreviewSuspension(
+    approvals.length > 0 || inputRequests.length > 0,
+  );
   const Root = embedded ? "section" : "main";
   const keyboardHelpId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);

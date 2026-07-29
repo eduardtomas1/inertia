@@ -40,6 +40,7 @@ export interface RuntimeWebSocketBoundaryOptions {
   approvals(): Iterable<AgentApprovalRequest>;
   inputs(): Iterable<AgentInputRequest>;
   plans(): Iterable<AgentPlan>;
+  onDisconnect?(socket: WebSocket): void;
 }
 
 export interface RuntimeWebSocketBoundary {
@@ -117,6 +118,7 @@ export function attachRuntimeWebSocketBoundary(
       }
     });
     socket.on("close", () => {
+      options.onDisconnect?.(socket);
       options.runtimeSync.disconnect(socket);
       options.terminals.disposeOwner(socket);
       options.isolatedRuns.stopOwned(socket);

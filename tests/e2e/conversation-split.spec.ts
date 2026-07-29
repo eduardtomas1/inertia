@@ -102,7 +102,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(secondaryStash).toBeVisible();
   await secondaryStash.click();
   await secondary.getByRole("menu", { name: "Prompt stash" })
-    .getByRole("menuitem", { name: /Draft owned by Inertia/u })
+    .getByRole("menuitem", { name: /^Draft owned by Inertia/u })
     .click();
   await expect(secondaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(primary.getByRole("button", {
@@ -235,6 +235,41 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
         contents.getURL() === url)),
     [primaryPreviewUrl, secondaryPreviewUrl],
   )).toBe(true);
+  const previewStorageIsolation = await app.electronApp.evaluate(
+    async ({ BrowserWindow }, urls) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      if (!window) return null;
+      const previews = window.contentView.children
+        .map((view) => Reflect.get(view, "webContents") as
+          | {
+            getURL: () => string;
+            executeJavaScript: (code: string) => Promise<unknown>;
+          }
+          | undefined)
+        .filter((contents): contents is NonNullable<typeof contents> =>
+          Boolean(contents && urls.includes(contents.getURL())));
+      const primaryContents = previews.find(
+        (contents) => contents.getURL() === urls[0],
+      );
+      const secondaryContents = previews.find(
+        (contents) => contents.getURL() === urls[1],
+      );
+      if (!primaryContents || !secondaryContents) return null;
+      await primaryContents.executeJavaScript(`
+        localStorage.setItem("inertia-preview-isolation", "primary");
+        document.cookie = "inertia-preview-isolation=primary; path=/";
+      `);
+      return await secondaryContents.executeJavaScript(`({
+        local: localStorage.getItem("inertia-preview-isolation"),
+        cookie: document.cookie
+      })`);
+    },
+    [primaryPreviewUrl, secondaryPreviewUrl],
+  );
+  expect(previewStorageIsolation).toEqual({
+    local: null,
+    cookie: "",
+  });
 
   await app.electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({

@@ -39,7 +39,8 @@ import {
 } from "./attachment-import.js";
 import {
   AttachmentRegistry,
-  cleanupOrphanedAttachments,
+  createAttachmentStorageSession,
+  removeAttachmentStorageSession,
   type AttachmentStorageReservation,
 } from "./attachment-registry.js";
 import { AppUpdateService } from "./app-update.js";
@@ -56,6 +57,7 @@ import {
   hardenDesktopSession,
 } from "./preview-broker.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import { SecureFileBroker } from "./secure-file-broker.js";
 import {
   WINDOW_APPEARANCE_FILENAME,
   isWindowThemePreference,
@@ -121,6 +123,7 @@ const previewBroker = new PreviewBroker({
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
 let attachmentCleanup: Promise<void> = Promise.resolve();
+let attachmentStorageDirectory: string | null = null;
 let attachmentReservation: AttachmentStorageReservation = {
   records: 0,
   bytes: 0,
@@ -138,8 +141,15 @@ function isContained(root: string, target: string): boolean {
   return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
 }
 
-function attachmentDirectory(): string {
+function attachmentStorageRoot(): string {
   return join(app.getPath("temp"), "inertia-attachments");
+}
+
+function attachmentDirectory(): string {
+  if (!attachmentStorageDirectory) {
+    throw new Error("Temporary attachment storage is not initialized.");
+  }
+  return attachmentStorageDirectory;
 }
 
 function attachmentRegistry(): AttachmentRegistry {
@@ -152,11 +162,16 @@ function attachmentRegistry(): AttachmentRegistry {
 
 function disposeImportedAttachments(): Promise<void> {
   const registry = importedAttachments;
+  const directory = attachmentStorageDirectory;
   importedAttachments = null;
-  if (registry) {
+  attachmentStorageDirectory = null;
+  if (registry || directory) {
     attachmentCleanup = attachmentCleanup
       .catch(() => undefined)
-      .then(() => registry.dispose());
+      .then(async () => {
+        await registry?.dispose();
+        if (directory) await removeAttachmentStorageSession(directory);
+      });
   }
   return attachmentCleanup;
 }
@@ -697,11 +712,13 @@ async function bootstrap(): Promise<void> {
     ),
   );
 
-  const [, , orphanReservation] = await Promise.all([
+  const [, , attachmentStorage] = await Promise.all([
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
-    cleanupOrphanedAttachments(attachmentDirectory()),
+    createAttachmentStorageSession(attachmentStorageRoot()),
   ]);
+  attachmentStorageDirectory = attachmentStorage.directory;
+  const orphanReservation = attachmentStorage.reservation;
   attachmentReservation = orphanReservation;
 
   registerAppProtocol();
@@ -733,6 +750,18 @@ async function bootstrap(): Promise<void> {
       clear: (secretReference) => credentialVault!.clear(secretReference),
       forget: (secretReference) => credentialVault!.forget(secretReference),
     },
+    secureFileBroker: new SecureFileBroker({
+      spawn: (root) => utilityProcess.fork(
+        fileURLToPath(new URL("./secure-file-worker.js", import.meta.url)),
+        [],
+        {
+          cwd: root,
+          env: {},
+          stdio: "ignore",
+          serviceName: "Inertia Secure File",
+        },
+      ),
+    }),
     workerOptions: {
       dataDirectory,
       defaultWorkspacePath,

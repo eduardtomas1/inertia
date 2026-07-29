@@ -1,4 +1,13 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+  spawn,
+  spawnSync,
+  type ChildProcess,
+} from "node:child_process";
+
+import { forceKillPosixProcessTree } from "../node/posix-process-tree";
+
+const DEFAULT_TERMINATION_WAIT_MS = 2_000;
+const PROCESS_GROUP_POLL_MS = 10;
 
 export interface ProcessLifecycleDependencies {
   platform: NodeJS.Platform;
@@ -6,7 +15,42 @@ export interface ProcessLifecycleDependencies {
   killProcess: typeof process.kill;
 }
 
-function killDirectChild(child: ChildProcessWithoutNullStreams, force: boolean): void {
+export interface AwaitableProcessLifecycleDependencies
+  extends Partial<ProcessLifecycleDependencies> {
+  spawnProcessSync?: typeof spawnSync;
+  waitMs?: number;
+}
+
+export type ProcessTreeTerminator = (
+  child: ChildProcess,
+  force: boolean,
+) => Promise<boolean>;
+
+export class ProcessTreeTerminationError extends Error {
+  readonly code = "process-tree-termination-unconfirmed";
+
+  constructor(subject: string, options?: ErrorOptions) {
+    super(`${subject} could not be confirmed stopped.`, options);
+    this.name = "ProcessTreeTerminationError";
+  }
+}
+
+export async function requireProcessTreeTermination(
+  terminate: ProcessTreeTerminator,
+  child: ChildProcess,
+  force: boolean,
+  subject: string,
+): Promise<void> {
+  let confirmed: boolean;
+  try {
+    confirmed = await terminate(child, force);
+  } catch (cause) {
+    throw new ProcessTreeTerminationError(subject, { cause });
+  }
+  if (!confirmed) throw new ProcessTreeTerminationError(subject);
+}
+
+function killDirectChild(child: ChildProcess, force: boolean): void {
   try {
     child.kill(force ? "SIGKILL" : "SIGTERM");
   } catch {
@@ -19,7 +63,7 @@ function killDirectChild(child: ChildProcessWithoutNullStreams, force: boolean):
  * direct child. Supervision policy intentionally lives with the caller.
  */
 export function terminateProcessTree(
-  child: ChildProcessWithoutNullStreams,
+  child: ChildProcess,
   force: boolean,
   dependencies: Partial<ProcessLifecycleDependencies> = {},
 ): void {
@@ -57,4 +101,183 @@ export function terminateProcessTree(
     }
   }
   killDirectChild(child, force);
+}
+
+function boundedWaitMs(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_TERMINATION_WAIT_MS;
+  return Math.max(1, Math.min(Math.trunc(value), 30_000));
+}
+
+function waitForDirectChildExit(
+  child: ChildProcess,
+  waitMs: number,
+): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve(true);
+  }
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (exited: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off("close", onClose);
+      resolve(exited);
+    };
+    const onClose = (): void => finish(true);
+    const timer = setTimeout(() => finish(false), waitMs);
+    child.once("close", onClose);
+  });
+}
+
+function waitForPosixProcessGroupExit(
+  pid: number,
+  killProcess: typeof process.kill,
+  waitMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + waitMs;
+  return new Promise<boolean>((resolve) => {
+    const inspect = (): void => {
+      try {
+        killProcess(-pid, 0);
+      } catch {
+        resolve(true);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        resolve(false);
+        return;
+      }
+      setTimeout(inspect, PROCESS_GROUP_POLL_MS);
+    };
+    inspect();
+  });
+}
+
+function waitForPosixProcessesExit(
+  pids: readonly number[],
+  killProcess: typeof process.kill,
+  waitMs: number,
+): Promise<boolean> {
+  const remaining = new Set(pids);
+  const deadline = Date.now() + waitMs;
+  return new Promise<boolean>((resolve) => {
+    const inspect = (): void => {
+      for (const pid of remaining) {
+        try {
+          killProcess(pid, 0);
+        } catch {
+          remaining.delete(pid);
+        }
+      }
+      if (remaining.size === 0) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        resolve(false);
+        return;
+      }
+      setTimeout(inspect, PROCESS_GROUP_POLL_MS);
+    };
+    inspect();
+  });
+}
+
+function terminateWindowsProcessTree(
+  pid: number,
+  force: boolean,
+  spawnProcess: typeof spawn,
+  waitMs: number,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let taskkill: ReturnType<typeof spawn>;
+    try {
+      taskkill = spawnProcess(
+        "taskkill.exe",
+        ["/pid", String(pid), "/t", ...(force ? ["/f"] : [])],
+        {
+          shell: false,
+          windowsHide: true,
+          stdio: "ignore",
+        },
+      );
+    } catch {
+      resolve(false);
+      return;
+    }
+    let settled = false;
+    const finish = (terminated: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      taskkill.off("error", onError);
+      taskkill.off("close", onClose);
+      resolve(terminated);
+    };
+    const onError = (): void => finish(false);
+    const onClose = (code: number | null): void => finish(code === 0);
+    const timer = setTimeout(() => {
+      try {
+        taskkill.kill("SIGKILL");
+      } catch {
+        // The taskkill process may already have exited.
+      }
+      finish(false);
+    }, waitMs);
+    taskkill.once("error", onError);
+    taskkill.once("close", onClose);
+  });
+}
+
+/**
+ * Terminates an owned process tree and waits for bounded confirmation.
+ *
+ * POSIX callers must spawn the direct child with `detached: true`, making its
+ * PID the process-group ID. Windows callers are confirmed by taskkill itself.
+ */
+export async function terminateProcessTreeAndWait(
+  child: ChildProcess,
+  force: boolean,
+  dependencies: AwaitableProcessLifecycleDependencies = {},
+): Promise<boolean> {
+  const pid = child.pid;
+  if (!pid) return true;
+  const platform = dependencies.platform ?? process.platform;
+  const spawnProcess = dependencies.spawnProcess ?? spawn;
+  const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
+  const killProcess = dependencies.killProcess ?? process.kill;
+  const waitMs = boundedWaitMs(dependencies.waitMs);
+
+  if (platform === "win32") {
+    const treeTerminated = await terminateWindowsProcessTree(
+      pid,
+      force,
+      spawnProcess,
+      waitMs,
+    );
+    if (treeTerminated) return true;
+    killDirectChild(child, force);
+    return await waitForDirectChildExit(child, waitMs);
+  }
+
+  if (force) {
+    const descendants = forceKillPosixProcessTree(pid, {
+      kill: killProcess,
+      spawnProcessSync,
+      rootProcessGroup: true,
+    });
+    const [groupExited, descendantsExited] = await Promise.all([
+      waitForPosixProcessGroupExit(pid, killProcess, waitMs),
+      waitForPosixProcessesExit(descendants, killProcess, waitMs),
+    ]);
+    return groupExited && descendantsExited;
+  }
+  try {
+    killProcess(-pid, "SIGTERM");
+    return await waitForPosixProcessGroupExit(pid, killProcess, waitMs);
+  } catch {
+    killDirectChild(child, false);
+    return await waitForDirectChildExit(child, waitMs);
+  }
 }

@@ -35,6 +35,9 @@ import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
+import {
+  workspaceFileReferenceFallback,
+} from "../utils/workspaceFileReference";
 
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("shell", bash);
@@ -140,12 +143,22 @@ export function resolveResponseLink(projectRoot: string, rawHref: string): Proje
   const href = rawHref.trim();
   if (!href || href.includes("\0")) return { kind: "unsafe" };
   if (href.startsWith("#")) return { kind: "anchor", href };
-  try {
-    const url = new URL(href);
-    if (url.protocol === "http:" || url.protocol === "https:") return { kind: "external", url: url.toString() };
-    return { kind: "unsafe" };
-  } catch {
-    // Relative project paths are intentionally handled below.
+  const windowsAbsolute = /^[a-z]:[\\/]/iu.test(href);
+  const scheme = /^[a-z][a-z0-9+.-]*:/iu.exec(href)?.[0] ?? null;
+  if (!windowsAbsolute && scheme) {
+    if (/^https?:$/iu.test(scheme)) {
+      try {
+        const url = new URL(href);
+        return { kind: "external", url: url.toString() };
+      } catch {
+        return { kind: "unsafe" };
+      }
+    }
+    const fallback = workspaceFileReferenceFallback(href);
+    if (
+      !fallback
+      || !scheme.includes(".")
+    ) return { kind: "unsafe" };
   }
   let decoded: string;
   try {
@@ -156,7 +169,6 @@ export function resolveResponseLink(projectRoot: string, rawHref: string): Proje
   if (
     !decoded
     || /[\0\r\n]/u.test(decoded)
-    || /^[a-z][a-z0-9+.-]*:/iu.test(decoded) && !/^[a-z]:[\\/]/iu.test(decoded)
   ) return { kind: "unsafe" };
   const root = normalizedPath(projectRoot).replace(/\/+$/u, "");
   if (!root) return { kind: "unsafe" };
@@ -264,8 +276,13 @@ function MarkdownTable({ children, ...props }: ComponentProps<"table">): React.J
 
 function codeMeta(meta: string | undefined): { label: string; file: string | null } {
   if (!meta) return { label: "Plain text", file: null };
-  const fileMatch = /(?:^|\s)(?:file|filename|title)=["']?([^"'\s]+)["']?/iu.exec(meta);
-  return { label: meta.split(/\s+/u)[0] || "Plain text", file: fileMatch?.[1] ?? null };
+  const fileMatch =
+    /(?:^|\s)(?:file|filename|title)=(?:"([^"]+)"|'([^']+)'|([^\s]+))/iu
+      .exec(meta);
+  return {
+    label: meta.split(/\s+/u)[0] || "Plain text",
+    file: fileMatch?.[1] ?? fileMatch?.[2] ?? fileMatch?.[3] ?? null,
+  };
 }
 
 function HighlightedCode({ code, language, enabled }: { code: string; language: string; enabled: boolean }): React.JSX.Element {

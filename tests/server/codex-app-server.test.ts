@@ -9,11 +9,16 @@ import {
   type ProviderSubagentEvent,
 } from "../../src/server/providers";
 import { startCodexAppServerRun } from "../../src/server/codex-app-server";
-import { readCodexMetadata } from "../../src/server/codex-metadata";
+import {
+  CODEX_METADATA_MAX_FRAME_BYTES,
+  readCodexMetadata,
+} from "../../src/server/codex-metadata";
+import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
   portableFixtureRoot,
   portableNodeExecutable,
   removePortableFixture,
+  waitFor,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
@@ -25,6 +30,7 @@ describe.sequential("Codex App Server runtime", () => {
   const originalApprovalKind = process.env.INERTIA_APP_SERVER_APPROVAL_KIND;
   const originalOversize = process.env.INERTIA_APP_SERVER_OVERSIZE;
   const originalScenario = process.env.INERTIA_APP_SERVER_SCENARIO;
+  const originalChildPid = process.env.INERTIA_APP_SERVER_CHILD_PID;
 
   afterEach(async () => {
     await Promise.all(managers.splice(0).map((manager) => manager.disposeAll()));
@@ -36,6 +42,8 @@ describe.sequential("Codex App Server runtime", () => {
     else process.env.INERTIA_APP_SERVER_OVERSIZE = originalOversize;
     if (originalScenario === undefined) delete process.env.INERTIA_APP_SERVER_SCENARIO;
     else process.env.INERTIA_APP_SERVER_SCENARIO = originalScenario;
+    if (originalChildPid === undefined) delete process.env.INERTIA_APP_SERVER_CHILD_PID;
+    else process.env.INERTIA_APP_SERVER_CHILD_PID = originalChildPid;
     await Promise.all(roots.splice(0).map(removePortableFixture));
   });
 
@@ -43,6 +51,28 @@ describe.sequential("Codex App Server runtime", () => {
     const manager = new ProviderManager({
       commands: { codex: command },
       ...(cancelGraceMs === undefined ? {} : { cancelGraceMs }),
+      resolveBackendLaunchOptions: (_input, environment) => ({
+        environment: {
+          ...environment,
+          // These values belong only to the executable fixture. Production
+          // launches continue to receive the provider-scoped allowlist.
+          ...(process.env.INERTIA_APP_SERVER_CAPTURE
+            ? { INERTIA_APP_SERVER_CAPTURE: process.env.INERTIA_APP_SERVER_CAPTURE }
+            : {}),
+          ...(process.env.INERTIA_APP_SERVER_APPROVAL_KIND
+            ? { INERTIA_APP_SERVER_APPROVAL_KIND: process.env.INERTIA_APP_SERVER_APPROVAL_KIND }
+            : {}),
+          ...(process.env.INERTIA_APP_SERVER_OVERSIZE
+            ? { INERTIA_APP_SERVER_OVERSIZE: process.env.INERTIA_APP_SERVER_OVERSIZE }
+            : {}),
+          ...(process.env.INERTIA_APP_SERVER_SCENARIO
+            ? { INERTIA_APP_SERVER_SCENARIO: process.env.INERTIA_APP_SERVER_SCENARIO }
+            : {}),
+          ...(process.env.INERTIA_APP_SERVER_CHILD_PID
+            ? { INERTIA_APP_SERVER_CHILD_PID: process.env.INERTIA_APP_SERVER_CHILD_PID }
+            : {}),
+        },
+      }),
     });
     managers.push(manager);
     return manager;
@@ -54,6 +84,7 @@ describe.sequential("Codex App Server runtime", () => {
     const command = portableNodeExecutable(root, "codex");
     const capturePath = join(root, "capture.jsonl");
     writeNodeSubcommand(root, "app-server", `
+const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const readline = require("node:readline");
 const capture = (value) => fs.appendFileSync(process.env.INERTIA_APP_SERVER_CAPTURE, JSON.stringify(value) + "\\n");
@@ -102,6 +133,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   capture(message);
   if (message.method === "initialize") {
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "rpc-timeout") return;
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "metadata-line-overflow") {
+      const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+      fs.writeFileSync(process.env.INERTIA_APP_SERVER_CHILD_PID, String(descendant.pid));
+      process.stdout.write("x".repeat(${CODEX_METADATA_MAX_FRAME_BYTES + 1}));
+      return;
+    }
     return send({ id: message.id, result: { userAgent: "fake" } });
   }
   if (message.method === "initialized") return;
@@ -188,7 +225,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
             reason: "Read generated fixtures",
             permissions: {
               network: null,
-              fileSystem: { read: [process.cwd() + "/generated"], write: null, entries: [] },
+              fileSystem: {
+                read: process.env.INERTIA_APP_SERVER_SCENARIO === "permission-overflow"
+                  ? Array.from({ length: 13 }, (_, index) => process.cwd() + "/generated-" + index)
+                  : [process.cwd() + "/generated"],
+                write: null,
+                entries: [],
+              },
             },
           }
       : {
@@ -208,7 +251,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return send({ id: "approval-rpc", method: approvalMethod, params });
   }
   if (message.id === "approval-rpc") {
-    if (message.error) return;
+    if (message.error) {
+      if (process.env.INERTIA_APP_SERVER_SCENARIO === "permission-overflow") complete();
+      return;
+    }
     if (message.result.decision !== "cancel") requestInput();
     return;
   }
@@ -229,6 +275,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
   function captured(path: string): Array<Record<string, unknown>> {
     return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  }
+
+  function processExists(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   it("reads provider-supplied models, reasoning options, and remaining usage", async () => {
@@ -252,6 +307,50 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       remainingPercent: 63,
       windowMinutes: 10080,
     })]);
+  });
+
+  it("rejects metadata when owned-process cleanup cannot be confirmed", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+
+    await expect(readCodexMetadata(
+      fake.command,
+      process.env,
+      fake.root,
+      6_000,
+      ["models"],
+      {
+        terminateProcessTree: async (child, force) => {
+          await terminateProcessTreeAndWait(child, force);
+          return false;
+        },
+      },
+    )).rejects.toThrow(
+      "Codex metadata process tree could not be confirmed stopped.",
+    );
+  });
+
+  it("rejects an unterminated oversized metadata frame and removes descendants", async () => {
+    const fake = fakeAppServer();
+    const childPidPath = join(fake.root, "metadata-child.pid");
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "metadata-line-overflow";
+    process.env.INERTIA_APP_SERVER_CHILD_PID = childPidPath;
+
+    await expect(readCodexMetadata(
+      fake.command,
+      process.env,
+      fake.root,
+      3_000,
+      ["models"],
+    )).rejects.toThrow("protocol safety limit");
+
+    const childPid = Number(readFileSync(childPidPath, "utf8"));
+    expect(Number.isSafeInteger(childPid)).toBe(true);
+    await waitFor(
+      "the oversized metadata descendant to stop",
+      () => !processExists(childPid),
+    );
   });
 
   it("round-trips approve-once, user input, native plans, deltas, resume, and images", async () => {
@@ -671,6 +770,41 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(typeof responsePath === "string" ? normalize(responsePath) : responsePath)
       .toBe(normalize(join(realpathSync(fake.root), "generated")));
     expect(JSON.stringify(response)).not.toContain("environmentId");
+    await manager.disposeAll();
+  });
+
+  it("rejects permission approvals whose complete grant cannot be displayed", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "permissions";
+    process.env.INERTIA_APP_SERVER_SCENARIO = "permission-overflow";
+    const manager = trackedManager(fake.command);
+    const approvals: ProviderApprovalEvent["request"][] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-permission-overflow",
+      cwd: fake.root,
+      prompt: "Inspect generated files",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (event) => approvals.push(event.request),
+    });
+
+    expect(result).toMatchObject({ status: "cancelled" });
+    expect(approvals).toEqual([]);
+    const response = captured(fake.capturePath).find(
+      ({ id }) => id === "approval-rpc",
+    );
+    expect(response).toMatchObject({
+      error: {
+        code: -32602,
+        message:
+          "Codex sent an approval request this client could not safely represent.",
+      },
+    });
+    expect(response).not.toHaveProperty("result.permissions");
     await manager.disposeAll();
   });
 

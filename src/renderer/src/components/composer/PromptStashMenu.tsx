@@ -31,6 +31,13 @@ export function PromptStashMenu({
     handleComposerMenuTriggerKeyDown,
     handleMoreMenuNavigation,
   } = menuController;
+  const entryDeleteLabel = (entry: PromptStashEntry): string => {
+    const content = entry.content.replace(/\s+/gu, " ").trim();
+    const summary = content.length > 80
+      ? `${content.slice(0, 77)}…`
+      : content;
+    return `Delete saved prompt: ${summary}`;
+  };
   return (
     <div className="popover-anchor prompt-stash-control">
       <button
@@ -57,13 +64,16 @@ export function PromptStashMenu({
           aria-label="Prompt stash"
           onKeyDown={handleMoreMenuNavigation}
         >
-          <div className="popover-title">Prompt stash</div>
+          <div className="popover-title" role="presentation">
+            Prompt stash
+          </div>
           <button
             type="button"
             role="menuitem"
-            disabled={!canStash}
+            aria-disabled={!canStash}
             title={blockedReason ?? "Save this text and model route"}
             onClick={() => {
+              if (!canStash) return;
               onStash();
               dismissMenu("selection");
             }}
@@ -77,15 +87,23 @@ export function PromptStashMenu({
           {entries.length === 0 ? (
             <p className="popover-empty">No saved prompts yet.</p>
           ) : (
-            <div className="prompt-stash-list">
-              {entries.map((entry) => (
+            <div
+              className="prompt-stash-list"
+              role="group"
+              aria-label="Saved prompts"
+            >
+              {entries.map((entry) => {
+                const restoreReason = restoreBlockedReason(entry);
+                const deleteLabel = entryDeleteLabel(entry);
+                return (
                 <div className="prompt-stash-entry" key={entry.id}>
                   <button
                     type="button"
                     role="menuitem"
-                    disabled={restoreBlockedReason(entry) !== null}
-                    title={restoreBlockedReason(entry) ?? entry.content}
+                    aria-disabled={restoreReason !== null}
+                    title={restoreReason ?? entry.content}
                     onClick={() => {
+                      if (restoreReason) return;
                       onRestore(entry);
                       dismissMenu("selection");
                     }}
@@ -94,24 +112,30 @@ export function PromptStashMenu({
                     <span>
                       <strong>{entry.content}</strong>
                       <small>
-                        {entry.route.modelId}
-                        {entry.route.reasoningEffort
-                          ? ` · ${entry.route.reasoningEffort}`
-                          : ""}
+                        {restoreReason ?? (
+                          <>
+                            {entry.route.modelId}
+                            {entry.route.reasoningEffort
+                              ? ` · ${entry.route.reasoningEffort}`
+                              : ""}
+                          </>
+                        )}
                       </small>
                     </span>
                   </button>
                   <button
                     type="button"
+                    role="menuitem"
                     className="prompt-stash-remove"
-                    aria-label="Delete saved prompt"
-                    title="Delete saved prompt"
+                    aria-label={deleteLabel}
+                    title={deleteLabel}
                     onClick={() => onRemove(entry.id)}
                   >
                     <Trash2 size={13} />
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

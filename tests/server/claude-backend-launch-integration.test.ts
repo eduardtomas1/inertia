@@ -25,6 +25,7 @@ import {
   claudeBackendProfileRegistrations,
   createClaudeBackendLaunchResolver,
 } from "../../src/server/runtime/backends/claude-compatible-adapter";
+import { providerChildEnvironment } from "../../src/server/environment";
 import { ProviderManager } from "../../src/server/providers";
 
 const SECRET_REFERENCE = "secret:integration-kimi";
@@ -157,13 +158,12 @@ describe("Claude backend launch integration", () => {
     expect(captured.harnessModel).toBe("k3-256k");
   });
 
-  it("preserves the native Anthropic environment exactly through the manager hook", async () => {
+  it("passes only the native Anthropic child environment through the manager hook", async () => {
     const profile = nativeAnthropicBackendProfile();
-    const expectedEnvironment = { ...process.env };
-    let harnessEnvironment: NodeJS.ProcessEnv | null = null;
+    const captured: { harnessEnvironment?: NodeJS.ProcessEnv } = {};
     const harness = capturingHarness(
       (options) => {
-        harnessEnvironment = options.environment;
+        captured.harnessEnvironment = options.environment;
       },
       async (input) => completedResult(input),
     );
@@ -173,7 +173,11 @@ describe("Claude backend launch integration", () => {
 
     await manager.run(runInput(profile, "claude-sonnet"));
 
-    expect(harnessEnvironment).toEqual(expectedEnvironment);
+    expect(captured.harnessEnvironment?.PATH).toBe(process.env.PATH);
+    expect(captured.harnessEnvironment).not.toHaveProperty("GITHUB_TOKEN");
+    expect(captured.harnessEnvironment).not.toHaveProperty(
+      "AWS_SECRET_ACCESS_KEY",
+    );
   });
 
   it("isolates concurrent native Anthropic and Kimi launch environments", async () => {
@@ -230,7 +234,9 @@ describe("Claude backend launch integration", () => {
       ANTHROPIC_BASE_URL: kimi.baseUrl,
       ANTHROPIC_MODEL: "k3",
     });
-    expect(nativeEnvironment).toEqual({ ...process.env });
+    expect(nativeEnvironment).toEqual(
+      providerChildEnvironment("claude", process.env),
+    );
     expect(nativeEnvironment).not.toBe(kimiEnvironment);
     expect(Object.fromEntries(
       Object.keys(inherited).map((key) => [key, process.env[key]]),

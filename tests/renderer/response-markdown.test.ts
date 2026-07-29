@@ -57,12 +57,27 @@ describe("response Markdown", () => {
     expect(html).not.toContain("<iframe");
     expect(resolveResponseLink("/work/project", "src/app.ts#L4")).toEqual({ kind: "project", relativePath: "src/app.ts", action: "reveal" });
     expect(resolveResponseLink("/work/project", "/work/project/src/app.ts#L4")).toEqual({ kind: "project", relativePath: "src/app.ts", action: "reveal" });
+    expect(resolveResponseLink("/work/project", "app.ts:42")).toEqual({ kind: "project", relativePath: "app.ts:42", action: "reveal" });
+    expect(resolveResponseLink("/work/project", "src/app.ts:42:7")).toEqual({ kind: "project", relativePath: "src/app.ts:42:7", action: "reveal" });
     expect(resolveResponseLink("/work/project", "../secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "%2e%2e/%2e%2e/secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "src/%00secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "file:///etc/passwd")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("/work/project", "file:///etc/passwd:42")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "javascript:alert(1)")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "https://example.com/docs")).toMatchObject({ kind: "external" });
+  });
+
+  it("keeps highlighted code as inert text", () => {
+    const html = render([
+      "```html",
+      '<script>alert("no")</script><img src=x onerror=alert(1)>',
+      "```",
+    ].join("\n"));
+    expect(html).toContain("hljs");
+    expect(html).toContain("&lt;");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("<img");
   });
 
   it("renders editorial quote, inline code, image, and long-link semantics without weakening sanitization", () => {
@@ -111,6 +126,7 @@ describe("response Markdown", () => {
 
   it("normalizes Windows paths case-insensitively without allowing traversal", () => {
     expect(resolveResponseLink("C:\\Work Space\\Project", "src\\index.ts")).toEqual({ kind: "project", relativePath: "src/index.ts", action: "reveal" });
+    expect(resolveResponseLink("C:\\Work Space\\Project", "C:\\Work Space\\Project\\src\\index.ts:42:7")).toEqual({ kind: "project", relativePath: "src/index.ts:42:7", action: "reveal" });
     expect(resolveResponseLink("C:\\Work Space\\Project", "..\\Elsewhere\\secret.ts")).toEqual({ kind: "unsafe" });
   });
 });

@@ -141,6 +141,7 @@ describe("client command contract", () => {
       payload: {
         projectId: crypto.randomUUID(),
         path: "src/example.ts",
+        authorityRef: crypto.randomUUID(),
         expectedDigest: "a".repeat(64),
         content: "export const enabled = true;\n",
       },

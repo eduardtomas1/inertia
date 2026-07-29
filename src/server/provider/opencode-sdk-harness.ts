@@ -16,7 +16,7 @@ import {
 } from "@opencode-ai/sdk/v2";
 
 import type { ProviderModel } from "../../shared/contracts";
-import { terminateProcessTree } from "../process-lifecycle";
+import { requireProcessTreeTermination, terminateProcessTree, terminateProcessTreeAndWait, type ProcessTreeTerminator } from "../process-lifecycle";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -34,10 +34,21 @@ import { providerActivityDetailSections } from "./activity-detail";
 import { CappedProviderBuffer } from "./io";
 
 const MAX_EVENT_CHARS = 1024 * 1024;
+const MAX_RUN_EVENT_CHARS = 32 * 1024 * 1024;
+const MAX_RUN_EVENTS = 8_192;
+const MAX_TRACKED_MESSAGES = 2_048;
+const MAX_TRACKED_PARTS = 4_096;
+const MAX_PENDING_INTERACTIONS = 64;
+const MAX_PART_CHARS = 256 * 1024;
+const MAX_RETAINED_PART_CHARS = 8 * 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_SERVER_OUTPUT_CHARS = 32 * 1024;
 const START_TIMEOUT_MS = 10_000;
+const METADATA_PROVIDER_TIMEOUT_MS = 10_000;
 const CANCEL_FORCE_MS = 2_000;
+const RUN_DEADLINE_MS = 4 * 60 * 60 * 1_000;
+const EVENT_INACTIVITY_DEADLINE_MS = 30 * 60 * 1_000;
+const MIN_DEADLINE_MS = 25;
 
 export const OPENCODE_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -71,17 +82,59 @@ interface OpenCodeUsageState {
   maxTokens: number | null;
   currentContextTokens: number | null;
   messages: Map<string, OpenCodeMessageUsage>;
+  totalProcessedTokens: number;
+  unknownTotalMessages: number;
   last: OpenCodeMessageUsage | null;
   compactsAutomatically: true | null;
 }
+interface OpenCodeEventState {
+  retainedPartChars: number;
+}
 
-export function createOpenCodeSdkHarness(): AgentHarness {
+export interface OpenCodeSdkHarnessOptions {
+  /**
+   * May shorten, but never extend, the production run lifetime.
+   * Primarily useful for deterministic lifecycle verification.
+   */
+  runDeadlineMs?: number;
+  /**
+   * May shorten, but never extend, the production owned-session inactivity
+   * window. Events for other sessions do not reset this deadline.
+   */
+  eventInactivityDeadlineMs?: number;
+  terminateProcessTree?: ProcessTreeTerminator;
+}
+
+export interface OpenCodeSdkMetadataOptions {
+  /**
+   * May shorten, but never extend, the production health-check deadline.
+   * Primarily useful for deterministic lifecycle verification.
+   */
+  healthTimeoutMs?: number;
+  /**
+   * May shorten, but never extend, the production provider-catalog deadline.
+   * Primarily useful for deterministic lifecycle verification.
+   */
+  providerTimeoutMs?: number;
+  terminateProcessTree?: ProcessTreeTerminator;
+}
+
+interface OpenCodeRunDeadlines {
+  runDeadlineMs: number;
+  eventInactivityDeadlineMs: number;
+}
+
+export function createOpenCodeSdkHarness(
+  options: OpenCodeSdkHarnessOptions = {},
+): AgentHarness {
+  const deadlines = openCodeRunDeadlines(options);
+  const terminateOwnedProcessTree = options.terminateProcessTree ?? terminateProcessTreeAndWait;
   return {
     id: "opencode-sdk",
     providerId: "opencode",
     capabilities: OPENCODE_SDK_CAPABILITIES,
     supports: (input) => input.providerId === "opencode",
-    start: startOpenCodeRun,
+    start: (startOptions) => startOpenCodeRun(startOptions, deadlines, terminateOwnedProcessTree),
   };
 }
 
@@ -104,21 +157,48 @@ export async function readOpenCodeSdkModels(
   executable: string,
   environment: NodeJS.ProcessEnv,
   cwd: string,
+  options: OpenCodeSdkMetadataOptions = {},
 ): Promise<ProviderModel[]> {
+  const healthTimeoutMs = shortenedTimeout(
+    options.healthTimeoutMs,
+    START_TIMEOUT_MS,
+    "metadata healthTimeoutMs",
+  );
+  const providerTimeoutMs = shortenedTimeout(
+    options.providerTimeoutMs,
+    METADATA_PROVIDER_TIMEOUT_MS,
+    "metadata providerTimeoutMs",
+  );
+  const terminateOwnedProcessTree = options.terminateProcessTree ?? terminateProcessTreeAndWait;
   const output = new CappedProviderBuffer(MAX_SERVER_OUTPUT_CHARS);
   const port = await availablePort();
-  const started = await startOwnedServer(executable, cwd, environment, port, output);
+  const started = await startOwnedServer(
+    executable, cwd, environment, port, output, terminateOwnedProcessTree,
+  );
   const client = createOpencodeClient({ baseUrl: started.url, directory: cwd, throwOnError: true });
   try {
-    await waitForHealth(client, started.child);
-    const response = await client.provider.list({ directory: cwd }, { throwOnError: true });
+    await waitForHealth(client, started.child, healthTimeoutMs);
+    const response = await withOpenCodeRequestDeadline(
+      providerTimeoutMs,
+      "Timed out waiting for the OpenCode provider catalog.",
+      async (signal) => await client.provider.list(
+        { directory: cwd },
+        { signal, throwOnError: true },
+      ),
+    );
     return openCodeModels(response.data.all, response.data.default);
   } finally {
-    terminateProcessTree(started.child, true);
+    await requireProcessTreeTermination(
+      terminateOwnedProcessTree, started.child, true, "OpenCode metadata server process tree",
+    );
   }
 }
 
-function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
+function startOpenCodeRun(
+  options: AgentHarnessStartOptions,
+  deadlines: OpenCodeRunDeadlines,
+  terminateOwnedProcessTree: ProcessTreeTerminator,
+): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
     "opencode",
@@ -135,7 +215,16 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   const eventAbort = new AbortController();
   const assistantMessages = new Set<string>();
   const emittedParts = new Map<string, string>();
-  const usageState: OpenCodeUsageState = { maxTokens: null, currentContextTokens: null, messages: new Map(), last: null, compactsAutomatically: null };
+  const usageState: OpenCodeUsageState = {
+    maxTokens: null,
+    currentContextTokens: null,
+    messages: new Map(),
+    totalProcessedTokens: 0,
+    unknownTotalMessages: 0,
+    last: null,
+    compactsAutomatically: null,
+  };
+  const eventState: OpenCodeEventState = { retainedPartChars: 0 };
   let sessionId = options.input.sessionId;
   let client: OpencodeClient | undefined;
   let child: ChildProcessWithoutNullStreams | undefined;
@@ -143,7 +232,29 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   let terminalError: string | undefined;
   let cancelOwnedRun: (force: boolean) => void = () => {};
   let cancelForceTimer: NodeJS.Timeout | undefined;
+  let runDeadlineTimer: NodeJS.Timeout | undefined;
+  let eventInactivityTimer: NodeJS.Timeout | undefined;
 
+  const clearDeadlineTimers = (): void => {
+    if (runDeadlineTimer) clearTimeout(runDeadlineTimer);
+    if (eventInactivityTimer) clearTimeout(eventInactivityTimer);
+    runDeadlineTimer = undefined;
+    eventInactivityTimer = undefined;
+  };
+  const failDeadline = (message: string): void => {
+    if (cancelRequested || terminalError) return;
+    terminalError = message;
+    eventAbort.abort();
+    if (child) terminateProcessTree(child, true);
+  };
+  const armEventInactivityDeadline = (): void => {
+    if (cancelRequested || terminalError) return;
+    if (eventInactivityTimer) clearTimeout(eventInactivityTimer);
+    eventInactivityTimer = setTimeout(() => {
+      failDeadline("OpenCode's event stream became inactive before the session completed.");
+    }, deadlines.eventInactivityDeadlineMs);
+    eventInactivityTimer.unref();
+  };
   const failInteraction = (error: unknown): void => {
     terminalError = safeError(error, "OpenCode could not deliver an interactive response.");
     eventAbort.abort();
@@ -199,11 +310,19 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   };
 
   emitter.status("starting");
+  runDeadlineTimer = setTimeout(() => {
+    failDeadline("OpenCode exceeded the maximum run duration.");
+  }, deadlines.runDeadlineMs);
+  runDeadlineTimer.unref();
   const result = (async (): Promise<ProviderRunResult> => {
+    let outcome: { status: ProviderRunResult["status"]; error?: string };
     try {
       const port = await availablePort();
-      const started = await startOwnedServer(options.executable, options.input.cwd, options.environment, port, serverOutput);
+      const started = await startOwnedServer(
+        options.executable, options.input.cwd, options.environment, port, serverOutput, terminateOwnedProcessTree,
+      );
       child = started.child;
+      if (terminalError) throw new Error(terminalError);
       client = createOpencodeClient({ baseUrl: started.url, directory: options.input.cwd, throwOnError: true });
       await waitForHealth(client, child);
 
@@ -247,34 +366,72 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
       usageState.maxTokens = finite(effectiveModel?.limit.context);
       const subscribed = await client.event.subscribe({ directory: options.input.cwd }, { signal: eventAbort.signal, throwOnError: true });
       emitter.status("running");
+      armEventInactivityDeadline();
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
-        onEvent: (event) => handleOpenCodeEvent(event, options, client!, text, emitter, approvals, inputs, assistantMessages, emittedParts, usageState, failInteraction),
+        onActivity: armEventInactivityDeadline,
+        onEvent: (event) => handleOpenCodeEvent(
+          event,
+          options,
+          client!,
+          text,
+          emitter,
+          approvals,
+          inputs,
+          assistantMessages,
+          emittedParts,
+          usageState,
+          eventState,
+          failInteraction,
+        ),
         isDone: (event) => event.type === "session.idle" || event.type === "session.error",
       });
-      await client.session.promptAsync({
-        sessionID: sessionId,
-        directory: options.input.cwd,
-        ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
-        ...(agent ? { agent: agent.name } : {}),
-        ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}),
-        parts: [
-          { type: "text", text: options.input.prompt },
-          ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),
-        ],
-      }, { throwOnError: true });
-      await pump;
-      if (cancelRequested) return finish("cancelled");
-      if (terminalError) return finish("failed", terminalError);
-      return finish("completed");
+      await Promise.all([
+        client.session.promptAsync({
+          sessionID: sessionId,
+          directory: options.input.cwd,
+          ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
+          ...(agent ? { agent: agent.name } : {}),
+          ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}),
+          parts: [
+            { type: "text", text: options.input.prompt },
+            ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),
+          ],
+        }, { throwOnError: true }),
+        pump,
+      ]);
+      outcome = cancelRequested
+        ? { status: "cancelled" }
+        : terminalError
+          ? { status: "failed", error: terminalError }
+          : { status: "completed" };
     } catch (error) {
-      if (cancelRequested) return finish("cancelled");
-      return finish("failed", terminalError ?? safeError(error, serverDiagnostic(serverOutput)));
-    } finally {
-      if (cancelForceTimer) clearTimeout(cancelForceTimer);
-      eventAbort.abort();
-      rejectPending();
-      if (child) terminateProcessTree(child, true);
+      outcome = cancelRequested
+        ? { status: "cancelled" }
+        : {
+            status: "failed",
+            error: terminalError ?? safeError(error, serverDiagnostic(serverOutput)),
+          };
     }
+    clearDeadlineTimers();
+    if (cancelForceTimer) clearTimeout(cancelForceTimer);
+    eventAbort.abort();
+    rejectPending();
+    if (child) {
+      try {
+        await requireProcessTreeTermination(
+          terminateOwnedProcessTree, child, true, "OpenCode server process tree",
+        );
+      } catch (error) {
+        outcome = {
+          status: "failed",
+          error: safeError(
+            error,
+            "OpenCode server process tree could not be confirmed stopped.",
+          ),
+        };
+      }
+    }
+    return finish(outcome.status, outcome.error);
   })();
 
   function finish(status: ProviderRunResult["status"], error?: string): ProviderRunResult {
@@ -295,6 +452,7 @@ function startOpenCodeRun(options: AgentHarnessStartOptions): AgentHarnessRun {
   cancelOwnedRun = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    clearDeadlineTimers();
     emitter.status("cancelling");
     rejectPending();
     if (!force && client && sessionId) {
@@ -328,6 +486,7 @@ async function startOwnedServer(
   environment: NodeJS.ProcessEnv,
   port: number,
   output: CappedProviderBuffer,
+  terminateOwnedProcessTree: ProcessTreeTerminator,
 ): Promise<{ child: ChildProcessWithoutNullStreams; url: string }> {
   const child = spawn(executable, ["serve", "--hostname=127.0.0.1", `--port=${port}`], {
     cwd,
@@ -348,36 +507,128 @@ async function startOwnedServer(
       child.once("error", (error) => { clearTimeout(timer); reject(error); });
     });
   } catch (error) {
-    terminateProcessTree(child, true);
+    await requireProcessTreeTermination(
+      terminateOwnedProcessTree, child, true, "OpenCode startup process tree",
+    );
     throw error;
   }
   return { child, url: `http://127.0.0.1:${port}` };
 }
 
-async function waitForHealth(client: OpencodeClient, child: ChildProcessWithoutNullStreams): Promise<void> {
-  const deadline = Date.now() + START_TIMEOUT_MS;
-  let lastError: unknown;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null) throw new Error("OpenCode server exited during startup.");
-    try { await client.global.health({ throwOnError: true }); return; } catch (error) { lastError = error; }
-    await new Promise((resolve) => setTimeout(resolve, 75));
+async function waitForHealth(
+  client: OpencodeClient,
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs = START_TIMEOUT_MS,
+): Promise<void> {
+  await withOpenCodeRequestDeadline(
+    timeoutMs,
+    "Timed out waiting for the OpenCode server health check.",
+    async (signal) => {
+      let lastError: unknown;
+      while (!signal.aborted) {
+        if (child.exitCode !== null || child.signalCode !== null) {
+          throw new Error("OpenCode server exited during startup.");
+        }
+        try {
+          await client.global.health({ signal, throwOnError: true });
+          return;
+        } catch (error) {
+          if (signal.aborted) throw error;
+          lastError = error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 75));
+      }
+      throw new Error(safeError(
+        lastError,
+        "Timed out waiting for the OpenCode server health check.",
+      ));
+    },
+  );
+}
+
+async function withOpenCodeRequestDeadline<T>(
+  timeoutMs: number,
+  timeoutMessage: string,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([operation(controller.signal), deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  throw new Error(safeError(lastError, "Timed out waiting for the OpenCode server health check."));
 }
 
 async function pumpOpenCodeEvents(
   stream: AsyncGenerator<Event>,
   sessionId: string,
-  handlers: { onEvent: (event: Event) => void; isDone: (event: Event) => boolean },
+  handlers: {
+    onActivity: () => void;
+    onEvent: (event: Event) => void;
+    isDone: (event: Event) => boolean;
+  },
 ): Promise<void> {
+  let eventCount = 0;
+  let eventChars = 0;
   for await (const event of stream) {
     const serialized = JSON.stringify(event);
     if (serialized.length > MAX_EVENT_CHARS) throw new Error("OpenCode sent an oversized event.");
+    eventCount += 1;
+    eventChars += serialized.length;
+    if (eventCount > MAX_RUN_EVENTS || eventChars > MAX_RUN_EVENT_CHARS) {
+      throw new Error("OpenCode exceeded the bounded event budget for this run.");
+    }
     if (openCodeEventSessionId(event) !== sessionId) continue;
+    handlers.onActivity();
     handlers.onEvent(event);
     if (handlers.isDone(event)) return;
   }
   throw new Error("OpenCode closed its event stream before the session completed.");
+}
+
+function openCodeRunDeadlines(
+  options: OpenCodeSdkHarnessOptions,
+): OpenCodeRunDeadlines {
+  return {
+    runDeadlineMs: shortenedDeadline(
+      options.runDeadlineMs,
+      RUN_DEADLINE_MS,
+      "runDeadlineMs",
+    ),
+    eventInactivityDeadlineMs: shortenedDeadline(
+      options.eventInactivityDeadlineMs,
+      EVENT_INACTIVITY_DEADLINE_MS,
+      "eventInactivityDeadlineMs",
+    ),
+  };
+}
+
+function shortenedDeadline(
+  value: number | undefined,
+  maximum: number,
+  name: keyof OpenCodeSdkHarnessOptions,
+): number {
+  return shortenedTimeout(value, maximum, name);
+}
+
+function shortenedTimeout(
+  value: number | undefined,
+  maximum: number,
+  name: string,
+): number {
+  if (value === undefined) return maximum;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`OpenCode ${name} must be a positive integer.`);
+  }
+  return Math.max(MIN_DEADLINE_MS, Math.min(value, maximum));
 }
 
 function handleOpenCodeEvent(
@@ -391,12 +642,17 @@ function handleOpenCodeEvent(
   assistantMessages: Set<string>,
   emittedParts: Map<string, string>,
   usageState: OpenCodeUsageState,
+  eventState: OpenCodeEventState,
   onFailure: (error: unknown) => void,
 ): void {
   const properties = event.properties as Record<string, unknown>;
   if (event.type === "message.updated") {
     const info = objectValue(properties.info);
     if (info?.role === "assistant" && typeof info.id === "string") {
+      if (
+        !assistantMessages.has(info.id)
+        && assistantMessages.size >= MAX_TRACKED_MESSAGES
+      ) throw new Error("OpenCode exceeded the bounded message budget.");
       assistantMessages.add(info.id);
       const tokens = objectValue(info.tokens);
       if (tokens) emitOpenCodeUsage(info.id, tokens, usageState, emitter.rich);
@@ -405,13 +661,25 @@ function handleOpenCodeEvent(
     }
   } else if (event.type === "message.part.updated") {
     const part = objectValue(properties.part);
-    if (part) handleOpenCodePart(part, assistantMessages, emittedParts, resultText, emitter, usageState);
+    if (part) {
+      handleOpenCodePart(
+        part,
+        assistantMessages,
+        emittedParts,
+        resultText,
+        emitter,
+        usageState,
+        eventState,
+      );
+    }
   } else if (event.type === "message.part.delta") {
     const partId = stringValue(properties.partID);
     const messageId = stringValue(properties.messageID);
     const delta = stringValue(properties.delta);
     if (partId && messageId && delta && assistantMessages.has(messageId)) {
-      const next = `${emittedParts.get(partId) ?? ""}${delta}`;
+      const previous = emittedParts.get(partId) ?? "";
+      const next = `${previous}${delta}`;
+      trackOpenCodePart(partId, previous, next, emittedParts, eventState);
       emittedParts.set(partId, next);
       emitOpenCodeText(delta, resultText, emitter.text);
     }
@@ -427,6 +695,9 @@ function handleOpenCodeEvent(
       return;
     }
     const requestId = randomUUID();
+    if (approvals.size >= MAX_PENDING_INTERACTIONS) {
+      throw new Error("OpenCode exceeded the bounded approval budget.");
+    }
     approvals.set(requestId, { nativeId, settled: false });
     const patterns = Array.isArray(properties.patterns) ? properties.patterns.filter((value): value is string => typeof value === "string") : [];
     const resources = Array.isArray(properties.resources) ? properties.resources.filter((value): value is string => typeof value === "string") : [];
@@ -447,6 +718,9 @@ function handleOpenCodeEvent(
     const questions = Array.isArray(properties.questions) ? properties.questions.filter(isQuestionInfo) : [];
     if (!nativeId || questions.length === 0) return;
     const requestId = randomUUID();
+    if (inputs.size >= MAX_PENDING_INTERACTIONS) {
+      throw new Error("OpenCode exceeded the bounded question budget.");
+    }
     inputs.set(requestId, { nativeId, questions, settled: false });
     emitter.rich({ type: "input", request: openCodeQuestions(requestId, questions) });
   } else if (event.type === "session.error") {
@@ -468,6 +742,7 @@ function handleOpenCodePart(
   resultText: CappedProviderBuffer,
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
   usageState: OpenCodeUsageState,
+  eventState: OpenCodeEventState,
 ): void {
   if (part.type === "compaction") {
     usageState.currentContextTokens = null;
@@ -481,6 +756,7 @@ function handleOpenCodePart(
     const previous = emittedParts.get(id) ?? "";
     const next = bounded(part.text);
     const delta = next.slice(commonPrefixLength(previous, next));
+    trackOpenCodePart(id, previous, next, emittedParts, eventState);
     emittedParts.set(id, next);
     if (!delta) return;
     if (part.type === "reasoning") emitter.rich({ type: "reasoning-summary", text: delta });
@@ -510,6 +786,26 @@ function handleOpenCodePart(
       },
     );
   }
+}
+
+function trackOpenCodePart(
+  id: string,
+  previous: string,
+  next: string,
+  parts: Map<string, string>,
+  state: OpenCodeEventState,
+): void {
+  if (!parts.has(id) && parts.size >= MAX_TRACKED_PARTS) {
+    throw new Error("OpenCode exceeded the bounded part budget.");
+  }
+  if (next.length > MAX_PART_CHARS) {
+    throw new Error("OpenCode sent an oversized retained message part.");
+  }
+  const retainedPartChars = state.retainedPartChars - previous.length + next.length;
+  if (retainedPartChars > MAX_RETAINED_PART_CHARS) {
+    throw new Error("OpenCode exceeded the bounded retained-text budget.");
+  }
+  state.retainedPartChars = retainedPartChars;
 }
 
 export function resolveOpenCodeModel(selection: string | undefined, providers: Provider[]): Model | undefined {
@@ -565,6 +861,14 @@ function emitOpenCodeUsage(
     output,
     reasoning,
   };
+  const previous = state.messages.get(messageId);
+  if (!previous && state.messages.size >= MAX_TRACKED_MESSAGES) {
+    throw new Error("OpenCode exceeded the bounded usage-message budget.");
+  }
+  if (previous?.total === null) state.unknownTotalMessages -= 1;
+  else if (previous) state.totalProcessedTokens -= previous.total;
+  if (messageUsage.total === null) state.unknownTotalMessages += 1;
+  else state.totalProcessedTokens += messageUsage.total;
   state.messages.set(messageId, messageUsage);
   state.last = messageUsage;
   state.currentContextTokens = sumTokenParts([input, cachedRead, cacheWrite]);
@@ -576,13 +880,15 @@ function sumTokenParts(values: Array<number | null>): number | null {
 }
 
 function emitOpenCodeUsageSnapshot(state: OpenCodeUsageState, emit: ReturnType<typeof createAgentHarnessEmitter>["rich"]): void {
-  const knownTotals = [...state.messages.values()].map(({ total }) => total).filter((value): value is number => value !== null);
   const last = state.last;
   emit({
     type: "usage",
     usage: {
       usedTokens: state.currentContextTokens,
-      totalProcessedTokens: state.messages.size > 0 && knownTotals.length === state.messages.size ? knownTotals.reduce((sum, value) => sum + value, 0) : null,
+      totalProcessedTokens: state.messages.size > 0
+        && state.unknownTotalMessages === 0
+        ? state.totalProcessedTokens
+        : null,
       totalProcessedScope: "run",
       maxTokens: state.maxTokens,
       inputTokens: last?.input ?? null,

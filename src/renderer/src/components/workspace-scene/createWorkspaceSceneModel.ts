@@ -115,6 +115,7 @@ export interface WorkspaceSceneModelInput {
   busyAction: string | null;
   project: Project | null;
   draftConversation: Conversation | null;
+  workspaceToolsUnavailable: boolean;
   connection: Connection;
   providerMaintenance: ProviderMaintenance;
   projection: ConversationProjection;
@@ -146,6 +147,7 @@ export function createWorkspaceSceneModel({
   busyAction,
   project,
   draftConversation,
+  workspaceToolsUnavailable,
   connection,
   providerMaintenance,
   projection,
@@ -350,7 +352,7 @@ export function createWorkspaceSceneModel({
       onStopSubagent: actions.stopSubagent,
       onStop: actions.stopAgent,
     },
-    resizeHandle: toolsVisible ? {
+    resizeHandle: project && !workspaceToolsUnavailable && toolsVisible ? {
       label: "Resize workspace tools",
       controls: "workspace-content",
       containerRef: workspaceBodyRef,
@@ -369,7 +371,7 @@ export function createWorkspaceSceneModel({
       valueText: (value) => `${value} pixels for workspace tools`,
       className: "workspace-tools-resize-handle",
     } : null,
-    tools: project ? {
+    tools: project && !workspaceToolsUnavailable ? {
       activeTool,
       panel: {
         activeTab: activeTool ?? "terminal",

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
@@ -18,6 +18,27 @@ import {
 } from "./support/app-fixture";
 
 const execFileAsync = promisify(execFile);
+
+async function stagedAttachmentPath(
+  id: string | undefined,
+  extension: string,
+): Promise<string> {
+  expect(id).toBeTruthy();
+  const root = join(
+    await electronApp.evaluate(({ app: electron }) =>
+      electron.getPath("temp")),
+    "inertia-attachments",
+  );
+  const sessions = (await readdir(root))
+    .filter((name) => /^session-[A-Za-z0-9_-]{6}$/u.test(name));
+  const candidates = await Promise.all(sessions.map(async (session) => {
+    const path = join(root, session, `${id}.${extension}`);
+    return await stat(path).then(() => path, () => null);
+  }));
+  const matches = candidates.filter((path) => path !== null);
+  expect(matches).toHaveLength(1);
+  return matches[0]!;
+}
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -427,11 +448,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
 
   const chosenId = chosenPreviewSource?.split("/").at(-1);
   expect(chosenId).toBeTruthy();
-  const selectedTempPath = join(
-    await electronApp.evaluate(({ app }) => app.getPath("temp")),
-    "inertia-attachments",
-    `${chosenId}.png`,
-  );
+  const selectedTempPath = await stagedAttachmentPath(chosenId, "png");
   await expect.poll(async () => stat(selectedTempPath).then(() => true, () => false)).toBe(true);
   const selectedBytes = await readFile(selectedTempPath);
   const sameSizeReplacement = Buffer.from(selectedBytes);
@@ -471,11 +488,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await expect(attachments.locator("img")).toHaveCount(1);
   const pastedSource = await attachments.locator("img").getAttribute("src");
   const pastedId = pastedSource?.split("/").at(-1);
-  const pastedTempPath = join(
-    await electronApp.evaluate(({ app }) => app.getPath("temp")),
-    "inertia-attachments",
-    `${pastedId}.png`,
-  );
+  const pastedTempPath = await stagedAttachmentPath(pastedId, "png");
   await attachments.getByRole("button", { name: "Remove attachment pasted.png" }).click();
   await expect.poll(async () => stat(pastedTempPath).then(() => true, () => false)).toBe(false);
 
@@ -517,11 +530,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await page.getByRole("button", { name: "Attach images or documents" }).click();
   const unsentSource = await attachments.locator("img").getAttribute("src");
   const unsentId = unsentSource?.split("/").at(-1);
-  const unsentTempPath = join(
-    await electronApp.evaluate(({ app }) => app.getPath("temp")),
-    "inertia-attachments",
-    `${unsentId}.png`,
-  );
+  const unsentTempPath = await stagedAttachmentPath(unsentId, "png");
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(true);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(false);

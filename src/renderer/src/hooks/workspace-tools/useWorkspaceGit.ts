@@ -90,11 +90,15 @@ export function useWorkspaceGit({
       setBranches([]);
       return;
     }
+    if (!event.result.status.authorityRef) {
+      throw new Error("The Git status authorization is unavailable.");
+    }
     const diffEvent = resultEvent(await request({
       type: "git.diff",
       payload: {
         projectId: project.id,
         conversationId: conversation?.id,
+        authorityRef: event.result.status.authorityRef,
         ignoreWhitespace,
       },
     }));
@@ -159,12 +163,19 @@ export function useWorkspaceGit({
     if (!project?.id) {
       throw new Error("Select a project before loading changes.");
     }
+    const repository = workspaceGitStatus?.repositories.find(
+      (candidate) => candidate.repositoryPath === repositoryPath,
+    );
+    if (!repository?.authorityRef) {
+      throw new Error("Refresh repository status before loading its diff.");
+    }
     const event = resultEvent(await run("git.workspace.diff", {
       type: "git.workspace.diff",
       payload: {
         projectId: project.id,
         conversationId: conversation?.id,
         repositoryPath,
+        authorityRef: repository.authorityRef,
         ...(filePath ? { path: filePath } : {}),
         ignoreWhitespace,
       },
@@ -173,7 +184,13 @@ export function useWorkspaceGit({
       throw new Error("Unexpected workspace diff response.");
     }
     return event.result.diff;
-  }, [conversation?.id, ignoreWhitespace, project?.id, run]);
+  }, [
+    conversation?.id,
+    ignoreWhitespace,
+    project?.id,
+    run,
+    workspaceGitStatus?.repositories,
+  ]);
 
   const loadBranches = useCallback(() => {
     if (!project || !gitStatus?.isRepository) return;

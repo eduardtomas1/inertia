@@ -235,6 +235,72 @@ describe("runtime process protocol", () => {
     })).toMatchObject({ ok: true, operation: "forget", removed: true });
   });
 
+  it("strictly validates secure-file requests and correlated results", () => {
+    const requestId = crypto.randomUUID();
+    const request = {
+      type: "runtime.secure-file-request",
+      requestId,
+      operation: "read",
+      root: workspaceDirectory,
+      rootIdentity: { dev: "1", ino: "2" },
+      parentIdentities: [],
+      targetIdentity: { dev: "1", ino: "3" },
+      path: "README.md",
+      maxBytes: 1024,
+    };
+    expect(parseRuntimeWorkerEvent(request)).toEqual(request);
+    expect(parseRuntimeWorkerEvent({
+      ...request,
+      path: "../outside.txt",
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...request,
+      parentIdentities: [{ dev: "1", ino: "4" }],
+    })).toBeNull();
+
+    const metadata = {
+      digest: "a".repeat(64),
+      size: 4,
+      modifiedAt: "2026-07-29T10:00:00.000Z",
+      mode: 0o600,
+    };
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.secure-file-result",
+      requestId,
+      result: {
+        ok: true,
+        operation: "read",
+        contentBase64: Buffer.from("test").toString("base64"),
+        metadata,
+      },
+    })).toMatchObject({
+      type: "runtime.secure-file-result",
+      requestId,
+      result: { ok: true, operation: "read", metadata },
+    });
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.secure-file-result",
+      requestId,
+      result: {
+        ok: true,
+        operation: "read",
+        contentBase64: Buffer.from("short").toString("base64"),
+        metadata,
+      },
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.secure-file-result",
+      requestId,
+      result: {
+        ok: false,
+        code: "unsafe",
+        message: "The workspace identity changed.",
+      },
+    })).toMatchObject({
+      result: { ok: false, code: "unsafe" },
+    });
+  });
+
   it("strictly validates opaque attachment requests and trusted descriptors", () => {
     const requestId = crypto.randomUUID();
     const attachmentId = crypto.randomUUID();

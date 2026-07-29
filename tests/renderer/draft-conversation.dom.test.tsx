@@ -90,6 +90,7 @@ describe("useDraftConversation", () => {
       status: "idle",
       providerSessionId: null,
     });
+    expect(hook.result.current.requiresWorkspaceMaterialization).toBe(false);
     expect(run).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -117,6 +118,26 @@ describe("useDraftConversation", () => {
     );
     expect(hook.result.current.conversation).toBeNull();
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("keeps isolated-worktree tools unavailable until the draft materializes", () => {
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: null,
+      settings: {
+        ...defaultSettings,
+        newThreadMode: "worktree",
+      },
+      run: vi.fn(),
+      request: vi.fn(),
+      sendMessage: vi.fn(),
+      persistedConversationId: null,
+      updatePersistedConversation: vi.fn(),
+    }));
+
+    act(() => hook.result.current.start(projectId));
+
+    expect(hook.result.current.conversation?.worktreePath).toBeNull();
+    expect(hook.result.current.requiresWorkspaceMaterialization).toBe(true);
   });
 
   it("removes a failed first-send shell without discarding the local draft", async () => {

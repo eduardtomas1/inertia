@@ -1,6 +1,7 @@
 import { GitCommitHorizontal, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DiffReviewState, GitStatusSnapshot, StructuredDiff } from "@shared/contracts";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { unreviewedCommitHunks } from "../lib/commitReview";
 import { IconButton, LoadingMark } from "./ui";
 
@@ -19,6 +20,7 @@ export function CommitDialog({ open, repositoryPath, status, diff, reviewStates,
   const [message, setMessage] = useState("");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  useNativePreviewSuspension(open);
   useEffect(() => {
     if (!open) return;
     setSelectedPaths(status?.files.map((file) => file.path) ?? []);

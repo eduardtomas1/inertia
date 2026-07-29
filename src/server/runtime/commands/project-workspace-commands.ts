@@ -7,6 +7,8 @@ import { inspectProjectIdentity } from "../../project-identity";
 import { requireRuntimeDirectory } from "../../runtime-commands";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { TerminalManager } from "../../terminal";
+import type { RuntimeSecureFileBroker } from "../../secure-files";
+import type { SecureFileAuthorityRegistry } from "../secure-file-authorities";
 import {
   listWorkspaceEntries,
   readWorkspaceTextFile,
@@ -23,6 +25,8 @@ export interface ProjectWorkspaceCommandDependencies {
   store: RuntimeStore;
   workspaceRuns: WorkspaceRunController<WebSocket>;
   terminals: TerminalManager;
+  secureFiles: RuntimeSecureFileBroker;
+  secureFileAuthorities: SecureFileAuthorityRegistry;
   workspacePath(projectId: string, conversationId?: string): string;
   rememberDeletedConversation(conversationId: string): void;
   broadcastSnapshot(): void;
@@ -120,12 +124,32 @@ export function createProjectWorkspaceCommandHandler(
         return "handled";
       }
       case "workspace.file.read": {
+        const workspacePath = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
+        const secureRoot = await dependencies.secureFiles.authorizeRoot(
+          workspacePath,
+        );
         const file = await readWorkspaceTextFile(
-          dependencies.workspacePath(
-            command.payload.projectId,
-            command.payload.conversationId,
-          ),
+          workspacePath,
           command.payload.path,
+          {
+            secureFiles: dependencies.secureFiles,
+            secureRoot,
+          },
+        );
+        const authorityRef = await dependencies.secureFileAuthorities.issue(
+          socket,
+          "workspace-save",
+          [
+            command.payload.projectId,
+            command.payload.conversationId ?? "",
+            workspacePath,
+            file.path,
+            file.contentDigest,
+          ],
+          secureRoot,
         );
         const extension = file.path.split(".").pop()?.toLowerCase() ?? "text";
         dependencies.send(socket, {
@@ -140,20 +164,51 @@ export function createProjectWorkspaceCommandHandler(
               language: extension,
               contentDigest: file.contentDigest,
               modifiedAt: file.modifiedAt,
+              authorityRef,
             },
           },
         });
         return "handled";
       }
       case "workspace.file.write": {
-        const file = await writeWorkspaceTextFile(
-          dependencies.workspacePath(
+        const workspacePath = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
+        const secureRoot = await dependencies.secureFileAuthorities.resolve(
+          socket,
+          command.payload.authorityRef,
+          "workspace-save",
+          [
             command.payload.projectId,
-            command.payload.conversationId,
-          ),
+            command.payload.conversationId ?? "",
+            workspacePath,
+            command.payload.path,
+            command.payload.expectedDigest,
+          ],
+          { consume: true },
+        );
+        const file = await writeWorkspaceTextFile(
+          workspacePath,
           command.payload.path,
           command.payload.content,
           command.payload.expectedDigest,
+          {
+            secureFiles: dependencies.secureFiles,
+            secureRoot,
+          },
+        );
+        const authorityRef = await dependencies.secureFileAuthorities.issue(
+          socket,
+          "workspace-save",
+          [
+            command.payload.projectId,
+            command.payload.conversationId ?? "",
+            workspacePath,
+            file.path,
+            file.contentDigest,
+          ],
+          secureRoot,
         );
         const extension = file.path.split(".").pop()?.toLowerCase() ?? "text";
         dependencies.send(socket, {
@@ -168,6 +223,7 @@ export function createProjectWorkspaceCommandHandler(
               language: extension,
               contentDigest: file.contentDigest,
               modifiedAt: file.modifiedAt,
+              authorityRef,
             },
           },
         });

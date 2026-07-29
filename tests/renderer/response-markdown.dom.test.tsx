@@ -16,12 +16,18 @@ describe("ResponseMarkdown project files", () => {
         content={[
           "Inspect [the adapter](src/server/adapter.ts).",
           "",
+          "Inspect [the cited adapter](src/server/adapter.ts:42:7).",
+          "",
           "Browse [the sources](src/server/).",
           "",
           "Browse [docs without a slash](docs).",
           "",
           "```ts file=src/server/adapter.ts",
           "export const adapter = true;",
+          "```",
+          "",
+          "```tsx file=\"src/my component.tsx\"",
+          "export const component = true;",
           "```",
         ].join("\n")}
         projectRoot="/workspace"
@@ -33,6 +39,7 @@ describe("ResponseMarkdown project files", () => {
     );
 
     fireEvent.click(screen.getByRole("link", { name: "the adapter" }));
+    fireEvent.click(screen.getByRole("link", { name: "the cited adapter" }));
     fireEvent.click(screen.getByRole("link", { name: "the sources" }));
     fireEvent.click(screen.getByRole("link", {
       name: "docs without a slash",
@@ -40,17 +47,28 @@ describe("ResponseMarkdown project files", () => {
     fireEvent.click(screen.getByRole("button", {
       name: "src/server/adapter.ts",
     }));
+    fireEvent.click(screen.getByRole("button", {
+      name: "src/my component.tsx",
+    }));
     expect(onOpenProjectFile).toHaveBeenNthCalledWith(
       1,
       "src/server/adapter.ts",
     );
     expect(onOpenProjectFile).toHaveBeenNthCalledWith(
       2,
-      "docs",
+      "src/server/adapter.ts:42:7",
     );
     expect(onOpenProjectFile).toHaveBeenNthCalledWith(
       3,
+      "docs",
+    );
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(
+      4,
       "src/server/adapter.ts",
+    );
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(
+      5,
+      "src/my component.tsx",
     );
     expect(openProjectPath).toHaveBeenCalledWith({
       projectId: "11111111-1111-4111-8111-111111111111",

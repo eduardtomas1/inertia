@@ -36,6 +36,7 @@ export interface AppFixture {
   malformedAttachmentPath: string;
   rendererErrors: string[];
   previewUrl: string;
+  nativePreviewIsVisible: (url: string) => Promise<boolean>;
   runtimeSnapshot: () => Promise<RuntimeTestSnapshot>;
   resizeWindow: (width: number, height: number) => Promise<void>;
   expectNoViewportOverflow: () => Promise<void>;
@@ -45,6 +46,7 @@ export interface AppFixture {
 interface AppFixtureOptions {
   name: string;
   initialState: "empty" | "conversation";
+  initialNewThreadMode?: "local" | "worktree";
   seedAssistantCodeBlock?: boolean;
   seedSecondProject?: boolean;
 }
@@ -310,6 +312,17 @@ export async function createAppFixture(
       options.seedAssistantCodeBlock ?? false,
       secondWorkspaceDirectory,
     );
+  } else if (options.initialNewThreadMode) {
+    await mkdir(join(testDirectory, "data"), { recursive: true });
+    const store = new RuntimeStore(
+      join(testDirectory, "data", "inertia.sqlite"),
+      workspace.workspaceDirectory,
+      { recoverInterruptedRuns: false },
+    );
+    store.updateSettings({
+      newThreadMode: options.initialNewThreadMode,
+    });
+    store.close();
   }
   const rendererErrors: string[] = [];
   const electronApp = await electron.launch({
@@ -326,6 +339,9 @@ export async function createAppFixture(
     if (message.type() === "error") rendererErrors.push(message.text());
   });
   page.on("pageerror", (error) => rendererErrors.push(error.message));
+  await page.locator(
+    '.app-shell[data-connection-status="online"]',
+  ).waitFor();
   if (options.initialState === "empty") {
     await page.getByRole("button", { name: "Add your first project" }).waitFor();
   } else {
@@ -355,6 +371,23 @@ export async function createAppFixture(
     );
     await page.waitForTimeout(250);
   };
+  const nativePreviewIsVisible = async (url: string): Promise<boolean> =>
+    await electronApp.evaluate(
+      ({ BrowserWindow }, previewUrl) => {
+        const window = BrowserWindow.getAllWindows()[0];
+        if (!window) return false;
+        const preview = window.contentView.children.find((view) => {
+          const contents = Reflect.get(view, "webContents") as
+            | { getURL: () => string }
+            | undefined;
+          return contents?.getURL() === previewUrl;
+        });
+        if (!preview) return false;
+        const bounds = preview.getBounds();
+        return bounds.width > 0 && bounds.height > 0;
+      },
+      url,
+    );
 
   return {
     electronApp,
@@ -364,6 +397,7 @@ export async function createAppFixture(
     secondWorkspaceDirectory,
     rendererErrors,
     previewUrl: preview.url,
+    nativePreviewIsVisible,
     runtimeSnapshot,
     resizeWindow,
     expectNoViewportOverflow: () => expectPageNoViewportOverflow(page),

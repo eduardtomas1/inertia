@@ -13,6 +13,7 @@ import {
   type ContextUsageDisplayValue,
   usageDisplayBehavior,
 } from "../utils/usageDisplay";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { outsidePointerShouldRestoreFocus } from "../utils/dismissibleMenu";
 import { INTERFACE_LOCALE } from "../lib/locale";
 
@@ -235,6 +236,7 @@ export function UsageIndicator({
   onModeChange,
 }: UsageIndicatorProps): React.JSX.Element | null {
   const [open, setOpen] = useState(false);
+  useNativePreviewSuspension(open);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const reactId = useId().replaceAll(":", "");

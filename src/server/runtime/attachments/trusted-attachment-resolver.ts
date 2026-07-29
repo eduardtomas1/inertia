@@ -46,6 +46,13 @@ function isContained(root: string, target: string): boolean {
     || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
 }
 
+function sameIdentity(
+  left: { dev: number; ino: number },
+  right: { dev: number; ino: number },
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
 function publicAttachmentError(): Error {
   return new Error("The selected attachment is no longer available or could not be verified.");
 }
@@ -138,10 +145,19 @@ export class TrustedAttachmentResolver {
           !== `${trusted.id}.${storageExtension(trusted.mimeType)}`
       ) throw publicAttachmentError();
       const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-      const file = await open(canonicalPath, constants.O_RDONLY | noFollow);
+      const nonBlocking =
+        "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
+      const file = await open(
+        canonicalPath,
+        constants.O_RDONLY | noFollow | nonBlocking,
+      );
       try {
         const before = await file.stat();
-        if (!before.isFile() || before.size !== trusted.size) throw publicAttachmentError();
+        if (
+          !before.isFile()
+          || !sameIdentity(pathInfo, before)
+          || before.size !== trusted.size
+        ) throw publicAttachmentError();
         if (signal?.aborted) throw publicAttachmentError();
         const bytes = await file.readFile();
         const after = await file.stat();

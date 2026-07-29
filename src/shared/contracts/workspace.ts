@@ -24,6 +24,8 @@ export interface WorkspaceFilePreview {
   language: string;
   contentDigest: string;
   modifiedAt: string;
+  /** Ephemeral runtime-owned reference required to save this exact preview. */
+  authorityRef?: string;
 }
 
 /**

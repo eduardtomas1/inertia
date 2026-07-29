@@ -12,6 +12,10 @@ import {
   getRepositoryStatus,
   type GitRepositoryStatus,
 } from "./git";
+import type {
+  RuntimeSecureFileBroker,
+  SecureFileRootCapability,
+} from "./secure-files";
 
 export const WORKSPACE_GIT_DEFAULT_LIMITS = Object.freeze({
   maxDepth: 8,
@@ -29,9 +33,19 @@ export interface WorkspaceGitDiscoveryLimits {
   maxIssues: number;
 }
 
+export interface WorkspaceGitDiscoveryOptions
+  extends Partial<WorkspaceGitDiscoveryLimits> {
+  secureFiles?: RuntimeSecureFileBroker;
+  onRepositoryAuthorized?: (
+    repositoryPath: string,
+    root: SecureFileRootCapability,
+  ) => void;
+}
+
 export interface ResolvedWorkspaceRepository {
   root: string;
   status: GitRepositoryStatus;
+  secureRoot?: SecureFileRootCapability;
 }
 
 interface DiscoveryCandidate {
@@ -215,7 +229,7 @@ async function mapWithConcurrency<T, R>(
  */
 export async function discoverWorkspaceGitRepositories(
   workspacePath: string,
-  inputLimits: Partial<WorkspaceGitDiscoveryLimits> = {},
+  inputLimits: WorkspaceGitDiscoveryOptions = {},
 ): Promise<WorkspaceGitSnapshot> {
   const limits = normalizedLimits(inputLimits);
   const workspaceRoot = await requireWorkspaceDirectory(workspacePath);
@@ -324,7 +338,28 @@ export async function discoverWorkspaceGitRepositories(
 
   const inspected = await mapWithConcurrency(candidates, limits.statusConcurrency, async (candidate) => {
     try {
-      const status = await getRepositoryStatus(candidate.absolutePath);
+      const candidateInfo = await lstat(candidate.absolutePath, {
+        bigint: true,
+      });
+      const secureRoot = inputLimits.secureFiles
+        ? await inputLimits.secureFiles.authorizeRoot(candidate.absolutePath)
+        : null;
+      if (
+        secureRoot
+        && (
+          secureRoot.identity.dev !== candidateInfo.dev.toString(10)
+          || secureRoot.identity.ino !== candidateInfo.ino.toString(10)
+        )
+      ) {
+        throw new GitError(
+          "conflict",
+          "The repository folder changed while it was being inspected.",
+        );
+      }
+      const status = await getRepositoryStatus(
+        secureRoot?.root ?? candidate.absolutePath,
+      );
+      if (secureRoot) await inputLimits.secureFiles!.verifyRoot(secureRoot);
       const candidateIdentity = canonicalIdentity(candidate.absolutePath);
       const rootIdentity = canonicalIdentity(status.root);
       if (candidateIdentity !== rootIdentity || !isContained(workspaceRoot, status.root)) {
@@ -333,12 +368,14 @@ export async function discoverWorkspaceGitRepositories(
       return {
         rootIdentity,
         repository: readyRepository(candidate.repositoryPath, status),
+        secureRoot,
       };
     } catch (error) {
       partial = true;
       return {
         rootIdentity: null,
         repository: failedRepository(candidate.repositoryPath, error),
+        secureRoot: null,
       };
     }
   });
@@ -348,6 +385,12 @@ export async function discoverWorkspaceGitRepositories(
     if (result.rootIdentity && seenRoots.has(result.rootIdentity)) continue;
     if (result.rootIdentity) seenRoots.add(result.rootIdentity);
     repositories.push(result.repository);
+    if (result.secureRoot) {
+      inputLimits.onRepositoryAuthorized?.(
+        result.repository.repositoryPath,
+        result.secureRoot,
+      );
+    }
   }
 
   repositories.sort((left, right) => comparePaths(left.repositoryPath, right.repositoryPath));
@@ -396,6 +439,7 @@ function normalizedRepositoryPath(repositoryPath: string): string {
 export async function resolveWorkspaceGitRepository(
   workspacePath: string,
   repositoryPath: string,
+  secureFiles?: RuntimeSecureFileBroker,
 ): Promise<ResolvedWorkspaceRepository> {
   const workspaceRoot = await requireWorkspaceDirectory(workspacePath);
   const normalized = normalizedRepositoryPath(repositoryPath);
@@ -419,6 +463,7 @@ export async function resolveWorkspaceGitRepository(
   if (!isContained(workspaceRoot, canonical)) {
     throw new GitError("invalid-input", "The repository is outside the workspace.");
   }
+  const canonicalInfo = await lstat(canonical, { bigint: true });
   const marker = await markerState(canonical);
   if (marker !== "present") {
     throw new GitError(
@@ -428,11 +473,27 @@ export async function resolveWorkspaceGitRepository(
         : "The selected folder is not a Git repository.",
     );
   }
-  const status = await getRepositoryStatus(canonical);
+  const secureRoot = secureFiles
+    ? await secureFiles.authorizeRoot(canonical)
+    : undefined;
+  if (
+    secureRoot
+    && (
+      secureRoot.identity.dev !== canonicalInfo.dev.toString(10)
+      || secureRoot.identity.ino !== canonicalInfo.ino.toString(10)
+    )
+  ) {
+    throw new GitError(
+      "conflict",
+      "The repository folder changed while it was being inspected.",
+    );
+  }
+  const status = await getRepositoryStatus(secureRoot?.root ?? canonical);
+  if (secureRoot) await secureFiles!.verifyRoot(secureRoot);
   if (canonicalIdentity(status.root) !== canonicalIdentity(canonical)) {
     throw new GitError("not-repository", "The selected folder is not a distinct Git repository.");
   }
-  return { root: status.root, status };
+  return { root: status.root, status, secureRoot };
 }
 
 export function workspaceGitFilePath(repositoryPath: string, filePath: string): string {

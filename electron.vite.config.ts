@@ -11,6 +11,7 @@ export default defineConfig({
         input: {
           index: resolve("src/main/index.ts"),
           "runtime-worker": resolve("src/server/runtime-worker.ts"),
+          "secure-file-worker": resolve("src/main/secure-file-worker.ts"),
         },
       },
     },

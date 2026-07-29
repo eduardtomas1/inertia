@@ -8,7 +8,10 @@ import type {
 import {
   PROVIDER_MAINTENANCE_PROVIDER_IDS,
 } from "../../shared/provider-maintenance";
-import { providerEnvironment } from "../environment";
+import {
+  providerChildEnvironment,
+  providerEnvironment,
+} from "../environment";
 import {
   resolveProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
@@ -432,7 +435,10 @@ export class ProviderMaintenanceController {
     }
     const environment = await providerEnvironment();
     return await runProviderMaintenanceAction(action, {
-      environment: environment.env,
+      environment: providerChildEnvironment(
+        active.operation.providerId,
+        environment.env,
+      ),
       signal: active.abort.signal,
       onProgress,
     });

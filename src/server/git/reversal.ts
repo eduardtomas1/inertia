@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import type {
   DiffLine,
   DiffReversalPlan,
@@ -48,11 +46,14 @@ import {
   registryOperation,
   reversalController,
 } from "./reversal-registry-adapter";
+import type {
+  RuntimeSecureFileBroker,
+  SecureFileRootCapability,
+} from "../secure-files";
 
 interface ReversalState {
   root: string;
   plan: DiffReversalPlan;
-  absolute: string;
   worktreeMode: number;
   worktreeContent: Buffer;
   index: IndexEntry;
@@ -64,13 +65,15 @@ async function completeRepositoryDiff(
   root: string,
   ignoreWhitespace = false,
   paths?: string[],
+  secureFiles?: RuntimeSecureFileBroker,
+  secureRoot?: SecureFileRootCapability,
 ): Promise<GitUnifiedDiff> {
   const diff = await getUnifiedDiff(root, {
     maxBytes: MAX_DIFF_BYTES,
     maxFiles: MAX_DIFF_FILES,
     ignoreWhitespace,
     paths,
-  });
+  }, undefined, secureFiles, secureRoot);
   if (diff.truncated) {
     throw new GitError("output-limit", "The complete repository diff is too large to reverse safely. Narrow the change set first.");
   }
@@ -104,9 +107,19 @@ async function completeLayerPatch(root: string, layer: "index" | "worktree", pat
   }
 }
 
-async function repositoryStateFingerprint(root: string): Promise<string> {
+async function repositoryStateFingerprint(
+  root: string,
+  secureFiles: RuntimeSecureFileBroker,
+  secureRoot: SecureFileRootCapability,
+): Promise<string> {
   const [combined, staged, unstaged, status] = await Promise.all([
-    completeRepositoryDiff(root),
+    completeRepositoryDiff(
+      root,
+      false,
+      undefined,
+      secureFiles,
+      secureRoot,
+    ),
     completeLayerPatch(root, "index"),
     completeLayerPatch(root, "worktree"),
     runGit(root, ["status", "--porcelain=v2", "-z", "--untracked-files=all"], {
@@ -179,7 +192,12 @@ function hunkFingerprint(header: string, lines: readonly DiffLine[]): string {
   }));
 }
 
-async function buildReversalState(root: string, selection: GitDiffSelection): Promise<ReversalState> {
+async function buildReversalState(
+  root: string,
+  selection: GitDiffSelection,
+  secureFiles: RuntimeSecureFileBroker,
+  secureRoot: SecureFileRootCapability,
+): Promise<ReversalState> {
   if (!(await hasHead(root))) throw new GitError("invalid-input", "Selective reversal requires a repository with an initial commit.");
   const status = await getRepositoryStatus(root);
   if (status.truncated) throw new GitError("output-limit", "The complete Git status is too large to validate safely.");
@@ -200,15 +218,27 @@ async function buildReversalState(root: string, selection: GitDiffSelection): Pr
     throw new GitError("invalid-input", "This file's Git state is not supported for selective reversal.");
   }
 
-  const stateBefore = await repositoryStateFingerprint(root);
+  const stateBefore = await repositoryStateFingerprint(
+    root,
+    secureFiles,
+    secureRoot,
+  );
   let current = await completeRepositoryDiff(
     root,
     selection.ignoreWhitespace,
     [selection.filePath],
+    secureFiles,
+    secureRoot,
   );
   let structured = parseUnifiedDiff(current.text);
   if (structured.fingerprint !== selection.fingerprint) {
-    current = await completeRepositoryDiff(root, selection.ignoreWhitespace);
+    current = await completeRepositoryDiff(
+      root,
+      selection.ignoreWhitespace,
+      undefined,
+      secureFiles,
+      secureRoot,
+    );
     structured = parseUnifiedDiff(current.text);
   }
   if (structured.fingerprint !== selection.fingerprint) {
@@ -226,19 +256,17 @@ async function buildReversalState(root: string, selection: GitDiffSelection): Pr
   if (selectedWorktreeLines.length === 0) throw new GitError("invalid-input", "Select at least one added or removed line to revert.");
 
   const validated = await validatedPaths(root, [file.path]);
-  const absolute = resolve(root, validated[0]!);
-  let info: Awaited<ReturnType<typeof lstat>>;
-  try { info = await lstat(absolute); }
-  catch { throw new GitError("conflict", "The selected file disappeared before it could be validated."); }
-  if (info.isSymbolicLink()) throw new GitError("invalid-input", "Symbolic links must be restored as a whole from source control.");
-  if (!info.isFile()) throw new GitError("invalid-input", "Only regular text files can be reverted by selection.");
-  if (info.size > MAX_DIFF_BYTES) throw new GitError("output-limit", "The selected file is too large to reverse safely.");
+  const worktree = await secureFiles.read(
+    secureRoot,
+    validated[0]!,
+    MAX_DIFF_BYTES,
+  );
 
-  const [worktreeContent, index, stagedPatch] = await Promise.all([
-    readFile(absolute),
+  const [index, stagedPatch] = await Promise.all([
     readIndexEntry(root, file.path),
     completeLayerPatch(root, "index", file.path, selection.ignoreWhitespace),
   ]);
+  const worktreeContent = worktree.content;
   textBuffer(worktreeContent);
   textBuffer(index.content);
   const stagedFile = parseUnifiedDiff(stagedPatch).files.find((candidate) => candidate.path === file.path);
@@ -283,7 +311,11 @@ async function buildReversalState(root: string, selection: GitDiffSelection): Pr
   reversalText(worktreeContent, selectedWorktreeLines);
   if (selectedIndexLines.length > 0) reversalText(index.content, selectedIndexLines);
 
-  const stateAfter = await repositoryStateFingerprint(root);
+  const stateAfter = await repositoryStateFingerprint(
+    root,
+    secureFiles,
+    secureRoot,
+  );
   if (stateAfter !== stateBefore) throw new GitError("conflict", "The repository changed while the reversal was being inspected. Refresh and try again.");
   const affectedLayers: Array<"index" | "worktree"> = [
     ...(selectedIndexLines.length > 0 ? ["index" as const] : []),
@@ -303,8 +335,7 @@ async function buildReversalState(root: string, selection: GitDiffSelection): Pr
   };
   return {
     root,
-    absolute,
-    worktreeMode: info.mode,
+    worktreeMode: worktree.mode,
     worktreeContent,
     index,
     selectedWorktreeLines,
@@ -329,11 +360,27 @@ function sameValidation(left: DiffReversalValidation, right: DiffReversalValidat
     && left.gitStateFingerprint === right.gitStateFingerprint;
 }
 
-export async function inspectDiffSelection(repositoryPath: string, selection: GitDiffSelection): Promise<DiffReversalPlan> {
-  const root = await repositoryRoot(repositoryPath);
+export async function inspectDiffSelection(
+  repositoryPath: string,
+  selection: GitDiffSelection,
+  secureFiles: RuntimeSecureFileBroker,
+  retainedRoot?: SecureFileRootCapability,
+): Promise<DiffReversalPlan> {
+  const root = retainedRoot?.root ?? await repositoryRoot(repositoryPath);
+  const secureRoot = retainedRoot ?? await secureFiles.authorizeRoot(root);
+  await secureFiles.verifyRoot(secureRoot);
   const controller = await reversalController(root);
-  await maintainReversalOperations(root, controller);
-  return (await buildReversalState(root, selection)).plan;
+  await maintainReversalOperations(
+    root,
+    controller,
+    secureFiles,
+    secureRoot,
+  );
+  const plan = (
+    await buildReversalState(root, selection, secureFiles, secureRoot)
+  ).plan;
+  await secureFiles.verifyRoot(secureRoot);
+  return plan;
 }
 
 /** Failure hooks are deliberately per-call so tests never alter process-global Git behavior. */
@@ -356,13 +403,27 @@ async function failReversalOperation(
 export async function revertDiffSelection(
   repositoryPath: string,
   selection: GitDiffSelection,
+  secureFiles: RuntimeSecureFileBroker,
   testHooks?: ReversalTestHooks,
+  retainedRoot?: SecureFileRootCapability,
 ): Promise<GitDiffReversalResult> {
-  const root = await repositoryRoot(repositoryPath);
+  const root = retainedRoot?.root ?? await repositoryRoot(repositoryPath);
+  const secureRoot = retainedRoot ?? await secureFiles.authorizeRoot(root);
+  await secureFiles.verifyRoot(secureRoot);
   const controller = await reversalController(root);
-  await maintainReversalOperations(root, controller);
+  await maintainReversalOperations(
+    root,
+    controller,
+    secureFiles,
+    secureRoot,
+  );
   if (!selection.expected) throw new GitError("invalid-input", "Inspect the selected reversal before applying it.");
-  const state = await buildReversalState(root, selection);
+  const state = await buildReversalState(
+    root,
+    selection,
+    secureFiles,
+    secureRoot,
+  );
   if (!sameValidation(state.plan.validation, selection.expected)) {
     throw new GitError("conflict", "The diff, file, hunk, selected lines, or staged state changed after confirmation. Refresh and try again.");
   }
@@ -392,20 +453,26 @@ export async function revertDiffSelection(
   }));
   let indexUpdated = false;
   let worktreeUpdated = false;
+  let enteredApplying = false;
   try {
     await testHooks?.afterBackupCreated?.(operation);
-    if ((await repositoryStateFingerprint(root)) !== state.plan.validation.gitStateFingerprint) {
+    if (
+      (await repositoryStateFingerprint(root, secureFiles, secureRoot))
+      !== state.plan.validation.gitStateFingerprint
+    ) {
       throw new GitError("conflict", "The repository changed immediately before the reversal. No files were changed.");
     }
     await registryOperation(controller.markApplying(operation.operationId));
+    enteredApplying = true;
     if (!(await fileStateMatches(
       root,
-      state.absolute,
       state.plan.filePath,
       operation.preWorktreeOid,
       operation.preWorktreeMode,
       operation.preIndexOid,
       operation.preIndexMode,
+      secureFiles,
+      secureRoot,
     ))) {
       throw new GitError("conflict", "The selected file or staged state changed immediately before the reversal. No changes were applied.");
     }
@@ -414,13 +481,37 @@ export async function revertDiffSelection(
       indexUpdated = true;
       await testHooks?.afterIndexUpdated?.(operation);
     }
-    await writeAtomic(root, state.absolute, nextWorktree, state.worktreeMode);
+    await writeAtomic(
+      root,
+      state.plan.filePath,
+      nextWorktree,
+      state.worktreeMode,
+      state.worktreeContent,
+      secureFiles,
+      secureRoot,
+    );
     worktreeUpdated = true;
-    if (!(await fileStateMatches(root, state.absolute, state.plan.filePath, operation.postWorktreeOid, operation.postWorktreeMode, operation.postIndexOid, operation.postIndexMode))) {
+    if (!(await fileStateMatches(
+      root,
+      state.plan.filePath,
+      operation.postWorktreeOid,
+      operation.postWorktreeMode,
+      operation.postIndexOid,
+      operation.postIndexMode,
+      secureFiles,
+      secureRoot,
+    ))) {
       throw new GitError("conflict", "Git could not verify the completed reversal; the original file state was restored.");
     }
-    const diff = await completeRepositoryDiff(root, selection.ignoreWhitespace);
+    const diff = await completeRepositoryDiff(
+      root,
+      selection.ignoreWhitespace,
+      undefined,
+      secureFiles,
+      secureRoot,
+    );
     const applied = await registryOperation(controller.markApplied(operation.operationId));
+    await secureFiles.verifyRoot(secureRoot);
     return {
       diff,
       operation: {
@@ -433,27 +524,52 @@ export async function revertDiffSelection(
     };
   } catch (error) {
     if (indexUpdated) await updateIndexEntry(root, state.plan.filePath, state.index.mode, state.index.oid).catch(() => undefined);
-    if (worktreeUpdated) await writeAtomic(root, state.absolute, state.worktreeContent, state.worktreeMode).catch(() => undefined);
-    const restored = !indexUpdated && !worktreeUpdated
-      ? true
-      : await fileStateMatches(
+    if (worktreeUpdated) {
+      await writeAtomic(
         root,
-        state.absolute,
         state.plan.filePath,
-        operation.preWorktreeOid,
-        operation.preWorktreeMode,
-        operation.preIndexOid,
-        operation.preIndexMode,
-      );
-    await failReversalOperation(controller, operation, !restored);
+        state.worktreeContent,
+        state.worktreeMode,
+        nextWorktree,
+        secureFiles,
+        secureRoot,
+      ).catch(() => undefined);
+    }
+    const restored = await fileStateMatches(
+      root,
+      state.plan.filePath,
+      operation.preWorktreeOid,
+      operation.preWorktreeMode,
+      operation.preIndexOid,
+      operation.preIndexMode,
+      secureFiles,
+      secureRoot,
+    );
+    await failReversalOperation(
+      controller,
+      operation,
+      enteredApplying && !restored,
+    );
     throw error;
   }
 }
 
-export async function undoDiffSelection(repositoryPath: string, operationId: string): Promise<GitUnifiedDiff> {
-  const root = await repositoryRoot(repositoryPath);
+export async function undoDiffSelection(
+  repositoryPath: string,
+  operationId: string,
+  secureFiles: RuntimeSecureFileBroker,
+  retainedRoot?: SecureFileRootCapability,
+): Promise<GitUnifiedDiff> {
+  const root = retainedRoot?.root ?? await repositoryRoot(repositoryPath);
+  const secureRoot = retainedRoot ?? await secureFiles.authorizeRoot(root);
+  await secureFiles.verifyRoot(secureRoot);
   const controller = await reversalController(root);
-  await maintainReversalOperations(root, controller);
+  await maintainReversalOperations(
+    root,
+    controller,
+    secureFiles,
+    secureRoot,
+  );
   const operation = await registryOperation(controller.get(operationId));
   await registryOperation(Promise.resolve().then(() => controller.assertCurrentIdentity(operation)));
   if (operation.status !== "applied") {
@@ -462,8 +578,16 @@ export async function undoDiffSelection(repositoryPath: string, operationId: str
       : "This reversal backup is no longer available for Undo.");
   }
   const [path] = await validatedPaths(root, [operation.filePath]);
-  const absolute = resolve(root, path!);
-  if (!(await fileStateMatches(root, absolute, path!, operation.postWorktreeOid, operation.postWorktreeMode, operation.postIndexOid, operation.postIndexMode))) {
+  if (!(await fileStateMatches(
+    root,
+    path!,
+    operation.postWorktreeOid,
+    operation.postWorktreeMode,
+    operation.postIndexOid,
+    operation.postIndexMode,
+    secureFiles,
+    secureRoot,
+  ))) {
     throw new GitError("conflict", "This file or its staged state changed after the reversal, so Undo was not applied.");
   }
   const [worktree, postWorktree] = await Promise.all([
@@ -471,7 +595,16 @@ export async function undoDiffSelection(repositoryPath: string, operationId: str
     registryOperation(controller.readBackup(operation, "post-worktree")),
   ]);
   await registryOperation(controller.markUndoing(operation.operationId));
-  if (!(await fileStateMatches(root, absolute, path!, operation.postWorktreeOid, operation.postWorktreeMode, operation.postIndexOid, operation.postIndexMode))) {
+  if (!(await fileStateMatches(
+    root,
+    path!,
+    operation.postWorktreeOid,
+    operation.postWorktreeMode,
+    operation.postIndexOid,
+    operation.postIndexMode,
+    secureFiles,
+    secureRoot,
+  ))) {
     await registryOperation(controller.markApplied(operation.operationId));
     throw new GitError("conflict", "This file or its staged state changed before Undo could start, so Undo was not applied.");
   }
@@ -483,23 +616,57 @@ export async function undoDiffSelection(repositoryPath: string, operationId: str
       await updateIndexEntry(root, path!, operation.preIndexMode, operation.preIndexOid);
       indexUpdated = true;
     }
-    await writeAtomic(root, absolute, worktree, operation.preWorktreeMode);
+    await writeAtomic(
+      root,
+      path!,
+      worktree,
+      operation.preWorktreeMode,
+      postWorktree,
+      secureFiles,
+      secureRoot,
+    );
     worktreeUpdated = true;
-    if (!(await fileStateMatches(root, absolute, path!, operation.preWorktreeOid, operation.preWorktreeMode, operation.preIndexOid, operation.preIndexMode))) {
+    if (!(await fileStateMatches(
+      root,
+      path!,
+      operation.preWorktreeOid,
+      operation.preWorktreeMode,
+      operation.preIndexOid,
+      operation.preIndexMode,
+      secureFiles,
+      secureRoot,
+    ))) {
       throw new GitError("conflict", "Git could not verify the restored reversal backup.");
     }
-    diff = await completeRepositoryDiff(root);
+    diff = await completeRepositoryDiff(
+      root,
+      false,
+      undefined,
+      secureFiles,
+      secureRoot,
+    );
   } catch (error) {
     if (indexUpdated) await updateIndexEntry(root, path!, operation.postIndexMode, operation.postIndexOid).catch(() => undefined);
-    if (worktreeUpdated) await writeAtomic(root, absolute, postWorktree, operation.postWorktreeMode).catch(() => undefined);
+    if (worktreeUpdated) {
+      await writeAtomic(
+        root,
+        path!,
+        postWorktree,
+        operation.postWorktreeMode,
+        worktree,
+        secureFiles,
+        secureRoot,
+      ).catch(() => undefined);
+    }
     const restored = await fileStateMatches(
       root,
-      absolute,
       path!,
       operation.postWorktreeOid,
       operation.postWorktreeMode,
       operation.postIndexOid,
       operation.postIndexMode,
+      secureFiles,
+      secureRoot,
     );
     if (restored) await registryOperation(controller.markApplied(operation.operationId));
     else await registryOperation(controller.markRecoveryRequired(operation.operationId));
@@ -512,20 +679,30 @@ export async function undoDiffSelection(repositoryPath: string, operationId: str
     if (operation.affectedLayers.includes("index")) {
       await updateIndexEntry(root, path!, operation.postIndexMode, operation.postIndexOid).catch(() => undefined);
     }
-    await writeAtomic(root, absolute, postWorktree, operation.postWorktreeMode).catch(() => undefined);
+    await writeAtomic(
+      root,
+      path!,
+      postWorktree,
+      operation.postWorktreeMode,
+      worktree,
+      secureFiles,
+      secureRoot,
+    ).catch(() => undefined);
     const restored = await fileStateMatches(
       root,
-      absolute,
       path!,
       operation.postWorktreeOid,
       operation.postWorktreeMode,
       operation.postIndexOid,
       operation.postIndexMode,
+      secureFiles,
+      secureRoot,
     );
     if (restored) await registryOperation(controller.markApplied(operation.operationId));
     else await registryOperation(controller.markRecoveryRequired(operation.operationId));
     throw error;
   }
   await registryOperation(controller.deleteBackups(undone));
+  await secureFiles.verifyRoot(secureRoot);
   return diff;
 }

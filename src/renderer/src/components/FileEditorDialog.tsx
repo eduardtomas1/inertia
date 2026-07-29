@@ -9,6 +9,7 @@ import {
 import { createPortal } from "react-dom";
 
 import type { WorkspaceFilePreview } from "@shared/contracts";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { LoadingMark } from "./ui";
 
 const FOCUSABLE_SELECTOR = [
@@ -54,6 +55,7 @@ export function FileEditorDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const changed = content !== originalEditorText;
+  useNativePreviewSuspension(true);
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement

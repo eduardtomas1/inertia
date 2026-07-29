@@ -9,6 +9,7 @@ import {
   runtimeRestartDelayMs,
   type RuntimeAttachmentBroker,
   type RuntimeCredentialBroker,
+  type RuntimeSecureFileBroker,
 } from "../../src/main/runtime-supervisor";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 
@@ -65,6 +66,7 @@ function createHarness(options: {
   forceKillWaitMs?: number;
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
+  secureFileBroker?: RuntimeSecureFileBroker;
   attachmentBroker?: RuntimeAttachmentBroker;
   attachmentRequestTimeoutMs?: number;
 } = {}) {
@@ -88,6 +90,7 @@ function createHarness(options: {
     forceKill,
     credentialBroker: options.credentialBroker,
     credentialRequestTimeoutMs: options.credentialRequestTimeoutMs,
+    secureFileBroker: options.secureFileBroker,
     attachmentBroker: options.attachmentBroker,
     attachmentRequestTimeoutMs: options.attachmentRequestTimeoutMs,
   });
@@ -275,6 +278,77 @@ describe("RuntimeSupervisor", () => {
       code: "unavailable",
       message: "Secure credential storage is unavailable.",
     });
+  });
+
+  it("brokers validated secure-file operations once and aborts them on stop", async () => {
+    let pendingSignal: AbortSignal | undefined;
+    let settlePending:
+      | ((value: Awaited<ReturnType<RuntimeSecureFileBroker["perform"]>>) => void)
+      | undefined;
+    const secureFileBroker: RuntimeSecureFileBroker = {
+      perform: vi.fn<RuntimeSecureFileBroker["perform"]>((_request, signal) => {
+        pendingSignal = signal;
+        return new Promise<
+          Awaited<ReturnType<RuntimeSecureFileBroker["perform"]>>
+        >((resolvePromise) => {
+          settlePending = resolvePromise;
+        });
+      }),
+    };
+    const { children, supervisor } = createHarness({ secureFileBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const requestId = crypto.randomUUID();
+    const request = {
+      type: "runtime.secure-file-request" as const,
+      requestId,
+      operation: "read" as const,
+      root: workspaceDirectory,
+      rootIdentity: { dev: "1", ino: "2" },
+      parentIdentities: [],
+      targetIdentity: { dev: "1", ino: "3" },
+      path: "README.md",
+      maxBytes: 1024,
+    };
+
+    children[0].message(request);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(secureFileBroker.perform).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "read",
+        path: "README.md",
+      }),
+      expect.any(AbortSignal),
+    );
+
+    children[0].message(request);
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.secure-file-result",
+      requestId,
+      result: { ok: false, code: "invalid" },
+    });
+
+    const stopped = supervisor.stop();
+    expect(pendingSignal?.aborted).toBe(true);
+    settlePending?.({
+      ok: false,
+      code: "unavailable",
+      message: "late result",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(children[0].messages).not.toContainEqual({
+      type: "runtime.secure-file-result",
+      requestId,
+      result: {
+        ok: false,
+        code: "unavailable",
+        message: "late result",
+      },
+    });
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+    await expect(stopped).resolves.toBe(true);
   });
 
   it("brokers attachments only to the current generation and bounds stalled requests", async () => {
@@ -807,11 +881,12 @@ describe("RuntimeSupervisor", () => {
   });
 
   it("kills a child that never becomes ready and waits for exit before replacing it", () => {
-    const { children, supervisor } = createHarness();
+    const { children, forceKill, supervisor } = createHarness();
     supervisor.start();
     children[0].spawn();
     vi.advanceTimersByTime(2_000);
-    expect(children[0].killCalls).toBe(1);
+    expect(children[0].killCalls).toBe(0);
+    expect(forceKill).toHaveBeenCalledWith(10_000);
     expect(children).toHaveLength(1);
     expect(() => supervisor.connection()).toThrow("did not become ready");
     children[0].exit(1);
@@ -874,11 +949,13 @@ describe("RuntimeSupervisor", () => {
 
     const stopped = supervisor.stop();
     vi.advanceTimersByTime(1_000);
-    expect(children[0].killCalls).toBe(1);
-    vi.advanceTimersByTime(500);
+    expect(children[0].killCalls).toBe(0);
     expect(forceKill).toHaveBeenCalledWith(10_000);
     vi.advanceTimersByTime(500);
+    expect(forceKill).toHaveBeenCalledWith(10_000);
     expect(forceKill).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(500);
+    expect(forceKill).toHaveBeenCalledTimes(3);
     await expect(stopped).resolves.toBe(false);
     expect(supervisor.snapshot()).toMatchObject({
       phase: "stopping",

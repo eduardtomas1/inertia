@@ -17,6 +17,7 @@ import { createCheckpoint } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import { getRepositoryStatus, getUnifiedDiff } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
+import type { RuntimeSecureFileBroker } from "../../secure-files";
 import {
   resolveWorkspaceGitRepository,
   workspaceGitFilePath,
@@ -108,6 +109,7 @@ export async function selectedReviewContext(
   store: RuntimeStore,
   selection: ReviewSelectionPayload,
   purpose: "ask" | "revision",
+  secureFiles: RuntimeSecureFileBroker,
 ): Promise<SelectedReviewContext> {
   const conversation = store.conversation(selection.conversationId);
   if (conversation.projectId !== selection.projectId) {
@@ -129,7 +131,7 @@ export async function selectedReviewContext(
   let selectionDiff = await getUnifiedDiff(repository.root, {
     paths: [selection.filePath],
     ignoreWhitespace: selection.ignoreWhitespace,
-  });
+  }, undefined, secureFiles);
   if (selectionDiff.truncated) {
     throw new RuntimeRequestError(
       "The current diff is truncated. Reduce the change set before reviewing a selection.",
@@ -140,7 +142,7 @@ export async function selectedReviewContext(
   if (structured.fingerprint !== selection.fingerprint) {
     fullDiff = await getUnifiedDiff(repository.root, {
       ignoreWhitespace: selection.ignoreWhitespace,
-    });
+    }, undefined, secureFiles);
     if (fullDiff.truncated) {
       throw new RuntimeRequestError(
         "The current diff is truncated. Reduce the change set before reviewing a selection.",
@@ -179,7 +181,7 @@ export async function selectedReviewContext(
   if (purpose === "revision" && !fullDiff) {
     fullDiff = await getUnifiedDiff(repository.root, {
       ignoreWhitespace: selection.ignoreWhitespace,
-    });
+    }, undefined, secureFiles);
     if (fullDiff.truncated) {
       throw new RuntimeRequestError(
         "The complete diff is required to audit a revision for changes outside the selected file.",

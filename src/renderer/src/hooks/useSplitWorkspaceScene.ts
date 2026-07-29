@@ -320,6 +320,7 @@ export function useSplitWorkspaceScene({
       : null,
     project: splitProject,
     draftConversation: null,
+    workspaceToolsUnavailable: false,
     connection,
     providerMaintenance,
     projection,

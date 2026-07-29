@@ -30,6 +30,7 @@ import { workspaceRunAttentionView } from "../../../shared/attention";
 import { formatRelativeTime } from "../lib/format";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
   buildLogicalProjectGroups,
   classicSidebarSearch,
@@ -136,6 +137,11 @@ export function Sidebar({
   const navigationRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   const mobile = useMediaQuery("(max-width: 760px)");
+  useNativePreviewSuspension(Boolean(
+    conversationMenu
+      || projectMenu
+      || (mobile && open),
+  ));
   const compact = snapshot?.settings.compactSidebar ?? false;
   const sidebarMode = snapshot?.settings.sidebarMode ?? "classic";
   const globalGrouping = snapshot?.settings.projectGrouping ?? "separate";

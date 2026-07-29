@@ -15,6 +15,7 @@ import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import {
   legacyProviderIdForHarness,
 } from "../../../../shared/model-routing";
+import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { composerRouteReadiness } from "../../utils/composerReadiness";
 import {
   buildComposerModelRoutes,
@@ -109,6 +110,7 @@ export function Composer({
   const [routeRepairing, setRouteRepairing] = useState(false);
   const menuController = useComposerMenus();
   const { menu, dismissMenu } = menuController;
+  useNativePreviewSuspension(menu !== null);
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const routeCancelRef = useRef<HTMLButtonElement>(null);

@@ -2,7 +2,12 @@ import { EventEmitter } from "node:events";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { terminateProcessTree } from "../../src/server/process-lifecycle";
+import {
+  ProcessTreeTerminationError,
+  requireProcessTreeTermination,
+  terminateProcessTree,
+  terminateProcessTreeAndWait,
+} from "../../src/server/process-lifecycle";
 
 function fakeChild(pid = 4_242) {
   return {
@@ -18,6 +23,34 @@ function fakeTaskkill() {
 }
 
 describe("provider process-tree termination", () => {
+  it("rejects an unconfirmed process-tree termination", async () => {
+    const child = fakeChild();
+    const terminate = vi.fn(async () => false);
+
+    await expect(requireProcessTreeTermination(
+      terminate,
+      child as never,
+      true,
+      "Provider process tree",
+    )).rejects.toMatchObject({
+      code: "process-tree-termination-unconfirmed",
+      message: "Provider process tree could not be confirmed stopped.",
+    } satisfies Partial<ProcessTreeTerminationError>);
+  });
+
+  it("normalizes a failed termination check to the same typed failure", async () => {
+    const child = fakeChild();
+
+    await expect(requireProcessTreeTermination(
+      async () => {
+        throw new Error("taskkill failed");
+      },
+      child as never,
+      true,
+      "Provider process tree",
+    )).rejects.toBeInstanceOf(ProcessTreeTerminationError);
+  });
+
   it.each([
     { force: false, args: ["/pid", "4242", "/t"] },
     { force: true, args: ["/pid", "4242", "/t", "/f"] },
@@ -91,5 +124,84 @@ describe("provider process-tree termination", () => {
     terminateProcessTree(child as never, true, { platform: "darwin", killProcess });
 
     expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+  });
+
+  it("awaits successful Windows tree termination", async () => {
+    const child = fakeChild();
+    const taskkill = fakeTaskkill();
+    const spawnProcess = vi.fn(() => taskkill);
+    queueMicrotask(() => taskkill.emit("close", 0));
+
+    await expect(terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        waitMs: 100,
+      },
+    )).resolves.toBe(true);
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      "taskkill.exe",
+      ["/pid", "4242", "/t", "/f"],
+      expect.objectContaining({ shell: false }),
+    );
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("awaits POSIX process-group disappearance", async () => {
+    const child = fakeChild();
+    let running = true;
+    const killProcess = vi.fn((_pid: number, signal?: NodeJS.Signals | number) => {
+      if (signal === 0 && _pid < 0) {
+        if (!running) throw new Error("group gone");
+        return true as const;
+      }
+      if (signal === "SIGKILL") running = false;
+      return true as const;
+    });
+
+    await expect(terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "linux",
+        killProcess,
+        spawnProcessSync: vi.fn(() => ({
+          status: 0,
+          stdout: "",
+        })) as never,
+        waitMs: 100,
+      },
+    )).resolves.toBe(true);
+
+    expect(killProcess).toHaveBeenCalledWith(-4_242, "SIGSTOP");
+    expect(killProcess).toHaveBeenCalledWith(-4_242, "SIGKILL");
+    expect(killProcess).toHaveBeenCalledWith(-4_242, 0);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("keeps POSIX confirmation bounded when a target does not disappear", async () => {
+    const child = fakeChild();
+    const killProcess = vi.fn(() => true as const);
+    const startedAt = Date.now();
+
+    await expect(terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "linux",
+        killProcess,
+        spawnProcessSync: vi.fn(() => ({
+          status: 0,
+          stdout: "4243 4242\n",
+        })) as never,
+        waitMs: 25,
+      },
+    )).resolves.toBe(false);
+
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(killProcess).toHaveBeenCalledWith(4_243, "SIGKILL");
   });
 });

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   WebContentsView,
   type BrowserWindow,
@@ -25,6 +27,10 @@ interface PreviewBrokerOptions {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const hardenedSessions = new WeakSet<Session>();
+
+export function createPreviewPartition(): string {
+  return `inertia-preview-${randomUUID()}`;
+}
 
 export function hardenDesktopSession(session: Session): void {
   if (hardenedSessions.has(session)) return;
@@ -187,6 +193,9 @@ export class PreviewBroker {
       if (!slot || (contextId && slot.contextId !== contextId)) continue;
       this.#slots.delete(id);
       this.options.getWindow()?.contentView.removeChildView(slot.view);
+      void slot.view.webContents.session.clearStorageData().catch(() => {
+        // The non-persistent session is destroyed with its owning view.
+      });
       if (!slot.view.webContents.isDestroyed()) slot.view.webContents.close();
     }
   }
@@ -249,9 +258,10 @@ export class PreviewBroker {
     if (this.#slots.has(ownerId)) this.close(ownerId);
     const window = this.options.getWindow();
     if (!window) throw new Error("The preview window is unavailable");
+    const partition = createPreviewPartition();
     const view = new WebContentsView({
       webPreferences: {
-        partition: "inertia-preview",
+        partition,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,

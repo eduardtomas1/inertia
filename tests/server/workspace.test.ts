@@ -2,6 +2,8 @@ import {
   chmod,
   mkdtemp,
   mkdir,
+  readFile,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -13,12 +15,46 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   listWorkspaceEntries,
-  readWorkspaceTextFile,
+  readWorkspaceTextFile as readWorkspaceTextFileWithBroker,
   searchWorkspaceEntries,
-  writeWorkspaceTextFile,
+  writeWorkspaceTextFile as writeWorkspaceTextFileWithBroker,
+  type ReadTextOptions,
+  type WorkspaceWriteOptions,
 } from "../../src/server/workspace";
+import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 
 const temporaryDirectories: string[] = [];
+const secureFiles = new SecureFileTestBroker();
+
+function readWorkspaceTextFile(
+  root: string,
+  path: string,
+  options: Omit<ReadTextOptions, "secureFiles"> = {},
+) {
+  return readWorkspaceTextFileWithBroker(root, path, {
+    ...options,
+    secureFiles,
+  });
+}
+
+function writeWorkspaceTextFile(
+  root: string,
+  path: string,
+  content: string,
+  expectedDigest: string,
+  options: Omit<WorkspaceWriteOptions, "secureFiles"> = {},
+) {
+  return writeWorkspaceTextFileWithBroker(
+    root,
+    path,
+    content,
+    expectedDigest,
+    {
+      ...options,
+      secureFiles,
+    },
+  );
+}
 
 async function temporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "inertia-workspace-tree-"));
@@ -170,7 +206,7 @@ describe("workspace file hierarchy", () => {
       ),
       writeWorkspaceTextFile(
         root,
-        "./shared.ts",
+        "shared.ts",
         "second writer\n",
         preview.contentDigest,
       ),
@@ -190,7 +226,7 @@ describe("workspace file hierarchy", () => {
   });
 
   it.skipIf(process.platform === "win32")(
-    "keeps the original intact when atomic staging cannot be created",
+    "writes through the verified file handle without sibling staging",
     async () => {
       const root = await temporaryDirectory();
       await writeFile(join(root, "protected.ts"), "original\n", {
@@ -204,14 +240,107 @@ describe("workspace file hierarchy", () => {
           "protected.ts",
           "replacement\n",
           preview.contentDigest,
-        )).rejects.toMatchObject({ code: "operation-failed" });
+        )).resolves.toMatchObject({ content: "replacement\n" });
       } finally {
         await chmod(root, 0o700);
       }
       await expect(readWorkspaceTextFile(root, "protected.ts"))
-        .resolves.toMatchObject({ content: "original\n" });
+        .resolves.toMatchObject({ content: "replacement\n" });
     },
   );
+
+  it("restores the original bytes when a save fails after writing", async () => {
+    const root = await temporaryDirectory();
+    await writeFile(join(root, "recoverable.ts"), "original\n");
+    const preview = await readWorkspaceTextFile(root, "recoverable.ts");
+
+    await expect(writeWorkspaceTextFile(
+      root,
+      "recoverable.ts",
+      "replacement\n",
+      preview.contentDigest,
+      {
+        afterWriteSynced: () => {
+          throw new Error("simulated post-write failure");
+        },
+      },
+    )).rejects.toMatchObject({
+      code: "operation-failed",
+    });
+
+    await expect(readWorkspaceTextFile(root, "recoverable.ts"))
+      .resolves.toMatchObject({
+        content: "original\n",
+        contentDigest: preview.contentDigest,
+      });
+  });
+
+  it("never follows a parent directory swapped after the target is opened", async () => {
+    const root = await temporaryDirectory();
+    const outside = await temporaryDirectory();
+    const parent = join(root, "src");
+    const movedParent = join(root, "src-moved");
+    await mkdir(parent);
+    await writeFile(join(parent, "example.ts"), "inside\n");
+    await writeFile(join(outside, "example.ts"), "outside\n");
+    const preview = await readWorkspaceTextFile(root, "src/example.ts");
+
+    await expect(writeWorkspaceTextFile(
+      root,
+      "src/example.ts",
+      "replacement\n",
+      preview.contentDigest,
+      {
+        afterDigestVerified: async () => {
+          await rename(parent, movedParent);
+          await symlink(
+            outside,
+            parent,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      },
+    )).rejects.toMatchObject({ code: "conflict" });
+
+    await expect(readWorkspaceTextFile(outside, "example.ts"))
+      .resolves.toMatchObject({ content: "outside\n" });
+    await expect(readWorkspaceTextFile(root, "src-moved/example.ts"))
+      .resolves.toMatchObject({ content: "inside\n" });
+  });
+
+  it("pins the workspace root identity across a save transaction", async () => {
+    const container = await temporaryDirectory();
+    const root = join(container, "workspace");
+    const movedRoot = join(container, "workspace-moved");
+    const outside = join(container, "outside");
+    await mkdir(root);
+    await mkdir(outside);
+    await writeFile(join(root, "example.ts"), "inside\n");
+    await writeFile(join(outside, "example.ts"), "inside\n");
+    const preview = await readWorkspaceTextFile(root, "example.ts");
+
+    await expect(writeWorkspaceTextFile(
+      root,
+      "example.ts",
+      "replacement\n",
+      preview.contentDigest,
+      {
+        afterDigestVerified: async () => {
+          await rename(root, movedRoot);
+          await symlink(
+            outside,
+            root,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      },
+    )).rejects.toMatchObject({ code: "conflict" });
+
+    await expect(readFile(join(outside, "example.ts"), "utf8"))
+      .resolves.toBe("inside\n");
+    await expect(readFile(join(movedRoot, "example.ts"), "utf8"))
+      .resolves.toBe("inside\n");
+  });
 
   it("does not write through symbolic links or accept binary editor content", async () => {
     const root = await temporaryDirectory();

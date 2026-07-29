@@ -6,6 +6,10 @@ import {
   type AppFixture,
   type RuntimeTestSnapshot,
 } from "./support/app-fixture";
+import {
+  capturePageWebSockets,
+  publishCapturedWebSocketEvent,
+} from "./support/browser-websocket-fixture";
 import { createQuietLedgerFixture } from "./support/quiet-ledger-fixture";
 
 let app!: AppFixture;
@@ -57,39 +61,9 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     warning,
   } = createQuietLedgerFixture({ testDirectory, workspaceDirectory });
 
-  await page.addInitScript(() => {
-    const NativeWebSocket = window.WebSocket;
-    const sockets: WebSocket[] = [];
-    const CapturedWebSocket = new Proxy(NativeWebSocket, {
-      construct(target, argumentsList) {
-        const socket = Reflect.construct(target, argumentsList) as WebSocket;
-        sockets.push(socket);
-        return socket;
-      },
-    });
-    Object.defineProperty(window, "__task41WebSockets", {
-      configurable: true,
-      value: sockets,
-    });
-    window.WebSocket = CapturedWebSocket as typeof WebSocket;
-  });
-
-  const publishFixtureEvent = async (event: object): Promise<void> => {
-    await page.evaluate((fixtureEvent) => {
-      const sockets = Reflect.get(window, "__task41WebSockets") as
-        | WebSocket[]
-        | undefined;
-      const socket = sockets?.find(
-        ({ readyState }) => readyState === WebSocket.OPEN,
-      );
-      if (!socket) {
-        throw new Error("The Quiet Ledger fixture WebSocket is unavailable.");
-      }
-      socket.dispatchEvent(new MessageEvent("message", {
-        data: JSON.stringify(fixtureEvent),
-      }));
-    }, event);
-  };
+  await capturePageWebSockets(page);
+  const publishFixtureEvent = (event: object): Promise<void> =>
+    publishCapturedWebSocketEvent(page, event);
 
   const captureScenario = async (name: string): Promise<void> => {
     const screenshotPath = testInfo.outputPath(`quiet-ledger-${name}.png`);
@@ -242,10 +216,36 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     });
     await captureElementScenario("streaming-caret-code", activeTurn);
 
+    await page.getByRole("button", { name: "Open workspace tools" }).click();
+    const previewTools = page.getByRole("complementary", {
+      name: "Workspace tools",
+    });
+    await previewTools.getByRole("tab", {
+      name: "Preview",
+      exact: true,
+    }).click();
+    const hostilePreviewUrl = `${app.previewUrl}approval-overlay`;
+    await previewTools.getByRole("textbox", {
+      name: "Preview address",
+    }).fill(hostilePreviewUrl);
+    await previewTools.getByRole("button", {
+      name: "Go",
+      exact: true,
+    }).click();
+    await expect.poll(
+      () => app.nativePreviewIsVisible(hostilePreviewUrl),
+    ).toBe(true);
+
     await publishFixtureEvent({
       type: "agent.approval.requested",
       request: approvalRequest,
     });
+    await expect.poll(
+      () => app.nativePreviewIsVisible(hostilePreviewUrl),
+    ).toBe(false);
+    await previewTools.getByRole("button", {
+      name: "Close workspace tools",
+    }).click();
     await publishFixtureEvent({
       type: "agent.input.requested",
       request: providerInputRequest,

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
+import type { Project } from "../../src/shared/contracts";
 import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
 
 const summary: EnvironmentSummarySnapshot = {
@@ -20,12 +21,34 @@ const summary: EnvironmentSummarySnapshot = {
   attachments: [],
 };
 
-function HeaderHarness(): React.JSX.Element {
+const project: Project = {
+  id: "11111111-1111-4111-8111-111111111111",
+  name: "Inertia",
+  path: "/workspace/inertia",
+  normalizedPath: "/workspace/inertia",
+  repositoryIdentity: null,
+  repositoryRoot: null,
+  repositoryRelativePath: "",
+  groupingMode: null,
+  gitRepositoryLimit: 64,
+  color: "#6366f1",
+  status: "ready",
+  createdAt: "2026-07-29T10:00:00.000Z",
+  updatedAt: "2026-07-29T10:00:00.000Z",
+};
+
+function HeaderHarness({
+  activeProject = null,
+  workspaceToolsUnavailableReason = null,
+}: {
+  activeProject?: Project | null;
+  workspaceToolsUnavailableReason?: string | null;
+}): React.JSX.Element {
   const [open, setOpen] = useState(true);
   return (
     <>
       <WorkspaceHeader
-        project={null}
+        project={activeProject}
         conversation={null}
         view="workspace"
         activeTool={null}
@@ -42,6 +65,7 @@ function HeaderHarness(): React.JSX.Element {
         environmentOpen={open}
         onOpenSidebar={vi.fn()}
         onToggleTools={vi.fn()}
+        workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
         onSetEnvironmentOpen={setOpen}
         onCycleTheme={vi.fn()}
         onOpenSettings={vi.fn()}
@@ -104,5 +128,18 @@ describe("environment summary header popover", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", {
       name: "Environment summary",
     })).not.toBeInTheDocument());
+  });
+
+  it("explains why isolated-worktree draft tools are not ready", () => {
+    const reason =
+      "Workspace tools are available after the first message creates this isolated worktree.";
+    render(
+      <HeaderHarness
+        activeProject={project}
+        workspaceToolsUnavailableReason={reason}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: reason })).toBeDisabled();
   });
 });

@@ -1,4 +1,4 @@
-import { isAbsolute, join, normalize } from "node:path";
+import { isAbsolute, normalize } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { CODEX_APP_SERVER_MAX_FRAME_BYTES } from "../../src/server/codex-app-server";
@@ -25,19 +25,29 @@ describe("Codex protocol seams", () => {
       request: {
         kind: "command",
         command: "npm test",
-        cwd: normalize("/workspace"),
+        cwd: "/workspace",
         reason: "Run verification",
         networkScope: { host: "registry.npmjs.org", protocol: "https" },
         permissionRoots: [
-          { path: normalize("/workspace"), access: "read" },
-          { path: normalize("/tmp"), access: "write" },
+          { path: "/workspace", access: "read" },
+          { path: "/tmp", access: "write" },
         ],
         availableDecisions: ["approve", "deny"],
       },
     });
+    expect(parseCodexApprovalRequest(
+      "item/commandExecution/requestApproval",
+      {
+        command: "npm test",
+        cwd: "/workspace",
+        reason: "Run the focused suite.\nThen report failures.",
+      },
+    )?.request.reason).toBe(
+      "Run the focused suite.\nThen report failures.",
+    );
   });
 
-  it("normalizes absolute permission paths without rewriting provider display patterns", () => {
+  it("preserves exact absolute permission paths and provider display patterns", () => {
     const absoluteRoot = isAbsolute("C:\\workspace") ? "C:\\workspace" : "/workspace";
     const mixedAbsolutePath = `${absoluteRoot}/generated/../fixtures`;
     const parsed = parseCodexApprovalRequest("item/permissions/requestApproval", {
@@ -53,11 +63,167 @@ describe("Codex protocol seams", () => {
     });
 
     expect(parsed?.request.permissionRoots).toEqual([
-      { path: normalize(join(absoluteRoot, "fixtures")), access: "read" },
+      { path: mixedAbsolutePath, access: "read" },
       { path: "glob: src/**/{*.ts,*.tsx}", access: "read" },
       { path: "project root: generated/**", access: "write" },
     ]);
+    expect(parsed?.requestedPermissions).toEqual({
+      fileSystem: {
+        read: [mixedAbsolutePath],
+        entries: [
+          {
+            access: "read",
+            path: {
+              type: "glob_pattern",
+              pattern: "src/**/{*.ts,*.tsx}",
+            },
+          },
+          {
+            access: "write",
+            path: {
+              type: "special",
+              value: { kind: "project_root", subpath: "generated/**" },
+            },
+          },
+        ],
+      },
+    });
   });
+
+  it("fails closed when a permission grant cannot be displayed completely", () => {
+    const roots = Array.from(
+      { length: 13 },
+      (_, index) => normalize(`/workspace/root-${index}`),
+    );
+
+    expect(parseCodexApprovalRequest("item/permissions/requestApproval", {
+      permissions: {
+        fileSystem: { read: roots, write: null, entries: [] },
+      },
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("item/permissions/requestApproval", {
+      permissions: {
+        fileSystem: {
+          read: ["/workspace"],
+          entries: [{
+            access: "write",
+            path: { type: "future_permission", path: "/private" },
+          }],
+        },
+      },
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("item/permissions/requestApproval", {
+      permissions: {
+        fileSystem: { read: ["/workspace"] },
+        futureGrant: { enabled: true },
+      },
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("item/commandExecution/requestApproval", {
+      command: `echo ${"x".repeat(4_000)}`,
+      cwd: "/workspace",
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("item/commandExecution/requestApproval", {
+      command: "npm test",
+      cwd: "relative-workspace",
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("item/commandExecution/requestApproval", {
+      command: "curl example.test",
+      networkApprovalContext: {
+        host: "example.test",
+        protocol: "future-protocol",
+      },
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("item/commandExecution/requestApproval", {
+      command: "curl example.test",
+      networkApprovalContext: {
+        host: "example.test",
+        protocol: "https",
+        scope: "future-session",
+      },
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("item/commandExecution/requestApproval", {
+      command: "npm test",
+      availableDecisions: ["accept", "future-decision"],
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("item/permissions/requestApproval", {
+      permissions: {
+        fileSystem: {
+          read: ["/workspace/link/../secret"],
+        },
+      },
+    })?.requestedPermissions).toEqual({
+      fileSystem: {
+        read: ["/workspace/link/../secret"],
+      },
+    });
+    expect(parseCodexApprovalRequest("item/permissions/requestApproval", {
+      permissions: {
+        fileSystem: {
+          read: ["/workspace/trailing-space "],
+        },
+      },
+    })?.request.permissionRoots).toEqual([
+      { path: "/workspace/trailing-space ", access: "read" },
+    ]);
+    expect(parseCodexApprovalRequest("item/permissions/requestApproval", {
+      permissions: {
+        fileSystem: {
+          read: ["/workspace/line\nbreak"],
+        },
+      },
+    })).toBeUndefined();
+    for (const controlCharacter of ["\t", "\u001b", "\u007f"]) {
+      expect(parseCodexApprovalRequest(
+        "item/commandExecution/requestApproval",
+        {
+          command: `npm${controlCharacter}test`,
+          cwd: "/workspace",
+        },
+      )).toBeUndefined();
+      expect(parseCodexApprovalRequest(
+        "item/permissions/requestApproval",
+        {
+          permissions: {
+            fileSystem: {
+              entries: [{
+                access: "read",
+                path: {
+                  type: "glob_pattern",
+                  pattern: `src/${controlCharacter}*.ts`,
+                },
+              }],
+            },
+          },
+        },
+      )).toBeUndefined();
+    }
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "preserves exact Windows drive and UNC approval paths",
+    () => {
+      const paths = [
+        String.raw`C:\workspace\link\..\target`,
+        String.raw`\\server\share\project`,
+        String.raw`C:\workspace\trailing-space `,
+      ];
+      const parsed = parseCodexApprovalRequest(
+        "item/permissions/requestApproval",
+        {
+          permissions: {
+            fileSystem: { read: paths },
+          },
+        },
+      );
+
+      expect(parsed?.requestedPermissions).toEqual({
+        fileSystem: { read: paths },
+      });
+      expect(parsed?.request.permissionRoots).toEqual(
+        paths.map((path) => ({ path, access: "read" })),
+      );
+    },
+  );
 
   it("parses and validates structured user questions", () => {
     const request = parseCodexInputRequest("item/tool/requestUserInput", {

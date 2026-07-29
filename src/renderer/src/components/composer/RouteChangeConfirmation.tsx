@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { ShieldCheck } from "lucide-react";
+import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import type { PendingModelRoute } from "./types";
 
 export interface RouteChangeConfirmationProps {
@@ -19,6 +20,7 @@ export function RouteChangeConfirmation({
   onDismiss,
   onCreate,
 }: RouteChangeConfirmationProps): React.JSX.Element {
+  useNativePreviewSuspension(true);
   return (
     <div
       className="composer-route-confirmation"

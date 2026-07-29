@@ -77,6 +77,74 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   expect(rendererErrors).toEqual([]);
 });
 
+test("keeps hostile native previews beneath trusted workspace overlays", async () => {
+  await resizeWindow(1440, 920);
+  await ensureWorkspaceTools();
+  await page.getByRole("tab", { name: /Preview/ }).click();
+  const hostilePreviewUrl = `${previewUrl}trusted-overlays`;
+  await page.getByRole("textbox", { name: "Preview address" })
+    .fill(hostilePreviewUrl);
+  await page.getByRole("button", { name: "Go", exact: true }).click();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(true);
+
+  await page.getByRole("button", { name: "Open environment summary" }).click();
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  await expect(page.getByRole("dialog", {
+    name: "Environment summary",
+  })).toBeVisible();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Close environment summary" }).click();
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(true);
+
+  await page.getByRole("button", { name: /^Open runs/u }).click();
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  await expect(page.getByRole("dialog", { name: "Runs" })).toBeVisible();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Close runs" }).click();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(true);
+
+  await page.keyboard.press(
+    process.platform === "darwin" ? "Meta+K" : "Control+K",
+  );
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  await expect(page.getByRole("dialog", { name: "Search Inertia" }))
+    .toBeVisible();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Close search" }).click();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(true);
+
+  const commitButton = page.locator(
+    ".workspace-header .primary-header-button",
+  );
+  await expect(commitButton).toBeEnabled();
+  await commitButton.click();
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  await expect(page.getByRole("dialog", { name: "Commit changes" }))
+    .toBeVisible();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Close commit dialog" }).click();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(true);
+});
+
 test("navigates the project file hierarchy lazily with an accessible keyboard tree", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const addProject = page.getByRole("button", { name: "Add your first project" });

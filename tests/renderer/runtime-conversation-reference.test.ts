@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   runtimeConversationReference,
+  visibleWorkspaceConversation,
 } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
 import {
   draftWorkspaceToolsUnavailableReason,
@@ -34,6 +35,22 @@ describe("runtime conversation references", () => {
     expect(runtimeConversationReference(conversation)).toEqual({
       conversationId: conversation.id,
     });
+  });
+
+  it("keeps a reconciling draft visible over its empty runtime shell", () => {
+    const persisted = {
+      id: "22222222-2222-4222-8222-222222222222",
+    };
+    const draft = {
+      id: "33333333-3333-4333-8333-333333333333",
+    };
+
+    expect(visibleWorkspaceConversation(
+      persisted as never,
+      draft as never,
+    )).toBe(draft);
+    expect(visibleWorkspaceConversation(persisted as never, null))
+      .toBe(persisted);
   });
 
   it("keeps unmaterialized isolated-worktree drafts away from project tools", () => {

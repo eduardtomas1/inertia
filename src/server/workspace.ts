@@ -14,6 +14,7 @@ import {
   sep,
 } from "node:path";
 
+import { secureFilePathSegments } from "../node/secure-file-protocol";
 import { MAX_WORKSPACE_FILE_EDIT_BYTES } from "../shared/contracts/workspace";
 import {
   SecureFileError,
@@ -173,6 +174,16 @@ function isContained(root: string, target: string): boolean {
   return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
 }
 
+function workspacePathSegments(path: string): string[] {
+  return path.split(process.platform === "win32" ? /[\\/]/u : "/");
+}
+
+function hasInvalidPlatformPathPrefix(path: string): boolean {
+  return process.platform === "win32"
+    ? /^[\\/]/u.test(path) || /^[A-Za-z]:/u.test(path)
+    : path.startsWith("/");
+}
+
 function validateOpenRelativePath(path: string): string {
   if (
     typeof path !== "string" ||
@@ -180,9 +191,8 @@ function validateOpenRelativePath(path: string): string {
     path.length > MAX_PATH_LENGTH ||
     /[\0\r\n]/u.test(path) ||
     isAbsolute(path) ||
-    /^[\\/]/u.test(path) ||
-    /^[A-Za-z]:/u.test(path) ||
-    path.split(/[\\/]/u).some((segment) => segment === "..")
+    hasInvalidPlatformPathPrefix(path) ||
+    workspacePathSegments(path).some((segment) => segment === "..")
   ) {
     throw new WorkspaceError("invalid-input", "The project path is invalid.");
   }
@@ -195,9 +205,8 @@ function validateRelativePath(path: string, allowRoot: boolean): string {
     path.length > MAX_PATH_LENGTH ||
     /[\0\r\n]/u.test(path) ||
     isAbsolute(path) ||
-    /^[\\/]/u.test(path) ||
-    /^[A-Za-z]:/u.test(path) ||
-    path.split(/[\\/]/u).some((segment) => segment === "..")
+    hasInvalidPlatformPathPrefix(path) ||
+    workspacePathSegments(path).some((segment) => segment === "..")
   ) {
     throw new WorkspaceError("invalid-input", "The workspace path is invalid.");
   }
@@ -459,7 +468,12 @@ function readTextFileResult(
   }
   let content: string;
   try {
-    content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    content = new TextDecoder("utf-8", {
+      fatal: true,
+      // Keep a leading BOM in the editable text so a read/edit/write round trip
+      // cannot silently change the file's encoding marker.
+      ignoreBOM: true,
+    }).decode(bytes);
   } catch {
     throw new WorkspaceError("not-text", "This file is not valid UTF-8 text.");
   }
@@ -568,9 +582,9 @@ async function readSecureFile(
 function secureRelativeFilePath(
   relativePath: string,
 ): string {
-  const normalized = validateRelativePath(relativePath, false);
-  const segments = normalized.split(/[\\/]/u);
-  if (segments.some((segment) => segment.length === 0 || segment === ".")) {
+  validateRelativePath(relativePath, false);
+  const segments = secureFilePathSegments(relativePath);
+  if (!segments) {
     throw new WorkspaceError(
       "invalid-input",
       "The workspace file path is invalid.",

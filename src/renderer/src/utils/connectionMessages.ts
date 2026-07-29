@@ -3,6 +3,27 @@ import type { ServerEvent } from "@shared/contracts";
 export const UNREADABLE_RUNTIME_RESPONSE =
   "Inertia received an unreadable response from its local service.";
 
+export type RuntimeCommandDelivery =
+  | "not-sent"
+  | "rejected"
+  | "ambiguous";
+
+export class RuntimeCommandError extends Error {
+  constructor(
+    message: string,
+    readonly delivery: RuntimeCommandDelivery,
+  ) {
+    super(message);
+    this.name = "RuntimeCommandError";
+  }
+}
+
+export function runtimeCommandDelivery(
+  error: unknown,
+): RuntimeCommandDelivery | null {
+  return error instanceof RuntimeCommandError ? error.delivery : null;
+}
+
 export interface PendingConnectionRequest {
   resolve: (event: ServerEvent) => void;
   reject: (error: Error) => void;
@@ -74,7 +95,7 @@ export function settlePendingConnectionRequest(
   clearPendingTimeout(pending.timeout);
   pendingRequests.delete(event.requestId);
   if (event.type === "request.error") {
-    pending.reject(new Error(event.message));
+    pending.reject(new RuntimeCommandError(event.message, "rejected"));
   } else {
     pending.resolve(event);
   }

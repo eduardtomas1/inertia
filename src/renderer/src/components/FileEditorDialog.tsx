@@ -36,10 +36,16 @@ export function serializeEditorText(
 
 export function FileEditorDialog({
   file,
+  canSave,
   onClose,
   onSave,
 }: {
   file: WorkspaceFilePreview;
+  canSave: (
+    path: string,
+    content: string,
+    expectedDigest: string,
+  ) => boolean;
   onClose: () => void;
   onSave: (
     path: string,
@@ -55,6 +61,15 @@ export function FileEditorDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const changed = content !== originalEditorText;
+  const serializedContent = serializeEditorText(file.content, content);
+  const withinTransportLimit = canSave(
+    file.path,
+    serializedContent,
+    file.contentDigest,
+  );
+  const sizeError = changed && !withinTransportLimit
+    ? "This edit is too large to send safely. Shorten the file before saving."
+    : null;
   useNativePreviewSuspension(true);
 
   useEffect(() => {
@@ -78,13 +93,13 @@ export function FileEditorDialog({
   };
 
   const save = async (): Promise<void> => {
-    if (!changed || saving) return;
+    if (!changed || saving || !withinTransportLimit) return;
     setSaving(true);
     setError(null);
     try {
       await onSave(
         file.path,
-        serializeEditorText(file.content, content),
+        serializedContent,
         file.contentDigest,
       );
       onClose();
@@ -172,8 +187,10 @@ export function FileEditorDialog({
             setError(null);
           }}
         />
-        {error && (
-          <p className="file-editor-error" role="alert">{error}</p>
+        {(error || sizeError) && (
+          <p className="file-editor-error" role="alert">
+            {error ?? sizeError}
+          </p>
         )}
         <footer>
           <span>Changes are checked against the version you opened.</span>
@@ -188,7 +205,7 @@ export function FileEditorDialog({
           <button
             type="button"
             className="primary-button"
-            disabled={!changed || saving}
+            disabled={!changed || saving || !withinTransportLimit}
             onClick={() => void save()}
           >
             {saving

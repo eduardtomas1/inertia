@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   mkdtemp,
   mkdir,
@@ -22,6 +23,54 @@ afterEach(async () => {
 });
 
 describe("runtime secure file broker client", () => {
+  it.skipIf(process.platform === "win32")(
+    "keeps a POSIX literal backslash inside one authorized filename segment",
+    async () => {
+      const root = await mkdtemp(
+        join(tmpdir(), "inertia-secure-client-posix-"),
+      );
+      roots.push(root);
+      const filename = "notes\\draft.md";
+      const content = Buffer.from("draft\n");
+      await writeFile(join(root, filename), content);
+      const post = vi.fn<(event: RuntimeWorkerEvent) => void>();
+      const client = new RuntimeSecureFileBrokerClient(post);
+      const authority = await client.authorizeRoot(root);
+
+      const pending = client.read(authority, filename, 1_024);
+      await vi.waitFor(() => {
+        expect(post).toHaveBeenCalledTimes(1);
+      });
+      const request = post.mock.calls[0]![0];
+      expect(request).toMatchObject({
+        type: "runtime.secure-file-request",
+        operation: "read",
+        path: filename,
+        parentIdentities: [],
+      });
+      if (request.type !== "runtime.secure-file-request") {
+        throw new Error("Expected a secure-file request.");
+      }
+      client.handle({
+        type: "runtime.secure-file-result",
+        requestId: request.requestId,
+        result: {
+          ok: true,
+          operation: "read",
+          contentBase64: content.toString("base64"),
+          metadata: {
+            digest: createHash("sha256").update(content).digest("hex"),
+            size: content.byteLength,
+            modifiedAt: new Date(0).toISOString(),
+            mode: 0o644,
+          },
+        },
+      });
+      await expect(pending).resolves.toMatchObject({ content });
+      client.close();
+    },
+  );
+
   it("does not remint root authority after the authorized path is replaced", async () => {
     const container = await mkdtemp(
       join(tmpdir(), "inertia-secure-client-"),

@@ -13,6 +13,7 @@ import type {
   SecureFileIdentity,
   SecureFileRequest,
 } from "../../node/secure-file-protocol.js";
+import { secureFilePathSegments } from "../../node/secure-file-protocol.js";
 import type {
   RuntimeSecureFileBroker,
   SecureFileRead,
@@ -35,17 +36,6 @@ interface PendingRequest {
 
 function unavailable(message = "The secure file operation could not be completed."): Error {
   return new SecureFileError("unavailable", message);
-}
-
-function safeRelativePath(path: string): boolean {
-  return path.length > 0
-    && path.length <= 4_096
-    && !/[\0\r\n]/u.test(path)
-    && !/^[\\/]/u.test(path)
-    && !/^[A-Za-z]:/u.test(path)
-    && path.split(/[\\/]/u).every(
-      (segment) => segment.length > 0 && segment !== "." && segment !== "..",
-    );
 }
 
 export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
@@ -181,14 +171,14 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
     parentIdentities: SecureFileIdentity[];
     targetIdentity: SecureFileIdentity;
   }> {
-    if (!safeRelativePath(path)) {
+    const segments = secureFilePathSegments(path);
+    if (!segments) {
       throw new SecureFileError(
         "invalid",
         "The secure file path was invalid.",
       );
     }
     await this.verifyRoot(root);
-    const segments = path.split(/[\\/]/u);
     const basename = segments.pop();
     if (!basename) throw unavailable();
     const parentIdentities: SecureFileIdentity[] = [];

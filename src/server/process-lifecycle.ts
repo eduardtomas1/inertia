@@ -234,7 +234,8 @@ function terminateWindowsProcessTree(
  * Terminates an owned process tree and waits for bounded confirmation.
  *
  * POSIX callers must spawn the direct child with `detached: true`, making its
- * PID the process-group ID. Windows callers are confirmed by taskkill itself.
+ * PID the process-group ID. Windows callers require both successful taskkill
+ * completion and the direct child's `close` event.
  */
 export async function terminateProcessTreeAndWait(
   child: ChildProcess,
@@ -256,7 +257,13 @@ export async function terminateProcessTreeAndWait(
       spawnProcess,
       waitMs,
     );
-    if (treeTerminated) return true;
+    if (treeTerminated) {
+      // taskkill confirms that it issued termination for the owned tree, but
+      // Windows can keep the direct child's executable image locked until the
+      // ChildProcess has emitted close. Do not let callers release temporary
+      // executables or other owned resources before that handle is closed.
+      return await waitForDirectChildExit(child, waitMs);
+    }
     killDirectChild(child, force);
     return await waitForDirectChildExit(child, waitMs);
   }

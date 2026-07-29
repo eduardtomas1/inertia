@@ -26,7 +26,12 @@ describe("FileEditorDialog", () => {
       contentDigest: expectedDigest,
     }));
     render(
-      <FileEditorDialog file={file} onClose={onClose} onSave={onSave} />,
+      <FileEditorDialog
+        file={file}
+        canSave={() => true}
+        onClose={onClose}
+        onSave={onSave}
+      />,
     );
 
     const editor = screen.getByRole("textbox", {
@@ -53,7 +58,12 @@ describe("FileEditorDialog", () => {
       );
     });
     render(
-      <FileEditorDialog file={file} onClose={onClose} onSave={onSave} />,
+      <FileEditorDialog
+        file={file}
+        canSave={() => true}
+        onClose={onClose}
+        onSave={onSave}
+      />,
     );
 
     fireEvent.change(screen.getByRole("textbox"), {
@@ -85,6 +95,7 @@ describe("FileEditorDialog", () => {
           ...file,
           content: "first\r\nsecond\r\n",
         }}
+        canSave={() => true}
         onClose={vi.fn()}
         onSave={onSave}
       />,
@@ -102,5 +113,31 @@ describe("FileEditorDialog", () => {
       "first changed\r\nsecond\r\n",
       "a".repeat(64),
     ));
+  });
+
+  it("blocks an edit when the exact serialized save command is too large", () => {
+    const onSave = vi.fn();
+    render(
+      <FileEditorDialog
+        file={file}
+        canSave={(_path, content) => !content.includes("\"".repeat(20))}
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "\"".repeat(20) },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "too large to send safely",
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("textbox"), {
+      key: "s",
+      ctrlKey: true,
+    });
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

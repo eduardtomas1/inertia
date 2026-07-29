@@ -14,6 +14,11 @@ import {
 import {
   workspaceFileReferenceFallback,
 } from "../../utils/workspaceFileReference";
+import {
+  workspaceFileWriteCommand,
+  workspaceFileWriteFitsRuntimeFrame,
+  type WorkspaceFileWriteIdentity,
+} from "../../utils/workspaceFileWrite";
 import { useWorkspaceMentions } from "./useWorkspaceMentions";
 
 type WorkspaceEntriesResult = Extract<
@@ -242,18 +247,22 @@ export function useWorkspaceFiles({
     ) {
       throw new Error("Reload this file before saving it.");
     }
+    const identity: WorkspaceFileWriteIdentity = {
+      projectId: project.id,
+      conversationId: conversation?.id,
+      path,
+      authorityRef: filePreview.authorityRef,
+      expectedDigest,
+    };
+    if (!workspaceFileWriteFitsRuntimeFrame(identity, content)) {
+      throw new Error(
+        "This edit is too large to send safely. Shorten the file and try again.",
+      );
+    }
     const generation = filePreviewRequestGenerationRef.current;
-    const event = resultEvent(await request({
-      type: "workspace.file.write",
-      payload: {
-        projectId: project.id,
-        conversationId: conversation?.id,
-        path,
-        content,
-        authorityRef: filePreview.authorityRef,
-        expectedDigest,
-      },
-    }));
+    const event = resultEvent(await request(
+      workspaceFileWriteCommand(identity, content),
+    ));
     if (event.result.kind !== "workspace.file") {
       throw new Error("The local service returned an unexpected file response.");
     }
@@ -266,6 +275,28 @@ export function useWorkspaceFiles({
     }
     return event.result.file;
   }, [conversation?.id, filePreview, project, request, selectedFile]);
+
+  const canSaveWorkspaceFile = useCallback((
+    path: string,
+    content: string,
+    expectedDigest: string,
+  ): boolean => {
+    if (
+      !project
+      || !filePreview?.authorityRef
+      || filePreview.path !== path
+      || filePreview.contentDigest !== expectedDigest
+    ) {
+      return false;
+    }
+    return workspaceFileWriteFitsRuntimeFrame({
+      projectId: project.id,
+      conversationId: conversation?.id,
+      path,
+      authorityRef: filePreview.authorityRef,
+      expectedDigest,
+    }, content);
+  }, [conversation?.id, filePreview, project]);
 
   return {
     workspaceEntries,
@@ -281,6 +312,7 @@ export function useWorkspaceFiles({
     requestWorkspaceEntries,
     loadFiles,
     selectWorkspaceFile,
+    canSaveWorkspaceFile,
     saveWorkspaceFile,
     searchMentions: mentions.searchMentions,
   };

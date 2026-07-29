@@ -405,7 +405,6 @@ export default function App(): React.JSX.Element {
     snapshot: connection.snapshot,
     settings,
     run,
-    request,
     sendMessage: sendMessageToConversation,
     persistedConversationId: conversation?.id ?? null,
     updatePersistedConversation: updateConversationById,

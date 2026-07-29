@@ -238,14 +238,23 @@ describe("client command contract", () => {
       requestId,
       payload: { projectId, directory: "src", query: "Button" },
     }).success).toBe(false);
+    for (const path of [
+      "notes\\draft.md",
+      "a:file.txt",
+      "\\leading-backslash",
+      "safe\\..\\literal-name",
+    ]) {
+      expect(clientCommandSchema.safeParse({
+        type: "workspace.file.read",
+        requestId,
+        payload: { projectId, path },
+      }).success).toBe(true);
+    }
 
     for (const directory of [
       "../outside",
       "src/../../outside",
       "/etc",
-      "\\\\server\\share",
-      "C:\\Windows",
-      "C:Windows",
     ]) {
       expect(clientCommandSchema.safeParse({
         type: "workspace.entries",

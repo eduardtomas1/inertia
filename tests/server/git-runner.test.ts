@@ -139,6 +139,11 @@ setInterval(() => {}, 1000);
         "the Git descendant to stop",
         () => !processExists(descendantPid),
       );
+      // The runner promise is also the ownership boundary for the executable
+      // itself. Windows must be able to remove the copied git.exe immediately,
+      // without relying on an afterEach retry or a later process reap.
+      await rm(directory, { force: true, recursive: true });
+      temporaryDirectories.splice(temporaryDirectories.indexOf(directory), 1);
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;

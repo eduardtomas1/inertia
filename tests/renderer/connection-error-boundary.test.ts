@@ -6,6 +6,7 @@ import {
   decodeServerEventMessage,
   deliverDecodedServerEvent,
   notifyConnectionListeners,
+  runtimeCommandDelivery,
   settlePendingConnectionRequest,
   UNREADABLE_RUNTIME_RESPONSE,
 } from "../../src/renderer/src/utils/connectionMessages";
@@ -53,9 +54,10 @@ describe("renderer error visibility boundary", () => {
       message: "The first message could not be sent.",
     }));
 
-    expect(commandError).toEqual(
-      new Error("The first message could not be sent."),
-    );
+    expect(commandError).toMatchObject({
+      message: "The first message could not be sent.",
+    });
+    expect(runtimeCommandDelivery(commandError)).toBe("rejected");
     expect(connectionError).toBeNull();
     expect(clearedTimeout).toBe(42);
     expect(pending.size).toBe(0);

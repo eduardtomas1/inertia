@@ -70,14 +70,27 @@ describe("authoritative project-path resolution", () => {
     }
   });
 
-  it("rejects traversal, portable absolute paths, null bytes, and missing targets", async () => {
+  it("rejects traversal, platform absolute paths, null bytes, and missing targets", async () => {
     const directory = await temporaryDirectory("inertia-project-path-invalid-");
     const root = join(directory, "project");
     await mkdir(root);
     await writeFile(join(directory, "secret.txt"), "secret");
 
-    for (const relativePath of ["../secret.txt", "nested/../../secret.txt", "/etc/passwd", "C:\\Windows\\system.ini", "C:system.ini", "bad\0path"]) {
+    const invalidPaths = [
+      "../secret.txt",
+      "nested/../../secret.txt",
+      "/etc/passwd",
+      "bad\0path",
+      ...(process.platform === "win32"
+        ? ["C:\\Windows\\system.ini", "C:system.ini"]
+        : []),
+    ];
+    for (const relativePath of invalidPaths) {
       await expect(resolveWorkspacePathForOpen(root, relativePath)).rejects.toMatchObject({ code: "invalid-input" });
+    }
+    if (process.platform !== "win32") {
+      await expect(resolveWorkspacePathForOpen(root, "C:\\Windows\\system.ini"))
+        .rejects.toMatchObject({ code: "not-found" });
     }
     await expect(resolveWorkspacePathForOpen(root, "missing.txt")).rejects.toMatchObject({ code: "not-found" });
   });

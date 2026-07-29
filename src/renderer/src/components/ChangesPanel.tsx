@@ -60,7 +60,9 @@ type ReviewAction = "ask" | "revise" | "revert" | "note";
 type ReviewFilter = "all" | "unreviewed" | "reviewed";
 
 function pathParts(path: string): { name: string; parent: string } {
-  const parts = path.split(/[\\/]/);
+  // Git's wire paths use "/" on every platform. A backslash can be a literal
+  // filename character on POSIX and must remain part of the visible basename.
+  const parts = path.split("/");
   return { name: parts.at(-1) ?? path, parent: parts.slice(0, -1).join("/") };
 }
 

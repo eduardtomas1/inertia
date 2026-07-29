@@ -23,9 +23,13 @@ import {
 } from "../lib/newConversation";
 import { projectNameFromPath } from "../lib/format";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import {
   forgetPersistedDraftConversation,
+  forgetPersistedMaterializedDraftConversation,
+  markPersistedDraftConversationMaterialized,
   readPersistedDraftConversation,
+  readPersistedMaterializedDraftConversation,
   writePersistedDraftConversation,
 } from "../utils/draftConversationPersistence";
 
@@ -47,13 +51,17 @@ type ConversationUpdate = Partial<Pick<
 interface DraftConversationState {
   conversation: Conversation;
   payload: ConversationCreatePayload;
+  materialized: {
+    draftConversationId: string;
+    conversationId: string;
+    awaitingReconciliation: boolean;
+  } | null;
 }
 
 export function useDraftConversation({
   snapshot,
   settings,
   run,
-  request,
   sendMessage,
   persistedConversationId,
   updatePersistedConversation,
@@ -64,7 +72,6 @@ export function useDraftConversation({
     key: string,
     command: CommandWithoutId,
   ) => Promise<ServerEvent>;
-  request: (command: CommandWithoutId) => Promise<ServerEvent>;
   sendMessage: (
     conversationId: string,
     content: string,
@@ -81,10 +88,12 @@ export function useDraftConversation({
   const [draft, setDraft] = useState<DraftConversationState | null>(() => {
     const stored = readPersistedDraftConversation();
     return (
+      stored
+      &&
       !persistedConversationId
-      && stored?.conversation.projectId === snapshot?.activeProjectId
+      && stored.conversation.projectId === snapshot?.activeProjectId
     )
-      ? stored
+      ? { ...stored, materialized: null }
       : null;
   });
   const draftRef = useRef(draft);
@@ -113,6 +122,7 @@ export function useDraftConversation({
     replaceDraft({
       conversation: buildDraftConversation(payload),
       payload,
+      materialized: null,
     });
   };
 
@@ -140,10 +150,19 @@ export function useDraftConversation({
   }, [replaceDraft]);
 
   const discard = useCallback((): void => {
-    const current = draftRef.current ?? readPersistedDraftConversation();
+    const persisted = readPersistedDraftConversation();
+    const current = draftRef.current ?? (
+      persisted ? { ...persisted, materialized: null } : null
+    );
     replaceDraft(null, false);
     if (!current) return;
-    forgetPersistedDraftConversation(current.conversation.id);
+    if (current.materialized) {
+      forgetPersistedMaterializedDraftConversation(
+        current.materialized.conversationId,
+      );
+    } else {
+      forgetPersistedDraftConversation(current.conversation.id);
+    }
     try {
       window.localStorage.removeItem(
         `inertia:draft:${current.conversation.id}`,
@@ -155,6 +174,78 @@ export function useDraftConversation({
 
   useEffect(() => {
     if (!snapshot) return;
+    const materialized = readPersistedMaterializedDraftConversation();
+    const materializedShell = materialized
+      ? snapshot.conversations.find(
+          ({ id }) => id === materialized.materializedConversationId,
+        )
+      : null;
+    if (materialized && materializedShell) {
+      const accepted = (
+        materializedShell.latestTurn !== null
+        ||
+        materializedShell.status !== "idle"
+        || (
+          materializedShell.title !== "New chat"
+          && materializedShell.title !== "New thread"
+        )
+      );
+      const current = draftRef.current;
+      if (accepted) {
+        forgetPersistedMaterializedDraftConversation(
+          materialized.materializedConversationId,
+        );
+        if (
+          current?.materialized
+          && current.materialized.conversationId
+            === materialized.materializedConversationId
+        ) {
+          replaceDraft(null, false);
+        }
+      } else if (
+        current?.materialized
+        && current.materialized.conversationId
+          === materialized.materializedConversationId
+        && current.materialized.awaitingReconciliation
+      ) {
+        replaceDraft({
+          ...current,
+          conversation: {
+            ...materializedShell,
+            id: current.conversation.id,
+          },
+          materialized: {
+            ...current.materialized,
+            awaitingReconciliation: false,
+          },
+        }, false);
+      } else if (
+        !current
+        && snapshot.activeProjectId === materialized.conversation.projectId
+      ) {
+        replaceDraft({
+          conversation: {
+            ...materializedShell,
+            id: materialized.draftConversationId,
+          },
+          payload: materialized.payload,
+          materialized: {
+            draftConversationId: materialized.draftConversationId,
+            conversationId: materialized.materializedConversationId,
+            awaitingReconciliation: false,
+          },
+        }, false);
+      }
+    } else if (
+      materialized
+      && !snapshot.projects.some(
+        ({ id }) => id === materialized.conversation.projectId,
+      )
+    ) {
+      forgetPersistedMaterializedDraftConversation(
+        materialized.materializedConversationId,
+      );
+    }
     const current = draftRef.current;
     if (current) {
       const projectExists = snapshot.projects.some(
@@ -163,7 +254,10 @@ export function useDraftConversation({
       if (!projectExists) {
         discard();
       } else if (
-        persistedConversationId
+        (
+          persistedConversationId
+          && current.materialized?.conversationId !== persistedConversationId
+        )
         || snapshot.activeProjectId !== current.conversation.projectId
       ) {
         replaceDraft(null, false);
@@ -181,7 +275,7 @@ export function useDraftConversation({
       return;
     }
     if (snapshot.activeProjectId === stored.conversation.projectId) {
-      replaceDraft(stored, false);
+      replaceDraft({ ...stored, materialized: null }, false);
     }
   }, [
     discard,
@@ -191,7 +285,7 @@ export function useDraftConversation({
   ]);
 
   const chooseModel = (selection: ModelSelection): boolean => {
-    if (!draft) return false;
+    if (!draft || draft.materialized) return false;
     const payload = withNewConversationModelSelection(
       draft.payload,
       selection,
@@ -202,13 +296,14 @@ export function useDraftConversation({
         id: draft.conversation.id,
         now: draft.conversation.createdAt,
       }),
+      materialized: null,
     });
     return true;
   };
 
   const updateDraft = (change: ConversationUpdate): void => {
     const current = draftRef.current;
-    if (!current) return;
+    if (!current || current.materialized) return;
     const next = (() => {
       const selection = change.modelSelection
         ? {
@@ -242,6 +337,7 @@ export function useDraftConversation({
       };
       return {
         conversation,
+        materialized: null,
         payload: {
           ...withNewConversationModelSelection(current.payload, selection),
           interactionMode: conversation.interactionMode,
@@ -281,6 +377,24 @@ export function useDraftConversation({
     const conversationId = creation.result.conversationId;
     const stillOwnsDraft =
       draftRef.current?.conversation.id === sendingDraft.conversation.id;
+    const materializedState: DraftConversationState = {
+      conversation: sendingDraft.conversation,
+      payload: sendingDraft.payload,
+      materialized: {
+        draftConversationId: sendingDraft.conversation.id,
+        conversationId,
+        awaitingReconciliation: false,
+      },
+    };
+    markPersistedDraftConversationMaterialized({
+      draftConversationId: sendingDraft.conversation.id,
+      materializedConversationId: conversationId,
+      conversation: materializedState.conversation,
+      payload: materializedState.payload,
+    });
+    forgetPersistedDraftConversation(sendingDraft.conversation.id);
+    if (stillOwnsDraft) replaceDraft(materializedState, false);
+
     try {
       await sendMessage(
         conversationId,
@@ -289,25 +403,27 @@ export function useDraftConversation({
         context,
         stillOwnsDraft,
       );
-      forgetPersistedDraftConversation(sendingDraft.conversation.id);
-      try {
-        window.localStorage.removeItem(
-          `inertia:draft:${sendingDraft.conversation.id}`,
-        );
-      } catch {
-        // The submitted prompt no longer needs browser persistence.
-      }
+      forgetPersistedMaterializedDraftConversation(conversationId);
       if (
-        draftRef.current?.conversation.id === sendingDraft.conversation.id
+        draftRef.current?.materialized?.conversationId === conversationId
       ) {
         replaceDraft(null, false);
       }
       return true;
     } catch (error) {
-      void request({
-        type: "conversation.delete",
-        payload: { conversationId },
-      }).catch(() => undefined);
+      if (
+        draftRef.current?.materialized?.conversationId === conversationId
+      ) {
+        replaceDraft({
+          ...materializedState,
+          materialized: {
+            ...materializedState.materialized!,
+            awaitingReconciliation:
+              runtimeCommandDelivery(error) === "ambiguous"
+              || runtimeCommandDelivery(error) === null,
+          },
+        }, false);
+      }
       throw error;
     }
   };
@@ -317,7 +433,50 @@ export function useDraftConversation({
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
   ): Promise<void> => {
-    if (persistedConversationId) {
+    const current = draftRef.current;
+    if (current?.materialized) {
+      if (current.materialized.awaitingReconciliation) {
+        throw new Error(
+          "Inertia is reconciling the first message after reconnecting.",
+        );
+      }
+      try {
+        await sendMessage(
+          current.materialized.conversationId,
+          content,
+          attachments,
+          context,
+          true,
+        );
+        forgetPersistedMaterializedDraftConversation(
+          current.materialized.conversationId,
+        );
+        if (
+          draftRef.current?.materialized?.conversationId
+            === current.materialized.conversationId
+        ) {
+          replaceDraft(null, false);
+        }
+      } catch (error) {
+        if (
+          draftRef.current?.materialized?.conversationId
+            === current.materialized.conversationId
+        ) {
+          replaceDraft({
+            ...current,
+            materialized: {
+              ...current.materialized,
+              awaitingReconciliation:
+                runtimeCommandDelivery(error) === "ambiguous"
+                || runtimeCommandDelivery(error) === null,
+            },
+          }, false);
+        }
+        throw error;
+      }
+      return;
+    }
+    if (persistedConversationId && !current) {
       await sendMessage(
         persistedConversationId,
         content,
@@ -330,7 +489,17 @@ export function useDraftConversation({
   };
 
   const updateConversation = (change: ConversationUpdate): void => {
-    if (persistedConversationId) {
+    const current = draftRef.current;
+    if (current?.materialized) {
+      updatePersistedConversation(
+        current.materialized.conversationId,
+        // Updates target the server-owned shell while Composer keeps its
+        // stable local draft identity until reconciliation finishes.
+        change,
+      );
+    } else if (current) {
+      updateDraft(change);
+    } else if (persistedConversationId) {
       updatePersistedConversation(persistedConversationId, change);
     } else {
       updateDraft(change);

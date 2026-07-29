@@ -13,9 +13,8 @@ export const requestBase = {
 function isPortableWorkspacePath(path: string, allowRoot: boolean): boolean {
   if (
     /[\0\r\n]/u.test(path)
-    || /^[\\/]/u.test(path)
-    || /^[A-Za-z]:/u.test(path)
-    || path.split(/[\\/]/u).some((segment) => segment === "..")
+    || path.startsWith("/")
+    || path.split("/").some((segment) => segment === "..")
   ) return false;
   return allowRoot || (path !== "" && path !== ".");
 }

@@ -207,6 +207,46 @@ describe("workspace repository-grouped Changes panel", () => {
     expect(html).toContain("Selected-file summary from the repository review.");
   });
 
+  it("keeps POSIX literal backslashes in Git wire-path basenames", () => {
+    const path = "docs/notes\\draft.md";
+    const patch = [
+      `diff --git a/${path} b/${path}`,
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+      "",
+    ].join("\n");
+    const html = renderToStaticMarkup(createElement(ChangesPanel, {
+      files: [changedFile(path)],
+      diff: {
+        patch,
+        truncated: false,
+        files: [changedFile(path)],
+      },
+      selectedPath: path,
+      summary: null,
+      onSelectFile: () => undefined,
+      onAsk: async () => undefined,
+      onRequestRevision: async () => undefined,
+      onRevert: async () => undefined,
+      onSetReviewState: async () => undefined,
+      onCreateNote: async () => undefined,
+      onUpdateNote: async () => undefined,
+      onDeleteNote: async () => undefined,
+      onAddTextToPrompt: () => undefined,
+      onAddToPrompt: () => undefined,
+    }));
+
+    expect(html).toContain(
+      '<span class="change-file-name">notes\\draft.md</span>',
+    );
+    expect(html).toContain(
+      '<span class="change-file-path">docs</span>',
+    );
+  });
+
   it("renders compact native repository disclosures without flattening duplicate file paths", () => {
     const html = renderWorkspaceChanges(snapshot());
 

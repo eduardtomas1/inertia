@@ -6,14 +6,18 @@ import {
   MAX_WORKSPACE_FILE_EDIT_BYTES,
 } from "../../src/shared/contracts";
 import { useInertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
+import { runtimeCommandDelivery } from "../../src/renderer/src/utils/connectionMessages";
 
 class FakeWebSocket extends EventTarget {
   static readonly OPEN = 1;
   static instances: FakeWebSocket[] = [];
 
-  readonly readyState = FakeWebSocket.OPEN;
+  readyState = FakeWebSocket.OPEN;
   readonly send = vi.fn();
-  readonly close = vi.fn();
+  readonly close = vi.fn(() => {
+    this.readyState = 3;
+    this.dispatchEvent(new Event("close"));
+  });
 
   constructor(readonly url: string) {
     super();
@@ -22,6 +26,7 @@ class FakeWebSocket extends EventTarget {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   FakeWebSocket.instances = [];
   vi.unstubAllGlobals();
   Reflect.deleteProperty(window, "inertia");
@@ -60,5 +65,36 @@ describe("useInertiaConnection", () => {
       .rejects.toThrow("The request is too large to send.");
     expect(FakeWebSocket.instances[0]?.send).not.toHaveBeenCalled();
     expect(FakeWebSocket.instances[0]?.close).not.toHaveBeenCalled();
+  });
+
+  it("forces authoritative reconciliation after an ambiguous timeout", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection: vi.fn(async () => ({
+          websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+        })),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const firstSocket = FakeWebSocket.instances[0]!;
+    vi.useFakeTimers();
+
+    const command = clientCommandSchema.parse({
+      type: "app.refresh",
+      requestId: "11111111-1111-4111-8111-111111111111",
+    });
+    let timeoutError: unknown;
+    void hook.result.current.sendCommand(command).catch((error: unknown) => {
+      timeoutError = error;
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
+    expect(firstSocket.close).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
   });
 });

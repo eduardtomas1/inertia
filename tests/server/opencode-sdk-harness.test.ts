@@ -78,8 +78,9 @@ const server = http.createServer((req, res) => {
       return;
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/abort") {
-      json(res, true);
       if (scenario === "stuck-cancel") return;
+      json(res, true);
+      if (scenario === "cancel") return;
       return setTimeout(() => sendEvent({ type: "session.idle", properties: { sessionID } }), 10);
     }
     return json(res, { error: "not found" }, 404);
@@ -497,7 +498,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
-  it("does not settle cancellation until the owned server is closed", async () => {
+  it("settles acknowledged cancellation only after the owned server is closed", async () => {
     const root = portableFixtureRoot("OpenCode cancellation");
     roots.push(root);
     const capturePath = join(root, "capture.json");
@@ -511,6 +512,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       })]),
     );
     let markRunning!: () => void;
+    let promptWasAcceptedWhenRunning = false;
     const running = new Promise<void>((resolve) => { markRunning = resolve; });
     const result = manager.run(nativeProviderRunInput({
       providerId: "opencode",
@@ -519,9 +521,23 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       prompt: "Wait",
       interactionMode: "build",
       access: "supervised",
-    }), { onStatus: ({ status }) => { if (status === "running") markRunning(); } });
+    }), {
+      onStatus: ({ status }) => {
+        if (status !== "running") return;
+        try {
+          const value = JSON.parse(readFileSync(capturePath, "utf8")) as {
+            captured: Array<{ path: string }>;
+          };
+          promptWasAcceptedWhenRunning = value.captured.some(({ path }) => path.endsWith("/prompt_async"));
+        } catch {
+          promptWasAcceptedWhenRunning = false;
+        }
+        markRunning();
+      },
+    });
 
     await running;
+    expect(promptWasAcceptedWhenRunning).toBe(true);
     expect(manager.cancel("opencode-cancel")).toBe(true);
     await expect(result).resolves.toMatchObject({ status: "cancelled" });
     await waitFor("the OpenCode abort request", () => {
@@ -530,7 +546,14 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
         return value.captured.some(({ path }) => path.endsWith("/abort"));
       } catch { return false; }
     });
-    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as { port: number };
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      port: number;
+      captured: Array<{ path: string }>;
+    };
+    const promptIndex = capture.captured.findIndex(({ path }) => path.endsWith("/prompt_async"));
+    const abortIndex = capture.captured.findIndex(({ path }) => path.endsWith("/abort"));
+    expect(promptIndex).toBeGreaterThanOrEqual(0);
+    expect(abortIndex).toBeGreaterThan(promptIndex);
     await waitFor(
       "the cancelled OpenCode server port to close",
       async () => !(await loopbackPortIsOpen(capture.port)),

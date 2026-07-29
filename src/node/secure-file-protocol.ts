@@ -1,4 +1,4 @@
-import { isAbsolute } from "node:path";
+import { isAbsolute, posix, win32 } from "node:path";
 
 export const MAX_SECURE_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_SECURE_FILE_PATH_BYTES = 4_096;
@@ -79,26 +79,33 @@ function safeIdentity(value: unknown): value is SecureFileIdentity {
     && /^[1-9][0-9]{0,39}$/u.test(value.ino);
 }
 
-function safeRelativePath(value: unknown): value is string {
+export function secureFilePathSegments(
+  value: unknown,
+  platform: NodeJS.Platform = process.platform,
+): string[] | null {
+  const windows = platform === "win32";
+  const pathApi = windows ? win32 : posix;
   if (!(typeof value === "string"
     && value.length > 0
     && value.length <= MAX_SECURE_FILE_PATH_BYTES
     && !/[\0\r\n]/u.test(value)
-    && !isAbsolute(value)
-    && !/^[\\/]/u.test(value)
-    && !/^[A-Za-z]:/u.test(value)
-    && value.split(/[\\/]/u).every(
-      (segment) => segment.length > 0 && segment !== "." && segment !== "..",
-    ))) return false;
-  if (process.platform !== "win32") return true;
-  return value.split(/[\\/]/u).every((segment) => {
+    && !pathApi.isAbsolute(value)
+    && (!windows || !/^[A-Za-z]:/u.test(value)))) return null;
+  const segments = value.split(windows ? /[\\/]/u : "/");
+  if (segments.some(
+    (segment) => segment.length === 0 || segment === "." || segment === "..",
+  )) return null;
+  if (!windows) return segments;
+  return segments.every((segment) => {
     if (
       /[<>:"|?*\u0000-\u001f]/u.test(segment)
       || /[ .]$/u.test(segment)
     ) return false;
     const basename = segment.split(".")[0] ?? "";
     return !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/iu.test(basename);
-  });
+  })
+    ? segments
+    : null;
 }
 
 function safeBase64(value: unknown, maxBytes: number): value is string {
@@ -139,12 +146,13 @@ export function parseSecureFileRequest(value: unknown): SecureFileRequest | null
     || value.parentIdentities.length > 256
     || !value.parentIdentities.every(safeIdentity)
     || !safeIdentity(value.targetIdentity)
-    || !safeRelativePath(value.path)
+    || typeof value.path !== "string"
+    || !secureFilePathSegments(value.path)
     || !safeInteger(value.maxBytes)
     || value.maxBytes < 1
     || value.maxBytes > MAX_SECURE_FILE_BYTES
   ) return null;
-  const segmentCount = value.path.split(/[\\/]/u).length;
+  const segmentCount = secureFilePathSegments(value.path)!.length;
   if (value.parentIdentities.length !== segmentCount - 1) return null;
   const base: SecureFileRequestBase = {
     root: value.root,

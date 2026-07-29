@@ -89,6 +89,30 @@ afterEach(() => {
 });
 
 describe("secure file worker", () => {
+  it.skipIf(process.platform === "win32")(
+    "reads and replaces a POSIX filename containing a literal backslash",
+    async () => {
+      const root = realpathSync(
+        mkdtempSync(join(tmpdir(), "inertia-secure-file-posix-")),
+      );
+      roots.push(root);
+      const filename = "notes\\draft.md";
+      writeFileSync(join(root, filename), "before\n");
+
+      const read = await perform(requestFor(root, filename, "read"));
+      expect(read).toMatchObject({ ok: true, operation: "read" });
+
+      const replaced = await perform(requestFor(
+        root,
+        filename,
+        "replace",
+        Buffer.from("after\n"),
+      ));
+      expect(replaced).toMatchObject({ ok: true, operation: "replace" });
+      expect(readFileSync(join(root, filename), "utf8")).toBe("after\n");
+    },
+  );
+
   it("reads and atomically replaces an identity-verified nested file", async () => {
     const root = realpathSync(
       mkdtempSync(join(tmpdir(), "inertia-secure-file-")),

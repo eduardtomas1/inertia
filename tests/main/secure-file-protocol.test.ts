@@ -5,11 +5,24 @@ import { describe, expect, it } from "vitest";
 import {
   parseSecureFileRequest,
   parseSecureFileResult,
+  secureFilePathSegments,
 } from "../../src/node/secure-file-protocol";
 
 const identity = { dev: "1", ino: "2" };
 
 describe("secure file protocol", () => {
+  it("uses platform-specific separators without rejecting POSIX filename characters", () => {
+    expect(secureFilePathSegments("notes\\draft.md", "linux"))
+      .toEqual(["notes\\draft.md"]);
+    expect(secureFilePathSegments("a:file.md", "darwin"))
+      .toEqual(["a:file.md"]);
+    expect(secureFilePathSegments("src\\example.ts", "win32"))
+      .toEqual(["src", "example.ts"]);
+    expect(secureFilePathSegments("src\\..\\outside.ts", "win32"))
+      .toBeNull();
+    expect(secureFilePathSegments("C:outside.ts", "win32")).toBeNull();
+  });
+
   it("accepts bounded empty replacements and strict identity vectors", () => {
     const request = {
       operation: "replace",

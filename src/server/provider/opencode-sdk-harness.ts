@@ -371,7 +371,6 @@ function startOpenCodeRun(
       }
       usageState.maxTokens = finite(effectiveModel?.limit.context);
       const subscribed = await client.event.subscribe({ directory: options.input.cwd }, { signal: eventAbort.signal, throwOnError: true });
-      emitter.status("running");
       armEventInactivityDeadline();
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
         onActivity: armEventInactivityDeadline,
@@ -391,20 +390,21 @@ function startOpenCodeRun(
         ),
         isDone: (event) => event.type === "session.idle" || event.type === "session.error",
       });
-      await Promise.race([Promise.all([
-        client.session.promptAsync({
-          sessionID: sessionId,
-          directory: options.input.cwd,
-          ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
-          ...(agent ? { agent: agent.name } : {}),
-          ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}),
-          parts: [
-            { type: "text", text: options.input.prompt },
-            ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),
-          ],
-        }, { throwOnError: true }),
-        pump,
-      ]), runInterrupted]);
+      const prompt = client.session.promptAsync({
+        sessionID: sessionId,
+        directory: options.input.cwd,
+        ...(effectiveModel ? { model: { providerID: effectiveModel.providerID, modelID: effectiveModel.id } } : {}),
+        ...(agent ? { agent: agent.name } : {}),
+        ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}),
+        parts: [
+          { type: "text", text: options.input.prompt },
+          ...(options.input.imagePaths ?? []).map((path) => ({ type: "file" as const, mime: imageMime(path), filename: path.split(/[\\/]/u).at(-1), url: pathToFileURL(path).href })),
+        ],
+      }, { throwOnError: true });
+      const completion = Promise.all([prompt, pump]);
+      await Promise.race([prompt, completion, runInterrupted]);
+      if (!cancelRequested && !terminalError) emitter.status("running");
+      await Promise.race([completion, runInterrupted]);
       outcome = cancelRequested
         ? { status: "cancelled" }
         : terminalError
@@ -468,7 +468,12 @@ function startOpenCodeRun(
         interruptRun(new Error("OpenCode cancellation did not settle before the force deadline."));
       }, CANCEL_FORCE_MS);
       cancelForceTimer.unref();
-      void client.session.abort({ sessionID: sessionId, directory: options.input.cwd }, { throwOnError: true }).catch(() => {
+      void client.session.abort(
+        { sessionID: sessionId, directory: options.input.cwd },
+        { throwOnError: true },
+      ).then((response) => {
+        if (response.data === true) interruptRun(new Error("OpenCode acknowledged session cancellation."));
+      }).catch(() => {
         if (child) terminateProcessTree(child, false);
       });
       return;

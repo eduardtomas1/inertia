@@ -54,6 +54,13 @@ type ActivityActions = ReturnType<typeof useActivityActions>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 type PlanSteps = ComponentProps<typeof PlanPanel>["steps"];
 
+export function visibleWorkspaceConversation(
+  persisted: Conversation | null,
+  draft: Conversation | null,
+): Conversation | null {
+  return draft ?? persisted;
+}
+
 export interface WorkspaceSceneActions {
   importProject: () => Promise<void>;
   createConversation: (
@@ -171,7 +178,10 @@ export function createWorkspaceSceneModel({
     detailState,
     refreshDetail,
   } = projection;
-  const conversation = persistedConversation ?? draftConversation;
+  const conversation = visibleWorkspaceConversation(
+    persistedConversation,
+    draftConversation,
+  );
   const runtimeConversation = runtimeConversationReference(
     persistedConversation,
   );
@@ -457,6 +467,7 @@ export function createWorkspaceSceneModel({
           relativePath: path,
           action: "open-externally",
         }),
+        canSaveFile: workspaceTools.canSaveWorkspaceFile,
         onSaveFile: workspaceTools.saveWorkspaceFile,
       },
       filesKey: `files:${project.id}:${conversation?.id ?? "project"}`,

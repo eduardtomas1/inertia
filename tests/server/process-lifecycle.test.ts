@@ -10,10 +10,17 @@ import {
 } from "../../src/server/process-lifecycle";
 
 function fakeChild(pid = 4_242) {
-  return {
-    pid,
-    kill: vi.fn(() => true),
+  const child = new EventEmitter() as EventEmitter & {
+    pid: number;
+    exitCode: number | null;
+    signalCode: NodeJS.Signals | null;
+    kill: ReturnType<typeof vi.fn>;
   };
+  child.pid = pid;
+  child.exitCode = null;
+  child.signalCode = null;
+  child.kill = vi.fn(() => true);
+  return child;
 }
 
 function fakeTaskkill() {
@@ -130,7 +137,11 @@ describe("provider process-tree termination", () => {
     const child = fakeChild();
     const taskkill = fakeTaskkill();
     const spawnProcess = vi.fn(() => taskkill);
-    queueMicrotask(() => taskkill.emit("close", 0));
+    queueMicrotask(() => {
+      taskkill.emit("close", 0);
+      child.exitCode = 1;
+      child.emit("close", 1);
+    });
 
     await expect(terminateProcessTreeAndWait(
       child as never,
@@ -148,6 +159,33 @@ describe("provider process-tree termination", () => {
       expect.objectContaining({ shell: false }),
     );
     expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("does not confirm Windows tree termination before the direct child closes", async () => {
+    const child = fakeChild();
+    const taskkill = fakeTaskkill();
+    let settled = false;
+
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "win32",
+        spawnProcess: vi.fn(() => taskkill) as never,
+        waitMs: 100,
+      },
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    taskkill.emit("close", 0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    child.exitCode = 1;
+    child.emit("close", 1);
+    await expect(termination).resolves.toBe(true);
   });
 
   it("awaits POSIX process-group disappearance", async () => {

@@ -19,10 +19,9 @@ import {
   Search,
   X,
 } from "lucide-react";
-import {
-  MAX_WORKSPACE_FILE_EDIT_BYTES,
-  type WorkspaceEntry,
-  type WorkspaceFilePreview,
+import type {
+  WorkspaceEntry,
+  WorkspaceFilePreview,
 } from "@shared/contracts";
 import {
   flattenWorkspaceTree,
@@ -63,6 +62,11 @@ export type FilesPanelProps = {
     content: string,
     expectedDigest: string,
   ) => Promise<WorkspaceFilePreview>;
+  canSaveFile?: (
+    path: string,
+    content: string,
+    expectedDigest: string,
+  ) => boolean;
 };
 
 export interface DirectoryPage {
@@ -100,11 +104,11 @@ function safeError(error: unknown, fallback: string): string {
 }
 
 function parentLabel(path: string): string {
-  return workspaceParentPath(path).replaceAll("\\", "/");
+  return workspaceParentPath(path);
 }
 
 function directoryChain(path: string): string[] {
-  const segments = path.replaceAll("\\", "/").split("/");
+  const segments = path.split("/");
   return segments.map((_, index) => segments.slice(0, index + 1).join("/"));
 }
 
@@ -122,6 +126,7 @@ export function FilesPanel({
   onRefresh,
   onOpenFile,
   onSaveFile,
+  canSaveFile,
 }: FilesPanelProps): React.JSX.Element {
   const initialPages = freshWorkspaceDirectoryPages(entries, entriesTruncated);
   const [directoryPages, setDirectoryPages] = useState(initialPages);
@@ -141,8 +146,11 @@ export function FilesPanel({
   const mounted = useRef(true);
   const previewEditable = preview !== null
     && !preview.truncated
-    && new TextEncoder().encode(preview.content).byteLength
-      <= MAX_WORKSPACE_FILE_EDIT_BYTES;
+    && canSaveFile?.(
+      preview.path,
+      preview.content,
+      preview.contentDigest,
+    ) === true;
 
   useEffect(() => {
     mounted.current = true;
@@ -523,7 +531,7 @@ export function FilesPanel({
                   <IconButton
                     label={previewEditable
                       ? `Edit ${preview.path} in Inertia`
-                      : `${preview.path} is too large to edit in Inertia`}
+                      : `${preview.path} is too large to edit safely in Inertia`}
                     disabled={!previewEditable}
                     onClick={() => setEditingFile(preview)}
                   >
@@ -567,6 +575,7 @@ export function FilesPanel({
       {editingFile && onSaveFile && (
         <FileEditorDialog
           file={editingFile}
+          canSave={canSaveFile ?? (() => false)}
           onClose={() => setEditingFile(null)}
           onSave={onSaveFile}
         />

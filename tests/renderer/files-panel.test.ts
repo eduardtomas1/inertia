@@ -94,11 +94,38 @@ describe("FilesPanel", () => {
       onSelectFile: vi.fn(),
       onLoadEntries: vi.fn(),
       onSaveFile: vi.fn(),
+      canSaveFile: () => false,
     }));
 
     expect(html).toContain(
-      'aria-label="large.txt is too large to edit in Inertia"',
+      'aria-label="large.txt is too large to edit safely in Inertia"',
     );
     expect(html).toContain("disabled");
+  });
+
+  it("enables editing only when the exact save command passes preflight", () => {
+    const html = renderToStaticMarkup(createElement(FilesPanel, {
+      entries: [{ path: "ordinary.txt", kind: "file" as const }],
+      preview: {
+        path: "ordinary.txt",
+        content: "ordinary text\n",
+        truncated: false,
+        language: "text",
+        contentDigest: "a".repeat(64),
+        modifiedAt: "2026-07-29T10:00:00.000Z",
+      },
+      selectedPath: "ordinary.txt",
+      onSelectFile: vi.fn(),
+      onLoadEntries: vi.fn(),
+      onSaveFile: vi.fn(),
+      canSaveFile: () => true,
+    }));
+
+    expect(html).toContain(
+      'aria-label="Edit ordinary.txt in Inertia"',
+    );
+    expect(html).not.toContain(
+      'aria-label="ordinary.txt is too large to edit safely in Inertia"',
+    );
   });
 });

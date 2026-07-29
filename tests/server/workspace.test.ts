@@ -141,15 +141,20 @@ describe("workspace file hierarchy", () => {
       process.platform === "win32" ? "junction" : "dir",
     );
 
-    for (const path of [
+    const invalidPaths = [
       "../outside",
       "safe/../../outside",
-      "safe\\..\\outside",
       "/etc",
-      "\\\\server\\share",
-      "C:\\Windows",
-      "C:Windows",
-    ]) {
+      ...(process.platform === "win32"
+        ? [
+            "safe\\..\\outside",
+            "\\\\server\\share",
+            "C:\\Windows",
+            "C:Windows",
+          ]
+        : []),
+    ];
+    for (const path of invalidPaths) {
       await expect(listWorkspaceEntries(root, path))
         .rejects.toMatchObject({ code: "invalid-input" });
     }
@@ -158,6 +163,38 @@ describe("workspace file hierarchy", () => {
     await expect(readWorkspaceTextFile(root, "escape/secret.ts"))
       .rejects.toMatchObject({ code: "unsafe-link" });
   });
+
+  it.skipIf(process.platform === "win32")(
+    "preserves POSIX filename characters through listing, reading, and editing",
+    async () => {
+      const root = await temporaryDirectory();
+      await writeFile(join(root, "notes\\draft.md"), "draft\n");
+      await writeFile(join(root, "a:file.txt"), "colon\n");
+
+      const page = await listWorkspaceEntries(root);
+      expect(page.entries.map(({ path }) => path)).toEqual([
+        "a:file.txt",
+        "notes\\draft.md",
+      ]);
+
+      const preview = await readWorkspaceTextFile(root, "notes\\draft.md");
+      expect(preview).toMatchObject({
+        path: "notes\\draft.md",
+        content: "draft\n",
+      });
+      await expect(writeWorkspaceTextFile(
+        root,
+        "notes\\draft.md",
+        "saved\n",
+        preview.contentDigest,
+      )).resolves.toMatchObject({
+        path: "notes\\draft.md",
+        content: "saved\n",
+      });
+      await expect(readWorkspaceTextFile(root, "a:file.txt"))
+        .resolves.toMatchObject({ path: "a:file.txt", content: "colon\n" });
+    },
+  );
 
   it("saves text only when the preview digest is still current", async () => {
     const root = await temporaryDirectory();
@@ -190,6 +227,27 @@ describe("workspace file hierarchy", () => {
     });
     await expect(readWorkspaceTextFile(root, "src/example.ts"))
       .resolves.toMatchObject({ content: "external edit\n" });
+  });
+
+  it("preserves a UTF-8 BOM through an edit", async () => {
+    const root = await temporaryDirectory();
+    const path = join(root, "windows-script.ts");
+    await writeFile(path, Buffer.from("\uFEFFconst value = 1;\r\n", "utf8"));
+
+    const preview = await readWorkspaceTextFile(root, "windows-script.ts");
+    expect(preview.content).toBe("\uFEFFconst value = 1;\r\n");
+
+    const saved = await writeWorkspaceTextFile(
+      root,
+      "windows-script.ts",
+      preview.content.replace("1", "2"),
+      preview.contentDigest,
+    );
+
+    expect(saved.content).toBe("\uFEFFconst value = 2;\r\n");
+    await expect(readFile(path)).resolves.toEqual(
+      Buffer.from("\uFEFFconst value = 2;\r\n", "utf8"),
+    );
   });
 
   it("lets only one concurrent save commit against the same preview", async () => {

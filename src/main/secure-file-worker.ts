@@ -11,6 +11,7 @@ import { resolve } from "node:path";
 
 import {
   parseSecureFileRequest,
+  secureFilePathSegments,
   type SecureFileIdentity,
   type SecureFileMetadata,
   type SecureFileRequest,
@@ -125,7 +126,13 @@ async function enterVerifiedParent(request: SecureFileRequest): Promise<string> 
       "The project root changed before the file operation started.",
     );
   }
-  const segments = request.path.split(/[\\/]/u);
+  const segments = secureFilePathSegments(request.path);
+  if (!segments) {
+    throw new SecureFileWorkerError(
+      "invalid",
+      "The selected file path is invalid.",
+    );
+  }
   const basename = segments.pop();
   if (!basename) {
     throw new SecureFileWorkerError(
@@ -252,7 +259,7 @@ async function replace(
   basename: string,
 ): Promise<SecureFileResult> {
   const content = Buffer.from(request.contentBase64, "base64");
-  const parentSegments = request.path.split(/[\\/]/u).slice(0, -1);
+  const parentSegments = secureFilePathSegments(request.path)!.slice(0, -1);
   const initial = await openVerifiedFile(
     basename,
     request.maxBytes,

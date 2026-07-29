@@ -6,7 +6,6 @@ import {
   realpath,
 } from "node:fs/promises";
 import {
-  isAbsolute,
   resolve,
 } from "node:path";
 
@@ -17,6 +16,7 @@ import {
   type SecureFileReplace,
   type SecureFileRootCapability,
 } from "../../src/server/secure-files";
+import { secureFilePathSegments } from "../../src/node/secure-file-protocol";
 
 type FileHandle = Awaited<ReturnType<typeof open>>;
 
@@ -34,19 +34,8 @@ function unavailableIfAborted(signal?: AbortSignal): void {
 }
 
 function securePathSegments(path: string): string[] {
-  const segments = path.split(/[\\/]/u);
-  if (
-    !path
-    || isAbsolute(path)
-    || /^[A-Za-z]:/u.test(path)
-    || segments.some(
-      (segment) =>
-        !segment
-        || segment === "."
-        || segment === ".."
-        || segment.includes("\0"),
-    )
-  ) {
+  const segments = secureFilePathSegments(path);
+  if (!segments) {
     throw new SecureFileError("invalid", "The secure file path is invalid.");
   }
   return segments;

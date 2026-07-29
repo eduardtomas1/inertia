@@ -153,6 +153,15 @@ export function writePromptStash(
   }
 }
 
+export function persistPromptStashUpdate(
+  storage: Pick<PromptStashStorage, "setItem">,
+  current: readonly PromptStashEntry[],
+  update: (entries: readonly PromptStashEntry[]) => PromptStashEntry[],
+): PromptStashEntry[] | null {
+  const next = update(current);
+  return writePromptStash(storage, next) ? next : null;
+}
+
 export function addPromptStashEntry(
   entries: readonly PromptStashEntry[],
   content: string,

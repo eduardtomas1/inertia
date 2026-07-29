@@ -170,6 +170,15 @@ export function resolveResponseLink(projectRoot: string, rawHref: string): Proje
   return relativePath ? { kind: "project", relativePath, action: "reveal" } : { kind: "unsafe" };
 }
 
+export function responseLinkHasDirectoryHint(rawHref: string): boolean {
+  const path = rawHref.trim().split("#", 1)[0]!.split("?", 1)[0]!;
+  try {
+    return /[\\/]$/u.test(decodeURIComponent(path));
+  } catch {
+    return false;
+  }
+}
+
 function nodeText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(nodeText).join("");
@@ -370,7 +379,10 @@ export function ResponseMarkdown({
             if (target.kind === "project") {
               return <a {...props} href={href} onClick={(event) => {
                 event.preventDefault();
-                if (onOpenProjectFile) {
+                if (
+                  onOpenProjectFile
+                  && !responseLinkHasDirectoryHint(href)
+                ) {
                   onOpenProjectFile(target.relativePath);
                   return;
                 }

@@ -1,4 +1,5 @@
 import {
+  chmod,
   mkdtemp,
   mkdir,
   rm,
@@ -187,6 +188,30 @@ describe("workspace file hierarchy", () => {
     const current = await readWorkspaceTextFile(root, "shared.ts");
     expect(["first writer\n", "second writer\n"]).toContain(current.content);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "keeps the original intact when atomic staging cannot be created",
+    async () => {
+      const root = await temporaryDirectory();
+      await writeFile(join(root, "protected.ts"), "original\n", {
+        mode: 0o600,
+      });
+      const preview = await readWorkspaceTextFile(root, "protected.ts");
+      await chmod(root, 0o500);
+      try {
+        await expect(writeWorkspaceTextFile(
+          root,
+          "protected.ts",
+          "replacement\n",
+          preview.contentDigest,
+        )).rejects.toMatchObject({ code: "operation-failed" });
+      } finally {
+        await chmod(root, 0o700);
+      }
+      await expect(readWorkspaceTextFile(root, "protected.ts"))
+        .resolves.toMatchObject({ content: "original\n" });
+    },
+  );
 
   it("does not write through symbolic links or accept binary editor content", async () => {
     const root = await temporaryDirectory();

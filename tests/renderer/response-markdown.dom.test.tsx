@@ -6,10 +6,17 @@ import { ResponseMarkdown } from "../../src/renderer/src/components/ResponseMark
 describe("ResponseMarkdown project files", () => {
   it("routes prose links and code-file metadata into Inertia's file viewer", () => {
     const onOpenProjectFile = vi.fn();
+    const openProjectPath = vi.fn(async () => undefined);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { openProjectPath },
+    });
     render(
       <ResponseMarkdown
         content={[
           "Inspect [the adapter](src/server/adapter.ts).",
+          "",
+          "Browse [the sources](src/server/).",
           "",
           "```ts file=src/server/adapter.ts",
           "export const adapter = true;",
@@ -24,6 +31,7 @@ describe("ResponseMarkdown project files", () => {
     );
 
     fireEvent.click(screen.getByRole("link", { name: "the adapter" }));
+    fireEvent.click(screen.getByRole("link", { name: "the sources" }));
     fireEvent.click(screen.getByRole("button", {
       name: "src/server/adapter.ts",
     }));
@@ -35,5 +43,11 @@ describe("ResponseMarkdown project files", () => {
       2,
       "src/server/adapter.ts",
     );
+    expect(openProjectPath).toHaveBeenCalledWith({
+      projectId: "11111111-1111-4111-8111-111111111111",
+      conversationId: "22222222-2222-4222-8222-222222222222",
+      relativePath: "src/server",
+      action: "reveal",
+    });
   });
 });

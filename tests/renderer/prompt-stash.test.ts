@@ -5,6 +5,7 @@ import {
   PROMPT_STASH_STORAGE_KEY,
   addPromptStashEntry,
   promptStashRouteMatches,
+  persistPromptStashUpdate,
   readPromptStash,
   removePromptStashEntry,
   type PromptStashEntry,
@@ -88,5 +89,26 @@ describe("bounded prompt stash", () => {
     expect(new TextEncoder().encode(storage.value() ?? "").byteLength)
       .toBeLessThanOrEqual(256 * 1024);
     expect(readPromptStash(storage)).toEqual(entries);
+  });
+
+  it("does not publish an in-memory update when persistence fails", () => {
+    const entries = addPromptStashEntry(
+      [],
+      "Keep this prompt safe.",
+      route,
+      { id: "safe-prompt", now: "2026-07-29T12:00:00.000Z" },
+    );
+    const failingStorage = {
+      setItem: () => {
+        throw new Error("quota exceeded");
+      },
+    };
+
+    expect(persistPromptStashUpdate(
+      failingStorage,
+      entries,
+      () => [],
+    )).toBeNull();
+    expect(entries).toHaveLength(1);
   });
 });

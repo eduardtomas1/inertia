@@ -37,12 +37,12 @@ import {
 } from "./config";
 import {
   addPromptStashEntry,
+  persistPromptStashUpdate,
   PROMPT_STASH_CHANGED_EVENT,
   PROMPT_STASH_STORAGE_KEY,
   promptStashRouteMatches,
   readPromptStash,
   removePromptStashEntry,
-  writePromptStash,
   type PromptStashEntry,
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
@@ -491,22 +491,25 @@ export function Composer({
   };
   const updatePromptStash = (
     update: (current: readonly PromptStashEntry[]) => PromptStashEntry[],
-  ): void => {
-    setPromptStash((current) => {
-      const next = update(current);
-      if (writePromptStash(window.localStorage, next)) {
-        window.dispatchEvent(new Event(PROMPT_STASH_CHANGED_EVENT));
-      }
-      return next;
-    });
+  ): boolean => {
+    const next = persistPromptStashUpdate(
+      window.localStorage,
+      promptStash,
+      update,
+    );
+    if (!next) return false;
+    setPromptStash(next);
+    window.dispatchEvent(new Event(PROMPT_STASH_CHANGED_EVENT));
+    return true;
   };
   const stashCurrentPrompt = (): void => {
     if (!message.trim() || attachments.length > 0) return;
-    updatePromptStash((current) => addPromptStashEntry(
+    const persisted = updatePromptStash((current) => addPromptStashEntry(
       current,
       message,
       conversation.modelSelection,
     ));
+    if (!persisted) return;
     setMessage("");
     textareaRef.current?.focus();
   };
@@ -518,7 +521,7 @@ export function Composer({
         entry.route,
       )
     ) return;
-    updatePromptStash((current) => {
+    const persisted = updatePromptStash((current) => {
       const withoutRestored = removePromptStashEntry(current, entry.id);
       return message.trim()
         ? addPromptStashEntry(
@@ -528,6 +531,7 @@ export function Composer({
           )
         : withoutRestored;
     });
+    if (!persisted) return;
     setMessage(entry.content);
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   };

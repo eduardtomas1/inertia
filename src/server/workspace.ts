@@ -1,13 +1,17 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   lstat,
   open,
   opendir,
   realpath,
+  rename,
   stat,
+  unlink,
 } from "node:fs/promises";
 import {
+  basename,
+  dirname,
   isAbsolute,
   relative,
   resolve,
@@ -610,40 +614,115 @@ export async function writeWorkspaceTextFile(
         );
       }
 
-      // Keep the mutation anchored to the already-verified file descriptor.
-      // A parent-directory swap can no longer redirect this write, while the
-      // per-path lock gives concurrent Inertia saves compare-and-swap behavior.
-      let offset = 0;
-      while (offset < bytes.length) {
-        const { bytesWritten } = await handle.write(
-          bytes,
-          offset,
-          bytes.length - offset,
-          offset,
+      const parentPath = dirname(target.absolute);
+      const parentRelativePath = slashPath(relative(root, parentPath));
+      const parent = await secureExistingPath(
+        root,
+        parentRelativePath,
+        "directory",
+      );
+      const temporaryRelativePath = slashPath(relative(
+        root,
+        resolve(
+          parentPath,
+          `.${basename(target.absolute)}.inertia-${randomUUID()}.tmp`,
+        ),
+      ));
+      const temporaryPath = resolve(root, temporaryRelativePath);
+      let temporaryHandle: Awaited<ReturnType<typeof open>> | undefined;
+      let temporaryIdentity: { dev: number; ino: number } | null = null;
+      try {
+        temporaryHandle = await open(
+          temporaryPath,
+          fsConstants.O_CREAT
+            | fsConstants.O_EXCL
+            | fsConstants.O_WRONLY
+            | (fsConstants.O_NOFOLLOW ?? 0),
+          opened.mode,
         );
-        if (bytesWritten === 0) {
-          throw new Error("The workspace file write made no progress.");
+        const temporaryInfo = await temporaryHandle.stat();
+        temporaryIdentity = {
+          dev: temporaryInfo.dev,
+          ino: temporaryInfo.ino,
+        };
+        const [openedParent, openedTemporary] = await Promise.all([
+          secureExistingPath(root, parentRelativePath, "directory"),
+          secureExistingPath(root, temporaryRelativePath, "file"),
+        ]);
+        if (
+          !sameIdentity(parent.identity, openedParent.identity)
+          || !sameIdentity(temporaryIdentity, openedTemporary.identity)
+        ) {
+          throw new WorkspaceError(
+            "unsafe-link",
+            "The workspace folder changed while the file was being saved.",
+          );
         }
-        offset += bytesWritten;
-      }
-      await handle.truncate(bytes.length);
-      await handle.sync();
+        // Only copy user content after the empty sibling has been proven to
+        // belong to the same verified workspace directory.
+        await temporaryHandle.writeFile(bytes);
+        if (process.platform !== "win32") {
+          await temporaryHandle.chmod(opened.mode);
+        }
+        await temporaryHandle.sync();
+        await temporaryHandle.close();
+        temporaryHandle = undefined;
 
-      const saved = await readTextFileHandle(
-        handle,
+        const [currentParent, currentTarget, currentTemporary] =
+          await Promise.all([
+            secureExistingPath(root, parentRelativePath, "directory"),
+            secureExistingPath(root, target.relativePath, "file"),
+            secureExistingPath(root, temporaryRelativePath, "file"),
+          ]);
+        const current = await readSecureFile(
+          root,
+          target.relativePath,
+          maxBytes,
+        );
+        if (
+          current.contentDigest !== expectedDigest
+          || !sameIdentity(parent.identity, currentParent.identity)
+          || !sameIdentity(target.identity, currentTarget.identity)
+          || !sameIdentity(temporaryIdentity, currentTemporary.identity)
+        ) {
+          throw new WorkspaceError(
+            "conflict",
+            "This file changed while it was being saved. Reload it and try again.",
+          );
+        }
+
+        // The fully written and fsynced sibling replaces the verified target
+        // in one filesystem operation. The original file remains intact if
+        // writing or syncing the temporary file fails.
+        await handle.close();
+        handle = undefined;
+        await rename(temporaryPath, target.absolute);
+        temporaryIdentity = null;
+      } finally {
+        await temporaryHandle?.close().catch(() => undefined);
+        if (temporaryIdentity) {
+          const currentTemporary = await secureExistingPath(
+            root,
+            temporaryRelativePath,
+            "file",
+          ).catch(() => null);
+          if (
+            currentTemporary
+            && sameIdentity(temporaryIdentity, currentTemporary.identity)
+          ) {
+            await unlink(temporaryPath).catch(() => undefined);
+          }
+        }
+      }
+
+      const saved = await readSecureFile(
+        root,
         target.relativePath,
         maxBytes,
       );
-      const savedTarget = await secureExistingPath(
-        root,
-        target.relativePath,
-        "file",
-      ).catch(() => null);
       if (
         saved.contentDigest
-          !== createHash("sha256").update(bytes).digest("hex")
-        || !savedTarget
-        || !sameIdentity(target.identity, savedTarget.identity)
+        !== createHash("sha256").update(bytes).digest("hex")
       ) {
         throw new WorkspaceError(
           "conflict",

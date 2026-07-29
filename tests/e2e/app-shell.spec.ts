@@ -91,6 +91,14 @@ test("starts without a demo and adds the first real project", async () => {
   };
   expect(conversationCount()).toBe(0);
 
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
+  await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
+  expect(conversationCount()).toBe(0);
+  await page.locator(".workspace-panel")
+    .getByRole("button", { name: "Close workspace tools" })
+    .click();
+
   await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
   await expect.poll(conversationCount).toBe(1);
   await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);

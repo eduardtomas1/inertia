@@ -133,6 +133,12 @@ export interface WorkspaceSceneModelInput {
   setLatestContentVisible: Dispatch<SetStateAction<boolean>>;
 }
 
+export function runtimeConversationReference(
+  conversation: Pick<Conversation, "id"> | null,
+): { conversationId?: string } {
+  return conversation ? { conversationId: conversation.id } : {};
+}
+
 export function createWorkspaceSceneModel({
   view,
   settingsTarget,
@@ -164,6 +170,9 @@ export function createWorkspaceSceneModel({
     refreshDetail,
   } = projection;
   const conversation = persistedConversation ?? draftConversation;
+  const runtimeConversation = runtimeConversationReference(
+    persistedConversation,
+  );
   const {
     activeTool,
     setActiveTool,
@@ -402,7 +411,7 @@ export function createWorkspaceSceneModel({
         onLoadRepositoryDiff: workspaceTools.loadWorkspaceRepositoryDiff,
         onOpenWorkspaceFile: (relativePath) => actions.openProjectPath({
           projectId: project.id,
-          ...(conversation ? { conversationId: conversation.id } : {}),
+          ...runtimeConversation,
           relativePath,
           action: "open-externally",
         }),
@@ -442,7 +451,7 @@ export function createWorkspaceSceneModel({
         },
         onOpenFile: (path) => actions.openProjectPath({
           projectId: project.id,
-          ...(conversation ? { conversationId: conversation.id } : {}),
+          ...runtimeConversation,
           relativePath: path,
           action: "open-externally",
         }),
@@ -452,7 +461,7 @@ export function createWorkspaceSceneModel({
       terminal: {
         visible: toolsVisible && activeTool === "terminal",
         projectId: project.id,
-        ...(conversation ? { conversationId: conversation.id } : {}),
+        ...runtimeConversation,
         projectName: project.name,
         status: connection.status,
         fontSize: settings.terminalFontSize,

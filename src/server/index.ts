@@ -560,6 +560,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     terminals,
     isolatedRuns,
     dispatchCommand,
+    beforeFreshSnapshot: () => turns.flushActiveStreamsForHydration(),
     currentSnapshot,
     approvals: () => pendingApprovals.values(),
     inputs: () => pendingInputs.values(),

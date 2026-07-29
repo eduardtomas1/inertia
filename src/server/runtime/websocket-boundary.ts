@@ -38,6 +38,7 @@ export interface RuntimeWebSocketBoundaryOptions {
     command: ClientCommand,
   ): Promise<void>;
   currentSnapshot(): AppSnapshot;
+  beforeFreshSnapshot?(): void;
   approvals(): Iterable<AgentApprovalRequest>;
   inputs(): Iterable<AgentInputRequest>;
   plans(): Iterable<AgentPlan>;
@@ -129,12 +130,17 @@ export function attachRuntimeWebSocketBoundary(
     });
     // Install every handler before hydration: a client may answer welcome from
     // another process immediately.
-    options.runtimeSync.connect(socket, resumeRequest, {
-      snapshot: options.currentSnapshot,
-      approvals: options.approvals(),
-      inputs: options.inputs(),
-      plans: options.plans(),
-    });
+    try {
+      options.runtimeSync.connect(socket, resumeRequest, {
+        beforeFreshSnapshot: options.beforeFreshSnapshot,
+        snapshot: options.currentSnapshot,
+        approvals: options.approvals(),
+        inputs: options.inputs(),
+        plans: options.plans(),
+      });
+    } catch {
+      socket.close(1011, "Runtime synchronization failed.");
+    }
   });
 
   return {

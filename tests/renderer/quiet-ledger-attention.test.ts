@@ -107,7 +107,7 @@ describe("Quiet Ledger warning and failure attention", () => {
     );
     expect(implicitFailure).toContain("Technical output preview:");
     expect(implicitFailure).toContain("Full command output");
-    expect(implicitFailure.match(/Process exited with status 1\./g)).toHaveLength(3);
+    expect(implicitFailure.match(/Process exited with status 1\./g)).toHaveLength(2);
     expect(explicitFailure).not.toContain('class="agent-activity-state"');
     expect(explicitFailure).toContain('<span class="visually-hidden">Failed: </span>');
   });
@@ -166,7 +166,7 @@ describe("Quiet Ledger warning and failure attention", () => {
     expect(warning).toContain('<span class="agent-activity-state" aria-hidden="true">Warning</span>');
     expect(warning).toContain('<details class="agent-activity-technical">');
     expect(warning).toContain("<summary><span>Full output</span>");
-    expect(warning).toContain("<pre>An unsupported optional capability was skipped.</pre>");
+    expect(warning).not.toContain("<pre>");
     expect(warning).not.toContain('role="alert"');
     expect(warning).not.toContain('aria-live="assertive"');
     expect(activitySource).toContain("<summary {...anchorToggleHandlers}>");

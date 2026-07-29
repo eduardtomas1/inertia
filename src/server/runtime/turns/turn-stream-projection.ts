@@ -10,9 +10,9 @@ import type {
   TurnTimerScheduler,
 } from "./turn-controller-types";
 import {
-  TurnStreamCoalescer,
   type StreamDeltaFlush,
 } from "./turn-stream-coalescer";
+import { TurnStreamChannel } from "./turn-stream-channel";
 
 export interface TurnStreamProjectionOptions {
   store: RuntimeStore;
@@ -32,10 +32,11 @@ export class TurnStreamProjection {
   create(
     active: () => ActiveTurn,
     kind: "assistant" | "reasoning",
-  ): TurnStreamCoalescer {
-    return new TurnStreamCoalescer({
+  ): TurnStreamChannel {
+    return new TurnStreamChannel({
       scheduler: this.options.scheduler,
-      onFlush: (flush) => this.persist(active(), kind, flush),
+      onProjectionFlush: (flush) => this.broadcast(active(), kind, flush),
+      onPersistenceFlush: () => this.persist(active(), kind),
       onTimerError: (error) => {
         const current = active();
         if (current.settled) return;
@@ -116,7 +117,6 @@ export class TurnStreamProjection {
   private persist(
     active: ActiveTurn,
     kind: "assistant" | "reasoning",
-    flush: StreamDeltaFlush,
   ): void {
     let recordId: string;
     if (kind === "assistant") {
@@ -160,10 +160,15 @@ export class TurnStreamProjection {
     } catch {
       // Optional downstream hooks cannot invalidate durable stream storage.
     }
+  }
 
-    // A terminal correction is persisted authoritatively. The terminal
-    // snapshot replaces renderer state; emitting it as a delta would corrupt
-    // the transient projection.
+  private broadcast(
+    active: ActiveTurn,
+    kind: "assistant" | "reasoning",
+    flush: StreamDeltaFlush,
+  ): void {
+    // A terminal correction is projected by the authoritative snapshot.
+    // Treating its complete value as an append-only delta would duplicate text.
     if (flush.replacement) return;
     this.options.hooks.broadcast({
       type: kind === "assistant" ? "agent.text" : "agent.reasoning",

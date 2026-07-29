@@ -142,6 +142,34 @@ describe("RuntimeStore repository compatibility", () => {
     store.close();
   });
 
+  it("keeps streamed message content and conversation activity atomic", async () => {
+    const { databasePath, store, workspacePath } = await createStore();
+    const project = store.createProject("Streaming", workspacePath);
+    const conversation = store.createConversation(project.id, "Streaming");
+    const message = store.createMessage(
+      conversation.id,
+      "Original response",
+      "assistant",
+    );
+    const inspector = new Database(databasePath);
+    inspector.exec(`
+      CREATE TRIGGER reject_stream_conversation_touch
+      BEFORE UPDATE OF updated_at ON conversations
+      BEGIN
+        SELECT RAISE(ABORT, 'conversation touch rejected');
+      END
+    `);
+
+    expect(() => store.updateMessageContent(message.id, "Partial response"))
+      .toThrow(/conversation touch rejected/u);
+    expect(store.snapshot().messages.find(({ id }) => id === message.id)?.content)
+      .toBe("Original response");
+
+    inspector.exec("DROP TRIGGER reject_stream_conversation_touch");
+    inspector.close();
+    store.close();
+  });
+
   it("creates a secondary conversation without stealing active selection", async () => {
     const { store, workspacePath } = await createStore();
     const primaryProject = store.createProject("Primary", workspacePath);

@@ -111,9 +111,14 @@ function responseTurn(turn: AgentTurn): ResponseTurn {
     activities: [],
     reasonings: [],
     checkpoints: [],
-  }).find((candidate) => candidate.kind === "turn");
-  if (!item || item.kind !== "turn") throw new Error("Missing response turn");
-  return item.turn;
+  })[0];
+  if (!item) throw new Error("Missing response turn");
+  if (item.kind === "turn") return item.turn;
+  const inferred = item.compatibility.inferredTurns.find(
+    (candidate) => candidate.id === turn.id,
+  );
+  if (!inferred) throw new Error("Missing inferred response turn");
+  return inferred;
 }
 
 function renderTimeline(turn: AgentTurn, showTimestamps = false): string {
@@ -272,6 +277,7 @@ describe("final-answer turn metadata", () => {
       association: "inferred",
     });
     const html = renderTimeline(turn);
+    const projected = responseTurn(turn);
     const primaryStart = html.indexOf('<div class="turn-meta-primary">');
     const primaryEnd = html.indexOf("</div>", primaryStart);
     const primary = html.slice(primaryStart, primaryEnd);
@@ -281,15 +287,16 @@ describe("final-answer turn metadata", () => {
     expect(primary).not.toContain("custom-harness");
     expect(primary).not.toContain("custom:acme");
     expect(primary).not.toContain("acme/code-pro");
-    expect(html).toContain("<dt>Harness ID</dt><dd><code>custom-harness</code>");
-    expect(html).toContain("<dt>Backend profile ID</dt><dd><code>custom:acme</code>");
-    expect(html).toContain("<dt>Exact model ID</dt><dd><code>acme/code-pro</code>");
-    expect(html).toContain("<dt>Requested alias</dt><dd>Not requested</dd>");
-    expect(html).toContain("<dt>Reasoning level</dt><dd>Default</dd>");
-    expect(html).toContain("<dt>Interaction mode</dt><dd><code>plan</code>");
-    expect(html).toContain("<dt>Access mode</dt><dd><code>full</code>");
-    expect(html).toContain("<dt>Historical association</dt><dd>Inferred</dd>");
-    expect(html).toContain("<dt>Session continuation</dt><dd>Resumed existing session</dd>");
+    expect(detailValue(projected, "Harness ID")).toBe("custom-harness");
+    expect(detailValue(projected, "Backend profile ID")).toBe("custom:acme");
+    expect(detailValue(projected, "Exact model ID")).toBe("acme/code-pro");
+    expect(detailValue(projected, "Requested alias")).toBe("Not requested");
+    expect(detailValue(projected, "Reasoning level")).toBe("Default");
+    expect(detailValue(projected, "Interaction mode")).toBe("plan");
+    expect(detailValue(projected, "Access mode")).toBe("full");
+    expect(detailValue(projected, "Historical association")).toBe("Inferred");
+    expect(detailValue(projected, "Session continuation")).toBe("Resumed existing session");
+    expect(html).not.toContain("<dt>");
     for (const secret of [
       "provider-session-before-secret",
       "provider-session-after-secret",

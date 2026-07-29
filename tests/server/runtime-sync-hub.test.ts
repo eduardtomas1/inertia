@@ -111,9 +111,26 @@ function fixture() {
 }
 
 describe("runtime sync hub", () => {
+  it("does not own a socket when fresh hydration fails", () => {
+    const runtime = fixture();
+    expect(() => runtime.hub.connect("broken", { kind: "none" }, {
+      beforeFreshSnapshot: () => {
+        throw new Error("flush failed");
+      },
+      snapshot,
+      approvals: [],
+      inputs: [],
+      plans: [],
+    })).toThrow("flush failed");
+    expect(runtime.hub.connectionCount).toBe(0);
+    expect(runtime.events.has("broken")).toBe(false);
+  });
+
   it("hydrates a fresh connection in order and embeds the authoritative cursor", () => {
     const runtime = fixture();
+    const beforeFreshSnapshot = vi.fn();
     runtime.hub.connect("fresh", { kind: "none" }, {
+      beforeFreshSnapshot,
       snapshot,
       approvals: [approval()],
       inputs: [inputRequest()],
@@ -134,6 +151,7 @@ describe("runtime sync hub", () => {
       runtimeGeneration: GENERATION,
       latestSequence: 0,
     });
+    expect(beforeFreshSnapshot).toHaveBeenCalledTimes(1);
     expect(runtime.hub.connectionCount).toBe(1);
   });
 
@@ -361,6 +379,7 @@ describe("runtime sync hub", () => {
 
   it("replays compatible cursors, refreshes incompatible generations, and tears down all clients", () => {
     const runtime = fixture();
+    const beforeFreshSnapshot = vi.fn();
     runtime.hub.broadcastSnapshot(snapshot);
     runtime.hub.connect("resumed", {
       kind: "resume",
@@ -368,6 +387,7 @@ describe("runtime sync hub", () => {
       afterSequence: 0,
       conversationIds: [],
     }, {
+      beforeFreshSnapshot,
       snapshot,
       approvals: [],
       inputs: [],
@@ -378,6 +398,7 @@ describe("runtime sync hub", () => {
       "runtime.event",
       "runtime.sync.completed",
     ]);
+    expect(beforeFreshSnapshot).not.toHaveBeenCalled();
 
     runtime.hub.connect("reset", {
       kind: "resume",
@@ -385,6 +406,7 @@ describe("runtime sync hub", () => {
       afterSequence: 1,
       conversationIds: [],
     }, {
+      beforeFreshSnapshot,
       snapshot,
       approvals: [],
       inputs: [],
@@ -394,6 +416,7 @@ describe("runtime sync hub", () => {
       "server.welcome",
       "runtime.sync.completed",
     ]);
+    expect(beforeFreshSnapshot).toHaveBeenCalledTimes(1);
 
     const terminated: string[] = [];
     runtime.hub.terminateAll((socket) => terminated.push(socket));

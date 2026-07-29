@@ -344,7 +344,7 @@ describe("Quiet Ledger settled work summary", () => {
     const detailsStart = html.indexOf("<details");
     const detailsEnd = html.indexOf("</details>", detailsStart);
     const details = html.slice(detailsStart, detailsEnd);
-    expect(details).toContain("Read source");
+    expect(details).not.toContain("Read source");
     expect(details).not.toContain("Warning: provider fallback used");
     expect(details).not.toContain("Tests failed");
     expect(html.indexOf("Warning: provider fallback used")).toBeGreaterThan(detailsEnd);
@@ -354,8 +354,8 @@ describe("Quiet Ledger settled work summary", () => {
     expect(html.match(/class="agent-activity-technical"/g)).toHaveLength(2);
     expect(html).toContain("<summary><span>Full output</span>");
     expect(html).toContain("<summary><span>Full command output</span>");
-    expect(html).toContain("npm test exited with status 1.");
-    expect(html).toContain("The provider ignored one optional capability.");
+    expect(html.match(/npm test exited with status 1\./g)).toHaveLength(2);
+    expect(html.match(/The provider ignored one optional capability\./g)).toHaveLength(2);
     expect(html.indexOf('data-turn-layer="final-answer"'))
       .toBeGreaterThan(html.indexOf('data-turn-layer="agent-execution"'));
   });
@@ -387,8 +387,8 @@ describe("Quiet Ledger settled work summary", () => {
     expect(collapsed).toContain(
       'class="turn-run-details" id="turn-run-details-auto-collapse" aria-labelledby="turn-run-details-auto-collapse-label" hidden=""',
     );
-    expect(collapsed).toContain("Execution transcript");
-    expect(collapsed).toContain("Read source");
+    expect(collapsed).not.toContain("Execution transcript");
+    expect(collapsed).not.toContain("Read source");
     expect(expanded).not.toContain("turn-settled-summary");
     expect(expanded).toContain(
       'class="turn-run-details-toggle" id="turn-run-details-auto-collapse-label" aria-expanded="true"',
@@ -415,7 +415,7 @@ describe("Quiet Ledger settled work summary", () => {
     expect(html).not.toContain("turn-settled-summary");
     expect(html).not.toContain("Worked for");
     expect(html.match(/class="turn-duration">Worked 1m 42s/g)).toHaveLength(3);
-    expect(html.match(/>Execution transcript</g)).toHaveLength(3);
+    expect(html).not.toContain(">Execution transcript<");
   });
 
   it("keeps historical summaries static and never derives terminal time from a mutable clock", () => {

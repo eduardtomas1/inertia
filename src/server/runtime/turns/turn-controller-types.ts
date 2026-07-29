@@ -25,7 +25,8 @@ import type {
   ProviderRunResult,
 } from "../../provider/contracts";
 import type { HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
-import type { DeltaTimerScheduler, TurnStreamCoalescer } from "./turn-stream-coalescer";
+import type { DeltaTimerScheduler } from "./turn-stream-coalescer";
+import type { TurnStreamChannel } from "./turn-stream-channel";
 
 export interface TurnTimerScheduler extends DeltaTimerScheduler {}
 
@@ -177,10 +178,10 @@ export interface ActiveTurn {
   assistantSegmentText: string;
   assistantMessageId: string | null;
   latestAssistantMessageId: string | null;
-  assistantStream: TurnStreamCoalescer;
+  assistantStream: TurnStreamChannel;
   reasoningText: string;
   reasoningId: string | null;
-  reasoningStream: TurnStreamCoalescer;
+  reasoningStream: TurnStreamChannel;
   timeoutTimer: unknown;
   runningActivities: Map<ProviderActivityEvent["kind"], AgentActivity[]>;
   providerActivitiesById: Map<string, AgentActivity>;

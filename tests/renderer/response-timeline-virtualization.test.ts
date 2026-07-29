@@ -16,6 +16,7 @@ import {
   buildResponseTimeline,
   buildTimelineMinimapMarkers,
   estimateCompletedTurnSpacing,
+  estimateTimelineRenderWeight,
   estimateTimelineRowSize,
   shouldAdjustTimelineScrollPosition,
   shouldFollowTimeline,
@@ -251,6 +252,53 @@ function responseTurns(items: ResponseTimelineItem[]): ResponseTurn[] {
 }
 
 describe("quiet-ledger timeline virtualization estimates", () => {
+  it("virtualizes short histories when mounted content weight exceeds ordinary rows", () => {
+    const turns = Array.from({ length: 36 }, (_, index) =>
+      agentTurn(`weighted-${index}`));
+    const messages = turns.flatMap((turn, index) => {
+      const commentaryCount = index < 29 ? 3 : 2;
+      return [
+        message(turn.userMessageId, turn.id, "user", `Request ${index}`),
+        ...Array.from({ length: commentaryCount }, (_, commentaryIndex) =>
+          message(
+            `${turn.id}-commentary-${commentaryIndex}`,
+            turn.id,
+            "assistant",
+            `Commentary ${index}.${commentaryIndex}`,
+          )),
+        message(turn.terminalAssistantMessageId!, turn.id, "assistant", `Answer ${index}`),
+      ];
+    });
+    const activities = turns.flatMap((turn, turnIndex) =>
+      Array.from({ length: 34 }, (_, activityIndex) =>
+        activity(`weighted-${turnIndex}-${activityIndex}`, turn.id, {
+          detail: "x".repeat(2_778),
+        })));
+    const startedAt = performance.now();
+    const timeline = buildResponseTimeline({
+      turns,
+      messages,
+      activities,
+      reasonings: [],
+      checkpoints: [],
+    });
+    const weight = estimateTimelineRenderWeight(timeline);
+    const elapsed = performance.now() - startedAt;
+
+    expect(timeline).toHaveLength(36);
+    expect(messages.filter(({ role }) => role === "assistant")).toHaveLength(137);
+    expect(activities).toHaveLength(1_224);
+    expect(activities.reduce(
+      (total, entry) => total + (entry.detail?.length ?? 0),
+      0,
+    )).toBeGreaterThan(3_400_000);
+    expect(shouldVirtualizeTimeline(timeline.length)).toBe(false);
+    expect(weight).toBeGreaterThan(40);
+    expect(shouldVirtualizeTimeline(timeline.length, weight)).toBe(true);
+    expect(shouldVirtualizeTimeline(12, 12)).toBe(false);
+    expect(elapsed).toBeLessThan(250);
+  });
+
   it("keeps compact answers compact and scales with structurally long Markdown", () => {
     const short = buildItem({ id: "short" });
     const longMarkdown = Array.from({ length: 36 }, (_, index) => [

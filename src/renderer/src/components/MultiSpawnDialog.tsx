@@ -26,7 +26,7 @@ import { legacyProviderIdForHarness } from "../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
   composerRouteReadiness,
-  type ComposerRouteReadiness,
+  type ComposerRouteRepair,
 } from "../utils/composerReadiness";
 import {
   buildComposerModelRoutes,
@@ -59,8 +59,12 @@ export interface MultiSpawnDialogProps {
 interface RouteState {
   routes: ComposerModelRoute[];
   selected: ReturnType<typeof selectedModelSearchRoute>;
-  readiness: ComposerRouteReadiness;
   providerId: ProviderId | null;
+  ready: boolean;
+  repairAction: ComposerRouteRepair | null;
+  statusBadge: string;
+  statusTitle: string;
+  statusDetail: string;
 }
 
 function cloneSelection(selection: ModelSelection): ModelSelection {
@@ -116,7 +120,7 @@ function MultiSpawnSideEditor({
     && candidate.backendProfileId === side.selection.backendProfileId
     && candidate.modelId === side.selection.modelId);
   const reasoningOptions = route?.reasoningOptions ?? [];
-  const ready = routeState.readiness.ready;
+  const ready = routeState.ready;
 
   return (
     <section
@@ -136,7 +140,7 @@ function MultiSpawnSideEditor({
         </span>
         <span className={`multi-spawn-readiness ${ready ? "is-ready" : ""}`}>
           {ready ? <Check size={11} /> : <KeyRound size={11} />}
-          {ready ? "Ready" : routeState.readiness.badge}
+          {ready ? "Ready" : routeState.statusBadge}
         </span>
       </header>
 
@@ -240,10 +244,10 @@ function MultiSpawnSideEditor({
       {!ready && (
         <div className="multi-spawn-route-warning" role="status">
           <span>
-            <strong>{routeState.readiness.title}</strong>
-            <small>{routeState.readiness.detail}</small>
+            <strong>{routeState.statusTitle}</strong>
+            <small>{routeState.statusDetail}</small>
           </span>
-          {routeState.readiness.action && (
+          {routeState.repairAction && routeState.providerId && (
             <button type="button" disabled={disabled} onClick={onRepair}>
               Open setup
             </button>
@@ -268,6 +272,7 @@ export function MultiSpawnDialog({
   const dialogRef = useRef<HTMLElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const initializedForOpenRef = useRef(false);
+  const restoreFocusRef = useRef(true);
   const [draft, setDraft] = useState<MultiSpawnDraft | null>(null);
   useNativePreviewSuspension(open);
 
@@ -296,8 +301,24 @@ export function MultiSpawnDialog({
       routesForSelection,
       preset: readMultiSpawnPreset(window.localStorage),
     }));
-    window.requestAnimationFrame(() => promptRef.current?.focus());
   }, [open, routesForSelection, settings, snapshot]);
+
+  useEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current = true;
+    const previous = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const frame = window.requestAnimationFrame(
+      () => promptRef.current?.focus(),
+    );
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (restoreFocusRef.current && previous?.isConnected) {
+        previous.focus({ preventScroll: true });
+      }
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -333,19 +354,36 @@ export function MultiSpawnDialog({
       ({ id }) => id === side.selection.backendProfileId,
     );
     const routes = routesForSelection(side.selection);
+    const selected = selectedModelSearchRoute(routes, side.selection);
+    const readiness = composerRouteReadiness({
+      provider,
+      profile,
+      selection: side.selection,
+    });
+    const readinessIssue = readiness.ready ? null : readiness;
+    const routeSelectable = selected.selectable;
     return {
       routes,
-      selected: selectedModelSearchRoute(routes, side.selection),
-      readiness: composerRouteReadiness({
-        provider,
-        profile,
-        selection: side.selection,
-      }),
+      selected,
       providerId,
+      ready: routeSelectable && readiness.ready,
+      repairAction: routeSelectable
+        ? readinessIssue?.action ?? null
+        : null,
+      statusBadge: routeSelectable
+        ? readinessIssue?.badge ?? "Ready"
+        : "Select model",
+      statusTitle: routeSelectable
+        ? readinessIssue?.title ?? "Route ready"
+        : "Model route unavailable",
+      statusDetail: routeSelectable
+        ? readinessIssue?.detail ?? "The selected route is ready."
+        : selected.unavailableReason
+          ?? "Choose a model route that is currently available.",
     };
   }) as [RouteState, RouteState];
   const validationError = validateMultiSpawnDraft(draft);
-  const routesReady = routeStates.every(({ readiness }) => readiness.ready);
+  const routesReady = routeStates.every(({ ready }) => ready);
   const sharesLocalCheckout = settings.newThreadMode === "local"
     && draft.sides[0].projectId === draft.sides[1].projectId;
 
@@ -363,15 +401,16 @@ export function MultiSpawnDialog({
 
   const openRepair = (index: 0 | 1): void => {
     const route = routeStates[index];
+    restoreFocusRef.current = false;
     onClose();
     if (
-      route.readiness.ready
-      || !route.readiness.action
+      route.ready
+      || !route.repairAction
       || !route.providerId
     ) return;
     if (
-      route.readiness.action === "add-key"
-      || route.readiness.action === "probe"
+      route.repairAction === "add-key"
+      || route.repairAction === "probe"
     ) {
       onOpenBackendSetup(draft.sides[index].selection.backendProfileId);
     } else {

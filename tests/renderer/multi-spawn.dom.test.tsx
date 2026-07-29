@@ -299,6 +299,63 @@ describe("multi-spawn", () => {
     expect(screen.getByLabelText("Chat 1 name")).toHaveValue("Kept title");
   });
 
+  it("restores focus to the launch trigger when the dialog closes", async () => {
+    const trigger = document.createElement("button");
+    trigger.textContent = "Launch two chats";
+    document.body.append(trigger);
+    trigger.focus();
+    let view!: ReturnType<typeof render>;
+    const renderDialog = (open: boolean): React.JSX.Element => (
+      <MultiSpawnDialog
+        open={open}
+        snapshot={snapshot}
+        settings={settings}
+        submitting={false}
+        error={null}
+        onClose={() => view.rerender(renderDialog(false))}
+        onSubmit={vi.fn(async () => undefined)}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />
+    );
+    view = render(renderDialog(true));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Shared prompt")).toHaveFocus());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(trigger).toHaveFocus());
+    trigger.remove();
+  });
+
+  it("requires a stale selected model to be replaced before launch", () => {
+    render(
+      <MultiSpawnDialog
+        open
+        snapshot={{
+          ...snapshot,
+          providers: snapshot.providers.map((entry) => ({
+            ...entry,
+            models: entry.models.filter(({ id }) => id === "gpt-5.5"),
+          })),
+        }}
+        settings={settings}
+        submitting={false}
+        error={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn(async () => undefined)}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Launch duo" })).toBeDisabled();
+    expect(screen.getAllByText("Model route unavailable")).toHaveLength(2);
+    expect(screen.getAllByText(
+      "This saved model route is no longer available.",
+    )).toHaveLength(2);
+  });
+
   it("blocks launch and exposes route-specific setup when a route is unavailable", () => {
     render(
       <MultiSpawnDialog

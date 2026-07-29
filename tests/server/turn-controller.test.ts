@@ -1127,6 +1127,70 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
+  it("retains attachments and gates retries when a synchronous provider event settles during start", async () => {
+    const runtime = await testRuntime();
+    runtime.provider.deferOwnedStop();
+    const attachment = await testAttachment(
+      runtime,
+      "abababab-abab-4bab-8bab-abababababab",
+      "synchronous-start.png",
+    );
+    const originalRun = runtime.provider.run.bind(runtime.provider);
+    vi.spyOn(runtime.provider, "run").mockImplementationOnce((input, callbacks) => {
+      const result = originalRun(input, callbacks);
+      callbacks.onEvent?.({
+        providerId: input.providerId,
+        conversationId: runtime.conversationId,
+        runId: input.runId!,
+        turnId: input.turnId!,
+        type: "activity",
+        kind: "command",
+        phase: "started",
+        label: "Synchronous provider activity",
+      });
+      return result;
+    });
+    vi.spyOn(runtime.store, "addActivity").mockImplementationOnce(() => {
+      throw new Error("injected synchronous persistence failure");
+    });
+    const first = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Settle synchronously after provider ownership begins.",
+      attachments: [attachment],
+    });
+
+    expect(runtime.controller.start(first.turn.id)).toBe(true);
+    expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
+      status: "failed",
+      terminalReason: expect.stringContaining("stream-persistence-failed"),
+    });
+    expect(runtime.provider.stopOwnedCalls).toEqual([{
+      conversationId: runtime.conversationId,
+      identity: {
+        runId: first.turn.runId,
+        turnId: first.turn.id,
+      },
+    }]);
+    expect(runtime.attachmentReleases).toEqual([]);
+
+    const retry = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Retry only after exact-run cleanup.",
+    });
+    expect(runtime.controller.start(retry.turn.id)).toBe(true);
+    expect(runtime.provider.runCount).toBe(1);
+
+    runtime.provider.resolveOwnedStop();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+    expect(runtime.provider.runCount).toBe(2);
+    expect(runtime.provider.input?.turnId).toBe(retry.turn.id);
+    runtime.provider.resolve({ status: "completed", text: "Retry completed." });
+    await flushPromises();
+    runtime.store.close();
+  });
+
   it("treats a rejected provider promise as an interrupted transport without exposing diagnostics", async () => {
     const runtime = await testRuntime();
     const queued = runtime.controller.queue({

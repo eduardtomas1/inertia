@@ -311,13 +311,17 @@ export class TurnController {
 
   private startProvider(active: ActiveTurn): boolean {
     if (active.settled || this.closing) return false;
+    // Provider callbacks may fire synchronously from run()/harness.start().
+    // Claim ownership before invoking the provider so any callback-triggered
+    // settlement uses bounded exact-run cleanup instead of releasing resources
+    // while the provider is still alive.
+    active.providerRunStarted = true;
     try {
       const result = this.providers.run(active.providerInput, {
         onEvent: (event) => {
           this.handleProviderEvent(event);
         },
       });
-      active.providerRunStarted = true;
       void result.then(
         (providerResult) => this.handleProviderResult(active, providerResult),
         (error: unknown) => {

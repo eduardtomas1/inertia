@@ -67,4 +67,40 @@ describe("FileEditorDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
+
+  it("preserves a CRLF file's newline convention after browser editing", async () => {
+    const onSave = vi.fn(async (
+      path: string,
+      content: string,
+      expectedDigest: string,
+    ) => ({
+      ...file,
+      path,
+      content,
+      contentDigest: expectedDigest,
+    }));
+    render(
+      <FileEditorDialog
+        file={{
+          ...file,
+          content: "first\r\nsecond\r\n",
+        }}
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox");
+    expect(editor).toHaveValue("first\nsecond\n");
+    fireEvent.change(editor, {
+      target: { value: "first changed\nsecond\n" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(
+      "src/example.ts",
+      "first changed\r\nsecond\r\n",
+      "a".repeat(64),
+    ));
+  });
 });

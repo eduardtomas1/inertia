@@ -17,6 +17,22 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(", ");
 
+function normalizedEditorText(value: string): string {
+  return value.replace(/\r\n?/gu, "\n");
+}
+
+export function serializeEditorText(
+  source: string,
+  edited: string,
+): string {
+  const crlfLines = source.match(/\r\n/gu)?.length ?? 0;
+  const lfLines = source.match(/(?<!\r)\n/gu)?.length ?? 0;
+  const normalized = normalizedEditorText(edited);
+  return crlfLines > lfLines
+    ? normalized.replace(/\n/gu, "\r\n")
+    : normalized;
+}
+
 export function FileEditorDialog({
   file,
   onClose,
@@ -33,10 +49,11 @@ export function FileEditorDialog({
   const titleId = useId();
   const descriptionId = useId();
   const editorRef = useRef<HTMLTextAreaElement>(null);
-  const [content, setContent] = useState(file.content);
+  const originalEditorText = normalizedEditorText(file.content);
+  const [content, setContent] = useState(originalEditorText);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const changed = content !== file.content;
+  const changed = content !== originalEditorText;
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement
@@ -63,7 +80,11 @@ export function FileEditorDialog({
     setSaving(true);
     setError(null);
     try {
-      await onSave(file.path, content, file.contentDigest);
+      await onSave(
+        file.path,
+        serializeEditorText(file.content, content),
+        file.contentDigest,
+      );
       onClose();
     } catch (saveError) {
       setError(

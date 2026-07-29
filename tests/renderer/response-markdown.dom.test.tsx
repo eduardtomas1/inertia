@@ -18,6 +18,8 @@ describe("ResponseMarkdown project files", () => {
           "",
           "Browse [the sources](src/server/).",
           "",
+          "Browse [docs without a slash](docs).",
+          "",
           "```ts file=src/server/adapter.ts",
           "export const adapter = true;",
           "```",
@@ -32,6 +34,9 @@ describe("ResponseMarkdown project files", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "the adapter" }));
     fireEvent.click(screen.getByRole("link", { name: "the sources" }));
+    fireEvent.click(screen.getByRole("link", {
+      name: "docs without a slash",
+    }));
     fireEvent.click(screen.getByRole("button", {
       name: "src/server/adapter.ts",
     }));
@@ -41,6 +46,10 @@ describe("ResponseMarkdown project files", () => {
     );
     expect(onOpenProjectFile).toHaveBeenNthCalledWith(
       2,
+      "docs",
+    );
+    expect(onOpenProjectFile).toHaveBeenNthCalledWith(
+      3,
       "src/server/adapter.ts",
     );
     expect(openProjectPath).toHaveBeenCalledWith({

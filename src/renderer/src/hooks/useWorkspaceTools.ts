@@ -29,6 +29,24 @@ interface WorkspaceToolsOptions {
   setActiveTool: (tool: WorkspacePanelTab | null) => void;
 }
 
+export async function openWorkspaceEntry(
+  path: string,
+  actions: {
+    inspectDirectory: (path: string) => Promise<unknown>;
+    openDirectory: (path: string) => Promise<unknown>;
+    openFile: (path: string) => void;
+  },
+): Promise<"directory" | "file"> {
+  try {
+    await actions.inspectDirectory(path);
+  } catch {
+    actions.openFile(path);
+    return "file";
+  }
+  await actions.openDirectory(path);
+  return "directory";
+}
+
 export function useWorkspaceTools(options: WorkspaceToolsOptions) {
   const enabled = options.enabled ?? true;
   const git = useWorkspaceGit({
@@ -65,11 +83,35 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     loadGit: git.loadGit,
   });
   const selectWorkspaceFile = files.selectWorkspaceFile;
+  const requestWorkspaceEntries = files.requestWorkspaceEntries;
   const setActiveTool = options.setActiveTool;
   const openWorkspaceFile = useCallback((path: string): void => {
-    selectWorkspaceFile(path);
-    setActiveTool("files");
-  }, [selectWorkspaceFile, setActiveTool]);
+    const projectId = options.project?.id;
+    if (!projectId) return;
+    void openWorkspaceEntry(path, {
+      inspectDirectory: async (directory) =>
+        await requestWorkspaceEntries({ directory }),
+      openDirectory: async (directory) =>
+        await window.inertia.openProjectPath({
+            projectId,
+            ...(options.conversation?.id
+              ? { conversationId: options.conversation.id }
+              : {}),
+            relativePath: directory,
+            action: "reveal",
+        }),
+      openFile: (file) => {
+        selectWorkspaceFile(file);
+        setActiveTool("files");
+      },
+    }).catch(() => undefined);
+  }, [
+    options.conversation?.id,
+    options.project?.id,
+    requestWorkspaceEntries,
+    selectWorkspaceFile,
+    setActiveTool,
+  ]);
   const artifacts = useTurnArtifacts({
     project: options.project,
     conversation: options.conversation,

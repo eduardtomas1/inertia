@@ -11,6 +11,7 @@ import type {
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import { useActivityActions } from "../../src/renderer/src/hooks/useActivityActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
+import { openWorkspaceEntry } from "../../src/renderer/src/hooks/useWorkspaceTools";
 import {
   useWorkspaceFiles,
 } from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceFiles";
@@ -95,6 +96,28 @@ const betaChat = conversation(
 );
 
 describe("workspace pane authority", () => {
+  it("routes actual directories to reveal and files to the internal preview", async () => {
+    const openDirectory = vi.fn(async () => undefined);
+    const openFile = vi.fn();
+    const inspectDirectory = vi.fn(async (path: string) => {
+      if (path === "README") throw new Error("not a directory");
+    });
+
+    await expect(openWorkspaceEntry("docs", {
+      inspectDirectory,
+      openDirectory,
+      openFile,
+    })).resolves.toBe("directory");
+    await expect(openWorkspaceEntry("README", {
+      inspectDirectory,
+      openDirectory,
+      openFile,
+    })).resolves.toBe("file");
+
+    expect(openDirectory).toHaveBeenCalledWith("docs");
+    expect(openFile).toHaveBeenCalledWith("README");
+  });
+
   it("does not let delayed project actions replace the new owner's actions", async () => {
     let settleAlpha: ((event: ServerEvent) => void) | null = null;
     const alphaAction: ProjectAction = {

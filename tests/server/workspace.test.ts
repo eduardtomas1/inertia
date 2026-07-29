@@ -164,6 +164,48 @@ describe("workspace file hierarchy", () => {
       .rejects.toMatchObject({ code: "unsafe-link" });
   });
 
+  it("does not list an entry swapped to an external link after enumeration", async () => {
+    const root = await temporaryDirectory();
+    const outside = await temporaryDirectory();
+    const target = join(root, "target");
+    await mkdir(target);
+    await writeFile(join(outside, "secret.ts"), "outside");
+    let swapped = false;
+
+    const page = await listWorkspaceEntries(root, "", {
+      afterEntryObserved: async (path) => {
+        if (path !== "target") return;
+        swapped = true;
+        await rename(target, join(root, "target-moved"));
+        await symlink(outside, target, process.platform === "win32" ? "junction" : "dir");
+      },
+    });
+
+    expect(swapped).toBe(true);
+    expect(page.entries.map(({ path }) => path)).not.toContain("target");
+  });
+
+  it("does not queue a directory swapped to an external link during search", async () => {
+    const root = await temporaryDirectory();
+    const outside = await temporaryDirectory();
+    const target = join(root, "race-dir");
+    await mkdir(target);
+    await writeFile(join(outside, "needle-secret.ts"), "outside");
+    let swapped = false;
+
+    const result = await searchWorkspaceEntries(root, "needle", {
+      afterEntryObserved: async (path) => {
+        if (path !== "race-dir" || swapped) return;
+        swapped = true;
+        await rename(target, join(root, "race-dir-moved"));
+        await symlink(outside, target, process.platform === "win32" ? "junction" : "dir");
+      },
+    });
+
+    expect(swapped).toBe(true);
+    expect(result.entries).toEqual([]);
+  });
+
   it.skipIf(process.platform === "win32")(
     "preserves POSIX filename characters through listing, reading, and editing",
     async () => {

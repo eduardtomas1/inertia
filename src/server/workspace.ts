@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, type Dirent } from "node:fs";
 import {
   lstat,
   open,
@@ -100,6 +100,8 @@ export interface WorkspaceEntryList {
 export interface ListWorkspaceOptions {
   includeHidden?: boolean;
   maxEntries?: number;
+  /** Focused race hook; production callers never provide it. */
+  afterEntryObserved?: (path: string) => void | Promise<void>;
 }
 
 export interface SearchWorkspaceOptions {
@@ -108,6 +110,8 @@ export interface SearchWorkspaceOptions {
   maxDepth?: number;
   maxVisitedEntries?: number;
   ignoredDirectories?: readonly string[];
+  /** Focused race hook; production callers never provide it. */
+  afterEntryObserved?: (path: string) => void | Promise<void>;
 }
 
 export interface WorkspaceSearchResult {
@@ -321,17 +325,55 @@ function entryKind(info: Awaited<ReturnType<typeof lstat>>): WorkspaceEntryKind 
   return "other";
 }
 
-async function describeEntry(root: string, absolute: string, name: string): Promise<WorkspaceEntry> {
+async function describeEntry(
+  root: string,
+  absolute: string,
+  name: string,
+  observedKind: WorkspaceEntryKind,
+): Promise<{ entry: WorkspaceEntry; identity: { dev: number; ino: number } } | null> {
   const info = await lstat(absolute);
   const kind = entryKind(info);
+  if (observedKind !== "other" && kind !== observedKind) return null;
   return {
-    name,
-    path: slashPath(relative(root, absolute)),
-    kind,
-    size: kind === "file" ? info.size : null,
-    modifiedAt: Number.isFinite(info.mtimeMs) ? info.mtime.toISOString() : null,
-    hidden: name.startsWith("."),
+    entry: {
+      name,
+      path: slashPath(relative(root, absolute)),
+      kind,
+      size: kind === "file" ? info.size : null,
+      modifiedAt: Number.isFinite(info.mtimeMs) ? info.mtime.toISOString() : null,
+      hidden: name.startsWith("."),
+    },
+    identity: { dev: info.dev, ino: info.ino },
   };
+}
+
+async function openStableDirectory(
+  root: string,
+  absolute: string,
+  identity: { dev: number; ino: number },
+) {
+  const before = await lstat(absolute);
+  if (before.isSymbolicLink() || !before.isDirectory() || !sameIdentity(before, identity)) return null;
+  if (!isContained(root, await realpath(absolute))) return null;
+  const handle = await opendir(absolute);
+  try {
+    const after = await lstat(absolute);
+    if (
+      !after.isSymbolicLink()
+      && after.isDirectory()
+      && sameIdentity(after, identity)
+      && isContained(root, await realpath(absolute))
+    ) return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+  await handle.close();
+  return null;
+}
+
+function direntKind(child: Dirent): WorkspaceEntryKind {
+  return child.isSymbolicLink() ? "symlink" : child.isDirectory() ? "directory" : child.isFile() ? "file" : "other";
 }
 
 function compareEntries(left: WorkspaceEntry, right: WorkspaceEntry): number {
@@ -351,9 +393,10 @@ export async function listWorkspaceEntries(
   const maxEntries = boundedInteger(options.maxEntries, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
   try {
     const entries: WorkspaceEntry[] = [];
-    const children: Array<{ absolute: string; name: string }> = [];
+    const children: Array<{ absolute: string; name: string; kind: WorkspaceEntryKind }> = [];
     let truncated = false;
-    const directoryHandle = await opendir(target.absolute);
+    const directoryHandle = await openStableDirectory(root, target.absolute, target.identity);
+    if (!directoryHandle) throw new WorkspaceError("unsafe-link", "The workspace folder changed while it was listed.");
     for await (const child of directoryHandle) {
       if (!options.includeHidden && child.name.startsWith(".")) continue;
       if (children.length >= maxEntries) {
@@ -363,15 +406,20 @@ export async function listWorkspaceEntries(
       children.push({
         absolute: resolve(target.absolute, child.name),
         name: child.name,
+        kind: direntKind(child),
       });
     }
     // Bound metadata fan-out so large directories remain responsive without
     // opening hundreds of filesystem operations at once.
     for (let offset = 0; offset < children.length; offset += 32) {
-      entries.push(...await Promise.all(
+      const described = await Promise.all(
         children.slice(offset, offset + 32)
-          .map(({ absolute, name }) => describeEntry(root, absolute, name)),
-      ));
+          .map(async ({ absolute, name, kind }) => {
+            await options.afterEntryObserved?.(slashPath(relative(root, absolute)));
+            return describeEntry(root, absolute, name, kind);
+          }),
+      );
+      entries.push(...described.flatMap((result) => result ? [result.entry] : []));
     }
     entries.sort(compareEntries);
     return { directory: target.relativePath === "." ? "" : target.relativePath, entries, truncated };
@@ -381,10 +429,7 @@ export async function listWorkspaceEntries(
   }
 }
 
-interface SearchQueueEntry {
-  absolute: string;
-  depth: number;
-}
+type SearchQueueEntry = { absolute: string; depth: number; identity: { dev: number; ino: number } };
 
 export async function searchWorkspaceEntries(
   workspacePath: string,
@@ -400,7 +445,12 @@ export async function searchWorkspaceEntries(
   const maxVisited = boundedInteger(options.maxVisitedEntries, DEFAULT_VISITED_ENTRIES, MAX_VISITED_ENTRIES);
   const ignored = new Set(options.ignoredDirectories ?? DEFAULT_IGNORED_DIRECTORIES);
   const needle = query.trim().toLocaleLowerCase();
-  const queue: SearchQueueEntry[] = [{ absolute: root, depth: 0 }];
+  const rootInfo = await lstat(root);
+  const queue: SearchQueueEntry[] = [{
+    absolute: root,
+    depth: 0,
+    identity: { dev: rootInfo.dev, ino: rootInfo.ino },
+  }];
   const entries: WorkspaceEntry[] = [];
   let visitedEntries = 0;
   let truncated = false;
@@ -408,7 +458,8 @@ export async function searchWorkspaceEntries(
   try {
     for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
       const directory = queue[queueIndex];
-      const directoryHandle = await opendir(directory.absolute);
+      const directoryHandle = await openStableDirectory(root, directory.absolute, directory.identity);
+      if (!directoryHandle) continue;
       for await (const child of directoryHandle) {
         if (visitedEntries >= maxVisited || entries.length >= maxResults) {
           truncated = true;
@@ -418,20 +469,18 @@ export async function searchWorkspaceEntries(
         const hidden = child.name.startsWith(".");
         if (hidden && !options.includeHidden) continue;
         const absolute = resolve(directory.absolute, child.name);
-        const kind = child.isSymbolicLink()
-          ? "symlink"
-          : child.isDirectory()
-            ? "directory"
-            : child.isFile()
-              ? "file"
-              : "other";
+        const kind = direntKind(child);
         const projectPath = slashPath(relative(root, absolute));
-        if (projectPath.toLocaleLowerCase().includes(needle)) {
-          entries.push(await describeEntry(root, absolute, child.name));
-        }
-        if (kind === "directory" && directory.depth < maxDepth && !ignored.has(child.name)) {
-          queue.push({ absolute, depth: directory.depth + 1 });
-        } else if (kind === "directory" && directory.depth >= maxDepth) {
+        const matches = projectPath.toLocaleLowerCase().includes(needle);
+        const traversable = kind === "directory" && !ignored.has(child.name);
+        if (!matches && !traversable) continue;
+        await options.afterEntryObserved?.(projectPath);
+        const described = await describeEntry(root, absolute, child.name, kind);
+        if (!described) continue;
+        if (matches) entries.push(described.entry);
+        if (described.entry.kind === "directory" && directory.depth < maxDepth && !ignored.has(child.name)) {
+          queue.push({ absolute, depth: directory.depth + 1, identity: described.identity });
+        } else if (described.entry.kind === "directory" && directory.depth >= maxDepth) {
           truncated = true;
         }
       }

@@ -674,9 +674,10 @@ function finishQuitAfterCleanup(): void {
   recordPackageSmokeStage("app-exit");
   // The first quit pass already saved window state, closed native previews,
   // stopped the utility runtime, and disposed owned attachments. Exit directly
-  // because Electron's native app-exit path can still block inside Chromium
-  // teardown after every privileged resource has already been released.
-  process.exit(0);
+  // through Electron's immediate exit path so Chromium tears down its native
+  // processes consistently on every packaged platform without re-entering
+  // before-quit or waiting on renderer unload handlers.
+  app.exit(0);
 }
 
 async function bootstrap(): Promise<void> {

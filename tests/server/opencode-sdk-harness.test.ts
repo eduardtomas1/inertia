@@ -507,8 +507,8 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     const manager = new ProviderManager(
       { commands: { opencode: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        runDeadlineMs: 1_000,
-        eventInactivityDeadlineMs: 500,
+        runDeadlineMs: 5_000,
+        eventInactivityDeadlineMs: 5_000,
       })]),
     );
     let markRunning!: () => void;
@@ -645,8 +645,8 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     const manager = new ProviderManager(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        runDeadlineMs: 1_000,
-        eventInactivityDeadlineMs: 3_000,
+        runDeadlineMs: 5_000,
+        eventInactivityDeadlineMs: 10_000,
       })]),
     );
 

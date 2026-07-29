@@ -8,6 +8,7 @@ import { forceKillPosixProcessTree } from "../node/posix-process-tree";
 
 const DEFAULT_TERMINATION_WAIT_MS = 2_000;
 const PROCESS_GROUP_POLL_MS = 10;
+const WINDOWS_RESOURCE_SETTLE_MS = 100;
 
 export interface ProcessLifecycleDependencies {
   platform: NodeJS.Platform;
@@ -154,6 +155,20 @@ function waitForDirectChildExit(
   return observeDirectChildClose(child)(waitMs);
 }
 
+async function confirmWindowsChildResourcesClosed(
+  waitForObservedClose: (waitMs: number) => Promise<boolean>,
+  waitMs: number,
+): Promise<boolean> {
+  if (!await waitForObservedClose(waitMs)) return false;
+  // Windows can report ChildProcess `close` just before the executable image
+  // becomes deletable. Give the kernel one short, bounded quiescence window
+  // before callers release temporary executables or other owned resources.
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, Math.min(waitMs, WINDOWS_RESOURCE_SETTLE_MS));
+  });
+  return true;
+}
+
 function waitForPosixProcessGroupExit(
   pid: number,
   killProcess: typeof process.kill,
@@ -287,10 +302,16 @@ export async function terminateProcessTreeAndWait(
       // Windows can keep the direct child's executable image locked until the
       // ChildProcess has emitted close. Do not let callers release temporary
       // executables or other owned resources before that handle is closed.
-      return await waitForObservedDirectChildClose(waitMs);
+      return await confirmWindowsChildResourcesClosed(
+        waitForObservedDirectChildClose,
+        waitMs,
+      );
     }
     killDirectChild(child, force);
-    return await waitForObservedDirectChildClose(waitMs);
+    return await confirmWindowsChildResourcesClosed(
+      waitForObservedDirectChildClose,
+      waitMs,
+    );
   }
 
   if (force) {

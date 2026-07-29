@@ -139,13 +139,14 @@ describe("provider process-tree termination", () => {
     const child = fakeChild();
     const taskkill = fakeTaskkill();
     const spawnProcess = vi.fn(() => taskkill);
+    let settled = false;
     queueMicrotask(() => {
       taskkill.emit("close", 0);
       child.exitCode = 1;
       child.emit("close", 1);
     });
 
-    await expect(terminateProcessTreeAndWait(
+    const termination = terminateProcessTreeAndWait(
       child as never,
       true,
       {
@@ -153,7 +154,13 @@ describe("provider process-tree termination", () => {
         spawnProcess: spawnProcess as never,
         waitMs: 100,
       },
-    )).resolves.toBe(true);
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    await expect(termination).resolves.toBe(true);
 
     expect(spawnProcess).toHaveBeenCalledWith(
       "taskkill.exe",

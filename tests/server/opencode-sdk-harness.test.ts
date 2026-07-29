@@ -499,7 +499,9 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const manager = new ProviderManager(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        initializationTimeoutMs: 100,
+        // Leave enough headroom for both concurrent discovery requests to
+        // reach the fixture when coverage instrumentation is active.
+        initializationTimeoutMs: 1_000,
       })]),
     );
 

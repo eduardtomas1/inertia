@@ -234,6 +234,7 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
   await expect(deepResult).toHaveAttribute("title", "src/components/deep");
   await deepResult.press("Enter");
   await expect(search).toHaveValue("");
+  await expect(deep).toBeFocused();
   const leaf = tree.getByRole("treeitem", { name: "CaseSensitiveLeaf.ts", exact: true });
   await expect(leaf).toHaveAttribute("aria-level", "4");
   await leaf.focus();

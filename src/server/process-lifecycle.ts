@@ -9,6 +9,7 @@ import { forceKillPosixProcessTree } from "../node/posix-process-tree";
 const DEFAULT_TERMINATION_WAIT_MS = 2_000;
 const PROCESS_GROUP_POLL_MS = 10;
 const WINDOWS_RESOURCE_SETTLE_MS = 100;
+const WINDOWS_PROCESS_SNAPSHOT_BYTES = 256 * 1024;
 
 export interface ProcessLifecycleDependencies {
   platform: NodeJS.Platform;
@@ -223,6 +224,58 @@ function waitForPosixProcessesExit(
   });
 }
 
+function snapshotWindowsProcessTree(
+  rootPid: number,
+  spawnProcessSync: typeof spawnSync,
+  waitMs: number,
+): number[] | null {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$root = ${rootPid}`,
+    "$processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId)",
+    "$rootProcess = $processes | Where-Object { [int]$_.ProcessId -eq $root } | Select-Object -First 1",
+    "if ($null -eq $rootProcess) { exit 3 }",
+    "$ids = New-Object 'System.Collections.Generic.HashSet[int]'",
+    "[void]$ids.Add($root)",
+    "do {",
+    "  $added = $false",
+    "  foreach ($candidate in $processes) {",
+    "    if ($ids.Contains([int]$candidate.ParentProcessId) -and $ids.Add([int]$candidate.ProcessId)) { $added = $true }",
+    "  }",
+    "} while ($added)",
+    "$ids | Sort-Object",
+  ].join("; ");
+  try {
+    const result = spawnProcessSync(
+      "powershell.exe",
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+      {
+        shell: false,
+        windowsHide: true,
+        encoding: "utf8",
+        maxBuffer: WINDOWS_PROCESS_SNAPSHOT_BYTES,
+        timeout: Math.max(250, Math.min(waitMs, 2_000)),
+      },
+    );
+    if (result.error || result.status !== 0) return null;
+    const pids = String(result.stdout ?? "")
+      .split(/\r?\n/u)
+      .map((value) => Number(value.trim()))
+      .filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+    return pids.includes(rootPid) ? [...new Set(pids)] : null;
+  } catch {
+    return null;
+  }
+}
+
+function waitForWindowsProcessesExit(
+  pids: readonly number[],
+  killProcess: typeof process.kill,
+  waitMs: number,
+): Promise<boolean> {
+  return waitForPosixProcessesExit(pids, killProcess, waitMs);
+}
+
 function terminateWindowsProcessTree(
   pid: number,
   force: boolean,
@@ -290,7 +343,15 @@ export async function terminateProcessTreeAndWait(
   const waitMs = boundedWaitMs(dependencies.waitMs);
 
   if (platform === "win32") {
+    // Never target a reused Windows PID after Node has already observed the
+    // complete owned child close.
+    if (directChildResourcesAreClosed(child)) return true;
     const waitForObservedDirectChildClose = observeDirectChildClose(child);
+    const beforeTermination = snapshotWindowsProcessTree(
+      pid,
+      spawnProcessSync,
+      waitMs,
+    );
     const treeTerminated = await terminateWindowsProcessTree(
       pid,
       force,
@@ -307,15 +368,33 @@ export async function terminateProcessTreeAndWait(
         waitMs,
       );
     }
-    killDirectChild(child, force);
-    await confirmWindowsChildResourcesClosed(
-      waitForObservedDirectChildClose,
+    const afterTaskkill = snapshotWindowsProcessTree(
+      pid,
+      spawnProcessSync,
       waitMs,
     );
-    // A direct-child fallback cannot prove that taskkill's unobserved
-    // descendants stopped. Keep the result unconfirmed even when the direct
-    // child releases its resources successfully.
-    return false;
+    killDirectChild(child, force);
+    const observedPids = beforeTermination === null && afterTaskkill === null
+      ? null
+      : [...new Set([
+        ...(beforeTermination ?? []),
+        ...(afterTaskkill ?? []),
+      ])];
+    if (observedPids === null) {
+      await confirmWindowsChildResourcesClosed(
+        waitForObservedDirectChildClose,
+        waitMs,
+      );
+      return false;
+    }
+    const [resourcesClosed, observedProcessesExited] = await Promise.all([
+      confirmWindowsChildResourcesClosed(
+        waitForObservedDirectChildClose,
+        waitMs,
+      ),
+      waitForWindowsProcessesExit(observedPids, killProcess, waitMs),
+    ]);
+    return resourcesClosed && observedProcessesExited;
   }
 
   if (force) {

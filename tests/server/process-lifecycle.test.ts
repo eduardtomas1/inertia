@@ -231,22 +231,57 @@ describe("provider process-tree termination", () => {
     await expect(termination).resolves.toBe(true);
   });
 
-  it("accepts a Windows child whose process and stdio closed before entry", async () => {
+  it("accepts a Windows child whose process and stdio closed before entry without targeting a reused PID", async () => {
     const child = fakeChild();
     const taskkill = fakeTaskkill();
+    const spawnProcess = vi.fn(() => taskkill);
     child.exitCode = 0;
     child.stdio[1] = { closed: true };
-    queueMicrotask(() => taskkill.emit("close", 0));
 
     await expect(terminateProcessTreeAndWait(
       child as never,
       true,
       {
         platform: "win32",
-        spawnProcess: vi.fn(() => taskkill) as never,
+        spawnProcess: spawnProcess as never,
         waitMs: 25,
       },
     )).resolves.toBe(true);
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it("confirms a Windows fallback only after every snapshotted process exits", async () => {
+    const child = fakeChild();
+    const taskkill = fakeTaskkill();
+    const spawnProcessSync = vi.fn(() => ({
+      error: undefined,
+      status: 0,
+      stdout: "4242\r\n4243\r\n",
+    }));
+    const killProcess = vi.fn(() => {
+      throw new Error("process gone");
+    });
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "win32",
+        spawnProcess: vi.fn(() => taskkill) as never,
+        spawnProcessSync: spawnProcessSync as never,
+        killProcess,
+        waitMs: 25,
+      },
+    );
+
+    taskkill.emit("close", 1);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.exitCode = 1;
+    child.emit("close", 1);
+
+    await expect(termination).resolves.toBe(true);
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(killProcess).toHaveBeenCalledWith(4_242, 0);
+    expect(killProcess).toHaveBeenCalledWith(4_243, 0);
   });
 
   it.each([

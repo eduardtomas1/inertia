@@ -4,6 +4,7 @@ import {
   MULTI_SPAWN_PRESET_STORAGE_KEY,
   projectsShareLocalCheckout,
   readMultiSpawnPreset,
+  refreshMultiSpawnSelection,
   selectionFromPreset,
   validateMultiSpawnDraft,
   writeMultiSpawnPreset,
@@ -183,6 +184,56 @@ describe("multi-spawn preset", () => {
       modelId: route.modelId,
       reasoningEffort: "ultra",
     }, codexSelection).reasoningEffort).toBe("high");
+  });
+
+  it("rebinds a draft to the current backend configuration revision", () => {
+    const currentSelection = {
+      ...codexSelection,
+      backendProfileId: "custom:team",
+      backendProfileDisplayName: "Team gateway",
+      backendConfigurationRevision: 5,
+    };
+    const route: ComposerModelRoute = {
+      key: "codex-app-server:custom:team:gpt-5.6-sol",
+      displayName: "GPT-5.6-Sol",
+      harnessId: currentSelection.harnessId,
+      harnessLabel: "Codex harness",
+      backendProfileId: currentSelection.backendProfileId,
+      backendProfileName: currentSelection.backendProfileDisplayName,
+      modelId: currentSelection.modelId,
+      alias: currentSelection.alias,
+      providerLabel: "Team gateway",
+      source: "custom",
+      routeTerms: [],
+      reasoningEffort: "high",
+      reasoningOptions: ["low", "high"],
+      selectable: true,
+      unavailableReason: null,
+      selection: currentSelection,
+      continuationIdentity: {
+        harnessId: currentSelection.harnessId,
+        backendProfileId: currentSelection.backendProfileId,
+        backendConfigurationRevision: 5,
+        modelIdentity: currentSelection.modelId,
+        endpointIdentity: "opaque-team-route-5",
+      },
+      compatibility: {
+        state: "verified",
+        allowsModelSwitchWithinSession: false,
+      },
+      rowCompatibility: null,
+      providerId: "codex",
+    };
+    const stale = {
+      ...currentSelection,
+      reasoningEffort: "low",
+      backendConfigurationRevision: 4,
+    };
+
+    expect(refreshMultiSpawnSelection([route], stale)).toMatchObject({
+      reasoningEffort: "low",
+      backendConfigurationRevision: 5,
+    });
   });
 
   it("validates the shared prompt and both chat names", () => {

@@ -48,11 +48,25 @@ export function modelChooserHarnessLabel(harnessId: string): string {
 }
 
 function sameRoute(
-  left: Pick<ModelSelection, "harnessId" | "backendProfileId" | "modelId">,
-  right: Pick<ModelSelection, "harnessId" | "backendProfileId" | "modelId">,
+  left: Pick<
+    ModelSelection,
+    | "harnessId"
+    | "backendProfileId"
+    | "backendConfigurationRevision"
+    | "modelId"
+  >,
+  right: Pick<
+    ModelSelection,
+    | "harnessId"
+    | "backendProfileId"
+    | "backendConfigurationRevision"
+    | "modelId"
+  >,
 ): boolean {
   return left.harnessId === right.harnessId
     && left.backendProfileId === right.backendProfileId
+    && left.backendConfigurationRevision
+      === right.backendConfigurationRevision
     && left.modelId === right.modelId;
 }
 

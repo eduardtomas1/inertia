@@ -245,6 +245,33 @@ function matchingPresetRoute(
     && route.modelId === reference.modelId) ?? null;
 }
 
+export function refreshMultiSpawnSelection(
+  routes: readonly ComposerModelRoute[],
+  selection: ModelSelection,
+): ModelSelection {
+  const route = routes.find((candidate) =>
+    candidate.harnessId === selection.harnessId
+    && candidate.backendProfileId === selection.backendProfileId
+    && candidate.modelId === selection.modelId);
+  if (
+    !route
+    || route.selection.backendConfigurationRevision
+      === selection.backendConfigurationRevision
+  ) {
+    return selection;
+  }
+  const reasoningEffort = (
+    selection.reasoningEffort === null
+    || route.reasoningOptions.includes(selection.reasoningEffort)
+  )
+    ? selection.reasoningEffort
+    : route.selection.reasoningEffort;
+  return cloneSelection({
+    ...route.selection,
+    reasoningEffort,
+  });
+}
+
 export function selectionFromPreset(
   routes: readonly ComposerModelRoute[],
   reference: MultiSpawnRouteReference,
@@ -269,6 +296,8 @@ function concreteDefaultSelection(
   routes: readonly ComposerModelRoute[],
   fallback: ModelSelection,
 ): ModelSelection {
+  const refreshed = refreshMultiSpawnSelection(routes, fallback);
+  if (refreshed !== fallback) return refreshed;
   if (fallback.modelId !== "provider-default") {
     return cloneSelection(fallback);
   }

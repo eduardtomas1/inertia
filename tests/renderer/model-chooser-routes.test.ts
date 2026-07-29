@@ -161,6 +161,32 @@ describe("composer model chooser route projection", () => {
     expect(JSON.stringify(route)).not.toContain("credential");
   });
 
+  it("does not preserve a selection from an older backend revision", () => {
+    const profile = customProfile();
+    const staleSelection = {
+      ...nativeModelSelection({
+        providerId: "codex",
+        modelId: "team-alpha",
+      }),
+      harnessId: profile.harnessId,
+      backendProfileId: profile.id,
+      backendProfileDisplayName: profile.displayName,
+      backendConfigurationRevision: profile.configurationRevision - 1,
+    };
+    const [route] = buildComposerModelRoutes(
+      [provider()],
+      [profile],
+      staleSelection,
+    );
+
+    expect(route?.selection.backendConfigurationRevision)
+      .toBe(profile.configurationRevision);
+    expect(selectedModelSearchRoute([route!], staleSelection)).toMatchObject({
+      selectable: false,
+      unavailableReason: "This saved model route is no longer available.",
+    });
+  });
+
   it("keeps unknown routes visible with a truthful disabled reason", () => {
     const [route] = buildComposerModelRoutes(
       [provider()],

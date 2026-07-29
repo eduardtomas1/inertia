@@ -37,6 +37,7 @@ import {
   initialMultiSpawnDraft,
   projectsShareLocalCheckout,
   readMultiSpawnPreset,
+  refreshMultiSpawnSelection,
   validateMultiSpawnDraft,
   type MultiSpawnDraft,
   type MultiSpawnSideDraft,
@@ -119,7 +120,9 @@ function MultiSpawnSideEditor({
   const route = routeState.routes.find((candidate) =>
     candidate.harnessId === side.selection.harnessId
     && candidate.backendProfileId === side.selection.backendProfileId
-    && candidate.modelId === side.selection.modelId);
+    && candidate.modelId === side.selection.modelId
+    && candidate.selection.backendConfigurationRevision
+      === side.selection.backendConfigurationRevision);
   const reasoningOptions = route?.reasoningOptions ?? [];
   const ready = routeState.ready;
 
@@ -304,6 +307,32 @@ export function MultiSpawnDialog({
 
   useEffect(() => {
     if (!open) return;
+    setDraft((current) => {
+      if (!current) return current;
+      const first = refreshMultiSpawnSelection(
+        routesForSelection(current.sides[0].selection),
+        current.sides[0].selection,
+      );
+      const second = refreshMultiSpawnSelection(
+        routesForSelection(current.sides[1].selection),
+        current.sides[1].selection,
+      );
+      if (
+        first === current.sides[0].selection
+        && second === current.sides[1].selection
+      ) return current;
+      return {
+        ...current,
+        sides: [
+          { ...current.sides[0], selection: first },
+          { ...current.sides[1], selection: second },
+        ],
+      };
+    });
+  }, [open, routesForSelection]);
+
+  useEffect(() => {
+    if (!open) return;
     restoreFocusRef.current = true;
     const previous = document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -357,7 +386,9 @@ export function MultiSpawnDialog({
     const exactRoute = routes.find((candidate) =>
       candidate.harnessId === side.selection.harnessId
       && candidate.backendProfileId === side.selection.backendProfileId
-      && candidate.modelId === side.selection.modelId);
+      && candidate.modelId === side.selection.modelId
+      && candidate.selection.backendConfigurationRevision
+        === side.selection.backendConfigurationRevision);
     const readiness = composerRouteReadiness({
       provider,
       profile,

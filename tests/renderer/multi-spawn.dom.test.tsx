@@ -6,7 +6,14 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type {
   AppSnapshot,
   ModelBackendProfileView,
@@ -28,6 +35,7 @@ const secondProjectId = "22222222-2222-4222-8222-222222222222";
 const firstConversationId = "33333333-3333-4333-8333-333333333333";
 const secondConversationId = "44444444-4444-4444-8444-444444444444";
 const now = "2026-07-29T14:00:00.000Z";
+const browserLocalStorage = window.localStorage;
 
 function project(
   id: string,
@@ -167,6 +175,24 @@ const probeNeededProfile: ModelBackendProfileView = {
   canDisable: true,
 };
 
+function readyCustomProfile(
+  configurationRevision: number,
+): ModelBackendProfileView {
+  return {
+    ...probeNeededProfile,
+    configurationRevision,
+    endpointIdentity: `opaque-team-route-${configurationRevision}`,
+    connectionState: "connected",
+    compatibility: {
+      ...probeNeededProfile.compatibility,
+      state: "verified",
+      provenance: "probe",
+      reasonCode: "responses-probe-verified",
+      reason: "The exact Responses route was verified.",
+    },
+  };
+}
+
 const settings = {
   ...defaultSettings,
   defaultProvider: "codex" as const,
@@ -246,6 +272,14 @@ describe("multi-spawn", () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     })));
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: browserLocalStorage,
+    });
+    vi.unstubAllGlobals();
   });
 
   it("collects one prompt and two independently scoped chat routes", async () => {
@@ -436,6 +470,55 @@ describe("multi-spawn", () => {
       "Keep this prompt through reconnect.",
     );
     expect(screen.getByLabelText("Chat 1 name")).toHaveValue("Kept title");
+  });
+
+  it("rebinds open drafts when a backend configuration is revised", async () => {
+    const onSubmit = vi.fn(async (_draft: MultiSpawnDraft) => undefined);
+    const props = {
+      open: true,
+      settings,
+      submitting: false,
+      error: null,
+      onClose: vi.fn(),
+      onSubmit,
+      onOpenProviderSetup: vi.fn(),
+      onOpenBackendSetup: vi.fn(),
+    };
+    const customSnapshot = (revision: number): AppSnapshot => ({
+      ...snapshot,
+      backendProfiles: [readyCustomProfile(revision)],
+      backendDefaults: [{
+        scope: "global",
+        projectId: null,
+        selection: customSelection,
+        updatedAt: now,
+      }],
+    });
+    const view = render(
+      <MultiSpawnDialog {...props} snapshot={customSnapshot(4)} />,
+    );
+    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+      target: { value: "Compare the revised backend." },
+    });
+    fireEvent.change(screen.getByLabelText("Chat 1 name"), {
+      target: { value: "Keep this title" },
+    });
+
+    view.rerender(
+      <MultiSpawnDialog {...props} snapshot={customSnapshot(5)} />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Launch duo" })).toBeEnabled());
+    expect(screen.getByLabelText("Shared prompt")).toHaveValue(
+      "Compare the revised backend.",
+    );
+    expect(screen.getByLabelText("Chat 1 name")).toHaveValue("Keep this title");
+    fireEvent.click(screen.getByRole("button", { name: "Launch duo" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0].sides.map(
+      ({ selection }) => selection.backendConfigurationRevision,
+    )).toEqual([5, 5]);
   });
 
   it("restores focus to the launch trigger when the dialog closes", async () => {

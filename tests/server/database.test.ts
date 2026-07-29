@@ -973,6 +973,58 @@ describe("RuntimeStore conversation lifecycle", () => {
     reopened.close();
   });
 
+  it("rolls back every recovery projection when recovery cannot finish", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const project = store.snapshot().projects[0]!;
+    const conversation = store.createConversation(
+      project.id,
+      "Interrupted atomic recovery",
+    );
+    store.updateConversation(conversation.id, {
+      status: "needs-input",
+      attentionKind: "approval",
+    });
+    const workspaceRun = store.createWorkspaceRun({
+      kind: "agent",
+      projectId: project.id,
+      conversationId: conversation.id,
+      actionId: null,
+      label: "Interrupted agent",
+      detail: null,
+      status: "waiting",
+      port: null,
+    });
+    store.close();
+
+    const database = new Database(databasePath);
+    database.exec(`
+      CREATE TRIGGER reject_recovery_activity
+      BEFORE INSERT ON activities
+      WHEN NEW.kind = 'error'
+      BEGIN
+        SELECT RAISE(ABORT, 'injected recovery failure');
+      END
+    `);
+    database.close();
+
+    const reopened = new RuntimeStore(
+      databasePath,
+      workspacePath,
+      { recoverInterruptedRuns: false },
+    );
+    expect(() => reopened.recoverInterruptedRuns())
+      .toThrow(/injected recovery failure/iu);
+    expect(reopened.conversation(conversation.id)).toMatchObject({
+      status: "needs-input",
+      attentionKind: "approval",
+    });
+    expect(reopened.workspaceRun(workspaceRun.id)).toMatchObject({
+      status: "waiting",
+      finishedAt: null,
+    });
+    reopened.close();
+  });
+
   it("preserves a nullable legacy plan across restart", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     const project = store.snapshot().projects[0];

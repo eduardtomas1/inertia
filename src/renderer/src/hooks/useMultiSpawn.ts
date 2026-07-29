@@ -11,6 +11,7 @@ import type {
   AppSnapshot,
   ChatAttachment,
   ServerEvent,
+  TurnRequestContext,
 } from "@shared/contracts";
 import {
   clearMultiSpawnPreset,
@@ -89,7 +90,8 @@ export function useMultiSpawn({
     conversationId: string,
     content: string,
     attachments: ChatAttachment[],
-    context?: undefined,
+    context?: TurnRequestContext,
+    skillIds?: readonly string[],
     activate?: boolean,
   ) => Promise<void>;
   splitSelectionTransitionsRef: MutableRefObject<number>;
@@ -230,6 +232,7 @@ export function useMultiSpawn({
           side.conversationId,
           draft.prompt.trim(),
           [],
+          undefined,
           undefined,
           false,
         )));

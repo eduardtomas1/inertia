@@ -9,7 +9,11 @@ import {
   type ProviderInfo,
   type ServerEvent,
 } from "../../../shared/contracts";
-import { CheckpointError, createCheckpoint } from "../../checkpoints";
+import {
+  CheckpointError,
+  createCheckpoint,
+  deleteCheckpoint,
+} from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import { getRepositoryStatus, GitError } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -174,11 +178,11 @@ export function createTurnInteractionCommandHandler(
             throw error;
           }
         }
-        let skills: Awaited<
-          ReturnType<AgentWorkflowController["resolveSkills"]>
+        let resolvedSkills: Awaited<
+          ReturnType<AgentWorkflowController["resolveTurnSkills"]>
         >;
         try {
-          skills = await dependencies.workflows.resolveSkills(
+          resolvedSkills = await dependencies.workflows.resolveTurnSkills(
             conversation.id,
             command.payload.skillIds ?? [],
           );
@@ -187,6 +191,19 @@ export function createTurnInteractionCommandHandler(
           throw error;
         }
         let checkpointId: string | null = null;
+        let capturedCheckpoint: {
+          repositoryPath: string;
+          ref: string;
+        } | null = null;
+        let pendingCheckpoint: {
+          repositoryPath: string;
+          ref: string;
+          label: string;
+          turnIndex: number;
+          filesChanged: number;
+          insertions: number;
+          deletions: number;
+        } | null = null;
         if (dependencies.enableProviders) {
           try {
             const path = dependencies.store.conversationPath(conversation.id);
@@ -196,19 +213,30 @@ export function createTurnInteractionCommandHandler(
               join(dependencies.dataDirectory, "checkpoint-indexes"),
               conversation.id,
             );
+            capturedCheckpoint = {
+              repositoryPath: path,
+              ref: captured.ref,
+            };
             const turnIndex = dependencies.store.checkpointCount(
               conversation.id,
             ) + 1;
-            checkpointId = dependencies.store.addCheckpoint({
-              conversationId: conversation.id,
+            pendingCheckpoint = {
+              repositoryPath: path,
               ref: captured.ref,
               label: `Before turn ${turnIndex}`,
               turnIndex,
               filesChanged: status.files.length,
               insertions: status.insertions,
               deletions: status.deletions,
-            }).id;
+            };
           } catch (error) {
+            if (capturedCheckpoint && !pendingCheckpoint) {
+              await deleteCheckpoint(
+                capturedCheckpoint.repositoryPath,
+                capturedCheckpoint.ref,
+                conversation.id,
+              ).catch(() => undefined);
+            }
             if (
               !(
                 error instanceof CheckpointError
@@ -225,6 +253,21 @@ export function createTurnInteractionCommandHandler(
         }
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
         try {
+          dependencies.workflows.assertTurnSkillsCurrent(
+            conversation.id,
+            resolvedSkills.routeKey,
+          );
+          if (pendingCheckpoint) {
+            checkpointId = dependencies.store.addCheckpoint({
+              conversationId: conversation.id,
+              ref: pendingCheckpoint.ref,
+              label: pendingCheckpoint.label,
+              turnIndex: pendingCheckpoint.turnIndex,
+              filesChanged: pendingCheckpoint.filesChanged,
+              insertions: pendingCheckpoint.insertions,
+              deletions: pendingCheckpoint.deletions,
+            }).id;
+          }
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
                 conversationId: conversation.id,
@@ -233,10 +276,17 @@ export function createTurnInteractionCommandHandler(
                 activateConversation: command.payload.activate,
                 context: command.payload.context,
                 checkpointId,
-                skills,
+                skills: resolvedSkills.inputs,
               })
             : null;
         } catch (error) {
+          if (pendingCheckpoint && checkpointId === null) {
+            await deleteCheckpoint(
+              pendingCheckpoint.repositoryPath,
+              pendingCheckpoint.ref,
+              conversation.id,
+            ).catch(() => undefined);
+          }
           await relinquishAttachments();
           throw error;
         }

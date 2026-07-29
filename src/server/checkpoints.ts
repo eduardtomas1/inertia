@@ -429,6 +429,41 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
   }
 }
 
+export async function deleteCheckpoint(
+  repositoryPath: string,
+  ref: string,
+  conversationId: string,
+): Promise<void> {
+  const prefix = `refs/inertia/checkpoints/${conversationId}/`;
+  if (
+    !ref.startsWith(prefix)
+    || !/^refs\/inertia\/checkpoints\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/u
+      .test(ref)
+  ) {
+    throw new CheckpointError("The checkpoint reference is invalid.");
+  }
+  const hooksDirectory = await mkdtemp(
+    join(tmpdir(), "inertia-checkpoint-hooks-"),
+  );
+  try {
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments([
+        "-c",
+        `core.hooksPath=${hooksDirectory}`,
+        "update-ref",
+        "-d",
+        ref,
+      ]),
+    );
+  } finally {
+    await rm(hooksDirectory, {
+      force: true,
+      recursive: true,
+    }).catch(() => undefined);
+  }
+}
+
 export async function deleteCheckpoints(repositoryPath: string, conversationId: string): Promise<void> {
   if (!/^[0-9a-f-]{36}$/u.test(conversationId)) throw new CheckpointError("The checkpoint namespace is invalid.");
   const prefix = `refs/inertia/checkpoints/${conversationId}/`;

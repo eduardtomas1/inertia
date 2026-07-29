@@ -736,6 +736,16 @@ export class AgentWorkflowController {
     conversationId: string,
     skillIds: readonly string[],
   ): Promise<ProviderSkillInput[]> {
+    return (await this.resolveTurnSkills(conversationId, skillIds)).inputs;
+  }
+
+  async resolveTurnSkills(
+    conversationId: string,
+    skillIds: readonly string[],
+  ): Promise<{
+    inputs: ProviderSkillInput[];
+    routeKey: string | null;
+  }> {
     this.pruneSkills();
     const unique = [...new Set(skillIds)];
     if (unique.length > 8) {
@@ -743,14 +753,16 @@ export class AgentWorkflowController {
         "Select at most eight skills for one turn.",
       );
     }
-    if (unique.length === 0) return [];
+    if (unique.length === 0) {
+      return { inputs: [], routeKey: null };
+    }
     await this.listSkills(conversationId, true);
     const conversation = this.store.conversation(conversationId);
     const routeKey = this.skillRouteKey(
       conversation,
       this.store.conversationPath(conversationId),
     );
-    return unique.map((id) => {
+    const inputs = unique.map((id) => {
       const capability = this.skills.get(id);
       if (
         !capability
@@ -764,6 +776,16 @@ export class AgentWorkflowController {
       }
       return capability.providerInput;
     });
+    return { inputs, routeKey };
+  }
+
+  assertTurnSkillsCurrent(
+    conversationId: string,
+    routeKey: string | null,
+  ): void {
+    if (routeKey !== null) {
+      this.requireCurrentSkillRoute(conversationId, routeKey);
+    }
   }
 
   private replaceSkills<T>(

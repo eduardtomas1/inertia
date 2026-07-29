@@ -1,10 +1,15 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 
 import type {
   ChatAttachment,
   ClientCommand,
+  ProviderSkillInput,
   ProviderInfo,
 } from "../../src/shared/contracts";
 import {
@@ -13,6 +18,7 @@ import {
 } from "../../src/server/runtime/commands/turn-interaction-commands";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
+const execFileAsync = promisify(execFile);
 const requestAttachment: ChatAttachment = {
   id: "22222222-2222-4222-8222-222222222222",
   name: "request.png",
@@ -44,7 +50,16 @@ function dependencies(options: {
   queue: ReturnType<typeof vi.fn>;
   relinquishAll: ReturnType<typeof vi.fn>;
   readiness?: ReturnType<typeof vi.fn>;
-  resolveSkills?: ReturnType<typeof vi.fn>;
+  resolveSkills?: Mock<(
+    conversationId: string,
+    skillIds: readonly string[],
+  ) => Promise<ProviderSkillInput[]>>;
+  assertTurnSkillsCurrent?: Mock<(
+    conversationId: string,
+    routeKey: string | null,
+  ) => void>;
+  conversationPath?: string;
+  checkpointCount?: Mock<() => number>;
 }): TurnInteractionCommandDependencies {
   const provider = {
     id: "codex",
@@ -70,7 +85,11 @@ function dependencies(options: {
           backendConfigurationRevision: 0,
         },
       })),
-      conversationPath: vi.fn(() => tmpdir()),
+      conversationPath: vi.fn(() => options.conversationPath ?? tmpdir()),
+      checkpointCount: options.checkpointCount ?? vi.fn(() => 0),
+      addCheckpoint: vi.fn(() => ({
+        id: "55555555-5555-4555-8555-555555555555",
+      })),
     } as unknown as TurnInteractionCommandDependencies["store"],
     backendProfileController: {
       validateSelection: vi.fn(),
@@ -95,7 +114,17 @@ function dependencies(options: {
       relinquishAll: options.relinquishAll,
     } as unknown as TurnInteractionCommandDependencies["attachmentResolver"],
     workflows: {
-      resolveSkills: options.resolveSkills ?? vi.fn(() => []),
+      resolveTurnSkills: vi.fn(async (
+        selectedConversationId: string,
+        skillIds: readonly string[],
+      ) => ({
+        inputs: await (
+          options.resolveSkills ?? vi.fn(() => [])
+        )(selectedConversationId, skillIds),
+        routeKey: skillIds.length > 0 ? "test-route" : null,
+      })),
+      assertTurnSkillsCurrent:
+        options.assertTurnSkillsCurrent ?? vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["workflows"],
     providerInfo: () => [provider],
     broadcastSnapshot: vi.fn(),
@@ -208,6 +237,98 @@ describe("message attachment ownership transfer", () => {
       vi.mocked(handlerDependencies.store.conversationPath)
         .mock.invocationCallOrder[0]!,
     );
+    expect(
+      vi.mocked(handlerDependencies.workflows.assertTurnSkillsCurrent)
+        .mock.invocationCallOrder[0],
+    ).toBeLessThan(queue.mock.invocationCallOrder[0]!);
+  });
+
+  it("rejects a changed skill route before persisting its checkpoint", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "inertia-skill-route-"));
+    try {
+      await execFileAsync("git", ["init", "--quiet", repository]);
+      await writeFile(join(repository, "request.txt"), "pending\n");
+      const relinquishAll = vi.fn(async () => undefined);
+      const queue = vi.fn();
+      const assertTurnSkillsCurrent = vi.fn(() => {
+        throw new Error("The provider route changed.");
+      });
+      const handlerDependencies = dependencies({
+        queue,
+        relinquishAll,
+        conversationPath: repository,
+        resolveSkills: vi.fn(async () => [{
+          source: "codex-native" as const,
+          name: "review",
+          path: join(repository, ".codex", "skills", "review", "SKILL.md"),
+        }]),
+        assertTurnSkillsCurrent,
+      });
+      const command = messageCommand();
+      command.payload.skillIds = ["skill-1"];
+      const handler = createTurnInteractionCommandHandler(
+        handlerDependencies,
+      );
+
+      await expect(handler({} as never, command)).rejects.toThrow(
+        "The provider route changed.",
+      );
+      expect(assertTurnSkillsCurrent).toHaveBeenCalledWith(
+        conversationId,
+        "test-route",
+      );
+      expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
+      expect(queue).not.toHaveBeenCalled();
+      expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+      const { stdout } = await execFileAsync("git", [
+        "-C",
+        repository,
+        "for-each-ref",
+        "--format=%(refname)",
+        `refs/inertia/checkpoints/${conversationId}/`,
+      ]);
+      expect(stdout.trim()).toBe("");
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a captured checkpoint when its metadata cannot be counted", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "inertia-checkpoint-count-"));
+    try {
+      await execFileAsync("git", ["init", "--quiet", repository]);
+      await writeFile(join(repository, "request.txt"), "pending\n");
+      const queue = vi.fn(() => ({
+        turn: { id: "44444444-4444-4444-8444-444444444444" },
+      }));
+      const handlerDependencies = dependencies({
+        queue,
+        relinquishAll: vi.fn(async () => undefined),
+        conversationPath: repository,
+        checkpointCount: vi.fn(() => {
+          throw new Error("checkpoint count unavailable");
+        }),
+      });
+      const handler = createTurnInteractionCommandHandler(
+        handlerDependencies,
+      );
+
+      await expect(handler({} as never, messageCommand())).resolves.toBe(
+        "handled",
+      );
+      expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
+      expect(queue).toHaveBeenCalledOnce();
+      const { stdout } = await execFileAsync("git", [
+        "-C",
+        repository,
+        "for-each-ref",
+        "--format=%(refname)",
+        `refs/inertia/checkpoints/${conversationId}/`,
+      ]);
+      expect(stdout.trim()).toBe("");
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
   });
 
   it("does not release after an authoritative turn accepts ownership", async () => {

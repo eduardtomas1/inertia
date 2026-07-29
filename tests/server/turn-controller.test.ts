@@ -675,6 +675,147 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
+  it("preserves terminal subagent state when it settles before stop acknowledgement", async () => {
+    const runtime = await testRuntime({}, {
+      modelSelection: nativeModelSelection({
+        providerId: "claude",
+        modelId: "provider-default",
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Delegate work that may finish while stopping.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const base = identity(runtime);
+    runtime.provider.emit({
+      ...base,
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: "task-finishes-during-stop",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-finishes-during-stop",
+      providerRole: "researcher",
+      providerName: "Evidence",
+      status: "running",
+      description: "Finish before the stop acknowledgement.",
+      progress: null,
+      result: null,
+    });
+    const trace = runtime.store.conversationDetail(
+      runtime.conversationId,
+    )!.subagents[0]!;
+    let acknowledgeStop!: (accepted: boolean) => void;
+    vi.spyOn(runtime.provider, "stopSubagent")
+      .mockImplementation(async () =>
+        await new Promise<boolean>((resolve) => {
+          acknowledgeStop = resolve;
+        }));
+
+    const stopping = runtime.controller.stopSubagent(
+      runtime.conversationId,
+      trace.id,
+    );
+    await flushPromises();
+    runtime.provider.emit({
+      ...base,
+      type: "subagent",
+      sequence: 2,
+      providerTaskId: "task-finishes-during-stop",
+      providerAgentId: "agent-finished",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-finishes-during-stop",
+      providerRole: "researcher",
+      providerName: "Evidence",
+      status: "completed",
+      description: "Finish before the stop acknowledgement.",
+      progress: "Finished.",
+      result: "Verified.",
+    });
+    acknowledgeStop(true);
+
+    await expect(stopping).resolves.toBe(false);
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({
+      status: "completed",
+      sequence: 2,
+      providerAgentId: "agent-finished",
+      progress: "Finished.",
+      result: "Verified.",
+    });
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("preserves settlement-owned subagent state when the parent settles before stop acknowledgement", async () => {
+    const runtime = await testRuntime({}, {
+      modelSelection: nativeModelSelection({
+        providerId: "claude",
+        modelId: "provider-default",
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Delegate work until the parent settles.",
+    });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: "task-parent-settles",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-parent-settles",
+      providerRole: "researcher",
+      providerName: "Evidence",
+      status: "waiting",
+      description: "Wait for the parent result.",
+      progress: "Waiting.",
+      result: null,
+    });
+    const trace = runtime.store.conversationDetail(
+      runtime.conversationId,
+    )!.subagents[0]!;
+    let acknowledgeStop!: (accepted: boolean) => void;
+    vi.spyOn(runtime.provider, "stopSubagent")
+      .mockImplementation(async () =>
+        await new Promise<boolean>((resolve) => {
+          acknowledgeStop = resolve;
+        }));
+
+    const stopping = runtime.controller.stopSubagent(
+      runtime.conversationId,
+      trace.id,
+    );
+    await flushPromises();
+    runtime.provider.resolve({
+      status: "completed",
+      text: "The parent completed first.",
+    });
+    await flushPromises();
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({
+      status: "lost",
+      sequence: 2,
+      progress: "Waiting.",
+    });
+    acknowledgeStop(true);
+
+    await expect(stopping).resolves.toBe(false);
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({
+      status: "lost",
+      sequence: 2,
+      progress: "Waiting.",
+    });
+
+    runtime.store.close();
+  });
+
   it("marks live delegated traces lost when an interrupted runtime reconnects", async () => {
     const runtime = await testRuntime();
     const queued = runtime.controller.queue({

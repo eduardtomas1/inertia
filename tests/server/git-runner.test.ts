@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runGit } from "../../src/server/git/runner";
 import { gitProcessEnvironment } from "../../src/server/git/environment";
@@ -192,6 +192,36 @@ setInterval(() => {}, 1000);
         code: "operation-failed",
         message: "Git stopped responding, and its process tree could not be confirmed stopped.",
       } satisfies Partial<GitError>);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it("lets an already-finishing bounded Git inspection close without termination", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-bounded-drain-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(
+      directory,
+      "status",
+      'process.stdout.write("x".repeat(64 * 1024));',
+    );
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    const terminateProcessTree = vi.fn(async () => true);
+    try {
+      await expect(runGit(directory, ["status"], {
+        timeoutMs: 5_000,
+        maxOutputBytes: 1_024,
+        truncateOutput: true,
+        failureMessage: "Git status failed.",
+      }, {
+        terminateProcessTree,
+      })).resolves.toMatchObject({
+        truncated: true,
+      });
+      expect(terminateProcessTree).not.toHaveBeenCalled();
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;

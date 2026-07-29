@@ -141,6 +141,14 @@ export async function runProviderMaintenanceAction(
     100,
     Math.min(options.killGraceMs ?? DEFAULT_KILL_GRACE_MS, 30_000),
   );
+  const processLifecycle = {
+    windowsSystemRoot: environmentValue(
+      environment,
+      "SystemRoot",
+      platform,
+    ) ?? null,
+    ...options.processLifecycle,
+  };
 
   return await new Promise<ProviderMaintenanceRunResult>((resolveRun) => {
     let child: ChildProcessWithoutNullStreams;
@@ -181,13 +189,13 @@ export async function runProviderMaintenanceAction(
     const terminate = (): void => {
       if (!child || child.killed) return;
       try {
-        terminateProcessTree(child, false, options.processLifecycle);
+        terminateProcessTree(child, false, processLifecycle);
       } catch {
         // The process may already have exited between the state check and kill.
       }
       hardKill = setTimeout(() => {
         try {
-          terminateProcessTree(child, true, options.processLifecycle);
+          terminateProcessTree(child, true, processLifecycle);
         } catch {
           // The process may already have exited.
         }

@@ -242,7 +242,7 @@ describe("provider maintenance runner", () => {
       }),
     );
     expect(taskkillSpawn).toHaveBeenCalledWith(
-      "taskkill.exe",
+      "C:\\Windows\\System32\\taskkill.exe",
       ["/pid", "4242", "/t"],
       {
         shell: false,
@@ -290,13 +290,13 @@ describe("provider maintenance runner", () => {
       });
       expect(taskkillSpawn).toHaveBeenNthCalledWith(
         1,
-        "taskkill.exe",
+        "C:\\Windows\\System32\\taskkill.exe",
         ["/pid", "4242", "/t"],
         expect.objectContaining({ shell: false }),
       );
       expect(taskkillSpawn).toHaveBeenNthCalledWith(
         2,
-        "taskkill.exe",
+        "C:\\Windows\\System32\\taskkill.exe",
         ["/pid", "4242", "/t", "/f"],
         expect.objectContaining({ shell: false }),
       );

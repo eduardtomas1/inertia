@@ -13,6 +13,8 @@ import {
 import { gitProcessEnvironment } from "./environment";
 import { GitError } from "./types";
 
+const TRUNCATED_OUTPUT_DRAIN_MS = 250;
+
 export interface GitProcessResult {
   stdout: Buffer;
   stderr: Buffer;
@@ -147,6 +149,7 @@ export function runGit(
     let truncated = false;
     let settled = false;
     let termination: Promise<void> | undefined;
+    let truncatedOutputDrainTimer: NodeJS.Timeout | undefined;
 
     const finish = (
       error?: GitError,
@@ -155,6 +158,9 @@ export function runGit(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (truncatedOutputDrainTimer) {
+        clearTimeout(truncatedOutputDrainTimer);
+      }
       if (error) rejectProcess(error);
       else if (result) resolveProcess(result);
     };
@@ -210,12 +216,23 @@ export function runGit(
       if (remaining > 0) stdout.push(chunk.subarray(0, remaining));
       stdoutBytes = maxOutputBytes;
       truncated = true;
-      terminateAndFinish(options.truncateOutput
-        ? undefined
-        : new GitError(
-            "output-limit",
-            "Git returned more data than this application can safely process.",
-          ));
+      if (options.truncateOutput) {
+        // A real Git process commonly exits immediately after crossing a
+        // bounded diff limit. Give that already-finishing child one short
+        // window to close normally before process-tree termination. This
+        // avoids racing Windows taskkill after the root PID has disappeared,
+        // while still bounding a producer that continues or stalls.
+        truncatedOutputDrainTimer = setTimeout(
+          () => terminateAndFinish(),
+          TRUNCATED_OUTPUT_DRAIN_MS,
+        );
+        truncatedOutputDrainTimer.unref();
+        return;
+      }
+      terminateAndFinish(new GitError(
+        "output-limit",
+        "Git returned more data than this application can safely process.",
+      ));
     });
     child.stderr!.on("data", (chunk: Buffer) => {
       if (stderrBytes >= STDERR_BYTES) return;

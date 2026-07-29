@@ -213,7 +213,11 @@ describe("agent input answers", () => {
     expect(card).toContain("--agent-request-accent: var(--approval-accent)");
     expect(card).toContain("padding: 8px 10px");
     expect(card).toContain("border-inline-start: 2px solid var(--agent-request-accent)");
-    expect(card).toContain("var(--agent-request-accent) 3%");
+    expect(card).toContain("--agent-request-surface: var(--approval-surface)");
+    expect(card).toContain("background: var(--agent-request-surface)");
+    expect(question).toContain(
+      "--agent-request-surface: var(--question-surface)",
+    );
     expect(card).toContain("box-shadow: none");
     expect(card).not.toContain("3px solid");
     expect(question).toContain("--agent-request-accent: var(--question-accent)");

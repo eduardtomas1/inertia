@@ -64,15 +64,13 @@ describe("transcript and composer composition", () => {
     const root = cssBlock(css, ":root {");
     const focus = cssBlock(css, ".composer:focus-within {");
 
-    expect(root).toContain(
-      "--composer-border: color-mix(in srgb, var(--border-strong) 78%, transparent)",
-    );
+    expect(root).toContain("--composer-border: var(--interactive-border)");
     expect(root).toContain("--radius-composer: 12px");
     expect(root).toContain("0 8px 24px -22px");
     expect(root).toContain("0 1px 4px -3px");
-    expect(focus).toContain("var(--accent) 32%");
+    expect(focus).toContain("var(--interactive-border-hover)");
     expect(focus).toContain("0 0 0 2px");
-    expect(focus).toContain("var(--accent) 6%");
+    expect(focus).toContain("var(--focus-ring-soft)");
     expect(focus).not.toContain("0 0 0 3px");
   });
 });

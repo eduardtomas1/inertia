@@ -157,6 +157,44 @@ function renderProjection(
 }
 
 describe("useConversationProjection pending interactions", () => {
+  it("does not let a newly reported plan steal focus unless the user opted in", () => {
+    expect(defaultSettings.autoOpenPlan).toBe(false);
+    for (const autoOpenPlan of [false, true]) {
+      const source = createEventSource();
+      const onOpenPlan = vi.fn();
+      const request = vi.fn(async (
+        _command: CommandWithoutId,
+      ): Promise<ServerEvent> => ({
+        type: "request.ok",
+        requestId: crypto.randomUUID(),
+      }));
+      const hook = renderHook(() => useConversationProjection({
+        snapshot,
+        status: "offline",
+        request,
+        subscribe: source.subscribe,
+        enabled: true,
+        autoOpenPlan,
+        onOpenPlan,
+        onTerminal: vi.fn(),
+      }));
+
+      source.emit({
+        type: "agent.plan.updated",
+        plan: {
+          conversationId: primaryId,
+          runId: `${primaryId}-run`,
+          turnId: `${primaryId}-turn`,
+          explanation: "Keep the current workspace panel focused.",
+          steps: [{ step: "Publish the plan", status: "inProgress" }],
+        },
+      });
+
+      expect(onOpenPlan).toHaveBeenCalledTimes(autoOpenPlan ? 1 : 0);
+      hook.unmount();
+    }
+  });
+
   it("subscribes and unsubscribes the mounted secondary pane explicitly", () => {
     const source = createEventSource();
     const request = vi.fn(

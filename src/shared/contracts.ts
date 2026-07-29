@@ -8,6 +8,7 @@ export * from "./backend-profile-settings";
 export * from "./attachments";
 export * from "./provider-maintenance";
 export * from "./contracts/agent";
+export * from "./contracts/agent-workflows";
 export * from "./contracts/app";
 export * from "./contracts/client-command";
 export * from "./contracts/conversation-detail";

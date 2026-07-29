@@ -93,6 +93,9 @@ function dependencies(options: {
       resolveAll: vi.fn(async () => [trustedAttachment]),
       relinquishAll: options.relinquishAll,
     } as unknown as TurnInteractionCommandDependencies["attachmentResolver"],
+    workflows: {
+      resolveSkills: vi.fn(() => []),
+    } as unknown as TurnInteractionCommandDependencies["workflows"],
     providerInfo: () => [provider],
     broadcastSnapshot: vi.fn(),
     send: vi.fn(),

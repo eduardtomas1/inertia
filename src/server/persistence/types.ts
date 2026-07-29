@@ -1,6 +1,7 @@
 import type {
   AccessMode,
   AgentActivity,
+  AgentGoal,
   AgentPlan,
   AgentReasoning,
   AgentTurn,
@@ -157,6 +158,7 @@ export interface RuntimeStoreSnapshot extends Omit<AppSnapshot, "conversations">
   reasonings: AgentReasoning[];
   usage: ThreadUsageSnapshot[];
   plans: AgentPlan[];
+  goals: AgentGoal[];
   checkpoints: CheckpointSummary[];
   reviewSummaries: DiffReviewSummary[];
   reviewStates: DiffReviewState[];

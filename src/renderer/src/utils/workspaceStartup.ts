@@ -11,6 +11,7 @@ const WORKSPACE_TOOLS = new Set<WorkspacePanelTab>([
   "changes",
   "files",
   "terminal",
+  "goal",
   "plan",
   "preview",
 ]);

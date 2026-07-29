@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 import { PROVIDER_INFO } from "./catalog";
 import {
   continuationIdentitySchema,
@@ -39,6 +41,7 @@ type JsonObject = Record<string, unknown>;
 
 const MAX_PROMPT_CHARS = 256 * 1024;
 const MAX_IMAGE_COUNT = 32;
+const MAX_SKILL_COUNT = 8;
 const PLAN_PREFIX = [
   "You are in PLAN MODE.",
   "Inspect and reason about the project, but do not edit files or run mutating commands.",
@@ -477,6 +480,41 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
   }
   if (imagePaths.some((path) => !path.trim() || path.length > 4096 || path.includes("\0"))) {
     throw new ProviderRuntimeError("invalid_input", "An image path is invalid.");
+  }
+  const skills = input.skills ?? [];
+  if (skills.length > MAX_SKILL_COUNT) {
+    throw new ProviderRuntimeError("invalid_input", "Too many skills were selected.");
+  }
+  if (
+    skills.length > 0
+    && input.harnessId !== "codex-app-server"
+    && input.harnessId !== "claude-agent-sdk"
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The selected harness does not support structured skills.",
+    );
+  }
+  if (skills.some((skill) =>
+    !skill.name.trim()
+    || skill.name.length > 160
+    || skill.name.includes("\0")
+    || (
+      input.harnessId === "codex-app-server"
+      && (
+        skill.source !== "codex-native"
+        || !skill.path.trim()
+        || !isAbsolute(skill.path)
+        || skill.path.length > 4096
+        || skill.path.includes("\0")
+      )
+    )
+    || (
+      input.harnessId === "claude-agent-sdk"
+      && skill.source !== "claude-native"
+    )
+  )) {
+    throw new ProviderRuntimeError("invalid_input", "A skill reference is invalid.");
   }
   return conversationId;
 }

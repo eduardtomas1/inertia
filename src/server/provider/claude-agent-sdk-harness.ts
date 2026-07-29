@@ -9,6 +9,7 @@ import {
   type PermissionResult,
   type Query,
   type SDKUserMessage,
+  type SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
@@ -176,6 +177,57 @@ export async function readClaudeAgentSdkModels(
   createQuery: ClaudeQueryFactory = claudeQuery,
 ): Promise<ProviderModel[]> {
   return (await readClaudeAgentSdkMetadata(executable, environment, cwd, timeoutMs, createQuery, ["models"])).models ?? [];
+}
+
+export async function readClaudeAgentSdkSkills(
+  executable: string,
+  environment: NodeJS.ProcessEnv,
+  cwd: string,
+  forceReload = false,
+  timeoutMs = 6_000,
+  createQuery: ClaudeQueryFactory = claudeQuery,
+): Promise<SlashCommand[]> {
+  const abortController = new AbortController();
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  async function* dormantPrompt(): AsyncIterable<SDKUserMessage> {
+    await hold;
+    yield* [] as SDKUserMessage[];
+  }
+  const query = createQuery({
+    prompt: dormantPrompt(),
+    options: {
+      abortController,
+      cwd,
+      env: environment,
+      pathToClaudeCodeExecutable: executable,
+    },
+  });
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        abortController.abort();
+        reject(new Error("Claude skill discovery timed out."));
+      }, timeoutMs);
+      timer.unref();
+    });
+    const skills = forceReload
+      ? query.reloadSkills().then((result) => result.skills)
+      : query.supportedCommands();
+    return await Promise.race([skills, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    release();
+    abortController.abort();
+    try {
+      query.close();
+    } catch {
+      // The SDK subprocess may already have exited.
+    }
+  }
 }
 
 interface PendingApproval {
@@ -364,6 +416,12 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
           ...(options.input.sessionId ? { resume: options.input.sessionId } : {}),
           ...(options.input.model ? { model: options.input.model } : {}),
           ...(claudeEffort(options.input.reasoningEffort) ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
+          ...(options.input.skills?.length
+            ? {
+                skills: options.input.skills.flatMap((skill) =>
+                  skill.source === "claude-native" ? [skill.name] : []),
+              }
+            : {}),
         },
       });
       if (usesNativeAnthropic) {

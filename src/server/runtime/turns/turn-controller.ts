@@ -418,11 +418,40 @@ export class TurnController {
       || !trace.providerTaskId
       || !["spawned", "running", "waiting"].includes(trace.status)
     ) return false;
-    return await this.providers.stopSubagent(
+    const accepted = await this.providers.stopSubagent(
       conversationId,
       trace.providerTaskId,
       { runId: active.turn.runId, turnId: active.turn.id },
     );
+    if (!accepted) return false;
+    const stopped = this.store.upsertSubagentTrace({
+      conversationId: trace.conversationId,
+      runId: trace.runId,
+      turnId: trace.turnId,
+      providerId: trace.providerId,
+      providerTaskId: trace.providerTaskId,
+      providerAgentId: trace.providerAgentId,
+      parentProviderAgentId: trace.parentProviderAgentId,
+      parentProviderToolUseId: trace.parentProviderToolUseId,
+      providerToolUseId: trace.providerToolUseId,
+      providerRole: trace.providerRole,
+      providerName: trace.providerName,
+      status: "cancelled",
+      description: trace.description,
+      progress: "Stopped by the user.",
+      result: trace.result,
+      // A successful SDK stop acknowledgement is authoritative. Reserve the
+      // terminal sequence so a delayed provider replay cannot resurrect it.
+      sequence: 2_147_483_647,
+      updatedAt: this.now(),
+    });
+    if (stopped?.changed) {
+      this.hooks.broadcast({
+        type: "agent.subagent.updated",
+        trace: stopped.trace,
+      });
+    }
+    return true;
   }
 
   respondToApproval(

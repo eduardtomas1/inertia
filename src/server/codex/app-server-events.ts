@@ -6,6 +6,10 @@ import {
   commandExecutionLabel,
   type CodexRunPhase,
 } from "./app-server-config";
+import {
+  parseCodexGoalClearedNotification,
+  parseCodexGoalUpdatedNotification,
+} from "./goals";
 import { parseCodexPlan } from "./plans";
 import {
   boundedText,
@@ -281,6 +285,24 @@ export class CodexAppServerEvents {
         notificationThreadId,
       )
     ) return;
+
+    if (method === "thread/goal/updated") {
+      const update = parseCodexGoalUpdatedNotification(params);
+      if (
+        update
+        && update.threadId === this.host.providerThreadId()
+      ) {
+        this.host.options.onGoalUpdated?.(update.threadId, update.goal);
+      }
+      return;
+    }
+    if (method === "thread/goal/cleared") {
+      const threadId = parseCodexGoalClearedNotification(params);
+      if (threadId && threadId === this.host.providerThreadId()) {
+        this.host.options.onGoalCleared?.(threadId);
+      }
+      return;
+    }
 
     if (method === "turn/started") {
       const phase = this.host.phase();

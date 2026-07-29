@@ -406,6 +406,91 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
+  it("persists and broadcasts only native goals for the active Codex thread", async () => {
+    const runtime = await testRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Track the provider-owned objective.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const base = identity(runtime);
+    runtime.provider.emit({
+      ...base,
+      type: "session",
+      sessionId: "thread-goal-1",
+    });
+    runtime.provider.emit({
+      ...base,
+      type: "goal-updated",
+      providerId: "codex",
+      sessionId: "thread-other",
+      goal: {
+        objective: "Ignore an unrelated thread",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: 0,
+        timeUsedSeconds: 0,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z",
+      },
+    });
+    expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([]);
+
+    runtime.provider.emit({
+      ...base,
+      type: "goal-updated",
+      providerId: "codex",
+      sessionId: "thread-goal-1",
+      goal: {
+        objective: "Keep the workflow authoritative",
+        status: "active",
+        tokenBudget: 12_000,
+        tokensUsed: 250,
+        timeUsedSeconds: 9,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:09.000Z",
+      },
+    });
+    expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([
+      expect.objectContaining({
+        source: "codex-native",
+        providerSessionId: "thread-goal-1",
+        objective: "Keep the workflow authoritative",
+      }),
+    ]);
+    expect(runtime.events).toContainEqual(expect.objectContaining({
+      type: "agent.goal.updated",
+      goal: expect.objectContaining({
+        providerSessionId: "thread-goal-1",
+      }),
+    }));
+
+    runtime.provider.emit({
+      ...base,
+      type: "goal-cleared",
+      providerId: "codex",
+      sessionId: "thread-goal-1",
+    });
+    expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([]);
+    expect(runtime.events).toContainEqual({
+      type: "agent.goal.cleared",
+      conversationId: runtime.conversationId,
+      source: "codex-native",
+    });
+    runtime.provider.emit({
+      ...base,
+      type: "goal-cleared",
+      providerId: "codex",
+      sessionId: "thread-goal-1",
+    });
+    expect(runtime.events.filter((event) =>
+      event.type === "agent.goal.cleared")).toHaveLength(1);
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
   it("persists ordered delegated-agent traces, rejects regressions, and stops only an exact live Claude task", async () => {
     const runtime = await testRuntime({}, {
       modelSelection: nativeModelSelection({
@@ -431,9 +516,12 @@ describe("TurnController authoritative lifecycle", () => {
       providerRole: "researcher",
       providerName: "Evidence",
       status: "running",
-      description: "Check Bearer abcdefghijklmnop",
-      progress: "Reading the repository",
-      result: null,
+      description:
+        `Check \u001b[31mghp_abcdefghijklmnopqrstuvwxyz in ${runtime.workspace}/private`,
+      progress:
+        "password=hunter2 Cookie=session-value system_prompt=hidden",
+      result:
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQifQ.abcdefghijklmnop",
     });
     let trace = runtime.store.conversationDetail(
       runtime.conversationId,
@@ -443,8 +531,13 @@ describe("TurnController authoritative lifecycle", () => {
       providerRole: "researcher",
       status: "running",
       sequence: 1,
-      description: "Check [redacted]",
+      description: "Check [redacted] in <workspace>/private",
     });
+    expect(trace?.description).not.toContain("\u001b");
+    expect(trace?.progress).toBe(
+      "password=[redacted] Cookie=[redacted] system_prompt=[redacted]",
+    );
+    expect(trace?.result).toBe("[redacted]");
     expect(await runtime.controller.stopSubagent(
       runtime.conversationId,
       trace!.id,
@@ -467,7 +560,7 @@ describe("TurnController authoritative lifecycle", () => {
       progress: null,
       result: "stale",
     });
-    expect(runtime.store.subagentTrace(trace!.id).status).toBe("running");
+    expect(runtime.store.subagentTrace(trace!.id).status).toBe("cancelled");
     runtime.provider.emit({
       ...base,
       type: "subagent",
@@ -502,10 +595,10 @@ describe("TurnController authoritative lifecycle", () => {
     });
     trace = runtime.store.subagentTrace(trace!.id);
     expect(trace).toMatchObject({
-      providerAgentId: "agent-1",
-      status: "completed",
-      sequence: 2,
-      result: "Verified",
+      providerAgentId: null,
+      status: "cancelled",
+      sequence: 2_147_483_647,
+      progress: "Stopped by the user.",
     });
     expect(runtime.events.filter((event) =>
       event.type === "agent.subagent.updated")).toHaveLength(2);

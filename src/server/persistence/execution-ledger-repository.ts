@@ -15,7 +15,6 @@ import type {
 import { validateProviderUsage } from "../provider/usage-values";
 import {
   boundedSubagentIdentifier,
-  boundedSubagentText,
   isTerminalSubagentStatus,
   MAX_SUBAGENT_DESCRIPTION_CHARS,
   MAX_SUBAGENT_PROGRESS_CHARS,
@@ -45,6 +44,7 @@ import type {
   UpsertSubagentTraceInput,
   UpsertSubagentTraceResult,
 } from "./types";
+import { sanitizeProviderActivityDetail } from "../provider/activity-detail";
 
 interface ExecutionLedgerPersistenceContext {
   assertAgentTurnIdentity(
@@ -53,8 +53,19 @@ interface ExecutionLedgerPersistenceContext {
     turnId: string,
   ): AgentTurn;
   database: Database.Database;
+  conversationPath(conversationId: string): string;
   requireAgentTurn(turnId: string): AgentTurnRow;
   requireConversation(conversationId: string): ConversationRow;
+}
+
+function safeSubagentLabel(
+  value: unknown,
+  workspaceRoot: string,
+): string | null {
+  return sanitizeProviderActivityDetail(value, {
+    workspaceRoot,
+    maxChars: 200,
+  })?.replace(/\s+/gu, " ").trim() || null;
 }
 
 export class ExecutionLedgerRepository {
@@ -129,6 +140,7 @@ export class ExecutionLedgerRepository {
     input: UpsertSubagentTraceInput,
   ): UpsertSubagentTraceResult | null {
     this.context.assertAgentTurnIdentity(input.conversationId, input.runId, input.turnId);
+    const workspaceRoot = this.context.conversationPath(input.conversationId);
     const providerTaskId = boundedSubagentIdentifier(input.providerTaskId);
     const providerAgentId = boundedSubagentIdentifier(input.providerAgentId);
     if (!providerTaskId && !providerAgentId) return null;
@@ -210,17 +222,20 @@ export class ExecutionLedgerRepository {
       parentProviderAgentId,
       parentProviderToolUseId,
       providerToolUseId,
-      providerRole: boundedSubagentIdentifier(input.providerRole, 200),
-      providerName: boundedSubagentIdentifier(input.providerName, 200),
-      description: boundedSubagentText(
+      providerRole: safeSubagentLabel(input.providerRole, workspaceRoot),
+      providerName: safeSubagentLabel(input.providerName, workspaceRoot),
+      description: sanitizeProviderActivityDetail(
         input.description,
-        MAX_SUBAGENT_DESCRIPTION_CHARS,
+        { workspaceRoot, maxChars: MAX_SUBAGENT_DESCRIPTION_CHARS },
       ),
-      progress: boundedSubagentText(
+      progress: sanitizeProviderActivityDetail(
         input.progress,
-        MAX_SUBAGENT_PROGRESS_CHARS,
+        { workspaceRoot, maxChars: MAX_SUBAGENT_PROGRESS_CHARS },
       ),
-      result: boundedSubagentText(input.result, MAX_SUBAGENT_RESULT_CHARS),
+      result: sanitizeProviderActivityDetail(input.result, {
+        workspaceRoot,
+        maxChars: MAX_SUBAGENT_RESULT_CHARS,
+      }),
     };
 
     if (existing) {

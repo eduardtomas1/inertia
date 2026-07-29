@@ -51,6 +51,10 @@ import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps } from "./types";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
+import {
+  COMPOSER_PREFILL_EVENT,
+  type ComposerPrefillDetail,
+} from "../../utils/composerPrefill";
 
 export function Composer({
   conversation,
@@ -64,8 +68,16 @@ export function Composer({
   mentionResults,
   usage,
   usageDisplayMode,
+  skills,
+  skillsCapability,
+  selectedSkillIds,
+  skillsLoading,
+  skillsError,
   promptContext,
   onSend,
+  onListSkills,
+  onToggleSkill,
+  onClearSelectedSkills,
   onUpdateConversation,
   onCreateConversationForSelection,
   onChooseAttachments,
@@ -136,6 +148,23 @@ export function Composer({
       editorRevisionSequenceRef.current,
     );
   };
+
+  useEffect(() => {
+    const prefill = (event: Event): void => {
+      const detail = (event as CustomEvent<ComposerPrefillDetail>).detail;
+      if (
+        !detail
+        || detail.conversationId !== conversationIdRef.current
+        || typeof detail.text !== "string"
+      ) return;
+      setMessage((current) => current.trim()
+        ? `${current.trim()}\n\n${detail.text}`
+        : detail.text);
+      window.requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+    window.addEventListener(COMPOSER_PREFILL_EVENT, prefill);
+    return () => window.removeEventListener(COMPOSER_PREFILL_EVENT, prefill);
+  }, []);
 
   useEffect(() => {
     const refreshPromptStash = (): void => {
@@ -314,7 +343,12 @@ export function Composer({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      await onSend(request.visibleContent, submittedAttachments, request.context);
+      await onSend(
+        request.visibleContent,
+        submittedAttachments,
+        request.context,
+        running ? [] : selectedSkillIds,
+      );
       const ownsSubmission =
         activeSubmissionsRef.current.get(submittedConversationId)
         === submissionSequence;
@@ -339,6 +373,7 @@ export function Composer({
         !mountedRef.current
         || conversationIdRef.current !== submittedConversationId
       ) return;
+      onClearSelectedSkills();
       if (editorUnchanged) {
         setMessage("");
         setAttachments([]);
@@ -563,6 +598,7 @@ export function Composer({
       attachments.length === 0
       && !promptContext
       && fileReferences.length === 0
+      && selectedSkillIds.length === 0
       && messageFits
       && !disabled,
     submitting,
@@ -764,6 +800,14 @@ export function Composer({
           attachmentCount={attachments.length}
           onChooseAttachments={chooseAttachments}
           onRunAction={onRunAction}
+          skills={skills}
+          skillsCapability={skillsCapability}
+          selectedSkillIds={selectedSkillIds}
+          skillsLoading={skillsLoading}
+          skillsError={skillsError}
+          onListSkills={onListSkills}
+          onToggleSkill={onToggleSkill}
+          onClearSelectedSkills={onClearSelectedSkills}
           promptStash={promptStash}
           canStashPrompt={Boolean(message.trim()) && attachments.length === 0}
           promptStashBlockedReason={

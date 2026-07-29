@@ -12,6 +12,7 @@ import type {
   KnownHarnessId,
   ModelBackendProfile,
   ModelSelection,
+  ProviderSkillInput,
   ProviderId,
   ProviderInfo,
   RuntimeMutationEvent,
@@ -131,6 +132,8 @@ export interface QueueTurnRequest {
   /** Server-constructed only. Renderer command schemas never accept this. */
   internalInstructions?: readonly HiddenProviderInstruction[];
   checkpointId?: string | null;
+  /** Privileged provider-native skill references resolved from opaque IDs. */
+  skills?: readonly ProviderSkillInput[];
   rendererOwnerId?: string | null;
   onSettled?: (
     status: AgentTurnTerminalStatus,

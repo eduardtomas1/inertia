@@ -2,6 +2,7 @@ export type WorkspaceShortcutTool =
   | "changes"
   | "files"
   | "terminal"
+  | "goal"
   | "plan"
   | "preview";
 

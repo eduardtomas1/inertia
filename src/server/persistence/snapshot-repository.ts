@@ -5,6 +5,7 @@ import type {
 } from "../../shared/contracts";
 import {
   activityFromRow,
+  agentGoalFromRow,
   agentTurnFromRow,
   checkpointFromRow,
   conversationFromRow,
@@ -27,6 +28,7 @@ import {
 } from "./review-codecs";
 import type {
   ActivityRow,
+  AgentGoalRow,
   AgentPlanRow,
   AgentReasoningRow,
   AgentTurnRow,
@@ -71,6 +73,10 @@ export class SnapshotRepository {
         FROM agent_plans
         ORDER BY updated_at ASC, conversation_id ASC, run_id ASC
       `).all() as AgentPlanRow[]).map(planFromRow),
+      goals: (this.context.database.prepare(`
+        SELECT * FROM agent_goals
+        ORDER BY updated_at ASC, conversation_id ASC, source ASC
+      `).all() as AgentGoalRow[]).map(agentGoalFromRow),
       checkpoints: (this.context.database.prepare("SELECT * FROM checkpoints ORDER BY created_at ASC, id ASC").all() as CheckpointRow[]).map(checkpointFromRow),
       reviewSummaries: (this.context.database.prepare("SELECT * FROM diff_review_summaries ORDER BY generated_at ASC").all() as DiffReviewSummaryRow[])
         .flatMap((row) => {
@@ -171,6 +177,11 @@ export class SnapshotRepository {
         WHERE conversation_id = ?
         ORDER BY updated_at ASC, conversation_id ASC, run_id ASC
       `).all(conversationId) as AgentPlanRow[]).map(planFromRow),
+      goals: (this.context.database.prepare(`
+        SELECT * FROM agent_goals
+        WHERE conversation_id = ?
+        ORDER BY updated_at ASC, source ASC
+      `).all(conversationId) as AgentGoalRow[]).map(agentGoalFromRow),
       checkpoints: (this.context.database.prepare(`
         SELECT * FROM checkpoints
         WHERE conversation_id = ?

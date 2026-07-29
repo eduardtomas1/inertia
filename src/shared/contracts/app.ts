@@ -260,7 +260,7 @@ export const defaultSettings: AppSettings = {
   showChangedFileSummaries: true,
   sidebarMode: "classic",
   projectGrouping: "separate",
-  autoOpenPlan: true,
+  autoOpenPlan: false,
   confirmDestructiveActions: true,
   defaultReasoningEffort: "",
   defaultInteractionMode: "build",

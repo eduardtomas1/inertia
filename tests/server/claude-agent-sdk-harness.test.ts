@@ -23,6 +23,7 @@ import {
   claudeQuestions,
   createClaudeAgentSdkHarness,
   readClaudeAgentSdkModels,
+  readClaudeAgentSdkSkills,
 } from "../../src/server/provider/claude-agent-sdk-harness";
 import {
   claudeBackendProfileRegistrations,
@@ -256,17 +257,23 @@ describe("Claude Agent SDK harness", () => {
     const metadata: Array<{ models: string[]; rateLimits: string[] }> = [];
     const activities: Array<{ activityId?: string; detail?: string; phase: string }> = [];
 
-    const result = await manager.run(nativeProviderRunInput({
-      providerId: "claude",
-      conversationId: "claude-rich",
-      cwd: root,
-      prompt: "Inspect this image",
-      interactionMode: "build",
-      access: "supervised",
-      model: "sonnet",
-      reasoningEffort: "high",
-      imagePaths: [imagePath],
-    }), {
+    const result = await manager.run({
+      ...nativeProviderRunInput({
+        providerId: "claude",
+        conversationId: "claude-rich",
+        cwd: root,
+        prompt: "Inspect this image",
+        interactionMode: "build",
+        access: "supervised",
+        model: "sonnet",
+        reasoningEffort: "high",
+        imagePaths: [imagePath],
+      }),
+      skills: [{
+        source: "claude-native",
+        name: "security-review",
+      }],
+    }, {
       onApproval: (event) => {
         approvals.push(event.request.title);
         expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
@@ -300,6 +307,7 @@ describe("Claude Agent SDK harness", () => {
       includePartialMessages: true,
       model: "sonnet",
       effort: "high",
+      skills: ["security-review"],
     });
     const content = capturedMessage?.message.content as unknown as Array<Record<string, unknown>>;
     expect(content[0]).toMatchObject({ type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw==" } });
@@ -377,6 +385,59 @@ describe("Claude Agent SDK harness", () => {
       defaultReasoningEffort: "high",
       reasoningOptions: [expect.objectContaining({ value: "low" }), expect.objectContaining({ value: "high" })],
     })]);
+  });
+
+  it("discovers and force-reloads Claude skills without sending a prompt", async () => {
+    let promptWasRead = false;
+    let reloads = 0;
+    const createQuery = ({ prompt }: {
+      prompt: string | AsyncIterable<SDKUserMessage>;
+    }): Query => {
+      // oxlint-disable-next-line require-yield -- Control-only discovery emits no SDK messages.
+      const stream = (async function* (): AsyncGenerator<SDKMessage> {
+        promptWasRead = true;
+        for await (const _message of prompt as AsyncIterable<SDKUserMessage>) {
+          // A control-only query must not receive a user message.
+        }
+      })();
+      return Object.assign(stream, {
+        supportedCommands: async () => [{
+          name: "review",
+          description: "Review the repository.",
+          argumentHint: "<scope>",
+        }],
+        reloadSkills: async () => {
+          reloads += 1;
+          return {
+            skills: [{
+              name: "review",
+              description: "Review the repository.",
+              argumentHint: "<scope>",
+            }],
+          };
+        },
+        close: () => undefined,
+      }) as unknown as Query;
+    };
+
+    await expect(readClaudeAgentSdkSkills(
+      "/fake/claude",
+      {},
+      "/workspace",
+      false,
+      1_000,
+      createQuery,
+    )).resolves.toEqual([expect.objectContaining({ name: "review" })]);
+    await expect(readClaudeAgentSdkSkills(
+      "/fake/claude",
+      {},
+      "/workspace",
+      true,
+      1_000,
+      createQuery,
+    )).resolves.toEqual([expect.objectContaining({ name: "review" })]);
+    expect(reloads).toBe(1);
+    expect(promptWasRead).toBe(false);
   });
 
   it("preserves local Claude interactions for Kimi without reading native Claude metadata", async () => {

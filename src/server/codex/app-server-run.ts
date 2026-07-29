@@ -655,11 +655,33 @@ export async function openCodexTurn({
       "Codex did not return an effective model for Plan mode.",
     );
   }
+  // Codex treats `$name` as the explicit user invocation. Keep the structured
+  // skill item as the authoritative path capability while making the user's
+  // selection explicit in the provider-owned prompt.
+  const selectedSkillMentions = (options.skills ?? []).map((skill) => {
+    if (
+      skill.source !== "codex-native"
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(skill.name)
+    ) {
+      throw new Error("Codex received an invalid selected skill.");
+    }
+    return `$${skill.name}`;
+  });
+  const prompt = selectedSkillMentions.length > 0
+    ? `${selectedSkillMentions.join(" ")}\n\n${options.prompt}`
+    : options.prompt;
   const input: JsonObject[] = [{
     type: "text",
-    text: options.prompt,
+    text: prompt,
     text_elements: [],
   }];
+  for (const skill of options.skills ?? []) {
+    input.push({
+      type: "skill",
+      name: skill.name,
+      path: skill.path,
+    });
+  }
   for (const path of options.imagePaths ?? []) {
     input.push({ type: "localImage", path });
   }

@@ -2,6 +2,10 @@ import type { ComponentProps, Dispatch, SetStateAction } from "react";
 import type {
   AgentApprovalDecision,
   AgentApprovalRequest,
+  AgentGoalSource,
+  AgentGoalStatus,
+  AgentSkillSummary,
+  AgentWorkflowState,
   AgentInputRequest,
   AppSettings,
   ChatAttachment,
@@ -33,6 +37,14 @@ import {
 import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
 import type { NewConversationLocation } from "../../lib/newConversation";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
+import {
+  supportsActiveParentFollowUp,
+} from "../../utils/composerPrimaryAction";
+import { requestComposerPrefill } from "../../utils/composerPrefill";
+import {
+  canStopSubagentTrace,
+  isLiveSubagentTrace,
+} from "../../utils/subagentDisclosure";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
@@ -72,7 +84,18 @@ export interface WorkspaceSceneActions {
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
+    skillIds?: readonly string[],
   ) => Promise<void>;
+  listSkills: (forceReload?: boolean) => Promise<void>;
+  toggleSkill: (skill: AgentSkillSummary) => void;
+  clearSelectedSkills: () => void;
+  setGoal: (input: {
+    source: AgentGoalSource;
+    objective?: string;
+    status: AgentGoalStatus;
+    tokenBudget?: number | null;
+  }) => Promise<void>;
+  clearGoal: (source: AgentGoalSource) => Promise<void>;
   respondToApproval: (
     request: AgentApprovalRequest,
     decision: AgentApprovalDecision,
@@ -133,6 +156,13 @@ export interface WorkspaceSceneModelInput {
   activityActions: ActivityActions;
   appUpdate: AppUpdate;
   planSteps: PlanSteps;
+  workflow: {
+    state: AgentWorkflowState | null;
+    loading: boolean;
+    error: string | null;
+    selectedSkillIds: readonly string[];
+    refresh: (providerRefresh?: boolean) => Promise<void>;
+  };
   detailLoading: boolean;
   selectedMaintenanceStatus: WorkspaceSceneProps["chat"]["maintenanceStatus"];
   selectedMaintenanceOperation: WorkspaceSceneProps["chat"]["maintenanceOperation"];
@@ -165,6 +195,7 @@ export function createWorkspaceSceneModel({
   activityActions,
   appUpdate,
   planSteps,
+  workflow,
   detailLoading,
   selectedMaintenanceStatus,
   selectedMaintenanceOperation,
@@ -212,6 +243,20 @@ export function createWorkspaceSceneModel({
     && visibleDetailState.state !== "ready"
       ? visibleDetailState
       : null;
+  const latestPlan = projection.plans.at(-1) ?? null;
+  const canGuideParent = (trace: SubagentTrace): boolean => {
+    if (!isLiveSubagentTrace(trace)) return false;
+    const owner = projection.turns.find(({ id }) => id === trace.turnId);
+    return Boolean(
+      owner
+      && (
+        owner.status === "running"
+        || owner.status === "waiting-for-approval"
+        || owner.status === "waiting-for-input"
+      )
+      && supportsActiveParentFollowUp(owner.harnessId),
+    );
+  };
 
   return {
     view,
@@ -292,6 +337,11 @@ export function createWorkspaceSceneModel({
       streamingText: projection.streamingText,
       streamingReasoning: projection.streamingReasoning,
       usage: projection.usage,
+      skills: workflow.state?.skills ?? [],
+      skillsCapability: workflow.state?.skillsCapability ?? null,
+      selectedSkillIds: workflow.selectedSkillIds,
+      skillsLoading: workflow.loading,
+      skillsError: workflow.error,
       approvals: projection.pendingApprovals,
       inputRequests: projection.pendingInputs,
       providers: connection.snapshot?.providers ?? [],
@@ -314,6 +364,9 @@ export function createWorkspaceSceneModel({
       onAddProject: () => void actions.importProject(),
       onCreateConversation: () => actions.createConversation(),
       onSendMessage: actions.sendMessage,
+      onListSkills: actions.listSkills,
+      onToggleSkill: actions.toggleSkill,
+      onClearSelectedSkills: actions.clearSelectedSkills,
       onRespondToApproval: actions.respondToApproval,
       onRespondToInput: actions.respondToInput,
       onUpdateConversation: actions.updateConversation,
@@ -389,6 +442,9 @@ export function createWorkspaceSceneModel({
         onTabChange: setActiveTool,
         badges: {
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
+          goal: (workflow.state?.goals.some(({ status }) =>
+            status !== "complete") ? 1 : 0)
+            + projection.subagents.filter(isLiveSubagentTrace).length,
           plan: planSteps.length,
         },
         onClose: () => setActiveTool(null),
@@ -486,6 +542,62 @@ export function createWorkspaceSceneModel({
         onClose: () => setActiveTool(null),
       },
       terminalKey: `${project.id}:${conversation?.id ?? "project"}`,
+      goal: {
+        workflow: workflow.state,
+        error: workflow.error,
+        plan: latestPlan,
+        subagents: projection.subagents,
+        turns: projection.turns,
+        selectedSkillIds: workflow.selectedSkillIds,
+        busy: workflow.loading
+          || busyAction?.startsWith("agent.goal") === true,
+        onRetry: () => workflow.refresh(true),
+        onSetGoal: async (input) => {
+          try {
+            await actions.setGoal(input);
+          } catch (error) {
+            setActionError(
+              error instanceof Error
+                ? error.message
+                : "The goal could not be updated.",
+            );
+            throw error;
+          }
+        },
+        onClearGoal: (goal) => {
+          void actions.clearGoal(goal.source).catch((error) => setActionError(
+            error instanceof Error
+              ? error.message
+              : "The goal could not be cleared.",
+          ));
+        },
+        onToggleSkill: (skill) => actions.toggleSkill(skill),
+        onRefreshSkills: () => {
+          void actions.listSkills(true).catch((error) => setActionError(
+            error instanceof Error
+              ? error.message
+              : "Skills could not be refreshed.",
+          ));
+        },
+        canFollowUpSubagent: canGuideParent,
+        onFollowUpSubagent: (trace) => {
+          if (!conversation || !canGuideParent(trace)) return;
+          const task = trace.description ?? trace.providerRole ?? "delegated task";
+          requestComposerPrefill({
+            conversationId: conversation.id,
+            text: `Please follow up on the delegated task “${task}” and incorporate its latest result.`,
+          });
+        },
+        canStopSubagent: (trace) =>
+          canStopSubagentTrace(trace, projection.turns),
+        onStopSubagent: (trace) => {
+          void actions.stopSubagent(trace).catch((error) => setActionError(
+            error instanceof Error
+              ? error.message
+              : "The delegated task could not be stopped.",
+          ));
+        },
+      },
       plan: {
         steps: planSteps,
         summary: planSummary,

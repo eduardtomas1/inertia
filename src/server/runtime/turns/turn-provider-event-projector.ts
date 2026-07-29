@@ -121,6 +121,55 @@ export class TurnProviderEventProjector {
         });
         break;
       }
+      case "goal-updated": {
+        const expectedSessionId = active.sessionAfter
+          ?? active.providerInput.sessionId
+          ?? active.conversation.providerSessionId;
+        if (
+          event.providerId !== "codex"
+          || active.turn.harnessId !== "codex-app-server"
+          || !expectedSessionId
+          || event.sessionId !== expectedSessionId
+        ) break;
+        const synchronizedAt = this.options.now();
+        const persisted = this.options.store.mergeNativeAgentGoal({
+          conversationId: active.conversation.id,
+          source: "codex-native",
+          providerSessionId: event.sessionId,
+          ...event.goal,
+          synchronizedAt,
+        });
+        if (!persisted.changed || !persisted.goal) break;
+        this.options.hooks.broadcast({
+          type: "agent.goal.updated",
+          goal: persisted.goal,
+        });
+        break;
+      }
+      case "goal-cleared": {
+        const expectedSessionId = active.sessionAfter
+          ?? active.providerInput.sessionId
+          ?? active.conversation.providerSessionId;
+        if (
+          event.providerId !== "codex"
+          || active.turn.harnessId !== "codex-app-server"
+          || !expectedSessionId
+          || event.sessionId !== expectedSessionId
+        ) break;
+        const changed = this.options.store.clearAgentGoal(
+          active.conversation.id,
+          "codex-native",
+          this.options.now(),
+          event.sessionId,
+        );
+        if (!changed) break;
+        this.options.hooks.broadcast({
+          type: "agent.goal.cleared",
+          conversationId: active.conversation.id,
+          source: "codex-native",
+        });
+        break;
+      }
       case "metadata":
         try {
           this.options.hooks.applyProviderMetadata?.(event);

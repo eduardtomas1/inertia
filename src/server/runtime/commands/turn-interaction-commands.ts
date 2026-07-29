@@ -17,6 +17,7 @@ import type { BackendProfileController } from "../backends/backend-profile-contr
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
+import type { AgentWorkflowController } from "../agent-workflow-controller";
 import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import {
   defineRuntimeCommandHandler,
@@ -34,6 +35,7 @@ export interface TurnInteractionCommandDependencies {
   dataDirectory: string;
   enableProviders: boolean;
   attachmentResolver: TrustedAttachmentResolver | null;
+  workflows: AgentWorkflowController;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -62,9 +64,10 @@ export function createTurnInteractionCommandHandler(
           if (
             command.payload.attachments.length > 0
             || command.payload.context !== undefined
+            || (command.payload.skillIds?.length ?? 0) > 0
           ) {
             throw new RuntimeRequestError(
-              "Follow-ups while the agent is working support text only.",
+              "Follow-ups while the agent is working support text only and cannot add skills.",
             );
           }
           const followedUp = await dependencies.turns.steer(
@@ -210,6 +213,10 @@ export function createTurnInteractionCommandHandler(
         }
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
         try {
+          const skills = await dependencies.workflows.resolveSkills(
+            conversation.id,
+            command.payload.skillIds ?? [],
+          );
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
                 conversationId: conversation.id,
@@ -218,6 +225,7 @@ export function createTurnInteractionCommandHandler(
                 activateConversation: command.payload.activate,
                 context: command.payload.context,
                 checkpointId,
+                skills,
               })
             : null;
         } catch (error) {

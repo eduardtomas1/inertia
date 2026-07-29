@@ -57,6 +57,7 @@ import {
   type ProviderMetadata,
   type ProviderMetadataRequestOptions,
 } from "./provider/metadata";
+import { readClaudeAgentSdkSkills } from "./provider/claude-agent-sdk-harness";
 import { providerProcessInvocation, providerPtyArguments } from "./provider/process";
 
 export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider, detectProviders };
@@ -100,6 +101,12 @@ export interface ResolvedModelRoute {
   backendProfile: ModelBackendProfile;
   compatibility: HarnessBackendCompatibility;
   continuationIdentity: ContinuationIdentity;
+}
+
+export interface CodexControlContext {
+  executable: string;
+  environment: NodeJS.ProcessEnv;
+  cwd: string;
 }
 
 export class ProviderManager {
@@ -366,6 +373,46 @@ export class ProviderManager {
       providerChildEnvironment(providerId, environment.env),
       cwd,
       options,
+    );
+  }
+
+  async codexControlContext(cwd: string): Promise<CodexControlContext> {
+    let executable = this.resolvedCommands.get("codex");
+    if (!executable) executable = (await this.detect("codex")).executable;
+    if (!executable) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        "Codex CLI is not installed.",
+      );
+    }
+    const environment = await providerEnvironment();
+    this.processEnvironment = environment.env;
+    return {
+      executable,
+      environment: providerChildEnvironment("codex", environment.env),
+      cwd,
+    };
+  }
+
+  async claudeSkills(
+    cwd: string,
+    forceReload: boolean,
+  ): Promise<Awaited<ReturnType<typeof readClaudeAgentSdkSkills>>> {
+    let executable = this.resolvedCommands.get("claude");
+    if (!executable) executable = (await this.detect("claude")).executable;
+    if (!executable) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        "Claude CLI is not installed.",
+      );
+    }
+    const environment = await providerEnvironment();
+    this.processEnvironment = environment.env;
+    return await readClaudeAgentSdkSkills(
+      executable,
+      providerChildEnvironment("claude", environment.env),
+      cwd,
+      forceReload,
     );
   }
 

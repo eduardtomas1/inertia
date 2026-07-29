@@ -18,6 +18,8 @@ import {
 import clsx from "clsx";
 import type {
   AgentActivity,
+  AgentSkillSummary,
+  AgentWorkflowSkillsCapability,
   AgentApprovalDecision,
   AgentApprovalRequest,
   AgentInputRequest,
@@ -66,6 +68,11 @@ type ChatWorkspaceProps = {
   streamingText: string;
   streamingReasoning: string;
   usage: ThreadUsageSnapshot | null;
+  skills: AgentSkillSummary[];
+  skillsCapability: AgentWorkflowSkillsCapability | null;
+  selectedSkillIds: readonly string[];
+  skillsLoading: boolean;
+  skillsError: string | null;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   providers: ProviderInfo[];
@@ -86,7 +93,15 @@ type ChatWorkspaceProps = {
   sending: boolean;
   onAddProject: () => void;
   onCreateConversation: () => void;
-  onSendMessage: (content: string, attachments: ChatAttachment[], context?: TurnRequestContext) => Promise<void>;
+  onSendMessage: (
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+    skillIds?: readonly string[],
+  ) => Promise<void>;
+  onListSkills: (forceReload?: boolean) => Promise<void>;
+  onToggleSkill: (skill: AgentSkillSummary) => void;
+  onClearSelectedSkills: () => void;
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => void;
@@ -131,6 +146,11 @@ export function ChatWorkspace({
   streamingText,
   streamingReasoning,
   usage,
+  skills,
+  skillsCapability,
+  selectedSkillIds,
+  skillsLoading,
+  skillsError,
   approvals,
   inputRequests,
   providers,
@@ -152,6 +172,9 @@ export function ChatWorkspace({
   onAddProject,
   onCreateConversation,
   onSendMessage,
+  onListSkills,
+  onToggleSkill,
+  onClearSelectedSkills,
   onRespondToApproval,
   onRespondToInput,
   onUpdateConversation,
@@ -371,6 +394,11 @@ export function ChatWorkspace({
           mentionResults={mentionResults}
           usage={usage}
           usageDisplayMode={usageDisplayMode}
+          skills={skills}
+          skillsCapability={skillsCapability}
+          selectedSkillIds={selectedSkillIds}
+          skillsLoading={skillsLoading}
+          skillsError={skillsError}
           promptContext={promptContext}
           disabled={!conversation}
           sending={sending}
@@ -378,6 +406,9 @@ export function ChatWorkspace({
           backendProfiles={backendProfiles}
           latestTurn={turns.at(-1) ?? null}
           onSend={onSendMessage}
+          onListSkills={onListSkills}
+          onToggleSkill={onToggleSkill}
+          onClearSelectedSkills={onClearSelectedSkills}
           onUpdateConversation={onUpdateConversation}
           onCreateConversationForSelection={onCreateConversationForSelection}
           onChooseAttachments={onChooseAttachments}

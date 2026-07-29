@@ -34,6 +34,7 @@ import {
 } from "../lib/runtimeCommands";
 import { planFromText } from "../utils/planFromText";
 import { useActivityActions } from "./useActivityActions";
+import { useAgentWorkflows } from "./useAgentWorkflows";
 import type { useBackendProfiles } from "./useBackendProfiles";
 import type {
   ConversationPaneLayout,
@@ -79,6 +80,7 @@ interface SplitWorkspaceActions
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
+    skillIds?: readonly string[],
     activate?: boolean,
   ) => Promise<void>;
   updateConversationById: (
@@ -165,6 +167,21 @@ export function useSplitWorkspaceScene({
     autoOpenPlan: false,
     onOpenPlan: () => undefined,
     onTerminal,
+  }));
+  const workflow = useStableController(useAgentWorkflows({
+    conversationId: splitConversation?.id ?? null,
+    routeIdentity: splitConversation
+      ? [
+          splitConversation.modelSelection.harnessId,
+          splitConversation.modelSelection.backendProfileId,
+          splitConversation.modelSelection.backendConfigurationRevision,
+          splitConversation.providerSessionId ?? "new-thread",
+        ].join("\0")
+      : null,
+    status: connection.status,
+    enabled: Boolean(splitConversation),
+    request,
+    subscribe: connection.subscribe,
   }));
   const run = useCallback(async (
     key: string,
@@ -288,19 +305,27 @@ export function useSplitWorkspaceScene({
       }
       onSecondaryConversationCreated(event.result.conversationId);
     },
-    sendMessage: (
+    sendMessage: async (
       content: string,
       attachments: ChatAttachment[],
       context?: TurnRequestContext,
-    ) => splitConversation
-      ? actions.sendMessageToConversation(
-          splitConversation.id,
-          content,
-          attachments,
-          context,
-          false,
-        )
-      : Promise.resolve(),
+      skillIds?: readonly string[],
+    ) => {
+      if (!splitConversation) return;
+      await actions.sendMessageToConversation(
+        splitConversation.id,
+        content,
+        attachments,
+        context,
+        skillIds,
+        false,
+      );
+    },
+    listSkills: workflow.listSkills,
+    toggleSkill: workflow.toggleSkill,
+    clearSelectedSkills: workflow.clearSelectedSkills,
+    setGoal: workflow.setGoal,
+    clearGoal: workflow.clearGoal,
     updateConversation: (
       update: Parameters<WorkspaceSceneActions["updateConversation"]>[0],
     ) => {
@@ -331,6 +356,7 @@ export function useSplitWorkspaceScene({
     activityActions,
     appUpdate,
     planSteps,
+    workflow,
     detailLoading: Boolean(
       splitConversation
       && projection.detailState?.state === "loading"
@@ -365,6 +391,7 @@ export function useSplitWorkspaceScene({
     splitConversation,
     splitProject,
     tools,
+    workflow,
   ]);
 
   const scene = useMemo(() => {

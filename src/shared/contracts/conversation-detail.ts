@@ -1,4 +1,7 @@
 import type {
+  AgentGoal,
+} from "./agent-workflows";
+import type {
   AgentActivity,
   AgentPlan,
   AgentReasoning,
@@ -33,6 +36,7 @@ export interface ConversationDetail {
   reasonings: AgentReasoning[];
   usage: ThreadUsageSnapshot[];
   plans: AgentPlan[];
+  goals: AgentGoal[];
   checkpoints: CheckpointSummary[];
   reviewSummaries: DiffReviewSummary[];
   reviewStates: DiffReviewState[];

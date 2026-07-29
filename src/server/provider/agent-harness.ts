@@ -7,6 +7,9 @@ import type {
 import type { KnownHarnessId } from "../../shared/model-routing";
 import type {
   ProviderActivityEvent,
+  ProviderGoalClearedEvent,
+  ProviderGoalSnapshot,
+  ProviderGoalUpdatedEvent,
   ProviderId,
   ProviderMetadataEvent,
   ProviderRunInput,
@@ -177,6 +180,8 @@ export type AgentHarnessCoreEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
+  | ProviderGoalUpdatedEvent
+  | ProviderGoalClearedEvent
   | ProviderSubagentEvent;
 
 export type AgentInteractiveHarnessEvent =
@@ -286,6 +291,8 @@ export interface AgentHarnessEmitter {
   ) => void;
   status: (status: ProviderStatusEvent["status"], message?: string) => void;
   session: (sessionId: string) => void;
+  goalUpdated: (sessionId: string, goal: ProviderGoalSnapshot) => void;
+  goalCleared: (sessionId: string) => void;
   subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type">) => void;
   codex: (event: AgentInteractiveHarnessEvent) => void;
   rich: (event: ProviderInteractiveHarnessEvent) => void;
@@ -344,6 +351,17 @@ export function createAgentHarnessEmitter(
     },
     status: (status, message) => emit({ ...base, type: "status", status, ...(message ? { message } : {}) }),
     session: (sessionId) => emit({ ...base, type: "session", sessionId }),
+    goalUpdated: (sessionId, goal) => emit({
+      ...base,
+      type: "goal-updated",
+      sessionId,
+      goal,
+    }),
+    goalCleared: (sessionId) => emit({
+      ...base,
+      type: "goal-cleared",
+      sessionId,
+    }),
     subagent: (event) => emit({ ...base, type: "subagent", ...event }),
     codex: (event) => {
       if (providerId !== "codex") return;

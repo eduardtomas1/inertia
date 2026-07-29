@@ -226,7 +226,7 @@ describe("GoalPanel", () => {
 
   it("creates, resumes, completes and clears only through explicit callbacks", async () => {
     const user = userEvent.setup();
-    const onSetGoal = vi.fn();
+    const onSetGoal = vi.fn(async () => undefined);
     const onClearGoal = vi.fn();
     const view = render(
       <GoalPanel

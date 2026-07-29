@@ -9,6 +9,7 @@ import type {
   AppSnapshot,
   ClientCommand,
 } from "../../shared/contracts";
+import { RUNTIME_WEBSOCKET_MAX_PAYLOAD_BYTES } from "../../shared/runtime-websocket";
 import type { TerminalManager } from "../terminal";
 import {
   isAllowedRuntimeOrigin,
@@ -21,7 +22,7 @@ import type { IsolatedRunController } from "./reviews/isolated-run-controller";
 import type { RuntimeSyncHub } from "./runtime-sync-hub";
 
 export const RUNTIME_WEBSOCKET_LIMITS = {
-  maxPayloadBytes: 256 * 1024,
+  maxPayloadBytes: RUNTIME_WEBSOCKET_MAX_PAYLOAD_BYTES,
   maxClients: 16,
   maxInFlightCommands: 32,
 } as const;

@@ -59,7 +59,7 @@ async function untrackedPreview(
   } catch {
     return {
       text: `Unable to preview untracked file ${path}.\n`,
-      truncated: false,
+      truncated: true,
     };
   }
 }

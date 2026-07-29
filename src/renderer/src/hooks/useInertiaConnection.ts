@@ -10,6 +10,7 @@ import {
   runtimeResumeUrl,
   RuntimeProjectionSequence,
 } from "../utils/runtimeSequencing";
+import { serializeRuntimeClientCommand } from "@shared/runtime-websocket";
 import {
   deliverDecodedServerEvent,
   notifyConnectionListeners,
@@ -232,6 +233,17 @@ export function useInertiaConnection(): InertiaConnection {
       return Promise.reject(new Error("The local service is reconnecting. Try again in a moment."));
     }
 
+    let serialized: string;
+    try {
+      serialized = serializeRuntimeClientCommand(command);
+    } catch (serializationError) {
+      return Promise.reject(
+        serializationError instanceof Error
+          ? serializationError
+          : new Error("The request could not be validated."),
+      );
+    }
+
     return new Promise((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         pendingRef.current.delete(command.requestId);
@@ -240,7 +252,7 @@ export function useInertiaConnection(): InertiaConnection {
 
       pendingRef.current.set(command.requestId, { resolve, reject, timeout });
       try {
-        socket.send(JSON.stringify(command));
+        socket.send(serialized);
       } catch (sendError) {
         window.clearTimeout(timeout);
         pendingRef.current.delete(command.requestId);

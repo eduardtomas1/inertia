@@ -218,7 +218,27 @@ describe("safe selected diff reversal", () => {
     expect(diff.text).toContain(
       "Unable to preview untracked file nested/untracked.txt.",
     );
+    expect(diff.truncated).toBe(true);
     expect(diff.text).not.toContain("OUTSIDE_SENTINEL");
+  });
+
+  it("marks an oversized untracked preview incomplete before review reconciliation", async () => {
+    const root = repository();
+    writeFileSync(join(root, "large.txt"), "x".repeat(2_048));
+
+    const diff = await getUnifiedDiff(
+      root,
+      { maxBytes: 1_024 },
+      undefined,
+      secureFiles,
+    );
+
+    expect(diff).toMatchObject({
+      filesIncluded: 1,
+      totalFiles: 1,
+      truncated: true,
+    });
+    expect(diff.text).toContain("Unable to preview untracked file large.txt.");
   });
 
   it("pins the repository root while previewing untracked content", async () => {
@@ -252,6 +272,7 @@ describe("safe selected diff reversal", () => {
     expect(diff.text).toContain(
       "Unable to preview untracked file untracked.txt.",
     );
+    expect(diff.truncated).toBe(true);
     expect(diff.text).not.toContain("OUTSIDE_SENTINEL");
   });
 

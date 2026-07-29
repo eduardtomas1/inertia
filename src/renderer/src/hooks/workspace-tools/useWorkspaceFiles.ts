@@ -50,6 +50,7 @@ export function useWorkspaceFiles({
   const fileListRequestGenerationRef = useRef(0);
   const filePreviewRequestGenerationRef = useRef(0);
   const actionsRequestGenerationRef = useRef(0);
+  const automaticallyLoadedAuthorityRef = useRef<string | null>(null);
   const mentions = useWorkspaceMentions({ project, conversation, request });
 
   const requestWorkspaceEntries = useCallback(async (options: {
@@ -122,6 +123,7 @@ export function useWorkspaceFiles({
   }, [conversation?.id, project?.id, request]);
 
   useEffect(() => {
+    automaticallyLoadedAuthorityRef.current = null;
     fileListRequestGenerationRef.current += 1;
     filePreviewRequestGenerationRef.current += 1;
     actionsRequestGenerationRef.current += 1;
@@ -145,8 +147,22 @@ export function useWorkspaceFiles({
 
   useEffect(() => {
     if (!enabled || !project?.id || !online || !loadOnMount) return;
-    void loadFiles().catch(() => undefined);
-  }, [enabled, loadFiles, loadOnMount, online, project?.id]);
+    const authority = `${project.id}\0${conversation?.id ?? ""}`;
+    if (automaticallyLoadedAuthorityRef.current === authority) return;
+    automaticallyLoadedAuthorityRef.current = authority;
+    void loadFiles().catch(() => {
+      if (automaticallyLoadedAuthorityRef.current === authority) {
+        automaticallyLoadedAuthorityRef.current = null;
+      }
+    });
+  }, [
+    conversation?.id,
+    enabled,
+    loadFiles,
+    loadOnMount,
+    online,
+    project?.id,
+  ]);
 
   const selectWorkspaceFile = useCallback((path: string) => {
     if (!project) return;

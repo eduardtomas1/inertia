@@ -97,7 +97,10 @@ describe("renderer error visibility boundary", () => {
 
     expect(hydrationStart).toBeGreaterThan(-1);
     expect(hydration).not.toContain("setActionError(");
-    expect(hydration).toContain("void loadFiles().catch(() => undefined);");
+    expect(hydration).toContain("void loadFiles().catch(() => {");
+    expect(hydration).toContain(
+      "automaticallyLoadedAuthorityRef.current = null;",
+    );
     expect(workspaceGitSource).toMatch(
       /void loadGit\(\)\.catch\(\(error\) => \{[\s\S]*?if \(!cancelled\) \{[\s\S]*?setActionError\(/,
     );

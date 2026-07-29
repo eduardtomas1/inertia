@@ -239,6 +239,56 @@ describe("workspace pane authority", () => {
     expect(hook.result.current.filePreview?.path).toBe("src/example.ts");
   });
 
+  it("does not reload and collapse the Files tree when reopening the same pane", async () => {
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "project.actions") {
+        return Promise.resolve(result({
+          kind: "project.actions",
+          actions: [],
+        }));
+      }
+      if (command.type === "workspace.entries") {
+        return Promise.resolve(result({
+          kind: "workspace.entries",
+          directory: "",
+          entries: [{ path: "src", kind: "directory" }],
+          truncated: false,
+        }));
+      }
+      return Promise.reject(new Error("Unexpected command"));
+    });
+    const hook = renderHook(
+      ({ loadOnMount }: { loadOnMount: boolean }) => useWorkspaceFiles({
+        project: alpha,
+        conversation: alphaChat,
+        enabled: true,
+        loadOnMount,
+        online: true,
+        request,
+        setActionError: vi.fn(),
+      }),
+      { initialProps: { loadOnMount: true } },
+    );
+
+    await waitFor(() => {
+      expect(request.mock.calls.filter(
+        ([command]) => command.type === "workspace.entries",
+      )).toHaveLength(1);
+    });
+    hook.rerender({ loadOnMount: false });
+    hook.rerender({ loadOnMount: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(
+      ([command]) => command.type === "workspace.entries",
+    )).toHaveLength(1);
+    expect(hook.result.current.workspaceEntries).toEqual([
+      { path: "src", kind: "directory" },
+    ]);
+  });
+
   it("discards a delayed Git refresh after the pane changes owner", async () => {
     const alphaResolvers: Array<(event: ServerEvent) => void> = [];
     const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {

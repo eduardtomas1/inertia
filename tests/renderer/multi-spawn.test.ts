@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MULTI_SPAWN_PRESET_STORAGE_KEY,
+  projectsShareLocalCheckout,
   readMultiSpawnPreset,
   selectionFromPreset,
   validateMultiSpawnDraft,
@@ -12,6 +13,7 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import type { ComposerModelRoute } from "../../src/renderer/src/utils/modelChooserRoutes";
+import type { Project } from "../../src/shared/contracts";
 
 const codexSelection = nativeModelSelection({
   providerId: "codex",
@@ -191,5 +193,36 @@ describe("multi-spawn preset", () => {
       ...draft,
       sides: [{ ...draft.sides[0], title: "" }, draft.sides[1]],
     })).toBe("Name chat 1.");
+  });
+
+  it("recognizes distinct project records in one local checkout", () => {
+    const project = (
+      id: string,
+      normalizedPath: string,
+      repositoryRoot: string | null,
+    ): Project => ({
+      id,
+      name: id,
+      path: normalizedPath,
+      normalizedPath,
+      repositoryIdentity: repositoryRoot ? `git:${repositoryRoot}` : null,
+      repositoryRoot,
+      repositoryRelativePath: ".",
+      groupingMode: null,
+      gitRepositoryLimit: 64,
+      color: "#6366f1",
+      status: "ready",
+      createdAt: "2026-07-29T14:00:00.000Z",
+      updatedAt: "2026-07-29T14:00:00.000Z",
+    });
+    const projects = [
+      project("root", "/workspace/repo", "/workspace/repo"),
+      project("module", "/workspace/repo/modules/a", "/workspace/repo"),
+      project("other", "/workspace/other", "/workspace/other"),
+    ];
+
+    expect(projectsShareLocalCheckout(projects, "root", "module")).toBe(true);
+    expect(projectsShareLocalCheckout(projects, "module", "other")).toBe(false);
+    expect(projectsShareLocalCheckout(projects, "missing", "other")).toBe(false);
   });
 });

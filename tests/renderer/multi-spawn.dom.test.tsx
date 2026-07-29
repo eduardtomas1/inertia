@@ -27,7 +27,11 @@ const firstConversationId = "33333333-3333-4333-8333-333333333333";
 const secondConversationId = "44444444-4444-4444-8444-444444444444";
 const now = "2026-07-29T14:00:00.000Z";
 
-function project(id: string, name: string): Project {
+function project(
+  id: string,
+  name: string,
+  overrides: Partial<Project> = {},
+): Project {
   return {
     id,
     name,
@@ -42,6 +46,7 @@ function project(id: string, name: string): Project {
     status: "ready",
     createdAt: now,
     updatedAt: now,
+    ...overrides,
   };
 }
 
@@ -224,6 +229,43 @@ describe("multi-spawn", () => {
         { projectId: secondProjectId, accessMode: "full" },
       ],
     });
+  });
+
+  it("warns when distinct project records share one local checkout", () => {
+    const sharedRoot = "/workspace/shared-repository";
+    render(
+      <MultiSpawnDialog
+        open
+        snapshot={{
+          ...snapshot,
+          projects: [
+            project(firstProjectId, "Root", {
+              repositoryRoot: sharedRoot,
+              repositoryRelativePath: ".",
+            }),
+            project(secondProjectId, "Module", {
+              repositoryRoot: sharedRoot,
+              repositoryRelativePath: "modules/a",
+            }),
+          ],
+        }}
+        settings={settings}
+        submitting={false}
+        error={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn(async () => undefined)}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Chat 2 project"), {
+      target: { value: secondProjectId },
+    });
+
+    expect(screen.getByText(
+      /Both agents will share this project checkout/u,
+    )).toBeVisible();
   });
 
   it("selects each model independently through the existing route chooser", async () => {

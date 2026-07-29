@@ -35,6 +35,7 @@ import {
 } from "../utils/modelChooserRoutes";
 import {
   initialMultiSpawnDraft,
+  projectsShareLocalCheckout,
   readMultiSpawnPreset,
   validateMultiSpawnDraft,
   type MultiSpawnDraft,
@@ -385,7 +386,11 @@ export function MultiSpawnDialog({
   const validationError = validateMultiSpawnDraft(draft);
   const routesReady = routeStates.every(({ ready }) => ready);
   const sharesLocalCheckout = settings.newThreadMode === "local"
-    && draft.sides[0].projectId === draft.sides[1].projectId;
+    && projectsShareLocalCheckout(
+      snapshot.projects,
+      draft.sides[0].projectId,
+      draft.sides[1].projectId,
+    );
 
   const updateSide = (
     index: 0 | 1,

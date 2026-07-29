@@ -4,6 +4,7 @@ import type {
   AppSnapshot,
   InteractionMode,
   ModelSelection,
+  Project,
 } from "@shared/contracts";
 import {
   legacyProviderIdForHarness,
@@ -58,6 +59,26 @@ export interface MultiSpawnDraft {
   prompt: string;
   sides: [MultiSpawnSideDraft, MultiSpawnSideDraft];
   rememberPreset: boolean;
+}
+
+function localCheckoutIdentity(project: Project): string {
+  return project.repositoryRoot
+    || project.normalizedPath
+    || project.path;
+}
+
+export function projectsShareLocalCheckout(
+  projects: readonly Project[],
+  firstProjectId: string,
+  secondProjectId: string,
+): boolean {
+  const first = projects.find(({ id }) => id === firstProjectId);
+  const second = projects.find(({ id }) => id === secondProjectId);
+  return Boolean(
+    first
+    && second
+    && localCheckoutIdentity(first) === localCheckoutIdentity(second),
+  );
 }
 
 function boundedString(value: unknown, maximum: number): string | null {

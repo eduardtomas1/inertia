@@ -112,6 +112,86 @@ describe("secure file broker", () => {
     }
   });
 
+  it("does not deliver a cancelled replacement that spawns late", async () => {
+    vi.useFakeTimers();
+    try {
+      const children: FakeUtilityProcess[] = [];
+      const broker = new SecureFileBroker({
+        spawn: () => {
+          const child = new FakeUtilityProcess();
+          children.push(child);
+          return utility(child);
+        },
+        timeoutMs: 100,
+        killGraceMs: 10,
+      });
+      const replacement: SecureFileRequest = {
+        ...request,
+        operation: "replace",
+        expectedDigest: "a".repeat(64),
+        contentBase64: Buffer.from("replacement").toString("base64"),
+        expectedMode: 0o644,
+        mode: 0o644,
+      };
+      const controller = new AbortController();
+      const first = broker.perform(replacement, controller.signal);
+      await vi.waitFor(() => expect(children).toHaveLength(1));
+
+      controller.abort();
+      expect(children[0]!.kill).toHaveBeenCalledOnce();
+      children[0]!.emit("spawn");
+      expect(children[0]!.postMessage).not.toHaveBeenCalled();
+      expect(children[0]!.kill).toHaveBeenCalledTimes(2);
+
+      let firstSettled = false;
+      void first.then(() => {
+        firstSettled = true;
+      });
+      await vi.advanceTimersByTimeAsync(9);
+      expect(firstSettled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(first).resolves.toMatchObject({
+        ok: false,
+        code: "unavailable",
+      });
+      const blocked = broker.perform(replacement);
+      await expect(blocked).resolves.toMatchObject({
+        ok: false,
+        code: "unavailable",
+      });
+      expect(children).toHaveLength(1);
+
+      const activeOthers = ["src/one.ts", "src/two.ts", "src/three.ts"].map(
+        (path) => broker.perform({ ...request, path }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(children).toHaveLength(4);
+      for (const child of children.slice(1)) child.emit("spawn");
+
+      const capacityWaiter = broker.perform({
+        ...request,
+        path: "src/four.ts",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(children).toHaveLength(4);
+
+      children[0]!.emit("exit", 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(children).toHaveLength(5);
+      children[4]!.emit("spawn");
+      for (const child of children.slice(1)) {
+        child.emit("message", success);
+        child.emit("exit", 0);
+      }
+      await expect(Promise.all([...activeOthers, capacityWaiter])).resolves
+        .toEqual([success, success, success, success]);
+      broker.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects malformed helper output without trusting it", async () => {
     const child = new FakeUtilityProcess();
     const broker = new SecureFileBroker({

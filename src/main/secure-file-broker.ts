@@ -143,7 +143,6 @@ export class SecureFileBroker {
     this.active.add(child);
     return new Promise((resolve) => {
       let settled = false;
-      let spawned = false;
       let exitConfirmed = false;
       let poisonedAfterReturn = false;
       let reported: SecureFileResult | null = null;
@@ -170,10 +169,6 @@ export class SecureFileBroker {
         if (stoppingResult || settled) return;
         stoppingResult = unavailable(message);
         child.kill();
-        if (!spawned) {
-          settle(stoppingResult, true);
-          return;
-        }
         killGraceTimer = setTimeout(() => {
           if (exitConfirmed || settled || !stoppingResult) return;
           this.poisonedTargets.add(key);
@@ -190,8 +185,12 @@ export class SecureFileBroker {
       }, this.timeoutMs);
       timer.unref();
       signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
       child.once("spawn", () => {
-        spawned = true;
+        if (stoppingResult || settled) {
+          child.kill();
+          return;
+        }
         try {
           child.postMessage(request);
         } catch {

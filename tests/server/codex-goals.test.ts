@@ -62,6 +62,13 @@ describe("Codex native goal notifications", () => {
     })).toBeNull();
     expect(parseCodexGoalUpdatedNotification({
       threadId: "thread-1",
+      goal: {
+        ...goal,
+        createdAt: goal.updatedAt + 1,
+      },
+    })).toBeNull();
+    expect(parseCodexGoalUpdatedNotification({
+      threadId: "thread-1",
     })).toBeNull();
     expect(parseCodexGoalClearedNotification({
       threadId: "\0thread-1",

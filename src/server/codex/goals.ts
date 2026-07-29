@@ -90,6 +90,7 @@ export function parseCodexGoalUpdatedNotification(
     || timeUsedSeconds === null
     || !createdAt
     || !updatedAt
+    || createdAt > updatedAt
     || (hasTokenBudget && tokenBudget === null)
   ) return null;
   return {

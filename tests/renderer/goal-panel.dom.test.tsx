@@ -384,7 +384,7 @@ describe("GoalPanel", () => {
       "Showing the first 128 provider-reported skills.",
     )).toBeInTheDocument();
     expect(screen.getByText(
-      "The provider reported 2 discovery warnings.",
+      "Skill discovery reported 2 discovery warnings.",
     )).toBeInTheDocument();
   });
 

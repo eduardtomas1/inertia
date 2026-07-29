@@ -75,6 +75,18 @@ function boundedDisplayString(
   return clean || undefined;
 }
 
+function sameProviderSkillIdentity(
+  left: ProviderSkillInput,
+  right: ProviderSkillInput,
+): boolean {
+  if (left.source !== right.source || left.name !== right.name) return false;
+  return left.source === "claude-native"
+    || (
+      right.source === "codex-native"
+      && normalizeIdentityPath(left.path) === normalizeIdentityPath(right.path)
+    );
+}
+
 function boundedInteger(
   value: unknown,
   minimum: number,
@@ -801,24 +813,47 @@ export class AgentWorkflowController {
     routeKey: string,
   ): AgentSkillSummary[] {
     const nextIds = new Set<string>();
-    const nextIdentityKeys = new Set<string>();
     const summaries: AgentSkillSummary[] = [];
     const expiresAt = this.clock().getTime() + SKILL_CAPABILITY_TTL_MS;
-    for (const raw of rawSkills.slice(0, MAX_SKILLS)) {
-      const mapped = mapSkill(raw);
-      if (!mapped || nextIdentityKeys.has(mapped.identityKey)) continue;
-      nextIdentityKeys.add(mapped.identityKey);
-      const id = mapped.summary.id;
+    const mappedSkills = rawSkills
+      .slice(0, MAX_SKILLS)
+      .map(mapSkill)
+      .filter((skill) => skill !== null);
+    const identityCounts = new Map<string, number>();
+    for (const mapped of mappedSkills) {
+      identityCounts.set(
+        mapped.identityKey,
+        (identityCounts.get(mapped.identityKey) ?? 0) + 1,
+      );
+    }
+    const ambiguousIdentityCount = [...identityCounts.values()]
+      .filter((count) => count > 1).length;
+    for (const mapped of mappedSkills) {
+      if (identityCounts.get(mapped.identityKey) !== 1) continue;
+      const previousId = this.skillIdsByPath.get(mapped.identityKey);
+      const previous = previousId ? this.skills.get(previousId) : undefined;
+      let id = mapped.summary.id;
+      if (previous && previousId) {
+        id = sameProviderSkillIdentity(
+          previous.providerInput,
+          mapped.providerInput,
+        )
+          ? previousId
+          : randomUUID();
+      }
+      const summary = id === mapped.summary.id
+        ? mapped.summary
+        : { ...mapped.summary, id };
       this.skillIdsByPath.set(mapped.identityKey, id);
       nextIds.add(id);
       this.skills.set(id, {
-        summary: mapped.summary,
+        summary,
         providerInput: mapped.providerInput,
         identityKey: mapped.identityKey,
         routeKey,
         expiresAt,
       });
-      summaries.push(mapped.summary);
+      summaries.push(summary);
     }
     for (const [id, capability] of this.skills) {
       if (
@@ -832,7 +867,10 @@ export class AgentWorkflowController {
       routeKey,
       state: {
         truncated,
-        warningCount: Math.min(99, Math.max(0, warningCount)),
+        warningCount: Math.min(
+          99,
+          Math.max(0, warningCount + ambiguousIdentityCount),
+        ),
         synchronizedAt: this.clock().toISOString(),
       },
     });

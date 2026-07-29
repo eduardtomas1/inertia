@@ -606,48 +606,159 @@ describe("AgentWorkflowController", () => {
     ]);
   });
 
-  it("keeps the first provider skill when identities are duplicated", async () => {
+  it("rejects ambiguous provider skill identities across reordered reloads", async () => {
     const skillPath = "/workspace/project/.codex/skills/review/SKILL.md";
-    controlRequest.mockResolvedValue({
+    const skillPathAlias =
+      "/workspace/project/.codex//skills/review/SKILL.md";
+    const firstSkill = {
+      name: "first-review",
+      path: skillPath,
+      description: "Use the first provider entry.",
+      scope: "repo",
+      enabled: true,
+    };
+    const replacementSkill = {
+      name: "replacement-review",
+      path: skillPathAlias,
+      description: "Must not replace the first entry.",
+      scope: "repo",
+      enabled: true,
+    };
+    controlRequest.mockResolvedValueOnce({
       data: [{
         cwd: "/workspace/project",
-        skills: [{
-          name: "first-review",
-          path: skillPath,
-          description: "Use the first provider entry.",
-          scope: "repo",
-          enabled: true,
-        }, {
-          name: "replacement-review",
-          path: skillPath,
-          description: "Must not replace the first entry.",
-          scope: "repo",
-          enabled: true,
-        }],
+        skills: [firstSkill, replacementSkill],
+        errors: [],
+      }],
+    }).mockResolvedValueOnce({
+      data: [{
+        cwd: "/workspace/project",
+        skills: [replacementSkill, firstSkill],
         errors: [],
       }],
     });
     const runtime = harness();
 
+    await expect(runtime.controller.listSkills(
+      "conversation-1",
+      false,
+    )).resolves.toEqual([]);
+    await expect(runtime.controller.listSkills(
+      "conversation-1",
+      true,
+    )).resolves.toEqual([]);
+    expect(runtime.controller.state("conversation-1")).toEqual(
+      expect.objectContaining({
+        skills: [],
+        skillDiscovery: expect.objectContaining({ warningCount: 1 }),
+      }),
+    );
+  });
+
+  it("invalidates a truncated capability when a duplicate reorders inside the display bound", async () => {
+    const skillPath = "/workspace/project/.codex/skills/review/SKILL.md";
+    const skillPathAlias =
+      "/workspace/project/.codex//skills/review/SKILL.md";
+    const selectedSkill = {
+      name: "review",
+      path: skillPath,
+      description: "Review this project.",
+      scope: "repo",
+      enabled: true,
+    };
+    const replacementSkill = {
+      ...selectedSkill,
+      name: "replacement-review",
+      path: skillPathAlias,
+      description: "Must never replace the selected skill.",
+    };
+    const fillers = Array.from({ length: 127 }, (_, index) => ({
+      name: `filler-${index}`,
+      path:
+        `/workspace/project/.codex/skills/filler-${index}/SKILL.md`,
+      description: `Filler skill ${index}.`,
+      scope: "repo",
+      enabled: true,
+    }));
+    controlRequest.mockResolvedValueOnce({
+      data: [{
+        cwd: "/workspace/project",
+        skills: [selectedSkill, ...fillers, replacementSkill],
+        errors: [],
+      }],
+    }).mockResolvedValueOnce({
+      data: [{
+        cwd: "/workspace/project",
+        skills: [replacementSkill, ...fillers, selectedSkill],
+        errors: [],
+      }],
+    });
+    const runtime = harness();
     const summaries = await runtime.controller.listSkills(
       "conversation-1",
       false,
     );
+    const summary = summaries.find((skill) => skill.name === "review");
 
-    expect(summaries).toEqual([
-      expect.objectContaining({
-        name: "first-review",
-        description: "Use the first provider entry.",
-      }),
-    ]);
+    expect(summary).toBeDefined();
+    expect(runtime.controller.state("conversation-1").skillDiscovery)
+      .toEqual(expect.objectContaining({ truncated: true }));
     await expect(runtime.controller.resolveSkills(
       "conversation-1",
-      [summaries[0]!.id],
-    )).resolves.toEqual([{
-      source: "codex-native",
-      name: "first-review",
+      [summary!.id],
+    )).rejects.toThrow(
+      "A selected skill is no longer available. Refresh skills and try again.",
+    );
+    expect(runtime.controller.state("conversation-1").skills)
+      .not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: summary!.id }),
+      ]));
+  });
+
+  it("invalidates a selected skill when forced reload becomes ambiguous", async () => {
+    const skillPath = "/workspace/project/.codex/skills/review/SKILL.md";
+    const selectedSkill = {
+      name: "review",
       path: skillPath,
-    }]);
+      description: "Review this project.",
+      scope: "repo",
+      enabled: true,
+    };
+    controlRequest.mockResolvedValueOnce({
+      data: [{
+        cwd: "/workspace/project",
+        skills: [selectedSkill],
+        errors: [],
+      }],
+    }).mockResolvedValueOnce({
+      data: [{
+        cwd: "/workspace/project",
+        skills: [{
+          ...selectedSkill,
+          name: "replacement-review",
+          description: "Must never replace the selected skill.",
+        }, selectedSkill],
+        errors: [],
+      }],
+    });
+    const runtime = harness();
+    const [summary] = await runtime.controller.listSkills(
+      "conversation-1",
+      false,
+    );
+
+    await expect(runtime.controller.resolveSkills(
+      "conversation-1",
+      [summary!.id],
+    )).rejects.toThrow(
+      "A selected skill is no longer available. Refresh skills and try again.",
+    );
+    expect(runtime.controller.state("conversation-1")).toEqual(
+      expect.objectContaining({
+        skills: [],
+        skillDiscovery: expect.objectContaining({ warningCount: 1 }),
+      }),
+    );
   });
 
   it("force-revalidates an opaque skill immediately before provider use", async () => {

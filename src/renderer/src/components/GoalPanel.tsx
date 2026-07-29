@@ -414,7 +414,7 @@ function SkillsSection({
       )}
       {workflow.skillDiscovery.warningCount > 0 && (
         <p className="goal-panel-capability-note" role="status">
-          The provider reported {workflow.skillDiscovery.warningCount}{" "}
+          Skill discovery reported {workflow.skillDiscovery.warningCount}{" "}
           {workflow.skillDiscovery.warningCount === 1
             ? "discovery warning"
             : "discovery warnings"}.

@@ -24,6 +24,7 @@ import {
 } from "../../src/shared/model-routing";
 import type {
   ProviderEvent,
+  ProviderGoalSnapshot,
   ProviderRunCallbacks,
   ProviderRunInput,
   ProviderRunResult,
@@ -445,21 +446,23 @@ describe("TurnController authoritative lifecycle", () => {
     });
     expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([]);
 
-    runtime.provider.emit({
+    const authoritativeGoal = {
+      objective: "Keep the workflow authoritative",
+      status: "active" as const,
+      tokenBudget: 12_000,
+      tokensUsed: 250,
+      timeUsedSeconds: 9,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:09.000Z",
+    };
+    const emitGoal = (goal: ProviderGoalSnapshot) => runtime.provider.emit({
       ...base,
       type: "goal-updated",
       providerId: "codex",
       sessionId: "thread-goal-1",
-      goal: {
-        objective: "Keep the workflow authoritative",
-        status: "active",
-        tokenBudget: 12_000,
-        tokensUsed: 250,
-        timeUsedSeconds: 9,
-        createdAt: "2030-01-01T00:00:00.000Z",
-        updatedAt: "2030-01-01T00:00:09.000Z",
-      },
+      goal,
     });
+    emitGoal(authoritativeGoal);
     expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([
       expect.objectContaining({
         source: "codex-native",
@@ -475,23 +478,24 @@ describe("TurnController authoritative lifecycle", () => {
     }));
     expect(synchronizedSessions).toEqual(["thread-goal-1"]);
     recoverRefreshWarning = true;
-    runtime.provider.emit({
-      ...base,
-      type: "goal-updated",
-      providerId: "codex",
-      sessionId: "thread-goal-1",
-      goal: {
-        objective: "Keep the workflow authoritative",
-        status: "active",
-        tokenBudget: 12_000,
-        tokensUsed: 250,
-        timeUsedSeconds: 9,
-        createdAt: "2030-01-01T00:00:00.000Z",
-        updatedAt: "2030-01-01T00:00:09.000Z",
-      },
-    });
+    emitGoal(authoritativeGoal);
     expect(runtime.events.filter((event) =>
       event.type === "agent.goal.updated")).toHaveLength(2);
+    emitGoal({
+      ...authoritativeGoal,
+      status: "complete",
+      tokensUsed: 300,
+      timeUsedSeconds: 10,
+    });
+    expect(runtime.store.agentGoals(runtime.conversationId)).toEqual([
+      expect.objectContaining({
+        status: "complete",
+        tokensUsed: 300,
+        timeUsedSeconds: 10,
+      }),
+    ]);
+    expect(runtime.events.filter((event) =>
+      event.type === "agent.goal.updated")).toHaveLength(3);
 
     runtime.provider.emit({
       ...base,
@@ -506,6 +510,7 @@ describe("TurnController authoritative lifecycle", () => {
       source: "codex-native",
     });
     expect(synchronizedSessions).toEqual([
+      "thread-goal-1",
       "thread-goal-1",
       "thread-goal-1",
       "thread-goal-1",

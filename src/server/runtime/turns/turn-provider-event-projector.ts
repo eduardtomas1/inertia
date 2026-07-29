@@ -32,6 +32,19 @@ export interface TurnProviderEventProjectorOptions {
   ): boolean;
 }
 
+function projectedNativeGoalMatches(
+  goal: ReturnType<RuntimeStore["mergeNativeAgentGoal"]>["goal"],
+  eventGoal: Extract<ProviderEvent, { type: "goal-updated" }>["goal"],
+): boolean {
+  return goal?.objective === eventGoal.objective
+    && goal.status === eventGoal.status
+    && goal.tokenBudget === eventGoal.tokenBudget
+    && goal.tokensUsed === eventGoal.tokensUsed
+    && goal.timeUsedSeconds === eventGoal.timeUsedSeconds
+    && goal.createdAt === eventGoal.createdAt
+    && goal.updatedAt === eventGoal.updatedAt;
+}
+
 /**
  * Projects an already identity-validated normalized provider event. Transport
  * acceptance and failure settlement remain controller responsibilities.
@@ -141,7 +154,7 @@ export class TurnProviderEventProjector {
         });
         const recovered = (
           persisted.goal?.providerSessionId === event.sessionId
-          && persisted.goal.updatedAt === event.goal.updatedAt
+          && projectedNativeGoalMatches(persisted.goal, event.goal)
         )
           ? this.options.hooks.onNativeGoalSynchronized?.({
             conversationId: active.conversation.id,

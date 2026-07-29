@@ -28,6 +28,17 @@ function nativeGoalRevision(timestamp: string): string {
   ).toISOString();
 }
 
+function sameNativeGoalPayload(left: AgentGoal, right: AgentGoal): boolean {
+  return left.providerSessionId === right.providerSessionId
+    && left.objective === right.objective
+    && left.status === right.status
+    && left.tokenBudget === right.tokenBudget
+    && left.tokensUsed === right.tokensUsed
+    && left.timeUsedSeconds === right.timeUsedSeconds
+    && left.createdAt === right.createdAt
+    && left.updatedAt === right.updatedAt;
+}
+
 export class AgentWorkflowRepository {
   private readonly nativeGoalTombstones =
     new Map<string, NativeAgentGoalTombstone>();
@@ -62,7 +73,10 @@ export class AgentWorkflowRepository {
       existing?.providerSessionId === goal.providerSessionId
       && (
         goal.updatedAt < existing.updatedAt
-        || (!authoritativeMutation && goal.updatedAt === existing.updatedAt)
+        || (
+          !authoritativeMutation && goal.updatedAt === existing.updatedAt
+          && sameNativeGoalPayload(existing, goal)
+        )
       )
     ) {
       return { goal: existing, changed: false };

@@ -82,6 +82,17 @@ function nativeGoal(update: Partial<AgentGoal> = {}): AgentGoal {
   };
 }
 
+function sameNativeGoalPayload(left: AgentGoal, right: AgentGoal): boolean {
+  return left.providerSessionId === right.providerSessionId
+    && left.objective === right.objective
+    && left.status === right.status
+    && left.tokenBudget === right.tokenBudget
+    && left.tokensUsed === right.tokensUsed
+    && left.timeUsedSeconds === right.timeUsedSeconds
+    && left.createdAt === right.createdAt
+    && left.updatedAt === right.updatedAt;
+}
+
 function harness(options: {
   current?: Conversation;
   goals?: AgentGoal[];
@@ -132,9 +143,14 @@ function harness(options: {
       const existing = goals.find(({ source }) => source === "codex-native");
       if (
         existing
-        && !authoritativeMutation
         && existing.providerSessionId === goal.providerSessionId
-        && existing.updatedAt >= goal.updatedAt
+        && (
+          existing.updatedAt > goal.updatedAt
+          || (
+            !authoritativeMutation
+            && sameNativeGoalPayload(existing, goal)
+          )
+        )
       ) {
         return { goal: existing, changed: false };
       }
@@ -348,6 +364,33 @@ describe("AgentWorkflowController", () => {
       expect.any(String),
       "thread-1",
     );
+  });
+
+  it("does not let a same-second refresh overwrite a newer live revision", async () => {
+    let settleRefresh!: (value: Record<string, unknown>) => void;
+    controlRequest.mockImplementation(() =>
+      new Promise<Record<string, unknown>>((resolve) => {
+        settleRefresh = resolve;
+      }));
+    const active = nativeGoal();
+    const runtime = harness({ goals: [active] });
+    const initialCallCount = controlRequest.mock.calls.length;
+
+    const refreshing = runtime.controller.refresh("conversation-1");
+    await vi.waitFor(() =>
+      expect(controlRequest).toHaveBeenCalledTimes(initialCallCount + 1));
+    const completed = nativeGoal({
+      status: "complete",
+      tokensUsed: 2_400,
+      timeUsedSeconds: 48,
+    });
+    runtime.goals.splice(0, runtime.goals.length, completed);
+    settleRefresh({ goal: providerGoal() });
+
+    await expect(refreshing).resolves.toMatchObject({
+      goals: [completed],
+    });
+    expect(runtime.goals).toEqual([completed]);
   });
 
   it("does not merge a stale refresh after the provider session rotates", async () => {

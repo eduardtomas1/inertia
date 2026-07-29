@@ -374,18 +374,17 @@ export class AgentWorkflowController {
             response.goal,
             this.clock().toISOString(),
           );
-          if (parsed) this.store.mergeNativeAgentGoal(parsed);
-          else if (response.goal !== null) {
+          const goalUnchanged = this.sameNativeGoalRevision(
+            observed,
+            this.nativeGoal(conversationId, providerSessionId),
+          );
+          if (parsed) {
+            if (goalUnchanged) this.store.mergeNativeAgentGoal(parsed);
+          } else if (response.goal !== null) {
             throw new RuntimeRequestError(
               "Codex returned a malformed goal response.",
             );
-          } else if (this.sameNativeGoalRevision(
-            observed,
-            this.nativeGoal(
-              conversationId,
-              providerSessionId,
-            ),
-          )) {
+          } else if (goalUnchanged) {
             this.store.clearAgentGoal(
               conversationId,
               "codex-native",

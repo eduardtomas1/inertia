@@ -146,4 +146,60 @@ describe("agent workflow persistence", () => {
     });
     store.close();
   });
+
+  it("persists distinct same-second native revisions but ignores exact replays", async () => {
+    const directory = await mkdtemp(join(
+      tmpdir(),
+      "inertia-goal-same-second-",
+    ));
+    temporaryDirectories.push(directory);
+    const workspace = join(directory, "workspace");
+    const databasePath = join(directory, "inertia.sqlite");
+    await mkdir(workspace);
+    const store = new RuntimeStore(databasePath, workspace);
+    const project = store.createProject("Workflows", workspace);
+    const conversation = store.createConversation(project.id, "Goal");
+    const active: AgentGoal = {
+      conversationId: conversation.id,
+      source: "codex-native",
+      providerSessionId: "thread-1",
+      objective: "Finish the provider workflow",
+      status: "active",
+      tokenBudget: 20_000,
+      tokensUsed: 4_000,
+      timeUsedSeconds: 90,
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:02:00.000Z",
+      synchronizedAt: "2030-01-01T00:02:00.000Z",
+    };
+    expect(store.mergeNativeAgentGoal(active)).toEqual({
+      goal: active,
+      changed: true,
+    });
+    expect(store.mergeNativeAgentGoal({
+      ...active,
+      synchronizedAt: "2030-01-01T00:02:01.000Z",
+    })).toEqual({
+      goal: active,
+      changed: false,
+    });
+
+    const completed: AgentGoal = {
+      ...active,
+      status: "complete",
+      tokensUsed: 4_500,
+      timeUsedSeconds: 95,
+      synchronizedAt: "2030-01-01T00:02:02.000Z",
+    };
+    expect(store.mergeNativeAgentGoal(completed)).toEqual({
+      goal: completed,
+      changed: true,
+    });
+    expect(store.agentGoals(conversation.id)).toEqual([completed]);
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspace);
+    expect(reopened.agentGoals(conversation.id)).toEqual([completed]);
+    reopened.close();
+  });
 });

@@ -317,6 +317,21 @@ async function seedShowcaseData() {
       requestedAt,
       completedAt,
     );
+    database.prepare(`
+      INSERT INTO agent_goals (
+        conversation_id, source, provider_session_id, objective, status,
+        token_budget, tokens_used, time_used_seconds, created_at, updated_at,
+        synchronized_at
+      ) VALUES (
+        ?, 'inertia-local', NULL, ?, 'active',
+        NULL, NULL, 68, ?, ?, NULL
+      )
+    `).run(
+      conversationId,
+      "Keep delegated work truthful, focused, and ready for review",
+      requestedAt,
+      completedAt,
+    );
     const metadataScope = {
       providerId: "codex",
       harnessId: "codex-app-server",
@@ -368,6 +383,9 @@ function seedActiveWorkstream(showcase) {
   const turnId = randomUUID();
   const runId = "readme-active-workstream";
   const userMessageId = randomUUID();
+  const delegatedParentId = randomUUID();
+  const delegatedChildId = randomUUID();
+  const delegatedVerifierId = randomUUID();
   database.transaction(() => {
     database.prepare(`
       UPDATE conversations
@@ -416,6 +434,79 @@ function seedActiveWorkstream(showcase) {
     database.prepare(`
       UPDATE messages SET turn_id = ? WHERE id = ?
     `).run(turnId, userMessageId);
+    database.prepare(`
+      INSERT INTO subagent_traces (
+        id, conversation_id, run_id, turn_id, provider_id,
+        provider_task_id, provider_agent_id, parent_trace_id,
+        parent_provider_agent_id, parent_provider_tool_use_id,
+        provider_tool_use_id, provider_role, provider_name, status,
+        description, progress, result, sequence, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, 'codex',
+        'task-interface-audit', 'agent-interface-audit', NULL,
+        NULL, NULL, 'tool-interface-audit', 'reviewer',
+        'Interface Auditor', 'running',
+        'Review the interaction and accessibility boundaries.',
+        'Checking the split workspace ownership.', NULL,
+        1, ?, ?
+      )
+    `).run(
+      delegatedParentId,
+      showcase.conversationId,
+      runId,
+      turnId,
+      at(4),
+      at(18),
+    );
+    database.prepare(`
+      INSERT INTO subagent_traces (
+        id, conversation_id, run_id, turn_id, provider_id,
+        provider_task_id, provider_agent_id, parent_trace_id,
+        parent_provider_agent_id, parent_provider_tool_use_id,
+        provider_tool_use_id, provider_role, provider_name, status,
+        description, progress, result, sequence, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, 'codex',
+        'task-keyboard-check', 'agent-keyboard-check', ?,
+        'agent-interface-audit', NULL, 'tool-keyboard-check', 'analyst',
+        'Keyboard Check', 'completed',
+        'Verify focus and keyboard ownership.',
+        NULL, 'Focus returns to the owning conversation.',
+        2, ?, ?
+      )
+    `).run(
+      delegatedChildId,
+      showcase.conversationId,
+      runId,
+      turnId,
+      delegatedParentId,
+      at(6),
+      at(14),
+    );
+    database.prepare(`
+      INSERT INTO subagent_traces (
+        id, conversation_id, run_id, turn_id, provider_id,
+        provider_task_id, provider_agent_id, parent_trace_id,
+        parent_provider_agent_id, parent_provider_tool_use_id,
+        provider_tool_use_id, provider_role, provider_name, status,
+        description, progress, result, sequence, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, 'codex',
+        'task-release-verifier', 'agent-release-verifier', NULL,
+        NULL, NULL, 'tool-release-verifier', 'verifier',
+        'Release Verifier', 'waiting',
+        'Confirm the final cross-platform evidence.',
+        'Waiting for the exact release CI matrix.', NULL,
+        3, ?, ?
+      )
+    `).run(
+      delegatedVerifierId,
+      showcase.conversationId,
+      runId,
+      turnId,
+      at(8),
+      at(18),
+    );
     database.prepare(`
       INSERT INTO messages (
         id, conversation_id, role, content, attachments_json, created_at,
@@ -565,6 +656,24 @@ try {
     name: "Project navigation",
     exact: true,
   });
+  await sidebar.getByRole("button", { name: "Launch two chats" }).click();
+  const duo = page.getByRole("dialog", {
+    name: "Launch two perspectives",
+  });
+  await duo.getByRole("textbox", { name: "Shared prompt" }).fill(
+    "Review the same implementation independently and compare the safest path.",
+  );
+  await duo.getByRole("textbox", { name: "Chat 1 name" }).fill(
+    "Interface review",
+  );
+  await duo.getByRole("textbox", { name: "Chat 2 name" }).fill(
+    "Runtime review",
+  );
+  await duo.getByRole("combobox", { name: "Chat 2 project" }).selectOption({
+    label: "Runtime",
+  });
+  await capture(page, "inertia-duo.png");
+  await duo.getByRole("button", { name: "Close multi-spawn" }).click();
   await sidebar.getByRole("button", { name: "Expand Runtime" }).click();
   await sidebar.getByRole("button", {
     name: "Thread actions for Review runtime safeguards",
@@ -613,6 +722,20 @@ try {
     exact: true,
   }).waitFor();
   await capture(page, "inertia-workstream.png");
+
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await page.getByRole("tab", { name: /Goal/u }).click();
+  const goalPanel = page.getByRole("region", {
+    name: "Goals and agent workflows",
+  });
+  await goalPanel.getByText("Inertia local", { exact: true }).waitFor();
+  await goalPanel.getByText("Interface Auditor", { exact: true }).waitFor();
+  await goalPanel.getByText("Release Verifier", { exact: true }).waitFor();
+  await capture(page, "inertia-agent-workflows.png");
+  await page
+    .getByRole("complementary", { name: "Workspace tools" })
+    .getByRole("button", { name: "Close workspace tools" })
+    .click();
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("radio", { name: "Light" }).click();

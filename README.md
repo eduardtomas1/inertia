@@ -21,6 +21,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Find models quickly through a searchable provider-aware palette, then save complete harness, backend, model, and reasoning routes as Favorites.
 - See provider-supplied thinking summaries, remaining context, and account usage through one compact context control.
 - Work with streaming conversations, resumable sessions, native plans, agent questions, image and document inputs, cancellation, and supervised approvals whenever the selected provider supports them.
+- Launch a saved Duo from one shared prompt into two independently named chats, each with its own project, model route, reasoning, and access mode.
 - Open any second chat beside the current one—even from another project—with its own transcript, draft, files, Git changes, terminal sessions, plan, and preview.
 - Keep up to 12 unfinished text prompts in a local stash with their exact harness, backend, model, and reasoning route, then restore one into either side of a split workspace without moving attachments or credentials.
 - Start from a compact Environment summary of the current branch, changes, active work, delegated agents, and attached context, while keeping the full workspace tools one click away.
@@ -31,6 +32,14 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Choose System, Light, or Dark with a restrained glass finish and clear contrast.
 
 ![Two independent projects sharing a split Inertia workspace](docs/screenshots/inertia-split-workspace.png)
+
+### Two perspectives, one prompt
+
+The lightning action beside **New chat** opens a focused Duo setup. Give both chats a name, choose their projects and complete provider routes, then send one shared prompt to both. Inertia creates the conversations safely, starts the acknowledged pair together, and opens the results in the split workspace without pretending that their sessions, permissions, tools, or working directories are shared.
+
+Save one bounded default Duo for the combinations you use often. The preset stores only safe route identity and chat names—not prompts, projects, credentials, or provider-specific secrets—and Inertia warns when both agents will edit the same checkout.
+
+![Configure two agent perspectives from one shared prompt](docs/screenshots/inertia-duo.png)
 
 ### Review changes without losing context
 
@@ -51,13 +60,22 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - The Activity Center keeps the latest meaningful operations close to the active agent, folds older successful calls behind one disclosure, and keeps manual Git work or failures independently visible.
 - Open project-file references from prose or fenced-code labels directly in Files, then edit supported text files in a focused dialog that refuses to overwrite content changed since it was opened.
 - Reasoning summaries, approvals, questions, warnings, final answers, and turn checkpoints stay together in the same chronological turn.
+- Codex-native goals and Inertia-local objectives keep their source visible, while next-turn skills stay route-bound and never expose provider paths or contents.
 - Each completed request keeps its original agent, model backend, and model attribution together with a turn-specific before-and-after Git record, when available, that remains useful after the workspace moves on.
 - Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
 - Long transcripts keep stable rows and load their heavier detail separately, while incremental runtime updates resume safely after a restart.
 - The transcript follows live work only while you are near the bottom, so reading earlier context is not interrupted.
-- Delegated agent work remains attached to its parent turn, with compact progress that can be followed without losing the main conversation.
+- Provider-reported delegated work remains attached to its parent turn. The Goal panel preserves the real hierarchy; **Guide parent** prepares an ordinary parent follow-up, while direct Stop appears only for supported live Claude tasks.
 
 ![An active Inertia workstream with interleaved commentary and compact tool activity](docs/screenshots/inertia-workstream.png)
+
+### Truthful goals, skills, and delegated work
+
+- Codex-native goals and Inertia-local objectives are labeled separately, persisted across reconnects, and never substituted for one another.
+- Skills are discovered from the selected Codex or Claude route and attached only to the next turn after privileged revalidation; the renderer never receives their filesystem path or content.
+- Delegated agent trees preserve provider-reported parentage, status, and ownership. Guide parent prepares an ordinary supported follow-up; direct Stop appears only for supported live Claude tasks.
+
+![Goals and delegated agent work in Inertia](docs/screenshots/inertia-agent-workflows.png)
 
 ### Keep the workspace moving
 
@@ -112,13 +130,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.13
+### Version 0.0.14
 
-This release turns the workspace into a calmer control surface. The new Environment summary keeps Git state, active work, delegated agents, and recent context close without opening a permanent tool panel. Activity is more concise, provider-reported quota limits can notify before they run out, and image or PDF attachments have useful previews before sending.
+This release makes parallel work fast without blurring ownership. Duo launches two independently configured agent chats from one prompt, while the Goal workspace brings truthful goals, route-bound skills, and provider-reported delegated agents into the same calm control surface.
 
-Two chats can now share the window even when they belong to different projects. Each side retains its own files, Git review, terminal sessions, plan, preview, draft, provider route, approvals, questions, and changed-file state; visually promoting a pane never transfers or destroys those resources.
+Long, activity-heavy conversations now virtualize by real render weight, closed execution details leave the DOM, and streaming is coalesced without sacrificing durable ordering. Cross-project splits, Git and filesystem actions, provider interactions, attachments, previews, and process cleanup also received a broad lifecycle and security hardening pass.
 
-Download [Inertia v0.0.13](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.13):
+Download [Inertia v0.0.14](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.14):
 
 | Platform | Download |
 | --- | --- |

@@ -4,6 +4,57 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.14 — 2026-07-29
+
+### Two agent perspectives from one prompt
+
+- A lightning action beside New chat configures exactly two independently named chats from one shared prompt, with a separate project, provider route, reasoning level, and access mode for each side.
+- Duo reuses Inertia's real model chooser, readiness checks, conversation creation, and split-workspace ownership. Cross-project pairs keep independent files, Git review, terminals, plans, previews, approvals, questions, drafts, and provider sessions.
+- An optional bounded default Duo stores only safe chat names and route identity. It never copies prompts, projects, credentials, provider options, or secrets, and warns when both agents will edit the same checkout.
+- Partial creation and ambiguous delivery stay honest: an acknowledged survivor can continue, duplicate submission is blocked, and uncertain delivery requires an authoritative refresh instead of risking duplicate chats.
+
+### Drafts and daily workspace flow
+
+- Adding a project now opens a recoverable unpersisted draft immediately. Sidebar search shows only matching active conversations, long pasted requests can collapse without losing scroll position, and IME composition can no longer send accidentally.
+- A bounded prompt stash keeps up to 12 unfinished text prompts with their exact safe route identity for later use in either split pane. Attachments and credentials deliberately remain outside the stash.
+- Project-file references in answers open directly in Files. Supported text files can be edited in a focused dialog that verifies the content has not changed before saving.
+- Expanded folders survive refresh when still present, nested repository changes remain scoped to their real repository, and workspace tools stay owned by the exact chat that requested them.
+
+### Truthful goals, skills, and delegated agents
+
+- Codex-native goals and Inertia-local objectives are persistent, separately attributed, reconnect-safe, and never injected or relabeled as one another.
+- Codex and Claude skills are discovered through the selected route, attached only to the next turn, revalidated at the privileged execution boundary, and represented without exposing provider paths, contents, or credentials.
+- Compact Codex and Claude subagent trees preserve provider-reported parentage, status, continuation, and terminal state. Guide parent prepares an ordinary parent follow-up; direct Stop appears only for supported live Claude tasks.
+- Provider plans no longer open the Plan tab automatically. Goal and skill state remains independent across split chats, themes, narrow layouts, and keyboard navigation.
+
+### Faster long conversations
+
+- Conversation virtualization now considers estimated render weight, so activity-heavy histories no longer wait for a fixed 40-turn threshold. The reproduced 36-turn, 1,224-activity fixture mounts fewer than 24 timeline rows.
+- Closed historical tool output and run details are unmounted instead of merely hidden. Large command payloads return only when their disclosure is opened.
+- Streaming commentary uses a lightweight text path and a measured 240 ms persistence/projection cadence, then settles into full safe Markdown. A deterministic 100,000-character stream reduced persistence flushes from 98 to 7 without losing content.
+- Stream updates persist before projection, batch message and conversation state transactionally, and flush at lifecycle and hydration boundaries so restart recovery and two-renderer exact-once delivery remain authoritative.
+- A reproducible loopback WebSocket compression benchmark is now documented. `permessage-deflate` remains disabled until repeated cross-platform evidence shows that reduced snapshot bytes outweigh the CPU and memory cost.
+
+### Clearer contrast and state
+
+- Light and dark themes now share semantic contrast, border, selection, focus, disabled, and status-surface tokens across the transcript, composer, activity, sidebars, settings, model chooser, split workspaces, diffs, attachments, and notifications.
+- Secondary text and boundaries are more readable without turning the interface into stacked panels. Hover, selection, focus, approvals, questions, warnings, failures, and success states remain distinguishable through text and shape as well as colour.
+- Numeric WCAG regression coverage and refreshed original-resolution screenshots protect the intended contrast across interface scales and response densities.
+
+### Reliability across providers, files, and Git
+
+- Conversation-bound sends, imports, pickers, draft restoration, previews, Stop actions, provider callbacks, and delayed responses now retain exact ownership across rapid A → B → A navigation and cross-project split use.
+- Git reversal is serialized per canonical repository, workspace traversal pins directory identities, and malformed, duplicated, empty, oversized, or unrepresentable provider interactions fail closed.
+- OpenCode startup, authentication, requests, interactions, and cancellation are bounded per run. Codex App Server, Cursor ACP, one-shot CLI, maintenance, Git, and supervised-runtime process trees must be confirmed stopped before a terminal success or cancellation can settle; Claude SDK tasks use bounded interrupt/abort acknowledgement.
+- Interrupted runtime projections reconcile atomically, packaged shutdown waits for runtime and attachment cleanup, and Windows process-tree handling uses explicit system executables and observable confirmation instead of trusting a launched kill command.
+
+### Security and release confidence
+
+- Filesystem and Git commands carry short-lived, owner- and purpose-bound secure-file authorities. Main revalidates containment, inode, mode, and digest at the operation boundary, while replacement journals preserve crash-safe recovery.
+- Attachments remain opaque, privately stored, inode-pinned, content-verified, bounded, and lifecycle-owned. Native previews use isolated sessions and suspend before trusted overlays paint.
+- Provider output, approvals, goals, skills, subagents, credentials, runtime capabilities, and diagnostics preserve their existing least-authority and redaction boundaries. Full Access remains the only explicit opt-in transfer of unrestricted provider authority.
+- The final release candidate is gated by architecture and lint checks, four TypeScript projects, unit and integration tests, portable provider contracts, Electron E2E, production dependency audit, three-OS packaging, package smoke, Electron fuse verification, checksums, and provenance.
+
 ## 0.0.13 — 2026-07-28
 
 ### Two chats, two complete workspaces

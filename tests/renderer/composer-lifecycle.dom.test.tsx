@@ -339,4 +339,105 @@ describe("composer asynchronous ownership", () => {
     expect(screen.queryByText("failed.png")).toBeNull();
     await waitFor(() => expect(release).toHaveBeenCalledWith("newer"));
   });
+
+  it("restores an unchanged failed submission after navigating away and back", async () => {
+    const first = conversation("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+    const second = conversation("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
+    const sent = deferred<void>();
+    const release = vi.fn(async () => undefined);
+    const overrides = {
+      onSend: () => sent.promise,
+      onChooseAttachments: async () => [attachment("retry")],
+      onReleaseAttachment: release,
+    };
+    const view = render(<Composer {...composerProps(first, overrides)} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach images or documents",
+    }));
+    await screen.findByText("retry.png");
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Retry this submission" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(window.localStorage.getItem(`inertia:draft:${first.id}`))
+      .toBe("Retry this submission");
+
+    view.rerender(<Composer {...composerProps(second, overrides)} />);
+    view.rerender(<Composer {...composerProps(first, overrides)} />);
+    await act(async () => sent.reject(new Error("send failed")));
+
+    expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Retry this submission");
+    expect(screen.getByText("retry.png")).toBeTruthy();
+    expect(release).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Remove attachment retry.png",
+    }));
+    await waitFor(() => expect(release).toHaveBeenCalledExactlyOnceWith(
+      "retry",
+    ));
+  });
+
+  it("does not clear context added after an older submission", async () => {
+    const first = conversation("ffffffff-ffff-4fff-8fff-ffffffffffff");
+    const second = conversation("12121212-1212-4212-8212-121212121212");
+    const sent = deferred<void>();
+    const clearPromptContext = vi.fn();
+    const overrides = {
+      onSend: () => sent.promise,
+      onClearPromptContext: clearPromptContext,
+    };
+    const view = render(<Composer {...composerProps(first, overrides)} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Inspect this" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    view.rerender(<Composer {...composerProps(second, overrides)} />);
+    view.rerender(<Composer {...composerProps(first, {
+      ...overrides,
+      promptContext: "Diff selection for src/index.ts",
+    })} />);
+    await act(async () => sent.resolve());
+
+    expect(screen.getByLabelText("Selected diff context")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Inspect this");
+    expect(clearPromptContext).not.toHaveBeenCalled();
+  });
+
+  it.each(["success", "failure"] as const)(
+    "keeps the newest Stop claim pending after an older %s settlement",
+    async (settlement) => {
+      const first = conversation("34343434-3434-4434-8434-343434343434");
+      const second = conversation("56565656-5656-4656-8656-565656565656");
+      const firstStop = deferred<void>();
+      const secondStop = deferred<void>();
+      const onStop = vi.fn()
+        .mockImplementationOnce(() => firstStop.promise)
+        .mockImplementationOnce(() => secondStop.promise);
+      const overrides = { running: true, onStop };
+      const view = render(<Composer {...composerProps(first, overrides)} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Stop agent" }));
+      expect(screen.getByRole("button", { name: "Stopping agent" }))
+        .toHaveAttribute("aria-busy", "true");
+      view.rerender(<Composer {...composerProps(second, overrides)} />);
+      view.rerender(<Composer {...composerProps(first, overrides)} />);
+      fireEvent.click(screen.getByRole("button", { name: "Stop agent" }));
+      expect(onStop).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        if (settlement === "success") firstStop.resolve();
+        else firstStop.reject(new Error("first stop failed"));
+      });
+
+      expect(screen.getByRole("button", { name: "Stopping agent" }))
+        .toHaveAttribute("aria-busy", "true");
+      await act(async () => secondStop.reject(new Error("second stop failed")));
+      expect(screen.getByRole("button", { name: "Stop agent" })).toBeTruthy();
+    },
+  );
 });

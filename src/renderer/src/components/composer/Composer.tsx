@@ -101,7 +101,14 @@ export function Composer({
   const conversationIdRef = useRef(conversation.id);
   const attachmentAuthorityRef = useRef(0);
   const submissionSequenceRef = useRef(0);
-  const draftSubmissionClaimsRef = useRef(new Map<string, number>());
+  const activeSubmissionsRef = useRef(new Map<string, number>());
+  const editorRevisionSequenceRef = useRef(0);
+  const editorRevisionsRef = useRef(new Map<string, number>());
+  const stopSequenceRef = useRef(0);
+  const activeStopsRef = useRef(new Map<string, number>());
+  const promptContextsRef = useRef(new Map([
+    [conversation.id, promptContext ?? null],
+  ]));
   const releaseAttachmentRef = useRef(onReleaseAttachment);
   const [fileReferences, setFileReferences] = useState<string[]>([]);
   const [pendingRoute, setPendingRoute] = useState<{
@@ -122,6 +129,14 @@ export function Composer({
 
   conversationIdRef.current = conversation.id;
 
+  const markEditorChanged = (conversationId = conversation.id): void => {
+    editorRevisionSequenceRef.current += 1;
+    editorRevisionsRef.current.set(
+      conversationId,
+      editorRevisionSequenceRef.current,
+    );
+  };
+
   useEffect(() => {
     const refreshPromptStash = (): void => {
       setPromptStash(readPromptStash(window.localStorage));
@@ -140,6 +155,22 @@ export function Composer({
     };
   }, []);
   releaseAttachmentRef.current = onReleaseAttachment;
+
+  useEffect(() => {
+    const nextPromptContext = promptContext ?? null;
+    const previousPromptContext = promptContextsRef.current.get(conversation.id);
+    if (
+      promptContextsRef.current.has(conversation.id)
+      && previousPromptContext !== nextPromptContext
+    ) {
+      editorRevisionSequenceRef.current += 1;
+      editorRevisionsRef.current.set(
+        conversation.id,
+        editorRevisionSequenceRef.current,
+      );
+    }
+    promptContextsRef.current.set(conversation.id, nextPromptContext);
+  }, [conversation.id, promptContext]);
 
   useEffect(() => {
     attachmentAuthorityRef.current += 1;
@@ -184,6 +215,7 @@ export function Composer({
       window.clearTimeout(stopReleaseTimerRef.current);
       stopReleaseTimerRef.current = null;
     }
+    activeStopsRef.current.delete(conversationIdRef.current);
     stoppingRef.current = false;
     setStopping(false);
   }, [dismissMenu, running]);
@@ -217,7 +249,6 @@ export function Composer({
       return;
     }
     const key = `inertia:draft:${conversation.id}`;
-    draftSubmissionClaimsRef.current.delete(conversation.id);
     if (message) window.localStorage.setItem(key, message);
     else window.localStorage.removeItem(key);
   }, [conversation.id, message]);
@@ -228,6 +259,25 @@ export function Composer({
   }, [mentionQuery, onMentionQuery]);
 
   useTextareaAutosize(textareaRef, message);
+
+  const updateMessage = (next: string): void => {
+    if (next === message) return;
+    markEditorChanged();
+    setMessage(next);
+  };
+
+  const addFileReference = (path: string): void => {
+    if (fileReferences.includes(path)) return;
+    markEditorChanged();
+    setFileReferences([...fileReferences, path]);
+  };
+
+  const clearPromptContext = (): void => {
+    if (!promptContext) return;
+    markEditorChanged();
+    promptContextsRef.current.set(conversation.id, null);
+    onClearPromptContext?.();
+  };
 
   const submit = async () => {
     const request = running
@@ -248,21 +298,15 @@ export function Composer({
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
     const submittedDraft = message;
-    const submittedAuthority = attachmentAuthorityRef.current;
+    const submittedPromptContext = promptContext;
+    const submittedRevision =
+      editorRevisionsRef.current.get(submittedConversationId) ?? 0;
     const submissionSequence = submissionSequenceRef.current + 1;
     submissionSequenceRef.current = submissionSequence;
-    try {
-      const key = `inertia:draft:${submittedConversationId}`;
-      if (submittedDraft && window.localStorage.getItem(key) === submittedDraft) {
-        window.localStorage.removeItem(key);
-        draftSubmissionClaimsRef.current.set(
-          submittedConversationId,
-          submissionSequence,
-        );
-      }
-    } catch {
-      // The in-memory composer remains authoritative when storage is unavailable.
-    }
+    activeSubmissionsRef.current.set(
+      submittedConversationId,
+      submissionSequence,
+    );
     // Submitted files must remain registered while the provider reads them.
     // Removing them from the unsent ref prevents an unmount from releasing
     // their temporary copies after the server has accepted the turn.
@@ -271,21 +315,37 @@ export function Composer({
     setSubmitting(true);
     try {
       await onSend(request.visibleContent, submittedAttachments, request.context);
-      if (
-        draftSubmissionClaimsRef.current.get(submittedConversationId)
-        === submissionSequence
-      ) {
-        draftSubmissionClaimsRef.current.delete(submittedConversationId);
+      const ownsSubmission =
+        activeSubmissionsRef.current.get(submittedConversationId)
+        === submissionSequence;
+      if (!ownsSubmission) return;
+      activeSubmissionsRef.current.delete(submittedConversationId);
+      const editorUnchanged =
+        (editorRevisionsRef.current.get(submittedConversationId) ?? 0)
+          === submittedRevision
+        && promptContextsRef.current.get(submittedConversationId)
+          === (submittedPromptContext ?? null);
+      if (editorUnchanged) {
+        try {
+          const key = `inertia:draft:${submittedConversationId}`;
+          if (window.localStorage.getItem(key) === submittedDraft) {
+            window.localStorage.removeItem(key);
+          }
+        } catch {
+          // The accepted in-memory draft can still settle when storage is unavailable.
+        }
       }
       if (
         !mountedRef.current
         || conversationIdRef.current !== submittedConversationId
-        || attachmentAuthorityRef.current !== submittedAuthority
       ) return;
-      setMessage("");
-      setAttachments([]);
-      setFileReferences([]);
-      onClearPromptContext?.();
+      if (editorUnchanged) {
+        setMessage("");
+        setAttachments([]);
+        setFileReferences([]);
+        promptContextsRef.current.set(submittedConversationId, null);
+        onClearPromptContext?.();
+      }
       textareaRef.current?.focus();
       submissionReleaseTimerRef.current = window.setTimeout(() => {
         submissionReleaseTimerRef.current = null;
@@ -295,25 +355,24 @@ export function Composer({
         }
       }, COMPOSER_ACTION_STALE_FALLBACK_MS);
     } catch {
-      if (
-        draftSubmissionClaimsRef.current.get(submittedConversationId)
-        === submissionSequence
-      ) {
-        draftSubmissionClaimsRef.current.delete(submittedConversationId);
-        try {
-          const key = `inertia:draft:${submittedConversationId}`;
-          if (submittedDraft && window.localStorage.getItem(key) === null) {
-            window.localStorage.setItem(key, submittedDraft);
-          }
-        } catch {
-          // The current in-memory draft remains available when storage fails.
-        }
+      const ownsSubmission =
+        activeSubmissionsRef.current.get(submittedConversationId)
+        === submissionSequence;
+      if (ownsSubmission) {
+        activeSubmissionsRef.current.delete(submittedConversationId);
       }
-      const ownsSettlement = mountedRef.current
+      const ownsCurrentComposer = ownsSubmission
+        && mountedRef.current
         && conversationIdRef.current === submittedConversationId
-        && attachmentAuthorityRef.current === submittedAuthority;
-      if (ownsSettlement) {
+      const editorUnchanged =
+        (editorRevisionsRef.current.get(submittedConversationId) ?? 0)
+          === submittedRevision
+        && promptContextsRef.current.get(submittedConversationId)
+          === (submittedPromptContext ?? null);
+      if (ownsCurrentComposer && editorUnchanged) {
+        setMessage(submittedDraft);
         attachmentsRef.current = submittedAttachments;
+        setAttachments(submittedAttachments);
       } else {
         for (const attachment of submittedAttachments) {
           void releaseAttachmentRef.current(attachment.id);
@@ -321,7 +380,7 @@ export function Composer({
       }
       // The workspace-level toast presents the failure; the current composer
       // keeps failed attachments available for retry when it is still mounted.
-      if (ownsSettlement) {
+      if (ownsCurrentComposer) {
         submittingRef.current = false;
         setSubmitting(false);
         textareaRef.current?.focus();
@@ -332,18 +391,39 @@ export function Composer({
   const stop = async (): Promise<void> => {
     if (stoppingRef.current || !running) return;
     const stoppedConversationId = conversation.id;
+    const stopSequence = stopSequenceRef.current + 1;
+    stopSequenceRef.current = stopSequence;
+    activeStopsRef.current.set(stoppedConversationId, stopSequence);
     stoppingRef.current = true;
     setStopping(true);
     try {
       await onStop();
+      if (
+        activeStopsRef.current.get(stoppedConversationId) !== stopSequence
+      ) return;
+      if (
+        !mountedRef.current
+        || conversationIdRef.current !== stoppedConversationId
+      ) {
+        activeStopsRef.current.delete(stoppedConversationId);
+        return;
+      }
       stopReleaseTimerRef.current = window.setTimeout(() => {
         stopReleaseTimerRef.current = null;
+        if (
+          activeStopsRef.current.get(stoppedConversationId) !== stopSequence
+        ) return;
+        activeStopsRef.current.delete(stoppedConversationId);
         stoppingRef.current = false;
         if (mountedRef.current && conversationIdRef.current === stoppedConversationId) {
           setStopping(false);
         }
       }, COMPOSER_ACTION_STALE_FALLBACK_MS);
     } catch {
+      if (
+        activeStopsRef.current.get(stoppedConversationId) !== stopSequence
+      ) return;
+      activeStopsRef.current.delete(stoppedConversationId);
       stoppingRef.current = false;
       if (mountedRef.current && conversationIdRef.current === stoppedConversationId) {
         setStopping(false);
@@ -353,6 +433,11 @@ export function Composer({
 
   const addAttachments = (incoming: readonly ChatAttachment[]): void => {
     const merged = mergeComposerAttachments(attachmentsRef.current, incoming);
+    const changed = merged.attachments.length !== attachmentsRef.current.length
+      || merged.attachments.some(
+        ({ id }, index) => id !== attachmentsRef.current[index]?.id,
+      );
+    if (changed) markEditorChanged();
     attachmentsRef.current = merged.attachments;
     setAttachments(merged.attachments);
     for (const attachment of merged.rejected) {
@@ -361,6 +446,8 @@ export function Composer({
   };
 
   const removeAttachment = (attachment: ChatAttachment): void => {
+    if (!attachmentsRef.current.some(({ id }) => id === attachment.id)) return;
+    markEditorChanged();
     const next = attachmentsRef.current.filter(({ id }) => id !== attachment.id);
     attachmentsRef.current = next;
     setAttachments(next);
@@ -585,7 +672,7 @@ export function Composer({
       conversation.modelSelection,
     ));
     if (!persisted) return;
-    setMessage("");
+    updateMessage("");
     textareaRef.current?.focus();
   };
   const restoreStashedPrompt = (entry: PromptStashEntry): void => {
@@ -607,7 +694,7 @@ export function Composer({
         : withoutRestored;
     });
     if (!persisted) return;
-    setMessage(entry.content);
+    updateMessage(entry.content);
     window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
   const dismissPendingRoute = (): void => {
@@ -637,7 +724,7 @@ export function Composer({
           disabled={disabled}
           onRunRouteRepair={runRouteRepair}
           promptContext={promptContext}
-          onClearPromptContext={onClearPromptContext}
+          onClearPromptContext={clearPromptContext}
           attachments={attachments}
           onRemoveAttachment={removeAttachment}
           attachmentSendBoundary={attachmentSendBoundary}
@@ -656,7 +743,7 @@ export function Composer({
           }}
           textareaRef={textareaRef}
           message={message}
-          setMessage={setMessage}
+          onMessageChange={updateMessage}
           onImportAttachments={importAttachments}
           onSubmit={submit}
           running={running}
@@ -666,7 +753,7 @@ export function Composer({
           messageFits={messageFits}
           mentionMatch={mentionMatch}
           mentionResults={mentionResults}
-          setFileReferences={setFileReferences}
+          onAddFileReference={addFileReference}
           slashMatch={slashMatch}
           onUpdateConversation={onUpdateConversation}
         />

@@ -801,11 +801,13 @@ export class AgentWorkflowController {
     routeKey: string,
   ): AgentSkillSummary[] {
     const nextIds = new Set<string>();
+    const nextIdentityKeys = new Set<string>();
     const summaries: AgentSkillSummary[] = [];
     const expiresAt = this.clock().getTime() + SKILL_CAPABILITY_TTL_MS;
     for (const raw of rawSkills.slice(0, MAX_SKILLS)) {
       const mapped = mapSkill(raw);
-      if (!mapped) continue;
+      if (!mapped || nextIdentityKeys.has(mapped.identityKey)) continue;
+      nextIdentityKeys.add(mapped.identityKey);
       const id = mapped.summary.id;
       this.skillIdsByPath.set(mapped.identityKey, id);
       nextIds.add(id);

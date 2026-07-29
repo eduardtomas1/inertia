@@ -606,6 +606,50 @@ describe("AgentWorkflowController", () => {
     ]);
   });
 
+  it("keeps the first provider skill when identities are duplicated", async () => {
+    const skillPath = "/workspace/project/.codex/skills/review/SKILL.md";
+    controlRequest.mockResolvedValue({
+      data: [{
+        cwd: "/workspace/project",
+        skills: [{
+          name: "first-review",
+          path: skillPath,
+          description: "Use the first provider entry.",
+          scope: "repo",
+          enabled: true,
+        }, {
+          name: "replacement-review",
+          path: skillPath,
+          description: "Must not replace the first entry.",
+          scope: "repo",
+          enabled: true,
+        }],
+        errors: [],
+      }],
+    });
+    const runtime = harness();
+
+    const summaries = await runtime.controller.listSkills(
+      "conversation-1",
+      false,
+    );
+
+    expect(summaries).toEqual([
+      expect.objectContaining({
+        name: "first-review",
+        description: "Use the first provider entry.",
+      }),
+    ]);
+    await expect(runtime.controller.resolveSkills(
+      "conversation-1",
+      [summaries[0]!.id],
+    )).resolves.toEqual([{
+      source: "codex-native",
+      name: "first-review",
+      path: skillPath,
+    }]);
+  });
+
   it("force-revalidates an opaque skill immediately before provider use", async () => {
     const skillPath = "/workspace/project/.codex/skills/review/SKILL.md";
     controlRequest.mockResolvedValueOnce({

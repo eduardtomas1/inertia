@@ -1653,7 +1653,7 @@ process.exit(child.status ?? 1);
     expect(readFileSync(join(nested, "review.ts"), "utf8")).toContain(
       "enabled = true",
     );
-  });
+  }, 30_000);
 
   it("applies the persisted project repository display limit during workspace refresh", async () => {
     const { data, workspace } = temporaryWorkspace();

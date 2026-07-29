@@ -193,7 +193,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "terminal-then-exit") {
       send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
-      return setImmediate(() => process.exit(9));
+      return setTimeout(() => process.exit(9), 5_000);
     }
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "unsupported-input") {
       return send({

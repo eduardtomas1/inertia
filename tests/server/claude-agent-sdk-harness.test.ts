@@ -819,6 +819,94 @@ describe("Claude Agent SDK harness", () => {
     ]);
   });
 
+  it("bounds an unacknowledged task stop without cancelling the parent", async () => {
+    const root = portableFixtureRoot("Claude SDK bounded task stop");
+    roots.push(root);
+    let releaseParent!: () => void;
+    const parentReleased = new Promise<void>((resolve) => {
+      releaseParent = resolve;
+    });
+    const stopTaskIds: string[] = [];
+    let closeCalls = 0;
+    let markTaskSpawned!: () => void;
+    const taskSpawned = new Promise<void>((resolve) => {
+      markTaskSpawned = resolve;
+    });
+    const harness = createClaudeAgentSdkHarness({
+      stopTaskTimeoutMs: 100,
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSystem("task_started", {
+            task_id: "task-hung-stop",
+            tool_use_id: "tool-hung-stop",
+            description: "Keep the parent alive",
+            subagent_type: "researcher",
+          });
+          await parentReleased;
+          yield claudeSystem("task_notification", {
+            task_id: "task-hung-stop",
+            tool_use_id: "tool-hung-stop",
+            status: "completed",
+            output_file: "/tmp/task-hung-stop",
+            summary: "Parent continued after the stop timeout",
+          });
+          yield claudeSuccessResult("Parent completed", "completed");
+          yield claudeSessionState("idle");
+        })(),
+        {
+          stopTask: async (taskId) => {
+            stopTaskIds.push(taskId);
+            await new Promise<void>(() => {});
+          },
+          close: () => {
+            closeCalls += 1;
+          },
+        },
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const traceStatuses: string[] = [];
+    let stopAccepted: Promise<boolean> | null = null;
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-bounded-task-stop",
+      runId: "claude-bounded-task-stop-run",
+      turnId: "claude-bounded-task-stop-turn",
+      cwd: root,
+      prompt: "Start delegated work",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onSubagent: (event) => {
+        traceStatuses.push(event.status);
+        if (event.status !== "spawned" || stopAccepted) return;
+        markTaskSpawned();
+        stopAccepted = manager.stopSubagent(
+          event.conversationId,
+          event.providerTaskId!,
+          { runId: event.runId, turnId: event.turnId! },
+        );
+        void stopAccepted.then(() => releaseParent());
+      },
+    });
+
+    await taskSpawned;
+    expect(manager.activeConversationIds())
+      .toContain("claude-bounded-task-stop");
+    expect(traceStatuses).toEqual(["spawned"]);
+    await expect(stopAccepted).resolves.toBe(false);
+    await expect(result).resolves.toMatchObject({
+      status: "completed",
+      text: "Parent completed",
+    });
+    expect(stopTaskIds).toEqual(["task-hung-stop"]);
+    expect(traceStatuses).toEqual(["spawned", "completed"]);
+    expect(closeCalls).toBe(1);
+  });
+
   it("cancels and cleans up while the parent is suspended on a delegate", async () => {
     const root = portableFixtureRoot("Claude SDK delegated cancellation");
     roots.push(root);

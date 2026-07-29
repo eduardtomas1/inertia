@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { isAbsolute } from "node:path";
+import { isAbsolute, win32 } from "node:path";
 
 import type {
   AgentGoal,
@@ -142,6 +142,7 @@ export function parseCodexGoal(
     || timeUsedSeconds === null
     || !createdAt
     || !updatedAt
+    || createdAt > updatedAt
     || (hasTokenBudget && tokenBudget === null)
   ) return null;
   return {
@@ -166,6 +167,11 @@ function skillScope(value: unknown): AgentSkillScope | null {
     || value === "admin"
     ? value
     : null;
+}
+
+function isAbsoluteSkillPath(path: string): boolean {
+  return isAbsolute(path)
+    || (process.platform === "win32" && win32.isAbsolute(path));
 }
 
 function isNativeCodexConversation(
@@ -669,12 +675,12 @@ export class AgentWorkflowController {
           !name
           || !CODEX_SKILL_NAME_PATTERN.test(name)
           || !path
-          || !isAbsolute(path)
+          || !isAbsoluteSkillPath(path)
           || !description
           || !scope
         ) return null;
         const identityKey =
-          `${conversationId}\0${routeKey}\0codex\0${path}`;
+          `${conversationId}\0${routeKey}\0codex\0${normalizeIdentityPath(path)}`;
         const interfaceValue = objectValue(skill?.interface);
         return {
           identityKey,

@@ -174,6 +174,18 @@ export function createTurnInteractionCommandHandler(
             throw error;
           }
         }
+        let skills: Awaited<
+          ReturnType<AgentWorkflowController["resolveSkills"]>
+        >;
+        try {
+          skills = await dependencies.workflows.resolveSkills(
+            conversation.id,
+            command.payload.skillIds ?? [],
+          );
+        } catch (error) {
+          await relinquishAttachments();
+          throw error;
+        }
         let checkpointId: string | null = null;
         if (dependencies.enableProviders) {
           try {
@@ -213,10 +225,6 @@ export function createTurnInteractionCommandHandler(
         }
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
         try {
-          const skills = await dependencies.workflows.resolveSkills(
-            conversation.id,
-            command.payload.skillIds ?? [],
-          );
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
                 conversationId: conversation.id,

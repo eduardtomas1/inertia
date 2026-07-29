@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -201,7 +201,7 @@ setInterval(() => {}, 1000);
   it("lets an already-finishing bounded Git inspection close without termination", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-git-bounded-drain-"));
     temporaryDirectories.push(directory);
-    portableNodeExecutable(directory, "git");
+    const executable = portableNodeExecutable(directory, "git");
     writeNodeSubcommand(
       directory,
       "status",
@@ -222,6 +222,18 @@ setInterval(() => {}, 1000);
         truncated: true,
       });
       expect(terminateProcessTree).not.toHaveBeenCalled();
+      await waitFor("the bounded Git fixture executable to be released", async () => {
+        try {
+          await rename(executable, `${executable}.released`);
+          return true;
+        } catch (error) {
+          const code = error && typeof error === "object" && "code" in error
+            ? error.code
+            : undefined;
+          if (code === "EBUSY" || code === "EPERM") return false;
+          throw error;
+        }
+      });
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;

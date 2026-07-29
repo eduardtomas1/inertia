@@ -114,12 +114,21 @@ describe("agent workflow persistence", () => {
     expect(store.clearAgentGoal(
       conversation.id,
       "codex-native",
-      "2030-01-01T00:03:00.000Z",
+      "2030-01-01T00:03:00.800Z",
     )).toBe(true);
     expect(store.mergeNativeAgentGoal({
       ...current,
       objective: "Delayed objective",
       synchronizedAt: "2030-01-01T00:04:00.000Z",
+    })).toEqual({
+      goal: null,
+      changed: false,
+    });
+    expect(store.mergeNativeAgentGoal({
+      ...current,
+      objective: "Unconfirmed same-second objective",
+      updatedAt: "2030-01-01T00:03:00.000Z",
+      synchronizedAt: "2030-01-01T00:04:30.000Z",
     })).toEqual({
       goal: null,
       changed: false,

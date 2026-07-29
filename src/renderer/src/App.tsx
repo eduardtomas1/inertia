@@ -22,6 +22,7 @@ import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
 import {
   agentWorkflowRouteIdentity,
+  agentWorkflowTargetConversation,
   useAgentWorkflows,
 } from "./hooks/useAgentWorkflows";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
@@ -255,13 +256,6 @@ export default function App(): React.JSX.Element {
     streamingText,
     nativePlans,
   } = conversationProjection;
-  const agentWorkflows = useStableController(useAgentWorkflows({
-    conversationId: conversation?.id ?? null,
-    routeIdentity: agentWorkflowRouteIdentity(conversation, project),
-    status: connection.status,
-    request,
-    subscribe: connection.subscribe,
-  }));
   const authProvider = useMemo(
     () => connection.snapshot?.providers.find(({ id }) => id === authProviderId) ?? null,
     [authProviderId, connection.snapshot?.providers],
@@ -322,6 +316,17 @@ export default function App(): React.JSX.Element {
   const updateConversation = draftConversation.updateConversation;
   const clearDraftConversation = draftConversation.clear;
   const discardDraftConversation = draftConversation.discard;
+  const workflowConversation = agentWorkflowTargetConversation(
+    conversation,
+    draftConversation.conversation,
+  );
+  const agentWorkflows = useStableController(useAgentWorkflows({
+    conversationId: workflowConversation?.id ?? null,
+    routeIdentity: agentWorkflowRouteIdentity(workflowConversation, project),
+    status: connection.status,
+    request,
+    subscribe: connection.subscribe,
+  }));
   const multiSpawn = useMultiSpawn({
     snapshot: connection.snapshot,
     settings,

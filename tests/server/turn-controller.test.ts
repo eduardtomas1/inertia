@@ -608,6 +608,73 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
+  it("marks a delegated trace cancelled only after the provider acknowledges stop", async () => {
+    const runtime = await testRuntime({}, {
+      modelSelection: nativeModelSelection({
+        providerId: "claude",
+        modelId: "provider-default",
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Delegate cancellable work.",
+    });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: "task-deferred-stop",
+      providerAgentId: null,
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-deferred-stop",
+      providerRole: "researcher",
+      providerName: "Evidence",
+      status: "running",
+      description: "Wait for explicit acknowledgement.",
+      progress: null,
+      result: null,
+    });
+    const trace = runtime.store.conversationDetail(
+      runtime.conversationId,
+    )!.subagents[0]!;
+    let acknowledgeStop!: (accepted: boolean) => void;
+    const stopSubagent = vi.spyOn(runtime.provider, "stopSubagent")
+      .mockImplementation(async () =>
+        await new Promise<boolean>((resolve) => {
+          acknowledgeStop = resolve;
+        }));
+
+    const rejectedStop = runtime.controller.stopSubagent(
+      runtime.conversationId,
+      trace.id,
+    );
+    await flushPromises();
+    expect(runtime.store.subagentTrace(trace.id).status).toBe("running");
+    acknowledgeStop(false);
+    await expect(rejectedStop).resolves.toBe(false);
+    expect(runtime.store.subagentTrace(trace.id).status).toBe("running");
+
+    const acceptedStop = runtime.controller.stopSubagent(
+      runtime.conversationId,
+      trace.id,
+    );
+    await flushPromises();
+    expect(runtime.store.subagentTrace(trace.id).status).toBe("running");
+    acknowledgeStop(true);
+    await expect(acceptedStop).resolves.toBe(true);
+    expect(runtime.store.subagentTrace(trace.id)).toMatchObject({
+      status: "cancelled",
+      progress: "Stopped by the user.",
+    });
+    expect(stopSubagent).toHaveBeenCalledTimes(2);
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
   it("marks live delegated traces lost when an interrupted runtime reconnects", async () => {
     const runtime = await testRuntime();
     const queued = runtime.controller.queue({

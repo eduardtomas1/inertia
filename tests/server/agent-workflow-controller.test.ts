@@ -198,7 +198,7 @@ describe("AgentWorkflowController", () => {
     });
   });
 
-  it("rejects malformed required usage and nullable budget fields", () => {
+  it("rejects malformed usage, budget, and timestamp fields", () => {
     const valid = providerGoal();
     expect(parseCodexGoal(
       "conversation-1",
@@ -214,6 +214,11 @@ describe("AgentWorkflowController", () => {
       "conversation-1",
       "thread-1",
       { ...valid, tokenBudget: "unbounded" },
+    )).toBeNull();
+    expect(parseCodexGoal(
+      "conversation-1",
+      "thread-1",
+      { ...valid, createdAt: 1_800_000_011 },
     )).toBeNull();
     expect(parseCodexGoal(
       "conversation-1",
@@ -517,6 +522,56 @@ describe("AgentWorkflowController", () => {
       name: "review",
       path: skillPath,
     }]);
+  });
+
+  it("keeps Windows skill identities stable while preserving invocation paths", async () => {
+    const platform = vi.spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    try {
+      const firstPath =
+        "C:\\Workspace\\Project\\.codex\\skills\\review\\SKILL.md";
+      const secondPath =
+        "c:/workspace/project/.codex/skills/review/SKILL.md";
+      const entry = (path: string) => ({
+        data: [{
+          cwd: "/workspace/project",
+          skills: [{
+            name: "review",
+            path,
+            description: "Review this project.",
+            scope: "repo",
+            enabled: true,
+          }],
+          errors: [],
+        }],
+      });
+      controlRequest
+        .mockResolvedValueOnce(entry(firstPath))
+        .mockResolvedValueOnce(entry(secondPath))
+        .mockResolvedValueOnce(entry(secondPath));
+      const runtime = harness();
+
+      const [first] = await runtime.controller.listSkills(
+        "conversation-1",
+        false,
+      );
+      const [second] = await runtime.controller.listSkills(
+        "conversation-1",
+        true,
+      );
+
+      expect(second?.id).toBe(first?.id);
+      await expect(runtime.controller.resolveSkills(
+        "conversation-1",
+        [second!.id],
+      )).resolves.toEqual([{
+        source: "codex-native",
+        name: "review",
+        path: secondPath,
+      }]);
+    } finally {
+      platform.mockRestore();
+    }
   });
 
   it("does not advertise malformed Codex skill references", async () => {

@@ -44,6 +44,7 @@ function dependencies(options: {
   queue: ReturnType<typeof vi.fn>;
   relinquishAll: ReturnType<typeof vi.fn>;
   readiness?: ReturnType<typeof vi.fn>;
+  resolveSkills?: ReturnType<typeof vi.fn>;
 }): TurnInteractionCommandDependencies {
   const provider = {
     id: "codex",
@@ -94,7 +95,7 @@ function dependencies(options: {
       relinquishAll: options.relinquishAll,
     } as unknown as TurnInteractionCommandDependencies["attachmentResolver"],
     workflows: {
-      resolveSkills: vi.fn(() => []),
+      resolveSkills: options.resolveSkills ?? vi.fn(() => []),
     } as unknown as TurnInteractionCommandDependencies["workflows"],
     providerInfo: () => [provider],
     broadcastSnapshot: vi.fn(),
@@ -154,6 +155,59 @@ describe("message attachment ownership transfer", () => {
       attachments: [trustedAttachment],
     }));
     expect(relinquishAll).toHaveBeenCalledOnce();
+  });
+
+  it("rejects stale skills before attempting a reversal checkpoint", async () => {
+    const relinquishAll = vi.fn(async () => undefined);
+    const queue = vi.fn();
+    const resolveSkills = vi.fn(async () => {
+      throw new Error("Selected skill is no longer available.");
+    });
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll,
+      resolveSkills,
+    });
+    const command = messageCommand();
+    command.payload.skillIds = ["skill-1"];
+    const handler = createTurnInteractionCommandHandler(handlerDependencies);
+
+    await expect(handler({} as never, command)).rejects.toThrow(
+      "Selected skill is no longer available.",
+    );
+    expect(resolveSkills).toHaveBeenCalledWith(conversationId, ["skill-1"]);
+    expect(handlerDependencies.store.conversationPath).not.toHaveBeenCalled();
+    expect(queue).not.toHaveBeenCalled();
+    expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+  });
+
+  it("revalidates skills before checkpoint work and passes them to the turn", async () => {
+    const skill = {
+      source: "codex-native" as const,
+      name: "review",
+      path: "/workspace/project/.codex/skills/review/SKILL.md",
+    };
+    const resolveSkills = vi.fn(async () => [skill]);
+    const queue = vi.fn(() => ({
+      turn: { id: "44444444-4444-4444-8444-444444444444" },
+    }));
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+      resolveSkills,
+    });
+    const command = messageCommand();
+    command.payload.skillIds = ["skill-1"];
+    const handler = createTurnInteractionCommandHandler(handlerDependencies);
+
+    await expect(handler({} as never, command)).resolves.toBe("handled");
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+      skills: [skill],
+    }));
+    expect(resolveSkills.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(handlerDependencies.store.conversationPath)
+        .mock.invocationCallOrder[0]!,
+    );
   });
 
   it("does not release after an authoritative turn accepts ownership", async () => {

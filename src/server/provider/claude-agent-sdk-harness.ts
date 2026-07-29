@@ -47,6 +47,8 @@ const MAX_INPUT_QUESTIONS = 4;
 const MAX_INPUT_OPTIONS = 4;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
+const CLAUDE_STOP_TASK_TIMEOUT_MS = 2_000;
+const MIN_CLAUDE_STOP_TASK_TIMEOUT_MS = 25;
 
 export const CLAUDE_AGENT_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -70,6 +72,25 @@ type ClaudeQueryFactory = (params: { prompt: string | AsyncIterable<SDKUserMessa
 
 export interface ClaudeAgentSdkHarnessOptions {
   createQuery?: ClaudeQueryFactory;
+  /**
+   * May shorten, but never extend, the production delegated-task stop
+   * acknowledgement deadline. Primarily useful for deterministic tests.
+   */
+  stopTaskTimeoutMs?: number;
+}
+
+function claudeStopTaskTimeout(value: number | undefined): number {
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value < 1
+  ) {
+    return CLAUDE_STOP_TASK_TIMEOUT_MS;
+  }
+  return Math.max(
+    MIN_CLAUDE_STOP_TASK_TIMEOUT_MS,
+    Math.min(value, CLAUDE_STOP_TASK_TIMEOUT_MS),
+  );
 }
 
 function claudeModels(models: Awaited<ReturnType<Query["supportedModels"]>>): ProviderModel[] {
@@ -241,16 +262,27 @@ interface PendingInput {
 }
 
 export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOptions = {}): AgentHarness {
+  const stopTaskTimeoutMs = claudeStopTaskTimeout(
+    options.stopTaskTimeoutMs,
+  );
   return {
     id: "claude-agent-sdk",
     providerId: "claude",
     capabilities: CLAUDE_AGENT_SDK_CAPABILITIES,
     supports: (input) => input.providerId === "claude",
-    start: (startOptions) => startClaudeRun(startOptions, options.createQuery ?? claudeQuery),
+    start: (startOptions) => startClaudeRun(
+      startOptions,
+      options.createQuery ?? claudeQuery,
+      stopTaskTimeoutMs,
+    ),
   };
 }
 
-function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQueryFactory): AgentHarnessRun {
+function startClaudeRun(
+  options: AgentHarnessStartOptions,
+  createQuery: ClaudeQueryFactory,
+  stopTaskTimeoutMs: number,
+): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
     "claude",
@@ -639,11 +671,21 @@ function startClaudeRun(options: AgentHarnessStartOptions, createQuery: ClaudeQu
           || cancelRequested
           || !subagentTracker.isLiveTask(providerTaskId)
         ) return false;
+        let timer: NodeJS.Timeout | undefined;
         try {
-          await query.stopTask(providerTaskId);
-          return true;
-        } catch {
-          return false;
+          const deadline = new Promise<false>((resolve) => {
+            timer = setTimeout(() => resolve(false), stopTaskTimeoutMs);
+            timer.unref();
+          });
+          return await Promise.race([
+            query.stopTask(providerTaskId).then(
+              () => true as const,
+              () => false as const,
+            ),
+            deadline,
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
         }
       },
     },

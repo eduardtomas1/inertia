@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   agentWorkflowRouteIdentity,
+  agentWorkflowTargetConversation,
   useAgentWorkflows,
 } from "../../src/renderer/src/hooks/useAgentWorkflows";
 import type {
@@ -58,6 +59,74 @@ describe("useAgentWorkflows", () => {
       { ...route, worktreePath: "/workspace/worktrees/feature" },
       project,
     )).toContain("\0/workspace/worktrees/feature");
+  });
+
+  it("does not bind persisted workflows through a visible local draft", () => {
+    const persisted = { id: "conversation-1" } as Conversation;
+    const draft = { id: "draft-1" } as Conversation;
+
+    expect(agentWorkflowTargetConversation(persisted, null)).toBe(persisted);
+    expect(agentWorkflowTargetConversation(persisted, draft)).toBeNull();
+  });
+
+  it("hides and disables persisted workflows when a local draft becomes visible", async () => {
+    const availableSkill = {
+      id: "skill-1",
+      conversationId: "conversation-1",
+      name: "review",
+      description: "Review this project.",
+      shortDescription: null,
+      scope: "repo" as const,
+      enabled: true,
+      source: "codex-native" as const,
+    };
+    const request = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result",
+      requestId: "request-1",
+      result: {
+        kind: "agent.workflow",
+        workflow: {
+          ...workflow({
+            kind: "codex-native",
+            available: true,
+            label: "Codex native goal",
+          }),
+          skills: [availableSkill],
+        },
+      },
+    }));
+    const subscribe = vi.fn(() => () => undefined);
+    const hook = renderHook(
+      ({ enabled }: { enabled: boolean }) => useAgentWorkflows({
+        conversationId: "conversation-1",
+        routeIdentity: "codex-app-server\0thread-1",
+        status: "online",
+        enabled,
+        request,
+        subscribe,
+      }),
+      { initialProps: { enabled: true } },
+    );
+    await waitFor(() =>
+      expect(hook.result.current.state?.skills).toEqual([availableSkill]));
+    act(() => hook.result.current.toggleSkill(availableSkill));
+    expect(hook.result.current.selectedSkillIds).toEqual(["skill-1"]);
+    const requestCount = request.mock.calls.length;
+
+    act(() => hook.rerender({ enabled: false }));
+
+    expect(hook.result.current.state).toBeNull();
+    expect(hook.result.current.selectedSkillIds).toEqual([]);
+    await act(async () => {
+      await hook.result.current.setGoal({
+        source: "codex-native",
+        objective: "Must not target the old chat",
+        status: "active",
+      });
+      await hook.result.current.clearGoal("codex-native");
+      await hook.result.current.listSkills();
+    });
+    expect(request).toHaveBeenCalledTimes(requestCount);
   });
 
   it("reloads capability state when a provider session appears in place", async () => {

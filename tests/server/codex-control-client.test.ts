@@ -58,11 +58,13 @@ describe("Codex control client", () => {
     const fixture = fakeChild((_text) => {
       fixture.stdout.write("{malformed-json}\n");
     });
+    const clientOptions = options(fixture.child);
 
     await expect(withCodexControlClient(
-      options(fixture.child),
+      clientOptions,
       async () => "unreachable",
     )).rejects.toThrow("returned malformed JSON");
+    expect(clientOptions.terminateProcessTree).toHaveBeenCalledOnce();
   });
 
   it("fails immediately when stdout closes before initialization settles", async () => {
@@ -87,5 +89,107 @@ describe("Codex control client", () => {
       options(fixture.child),
       async () => "unreachable",
     )).rejects.toThrow("input stream failed");
+  });
+
+  it("completes a request and terminates the owned process exactly once", async () => {
+    const methods: string[] = [];
+    const fixture = fakeChild((text) => {
+      const message = JSON.parse(text) as {
+        id?: number;
+        method: string;
+      };
+      methods.push(message.method);
+      if (message.id === undefined) return;
+      fixture.stdout.write(`${JSON.stringify({
+        id: message.id,
+        result: message.method === "skills/list"
+          ? { data: [{ cwd: "/workspace", skills: [] }] }
+          : {},
+      })}\n`);
+    });
+    const clientOptions = options(fixture.child);
+
+    await expect(withCodexControlClient(
+      clientOptions,
+      async ({ request }) => await request("skills/list", {
+        cwds: ["/workspace"],
+      }),
+    )).resolves.toEqual({
+      data: [{ cwd: "/workspace", skills: [] }],
+    });
+    expect(methods).toEqual(["initialize", "initialized", "skills/list"]);
+    expect(clientOptions.terminateProcessTree).toHaveBeenCalledOnce();
+    expect(clientOptions.terminateProcessTree)
+      .toHaveBeenCalledWith(fixture.child, true);
+  });
+
+  it("bounds an unanswered request and still terminates exactly once", async () => {
+    vi.useFakeTimers();
+    try {
+      let markRequestSeen!: () => void;
+      const requestSeen = new Promise<void>((resolve) => {
+        markRequestSeen = resolve;
+      });
+      const fixture = fakeChild((text) => {
+        const message = JSON.parse(text) as {
+          id?: number;
+          method: string;
+        };
+        if (message.id === undefined) return;
+        if (message.method === "initialize") {
+          fixture.stdout.write(`${JSON.stringify({
+            id: message.id,
+            result: {},
+          })}\n`);
+        } else {
+          markRequestSeen();
+        }
+      });
+      const clientOptions = {
+        ...options(fixture.child),
+        timeoutMs: 500,
+      };
+      const running = withCodexControlClient(
+        clientOptions,
+        async ({ request }) => await request("thread/goal/get", {
+          threadId: "thread-1",
+        }),
+      );
+      const rejection = expect(running).rejects.toThrow(
+        "thread/goal/get timed out",
+      );
+
+      await requestSeen;
+      await vi.advanceTimersByTimeAsync(500);
+      await rejection;
+      expect(clientOptions.terminateProcessTree).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a successful operation when cleanup is unconfirmed", async () => {
+    const fixture = fakeChild((text) => {
+      const message = JSON.parse(text) as {
+        id?: number;
+        method: string;
+      };
+      if (message.id === undefined) return;
+      fixture.stdout.write(`${JSON.stringify({
+        id: message.id,
+        result: {},
+      })}\n`);
+    });
+    const terminateProcessTree = vi.fn(async () => false);
+
+    await expect(withCodexControlClient({
+      ...options(fixture.child),
+      processLabel: "Codex goal process tree",
+      terminateProcessTree,
+    }, async () => "completed")).rejects.toMatchObject({
+      code: "process-tree-termination-unconfirmed",
+      message: "Codex goal process tree could not be confirmed stopped.",
+    });
+    expect(terminateProcessTree).toHaveBeenCalledOnce();
   });
 });

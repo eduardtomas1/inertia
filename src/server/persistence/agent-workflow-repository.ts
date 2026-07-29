@@ -20,6 +20,14 @@ interface NativeAgentGoalTombstone {
 
 const MAX_NATIVE_GOAL_TOMBSTONES = 1_024;
 
+function nativeGoalRevision(timestamp: string): string {
+  const milliseconds = Date.parse(timestamp);
+  if (!Number.isFinite(milliseconds)) return timestamp;
+  return new Date(
+    Math.floor(milliseconds / 1_000) * 1_000,
+  ).toISOString();
+}
+
 export class AgentWorkflowRepository {
   private readonly nativeGoalTombstones =
     new Map<string, NativeAgentGoalTombstone>();
@@ -110,28 +118,32 @@ export class AgentWorkflowRepository {
     this.context.requireConversation(conversationId);
     if (source === "codex-native") {
       const existing = this.goal(conversationId, source);
+      const tombstoneRevision = tombstoneAt
+        ? nativeGoalRevision(tombstoneAt)
+        : undefined;
       if (existing?.providerSessionId) {
         this.rememberNativeGoalTombstone({
           conversationId,
           providerSessionId: existing.providerSessionId,
-          updatedAt: tombstoneAt && tombstoneAt > existing.updatedAt
-            ? tombstoneAt
+          updatedAt: tombstoneRevision
+            && tombstoneRevision > existing.updatedAt
+            ? tombstoneRevision
             : existing.updatedAt,
         });
-      } else if (tombstoneAt && providerSessionId) {
+      } else if (tombstoneRevision && providerSessionId) {
         this.rememberNativeGoalTombstone({
           conversationId,
           providerSessionId,
-          updatedAt: tombstoneAt,
+          updatedAt: tombstoneRevision,
         });
-      } else if (tombstoneAt) {
+      } else if (tombstoneRevision) {
         const previous = this.nativeGoalTombstones.get(conversationId);
         if (previous) {
           this.rememberNativeGoalTombstone({
             conversationId,
             providerSessionId: previous.providerSessionId,
-            updatedAt: tombstoneAt > previous.updatedAt
-              ? tombstoneAt
+            updatedAt: tombstoneRevision > previous.updatedAt
+              ? tombstoneRevision
               : previous.updatedAt,
           });
         }

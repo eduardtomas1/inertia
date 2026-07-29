@@ -66,6 +66,13 @@ export function agentWorkflowRouteIdentity(
   ].join("\0");
 }
 
+export function agentWorkflowTargetConversation(
+  persistedConversation: Conversation | null,
+  visibleDraft: Conversation | null,
+): Conversation | null {
+  return visibleDraft ? null : persistedConversation;
+}
+
 export function useAgentWorkflows({
   conversationId,
   routeIdentity,
@@ -254,10 +261,10 @@ export function useAgentWorkflows({
   );
 
   return useMemo(() => ({
-    state,
-    loading,
-    error,
-    selectedSkillIds,
+    state: activeConversationId ? state : null,
+    loading: activeConversationId ? loading : false,
+    error: activeConversationId ? error : null,
+    selectedSkillIds: activeConversationId ? selectedSkillIds : [],
     refresh: load,
     setGoal,
     clearGoal,
@@ -265,6 +272,7 @@ export function useAgentWorkflows({
     toggleSkill,
     clearSelectedSkills,
   }), [
+    activeConversationId,
     clearGoal,
     clearSelectedSkills,
     error,

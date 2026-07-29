@@ -73,7 +73,9 @@ function requestFor(
 async function perform(
   request: SecureFileRequest,
 ): ReturnType<typeof performSecureFileOperation> {
-  process.chdir(request.root);
+  const segments = request.path.split("/");
+  segments.pop();
+  process.chdir(join(request.root, ...segments));
   try {
     return await performSecureFileOperation(request);
   } finally {
@@ -113,7 +115,7 @@ describe("secure file worker", () => {
     },
   );
 
-  it("reads and atomically replaces an identity-verified nested file", async () => {
+  it("reads and replaces an identity-verified nested file through a pinned handle", async () => {
     const root = realpathSync(
       mkdtempSync(join(tmpdir(), "inertia-secure-file-")),
     );
@@ -136,6 +138,91 @@ describe("secure file worker", () => {
     expect(replace).toMatchObject({ ok: true, operation: "replace" });
     expect(readFileSync(join(root, "src", "example.ts"), "utf8"))
       .toBe("after\n");
+  });
+
+  it("does not overwrite a concurrent path replacement", async () => {
+    const root = realpathSync(
+      mkdtempSync(join(tmpdir(), "inertia-secure-file-cas-")),
+    );
+    roots.push(root);
+    const target = join(root, "example.ts");
+    const displaced = join(root, "displaced.ts");
+    writeFileSync(target, "before\n");
+    const request = requestFor(
+      root,
+      "example.ts",
+      "replace",
+      Buffer.from("edited\n"),
+    );
+    process.chdir(root);
+    try {
+      const result = await performSecureFileOperation(request, {
+        beforePinnedWrite: () => {
+          renameSync(target, displaced);
+          writeFileSync(target, "concurrent\n");
+        },
+      });
+      expect(result).toMatchObject({ ok: false, code: "conflict" });
+      expect(readFileSync(target, "utf8")).toBe("concurrent\n");
+      expect(readFileSync(displaced, "utf8")).toBe("before\n");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  it("restores original content when a pinned write is interrupted", async () => {
+    const root = realpathSync(
+      mkdtempSync(join(tmpdir(), "inertia-secure-file-restore-")),
+    );
+    roots.push(root);
+    const target = join(root, "example.ts");
+    writeFileSync(target, "before\n");
+    const request = requestFor(
+      root,
+      "example.ts",
+      "replace",
+      Buffer.from("replacement\n"),
+    );
+    process.chdir(root);
+    try {
+      const result = await performSecureFileOperation(request, {
+        writePinned: async (handle) => {
+          await handle.write(Buffer.from("partial"), 0, 7, 0);
+          throw new Error("Injected write failure.");
+        },
+      });
+      expect(result).toMatchObject({ ok: false, code: "unavailable" });
+      expect(readFileSync(target, "utf8")).toBe("before\n");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  it("does not modify a target that gains another hard link before save", async () => {
+    const root = realpathSync(
+      mkdtempSync(join(tmpdir(), "inertia-secure-file-link-race-")),
+    );
+    roots.push(root);
+    const target = join(root, "example.ts");
+    const alias = join(root, "alias.ts");
+    writeFileSync(target, "before\n");
+    const request = requestFor(
+      root,
+      "example.ts",
+      "replace",
+      Buffer.from("edited\n"),
+    );
+    process.chdir(root);
+    try {
+      const result = await performSecureFileOperation(request, {
+        beforePinnedWrite: () => linkSync(target, alias),
+      });
+      expect(result).toMatchObject({ ok: false, code: "unsafe" });
+      expect(readFileSync(target, "utf8")).toBe("before\n");
+      expect(readFileSync(alias, "utf8")).toBe("before\n");
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 
   it("supports empty replacement content without weakening the size bound", async () => {
@@ -218,6 +305,45 @@ describe("secure file worker", () => {
     });
     expect(readFileSync(join(outside, "example.ts"), "utf8")).toBe("outside\n");
   });
+
+  it.each(["read", "replace"] as const)(
+    "rejects %s when the pinned parent was moved and substituted",
+    async (operation) => {
+      const root = realpathSync(
+        mkdtempSync(join(tmpdir(), "inertia-secure-parent-race-")),
+      );
+      const outside = realpathSync(
+        mkdtempSync(join(tmpdir(), "inertia-secure-parent-outside-")),
+      );
+      const moved = join(outside, "moved-src");
+      roots.push(root, outside);
+      mkdirSync(join(root, "src"));
+      writeFileSync(join(root, "src", "example.ts"), "inside\n");
+      const request = requestFor(
+        root,
+        "src/example.ts",
+        operation,
+        Buffer.from("edited\n"),
+      );
+      process.chdir(join(root, "src"));
+      renameSync(join(root, "src"), moved);
+      symlinkSync(
+        moved,
+        join(root, "src"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      try {
+        expect(await performSecureFileOperation(request)).toMatchObject({
+          ok: false,
+          code: "unsafe",
+        });
+        expect(readFileSync(join(moved, "example.ts"), "utf8"))
+          .toBe("inside\n");
+      } finally {
+        process.chdir(originalCwd);
+      }
+    },
+  );
 
   it("rejects a replacement root before touching its target", async () => {
     const root = realpathSync(

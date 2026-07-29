@@ -44,8 +44,10 @@ function utility(fake: FakeUtilityProcess): UtilityProcess {
 describe("secure file broker", () => {
   it("delivers one strict request and accepts one validated result", async () => {
     const child = new FakeUtilityProcess();
+    let spawnedParent = "";
     const broker = new SecureFileBroker({
-      spawn: () => {
+      spawn: (parent) => {
+        spawnedParent = parent;
         queueMicrotask(() => child.emit("spawn"));
         return utility(child);
       },
@@ -58,7 +60,34 @@ describe("secure file broker", () => {
     });
 
     await expect(broker.perform(request)).resolves.toEqual(success);
+    expect(spawnedParent).toBe(resolve(request.root, "src"));
     expect(child.postMessage).toHaveBeenCalledWith(request);
+    broker.close();
+  });
+
+  it("spawns root-level file helpers in the project root", async () => {
+    const child = new FakeUtilityProcess();
+    let spawnedParent = "";
+    const broker = new SecureFileBroker({
+      spawn: (parent) => {
+        spawnedParent = parent;
+        queueMicrotask(() => child.emit("spawn"));
+        return utility(child);
+      },
+    });
+    child.postMessage.mockImplementation(() => {
+      queueMicrotask(() => {
+        child.emit("message", success);
+        child.emit("exit", 0);
+      });
+    });
+
+    await expect(broker.perform({
+      ...request,
+      path: "example.ts",
+      parentIdentities: [],
+    })).resolves.toEqual(success);
+    expect(spawnedParent).toBe(request.root);
     broker.close();
   });
 

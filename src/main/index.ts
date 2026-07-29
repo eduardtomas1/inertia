@@ -751,11 +751,11 @@ async function bootstrap(): Promise<void> {
       forget: (secretReference) => credentialVault!.forget(secretReference),
     },
     secureFileBroker: new SecureFileBroker({
-      spawn: (root) => utilityProcess.fork(
+      spawn: (parent) => utilityProcess.fork(
         fileURLToPath(new URL("./secure-file-worker.js", import.meta.url)),
         [],
         {
-          cwd: root,
+          cwd: parent,
           env: {},
           stdio: "ignore",
           serviceName: "Inertia Secure File",

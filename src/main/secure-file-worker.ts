@@ -1,11 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   lstat,
   open,
-  rename,
+  realpath,
   stat,
-  unlink,
 } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -107,7 +106,7 @@ async function writeComplete(
     if (bytesWritten < 1) {
       throw new SecureFileWorkerError(
         "unavailable",
-        "The staged file could not be written completely.",
+        "The selected file could not be written completely.",
       );
     }
     offset += bytesWritten;
@@ -115,17 +114,104 @@ async function writeComplete(
   await handle.truncate(content.length);
 }
 
-async function enterVerifiedParent(request: SecureFileRequest): Promise<string> {
-  const rootInfo = await stat(".", { bigint: true });
+interface SecureFileWorkerHooks {
+  beforePinnedWrite?(): Promise<void> | void;
+  writePinned?(
+    handle: Awaited<ReturnType<typeof open>>,
+    content: Buffer,
+  ): Promise<void>;
+}
+
+function comparablePath(value: string): string {
+  return process.platform === "win32"
+    ? value.normalize("NFC").toLocaleLowerCase("en-US")
+    : value;
+}
+
+async function verifiedDirectory(
+  path: string,
+  expectedIdentity: SecureFileIdentity,
+  message: string,
+): Promise<void> {
+  const info = await lstat(path, { bigint: true }).catch(() => null);
   if (
-    !rootInfo.isDirectory()
-    || !sameIdentity(identity(rootInfo), request.rootIdentity)
+    !info?.isDirectory()
+    || info.isSymbolicLink()
+    || !sameIdentity(identity(info), expectedIdentity)
   ) {
     throw new SecureFileWorkerError(
       "unsafe",
-      "The project root changed before the file operation started.",
+      message,
     );
   }
+}
+
+async function assertPinnedNamespace(
+  request: SecureFileRequest,
+  parentSegments: readonly string[],
+): Promise<void> {
+  await verifiedDirectory(
+    request.root,
+    request.rootIdentity,
+    "The project root changed before the file operation completed.",
+  );
+  let cursor = request.root;
+  for (const [index, segment] of parentSegments.entries()) {
+    cursor = resolve(cursor, segment);
+    await verifiedDirectory(
+      cursor,
+      request.parentIdentities[index]!,
+      "A parent folder is missing or no longer safe.",
+    );
+  }
+  const expectedParentIdentity = parentSegments.length > 0
+    ? request.parentIdentities[parentSegments.length - 1]!
+    : request.rootIdentity;
+  const pinned = await stat(".", { bigint: true }).catch(() => null);
+  if (
+    !pinned?.isDirectory()
+    || !sameIdentity(identity(pinned), expectedParentIdentity)
+  ) {
+    throw new SecureFileWorkerError(
+      "unsafe",
+      "The secure file helper is no longer attached to the selected parent folder.",
+    );
+  }
+  const [currentCanonical, expectedCanonical] = await Promise.all([
+    realpath(".").catch(() => null),
+    realpath(cursor).catch(() => null),
+  ]);
+  if (
+    !currentCanonical
+    || !expectedCanonical
+    || comparablePath(currentCanonical) !== comparablePath(expectedCanonical)
+  ) {
+    throw new SecureFileWorkerError(
+      "unsafe",
+      "The selected parent folder moved outside the project.",
+    );
+  }
+  // A rename or reparse-point substitution between the identity and canonical
+  // checks must also fail closed.
+  await verifiedDirectory(
+    request.root,
+    request.rootIdentity,
+    "The project root changed before the file operation completed.",
+  );
+  cursor = request.root;
+  for (const [index, segment] of parentSegments.entries()) {
+    cursor = resolve(cursor, segment);
+    await verifiedDirectory(
+      cursor,
+      request.parentIdentities[index]!,
+      "A parent folder is missing or no longer safe.",
+    );
+  }
+}
+
+async function enterVerifiedParent(
+  request: SecureFileRequest,
+): Promise<{ basename: string; parentSegments: string[] }> {
   const segments = secureFilePathSegments(request.path);
   if (!segments) {
     throw new SecureFileWorkerError(
@@ -140,36 +226,15 @@ async function enterVerifiedParent(request: SecureFileRequest): Promise<string> 
       "The selected file path is invalid.",
     );
   }
-  for (const [index, segment] of segments.entries()) {
-    const before = await lstat(segment, { bigint: true }).catch(() => null);
-    if (!before?.isDirectory() || before.isSymbolicLink()) {
-      throw new SecureFileWorkerError(
-        before ? "unsafe" : "not-found",
-        "A parent folder is missing or no longer safe.",
-      );
-    }
-    process.chdir(segment);
-    const entered = await stat(".", { bigint: true });
-    if (
-      !entered.isDirectory()
-      || !sameIdentity(
-        identity(entered),
-        request.parentIdentities[index]!,
-      )
-    ) {
-      throw new SecureFileWorkerError(
-        "unsafe",
-        "A parent folder changed while it was being opened.",
-      );
-    }
-  }
-  return basename;
+  await assertPinnedNamespace(request, segments);
+  return { basename, parentSegments: segments };
 }
 
 async function openVerifiedFile(
   basename: string,
   maxBytes: number,
   expectedIdentity?: SecureFileIdentity,
+  writable = false,
 ): Promise<{
   handle: Awaited<ReturnType<typeof open>>;
   content: Buffer;
@@ -194,7 +259,8 @@ async function openVerifiedFile(
   }
   const handle = await open(
     basename,
-    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+    (writable ? fsConstants.O_RDWR : fsConstants.O_RDONLY)
+      | (fsConstants.O_NOFOLLOW ?? 0),
   );
   try {
     const openedIdentity = await handle.stat({ bigint: true });
@@ -219,51 +285,18 @@ async function openVerifiedFile(
   }
 }
 
-function assertAuthorizedNamespace(
-  request: SecureFileRequest,
-  parentSegments: readonly string[],
-): void {
-  const expected = resolve(request.root, ...parentSegments);
-  let current: string;
-  try {
-    current = resolve(process.cwd());
-  } catch {
-    throw new SecureFileWorkerError(
-      "unsafe",
-      "The selected parent folder is no longer attached to the project.",
-    );
-  }
-  const comparable = (value: string): string => (
-    process.platform === "win32" ? value.toLocaleLowerCase("en-US") : value
-  );
-  if (comparable(current) !== comparable(expected)) {
-    throw new SecureFileWorkerError(
-      "unsafe",
-      "The selected parent folder moved outside the project.",
-    );
-  }
-}
-
-async function syncCurrentDirectory(): Promise<void> {
-  if (process.platform === "win32") return;
-  const directory = await open(".", fsConstants.O_RDONLY);
-  try {
-    await directory.sync();
-  } finally {
-    await directory.close();
-  }
-}
-
 async function replace(
   request: Extract<SecureFileRequest, { operation: "replace" }>,
   basename: string,
+  parentSegments: readonly string[],
+  hooks: SecureFileWorkerHooks,
 ): Promise<SecureFileResult> {
   const content = Buffer.from(request.contentBase64, "base64");
-  const parentSegments = secureFilePathSegments(request.path)!.slice(0, -1);
   const initial = await openVerifiedFile(
     basename,
     request.maxBytes,
     request.targetIdentity,
+    true,
   );
   try {
     if (initial.metadata.digest !== request.expectedDigest) {
@@ -284,32 +317,7 @@ async function replace(
         "Files with multiple hard links cannot be replaced safely.",
       );
     }
-  } finally {
-    await initial.handle.close();
-  }
-
-  const temporary = `.inertia-save-${randomUUID()}.tmp`;
-  let staged = false;
-  try {
-    const stage = await open(
-      temporary,
-      fsConstants.O_CREAT
-        | fsConstants.O_EXCL
-        | fsConstants.O_WRONLY
-        | (fsConstants.O_NOFOLLOW ?? 0),
-      0o600,
-    );
-    staged = true;
-    try {
-      await writeComplete(stage, content);
-      if (process.platform !== "win32") {
-        await stage.chmod(request.mode & 0o777);
-      }
-      await stage.sync();
-    } finally {
-      await stage.close();
-    }
-
+    await assertPinnedNamespace(request, parentSegments);
     const current = await openVerifiedFile(
       basename,
       request.maxBytes,
@@ -319,13 +327,13 @@ async function replace(
       if (current.metadata.digest !== request.expectedDigest) {
         throw new SecureFileWorkerError(
           "conflict",
-          "The selected file changed while the replacement was staged.",
+          "The selected file changed before it was saved.",
         );
       }
       if (current.metadata.mode !== request.expectedMode) {
         throw new SecureFileWorkerError(
           "conflict",
-          "The selected file permissions changed while the replacement was staged.",
+          "The selected file permissions changed before it was saved.",
         );
       }
       if (current.linkCount !== 1) {
@@ -337,17 +345,94 @@ async function replace(
     } finally {
       await current.handle.close();
     }
-
-    assertAuthorizedNamespace(request, parentSegments);
-    await rename(temporary, basename);
-    staged = false;
-    await syncCurrentDirectory();
-    const saved = await openVerifiedFile(basename, request.maxBytes);
+    await hooks.beforePinnedWrite?.();
+    await assertPinnedNamespace(request, parentSegments);
+    const finalBinding = await openVerifiedFile(
+      basename,
+      request.maxBytes,
+      request.targetIdentity,
+    );
+    try {
+      if (
+        finalBinding.metadata.digest !== request.expectedDigest
+        || finalBinding.metadata.mode !== request.expectedMode
+      ) {
+        throw new SecureFileWorkerError(
+          "conflict",
+          "The selected file changed immediately before it was saved.",
+        );
+      }
+      if (finalBinding.linkCount !== 1) {
+        throw new SecureFileWorkerError(
+          "unsafe",
+          "Files with multiple hard links cannot be replaced safely.",
+        );
+      }
+    } finally {
+      await finalBinding.handle.close();
+    }
+    const pinnedIdentity = await initial.handle.stat({ bigint: true });
+    if (
+      !pinnedIdentity.isFile()
+      || !sameIdentity(identity(pinnedIdentity), request.targetIdentity)
+      || Number(pinnedIdentity.nlink) !== 1
+    ) {
+      throw new SecureFileWorkerError(
+        "conflict",
+        "The selected file binding changed immediately before it was saved.",
+      );
+    }
+    const immediatelyBeforeWrite = await readHandle(
+      initial.handle,
+      request.maxBytes,
+    );
+    if (
+      immediatelyBeforeWrite.metadata.digest !== request.expectedDigest
+      || immediatelyBeforeWrite.metadata.mode !== request.expectedMode
+    ) {
+      throw new SecureFileWorkerError(
+        "conflict",
+        "The selected file changed immediately before it was saved.",
+      );
+    }
+    try {
+      await (hooks.writePinned ?? writeComplete)(initial.handle, content);
+      if (process.platform !== "win32") {
+        await initial.handle.chmod(request.mode & 0o777);
+      }
+      await initial.handle.sync();
+    } catch (error) {
+      try {
+        await writeComplete(initial.handle, initial.content);
+        if (process.platform !== "win32") {
+          await initial.handle.chmod(request.expectedMode & 0o777);
+        }
+        await initial.handle.sync();
+      } catch {
+        throw new SecureFileWorkerError(
+          "unavailable",
+          "The interrupted save could not restore the original file.",
+        );
+      }
+      throw error;
+    }
+    await assertPinnedNamespace(request, parentSegments);
+    const saved = await openVerifiedFile(
+      basename,
+      request.maxBytes,
+      request.targetIdentity,
+    );
     try {
       if (saved.metadata.digest !== digest(content)) {
         throw new SecureFileWorkerError(
           "conflict",
           "The replacement file could not be verified.",
+        );
+      }
+      if (saved.linkCount !== 1) {
+        throw new SecureFileWorkerError(
+          "unsafe",
+          "The saved file unexpectedly has multiple hard links.",
         );
       }
       return {
@@ -359,12 +444,13 @@ async function replace(
       await saved.handle.close();
     }
   } finally {
-    if (staged) await unlink(temporary).catch(() => undefined);
+    await initial.handle.close();
   }
 }
 
 export async function performSecureFileOperation(
   value: unknown,
+  hooks: SecureFileWorkerHooks = {},
 ): Promise<SecureFileResult> {
   const request = parseSecureFileRequest(value);
   if (!request) {
@@ -375,9 +461,9 @@ export async function performSecureFileOperation(
     };
   }
   try {
-    const basename = await enterVerifiedParent(request);
+    const { basename, parentSegments } = await enterVerifiedParent(request);
     if (request.operation === "replace") {
-      return await replace(request, basename);
+      return await replace(request, basename, parentSegments, hooks);
     }
     const opened = await openVerifiedFile(
       basename,
@@ -385,6 +471,7 @@ export async function performSecureFileOperation(
       request.targetIdentity,
     );
     try {
+      await assertPinnedNamespace(request, parentSegments);
       return {
         ok: true,
         operation: "read",

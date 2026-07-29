@@ -1,7 +1,9 @@
 import type { UtilityProcess } from "electron";
+import { resolve } from "node:path";
 
 import {
   parseSecureFileResult,
+  secureFilePathSegments,
   type SecureFileRequest,
   type SecureFileResult,
 } from "../node/secure-file-protocol.js";
@@ -18,7 +20,7 @@ interface SlotWaiter {
 }
 
 export interface SecureFileBrokerOptions {
-  spawn(root: string): UtilityProcess;
+  spawn(parent: string): UtilityProcess;
   timeoutMs?: number;
   killGraceMs?: number;
 }
@@ -129,7 +131,14 @@ export class SecureFileBroker {
   ): Promise<{ result: SecureFileResult; exitConfirmed: boolean }> {
     let child: UtilityProcess;
     try {
-      child = this.options.spawn(request.root);
+      const segments = secureFilePathSegments(request.path);
+      if (!segments) {
+        throw new Error("Invalid secure file path.");
+      }
+      child = this.options.spawn(resolve(
+        request.root,
+        ...segments.slice(0, -1),
+      ));
     } catch {
       return Promise.resolve({
         result: {

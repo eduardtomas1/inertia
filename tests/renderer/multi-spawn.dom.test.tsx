@@ -523,9 +523,16 @@ describe("multi-spawn", () => {
 
   it("restores focus to the launch trigger when the dialog closes", async () => {
     const trigger = document.createElement("button");
+    const closeMobileSidebar = vi.fn();
+    const mobileSidebarEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") closeMobileSidebar();
+    };
     trigger.textContent = "Launch two chats";
     document.body.append(trigger);
     trigger.focus();
+    // The mobile sidebar registers its bubbling listener before the dialog
+    // opens. The dialog must still own Escape and preserve its trigger.
+    document.addEventListener("keydown", mobileSidebarEscape);
     let view!: ReturnType<typeof render>;
     const renderDialog = (open: boolean): React.JSX.Element => (
       <MultiSpawnDialog
@@ -547,6 +554,8 @@ describe("multi-spawn", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     await waitFor(() => expect(trigger).toHaveFocus());
+    expect(closeMobileSidebar).not.toHaveBeenCalled();
+    document.removeEventListener("keydown", mobileSidebarEscape);
     trigger.remove();
   });
 

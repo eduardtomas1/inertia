@@ -351,9 +351,12 @@ export function MultiSpawnDialog({
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !submitting) {
+      if (event.key === "Escape") {
+        // Own Escape before an underlying mobile sidebar can dismiss itself
+        // and unmount the trigger that should receive restored focus.
+        event.stopImmediatePropagation();
         event.preventDefault();
-        onClose();
+        if (!submitting) onClose();
         return;
       }
       if (event.key !== "Tab" || !dialogRef.current) return;
@@ -369,8 +372,8 @@ export function MultiSpawnDialog({
         first.focus();
       }
     };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, [onClose, open, submitting]);
 
   if (!open || !snapshot || !draft) return null;

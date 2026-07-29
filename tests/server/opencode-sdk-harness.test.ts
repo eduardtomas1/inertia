@@ -437,7 +437,7 @@ server.listen(port, "127.0.0.1", () => {
     );
 
     await expect(readOpenCodeSdkModels(command, process.env, root, {
-      healthTimeoutMs: 250,
+      healthTimeoutMs: stage === "provider" ? 2_000 : 250,
       providerTimeoutMs: 250,
     })).rejects.toThrow(message);
 

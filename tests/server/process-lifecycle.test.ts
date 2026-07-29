@@ -179,11 +179,11 @@ describe("provider process-tree termination", () => {
       return result;
     });
 
+    child.exitCode = 1;
     taskkill.emit("close", 0);
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(settled).toBe(false);
 
-    child.exitCode = 1;
     child.emit("close", 1);
     await expect(termination).resolves.toBe(true);
   });

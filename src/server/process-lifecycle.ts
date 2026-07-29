@@ -108,26 +108,43 @@ function boundedWaitMs(value: number | undefined): number {
   return Math.max(1, Math.min(Math.trunc(value), 30_000));
 }
 
+function observeDirectChildClose(
+  child: ChildProcess,
+): (waitMs: number) => Promise<boolean> {
+  // Preserve the settled-child fast path for callers that enter after exit.
+  // Live children register before termination so an `exit` event cannot be
+  // mistaken for the later `close` event that releases stdio resources.
+  let closed = child.exitCode !== null || child.signalCode !== null;
+  let finishWait: ((closed: boolean) => void) | undefined;
+  const onClose = (): void => {
+    closed = true;
+    finishWait?.(true);
+  };
+  if (!closed) child.once("close", onClose);
+
+  return (waitMs) => {
+    if (closed) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (didClose: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        finishWait = undefined;
+        child.off("close", onClose);
+        resolve(didClose);
+      };
+      finishWait = finish;
+      const timer = setTimeout(() => finish(false), waitMs);
+    });
+  };
+}
+
 function waitForDirectChildExit(
   child: ChildProcess,
   waitMs: number,
 ): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve(true);
-  }
-  return new Promise<boolean>((resolve) => {
-    let settled = false;
-    const finish = (exited: boolean): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      child.off("close", onClose);
-      resolve(exited);
-    };
-    const onClose = (): void => finish(true);
-    const timer = setTimeout(() => finish(false), waitMs);
-    child.once("close", onClose);
-  });
+  return observeDirectChildClose(child)(waitMs);
 }
 
 function waitForPosixProcessGroupExit(
@@ -251,6 +268,7 @@ export async function terminateProcessTreeAndWait(
   const waitMs = boundedWaitMs(dependencies.waitMs);
 
   if (platform === "win32") {
+    const waitForObservedDirectChildClose = observeDirectChildClose(child);
     const treeTerminated = await terminateWindowsProcessTree(
       pid,
       force,
@@ -262,10 +280,10 @@ export async function terminateProcessTreeAndWait(
       // Windows can keep the direct child's executable image locked until the
       // ChildProcess has emitted close. Do not let callers release temporary
       // executables or other owned resources before that handle is closed.
-      return await waitForDirectChildExit(child, waitMs);
+      return await waitForObservedDirectChildClose(waitMs);
     }
     killDirectChild(child, force);
-    return await waitForDirectChildExit(child, waitMs);
+    return await waitForObservedDirectChildClose(waitMs);
   }
 
   if (force) {

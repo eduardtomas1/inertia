@@ -139,6 +139,10 @@ class ControlledProvider implements TurnProviderRuntime {
     return true;
   }
 
+  async stopOwned(): Promise<"settled"> {
+    return "settled";
+  }
+
   isRunning(): boolean {
     return this.input !== null;
   }

@@ -74,6 +74,7 @@ export class TurnController {
   private readonly providerEvents: TurnProviderEventProjector;
   private readonly settlementTasks = new Set<Promise<unknown>>();
   private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
+  private readonly providerCleanupBarriers = new Map<string, Promise<void>>();
   private closing = false;
 
   constructor(
@@ -280,6 +281,22 @@ export class TurnController {
       this.settle(active, "failed", "turn-timeout", "The agent turn timed out.");
     }, this.turnTimeoutMs);
 
+    const priorProviderCleanup = this.providerCleanupBarriers.get(
+      active.conversation.id,
+    );
+    if (priorProviderCleanup) {
+      this.track(priorProviderCleanup
+        .catch(() => undefined)
+        .then(() => {
+          this.captureBeforeAndStartProvider(active);
+        }));
+      return true;
+    }
+    return this.captureBeforeAndStartProvider(active);
+  }
+
+  private captureBeforeAndStartProvider(active: ActiveTurn): boolean {
+    if (active.settled || this.closing) return false;
     const preCapture = this.artifacts.captureBefore(active);
     if (preCapture) {
       active.gitBeforeCapture = preCapture;
@@ -569,6 +586,7 @@ export class TurnController {
     message?: string,
     failure?: ProviderRunFailure,
   ): boolean {
+    const wasSettled = active.settled;
     const settled = this.settlement.settle(
       active,
       status,
@@ -576,10 +594,41 @@ export class TurnController {
       message,
       failure,
     );
+    if (wasSettled) return settled;
     if (!active.providerRunStarted) {
       this.track(this.releaseTurnAttachments(active));
+    } else if (this.requiresOwnedProviderStop(cause)) {
+      this.stopOwnedProviderAndRelease(active);
     }
     return settled;
+  }
+
+  private requiresOwnedProviderStop(cause: TurnTerminalCause): boolean {
+    return cause !== "provider-completed"
+      && cause !== "provider-error"
+      && cause !== "provider-process-exit"
+      && cause !== "provider-process-crash";
+  }
+
+  private stopOwnedProviderAndRelease(active: ActiveTurn): void {
+    const conversationId = active.conversation.id;
+    const task = (async () => {
+      try {
+        await this.providers.stopOwned(conversationId, {
+          runId: active.turn.runId,
+          turnId: active.turn.id,
+        });
+      } finally {
+        await this.releaseTurnAttachments(active);
+      }
+    })();
+    const barrier = task.finally(() => {
+      if (this.providerCleanupBarriers.get(conversationId) === barrier) {
+        this.providerCleanupBarriers.delete(conversationId);
+      }
+    });
+    this.providerCleanupBarriers.set(conversationId, barrier);
+    this.track(barrier);
   }
 
   private async releaseTurnAttachments(active: ActiveTurn): Promise<void> {

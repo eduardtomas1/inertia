@@ -73,6 +73,13 @@ class FakeProvider implements TurnProviderRuntime {
   stopSubagentSupported = true;
   readonly steerCalls: string[] = [];
   readonly stoppedSubagentIds: string[] = [];
+  readonly stopOwnedCalls: Array<{
+    conversationId: string;
+    identity: { runId: string; turnId: string | null };
+  }> = [];
+  runCount = 0;
+  private stopOwnedGate: Promise<"force-detached"> | null = null;
+  private resolveStopOwnedGate: (() => void) | null = null;
   private resolveResult: ((result: ProviderRunResult) => void) | null = null;
   private rejectResult: ((error: unknown) => void) | null = null;
 
@@ -83,6 +90,7 @@ class FakeProvider implements TurnProviderRuntime {
   }
 
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks): Promise<ProviderRunResult> {
+    this.runCount += 1;
     this.input = input;
     this.callbacks = callbacks;
     return new Promise((resolve, reject) => {
@@ -116,6 +124,26 @@ class FakeProvider implements TurnProviderRuntime {
   cancel(): boolean {
     this.cancelCount += 1;
     return true;
+  }
+
+  stopOwned(
+    conversationId: string,
+    identity: { runId: string; turnId: string | null },
+  ): Promise<"settled" | "force-detached"> {
+    this.stopOwnedCalls.push({ conversationId, identity });
+    return this.stopOwnedGate ?? Promise.resolve("settled");
+  }
+
+  deferOwnedStop(): void {
+    this.stopOwnedGate = new Promise<"force-detached">((resolve) => {
+      this.resolveStopOwnedGate = () => resolve("force-detached");
+    });
+  }
+
+  resolveOwnedStop(): void {
+    this.resolveStopOwnedGate?.();
+    this.resolveStopOwnedGate = null;
+    this.stopOwnedGate = null;
   }
 
   isRunning(): boolean {
@@ -833,7 +861,7 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
-  it("retains submitted attachments until the provider settles, then releases each turn once", async () => {
+  it("retains submitted attachments until provider settlement or bounded cancellation cleanup", async () => {
     const runtime = await testRuntime();
     const completedAttachment = await testAttachment(
       runtime,
@@ -896,6 +924,7 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.attachmentReleases).toEqual([
       [completedAttachment.id],
       [failedAttachment.id],
+      [cancelledAttachment.id],
     ]);
     expect(runtime.store.agentTurn(cancelled.turn.id)).toMatchObject({
       status: "cancelled",
@@ -913,7 +942,7 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
-  it("keeps an active attachment until the provider settles after runtime disposal", async () => {
+  it("releases an active attachment after bounded provider cleanup during runtime disposal", async () => {
     const runtime = await testRuntime();
     const attachment = await testAttachment(
       runtime,
@@ -930,7 +959,7 @@ describe("TurnController authoritative lifecycle", () => {
 
     await runtime.controller.dispose("runtime-crash");
 
-    expect(runtime.attachmentReleases).toEqual([]);
+    expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
     expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
       status: "interrupted",
       terminalReason: "runtime-crash",
@@ -941,6 +970,94 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
     runtime.store.close();
   });
+
+  it.each(["cancel", "timeout"] as const)(
+    "settles %s immediately, bounds provider cleanup, and starts a queued retry only after detach",
+    async (scenario) => {
+      const runtime = await testRuntime();
+      runtime.provider.deferOwnedStop();
+      const attachment = await testAttachment(
+        runtime,
+        scenario === "cancel"
+          ? "10101010-1010-4010-8010-101010101010"
+          : "20202020-2020-4020-8020-202020202020",
+        `${scenario}-detach.png`,
+      );
+      const first = runtime.controller.queue({
+        conversationId: runtime.conversationId,
+        content: `First ${scenario} turn.`,
+        attachments: [attachment],
+      });
+      runtime.controller.start(first.turn.id);
+      const firstIdentity = identity(runtime);
+      const firstCallbacks = runtime.provider.callbacks;
+
+      if (scenario === "cancel") {
+        expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
+      } else {
+        runtime.scheduler.runAll();
+      }
+
+      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
+        status: scenario === "cancel" ? "cancelled" : "failed",
+        terminalReason: scenario === "cancel" ? "user-cancelled" : "turn-timeout",
+      });
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+      expect(runtime.attachmentReleases).toEqual([]);
+      expect(runtime.provider.stopOwnedCalls).toEqual([{
+        conversationId: runtime.conversationId,
+        identity: {
+          runId: first.turn.runId,
+          turnId: first.turn.id,
+        },
+      }]);
+
+      const retry = runtime.controller.queue({
+        conversationId: runtime.conversationId,
+        content: `Retry after ${scenario}.`,
+      });
+      expect(runtime.controller.start(retry.turn.id)).toBe(true);
+      expect(runtime.provider.runCount).toBe(1);
+
+      firstCallbacks?.onEvent?.({
+        ...firstIdentity,
+        type: "text",
+        text: "late before detach",
+      });
+      expect(runtime.store.conversationDetail(runtime.conversationId)?.messages)
+        .not.toContainEqual(expect.objectContaining({
+          turnId: first.turn.id,
+          content: expect.stringContaining("late"),
+        }));
+
+      runtime.provider.resolveOwnedStop();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(runtime.provider.runCount).toBe(2);
+      expect(runtime.provider.input?.turnId).toBe(retry.turn.id);
+      expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+
+      firstCallbacks?.onEvent?.({
+        ...firstIdentity,
+        type: "text",
+        text: "late after detach",
+      });
+      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
+        status: scenario === "cancel" ? "cancelled" : "failed",
+        terminalReason: scenario === "cancel" ? "user-cancelled" : "turn-timeout",
+      });
+      expect(runtime.store.conversationDetail(runtime.conversationId)?.messages)
+        .not.toContainEqual(expect.objectContaining({
+          turnId: first.turn.id,
+          content: expect.stringContaining("late"),
+        }));
+
+      runtime.provider.resolve({ status: "completed", text: "Retry completed." });
+      await flushPromises();
+      expect(runtime.store.agentTurn(retry.turn.id).status).toBe("completed");
+      runtime.store.close();
+    },
+  );
 
   it("releases a queued attachment when accepted work fails before provider start", async () => {
     const runtime = await testRuntime();

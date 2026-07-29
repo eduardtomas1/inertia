@@ -306,7 +306,9 @@ describe("secure file worker", () => {
     expect(readFileSync(join(outside, "example.ts"), "utf8")).toBe("outside\n");
   });
 
-  it.each(["read", "replace"] as const)(
+  it.skipIf(process.platform === "win32").each(
+    ["read", "replace"] as const,
+  )(
     "rejects %s when the pinned parent was moved and substituted",
     async (operation) => {
       const root = realpathSync(

@@ -504,6 +504,17 @@ textarea {
   display: none;
 }
 
+.new-chat-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.new-chat-actions .new-chat-button {
+  margin-bottom: 0;
+}
+
 .new-chat-button {
   display: flex;
   width: 100%;
@@ -530,6 +541,43 @@ textarea {
 
 .new-chat-button:not(:disabled):active {
   transform: scale(0.985);
+}
+
+.multi-spawn-button {
+  width: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-strong));
+  border-radius: 10px;
+  color: color-mix(in srgb, var(--accent-strong) 86%, var(--text));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--accent-soft) 42%, var(--surface)),
+      color-mix(in srgb, var(--surface) 92%, transparent)
+    );
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--text) 4%, transparent),
+    var(--glass-inset);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+
+.multi-spawn-button:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  color: var(--accent-strong);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--accent-soft) 62%, var(--surface)),
+      color-mix(in srgb, var(--surface-strong) 92%, transparent)
+    );
+}
+
+.multi-spawn-button:not(:disabled):active {
+  transform: scale(0.96);
 }
 
 .sidebar-destination {
@@ -5026,6 +5074,480 @@ textarea {
   background: rgba(9, 9, 12, 0.48);
   -webkit-backdrop-filter: blur(5px);
   backdrop-filter: blur(5px);
+}
+
+.multi-spawn-backdrop {
+  overflow-y: auto;
+  background:
+    radial-gradient(
+      circle at 50% 14%,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 38%
+    ),
+    rgba(9, 9, 12, 0.54);
+}
+
+.multi-spawn-dialog {
+  position: relative;
+  display: grid;
+  width: min(940px, 100%);
+  grid-template-rows: auto auto auto auto auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-strong));
+  border-radius: 20px;
+  color: var(--text);
+  background:
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--surface-strong) 98%, var(--accent-soft)),
+      var(--surface-strong) 44%
+    );
+  box-shadow:
+    0 28px 90px color-mix(in srgb, var(--shadow) 92%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
+  animation: quiet-ledger-document-reveal var(--motion-base) var(--motion-ease) both;
+}
+
+.multi-spawn-dialog-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 17px 18px 15px;
+  border-bottom: 1px solid var(--border);
+}
+
+.multi-spawn-dialog-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  border-radius: 11px;
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent-soft) 56%, var(--surface));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 7%, transparent);
+}
+
+.multi-spawn-dialog-header h2 {
+  margin: 0 0 3px;
+  font-size: max(calc(var(--ui-font-main) + 2px), 14px);
+  font-weight: 680;
+  letter-spacing: -0.025em;
+}
+
+.multi-spawn-dialog-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: max(var(--ui-font-secondary), 10px);
+  line-height: 1.4;
+}
+
+.multi-spawn-prompt-zone {
+  display: grid;
+  gap: 7px;
+  padding: 15px 18px 12px;
+}
+
+.multi-spawn-prompt-zone > label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-soft);
+  font-size: max(var(--ui-font-secondary), 10px);
+  font-weight: 650;
+}
+
+.multi-spawn-prompt-zone > label > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.multi-spawn-prompt-zone > label small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  font-weight: 500;
+}
+
+.multi-spawn-prompt-zone textarea {
+  width: 100%;
+  min-height: 92px;
+  max-height: 190px;
+  resize: vertical;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  outline: none;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  font-family: inherit;
+  font-size: max(calc(var(--ui-font-main) - 1px), 12px);
+  line-height: 1.55;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.multi-spawn-prompt-zone textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-soft) 34%, transparent);
+}
+
+.multi-spawn-sides {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+  padding: 4px 18px 14px;
+}
+
+.multi-spawn-pair-arrow {
+  display: grid;
+  width: 24px;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.multi-spawn-side {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+}
+
+.multi-spawn-side > header {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.multi-spawn-side > header > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.multi-spawn-side > header strong,
+.multi-spawn-side > header small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multi-spawn-side > header strong {
+  font-size: max(var(--ui-font-main), 11px);
+}
+
+.multi-spawn-side > header small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.multi-spawn-side-number {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-soft);
+  background: var(--surface-muted);
+  font-size: var(--ui-font-micro);
+  font-weight: 750;
+}
+
+.multi-spawn-readiness {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  font-size: var(--ui-font-micro);
+  font-weight: 650;
+}
+
+.multi-spawn-readiness.is-ready {
+  color: var(--success-state);
+  background: color-mix(in srgb, var(--success-state) 9%, transparent);
+}
+
+.multi-spawn-field-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1.25fr) minmax(100px, 0.75fr);
+  gap: 8px;
+}
+
+.multi-spawn-field-grid.is-compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.multi-spawn-field {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  font-weight: 650;
+}
+
+.multi-spawn-field > span,
+.multi-spawn-control-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.multi-spawn-field input,
+.multi-spawn-field select {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  color: var(--text);
+  background: var(--surface-strong);
+  font: inherit;
+  font-size: max(var(--ui-font-secondary), 10px);
+  font-weight: 520;
+}
+
+.multi-spawn-field input:focus,
+.multi-spawn-field select:focus {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-soft) 30%, transparent);
+}
+
+.multi-spawn-route {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  font-weight: 650;
+}
+
+.multi-spawn-route .model-chooser-anchor {
+  width: 100%;
+  max-width: none;
+}
+
+.multi-spawn-route .selected-model-chip {
+  width: 100%;
+  max-width: none;
+  min-height: 32px;
+  justify-content: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.multi-spawn-route .selected-model-chip-label {
+  flex: 1;
+  text-align: left;
+}
+
+.multi-spawn-route .model-chooser-palette {
+  top: calc(100% + 7px);
+  right: auto;
+  bottom: auto;
+  left: 0;
+  width: min(600px, calc(100vw - 64px));
+  height: min(370px, calc(100dvh - 160px));
+}
+
+.multi-spawn-route-warning {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border-left: 2px solid var(--warning);
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+}
+
+.multi-spawn-route-warning > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.multi-spawn-route-warning strong {
+  font-size: var(--ui-font-secondary);
+}
+
+.multi-spawn-route-warning small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.35;
+}
+
+.multi-spawn-route-warning button {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 6px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  font-size: var(--ui-font-micro);
+  font-weight: 680;
+}
+
+.multi-spawn-dialog-status {
+  margin: 0 18px 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--warning);
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+  font-size: var(--ui-font-secondary);
+}
+
+.multi-spawn-dialog-status.is-error {
+  border-left-color: var(--failure-state);
+  background: color-mix(in srgb, var(--failure-state) 7%, transparent);
+}
+
+.multi-spawn-dialog-footer {
+  position: sticky;
+  z-index: 4;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 18px 15px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-strong) 96%, transparent);
+}
+
+.multi-spawn-preset-toggle {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-soft);
+}
+
+.multi-spawn-preset-toggle input {
+  accent-color: var(--accent);
+}
+
+.multi-spawn-preset-toggle > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.multi-spawn-preset-toggle strong {
+  font-size: var(--ui-font-secondary);
+}
+
+.multi-spawn-preset-toggle small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.multi-spawn-dialog-footer > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.multi-spawn-dialog-footer .primary-button,
+.multi-spawn-dialog-footer .secondary-button {
+  min-height: 34px;
+  margin: 0;
+}
+
+.multi-spawn-launch {
+  gap: 7px;
+  min-width: 126px;
+}
+
+.multi-spawn-launch .loading-mark {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 780px), (max-height: 700px) {
+  .multi-spawn-backdrop {
+    place-items: start center;
+    padding: 12px;
+  }
+
+  .multi-spawn-dialog {
+    width: min(600px, 100%);
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    border-radius: 16px;
+  }
+
+  .multi-spawn-sides {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .multi-spawn-pair-arrow {
+    width: 100%;
+    height: 18px;
+    transform: rotate(90deg);
+  }
+
+  .multi-spawn-route .model-chooser-palette {
+    position: fixed;
+    top: 50%;
+    right: auto;
+    bottom: auto;
+    left: 50%;
+    width: min(600px, calc(100vw - 28px));
+    height: min(420px, calc(100dvh - 38px));
+    transform: translate(-50%, -50%);
+  }
+}
+
+@media (max-width: 480px) {
+  .multi-spawn-dialog-header {
+    padding: 14px;
+  }
+
+  .multi-spawn-dialog-header p {
+    display: none;
+  }
+
+  .multi-spawn-prompt-zone,
+  .multi-spawn-sides {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .multi-spawn-field-grid,
+  .multi-spawn-field-grid.is-compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .multi-spawn-dialog-footer {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 12px 14px 14px;
+  }
+
+  .multi-spawn-dialog-footer > div {
+    justify-content: flex-end;
+  }
 }
 
 .commit-dialog {

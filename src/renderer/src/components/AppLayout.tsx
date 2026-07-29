@@ -25,6 +25,9 @@ import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
 import { CommitDialog } from "./CommitDialog";
+import {
+  MultiSpawnDialog,
+} from "./MultiSpawnDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { Sidebar } from "./Sidebar";
 import { WorkspaceHeader } from "./WorkspaceHeader";
@@ -35,6 +38,7 @@ import {
 } from "./WorkspaceScene";
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
 import { resultEvent } from "../lib/runtimeCommands";
+import type { MultiSpawnController } from "../hooks/useMultiSpawn";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
@@ -50,6 +54,8 @@ interface AppLayoutActions {
   selectConversation: (conversation: Conversation) => void;
   openConversationInSplit: (conversation: Conversation) => void;
   closeConversationSplit: () => void;
+  openProviderSetup: (providerId: Conversation["providerId"]) => void;
+  openBackendSetup: (profileId: string) => void;
   createConversation: (
     project?: Project | null,
     location?: NewConversationLocation,
@@ -117,6 +123,7 @@ interface AppLayoutProps {
   projectActions: ProjectAction[];
   reviewStates: Parameters<typeof CommitDialog>[0]["reviewStates"];
   structuredDiff: Parameters<typeof CommitDialog>[0]["diff"];
+  multiSpawn: MultiSpawnController;
   scene: WorkspaceSceneProps;
   providerAuth: Parameters<typeof AppStatusOverlays>[0]["providerAuth"];
   actions: AppLayoutActions;
@@ -155,6 +162,7 @@ export function AppLayout({
   projectActions,
   reviewStates,
   structuredDiff,
+  multiSpawn,
   scene,
   providerAuth,
   actions,
@@ -209,6 +217,7 @@ export function AppLayout({
           onOpenConversationInSplit={actions.openConversationInSplit}
           onCloseConversationSplit={actions.closeConversationSplit}
           onCreateConversation={actions.createConversation}
+          onOpenMultiSpawn={multiSpawn.openDialog}
           onRenameConversation={(thread, title) => {
             void actions.run("conversation.update", {
               type: "conversation.update",
@@ -419,6 +428,17 @@ export function AppLayout({
           await actions.commit(...args);
           setCommitDialogOpen(false);
         }}
+      />
+      <MultiSpawnDialog
+        open={multiSpawn.open}
+        snapshot={connection.snapshot}
+        settings={settings}
+        submitting={multiSpawn.submitting}
+        error={multiSpawn.error}
+        onClose={multiSpawn.closeDialog}
+        onSubmit={multiSpawn.submit}
+        onOpenProviderSetup={actions.openProviderSetup}
+        onOpenBackendSetup={actions.openBackendSetup}
       />
       <AppNavigationOverlays
         snapshot={connection.snapshot}

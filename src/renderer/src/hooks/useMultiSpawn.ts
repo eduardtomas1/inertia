@@ -75,6 +75,7 @@ export function useMultiSpawn({
   updateSplitConversationId,
   showWorkspace,
   closeSidebar,
+  focusWorkspace,
   discardDraftConversation,
   setActionError,
 }: {
@@ -95,6 +96,7 @@ export function useMultiSpawn({
   updateSplitConversationId: (conversationId: string | null) => void;
   showWorkspace: () => void;
   closeSidebar: () => void;
+  focusWorkspace: () => void;
   discardDraftConversation: () => void;
   setActionError: Dispatch<SetStateAction<string | null>>;
 }): MultiSpawnController {
@@ -197,6 +199,7 @@ export function useMultiSpawn({
         if (requiresReconciliation) {
           setOpen(false);
           setActionError(reconciliationMessage([message]));
+          focusWorkspace();
         } else {
           setError(message);
         }
@@ -220,6 +223,7 @@ export function useMultiSpawn({
         );
       }
       setOpen(false);
+      focusWorkspace();
 
       const sends = await Promise.allSettled(ordered.map((side) =>
         sendMessage(
@@ -263,6 +267,7 @@ export function useMultiSpawn({
   }, [
     activateCreatedConversations,
     discardDraftConversation,
+    focusWorkspace,
     run,
     sendMessage,
     setActionError,

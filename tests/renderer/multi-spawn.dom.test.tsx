@@ -467,6 +467,43 @@ describe("multi-spawn", () => {
     trigger.remove();
   });
 
+  it("keeps launch completion focused in the resulting workspace", async () => {
+    const trigger = document.createElement("button");
+    const workspace = document.createElement("section");
+    trigger.textContent = "Launch two chats";
+    workspace.tabIndex = -1;
+    document.body.append(trigger, workspace);
+    trigger.focus();
+    let view!: ReturnType<typeof render>;
+    const renderDialog = (open: boolean): React.JSX.Element => (
+      <MultiSpawnDialog
+        open={open}
+        snapshot={snapshot}
+        settings={settings}
+        submitting={false}
+        error={null}
+        onClose={() => view.rerender(renderDialog(false))}
+        onSubmit={async () => {
+          view.rerender(renderDialog(false));
+          workspace.focus();
+        }}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />
+    );
+    view = render(renderDialog(true));
+    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+      target: { value: "Compare focus behavior." },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Launch duo" }));
+
+    await waitFor(() => expect(workspace).toHaveFocus());
+    expect(trigger).not.toHaveFocus();
+    trigger.remove();
+    workspace.remove();
+  });
+
   it("requires a stale selected model to be replaced before launch", () => {
     render(
       <MultiSpawnDialog
@@ -586,6 +623,7 @@ describe("multi-spawn", () => {
       calls.push(`send:${conversationId}`);
     });
     const updateSplitConversationId = vi.fn();
+    const focusWorkspace = vi.fn();
     const transitionRef = { current: 0 };
     const hook = renderHook(() => useMultiSpawn({
       snapshot,
@@ -596,6 +634,7 @@ describe("multi-spawn", () => {
       updateSplitConversationId,
       showWorkspace: vi.fn(),
       closeSidebar: vi.fn(),
+      focusWorkspace,
       discardDraftConversation: vi.fn(),
       setActionError: vi.fn(),
     }));
@@ -638,6 +677,7 @@ describe("multi-spawn", () => {
       },
     ]);
     expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(focusWorkspace).toHaveBeenCalledTimes(1);
     expect(sendMessage).toHaveBeenCalledWith(
       firstConversationId,
       "Compare this change.",
@@ -683,6 +723,7 @@ describe("multi-spawn", () => {
       updateSplitConversationId: vi.fn(),
       showWorkspace: vi.fn(),
       closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
       discardDraftConversation: vi.fn(),
       setActionError,
     }));
@@ -747,6 +788,7 @@ describe("multi-spawn", () => {
       updateSplitConversationId: vi.fn(),
       showWorkspace: vi.fn(),
       closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
       discardDraftConversation: vi.fn(),
       setActionError: vi.fn(),
     }));
@@ -767,6 +809,7 @@ describe("multi-spawn", () => {
   it("closes for authoritative reconciliation after ambiguous creation", async () => {
     const setActionError = vi.fn();
     const discardDraftConversation = vi.fn();
+    const focusWorkspace = vi.fn();
     const run = vi.fn(async (): Promise<ServerEvent> => {
       throw new RuntimeCommandError("Connection interrupted.", "ambiguous");
     });
@@ -779,6 +822,7 @@ describe("multi-spawn", () => {
       updateSplitConversationId: vi.fn(),
       showWorkspace: vi.fn(),
       closeSidebar: vi.fn(),
+      focusWorkspace,
       discardDraftConversation,
       setActionError,
     }));
@@ -792,5 +836,6 @@ describe("multi-spawn", () => {
       expect.stringContaining("Refresh before trying again"),
     );
     expect(discardDraftConversation).not.toHaveBeenCalled();
+    expect(focusWorkspace).toHaveBeenCalledTimes(1);
   });
 });

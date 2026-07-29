@@ -37,7 +37,7 @@ import { useMultiSpawn } from "./hooks/useMultiSpawn";
 import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { activityRunSummary } from "./utils/activityCenter";
-import { shouldMarkWorkspaceRunSeen } from "./utils/attentionVisibility";
+import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
 import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
@@ -406,6 +406,7 @@ export default function App(): React.JSX.Element {
     updateSplitConversationId,
     showWorkspace: () => setView("workspace"),
     closeSidebar: () => setSidebarOpen(false),
+    focusWorkspace: () => window.requestAnimationFrame(() => document.getElementById("main-workspace")?.focus({ preventScroll: true })),
     discardDraftConversation,
     setActionError,
   });
@@ -485,11 +486,12 @@ export default function App(): React.JSX.Element {
         documentFocused: document.hasFocus(),
         workspaceVisible: view === "workspace",
         latestContentVisible,
-        obstructed: activityOpen
-          || paletteOpen
-          || commitDialogOpen
-          || authProviderId !== null
-          || (mobileNavigation && sidebarOpen),
+        obstructed: workspaceAttentionObstructed({
+          activityOpen, paletteOpen, commitDialogOpen,
+          authProviderOpen: authProviderId !== null,
+          multiSpawnOpen: multiSpawn.open,
+          mobileSidebarOpen: mobileNavigation && sidebarOpen,
+        }),
       },
     );
     if (!shouldMark) return;
@@ -507,7 +509,7 @@ export default function App(): React.JSX.Element {
     commitDialogOpen,
     conversation?.id,
     latestContentVisible,
-    mobileNavigation,
+    mobileNavigation, multiSpawn.open,
     paletteOpen,
     request,
     sidebarOpen,

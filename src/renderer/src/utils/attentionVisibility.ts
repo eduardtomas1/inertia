@@ -9,6 +9,22 @@ export interface AttentionVisibilityContext {
   obstructed: boolean;
 }
 
+export function workspaceAttentionObstructed(input: {
+  activityOpen: boolean;
+  paletteOpen: boolean;
+  commitDialogOpen: boolean;
+  authProviderOpen: boolean;
+  multiSpawnOpen: boolean;
+  mobileSidebarOpen: boolean;
+}): boolean {
+  return input.activityOpen
+    || input.paletteOpen
+    || input.commitDialogOpen
+    || input.authProviderOpen
+    || input.multiSpawnOpen
+    || input.mobileSidebarOpen;
+}
+
 /**
  * Visibility is deliberately renderer-owned: server selection alone is not
  * evidence that the user saw a result. The transcript must be the focused,

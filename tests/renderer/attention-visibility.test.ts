@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldMarkWorkspaceRunSeen } from "../../src/renderer/src/utils/attentionVisibility";
+import {
+  shouldMarkWorkspaceRunSeen,
+  workspaceAttentionObstructed,
+} from "../../src/renderer/src/utils/attentionVisibility";
 import type { WorkspaceRun } from "../../src/shared/contracts";
 
 function run(overrides: Partial<WorkspaceRun> = {}): WorkspaceRun {
@@ -69,6 +72,33 @@ describe("active transcript attention visibility", () => {
       completed,
       completed.conversationId,
       { ...visible, obstructed: true },
+    )).toBe(false);
+  });
+
+  it("treats the multi-spawn dialog as a completion obstruction", () => {
+    const unobstructed = {
+      activityOpen: false,
+      paletteOpen: false,
+      commitDialogOpen: false,
+      authProviderOpen: false,
+      multiSpawnOpen: false,
+      mobileSidebarOpen: false,
+    };
+    expect(workspaceAttentionObstructed(unobstructed)).toBe(false);
+    expect(workspaceAttentionObstructed({
+      ...unobstructed,
+      multiSpawnOpen: true,
+    })).toBe(true);
+    expect(shouldMarkWorkspaceRunSeen(
+      run(),
+      run().conversationId,
+      {
+        ...visible,
+        obstructed: workspaceAttentionObstructed({
+          ...unobstructed,
+          multiSpawnOpen: true,
+        }),
+      },
     )).toBe(false);
   });
 });

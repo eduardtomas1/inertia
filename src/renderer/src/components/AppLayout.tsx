@@ -315,6 +315,7 @@ export function AppLayout({
       <section
         className="workspace-shell"
         id="main-workspace"
+        tabIndex={-1}
         inert={mobileNavigation && sidebarOpen ? true : undefined}
       >
         <div className="workspace-frame">

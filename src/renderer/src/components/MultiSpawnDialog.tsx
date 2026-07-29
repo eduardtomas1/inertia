@@ -429,6 +429,15 @@ export function MultiSpawnDialog({
     }
   };
 
+  const submitDraft = (): void => {
+    restoreFocusRef.current = false;
+    void onSubmit(draft).finally(() => {
+      if (dialogRef.current?.isConnected) {
+        restoreFocusRef.current = true;
+      }
+    });
+  };
+
   return (
     <div
       className="dialog-backdrop multi-spawn-backdrop"
@@ -558,7 +567,7 @@ export function MultiSpawnDialog({
               title={validationError ?? (!routesReady
                 ? "Both routes must be ready."
                 : undefined)}
-              onClick={() => void onSubmit(draft)}
+              onClick={submitDraft}
             >
               {submitting ? <LoadingMark label="Launching duo" /> : <Zap size={14} />}
               {submitting ? "Launching duo…" : "Launch duo"}

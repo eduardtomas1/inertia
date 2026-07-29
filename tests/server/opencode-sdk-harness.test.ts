@@ -25,6 +25,19 @@ type LifecycleScenario =
   | "endless"
   | "no-image";
 
+function readStableCapture<T>(capturePath: string): T {
+  let lastError: unknown;
+  for (const candidate of [`${capturePath}.next`, capturePath]) {
+    if (!existsSync(candidate)) continue;
+    try {
+      return JSON.parse(readFileSync(candidate, "utf8")) as T;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error(`No fixture capture was written to ${capturePath}.`);
+}
+
 function lifecycleServerSource(root: string, capturePath: string, scenario: LifecycleScenario): string {
   return `
 const http = require("node:http");
@@ -156,7 +169,18 @@ const fs = require("node:fs");
 const args = process.argv.slice(2);
 let port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
 const captured = [];
-const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
+const capturePath = ${JSON.stringify(capturePath)};
+const save = () => {
+  const nextPath = capturePath + ".next";
+  fs.writeFileSync(nextPath, JSON.stringify({ port, captured }));
+  try {
+    fs.renameSync(nextPath, capturePath);
+  } catch (error) {
+    if (error?.code !== "EEXIST" && error?.code !== "EPERM") throw error;
+    fs.copyFileSync(nextPath, capturePath);
+    fs.unlinkSync(nextPath);
+  }
+};
 const json = (res, value) => {
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify(value));
@@ -189,7 +213,18 @@ const fs = require("node:fs");
 const args = process.argv.slice(2);
 let port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
 const captured = [];
-const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
+const capturePath = ${JSON.stringify(capturePath)};
+const save = () => {
+  const nextPath = capturePath + ".next";
+  fs.writeFileSync(nextPath, JSON.stringify({ port, captured }));
+  try {
+    fs.renameSync(nextPath, capturePath);
+  } catch (error) {
+    if (error?.code !== "EEXIST" && error?.code !== "EPERM") throw error;
+    fs.copyFileSync(nextPath, capturePath);
+    fs.unlinkSync(nextPath);
+  }
+};
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
   captured.push(url.pathname);
@@ -406,10 +441,10 @@ server.listen(port, "127.0.0.1", () => {
       providerTimeoutMs: 250,
     })).rejects.toThrow(message);
 
-    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+    const capture = readStableCapture<{
       port: number;
       captured: string[];
-    };
+    }>(capturePath);
     expect(capture.captured).toEqual(expect.arrayContaining(expectedPaths));
     await waitFor(
       `the stalled OpenCode metadata ${stage} server to close`,
@@ -479,10 +514,10 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       status: "failed",
       error: expect.stringContaining("provider and agent discovery"),
     });
-    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+    const capture = readStableCapture<{
       port: number;
       captured: string[];
-    };
+    }>(capturePath);
     expect(capture.captured).toEqual(expect.arrayContaining([
       "/global/health",
       "/provider",

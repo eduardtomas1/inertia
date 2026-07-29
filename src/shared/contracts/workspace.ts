@@ -22,6 +22,8 @@ export interface WorkspaceFilePreview {
   content: string;
   truncated: boolean;
   language: string;
+  contentDigest: string;
+  modifiedAt: string;
 }
 
 export interface ProjectAction {

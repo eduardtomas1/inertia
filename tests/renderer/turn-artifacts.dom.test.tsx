@@ -109,7 +109,7 @@ describe("useTurnArtifacts", () => {
     const request = vi.fn(async (
       _command: CommandWithoutId,
     ): Promise<ServerEvent> => turnDiffResult());
-    const openProjectPath = vi.fn();
+    const openWorkspaceFile = vi.fn();
     const setActiveTool = vi.fn();
     const hook = renderHook((owner: {
       project: Project;
@@ -119,7 +119,7 @@ describe("useTurnArtifacts", () => {
       request,
       setActionError: vi.fn(),
       setActiveTool,
-      openProjectPath,
+      openWorkspaceFile,
       loadGit: vi.fn(async () => undefined),
     }), {
       initialProps: {
@@ -160,12 +160,7 @@ describe("useTurnArtifacts", () => {
         laterTurnId: "turn-after",
       },
     });
-    expect(openProjectPath).toHaveBeenCalledWith({
-      projectId: splitProject.id,
-      conversationId: splitConversation.id,
-      relativePath: "src/split.ts",
-      action: "open-externally",
-    });
+    expect(openWorkspaceFile).toHaveBeenCalledWith("src/split.ts");
     expect(setActiveTool).toHaveBeenCalledWith("changes");
   });
 
@@ -182,7 +177,7 @@ describe("useTurnArtifacts", () => {
       request,
       setActionError: vi.fn(),
       setActiveTool: vi.fn(),
-      openProjectPath: vi.fn(),
+      openWorkspaceFile: vi.fn(),
       loadGit: vi.fn(async () => undefined),
     }), {
       initialProps: {

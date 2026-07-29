@@ -1,0 +1,181 @@
+import { FilePenLine, Save, X } from "lucide-react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
+import { createPortal } from "react-dom";
+
+import type { WorkspaceFilePreview } from "@shared/contracts";
+import { LoadingMark } from "./ui";
+
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+export function FileEditorDialog({
+  file,
+  onClose,
+  onSave,
+}: {
+  file: WorkspaceFilePreview;
+  onClose: () => void;
+  onSave: (
+    path: string,
+    content: string,
+    expectedDigest: string,
+  ) => Promise<WorkspaceFilePreview>;
+}): React.JSX.Element {
+  const titleId = useId();
+  const descriptionId = useId();
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const [content, setContent] = useState(file.content);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const changed = content !== file.content;
+
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const frame = window.requestAnimationFrame(() => editorRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, []);
+
+  const closeSafely = (): void => {
+    if (saving) return;
+    if (
+      changed
+      && !window.confirm("Discard the unsaved changes to this file?")
+    ) return;
+    onClose();
+  };
+
+  const save = async (): Promise<void> => {
+    if (!changed || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(file.path, content, file.contentDigest);
+      onClose();
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "The file could not be saved.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const trapFocus = (event: ReactKeyboardEvent<HTMLElement>): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSafely();
+      return;
+    }
+    if (
+      event.key.toLocaleLowerCase("en-US") === "s"
+      && (event.metaKey || event.ctrlKey)
+    ) {
+      event.preventDefault();
+      void save();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [
+      ...event.currentTarget.querySelectorAll<HTMLElement>(
+        FOCUSABLE_SELECTOR,
+      ),
+    ];
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return createPortal(
+    <div className="dialog-backdrop file-editor-backdrop" role="presentation">
+      <section
+        className="file-editor-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        aria-busy={saving}
+        onKeyDown={trapFocus}
+      >
+        <header>
+          <span className="dialog-icon">
+            <FilePenLine size={18} aria-hidden="true" />
+          </span>
+          <div>
+            <h2 id={titleId}>Edit {file.path.split("/").at(-1)}</h2>
+            <p id={descriptionId} title={file.path}>{file.path}</p>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Close file editor"
+            disabled={saving}
+            onClick={closeSafely}
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        </header>
+        <textarea
+          ref={editorRef}
+          value={content}
+          aria-label={`Edit contents of ${file.path}`}
+          spellCheck={false}
+          disabled={saving}
+          onChange={(event) => {
+            setContent(event.currentTarget.value);
+            setError(null);
+          }}
+        />
+        {error && (
+          <p className="file-editor-error" role="alert">{error}</p>
+        )}
+        <footer>
+          <span>Changes are checked against the version you opened.</span>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={saving}
+            onClick={closeSafely}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!changed || saving}
+            onClick={() => void save()}
+          >
+            {saving
+              ? <LoadingMark label="Saving file" />
+              : <Save size={14} aria-hidden="true" />}
+            <span>{saving ? "Saving…" : "Save"}</span>
+          </button>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}

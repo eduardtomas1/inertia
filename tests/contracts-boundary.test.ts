@@ -104,6 +104,7 @@ describe("shared contracts boundary", () => {
       "git.pr.open",
       "workspace.entries",
       "workspace.file.read",
+      "workspace.file.write",
       "project.actions",
       "project.action.run",
       "checkpoint.revert",

@@ -11,6 +11,7 @@ import {
   listWorkspaceEntries,
   readWorkspaceTextFile,
   searchWorkspaceEntries,
+  writeWorkspaceTextFile,
 } from "../../workspace";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import {
@@ -38,6 +39,7 @@ export function createProjectWorkspaceCommandHandler(
     "project.update",
     "workspace.entries",
     "workspace.file.read",
+    "workspace.file.write",
     "project.actions",
     "project.action.run",
     "checkpoint.revert",
@@ -50,12 +52,18 @@ export function createProjectWorkspaceCommandHandler(
       case "project.create": {
         const path = requireRuntimeDirectory(command.payload.path);
         const identity = await inspectProjectIdentity(path);
-        dependencies.store.createProject(
+        const project = dependencies.store.createProject(
           command.payload.name,
           path,
           identity,
         );
-        return "mutation";
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: { kind: "project.created", projectId: project.id },
+        });
+        return "handled";
       }
       case "project.select":
         dependencies.store.selectProject(command.payload.projectId);
@@ -130,6 +138,36 @@ export function createProjectWorkspaceCommandHandler(
               content: file.content,
               truncated: false,
               language: extension,
+              contentDigest: file.contentDigest,
+              modifiedAt: file.modifiedAt,
+            },
+          },
+        });
+        return "handled";
+      }
+      case "workspace.file.write": {
+        const file = await writeWorkspaceTextFile(
+          dependencies.workspacePath(
+            command.payload.projectId,
+            command.payload.conversationId,
+          ),
+          command.payload.path,
+          command.payload.content,
+          command.payload.expectedDigest,
+        );
+        const extension = file.path.split(".").pop()?.toLowerCase() ?? "text";
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "workspace.file",
+            file: {
+              path: file.path,
+              content: file.content,
+              truncated: false,
+              language: extension,
+              contentDigest: file.contentDigest,
+              modifiedAt: file.modifiedAt,
             },
           },
         });

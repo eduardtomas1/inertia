@@ -133,6 +133,28 @@ describe("client command contract", () => {
     expect(clientCommandSchema.safeParse(command).success).toBe(false);
   });
 
+  it("accepts conflict-checked workspace writes and rejects unbounded payloads", () => {
+    const base = {
+      type: "workspace.file.write",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId: crypto.randomUUID(),
+        path: "src/example.ts",
+        expectedDigest: "a".repeat(64),
+        content: "export const enabled = true;\n",
+      },
+    };
+    expect(clientCommandSchema.safeParse(base).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, expectedDigest: "../stale" },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, content: "x".repeat(2 * 1024 * 1024 + 1) },
+    }).success).toBe(false);
+  });
+
   it("accepts only scoped UUID targets for Activity Center mutations", () => {
     const runId = crypto.randomUUID();
     for (const type of [

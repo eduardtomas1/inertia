@@ -463,15 +463,22 @@ process.exit(child.status ?? 1);
       requestId: projectRequestId,
       payload: { name: "Inertia", path: workspace },
     });
-    await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-        event.type === "request.ok" && event.requestId === projectRequestId,
-    );
     const projectSnapshot = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated",
     );
+    const projectCreated = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === projectRequestId
+        && event.result.kind === "project.created",
+    );
     const project = projectSnapshot.snapshot.projects.find(({ name }) => name === "Inertia");
     expect(project?.path).toBe(workspace);
+    expect(
+      projectCreated.result.kind === "project.created"
+        ? projectCreated.result.projectId
+        : null,
+    ).toBe(project?.id);
 
     const conversationRequestId = randomUUID();
     send(client.socket, {
@@ -619,13 +626,15 @@ process.exit(child.status ?? 1);
       payload: { name: "Second project", path: secondWorkspace },
     });
     await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-        event.type === "request.ok" && event.requestId === projectRequestId,
-    );
-    await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"
         && event.snapshot.projects.some(({ name }) => name === "Second project"),
+    );
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === projectRequestId
+        && event.result.kind === "project.created",
     );
 
     const directSelectRequestId = randomUUID();

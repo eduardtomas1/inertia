@@ -32,6 +32,7 @@ import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   buildLogicalProjectGroups,
+  classicSidebarSearch,
   groupWorkThreads,
   nextSidebarNavigationIndex,
   sidebarThreadView,
@@ -191,17 +192,15 @@ export function Sidebar({
     };
   }, [mobile, open]);
 
-  const visibleProjects = useMemo(() => {
-    const projects = snapshot?.projects ?? [];
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return projects;
-    return projects.filter((project) => {
-      const conversations = snapshot?.conversations.filter((item) => item.projectId === project.id) ?? [];
-      return project.name.toLocaleLowerCase().includes(needle)
-        || project.path.toLocaleLowerCase().includes(needle)
-        || conversations.some((conversation) => conversation.title.toLocaleLowerCase().includes(needle));
-    });
-  }, [query, snapshot]);
+  const classicSearch = useMemo(
+    () => classicSidebarSearch(
+      snapshot?.projects ?? [],
+      snapshot?.conversations ?? [],
+      query,
+    ),
+    [query, snapshot?.conversations, snapshot?.projects],
+  );
+  const visibleProjects = classicSearch.projects;
 
   const logicalGroups = useMemo(
     () => buildLogicalProjectGroups(visibleProjects, globalGrouping),
@@ -557,9 +556,8 @@ export function Sidebar({
               {group.projects.map((project) => {
                 const isExpanded = expanded.has(project.id) || Boolean(query);
                 const isActive = snapshot?.activeProjectId === project.id;
-                const conversations = snapshot?.conversations
-                  .filter((conversation) => conversation.projectId === project.id && conversation.archivedAt === null)
-                  .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) ?? [];
+                const conversations =
+                  classicSearch.conversationsByProject.get(project.id) ?? [];
                 return (
                   <div className="project-group" role="listitem" key={project.id}>
                     <div className={clsx("project-row", isActive && view === "workspace" && "is-active")}>

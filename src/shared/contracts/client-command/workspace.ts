@@ -39,6 +39,19 @@ export const workspaceCommandSchemas = [
   z
     .object({
       ...requestBase,
+      type: z.literal("workspace.file.write"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid().optional(),
+        path: workspaceFilePathSchema,
+        expectedDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+        content: z.string().max(2 * 1024 * 1024),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("project.actions"),
       payload: z.object({
         projectId: z.string().uuid(),

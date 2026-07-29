@@ -35,6 +35,16 @@ import {
 import {
   composerHarnessLabel,
 } from "./config";
+import {
+  addPromptStashEntry,
+  PROMPT_STASH_CHANGED_EVENT,
+  PROMPT_STASH_STORAGE_KEY,
+  promptStashRouteMatches,
+  readPromptStash,
+  removePromptStashEntry,
+  writePromptStash,
+  type PromptStashEntry,
+} from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps } from "./types";
@@ -74,6 +84,9 @@ export function Composer({
   const [message, setMessage] = useState(
     () => window.localStorage.getItem(`inertia:draft:${conversation.id}`) ?? "",
   );
+  const [promptStash, setPromptStash] = useState(
+    () => readPromptStash(window.localStorage),
+  );
   const skipDraftPersistenceRef = useRef(true);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const attachmentsRef = useRef<ChatAttachment[]>([]);
@@ -103,6 +116,24 @@ export function Composer({
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
 
   conversationIdRef.current = conversation.id;
+
+  useEffect(() => {
+    const refreshPromptStash = (): void => {
+      setPromptStash(readPromptStash(window.localStorage));
+    };
+    const refreshFromStorage = (event: StorageEvent): void => {
+      if (event.key === PROMPT_STASH_STORAGE_KEY) refreshPromptStash();
+    };
+    window.addEventListener(PROMPT_STASH_CHANGED_EVENT, refreshPromptStash);
+    window.addEventListener("storage", refreshFromStorage);
+    return () => {
+      window.removeEventListener(
+        PROMPT_STASH_CHANGED_EVENT,
+        refreshPromptStash,
+      );
+      window.removeEventListener("storage", refreshFromStorage);
+    };
+  }, []);
   releaseAttachmentRef.current = onReleaseAttachment;
 
   useEffect(() => {
@@ -458,6 +489,48 @@ export function Composer({
       modelSelection: transition.selection,
     });
   };
+  const updatePromptStash = (
+    update: (current: readonly PromptStashEntry[]) => PromptStashEntry[],
+  ): void => {
+    setPromptStash((current) => {
+      const next = update(current);
+      if (writePromptStash(window.localStorage, next)) {
+        window.dispatchEvent(new Event(PROMPT_STASH_CHANGED_EVENT));
+      }
+      return next;
+    });
+  };
+  const stashCurrentPrompt = (): void => {
+    if (!message.trim() || attachments.length > 0) return;
+    updatePromptStash((current) => addPromptStashEntry(
+      current,
+      message,
+      conversation.modelSelection,
+    ));
+    setMessage("");
+    textareaRef.current?.focus();
+  };
+  const restoreStashedPrompt = (entry: PromptStashEntry): void => {
+    if (
+      attachments.length > 0
+      || !promptStashRouteMatches(
+        conversation.modelSelection,
+        entry.route,
+      )
+    ) return;
+    updatePromptStash((current) => {
+      const withoutRestored = removePromptStashEntry(current, entry.id);
+      return message.trim()
+        ? addPromptStashEntry(
+            withoutRestored,
+            message,
+            conversation.modelSelection,
+          )
+        : withoutRestored;
+    });
+    setMessage(entry.content);
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  };
   const dismissPendingRoute = (): void => {
     setPendingRoute(null);
     window.requestAnimationFrame(() => {
@@ -525,6 +598,33 @@ export function Composer({
           attachmentCount={attachments.length}
           onChooseAttachments={chooseAttachments}
           onRunAction={onRunAction}
+          promptStash={promptStash}
+          canStashPrompt={Boolean(message.trim()) && attachments.length === 0}
+          promptStashBlockedReason={
+            attachments.length > 0
+              ? "Remove attachments before stashing text"
+              : message.trim()
+                ? null
+                : "Type a prompt to stash"
+          }
+          promptRestoreBlockedReason={(entry) => {
+            if (attachments.length > 0) {
+              return "Remove attachments before restoring another prompt";
+            }
+            return promptStashRouteMatches(
+              conversation.modelSelection,
+              entry.route,
+            )
+              ? null
+              : `Switch to ${entry.route.modelId} with ${
+                  entry.route.reasoningEffort ?? "provider-default reasoning"
+                } before restoring`;
+          }}
+          onStashPrompt={stashCurrentPrompt}
+          onRestorePrompt={restoreStashedPrompt}
+          onRemoveStashedPrompt={(entryId) =>
+            updatePromptStash((current) =>
+              removePromptStashEntry(current, entryId))}
           modelRoutes={modelRoutes}
           selectedModelRoute={selectedModelRoute}
           onChooseModelRoute={chooseModelRoute}

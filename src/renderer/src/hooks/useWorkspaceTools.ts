@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import type {
   Conversation,
   ConversationDetail,
@@ -26,9 +27,6 @@ interface WorkspaceToolsOptions {
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   setActionError: (message: string | null) => void;
   setActiveTool: (tool: WorkspacePanelTab | null) => void;
-  openProjectPath: (
-    request: Parameters<typeof window.inertia.openProjectPath>[0],
-  ) => void;
 }
 
 export function useWorkspaceTools(options: WorkspaceToolsOptions) {
@@ -66,13 +64,19 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     setGitDiff: git.setGitDiff,
     loadGit: git.loadGit,
   });
+  const selectWorkspaceFile = files.selectWorkspaceFile;
+  const setActiveTool = options.setActiveTool;
+  const openWorkspaceFile = useCallback((path: string): void => {
+    selectWorkspaceFile(path);
+    setActiveTool("files");
+  }, [selectWorkspaceFile, setActiveTool]);
   const artifacts = useTurnArtifacts({
     project: options.project,
     conversation: options.conversation,
     request: options.request,
     setActionError: options.setActionError,
     setActiveTool: options.setActiveTool,
-    openProjectPath: options.openProjectPath,
+    openWorkspaceFile,
     loadGit: git.loadGit,
   });
 

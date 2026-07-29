@@ -14,6 +14,7 @@ import {
   listWorkspaceEntries,
   readWorkspaceTextFile,
   searchWorkspaceEntries,
+  writeWorkspaceTextFile,
 } from "../../src/server/workspace";
 
 const temporaryDirectories: string[] = [];
@@ -119,5 +120,64 @@ describe("workspace file hierarchy", () => {
       .rejects.toMatchObject({ code: "unsafe-link" });
     await expect(readWorkspaceTextFile(root, "escape/secret.ts"))
       .rejects.toMatchObject({ code: "unsafe-link" });
+  });
+
+  it("saves text atomically only when the preview digest is still current", async () => {
+    const root = await temporaryDirectory();
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "src", "example.ts"), "const value = 1;\n");
+
+    const preview = await readWorkspaceTextFile(root, "src/example.ts");
+    const saved = await writeWorkspaceTextFile(
+      root,
+      "src/example.ts",
+      "const value = 2;\n",
+      preview.contentDigest,
+    );
+    expect(saved).toMatchObject({
+      path: "src/example.ts",
+      content: "const value = 2;\n",
+      size: 17,
+    });
+    expect(saved.contentDigest).not.toBe(preview.contentDigest);
+
+    await writeFile(join(root, "src", "example.ts"), "external edit\n");
+    await expect(writeWorkspaceTextFile(
+      root,
+      "src/example.ts",
+      "const value = 3;\n",
+      saved.contentDigest,
+    )).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("changed"),
+    });
+    await expect(readWorkspaceTextFile(root, "src/example.ts"))
+      .resolves.toMatchObject({ content: "external edit\n" });
+  });
+
+  it("does not write through symbolic links or accept binary editor content", async () => {
+    const root = await temporaryDirectory();
+    const outside = await temporaryDirectory();
+    await writeFile(join(outside, "secret.ts"), "secret");
+    await symlink(
+      join(outside, "secret.ts"),
+      join(root, "linked.ts"),
+      "file",
+    );
+    await expect(writeWorkspaceTextFile(
+      root,
+      "linked.ts",
+      "changed",
+      "a".repeat(64),
+    )).rejects.toMatchObject({ code: "unsafe-link" });
+
+    await writeFile(join(root, "text.ts"), "text");
+    const preview = await readWorkspaceTextFile(root, "text.ts");
+    await expect(writeWorkspaceTextFile(
+      root,
+      "text.ts",
+      "unsafe\0content",
+      preview.contentDigest,
+    )).rejects.toMatchObject({ code: "not-text" });
   });
 });

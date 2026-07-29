@@ -32,6 +32,8 @@ describe("FilesPanel", () => {
         content: "# Project",
         truncated: false,
         language: "md",
+        contentDigest: "a".repeat(64),
+        modifiedAt: "2026-07-29T10:00:00.000Z",
       },
       selectedPath: "README.md",
       onSelectFile: vi.fn(),

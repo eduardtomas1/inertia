@@ -6,7 +6,10 @@ import type {
   ModelSelection,
   Project,
 } from "@shared/contracts";
-import { legacyProviderIdForHarness } from "../../../shared/model-routing";
+import {
+  legacyProviderIdForHarness,
+  nativeModelSelection,
+} from "../../../shared/model-routing";
 
 type ConversationCreateCommand = Extract<ClientCommand, { type: "conversation.create" }>;
 
@@ -106,6 +109,55 @@ export function withNewConversationModelSelection(
         ...capability,
       })),
     },
+  };
+}
+
+export function buildDraftConversation(
+  payload: NewConversationPayload,
+  options: {
+    id?: string;
+    now?: string;
+  } = {},
+): Conversation {
+  const selection = payload.modelSelection ?? nativeModelSelection({
+    providerId: payload.providerId ?? "codex",
+    modelId: payload.model || "provider-default",
+    alias: payload.model || null,
+    reasoningEffort: payload.reasoningEffort,
+  });
+  const providerId = legacyProviderIdForHarness(selection.harnessId);
+  if (!providerId) {
+    throw new Error("The selected agent harness is unavailable in this build.");
+  }
+  const now = options.now ?? new Date().toISOString();
+  return {
+    id: options.id ?? crypto.randomUUID(),
+    projectId: payload.projectId,
+    title: payload.title,
+    providerId,
+    modelSelection: {
+      ...selection,
+      providerOptions: { ...selection.providerOptions },
+      capabilities: selection.capabilities.map((capability) => ({
+        ...capability,
+      })),
+    },
+    continuationIdentity: null,
+    model: selection.modelId === "provider-default" ? "" : selection.modelId,
+    reasoningEffort: selection.reasoningEffort ?? payload.reasoningEffort ?? "",
+    interactionMode: payload.interactionMode ?? "build",
+    accessMode: payload.accessMode ?? "supervised",
+    status: "idle",
+    attentionKind: null,
+    branch: payload.branch ?? null,
+    worktreePath: payload.worktreePath ?? null,
+    providerSessionId: null,
+    archivedAt: null,
+    settledAt: null,
+    completedAt: null,
+    lastViewedAt: now,
+    createdAt: now,
+    updatedAt: now,
   };
 }
 

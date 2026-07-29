@@ -57,6 +57,8 @@ export function attachRuntimeWebSocketBoundary(
   const webSockets = new WebSocketServer({
     noServer: true,
     maxPayload: RUNTIME_WEBSOCKET_LIMITS.maxPayloadBytes,
+    // This transport is loopback-only. The checked-in benchmark documents why
+    // zlib CPU/native-memory overhead currently outweighs reduced TCP bytes.
     perMessageDeflate: false,
   });
 

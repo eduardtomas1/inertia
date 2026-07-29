@@ -208,7 +208,6 @@ export function useSplitWorkspaceScene({
     run,
     setActionError,
     setActiveTool: layout.setActiveTool,
-    openProjectPath: actions.openProjectPath,
     loadGitOnMount: layout.activeTool === "changes",
     loadFilesOnMount: layout.activeTool === "files",
   }));
@@ -320,6 +319,7 @@ export function useSplitWorkspaceScene({
       ? busyAction.slice("split:".length)
       : null,
     project: splitProject,
+    draftConversation: null,
     connection,
     providerMaintenance,
     projection,

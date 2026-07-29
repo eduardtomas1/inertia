@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import {
   Paperclip,
   RotateCcw,
@@ -7,6 +7,10 @@ import clsx from "clsx";
 import type { ChatMessage } from "@shared/contracts";
 import { formatClockTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
+import {
+  collapsedUserRequestPreview,
+  shouldCollapseUserRequest,
+} from "../../utils/userRequestPresentation";
 import {
   buildTurnExecutionStream,
   shouldConsolidateSettledWorkIntoRunDetails,
@@ -30,11 +34,25 @@ import type { ResponseTimelineProps } from "./types";
 export function UserRequestLayer({
   turn,
   props,
+  onBeforeToggle,
+  onAfterToggle,
 }: {
   turn: ResponseTurn;
   props: ResponseTimelineProps;
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
 }): React.JSX.Element {
   const isDocumentLike = turn.userMessage.content.length >= 280;
+  const collapsible = shouldCollapseUserRequest(turn.userMessage.content);
+  const [expanded, setExpanded] = useState(false);
+  const content = collapsible && !expanded
+    ? collapsedUserRequestPreview(turn.userMessage.content)
+    : turn.userMessage.content;
+  const toggleExpanded = (): void => {
+    onBeforeToggle?.();
+    setExpanded((current) => !current);
+    window.requestAnimationFrame(() => onAfterToggle?.());
+  };
   return (
     <article
       className={clsx("message is-user turn-user-request", isDocumentLike && "is-document-like")}
@@ -50,7 +68,22 @@ export function UserRequestLayer({
         {props.showTimestamps && <time dateTime={turn.userMessage.createdAt}>{formatClockTime(turn.userMessage.createdAt)}</time>}
         {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={11} />Revert</button>}
       </div>
-      <div className="message-body">{turn.userMessage.content}</div>
+      <div
+        className={clsx("message-body", collapsible && !expanded && "is-collapsed")}
+        data-request-content={collapsible ? "collapsible" : "complete"}
+      >
+        {content}
+      </div>
+      {collapsible && (
+        <button
+          type="button"
+          className="turn-user-request-expand"
+          aria-expanded={expanded}
+          onClick={toggleExpanded}
+        >
+          {expanded ? "Show less" : "Show full message"}
+        </button>
+      )}
       {turn.userMessage.attachments.length > 0 && (
         <ul className="message-attachments turn-user-request-context" aria-label="Request context">
           {turn.userMessage.attachments.map((attachment) => (
@@ -147,6 +180,7 @@ export function AgentExecutionLayer({
             projectId={props.projectId}
             conversationId={props.conversationId}
             defaultCodeWrap={props.defaultCodeWrap}
+            onOpenProjectFile={props.onOpenTurnFile}
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
           />
@@ -163,6 +197,7 @@ export function AgentExecutionLayer({
             projectId={props.projectId}
             conversationId={props.conversationId}
             defaultCodeWrap={props.defaultCodeWrap}
+            onOpenProjectFile={props.onOpenTurnFile}
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
           />
@@ -276,6 +311,7 @@ export function FinalAnswerDocument({
         conversationId={props.conversationId}
         defaultCodeWrap={props.defaultCodeWrap}
         streaming={presentation.markdownStreaming}
+        onOpenProjectFile={props.onOpenTurnFile}
       />
     </article>
   );
@@ -332,6 +368,7 @@ export function SupportingLedgerLayer({
                   projectId={props.projectId}
                   conversationId={props.conversationId}
                   defaultCodeWrap={props.defaultCodeWrap}
+                  onOpenProjectFile={props.onOpenTurnFile}
                   onBeforeToggle={onBeforeToggle}
                   onAfterToggle={onAfterToggle}
                 />

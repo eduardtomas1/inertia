@@ -1,6 +1,22 @@
+import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { lstat, open, opendir, realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import {
+  lstat,
+  open,
+  opendir,
+  realpath,
+  rename,
+  stat,
+  unlink,
+} from "node:fs/promises";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 const MAX_PATH_LENGTH = 4_096;
 const DEFAULT_LIST_LIMIT = 500;
@@ -43,6 +59,7 @@ export type WorkspaceErrorCode =
   | "not-file"
   | "file-too-large"
   | "not-text"
+  | "conflict"
   | "invalid-package"
   | "operation-failed";
 
@@ -102,6 +119,7 @@ export interface WorkspaceTextFile {
   content: string;
   size: number;
   modifiedAt: string;
+  contentDigest: string;
 }
 
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun" | "unknown";
@@ -431,6 +449,7 @@ async function readSecureFile(root: string, relativePath: string, maxBytes: numb
       content,
       size: offset,
       modifiedAt: info.mtime.toISOString(),
+      contentDigest: createHash("sha256").update(bytes).digest("hex"),
     };
   } catch (error) {
     if (error instanceof WorkspaceError) throw error;
@@ -448,6 +467,92 @@ export async function readWorkspaceTextFile(
   const root = await workspaceRoot(workspacePath);
   const maxBytes = boundedInteger(options.maxBytes, DEFAULT_TEXT_BYTES, MAX_TEXT_BYTES);
   return readSecureFile(root, relativePath, maxBytes);
+}
+
+export async function writeWorkspaceTextFile(
+  workspacePath: string,
+  relativePath: string,
+  content: string,
+  expectedDigest: string,
+  options: ReadTextOptions = {},
+): Promise<WorkspaceTextFile> {
+  const root = await workspaceRoot(workspacePath);
+  const maxBytes = boundedInteger(
+    options.maxBytes,
+    DEFAULT_TEXT_BYTES,
+    MAX_TEXT_BYTES,
+  );
+  if (!/^[a-f0-9]{64}$/u.test(expectedDigest)) {
+    throw new WorkspaceError(
+      "invalid-input",
+      "The expected file version is invalid.",
+    );
+  }
+  if (content.includes("\0")) {
+    throw new WorkspaceError(
+      "not-text",
+      "Files containing null bytes cannot be edited here.",
+    );
+  }
+  const bytes = Buffer.from(content, "utf8");
+  if (bytes.byteLength > maxBytes) {
+    throw new WorkspaceError(
+      "file-too-large",
+      `This file is larger than the ${Math.ceil(maxBytes / 1024)} KB editing limit.`,
+    );
+  }
+
+  const target = await secureExistingPath(root, relativePath, "file");
+  const initial = await readSecureFile(root, target.relativePath, maxBytes);
+  if (initial.contentDigest !== expectedDigest) {
+    throw new WorkspaceError(
+      "conflict",
+      "This file changed after it was opened. Reload it before saving.",
+    );
+  }
+
+  const targetInfo = await stat(target.absolute);
+  const temporaryPath = resolve(
+    dirname(target.absolute),
+    `.${basename(target.absolute)}.inertia-${randomUUID()}.tmp`,
+  );
+  let temporaryHandle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    temporaryHandle = await open(
+      temporaryPath,
+      fsConstants.O_CREAT
+        | fsConstants.O_EXCL
+        | fsConstants.O_WRONLY
+        | (fsConstants.O_NOFOLLOW ?? 0),
+      targetInfo.mode,
+    );
+    await temporaryHandle.writeFile(bytes);
+    if (process.platform !== "win32") {
+      await temporaryHandle.chmod(targetInfo.mode);
+    }
+    await temporaryHandle.sync();
+    await temporaryHandle.close();
+    temporaryHandle = undefined;
+
+    const current = await readSecureFile(root, target.relativePath, maxBytes);
+    if (current.contentDigest !== expectedDigest) {
+      throw new WorkspaceError(
+        "conflict",
+        "This file changed while it was being saved. Reload it and try again.",
+      );
+    }
+    await rename(temporaryPath, target.absolute);
+    return readSecureFile(root, target.relativePath, maxBytes);
+  } catch (error) {
+    if (error instanceof WorkspaceError) throw error;
+    throw new WorkspaceError(
+      "operation-failed",
+      "Unable to save this workspace file.",
+    );
+  } finally {
+    await temporaryHandle?.close().catch(() => undefined);
+    await unlink(temporaryPath).catch(() => undefined);
+  }
 }
 
 async function detectPackageManager(root: string): Promise<PackageManager> {

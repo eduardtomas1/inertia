@@ -641,7 +641,7 @@ export class ProviderManager {
    */
   async stopOwned(
     conversationId: string,
-    identity: { runId: string; turnId: string },
+    identity: { runId: string; turnId: string | null },
     graceMs = this.cancelGraceMs,
   ): Promise<OwnedProviderStopResult> {
     const active = this.activeRuns.get(conversationId);
@@ -673,8 +673,11 @@ export class ProviderManager {
 
   async disposeAll(): Promise<void> {
     const active = [...this.activeRuns.entries()];
-    for (const [conversationId] of active) this.cancel(conversationId);
-    await Promise.allSettled(active.map(([, run]) => run.result));
+    await Promise.allSettled(active.map(([conversationId, run]) =>
+      this.stopOwned(
+        conversationId,
+        { runId: run.runId, turnId: run.turnId },
+      )));
   }
 
   respondToApproval(

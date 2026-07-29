@@ -83,7 +83,7 @@ describe("composer Send and Stop", () => {
 
   it("preserves keyboard and focus semantics with explicit action labels", () => {
     expect(inputSource).toContain(
-      'if (event.key === "Enter" && !event.shiftKey)',
+      "if (shouldSubmitComposerKey(event))",
     );
     expect(inputSource).toContain("void onSubmit()");
     expect(inputSource).toContain(

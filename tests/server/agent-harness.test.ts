@@ -541,6 +541,53 @@ describe("agent harness architecture", () => {
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
+  it("bounds global shutdown and force-detaches malformed runs concurrently", async () => {
+    const cancelCalls = new Map<string, boolean[]>();
+    const harness: AgentHarness = {
+      id: "claude-cli",
+      providerId: "claude",
+      capabilities: CLI_AGENT_HARNESS_CAPABILITIES.claude,
+      supports: () => true,
+      start: (options) => {
+        const conversationId = options.input.conversationId!;
+        cancelCalls.set(conversationId, []);
+        return {
+          harnessId: "claude-cli",
+          providerId: "claude",
+          result: new Promise<ProviderRunResult>(() => undefined),
+          cancel: (force) => {
+            cancelCalls.get(conversationId)?.push(force);
+          },
+          extension: { kind: "cli", providerId: "claude" },
+        };
+      },
+    };
+    const manager = new ProviderManager(
+      { cancelGraceMs: 100 },
+      new AgentHarnessRegistry([harness]),
+    );
+    for (let index = 0; index < 3; index += 1) {
+      void manager.run(input("claude", {
+        harnessId: "claude-cli",
+        conversationId: `shutdown-${index}`,
+        runId: `run-${index}`,
+        turnId: `turn-${index}`,
+      }));
+    }
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    const startedAt = performance.now();
+    await manager.disposeAll();
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(700);
+    expect(manager.activeConversationIds()).toEqual([]);
+    for (const calls of cancelCalls.values()) {
+      expect(calls[0]).toBe(false);
+      expect(calls).toContain(true);
+    }
+  });
+
   it("fails closed when an explicitly selected harness is unavailable", () => {
     const harness = (id: "claude-cli" | "cursor-cli", providerId: "claude" | "cursor"): AgentHarness => ({
       id,

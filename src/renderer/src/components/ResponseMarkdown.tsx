@@ -68,6 +68,11 @@ const sanitizeSchema = {
     ...defaultSchema.attributes,
     details: ["open"],
     input: [...(defaultSchema.attributes?.input ?? []), "checked", "disabled", ["type", "checkbox"]],
+    code: [
+      ...(defaultSchema.attributes?.code ?? []),
+      "data-code-meta",
+      "dataCodeMeta",
+    ],
   },
 };
 
@@ -78,6 +83,7 @@ type ResponseMarkdownProps = {
   conversationId?: string;
   defaultCodeWrap: boolean;
   streaming?: boolean;
+  onOpenProjectFile?: (path: string) => void;
 };
 
 type ProjectLink =
@@ -101,7 +107,7 @@ function preserveCodeMeta() {
           ...node.data,
           hProperties: {
             ...node.data?.hProperties,
-            dataCodeMeta: node.meta.trim(),
+            "data-code-meta": node.meta.trim(),
           },
         };
       }
@@ -267,21 +273,62 @@ function HighlightedCode({ code, language, enabled }: { code: string; language: 
     : <code className={language ? `language-${language}` : undefined}>{code}</code>;
 }
 
-function CodeBlock({ children, defaultWrap, streaming }: { children: ReactNode; defaultWrap: boolean; streaming: boolean }): React.JSX.Element {
+function CodeBlock({
+  children,
+  defaultWrap,
+  streaming,
+  projectRoot,
+  onOpenProjectFile,
+}: {
+  children: ReactNode;
+  defaultWrap: boolean;
+  streaming: boolean;
+  projectRoot: string;
+  onOpenProjectFile?: (path: string) => void;
+}): React.JSX.Element {
   const child = Children.toArray(children)[0];
-  const element = isValidElement<{ className?: string; children?: ReactNode; node?: { properties?: Record<string, unknown> } }>(child) ? child : null;
+  const element = isValidElement<{
+    className?: string;
+    children?: ReactNode;
+    node?: { properties?: Record<string, unknown> };
+    dataCodeMeta?: unknown;
+    "data-code-meta"?: unknown;
+  }>(child) ? child : null;
   const code = nodeText(element?.props.children ?? children).replace(/\n$/u, "");
   const language = /^language-([\w+-]+)$/u.exec(element?.props.className ?? "")?.[1]?.toLocaleLowerCase("en-US") ?? "";
-  const rawMeta = element?.props.node?.properties?.dataCodeMeta;
+  const rawMeta = element?.props.node?.properties?.dataCodeMeta
+    ?? element?.props.node?.properties?.["data-code-meta"]
+    ?? element?.props.dataCodeMeta
+    ?? element?.props["data-code-meta"];
   const meta = codeMeta(typeof rawMeta === "string" ? rawMeta : language || undefined);
   const [wrap, setWrap] = useState(defaultWrap);
   const [copied, copy] = useCopiedState();
   useEffect(() => setWrap(defaultWrap), [defaultWrap]);
   const HeaderIcon = meta.file ? FileCode2 : Code2;
+  const fileTarget = meta.file
+    ? resolveResponseLink(projectRoot, meta.file)
+    : null;
+  const fileLabel = (
+    <>
+      <HeaderIcon size={13} />
+      {meta.file ?? meta.label}
+    </>
+  );
   return (
     <div className="response-code-block">
       <header>
-        <span title={meta.file ?? undefined}><HeaderIcon size={13} />{meta.file ?? meta.label}</span>
+        {fileTarget?.kind === "project" && onOpenProjectFile
+          ? (
+              <button
+                type="button"
+                className="response-code-file-link"
+                title={`Open ${fileTarget.relativePath} in Files`}
+                onClick={() => onOpenProjectFile(fileTarget.relativePath)}
+              >
+                {fileLabel}
+              </button>
+            )
+          : <span title={meta.file ?? undefined}>{fileLabel}</span>}
         <div>
           <button type="button" aria-pressed={wrap} title={wrap ? "Disable code wrapping" : "Wrap long code lines"} onClick={() => setWrap((value) => !value)}><WrapText size={13} /><span>Wrap</span></button>
           <button type="button" title="Copy code" onClick={() => void copy(code)}>{copied ? <Check size={13} /> : <Copy size={13} />}<span>{copied ? "Copied" : "Copy"}</span></button>
@@ -306,6 +353,7 @@ export function ResponseMarkdown({
   conversationId,
   defaultCodeWrap,
   streaming = false,
+  onOpenProjectFile,
 }: ResponseMarkdownProps): React.JSX.Element {
   const renderedContent = streaming ? stabilizeStreamingMarkdown(content) : content;
   return (
@@ -322,6 +370,10 @@ export function ResponseMarkdown({
             if (target.kind === "project") {
               return <a {...props} href={href} onClick={(event) => {
                 event.preventDefault();
+                if (onOpenProjectFile) {
+                  onOpenProjectFile(target.relativePath);
+                  return;
+                }
                 void window.inertia.openProjectPath({
                   projectId,
                   ...(conversationId ? { conversationId } : {}),
@@ -333,7 +385,16 @@ export function ResponseMarkdown({
             if (target.kind === "anchor") return <a {...props} href={target.href}>{children}</a>;
             return <span className="response-unsafe-link" title="This link was blocked because it is outside the project or uses an unsafe protocol.">{children}</span>;
           },
-          pre: ({ children }) => <CodeBlock defaultWrap={defaultCodeWrap} streaming={streaming}>{children}</CodeBlock>,
+          pre: ({ children }) => (
+            <CodeBlock
+              defaultWrap={defaultCodeWrap}
+              streaming={streaming}
+              projectRoot={projectRoot}
+              onOpenProjectFile={onOpenProjectFile}
+            >
+              {children}
+            </CodeBlock>
+          ),
           table: MarkdownTable,
           details: ({ children, ...props }) => <details {...props} className="response-details">{children}</details>,
         }}

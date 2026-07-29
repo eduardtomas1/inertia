@@ -37,6 +37,8 @@ import {
   type ComposerSettingsModel,
 } from "./ComposerSettings";
 import type { ComposerMenuController } from "./useComposerMenus";
+import type { PromptStashEntry } from "../../utils/promptStash";
+import { PromptStashMenu } from "./PromptStashMenu";
 
 export interface ComposerToolbarProps {
   actions: ProjectAction[];
@@ -45,6 +47,13 @@ export interface ComposerToolbarProps {
   attachmentCount: number;
   onChooseAttachments: () => Promise<void>;
   onRunAction: (action: ProjectAction) => void;
+  promptStash: readonly PromptStashEntry[];
+  canStashPrompt: boolean;
+  promptStashBlockedReason: string | null;
+  promptRestoreBlockedReason: (entry: PromptStashEntry) => string | null;
+  onStashPrompt: () => void;
+  onRestorePrompt: (entry: PromptStashEntry) => void;
+  onRemoveStashedPrompt: (entryId: string) => void;
   modelRoutes: ComposerModelRoute[];
   selectedModelRoute: ModelSearchRoute;
   onChooseModelRoute: (route: ComposerModelRoute) => void;
@@ -80,6 +89,13 @@ export function ComposerToolbar({
   attachmentCount,
   onChooseAttachments,
   onRunAction,
+  promptStash,
+  canStashPrompt,
+  promptStashBlockedReason,
+  promptRestoreBlockedReason,
+  onStashPrompt,
+  onRestorePrompt,
+  onRemoveStashedPrompt,
   modelRoutes,
   selectedModelRoute,
   onChooseModelRoute,
@@ -124,6 +140,16 @@ export function ComposerToolbar({
         >
           <Paperclip size={16} />
         </IconButton>
+        <PromptStashMenu
+          entries={promptStash}
+          canStash={canStashPrompt}
+          blockedReason={promptStashBlockedReason}
+          restoreBlockedReason={promptRestoreBlockedReason}
+          menuController={menuController}
+          onStash={onStashPrompt}
+          onRestore={onRestorePrompt}
+          onRemove={onRemoveStashedPrompt}
+        />
         {actions.length > 0 && (
           <div className="popover-anchor composer-action-control">
             <button

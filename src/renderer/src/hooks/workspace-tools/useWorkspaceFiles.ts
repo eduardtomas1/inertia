@@ -183,6 +183,36 @@ export function useWorkspaceFiles({
     });
   }, [conversation?.id, project, request, setActionError]);
 
+  const saveWorkspaceFile = useCallback(async (
+    path: string,
+    content: string,
+    expectedDigest: string,
+  ): Promise<WorkspaceFilePreview> => {
+    if (!project) throw new Error("Select a project before editing files.");
+    const generation = filePreviewRequestGenerationRef.current;
+    const event = resultEvent(await request({
+      type: "workspace.file.write",
+      payload: {
+        projectId: project.id,
+        conversationId: conversation?.id,
+        path,
+        content,
+        expectedDigest,
+      },
+    }));
+    if (event.result.kind !== "workspace.file") {
+      throw new Error("The local service returned an unexpected file response.");
+    }
+    if (
+      filePreviewRequestGenerationRef.current === generation
+      && selectedFile === path
+    ) {
+      setFilePreview(event.result.file);
+      setFilePreviewError(null);
+    }
+    return event.result.file;
+  }, [conversation?.id, project, request, selectedFile]);
+
   return {
     workspaceEntries,
     mentionResults: mentions.mentionResults,
@@ -197,6 +227,7 @@ export function useWorkspaceFiles({
     requestWorkspaceEntries,
     loadFiles,
     selectWorkspaceFile,
+    saveWorkspaceFile,
     searchMentions: mentions.searchMentions,
   };
 }

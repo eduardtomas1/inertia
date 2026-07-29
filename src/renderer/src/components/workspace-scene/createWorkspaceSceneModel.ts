@@ -114,6 +114,7 @@ export interface WorkspaceSceneModelInput {
   settings: AppSettings;
   busyAction: string | null;
   project: Project | null;
+  draftConversation: Conversation | null;
   connection: Connection;
   providerMaintenance: ProviderMaintenance;
   projection: ConversationProjection;
@@ -138,6 +139,7 @@ export function createWorkspaceSceneModel({
   settings,
   busyAction,
   project,
+  draftConversation,
   connection,
   providerMaintenance,
   projection,
@@ -156,11 +158,12 @@ export function createWorkspaceSceneModel({
   setLatestContentVisible,
 }: WorkspaceSceneModelInput): WorkspaceSceneProps {
   const {
-    conversation,
+    conversation: persistedConversation,
     detail,
     detailState,
     refreshDetail,
   } = projection;
+  const conversation = persistedConversation ?? draftConversation;
   const {
     activeTool,
     setActiveTool,
@@ -256,7 +259,7 @@ export function createWorkspaceSceneModel({
     } : null,
     chat: {
       project,
-      conversation: detail?.conversation ?? null,
+      conversation: detail?.conversation ?? conversation,
       turns: projection.turns,
       messages: projection.messages,
       activities: projection.activities,
@@ -443,6 +446,7 @@ export function createWorkspaceSceneModel({
           relativePath: path,
           action: "open-externally",
         }),
+        onSaveFile: workspaceTools.saveWorkspaceFile,
       },
       filesKey: `files:${project.id}:${conversation?.id ?? "project"}`,
       terminal: {

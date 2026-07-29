@@ -14,6 +14,7 @@ import type {
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import type { composerRouteReadiness } from "../../utils/composerReadiness";
 import { promptContextDetail } from "../../utils/requestContext";
+import { shouldSubmitComposerKey } from "../../utils/composerKeyboard";
 import { ComposerAttachmentList } from "../ComposerAttachmentList";
 import {
   RouteRepairIcon,
@@ -195,7 +196,7 @@ export function ComposerInputZone({
             }
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (shouldSubmitComposerKey(event)) {
               event.preventDefault();
               void onSubmit();
             }

@@ -141,7 +141,7 @@ describe("cohesive composer dock", () => {
     expect(autosizeSource).toContain(
       "textarea.style.overflowY = contentHeight > MAX_TEXTAREA_HEIGHT_PX",
     );
-    expect(inputSource).toContain('event.key === "Enter" && !event.shiftKey');
+    expect(inputSource).toContain("if (shouldSubmitComposerKey(event))");
     expect(toolbarSource).toContain('className="secondary-button composer-follow-up-button"');
     expect(toolbarSource).toContain('title="This active agent route cannot accept parent follow-ups."');
     expect(composerSource).toContain('event.dataTransfer.types.includes("Files")');

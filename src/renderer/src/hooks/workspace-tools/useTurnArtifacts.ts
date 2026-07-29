@@ -17,9 +17,7 @@ interface TurnArtifactsOptions {
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   setActionError: (message: string | null) => void;
   setActiveTool: (tool: WorkspacePanelTab | null) => void;
-  openProjectPath: (
-    request: Parameters<typeof window.inertia.openProjectPath>[0],
-  ) => void;
+  openWorkspaceFile: (path: string) => void;
   loadGit: () => Promise<void>;
 }
 
@@ -29,7 +27,7 @@ export function useTurnArtifacts({
   request,
   setActionError,
   setActiveTool,
-  openProjectPath,
+  openWorkspaceFile,
   loadGit,
 }: TurnArtifactsOptions) {
   const [historicalDiff, setHistoricalDiff] =
@@ -139,13 +137,8 @@ export function useTurnArtifacts({
 
   const openTurnFile = useCallback((path: string) => {
     if (!project || !conversation) return;
-    openProjectPath({
-      projectId: project.id,
-      conversationId: conversation.id,
-      relativePath: path,
-      action: "open-externally",
-    });
-  }, [conversation, openProjectPath, project]);
+    openWorkspaceFile(path);
+  }, [conversation, openWorkspaceFile, project]);
 
   const showCurrentChanges = useCallback(() => {
     setHistoricalDiff(null);

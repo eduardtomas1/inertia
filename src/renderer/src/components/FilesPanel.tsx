@@ -133,6 +133,7 @@ export function FilesPanel({
   const directoryPagesRef = useRef(initialPages);
   const directoryGeneration = useRef(0);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
+  const expandedPathsRef = useRef(expandedPaths);
   const [loadingDirectories, setLoadingDirectories] = useState<Set<string>>(() => new Set());
   const [directoryErrors, setDirectoryErrors] = useState<Map<string, string>>(() => new Map());
   const [query, setQuery] = useState("");
@@ -159,15 +160,15 @@ export function FilesPanel({
     };
   }, []);
 
-  useEffect(() => {
-    directoryGeneration.current += 1;
-    const next = freshWorkspaceDirectoryPages(entries, entriesTruncated);
-    directoryPagesRef.current = next;
-    setDirectoryPages(next);
-    setExpandedPaths(new Set());
-    setLoadingDirectories(new Set());
-    setDirectoryErrors(new Map());
-  }, [entries, entriesTruncated]);
+  const updateExpandedPaths = useCallback((
+    update: (current: Set<string>) => Set<string>,
+  ): void => {
+    setExpandedPaths((current) => {
+      const next = update(current);
+      expandedPathsRef.current = next;
+      return next;
+    });
+  }, []);
 
   const storePage = useCallback((path: string, page: WorkspaceEntriesPage): void => {
     if (page.directory !== path) {
@@ -211,6 +212,30 @@ export function FilesPanel({
       }
     }
   }, [onLoadEntries, storePage]);
+
+  useEffect(() => {
+    directoryGeneration.current += 1;
+    const next = freshWorkspaceDirectoryPages(entries, entriesTruncated);
+    const rootDirectories = new Set(
+      entries
+        .filter(({ kind }) => kind === "directory")
+        .map(({ path }) => path),
+    );
+    const retainedExpandedPaths = new Set(
+      [...expandedPathsRef.current].filter((path) =>
+        rootDirectories.has(path.split("/")[0] ?? "")
+      ),
+    );
+    expandedPathsRef.current = retainedExpandedPaths;
+    directoryPagesRef.current = next;
+    setDirectoryPages(next);
+    setExpandedPaths(retainedExpandedPaths);
+    setLoadingDirectories(new Set());
+    setDirectoryErrors(new Map());
+    for (const path of retainedExpandedPaths) {
+      void loadDirectory(path);
+    }
+  }, [entries, entriesTruncated, loadDirectory]);
 
   const updateQuery = (value: string): void => {
     searchGeneration.current += 1;
@@ -284,14 +309,14 @@ export function FilesPanel({
       return;
     }
     if (expandedPaths.has(path)) {
-      setExpandedPaths((current) => {
+      updateExpandedPaths((current) => {
         const next = new Set(current);
         next.delete(path);
         return next;
       });
       return;
     }
-    setExpandedPaths((current) => new Set(current).add(path));
+    updateExpandedPaths((current) => new Set(current).add(path));
     if (!directoryPagesRef.current.has(path)) void loadDirectory(path);
   };
 
@@ -299,7 +324,7 @@ export function FilesPanel({
     if (!isSafeWorkspaceEntryPath(path)) return;
     updateQuery("");
     const chain = directoryChain(path);
-    setExpandedPaths((current) => new Set([...current, ...chain]));
+    updateExpandedPaths((current) => new Set([...current, ...chain]));
     for (const directory of chain) {
       if (directoryPagesRef.current.has(directory)) continue;
       await loadDirectory(directory);

@@ -99,6 +99,7 @@ export function Composer({
   const stopReleaseTimerRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const conversationIdRef = useRef(conversation.id);
+  const attachmentAuthorityRef = useRef(0);
   const releaseAttachmentRef = useRef(onReleaseAttachment);
   const [fileReferences, setFileReferences] = useState<string[]>([]);
   const [pendingRoute, setPendingRoute] = useState<{
@@ -139,6 +140,7 @@ export function Composer({
   releaseAttachmentRef.current = onReleaseAttachment;
 
   useEffect(() => {
+    attachmentAuthorityRef.current += 1;
     skipDraftPersistenceRef.current = true;
     if (submissionReleaseTimerRef.current !== null) {
       window.clearTimeout(submissionReleaseTimerRef.current);
@@ -198,6 +200,7 @@ export function Composer({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      attachmentAuthorityRef.current += 1;
       const unsent = attachmentsRef.current;
       attachmentsRef.current = [];
       for (const attachment of unsent) {
@@ -241,6 +244,7 @@ export function Composer({
     ) return;
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
+    const submittedDraft = message;
     // Submitted files must remain registered while the provider reads them.
     // Removing them from the unsent ref prevents an unmount from releasing
     // their temporary copies after the server has accepted the turn.
@@ -249,6 +253,14 @@ export function Composer({
     setSubmitting(true);
     try {
       await onSend(request.visibleContent, submittedAttachments, request.context);
+      try {
+        const key = `inertia:draft:${submittedConversationId}`;
+        if (window.localStorage.getItem(key) === submittedDraft) {
+          window.localStorage.removeItem(key);
+        }
+      } catch {
+        // The in-memory composer still clears when it owns the settled send.
+      }
       if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
       setMessage("");
       setAttachments([]);
@@ -320,16 +332,40 @@ export function Composer({
 
   const chooseAttachments = async () => {
     if (submittingRef.current || disabled || sending || running) return;
+    const authority = attachmentAuthorityRef.current;
+    const attachmentConversationId = conversation.id;
     const selected = await onChooseAttachments();
+    if (
+      !mountedRef.current
+      || attachmentAuthorityRef.current !== authority
+      || conversationIdRef.current !== attachmentConversationId
+    ) {
+      for (const attachment of selected) {
+        void releaseAttachmentRef.current(attachment.id);
+      }
+      return;
+    }
     addAttachments(selected);
   };
 
   const importAttachments = async (files: File[]) => {
     if (submittingRef.current || disabled || sending || running) return;
+    const authority = attachmentAuthorityRef.current;
+    const attachmentConversationId = conversation.id;
     const remaining = Math.max(0, MAX_CHAT_ATTACHMENTS - attachmentsRef.current.length);
     const candidates = files.slice(0, remaining);
     if (candidates.length === 0) return;
     const selected = await onImportAttachments(candidates);
+    if (
+      !mountedRef.current
+      || attachmentAuthorityRef.current !== authority
+      || conversationIdRef.current !== attachmentConversationId
+    ) {
+      for (const attachment of selected) {
+        void releaseAttachmentRef.current(attachment.id);
+      }
+      return;
+    }
     addAttachments(selected);
   };
 

@@ -26,16 +26,23 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_PENDING_REQUESTS = 64;
 
 interface PendingRequest {
-  operation: "read" | "replace";
+  operation: SecureFileRequest["operation"];
   timer: NodeJS.Timeout;
   signal: AbortSignal | undefined;
   onAbort: (() => void) | null;
-  resolve: (value: SecureFileRead | SecureFileReplace) => void;
+  resolve: (value: SecureFileRead | SecureFileReplace | undefined) => void;
   reject: (error: Error) => void;
 }
 
 function unavailable(message = "The secure file operation could not be completed."): Error {
   return new SecureFileError("unavailable", message);
+}
+
+function missingPath(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === "ENOENT";
 }
 
 export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
@@ -56,7 +63,7 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
     maxBytes: number,
     signal?: AbortSignal,
   ): Promise<SecureFileRead> {
-    const authority = await this.authority(root, path);
+    const authority = await this.authority(root, path, signal);
     return await this.request({
       operation: "read",
       ...authority,
@@ -75,7 +82,7 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
     maxBytes: number,
     signal?: AbortSignal,
   ): Promise<SecureFileReplace> {
-    const authority = await this.authority(root, path);
+    const authority = await this.authority(root, path, signal);
     return await this.request({
       operation: "replace",
       ...authority,
@@ -141,7 +148,9 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
       pending.reject(unavailable());
       return true;
     }
-    if (result.result.operation === "read") {
+    if (result.result.operation === "recover") {
+      pending.resolve(undefined);
+    } else if (result.result.operation === "read") {
       pending.resolve({
         content: Buffer.from(result.result.contentBase64, "base64"),
         ...result.result.metadata,
@@ -165,6 +174,7 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
   private async authority(
     root: SecureFileRootCapability,
     path: string,
+    signal?: AbortSignal,
   ): Promise<{
     root: string;
     rootIdentity: SecureFileIdentity;
@@ -189,7 +199,30 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
       if (!info.isDirectory() || info.isSymbolicLink()) throw unavailable();
       parentIdentities.push(this.identity(info));
     }
-    const target = await lstat(resolve(cursor, basename), { bigint: true });
+    const targetPath = resolve(cursor, basename);
+    let target = await lstat(targetPath, { bigint: true }).catch((error) => {
+      if (missingPath(error)) return null;
+      throw error;
+    });
+    if (!target) {
+      await this.request({
+        operation: "recover",
+        root: root.root,
+        rootIdentity: root.identity,
+        parentIdentities,
+        path,
+      }, signal);
+      target = await lstat(targetPath, { bigint: true }).catch((error) => {
+        if (missingPath(error)) return null;
+        throw error;
+      });
+    }
+    if (!target) {
+      throw new SecureFileError(
+        "not-found",
+        "The selected file is missing.",
+      );
+    }
     if (!target.isFile() || target.isSymbolicLink()) throw unavailable();
     return {
       root: root.root,
@@ -219,7 +252,7 @@ export class RuntimeSecureFileBrokerClient implements RuntimeSecureFileBroker {
   private async request(
     request: SecureFileRequest,
     signal?: AbortSignal,
-  ): Promise<SecureFileRead | SecureFileReplace> {
+  ): Promise<SecureFileRead | SecureFileReplace | undefined> {
     if (
       this.closed
       || signal?.aborted

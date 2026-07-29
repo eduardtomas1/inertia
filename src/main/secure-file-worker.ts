@@ -1,126 +1,30 @@
-import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
-import {
-  lstat,
-  open,
-  realpath,
-  stat,
-} from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
   parseSecureFileRequest,
   secureFilePathSegments,
   type SecureFileIdentity,
-  type SecureFileMetadata,
   type SecureFileRequest,
   type SecureFileResult,
 } from "../node/secure-file-protocol.js";
+import {
+  identity,
+  openVerifiedFile,
+  sameIdentity,
+  SecureFileOperationError,
+} from "./secure-file-io.js";
+import {
+  recoverSecureFileTransactions,
+  replaceSecureFileTransaction,
+  type SecureFileTransactionHooks,
+} from "./secure-file-transaction.js";
+import {
+  parseSecureFileWorkerRequest,
+  type SecureFileWorkerEvent,
+} from "./secure-file-worker-protocol.js";
 
-class SecureFileWorkerError extends Error {
-  constructor(
-    readonly code:
-      | "conflict"
-      | "invalid"
-      | "not-found"
-      | "too-large"
-      | "unsafe"
-      | "unavailable",
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
-function sameIdentity(
-  left: SecureFileIdentity,
-  right: SecureFileIdentity,
-): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function identity(info: { dev: bigint; ino: bigint }): SecureFileIdentity {
-  return {
-    dev: info.dev.toString(10),
-    ino: info.ino.toString(10),
-  };
-}
-
-function digest(content: Buffer): string {
-  return createHash("sha256").update(content).digest("hex");
-}
-
-async function readHandle(
-  handle: Awaited<ReturnType<typeof open>>,
-  maxBytes: number,
-): Promise<{ content: Buffer; metadata: SecureFileMetadata }> {
-  const info = await handle.stat();
-  if (!info.isFile()) {
-    throw new SecureFileWorkerError(
-      "unsafe",
-      "The selected path is not a regular file.",
-    );
-  }
-  if (info.size > maxBytes) {
-    throw new SecureFileWorkerError(
-      "too-large",
-      "The selected file exceeds the supported size limit.",
-    );
-  }
-  const content = Buffer.alloc(info.size);
-  let offset = 0;
-  while (offset < content.length) {
-    const { bytesRead } = await handle.read(
-      content,
-      offset,
-      content.length - offset,
-      offset,
-    );
-    if (bytesRead === 0) break;
-    offset += bytesRead;
-  }
-  const bounded = content.subarray(0, offset);
-  return {
-    content: bounded,
-    metadata: {
-      digest: digest(bounded),
-      size: bounded.byteLength,
-      modifiedAt: info.mtime.toISOString(),
-      mode: info.mode & 0o777,
-    },
-  };
-}
-
-async function writeComplete(
-  handle: Awaited<ReturnType<typeof open>>,
-  content: Buffer,
-): Promise<void> {
-  let offset = 0;
-  while (offset < content.length) {
-    const { bytesWritten } = await handle.write(
-      content,
-      offset,
-      content.length - offset,
-      offset,
-    );
-    if (bytesWritten < 1) {
-      throw new SecureFileWorkerError(
-        "unavailable",
-        "The selected file could not be written completely.",
-      );
-    }
-    offset += bytesWritten;
-  }
-  await handle.truncate(content.length);
-}
-
-interface SecureFileWorkerHooks {
-  beforePinnedWrite?(): Promise<void> | void;
-  writePinned?(
-    handle: Awaited<ReturnType<typeof open>>,
-    content: Buffer,
-  ): Promise<void>;
-}
+export type SecureFileWorkerHooks = SecureFileTransactionHooks;
 
 function comparablePath(value: string): string {
   return process.platform === "win32"
@@ -139,10 +43,7 @@ async function verifiedDirectory(
     || info.isSymbolicLink()
     || !sameIdentity(identity(info), expectedIdentity)
   ) {
-    throw new SecureFileWorkerError(
-      "unsafe",
-      message,
-    );
+    throw new SecureFileOperationError("unsafe", message);
   }
 }
 
@@ -172,7 +73,7 @@ async function assertPinnedNamespace(
     !pinned?.isDirectory()
     || !sameIdentity(identity(pinned), expectedParentIdentity)
   ) {
-    throw new SecureFileWorkerError(
+    throw new SecureFileOperationError(
       "unsafe",
       "The secure file helper is no longer attached to the selected parent folder.",
     );
@@ -186,7 +87,7 @@ async function assertPinnedNamespace(
     || !expectedCanonical
     || comparablePath(currentCanonical) !== comparablePath(expectedCanonical)
   ) {
-    throw new SecureFileWorkerError(
+    throw new SecureFileOperationError(
       "unsafe",
       "The selected parent folder moved outside the project.",
     );
@@ -214,238 +115,20 @@ async function enterVerifiedParent(
 ): Promise<{ basename: string; parentSegments: string[] }> {
   const segments = secureFilePathSegments(request.path);
   if (!segments) {
-    throw new SecureFileWorkerError(
+    throw new SecureFileOperationError(
       "invalid",
       "The selected file path is invalid.",
     );
   }
   const basename = segments.pop();
   if (!basename) {
-    throw new SecureFileWorkerError(
+    throw new SecureFileOperationError(
       "invalid",
       "The selected file path is invalid.",
     );
   }
   await assertPinnedNamespace(request, segments);
   return { basename, parentSegments: segments };
-}
-
-async function openVerifiedFile(
-  basename: string,
-  maxBytes: number,
-  expectedIdentity?: SecureFileIdentity,
-  writable = false,
-): Promise<{
-  handle: Awaited<ReturnType<typeof open>>;
-  content: Buffer;
-  metadata: SecureFileMetadata;
-  linkCount: number;
-}> {
-  const before = await lstat(basename, { bigint: true }).catch(() => null);
-  if (!before?.isFile() || before.isSymbolicLink()) {
-    throw new SecureFileWorkerError(
-      before ? "unsafe" : "not-found",
-      "The selected file is missing or no longer safe.",
-    );
-  }
-  if (
-    expectedIdentity
-    && !sameIdentity(identity(before), expectedIdentity)
-  ) {
-    throw new SecureFileWorkerError(
-      "conflict",
-      "The selected file changed before it was opened.",
-    );
-  }
-  const handle = await open(
-    basename,
-    (writable ? fsConstants.O_RDWR : fsConstants.O_RDONLY)
-      | (fsConstants.O_NOFOLLOW ?? 0),
-  );
-  try {
-    const openedIdentity = await handle.stat({ bigint: true });
-    if (
-      !openedIdentity.isFile()
-      || !sameIdentity(identity(before), identity(openedIdentity))
-    ) {
-      throw new SecureFileWorkerError(
-        "unsafe",
-        "The selected file changed while it was being opened.",
-      );
-    }
-    const read = await readHandle(handle, maxBytes);
-    return {
-      handle,
-      ...read,
-      linkCount: Number(openedIdentity.nlink),
-    };
-  } catch (error) {
-    await handle.close().catch(() => undefined);
-    throw error;
-  }
-}
-
-async function replace(
-  request: Extract<SecureFileRequest, { operation: "replace" }>,
-  basename: string,
-  parentSegments: readonly string[],
-  hooks: SecureFileWorkerHooks,
-): Promise<SecureFileResult> {
-  const content = Buffer.from(request.contentBase64, "base64");
-  const initial = await openVerifiedFile(
-    basename,
-    request.maxBytes,
-    request.targetIdentity,
-    true,
-  );
-  try {
-    if (initial.metadata.digest !== request.expectedDigest) {
-      throw new SecureFileWorkerError(
-        "conflict",
-        "The selected file changed after it was opened.",
-      );
-    }
-    if (initial.metadata.mode !== request.expectedMode) {
-      throw new SecureFileWorkerError(
-        "conflict",
-        "The selected file permissions changed after it was opened.",
-      );
-    }
-    if (initial.linkCount !== 1) {
-      throw new SecureFileWorkerError(
-        "unsafe",
-        "Files with multiple hard links cannot be replaced safely.",
-      );
-    }
-    await assertPinnedNamespace(request, parentSegments);
-    const current = await openVerifiedFile(
-      basename,
-      request.maxBytes,
-      request.targetIdentity,
-    );
-    try {
-      if (current.metadata.digest !== request.expectedDigest) {
-        throw new SecureFileWorkerError(
-          "conflict",
-          "The selected file changed before it was saved.",
-        );
-      }
-      if (current.metadata.mode !== request.expectedMode) {
-        throw new SecureFileWorkerError(
-          "conflict",
-          "The selected file permissions changed before it was saved.",
-        );
-      }
-      if (current.linkCount !== 1) {
-        throw new SecureFileWorkerError(
-          "unsafe",
-          "Files with multiple hard links cannot be replaced safely.",
-        );
-      }
-    } finally {
-      await current.handle.close();
-    }
-    await hooks.beforePinnedWrite?.();
-    await assertPinnedNamespace(request, parentSegments);
-    const finalBinding = await openVerifiedFile(
-      basename,
-      request.maxBytes,
-      request.targetIdentity,
-    );
-    try {
-      if (
-        finalBinding.metadata.digest !== request.expectedDigest
-        || finalBinding.metadata.mode !== request.expectedMode
-      ) {
-        throw new SecureFileWorkerError(
-          "conflict",
-          "The selected file changed immediately before it was saved.",
-        );
-      }
-      if (finalBinding.linkCount !== 1) {
-        throw new SecureFileWorkerError(
-          "unsafe",
-          "Files with multiple hard links cannot be replaced safely.",
-        );
-      }
-    } finally {
-      await finalBinding.handle.close();
-    }
-    const pinnedIdentity = await initial.handle.stat({ bigint: true });
-    if (
-      !pinnedIdentity.isFile()
-      || !sameIdentity(identity(pinnedIdentity), request.targetIdentity)
-      || Number(pinnedIdentity.nlink) !== 1
-    ) {
-      throw new SecureFileWorkerError(
-        "conflict",
-        "The selected file binding changed immediately before it was saved.",
-      );
-    }
-    const immediatelyBeforeWrite = await readHandle(
-      initial.handle,
-      request.maxBytes,
-    );
-    if (
-      immediatelyBeforeWrite.metadata.digest !== request.expectedDigest
-      || immediatelyBeforeWrite.metadata.mode !== request.expectedMode
-    ) {
-      throw new SecureFileWorkerError(
-        "conflict",
-        "The selected file changed immediately before it was saved.",
-      );
-    }
-    try {
-      await (hooks.writePinned ?? writeComplete)(initial.handle, content);
-      if (process.platform !== "win32") {
-        await initial.handle.chmod(request.mode & 0o777);
-      }
-      await initial.handle.sync();
-    } catch (error) {
-      try {
-        await writeComplete(initial.handle, initial.content);
-        if (process.platform !== "win32") {
-          await initial.handle.chmod(request.expectedMode & 0o777);
-        }
-        await initial.handle.sync();
-      } catch {
-        throw new SecureFileWorkerError(
-          "unavailable",
-          "The interrupted save could not restore the original file.",
-        );
-      }
-      throw error;
-    }
-    await assertPinnedNamespace(request, parentSegments);
-    const saved = await openVerifiedFile(
-      basename,
-      request.maxBytes,
-      request.targetIdentity,
-    );
-    try {
-      if (saved.metadata.digest !== digest(content)) {
-        throw new SecureFileWorkerError(
-          "conflict",
-          "The replacement file could not be verified.",
-        );
-      }
-      if (saved.linkCount !== 1) {
-        throw new SecureFileWorkerError(
-          "unsafe",
-          "The saved file unexpectedly has multiple hard links.",
-        );
-      }
-      return {
-        ok: true,
-        operation: "replace",
-        metadata: saved.metadata,
-      };
-    } finally {
-      await saved.handle.close();
-    }
-  } finally {
-    await initial.handle.close();
-  }
 }
 
 export async function performSecureFileOperation(
@@ -462,8 +145,22 @@ export async function performSecureFileOperation(
   }
   try {
     const { basename, parentSegments } = await enterVerifiedParent(request);
+    const assertNamespace = async (): Promise<void> => {
+      await assertPinnedNamespace(request, parentSegments);
+    };
+    await assertNamespace();
+    await recoverSecureFileTransactions(basename);
+    await assertNamespace();
+    if (request.operation === "recover") {
+      return { ok: true, operation: "recover" };
+    }
     if (request.operation === "replace") {
-      return await replace(request, basename, parentSegments, hooks);
+      return await replaceSecureFileTransaction(
+        request,
+        basename,
+        assertNamespace,
+        hooks,
+      );
     }
     const opened = await openVerifiedFile(
       basename,
@@ -471,7 +168,7 @@ export async function performSecureFileOperation(
       request.targetIdentity,
     );
     try {
-      await assertPinnedNamespace(request, parentSegments);
+      await assertNamespace();
       return {
         ok: true,
         operation: "read",
@@ -482,7 +179,7 @@ export async function performSecureFileOperation(
       await opened.handle.close();
     }
   } catch (error) {
-    if (error instanceof SecureFileWorkerError) {
+    if (error instanceof SecureFileOperationError) {
       return { ok: false, code: error.code, message: error.message };
     }
     return {
@@ -493,11 +190,56 @@ export async function performSecureFileOperation(
   }
 }
 
+export async function recoverSecureFileOperation(
+  value: unknown,
+): Promise<boolean> {
+  const request = parseSecureFileRequest(value);
+  if (!request) return false;
+  try {
+    const { basename, parentSegments } = await enterVerifiedParent(request);
+    await assertPinnedNamespace(request, parentSegments);
+    await recoverSecureFileTransactions(basename);
+    await assertPinnedNamespace(request, parentSegments);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const parentPort = process.parentPort;
 if (parentPort) {
   parentPort.once("message", (event) => {
-    void performSecureFileOperation(event.data).then((result) => {
-      parentPort.postMessage(result);
+    const envelope = parseSecureFileWorkerRequest(event.data);
+    if (!envelope) {
+      parentPort.postMessage({
+        type: "secure-file.recovery-result",
+        ok: false,
+      } satisfies SecureFileWorkerEvent);
+      setImmediate(() => process.exit(1));
+      return;
+    }
+    if (envelope.type === "secure-file.recover") {
+      void recoverSecureFileOperation(envelope.request).then((ok) => {
+        parentPort.postMessage({
+          type: "secure-file.recovery-result",
+          ok,
+        } satisfies SecureFileWorkerEvent);
+        setImmediate(() => process.exit(ok ? 0 : 1));
+      });
+      return;
+    }
+    void performSecureFileOperation(envelope.request, {
+      onCommitPhase: (phase) => {
+        parentPort.postMessage({
+          type: "secure-file.commit",
+          phase,
+        } satisfies SecureFileWorkerEvent);
+      },
+    }).then((result) => {
+      parentPort.postMessage({
+        type: "secure-file.result",
+        result,
+      } satisfies SecureFileWorkerEvent);
       setImmediate(() => process.exit(result.ok ? 0 : 1));
     });
   });

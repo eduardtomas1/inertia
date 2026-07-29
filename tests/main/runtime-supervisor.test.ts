@@ -351,6 +351,95 @@ describe("RuntimeSupervisor", () => {
     await expect(stopped).resolves.toBe(true);
   });
 
+  it("forwards a strict secure-file recovery result to the current runtime", async () => {
+    const secureFileBroker: RuntimeSecureFileBroker = {
+      perform: vi.fn<RuntimeSecureFileBroker["perform"]>(
+        async () => ({ ok: true, operation: "recover" }),
+      ),
+    };
+    const { children, supervisor } = createHarness({ secureFileBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const requestId = crypto.randomUUID();
+
+    children[0].message({
+      type: "runtime.secure-file-request",
+      requestId,
+      operation: "recover",
+      root: workspaceDirectory,
+      rootIdentity: { dev: "1", ino: "2" },
+      parentIdentities: [],
+      path: "README.md",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(secureFileBroker.perform).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "recover",
+        path: "README.md",
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.secure-file-result",
+      requestId,
+      result: { ok: true, operation: "recover" },
+    });
+  });
+
+  it("waits for secure-file shutdown before confirming runtime stop", async () => {
+    let finishSecureFileShutdown: ((confirmed: boolean) => void) | undefined;
+    const secureFileBroker: RuntimeSecureFileBroker = {
+      perform: vi.fn<RuntimeSecureFileBroker["perform"]>(async () => ({
+        ok: false,
+        code: "unavailable",
+        message: "unused",
+      })),
+      shutdown: vi.fn(() => new Promise<boolean>((resolve) => {
+        finishSecureFileShutdown = resolve;
+      })),
+    };
+    const { children, supervisor } = createHarness({ secureFileBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    let settled = false;
+    const stopped = supervisor.stop().then((confirmed) => {
+      settled = true;
+      return confirmed;
+    });
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    expect(secureFileBroker.shutdown).toHaveBeenCalledOnce();
+
+    finishSecureFileShutdown?.(true);
+    await expect(stopped).resolves.toBe(true);
+  });
+
+  it("reports an unconfirmed secure-file shutdown", async () => {
+    const secureFileBroker: RuntimeSecureFileBroker = {
+      perform: vi.fn<RuntimeSecureFileBroker["perform"]>(async () => ({
+        ok: false,
+        code: "unavailable",
+        message: "unused",
+      })),
+      shutdown: vi.fn(async () => false),
+    };
+    const { children, supervisor } = createHarness({ secureFileBroker });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const stopped = supervisor.stop();
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+    await expect(stopped).resolves.toBe(false);
+  });
+
   it("brokers attachments only to the current generation and bounds stalled requests", async () => {
     let resolveAttachment:
       | ((value: typeof trustedAttachment | null) => void)

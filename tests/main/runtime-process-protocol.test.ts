@@ -257,6 +257,20 @@ describe("runtime process protocol", () => {
       ...request,
       parentIdentities: [{ dev: "1", ino: "4" }],
     })).toBeNull();
+    const recoveryRequest = {
+      type: "runtime.secure-file-request",
+      requestId,
+      operation: "recover",
+      root: workspaceDirectory,
+      rootIdentity: { dev: "1", ino: "2" },
+      parentIdentities: [],
+      path: "README.md",
+    };
+    expect(parseRuntimeWorkerEvent(recoveryRequest)).toEqual(recoveryRequest);
+    expect(parseRuntimeWorkerEvent({
+      ...recoveryRequest,
+      targetIdentity: { dev: "1", ino: "3" },
+    })).toBeNull();
 
     const metadata = {
       digest: "a".repeat(64),
@@ -298,6 +312,13 @@ describe("runtime process protocol", () => {
       },
     })).toMatchObject({
       result: { ok: false, code: "unsafe" },
+    });
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.secure-file-result",
+      requestId,
+      result: { ok: true, operation: "recover" },
+    })).toMatchObject({
+      result: { ok: true, operation: "recover" },
     });
   });
 

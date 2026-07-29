@@ -26,7 +26,11 @@ function fakeChild(pid = 4_242) {
 }
 
 function fakeTaskkill() {
-  const taskkill = new EventEmitter() as EventEmitter & { unref: ReturnType<typeof vi.fn> };
+  const taskkill = new EventEmitter() as EventEmitter & {
+    kill: ReturnType<typeof vi.fn>;
+    unref: ReturnType<typeof vi.fn>;
+  };
+  taskkill.kill = vi.fn(() => true);
   taskkill.unref = vi.fn();
   return taskkill;
 }
@@ -243,6 +247,87 @@ describe("provider process-tree termination", () => {
         waitMs: 25,
       },
     )).resolves.toBe(true);
+  });
+
+  it.each([
+    {
+      label: "reports an error",
+      settleTaskkill: (taskkill: ReturnType<typeof fakeTaskkill>) => {
+        taskkill.emit("error", new Error("taskkill unavailable"));
+      },
+    },
+    {
+      label: "exits unsuccessfully",
+      settleTaskkill: (taskkill: ReturnType<typeof fakeTaskkill>) => {
+        taskkill.emit("close", 1);
+      },
+    },
+  ])("keeps the Windows tree unconfirmed when taskkill $label", async ({
+    settleTaskkill,
+  }) => {
+    const child = fakeChild();
+    const taskkill = fakeTaskkill();
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "win32",
+        spawnProcess: vi.fn(() => taskkill) as never,
+        waitMs: 25,
+      },
+    );
+
+    settleTaskkill(taskkill);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+
+    child.exitCode = 1;
+    child.emit("close", 1);
+    await expect(termination).resolves.toBe(false);
+  });
+
+  it("keeps the Windows tree unconfirmed when taskkill times out", async () => {
+    const child = fakeChild();
+    const taskkill = fakeTaskkill();
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "win32",
+        spawnProcess: vi.fn(() => taskkill) as never,
+        waitMs: 10,
+      },
+    );
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    expect(taskkill.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+
+    child.exitCode = 1;
+    child.emit("close", 1);
+    await expect(termination).resolves.toBe(false);
+  });
+
+  it("keeps the Windows tree unconfirmed when taskkill throws during launch", async () => {
+    const child = fakeChild();
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "win32",
+        spawnProcess: vi.fn(() => {
+          throw new Error("invalid taskkill launch");
+        }) as never,
+        waitMs: 25,
+      },
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+
+    child.exitCode = 1;
+    child.emit("close", 1);
+    await expect(termination).resolves.toBe(false);
   });
 
   it("awaits POSIX process-group disappearance", async () => {

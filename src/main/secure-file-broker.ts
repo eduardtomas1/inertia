@@ -2,11 +2,14 @@ import type { UtilityProcess } from "electron";
 import { resolve } from "node:path";
 
 import {
-  parseSecureFileResult,
   secureFilePathSegments,
   type SecureFileRequest,
   type SecureFileResult,
 } from "../node/secure-file-protocol.js";
+import {
+  parseSecureFileWorkerEvent,
+  type SecureFileWorkerRequest,
+} from "./secure-file-worker-protocol.js";
 
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_KILL_GRACE_MS = 3_000;
@@ -29,12 +32,17 @@ export class SecureFileBroker {
   private readonly timeoutMs: number;
   private readonly killGraceMs: number;
   private readonly active = new Set<UtilityProcess>();
+  private readonly activeWaiters = new Set<(stopped: boolean) => void>();
+  private readonly operationControllers = new Set<AbortController>();
+  private readonly activeOperations = new Set<Promise<SecureFileResult>>();
   private readonly poisonedTargets = new Set<string>();
+  private readonly unconfirmedTargets = new Set<string>();
   private readonly tails = new Map<string, Promise<void>>();
   private readonly slotWaiters: SlotWaiter[] = [];
   private activeSlots = 0;
   private pending = 0;
   private closed = false;
+  private shutdownPromise: Promise<boolean> | null = null;
 
   constructor(private readonly options: SecureFileBrokerOptions) {
     this.timeoutMs = Math.max(
@@ -64,9 +72,15 @@ export class SecureFileBroker {
         code: "unavailable",
         message: signal?.aborted
           ? "The secure file operation was cancelled."
-          : "The secure file service is busy.",
+          : this.closed
+            ? "The secure file service is unavailable."
+            : "The secure file service is busy.",
       });
     }
+    const controller = new AbortController();
+    const onExternalAbort = (): void => controller.abort();
+    signal?.addEventListener("abort", onExternalAbort, { once: true });
+    this.operationControllers.add(controller);
     this.pending += 1;
     const normalizedPath = (
       process.platform === "win32" || process.platform === "darwin"
@@ -85,17 +99,27 @@ export class SecureFileBroker {
     });
     const tail = predecessor.catch(() => undefined).then(() => tailGate);
     this.tails.set(key, tail);
-    return predecessor.catch(() => undefined).then(async () => {
-      if (this.closed || this.poisonedTargets.has(key)) {
+    const operation = predecessor.catch(() => undefined).then(async () => {
+      const poisoned = this.poisonedTargets.has(key);
+      if (
+        this.closed
+        || (
+          poisoned
+          && (
+            request.operation !== "recover"
+            || this.unconfirmedTargets.has(key)
+          )
+        )
+      ) {
         return {
           ok: false,
           code: "unavailable",
           message: this.poisonedTargets.has(key)
-            ? "A previous secure file helper has not stopped."
+            ? "A previous secure file operation has not been recovered safely."
             : "The secure file service is unavailable.",
         } satisfies SecureFileResult;
       }
-      const acquired = await this.acquireSlot(signal);
+      const acquired = await this.acquireSlot(controller.signal);
       if (!acquired) {
         return {
           ok: false,
@@ -108,10 +132,19 @@ export class SecureFileBroker {
         const outcome = await this.run(
           request,
           key,
-          signal,
+          controller.signal,
           () => this.releaseSlot(),
         );
-        releaseSlotOnReturn = outcome.exitConfirmed;
+        if (
+          request.operation === "recover"
+          && outcome.exitConfirmed
+          && outcome.result.ok
+          && outcome.result.operation === "recover"
+        ) {
+          this.poisonedTargets.delete(key);
+        }
+        releaseSlotOnReturn = outcome.exitConfirmed
+          && !this.unconfirmedTargets.has(key);
         return outcome.result;
       } finally {
         if (releaseSlotOnReturn) this.releaseSlot();
@@ -121,6 +154,14 @@ export class SecureFileBroker {
       releaseTail();
       if (this.tails.get(key) === tail) this.tails.delete(key);
     });
+    let tracked: Promise<SecureFileResult>;
+    tracked = operation.finally(() => {
+      signal?.removeEventListener("abort", onExternalAbort);
+      this.operationControllers.delete(controller);
+      this.activeOperations.delete(tracked);
+    });
+    this.activeOperations.add(tracked);
+    return tracked;
   }
 
   private run(
@@ -149,7 +190,7 @@ export class SecureFileBroker {
         exitConfirmed: true,
       });
     }
-    this.active.add(child);
+    this.trackChild(child);
     return new Promise((resolve) => {
       let settled = false;
       let exitConfirmed = false;
@@ -157,6 +198,12 @@ export class SecureFileBroker {
       let reported: SecureFileResult | null = null;
       let stoppingResult: SecureFileResult | null = null;
       let killGraceTimer: NodeJS.Timeout | null = null;
+      let commitGraceTimer: NodeJS.Timeout | null = null;
+      let commitInProgress = false;
+      let commitStarted = false;
+      let commitFinished = false;
+      let killRequested = false;
+      let delivered = false;
       const settle = (
         result: SecureFileResult,
         confirmed: boolean,
@@ -165,8 +212,9 @@ export class SecureFileBroker {
         settled = true;
         clearTimeout(timer);
         if (killGraceTimer) clearTimeout(killGraceTimer);
+        if (commitGraceTimer) clearTimeout(commitGraceTimer);
         signal?.removeEventListener("abort", onAbort);
-        if (confirmed) this.active.delete(child);
+        if (confirmed) this.untrackChild(child);
         resolve({ result, exitConfirmed: confirmed });
       };
       const unavailable = (message: string): SecureFileResult => ({
@@ -174,17 +222,30 @@ export class SecureFileBroker {
         code: "unavailable",
         message,
       });
-      const stop = (message: string): void => {
-        if (stoppingResult || settled) return;
-        stoppingResult = unavailable(message);
+      const killChild = (): void => {
+        if (killRequested || exitConfirmed || settled) return;
+        killRequested = true;
         child.kill();
         killGraceTimer = setTimeout(() => {
           if (exitConfirmed || settled || !stoppingResult) return;
           this.poisonedTargets.add(key);
+          this.unconfirmedTargets.add(key);
           poisonedAfterReturn = true;
           settle(stoppingResult, false);
         }, this.killGraceMs);
         killGraceTimer.unref();
+      };
+      const stop = (message: string): void => {
+        if (stoppingResult || settled) return;
+        stoppingResult = unavailable(message);
+        if (!commitInProgress) {
+          killChild();
+          return;
+        }
+        // A worker that has claimed the target owns a bounded, journaled
+        // commit window. Let it finish before escalating to process kill.
+        commitGraceTimer = setTimeout(killChild, this.killGraceMs);
+        commitGraceTimer.unref();
       };
       const onAbort = (): void => {
         stop("The secure file operation was cancelled.");
@@ -197,58 +258,279 @@ export class SecureFileBroker {
       if (signal?.aborted) onAbort();
       child.once("spawn", () => {
         if (stoppingResult || settled) {
-          child.kill();
+          killChild();
           return;
         }
         try {
-          child.postMessage(request);
+          child.postMessage({
+            type: "secure-file.perform",
+            request,
+          } satisfies SecureFileWorkerRequest);
+          delivered = true;
         } catch {
           stop("The secure file request could not be delivered.");
         }
       });
       child.on("message", (value) => {
-        const result = parseSecureFileResult(value);
-        if (!result || reported) {
+        const event = parseSecureFileWorkerEvent(value);
+        if (!event) {
           stop("The secure file service returned an invalid result.");
           return;
         }
-        reported = result;
+        if (event.type === "secure-file.commit") {
+          if (
+            request.operation !== "replace"
+            || reported
+            || (
+              event.phase === "started"
+                ? commitStarted
+                : !commitInProgress || commitFinished
+            )
+          ) {
+            stop("The secure file service returned an invalid result.");
+            return;
+          }
+          commitInProgress = event.phase === "started";
+          commitStarted ||= commitInProgress;
+          commitFinished ||= !commitInProgress;
+          if (!commitInProgress && stoppingResult) {
+            if (commitGraceTimer) clearTimeout(commitGraceTimer);
+            killChild();
+          }
+          return;
+        }
+        if (
+          event.type !== "secure-file.result"
+          || reported
+          || commitInProgress
+          || (request.operation === "replace" && commitStarted && !commitFinished)
+        ) {
+          stop("The secure file service returned an invalid result.");
+          return;
+        }
+        reported = event.result;
       });
       child.once("error", () => {
         stop("The secure file service stopped unexpectedly.");
       });
       child.once("exit", () => {
         exitConfirmed = true;
-        this.active.delete(child);
         if (killGraceTimer) clearTimeout(killGraceTimer);
+        if (commitGraceTimer) clearTimeout(commitGraceTimer);
         if (poisonedAfterReturn) {
-          this.poisonedTargets.delete(key);
-          onLateExit?.();
+          this.unconfirmedTargets.delete(key);
+          const recovery = request.operation === "replace" && delivered
+            ? this.recoverAfterExit(request, key, onLateExit)
+            : Promise.resolve(true);
+          this.untrackChild(child);
+          void recovery.then((recovered) => {
+            if (recovered) this.poisonedTargets.delete(key);
+            if (!this.unconfirmedTargets.has(key)) onLateExit?.();
+          });
           return;
         }
+        if (settled) {
+          this.untrackChild(child);
+          return;
+        }
+        const result = stoppingResult
+          ?? reported
+          ?? unavailable(
+            "The secure file service stopped before replying.",
+          );
+        const needsRecovery = request.operation === "replace" && delivered
+          && Boolean(
+            stoppingResult
+            || !reported
+            || (commitStarted && !reported.ok),
+          );
+        if (!needsRecovery) {
+          settle(result, true);
+          return;
+        }
+        const recovery = this.recoverAfterExit(request, key, onLateExit);
+        this.untrackChild(child);
+        void recovery.then((recovered) => {
+          if (!recovered) this.poisonedTargets.add(key);
+          settle(
+            recovered
+              ? result
+              : unavailable(
+                  "The secure file service could not verify save recovery.",
+                ),
+            true,
+          );
+        });
+      });
+    });
+  }
+
+  private recoverAfterExit(
+    request: SecureFileRequest,
+    key: string,
+    onLateExit?: () => void,
+  ): Promise<boolean> {
+    const segments = secureFilePathSegments(request.path);
+    if (!segments) return Promise.resolve(false);
+    const parent = resolve(request.root, ...segments.slice(0, -1));
+    let child: UtilityProcess;
+    try {
+      child = this.options.spawn(parent);
+    } catch {
+      return Promise.resolve(false);
+    }
+    this.trackChild(child);
+    this.unconfirmedTargets.add(key);
+    return new Promise((resolveRecovery) => {
+      let reported: boolean | null = null;
+      let delivered = false;
+      let exited = false;
+      let settled = false;
+      let failed = false;
+      let killRequested = false;
+      let killTimer: NodeJS.Timeout | null = null;
+      const finish = (ok: boolean): void => {
         if (settled) return;
-        settle(
-          stoppingResult
-            ?? reported
-            ?? unavailable(
-              "The secure file service stopped before replying.",
-            ),
-          true,
+        settled = true;
+        clearTimeout(timeout);
+        if (killTimer) clearTimeout(killTimer);
+        resolveRecovery(ok);
+      };
+      const stop = (): void => {
+        failed = true;
+        if (settled || exited || killRequested) return;
+        killRequested = true;
+        child.kill();
+        killTimer = setTimeout(() => {
+          this.poisonedTargets.add(key);
+          finish(false);
+        }, this.killGraceMs);
+        killTimer.unref();
+      };
+      const timeout = setTimeout(stop, this.timeoutMs);
+      timeout.unref();
+      child.once("spawn", () => {
+        try {
+          child.postMessage({
+            type: "secure-file.recover",
+            request,
+          } satisfies SecureFileWorkerRequest);
+          delivered = true;
+        } catch {
+          stop();
+        }
+      });
+      child.on("message", (value) => {
+        const event = parseSecureFileWorkerEvent(value);
+        if (
+          failed
+          || !delivered
+          || event?.type !== "secure-file.recovery-result"
+          || reported !== null
+        ) {
+          stop();
+          return;
+        }
+        reported = event.ok;
+      });
+      child.once("error", stop);
+      child.once("exit", (code) => {
+        const returnedAfterTimeout = settled;
+        exited = true;
+        this.untrackChild(child);
+        this.unconfirmedTargets.delete(key);
+        finish(
+          !failed
+          && delivered
+          && reported === true
+          && code === 0,
         );
+        if (returnedAfterTimeout) onLateExit?.();
       });
     });
   }
 
   close(): void {
+    void this.shutdown();
+  }
+
+  shutdown(): Promise<boolean> {
+    if (this.shutdownPromise) return this.shutdownPromise;
     this.closed = true;
-    for (const child of this.active) child.kill();
-    this.active.clear();
+    for (const controller of this.operationControllers) controller.abort();
     for (const waiter of this.slotWaiters.splice(0)) {
       if (waiter.signal && waiter.onAbort) {
         waiter.signal.removeEventListener("abort", waiter.onAbort);
       }
       waiter.resolve(false);
     }
+    const timeoutMs = Math.min(
+      30_000,
+      this.timeoutMs + this.killGraceMs * 2,
+    );
+    this.shutdownPromise = this.finishShutdown(timeoutMs);
+    return this.shutdownPromise;
+  }
+
+  private async finishShutdown(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    const operationsStopped = await this.waitBounded(
+      Promise.allSettled(this.activeOperations).then(() => true),
+      Math.max(1, deadline - Date.now()),
+    );
+    if (!operationsStopped) {
+      for (const child of this.active) child.kill();
+      return false;
+    }
+    if (this.active.size === 0) return true;
+    for (const child of this.active) child.kill();
+    return await this.waitForNoActive(Math.max(1, deadline - Date.now()));
+  }
+
+  private waitBounded(
+    pending: Promise<boolean>,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve(false);
+      }, timeoutMs);
+      timer.unref();
+      void pending.then((result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      });
+    });
+  }
+
+  private waitForNoActive(timeoutMs: number): Promise<boolean> {
+    if (this.active.size === 0) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const finish = (stopped: boolean): void => {
+        clearTimeout(timer);
+        this.activeWaiters.delete(finish);
+        resolve(stopped);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      timer.unref();
+      this.activeWaiters.add(finish);
+      if (this.active.size === 0) finish(true);
+    });
+  }
+
+  private trackChild(child: UtilityProcess): void {
+    this.active.add(child);
+  }
+
+  private untrackChild(child: UtilityProcess): void {
+    this.active.delete(child);
+    if (this.active.size > 0) return;
+    for (const finish of this.activeWaiters) finish(true);
   }
 
   private acquireSlot(signal?: AbortSignal): Promise<boolean> {

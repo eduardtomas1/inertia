@@ -7,6 +7,10 @@ import {
   parseSecureFileResult,
   secureFilePathSegments,
 } from "../../src/node/secure-file-protocol";
+import {
+  parseSecureFileWorkerEvent,
+  parseSecureFileWorkerRequest,
+} from "../../src/main/secure-file-worker-protocol";
 
 const identity = { dev: "1", ino: "2" };
 
@@ -86,5 +90,63 @@ describe("secure file protocol", () => {
       code: "unsafe",
       message: "The workspace identity changed.",
     });
+  });
+
+  it("keeps the private worker transaction envelope strict", () => {
+    const request = {
+      operation: "read",
+      root: resolve("/tmp", "workspace"),
+      rootIdentity: identity,
+      parentIdentities: [identity],
+      targetIdentity: identity,
+      path: "src/example.ts",
+      maxBytes: 128,
+    } as const;
+    expect(parseSecureFileWorkerRequest({
+      type: "secure-file.perform",
+      request,
+    })).toEqual({ type: "secure-file.perform", request });
+    expect(parseSecureFileWorkerRequest({
+      type: "secure-file.recover",
+      request,
+      extra: true,
+    })).toBeNull();
+    expect(parseSecureFileWorkerEvent({
+      type: "secure-file.commit",
+      phase: "started",
+    })).toEqual({ type: "secure-file.commit", phase: "started" });
+    expect(parseSecureFileWorkerEvent({
+      type: "secure-file.recovery-result",
+      ok: true,
+    })).toEqual({ type: "secure-file.recovery-result", ok: true });
+    expect(parseSecureFileWorkerEvent({
+      type: "secure-file.commit",
+      phase: "started",
+      extra: true,
+    })).toBeNull();
+  });
+
+  it("accepts only bounded recovery requests and results", () => {
+    const recovery = {
+      operation: "recover",
+      root: resolve("/tmp", "workspace"),
+      rootIdentity: identity,
+      parentIdentities: [identity],
+      path: "src/example.ts",
+    } as const;
+    expect(parseSecureFileRequest(recovery)).toEqual(recovery);
+    expect(parseSecureFileRequest({
+      ...recovery,
+      targetIdentity: identity,
+    })).toBeNull();
+    expect(parseSecureFileResult({
+      ok: true,
+      operation: "recover",
+    })).toEqual({ ok: true, operation: "recover" });
+    expect(parseSecureFileResult({
+      ok: true,
+      operation: "recover",
+      metadata: {},
+    })).toBeNull();
   });
 });

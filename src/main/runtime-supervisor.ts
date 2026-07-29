@@ -78,6 +78,7 @@ export interface RuntimeSecureFileBroker {
     request: SecureFileRequest,
     signal?: AbortSignal,
   ): Promise<SecureFileResult>;
+  shutdown?(): Promise<boolean>;
 }
 
 export type RuntimeSupervisorPhase =
@@ -252,19 +253,28 @@ export class RuntimeSupervisor {
     this.rejectProjectPaths(this.current, "The local service is stopping.");
     this.clearCredentialRequests(this.current);
     this.clearSecureFileRequests(this.current);
+    const secureFilesStopped = this.secureFileBroker?.shutdown?.()
+      ?? Promise.resolve(true);
 
     if (!this.current) {
       this.phase = "stopped";
       this.emitState();
-      return Promise.resolve(true);
+      this.stopPromise = secureFilesStopped;
+      return this.stopPromise;
     }
 
     this.phase = "stopping";
     this.current.acceptingReady = false;
     this.emitState();
-    this.stopPromise = new Promise<boolean>((resolve) => {
+    const runtimeStopped = new Promise<boolean>((resolve) => {
       this.resolveStop = resolve;
     });
+    this.stopPromise = Promise.all([
+      runtimeStopped,
+      secureFilesStopped,
+    ]).then(([runtimeConfirmed, secureFilesConfirmed]) => (
+      runtimeConfirmed && secureFilesConfirmed
+    ));
     this.post(this.current.child, { type: "runtime.shutdown" });
     const record = this.current;
     const child = record.child;

@@ -308,10 +308,14 @@ export async function terminateProcessTreeAndWait(
       );
     }
     killDirectChild(child, force);
-    return await confirmWindowsChildResourcesClosed(
+    await confirmWindowsChildResourcesClosed(
       waitForObservedDirectChildClose,
       waitMs,
     );
+    // A direct-child fallback cannot prove that taskkill's unobserved
+    // descendants stopped. Keep the result unconfirmed even when the direct
+    // child releases its resources successfully.
+    return false;
   }
 
   if (force) {

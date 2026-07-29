@@ -8,16 +8,22 @@ export interface SecureFileIdentity {
   ino: string;
 }
 
-interface SecureFileRequestBase {
+interface SecureFileAuthorityBase {
   root: string;
   rootIdentity: SecureFileIdentity;
   parentIdentities: readonly SecureFileIdentity[];
-  targetIdentity: SecureFileIdentity;
   path: string;
+}
+
+interface SecureFileRequestBase extends SecureFileAuthorityBase {
+  targetIdentity: SecureFileIdentity;
   maxBytes: number;
 }
 
 export type SecureFileRequest =
+  | SecureFileAuthorityBase & {
+      operation: "recover";
+    }
   | SecureFileRequestBase & {
       operation: "read";
     }
@@ -37,6 +43,10 @@ export interface SecureFileMetadata {
 }
 
 export type SecureFileResult =
+  | {
+      ok: true;
+      operation: "recover";
+    }
   | {
       ok: true;
       operation: "read";
@@ -135,7 +145,11 @@ function safeMetadata(value: unknown): value is SecureFileMetadata {
 export function parseSecureFileRequest(value: unknown): SecureFileRequest | null {
   if (!plainObject(value)) return null;
   if (
-    (value.operation !== "read" && value.operation !== "replace")
+    (
+      value.operation !== "recover"
+      && value.operation !== "read"
+      && value.operation !== "replace"
+    )
     || typeof value.root !== "string"
     || value.root.length === 0
     || value.root.length > MAX_SECURE_FILE_PATH_BYTES
@@ -145,21 +159,31 @@ export function parseSecureFileRequest(value: unknown): SecureFileRequest | null
     || !Array.isArray(value.parentIdentities)
     || value.parentIdentities.length > 256
     || !value.parentIdentities.every(safeIdentity)
-    || !safeIdentity(value.targetIdentity)
     || typeof value.path !== "string"
     || !secureFilePathSegments(value.path)
+  ) return null;
+  const segmentCount = secureFilePathSegments(value.path)!.length;
+  if (value.parentIdentities.length !== segmentCount - 1) return null;
+  const authority: SecureFileAuthorityBase = {
+    root: value.root,
+    rootIdentity: value.rootIdentity,
+    parentIdentities: value.parentIdentities,
+    path: value.path,
+  };
+  if (value.operation === "recover") {
+    return Object.keys(value).length === 5
+      ? { ...authority, operation: "recover" }
+      : null;
+  }
+  if (
+    !safeIdentity(value.targetIdentity)
     || !safeInteger(value.maxBytes)
     || value.maxBytes < 1
     || value.maxBytes > MAX_SECURE_FILE_BYTES
   ) return null;
-  const segmentCount = secureFilePathSegments(value.path)!.length;
-  if (value.parentIdentities.length !== segmentCount - 1) return null;
   const base: SecureFileRequestBase = {
-    root: value.root,
-    rootIdentity: value.rootIdentity,
-    parentIdentities: value.parentIdentities,
+    ...authority,
     targetIdentity: value.targetIdentity,
-    path: value.path,
     maxBytes: value.maxBytes,
   };
   if (value.operation === "read") {
@@ -204,6 +228,11 @@ export function parseSecureFileResult(value: unknown): SecureFileResult | null {
     const message = value.message.trim();
     return message.length > 0 && message.length <= 300
       ? { ok: false, code: value.code, message }
+      : null;
+  }
+  if (value.operation === "recover") {
+    return Object.keys(value).length === 2
+      ? { ok: true, operation: "recover" }
       : null;
   }
   if (

@@ -23,6 +23,65 @@ afterEach(async () => {
 });
 
 describe("runtime secure file broker client", () => {
+  it("requests recovery before reminting authority for a missing target", async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), "inertia-secure-client-recovery-"),
+    );
+    roots.push(root);
+    const content = Buffer.from("restored\n");
+    const post = vi.fn<(event: RuntimeWorkerEvent) => void>();
+    const client = new RuntimeSecureFileBrokerClient(post);
+    const authority = await client.authorizeRoot(root);
+
+    const pending = client.read(authority, "example.ts", 1_024);
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    const recovery = post.mock.calls[0]![0];
+    expect(recovery).toMatchObject({
+      type: "runtime.secure-file-request",
+      operation: "recover",
+      path: "example.ts",
+      parentIdentities: [],
+    });
+    if (recovery.type !== "runtime.secure-file-request") {
+      throw new Error("Expected a secure-file recovery request.");
+    }
+    await writeFile(join(root, "example.ts"), content);
+    client.handle({
+      type: "runtime.secure-file-result",
+      requestId: recovery.requestId,
+      result: { ok: true, operation: "recover" },
+    });
+
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    const read = post.mock.calls[1]![0];
+    expect(read).toMatchObject({
+      type: "runtime.secure-file-request",
+      operation: "read",
+      path: "example.ts",
+    });
+    if (read.type !== "runtime.secure-file-request") {
+      throw new Error("Expected a secure-file read request.");
+    }
+    client.handle({
+      type: "runtime.secure-file-result",
+      requestId: read.requestId,
+      result: {
+        ok: true,
+        operation: "read",
+        contentBase64: content.toString("base64"),
+        metadata: {
+          digest: createHash("sha256").update(content).digest("hex"),
+          size: content.byteLength,
+          modifiedAt: new Date(0).toISOString(),
+          mode: 0o644,
+        },
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({ content });
+    client.close();
+  });
+
   it.skipIf(process.platform === "win32")(
     "keeps a POSIX literal backslash inside one authorized filename segment",
     async () => {

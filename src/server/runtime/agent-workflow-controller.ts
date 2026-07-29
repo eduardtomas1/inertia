@@ -291,6 +291,11 @@ export class AgentWorkflowController {
               threadId: conversation.providerSessionId!,
             }),
           );
+          if (response.goal === undefined) {
+            throw new RuntimeRequestError(
+              "Codex returned a malformed goal response.",
+            );
+          }
           const parsed = parseCodexGoal(
             conversationId,
             conversation.providerSessionId!,
@@ -298,7 +303,11 @@ export class AgentWorkflowController {
             this.clock().toISOString(),
           );
           if (parsed) this.store.mergeNativeAgentGoal(parsed);
-          else if (this.sameNativeGoalRevision(
+          else if (response.goal !== null) {
+            throw new RuntimeRequestError(
+              "Codex returned a malformed goal response.",
+            );
+          } else if (this.sameNativeGoalRevision(
             observed,
             this.nativeGoal(
               conversationId,
@@ -426,6 +435,10 @@ export class AgentWorkflowController {
               threadId: providerSessionId,
             }),
           );
+          if (!this.hasNativeGoalSession(
+            conversationId,
+            providerSessionId,
+          )) return false;
           return this.store.clearAgentGoal(
             conversationId,
             source,

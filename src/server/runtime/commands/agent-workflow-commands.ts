@@ -47,15 +47,17 @@ export function createAgentWorkflowCommandHandler(
         return "handled";
       }
       case "agent.goal.clear": {
-        await dependencies.workflows.clearGoal(
+        const cleared = await dependencies.workflows.clearGoal(
           command.payload.conversationId,
           command.payload.source,
         );
-        dependencies.broadcast({
-          type: "agent.goal.cleared",
-          conversationId: command.payload.conversationId,
-          source: command.payload.source,
-        });
+        if (cleared) {
+          dependencies.broadcast({
+            type: "agent.goal.cleared",
+            conversationId: command.payload.conversationId,
+            source: command.payload.source,
+          });
+        }
         dependencies.send(socket, {
           type: "request.ok",
           requestId: command.requestId,

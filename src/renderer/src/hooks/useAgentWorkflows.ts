@@ -109,7 +109,7 @@ export function useAgentWorkflows({
     setError(null);
     setSelectedSkillIds([]);
     if (activeConversationId && status === "online") {
-      void load(false);
+      void load(true);
     }
   }, [activeConversationId, load, routeIdentity, status]);
 
@@ -119,7 +119,7 @@ export function useAgentWorkflows({
       setState(null);
       setSelectedSkillIds([]);
       if (activeConversationId && status === "online") {
-        void load(false);
+        void load(true);
       }
       return;
     }

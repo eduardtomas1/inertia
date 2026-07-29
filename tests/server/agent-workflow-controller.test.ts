@@ -345,6 +345,54 @@ describe("AgentWorkflowController", () => {
     );
   });
 
+  it("preserves the persisted goal when refresh returns malformed data", async () => {
+    const persisted = nativeGoal();
+    controlRequest.mockResolvedValue({
+      goal: {
+        ...providerGoal(),
+        status: "not-a-goal-status",
+      },
+    });
+    const runtime = harness({ goals: [persisted] });
+
+    await expect(runtime.controller.refresh("conversation-1"))
+      .rejects.toThrow("malformed goal response");
+
+    expect(runtime.goals).toEqual([persisted]);
+    expect(runtime.clear).not.toHaveBeenCalledWith(
+      "conversation-1",
+      "codex-native",
+      expect.any(String),
+      "thread-1",
+    );
+  });
+
+  it("does not clear a replacement thread after the provider request settles", async () => {
+    let settleClear!: () => void;
+    const clearResponse = new Promise<Record<string, unknown>>((resolve) => {
+      settleClear = () => resolve({});
+    });
+    controlRequest.mockReturnValue(clearResponse);
+    const current = conversation();
+    const persisted = nativeGoal();
+    const runtime = harness({ current, goals: [persisted] });
+
+    const clearing = runtime.controller.clearGoal(
+      "conversation-1",
+      "codex-native",
+    );
+    await vi.waitFor(() =>
+      expect(controlRequest).toHaveBeenCalledWith("thread/goal/clear", {
+        threadId: "thread-1",
+      }));
+    current.providerSessionId = "thread-2";
+    settleClear();
+
+    await expect(clearing).resolves.toBe(false);
+    expect(runtime.goals).toEqual([persisted]);
+    expect(runtime.clear).not.toHaveBeenCalled();
+  });
+
   it("never accepts skills returned for another cwd", async () => {
     controlRequest.mockResolvedValue({
       data: [{

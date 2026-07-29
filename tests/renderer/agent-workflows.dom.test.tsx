@@ -70,6 +70,13 @@ describe("useAgentWorkflows", () => {
     await waitFor(() =>
       expect(hook.result.current.state?.goalCapability.kind)
         .toBe("inertia-local"));
+    expect(request).toHaveBeenNthCalledWith(1, {
+      type: "agent.workflow.load",
+      payload: {
+        conversationId: "conversation-1",
+        refresh: true,
+      },
+    });
     native = true;
     act(() => {
       hook.rerender({ routeIdentity: "codex-app-server\0thread-1" });
@@ -78,6 +85,61 @@ describe("useAgentWorkflows", () => {
       expect(hook.result.current.state?.goalCapability.kind)
         .toBe("codex-native"));
     expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenNthCalledWith(2, {
+      type: "agent.workflow.load",
+      payload: {
+        conversationId: "conversation-1",
+        refresh: true,
+      },
+    });
+  });
+
+  it("refreshes provider-owned goals after a renderer reconnect", async () => {
+    let emit!: (event: ServerEvent) => void;
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type !== "agent.workflow.load") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "agent.workflow",
+          workflow: workflow({
+            kind: "codex-native",
+            available: true,
+            label: "Codex native goal",
+          }, command.payload.conversationId),
+        },
+      };
+    });
+    const subscribe = vi.fn((
+      listener: (event: ServerEvent) => void,
+    ) => {
+      emit = listener;
+      return () => undefined;
+    });
+    renderHook(() => useAgentWorkflows({
+      conversationId: "conversation-1",
+      routeIdentity: "codex-app-server\0thread-1",
+      status: "online",
+      request,
+      subscribe,
+    }));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+
+    act(() => emit({ type: "server.welcome" } as ServerEvent));
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request).toHaveBeenLastCalledWith({
+      type: "agent.workflow.load",
+      payload: {
+        conversationId: "conversation-1",
+        refresh: true,
+      },
+    });
   });
 
   it("never applies a delayed skills response to a newly selected conversation", async () => {

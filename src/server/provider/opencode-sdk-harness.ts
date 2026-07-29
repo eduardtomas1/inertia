@@ -14,7 +14,7 @@ import {
 } from "@opencode-ai/sdk/v2";
 
 import type { ProviderModel } from "../../shared/contracts";
-import { requireProcessTreeTermination, terminateProcessTree, terminateProcessTreeAndWait, type ProcessTreeTerminator } from "../process-lifecycle";
+import { requireProcessTreeTermination, terminateProcessTreeAndWait, type ProcessTreeTerminator } from "../process-lifecycle";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -272,7 +272,6 @@ function startOpenCodeRun(
     if (cancelRequested || terminalError) return;
     terminalError = message;
     eventAbort.abort();
-    if (child) terminateProcessTree(child, true);
     interruptRun(new Error(message));
   };
   const armEventInactivityDeadline = (): void => {
@@ -286,7 +285,7 @@ function startOpenCodeRun(
   const failInteraction = (error: unknown): void => {
     terminalError = safeError(error, "OpenCode could not deliver an interactive response.");
     eventAbort.abort();
-    if (child) terminateProcessTree(child, false);
+    interruptRun(new Error(terminalError));
   };
   const settleApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = approvals.get(requestId);
@@ -541,7 +540,6 @@ function startOpenCodeRun(
     if (!force && client && sessionId) {
       cancelForceTimer ??= setTimeout(() => {
         eventAbort.abort();
-        if (child) terminateProcessTree(child, true);
         interruptRun(new Error("OpenCode cancellation did not settle before the force deadline."));
       }, CANCEL_FORCE_MS);
       cancelForceTimer.unref();
@@ -551,14 +549,18 @@ function startOpenCodeRun(
       ).then((response) => {
         if (response.data === true) interruptRun(new Error("OpenCode acknowledged session cancellation."));
       }).catch(() => {
-        if (child) terminateProcessTree(child, false);
+        eventAbort.abort();
+        interruptRun(new Error("OpenCode session cancellation failed."));
       });
       return;
     }
     if (cancelForceTimer) clearTimeout(cancelForceTimer);
     eventAbort.abort();
-    if (child) terminateProcessTree(child, force);
-    if (force) interruptRun(new Error("OpenCode cancellation was forced."));
+    interruptRun(new Error(
+      force
+        ? "OpenCode cancellation was forced."
+        : "OpenCode cancellation was requested before the session became ready.",
+    ));
   };
 
   return {

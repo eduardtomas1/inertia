@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
@@ -728,9 +728,14 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "stuck-cancel"));
+    const terminateOwnedProcessTree = vi.fn(
+      async (child, force) => await terminateProcessTreeAndWait(child, force),
+    );
     const manager = new ProviderManager(
       { commands: { opencode: command }, cancelGraceMs: 500 },
-      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        terminateProcessTree: terminateOwnedProcessTree,
+      })]),
     );
     let markRunning!: () => void;
     const running = new Promise<void>((resolve) => { markRunning = resolve; });
@@ -751,6 +756,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "the unresponsive OpenCode server port to close",
       async () => !(await loopbackPortIsOpen(capture.port)),
     );
+    expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();
     expect(manager.activeConversationIds()).toEqual([]);
   }, 10_000);
 
@@ -764,11 +770,15 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "slow"),
     );
+    const terminateOwnedProcessTree = vi.fn(
+      async (child, force) => await terminateProcessTreeAndWait(child, force),
+    );
     const manager = new ProviderManager(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         runDeadlineMs: 3_000,
         eventInactivityDeadlineMs: 300,
+        terminateProcessTree: terminateOwnedProcessTree,
       })]),
     );
 
@@ -790,6 +800,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "the inactive OpenCode server to close",
       async () => !(await loopbackPortIsOpen(capture.port)),
     );
+    expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
@@ -803,11 +814,15 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "endless"),
     );
+    const terminateOwnedProcessTree = vi.fn(
+      async (child, force) => await terminateProcessTreeAndWait(child, force),
+    );
     const manager = new ProviderManager(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         runDeadlineMs: 5_000,
         eventInactivityDeadlineMs: 10_000,
+        terminateProcessTree: terminateOwnedProcessTree,
       })]),
     );
 
@@ -829,6 +844,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "the overlong OpenCode server to close",
       async () => !(await loopbackPortIsOpen(capture.port)),
     );
+    expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();
     expect(manager.activeConversationIds()).toEqual([]);
   });
 

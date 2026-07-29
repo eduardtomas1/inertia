@@ -3,18 +3,19 @@ import {
   spawnSync,
   type ChildProcess,
 } from "node:child_process";
+import { win32 } from "node:path";
 
 import { forceKillPosixProcessTree } from "../node/posix-process-tree";
 
 const DEFAULT_TERMINATION_WAIT_MS = 2_000;
 const PROCESS_GROUP_POLL_MS = 10;
 const WINDOWS_RESOURCE_SETTLE_MS = 100;
-const WINDOWS_PROCESS_SNAPSHOT_BYTES = 256 * 1024;
 
 export interface ProcessLifecycleDependencies {
   platform: NodeJS.Platform;
   spawnProcess: typeof spawn;
   killProcess: typeof process.kill;
+  windowsSystemRoot: string | null;
 }
 
 export interface AwaitableProcessLifecycleDependencies
@@ -60,6 +61,28 @@ function killDirectChild(child: ChildProcess, force: boolean): void {
   }
 }
 
+function inheritedWindowsSystemRoot(
+  environment: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const value = (name: string): string | undefined =>
+    Object.entries(environment).find(([key]) =>
+      key.toLowerCase() === name
+    )?.[1];
+  const candidate = (value("systemroot") ?? value("windir"))?.trim();
+  return candidate && win32.isAbsolute(candidate)
+    ? win32.normalize(candidate)
+    : null;
+}
+
+function windowsSystemExecutable(
+  systemRoot: string | null,
+  ...segments: string[]
+): string {
+  return systemRoot
+    ? win32.join(systemRoot, "System32", ...segments)
+    : segments.at(-1) ?? "";
+}
+
 /**
  * Stops the whole provider process group when possible, then falls back to the
  * direct child. Supervision policy intentionally lives with the caller.
@@ -72,15 +95,22 @@ export function terminateProcessTree(
   const platform = dependencies.platform ?? process.platform;
   const spawnProcess = dependencies.spawnProcess ?? spawn;
   const killProcess = dependencies.killProcess ?? process.kill;
+  const windowsSystemRoot = dependencies.windowsSystemRoot === undefined
+    ? inheritedWindowsSystemRoot()
+    : dependencies.windowsSystemRoot;
   const pid = child.pid;
   if (!pid) return;
   if (platform === "win32") {
     try {
-      const taskkill = spawnProcess("taskkill.exe", ["/pid", String(pid), "/t", ...(force ? ["/f"] : [])], {
-        shell: false,
-        windowsHide: true,
-        stdio: "ignore",
-      });
+      const taskkill = spawnProcess(
+        windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
+        ["/pid", String(pid), "/t", ...(force ? ["/f"] : [])],
+        {
+          shell: false,
+          windowsHide: true,
+          stdio: "ignore",
+        },
+      );
       let fellBack = false;
       const fallback = (): void => {
         if (fellBack) return;
@@ -224,69 +254,18 @@ function waitForPosixProcessesExit(
   });
 }
 
-function snapshotWindowsProcessTree(
-  rootPid: number,
-  spawnProcessSync: typeof spawnSync,
-  waitMs: number,
-): number[] | null {
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    `$root = ${rootPid}`,
-    "$processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId)",
-    "$rootProcess = $processes | Where-Object { [int]$_.ProcessId -eq $root } | Select-Object -First 1",
-    "if ($null -eq $rootProcess) { exit 3 }",
-    "$ids = New-Object 'System.Collections.Generic.HashSet[int]'",
-    "[void]$ids.Add($root)",
-    "do {",
-    "  $added = $false",
-    "  foreach ($candidate in $processes) {",
-    "    if ($ids.Contains([int]$candidate.ParentProcessId) -and $ids.Add([int]$candidate.ProcessId)) { $added = $true }",
-    "  }",
-    "} while ($added)",
-    "$ids | Sort-Object",
-  ].join("; ");
-  try {
-    const result = spawnProcessSync(
-      "powershell.exe",
-      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-      {
-        shell: false,
-        windowsHide: true,
-        encoding: "utf8",
-        maxBuffer: WINDOWS_PROCESS_SNAPSHOT_BYTES,
-        timeout: Math.max(250, Math.min(waitMs, 2_000)),
-      },
-    );
-    if (result.error || result.status !== 0) return null;
-    const pids = String(result.stdout ?? "")
-      .split(/\r?\n/u)
-      .map((value) => Number(value.trim()))
-      .filter((pid) => Number.isSafeInteger(pid) && pid > 0);
-    return pids.includes(rootPid) ? [...new Set(pids)] : null;
-  } catch {
-    return null;
-  }
-}
-
-function waitForWindowsProcessesExit(
-  pids: readonly number[],
-  killProcess: typeof process.kill,
-  waitMs: number,
-): Promise<boolean> {
-  return waitForPosixProcessesExit(pids, killProcess, waitMs);
-}
-
 function terminateWindowsProcessTree(
   pid: number,
   force: boolean,
   spawnProcess: typeof spawn,
+  taskkillExecutable: string,
   waitMs: number,
 ): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let taskkill: ReturnType<typeof spawn>;
     try {
       taskkill = spawnProcess(
-        "taskkill.exe",
+        taskkillExecutable,
         ["/pid", String(pid), "/t", ...(force ? ["/f"] : [])],
         {
           shell: false,
@@ -340,6 +319,9 @@ export async function terminateProcessTreeAndWait(
   const spawnProcess = dependencies.spawnProcess ?? spawn;
   const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
   const killProcess = dependencies.killProcess ?? process.kill;
+  const windowsSystemRoot = dependencies.windowsSystemRoot === undefined
+    ? inheritedWindowsSystemRoot()
+    : dependencies.windowsSystemRoot;
   const waitMs = boundedWaitMs(dependencies.waitMs);
 
   if (platform === "win32") {
@@ -347,15 +329,11 @@ export async function terminateProcessTreeAndWait(
     // complete owned child close.
     if (directChildResourcesAreClosed(child)) return true;
     const waitForObservedDirectChildClose = observeDirectChildClose(child);
-    const beforeTermination = snapshotWindowsProcessTree(
-      pid,
-      spawnProcessSync,
-      waitMs,
-    );
     const treeTerminated = await terminateWindowsProcessTree(
       pid,
       force,
       spawnProcess,
+      windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
       waitMs,
     );
     if (treeTerminated) {
@@ -368,33 +346,14 @@ export async function terminateProcessTreeAndWait(
         waitMs,
       );
     }
-    const afterTaskkill = snapshotWindowsProcessTree(
-      pid,
-      spawnProcessSync,
+    killDirectChild(child, force);
+    // Direct-child fallback cannot prove that taskkill's unobserved
+    // descendants stopped, even if the child releases its handles.
+    await confirmWindowsChildResourcesClosed(
+      waitForObservedDirectChildClose,
       waitMs,
     );
-    killDirectChild(child, force);
-    const observedPids = beforeTermination === null && afterTaskkill === null
-      ? null
-      : [...new Set([
-        ...(beforeTermination ?? []),
-        ...(afterTaskkill ?? []),
-      ])];
-    if (observedPids === null) {
-      await confirmWindowsChildResourcesClosed(
-        waitForObservedDirectChildClose,
-        waitMs,
-      );
-      return false;
-    }
-    const [resourcesClosed, observedProcessesExited] = await Promise.all([
-      confirmWindowsChildResourcesClosed(
-        waitForObservedDirectChildClose,
-        waitMs,
-      ),
-      waitForWindowsProcessesExit(observedPids, killProcess, waitMs),
-    ]);
-    return resourcesClosed && observedProcessesExited;
+    return false;
   }
 
   if (force) {

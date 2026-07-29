@@ -73,7 +73,12 @@ describe("provider process-tree termination", () => {
     const spawnProcess = vi.fn(() => taskkill);
     const killProcess = vi.fn();
 
-    terminateProcessTree(child as never, force, { platform: "win32", spawnProcess: spawnProcess as never, killProcess });
+    terminateProcessTree(child as never, force, {
+      platform: "win32",
+      spawnProcess: spawnProcess as never,
+      killProcess,
+      windowsSystemRoot: null,
+    });
 
     expect(spawnProcess).toHaveBeenCalledWith("taskkill.exe", args, {
       shell: false,
@@ -90,7 +95,11 @@ describe("provider process-tree termination", () => {
     const taskkill = fakeTaskkill();
     const spawnProcess = vi.fn(() => taskkill);
 
-    terminateProcessTree(child as never, false, { platform: "win32", spawnProcess: spawnProcess as never });
+    terminateProcessTree(child as never, false, {
+      platform: "win32",
+      spawnProcess: spawnProcess as never,
+      windowsSystemRoot: null,
+    });
     taskkill.emit("error", new Error("taskkill unavailable"));
     taskkill.emit("close", -1);
 
@@ -102,7 +111,11 @@ describe("provider process-tree termination", () => {
     const child = fakeChild();
     const spawnProcess = vi.fn(() => { throw new Error("invalid taskkill launch"); });
 
-    terminateProcessTree(child as never, true, { platform: "win32", spawnProcess: spawnProcess as never });
+    terminateProcessTree(child as never, true, {
+      platform: "win32",
+      spawnProcess: spawnProcess as never,
+      windowsSystemRoot: null,
+    });
 
     expect(child.kill).toHaveBeenCalledWith("SIGKILL");
   });
@@ -111,7 +124,11 @@ describe("provider process-tree termination", () => {
     const child = fakeChild();
     const taskkill = fakeTaskkill();
 
-    terminateProcessTree(child as never, true, { platform: "win32", spawnProcess: vi.fn(() => taskkill) as never });
+    terminateProcessTree(child as never, true, {
+      platform: "win32",
+      spawnProcess: vi.fn(() => taskkill) as never,
+      windowsSystemRoot: null,
+    });
     taskkill.emit("close", 1);
 
     expect(child.kill).toHaveBeenCalledWith("SIGKILL");
@@ -156,6 +173,7 @@ describe("provider process-tree termination", () => {
       {
         platform: "win32",
         spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
         waitMs: 100,
       },
     ).then((result) => {
@@ -185,6 +203,7 @@ describe("provider process-tree termination", () => {
       {
         platform: "win32",
         spawnProcess: vi.fn(() => taskkill) as never,
+        windowsSystemRoot: null,
         waitMs: 100,
       },
     ).then((result) => {
@@ -215,6 +234,7 @@ describe("provider process-tree termination", () => {
       {
         platform: "win32",
         spawnProcess: vi.fn(() => taskkill) as never,
+        windowsSystemRoot: null,
         waitMs: 100,
       },
     ).then((result) => {
@@ -244,44 +264,38 @@ describe("provider process-tree termination", () => {
       {
         platform: "win32",
         spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
         waitMs: 25,
       },
     )).resolves.toBe(true);
     expect(spawnProcess).not.toHaveBeenCalled();
   });
 
-  it("confirms a Windows fallback only after every snapshotted process exits", async () => {
+  it("uses the trusted System32 taskkill when PATH cannot resolve system tools", async () => {
     const child = fakeChild();
     const taskkill = fakeTaskkill();
-    const spawnProcessSync = vi.fn(() => ({
-      error: undefined,
-      status: 0,
-      stdout: "4242\r\n4243\r\n",
-    }));
-    const killProcess = vi.fn(() => {
-      throw new Error("process gone");
-    });
+    const spawnProcess = vi.fn(() => taskkill);
     const termination = terminateProcessTreeAndWait(
       child as never,
       true,
       {
         platform: "win32",
-        spawnProcess: vi.fn(() => taskkill) as never,
-        spawnProcessSync: spawnProcessSync as never,
-        killProcess,
-        waitMs: 25,
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: "C:\\Windows",
+        waitMs: 100,
       },
     );
 
-    taskkill.emit("close", 1);
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    taskkill.emit("close", 0);
     child.exitCode = 1;
     child.emit("close", 1);
 
     await expect(termination).resolves.toBe(true);
-    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
-    expect(killProcess).toHaveBeenCalledWith(4_242, 0);
-    expect(killProcess).toHaveBeenCalledWith(4_243, 0);
+    expect(spawnProcess).toHaveBeenCalledWith(
+      "C:\\Windows\\System32\\taskkill.exe",
+      ["/pid", "4242", "/t", "/f"],
+      expect.objectContaining({ shell: false }),
+    );
   });
 
   it.each([
@@ -308,6 +322,7 @@ describe("provider process-tree termination", () => {
       {
         platform: "win32",
         spawnProcess: vi.fn(() => taskkill) as never,
+        windowsSystemRoot: null,
         waitMs: 25,
       },
     );
@@ -330,6 +345,7 @@ describe("provider process-tree termination", () => {
       {
         platform: "win32",
         spawnProcess: vi.fn(() => taskkill) as never,
+        windowsSystemRoot: null,
         waitMs: 10,
       },
     );
@@ -353,6 +369,7 @@ describe("provider process-tree termination", () => {
         spawnProcess: vi.fn(() => {
           throw new Error("invalid taskkill launch");
         }) as never,
+        windowsSystemRoot: null,
         waitMs: 25,
       },
     );

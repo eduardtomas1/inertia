@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -23,6 +23,19 @@ type BoundaryScenario =
   | "invalid-question-id"
   | "invalid-permission-id";
 
+function readStableCapture<T>(capturePath: string): T {
+  let lastError: unknown;
+  for (const candidate of [`${capturePath}.next`, capturePath]) {
+    if (!existsSync(candidate)) continue;
+    try {
+      return JSON.parse(readFileSync(candidate, "utf8")) as T;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error(`No fixture capture was written to ${capturePath}.`);
+}
+
 function boundaryServerSource(
   root: string,
   capturePath: string,
@@ -43,10 +56,17 @@ let unauthorizedRequests = 0;
 const secretDigest = crypto.createHash("sha256")
   .update(process.env.OPENCODE_SERVER_PASSWORD || "")
   .digest("hex");
-const save = () => fs.writeFileSync(
-  ${JSON.stringify(capturePath)},
-  JSON.stringify({ port, requestedPort, authorizedRequests, unauthorizedRequests, secretDigest }),
-);
+const capturePath = ${JSON.stringify(capturePath)};
+const save = () => {
+  const nextPath = capturePath + ".next";
+  fs.writeFileSync(nextPath, JSON.stringify({ port, requestedPort, authorizedRequests, unauthorizedRequests, secretDigest }));
+  try {
+    fs.renameSync(nextPath, capturePath);
+  } catch (error) {
+    if (error?.code !== "EEXIST" && error?.code !== "EPERM") throw error;
+    fs.copyFileSync(nextPath, capturePath);
+  }
+};
 const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
 const session = { id: sessionID, slug: "fixture", projectID: "project", directory: ${JSON.stringify(root)}, title: "Fixture", version: "1.18.9", model: { id: "model-a", providerID: "fake" }, time: { created: Date.now(), updated: Date.now() } };
 const model = { id: "model-a", providerID: "fake", api: { id: "fake", url: "http://fake", npm: "fake" }, name: "Model A", capabilities: { temperature: true, reasoning: true, attachment: true, toolcall: true, input: { text: true, audio: false, image: false, video: false, pdf: false }, output: { text: true, audio: false, image: false, video: false, pdf: false }, interleaved: true }, cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }, limit: { context: 200000, output: 32000 }, status: "active", options: {}, headers: {}, release_date: "2026-01-01" };
@@ -159,10 +179,10 @@ describe.sequential("OpenCode owned-server boundary", () => {
       text: "Authenticated OpenCode response",
     });
 
-    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+    const capture = readStableCapture<{
       authorizedRequests: number;
       unauthorizedRequests: number;
-    };
+    }>(capturePath);
     expect(capture.authorizedRequests).toBeGreaterThan(0);
     expect(capture.unauthorizedRequests).toBe(0);
     expect(JSON.stringify(capture)).not.toContain("private-test-password");
@@ -194,18 +214,18 @@ describe.sequential("OpenCode owned-server boundary", () => {
     const firstRun = run("opencode-generated-1");
     await waitFor("the first generated OpenCode server to listen", async () => {
       try {
-        const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+        const capture = readStableCapture<{
           port: number;
-        };
+        }>(capturePath);
         return await loopbackPortIsOpen(capture.port);
       } catch {
         return false;
       }
     });
-    const firstListening = JSON.parse(readFileSync(capturePath, "utf8")) as {
+    const firstListening = readStableCapture<{
       port: number;
       requestedPort: number;
-    };
+    }>(capturePath);
     expect(firstListening.requestedPort).toBe(0);
     const unauthenticated = await fetch(
       `http://127.0.0.1:${firstListening.port}/global/health`,
@@ -216,11 +236,11 @@ describe.sequential("OpenCode owned-server boundary", () => {
       status: "completed",
       text: "Authenticated OpenCode response",
     });
-    const firstCapture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+    const firstCapture = readStableCapture<{
       authorizedRequests: number;
       unauthorizedRequests: number;
       secretDigest: string;
-    };
+    }>(capturePath);
     expect(firstCapture.authorizedRequests).toBeGreaterThan(0);
     expect(firstCapture.unauthorizedRequests).toBe(1);
 
@@ -229,9 +249,9 @@ describe.sequential("OpenCode owned-server boundary", () => {
       status: "completed",
       text: "Authenticated OpenCode response",
     });
-    const secondCapture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+    const secondCapture = readStableCapture<{
       secretDigest: string;
-    };
+    }>(capturePath);
     expect(secondCapture.secretDigest).toMatch(/^[a-f0-9]{64}$/u);
     expect(secondCapture.secretDigest).not.toBe(firstCapture.secretDigest);
     expect(JSON.stringify([firstResult, secondResult])).not.toMatch(
@@ -275,7 +295,7 @@ describe.sequential("OpenCode owned-server boundary", () => {
     });
 
     expect(inputRequests).toBe(0);
-    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as { port: number };
+    const capture = readStableCapture<{ port: number }>(capturePath);
     await waitFor(
       `the ${scenario} OpenCode server to close`,
       async () => !(await loopbackPortIsOpen(capture.port)),

@@ -89,12 +89,15 @@ function attachment(id: string): ChatAttachment {
 function deferred<T>(): {
   promise: Promise<T>;
   resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
 } {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((settle) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((settle, fail) => {
     resolve = settle;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function composerProps(
@@ -239,5 +242,101 @@ describe("composer asynchronous ownership", () => {
     await waitFor(() => expect(
       screen.getByRole("textbox", { name: "Message" }),
     ).toHaveValue("Newer local draft"));
+  });
+
+  it("does not clear a newer draft after returning to the submitted chat", async () => {
+    const first = conversation("99999999-9999-4999-8999-999999999999");
+    const second = conversation("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    const sent = deferred<void>();
+    const chooseAttachments = vi.fn()
+      .mockResolvedValueOnce([attachment("submitted")])
+      .mockResolvedValueOnce([attachment("newer")]);
+    const release = vi.fn(async () => undefined);
+    const overrides = {
+      onSend: () => sent.promise,
+      onChooseAttachments: chooseAttachments,
+      onReleaseAttachment: release,
+    };
+    const view = render(<Composer {...composerProps(first, overrides)} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach images or documents",
+    }));
+    await screen.findByText("submitted.png");
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Submitted draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    view.rerender(<Composer {...composerProps(second, overrides)} />);
+    view.rerender(<Composer {...composerProps(first, overrides)} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Submitted draft" },
+    });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach images or documents",
+    }));
+    await screen.findByText("newer.png");
+    await act(async () => sent.resolve());
+
+    expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Submitted draft");
+    expect(screen.getByText("newer.png")).toBeTruthy();
+    expect(release).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(`inertia:draft:${first.id}`))
+      .toBe("Submitted draft");
+  });
+
+  it("does not restore stale state when a failed send returns to its chat", async () => {
+    const first = conversation("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    const second = conversation("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+    const sent = deferred<void>();
+    const chooseAttachments = vi.fn()
+      .mockResolvedValueOnce([attachment("failed")])
+      .mockResolvedValueOnce([attachment("newer")]);
+    const release = vi.fn(async () => undefined);
+    const overrides = {
+      onSend: () => sent.promise,
+      onChooseAttachments: chooseAttachments,
+      onReleaseAttachment: release,
+    };
+    const view = render(<Composer {...composerProps(first, overrides)} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach images or documents",
+    }));
+    await screen.findByText("failed.png");
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Failed submitted draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    view.rerender(<Composer {...composerProps(second, overrides)} />);
+    view.rerender(<Composer {...composerProps(first, overrides)} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Newer retry draft" },
+    });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach images or documents",
+    }));
+    await screen.findByText("newer.png");
+    await act(async () => sent.reject(new Error("send failed")));
+
+    expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Newer retry draft");
+    expect(screen.getByText("newer.png")).toBeTruthy();
+    expect(screen.queryByText("failed.png")).toBeNull();
+    await waitFor(() => expect(release).toHaveBeenCalledExactlyOnceWith(
+      "failed",
+    ));
+    expect(window.localStorage.getItem(`inertia:draft:${first.id}`))
+      .toBe("Newer retry draft");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Remove attachment newer.png",
+    }));
+    expect(screen.queryByText("newer.png")).toBeNull();
+    expect(screen.queryByText("failed.png")).toBeNull();
+    await waitFor(() => expect(release).toHaveBeenCalledWith("newer"));
   });
 });

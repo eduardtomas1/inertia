@@ -100,6 +100,8 @@ export function Composer({
   const mountedRef = useRef(true);
   const conversationIdRef = useRef(conversation.id);
   const attachmentAuthorityRef = useRef(0);
+  const submissionSequenceRef = useRef(0);
+  const draftSubmissionClaimsRef = useRef(new Map<string, number>());
   const releaseAttachmentRef = useRef(onReleaseAttachment);
   const [fileReferences, setFileReferences] = useState<string[]>([]);
   const [pendingRoute, setPendingRoute] = useState<{
@@ -215,6 +217,7 @@ export function Composer({
       return;
     }
     const key = `inertia:draft:${conversation.id}`;
+    draftSubmissionClaimsRef.current.delete(conversation.id);
     if (message) window.localStorage.setItem(key, message);
     else window.localStorage.removeItem(key);
   }, [conversation.id, message]);
@@ -245,6 +248,21 @@ export function Composer({
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
     const submittedDraft = message;
+    const submittedAuthority = attachmentAuthorityRef.current;
+    const submissionSequence = submissionSequenceRef.current + 1;
+    submissionSequenceRef.current = submissionSequence;
+    try {
+      const key = `inertia:draft:${submittedConversationId}`;
+      if (submittedDraft && window.localStorage.getItem(key) === submittedDraft) {
+        window.localStorage.removeItem(key);
+        draftSubmissionClaimsRef.current.set(
+          submittedConversationId,
+          submissionSequence,
+        );
+      }
+    } catch {
+      // The in-memory composer remains authoritative when storage is unavailable.
+    }
     // Submitted files must remain registered while the provider reads them.
     // Removing them from the unsent ref prevents an unmount from releasing
     // their temporary copies after the server has accepted the turn.
@@ -253,15 +271,17 @@ export function Composer({
     setSubmitting(true);
     try {
       await onSend(request.visibleContent, submittedAttachments, request.context);
-      try {
-        const key = `inertia:draft:${submittedConversationId}`;
-        if (window.localStorage.getItem(key) === submittedDraft) {
-          window.localStorage.removeItem(key);
-        }
-      } catch {
-        // The in-memory composer still clears when it owns the settled send.
+      if (
+        draftSubmissionClaimsRef.current.get(submittedConversationId)
+        === submissionSequence
+      ) {
+        draftSubmissionClaimsRef.current.delete(submittedConversationId);
       }
-      if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
+      if (
+        !mountedRef.current
+        || conversationIdRef.current !== submittedConversationId
+        || attachmentAuthorityRef.current !== submittedAuthority
+      ) return;
       setMessage("");
       setAttachments([]);
       setFileReferences([]);
@@ -275,17 +295,34 @@ export function Composer({
         }
       }, COMPOSER_ACTION_STALE_FALLBACK_MS);
     } catch {
-      if (mountedRef.current && conversationIdRef.current === submittedConversationId) {
+      if (
+        draftSubmissionClaimsRef.current.get(submittedConversationId)
+        === submissionSequence
+      ) {
+        draftSubmissionClaimsRef.current.delete(submittedConversationId);
+        try {
+          const key = `inertia:draft:${submittedConversationId}`;
+          if (submittedDraft && window.localStorage.getItem(key) === null) {
+            window.localStorage.setItem(key, submittedDraft);
+          }
+        } catch {
+          // The current in-memory draft remains available when storage fails.
+        }
+      }
+      const ownsSettlement = mountedRef.current
+        && conversationIdRef.current === submittedConversationId
+        && attachmentAuthorityRef.current === submittedAuthority;
+      if (ownsSettlement) {
         attachmentsRef.current = submittedAttachments;
       } else {
         for (const attachment of submittedAttachments) {
-          void onReleaseAttachment(attachment.id);
+          void releaseAttachmentRef.current(attachment.id);
         }
       }
       // The workspace-level toast presents the failure; the current composer
       // keeps failed attachments available for retry when it is still mounted.
-      submittingRef.current = false;
-      if (mountedRef.current && conversationIdRef.current === submittedConversationId) {
+      if (ownsSettlement) {
+        submittingRef.current = false;
         setSubmitting(false);
         textareaRef.current?.focus();
       }

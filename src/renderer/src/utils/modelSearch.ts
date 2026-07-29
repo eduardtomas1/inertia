@@ -10,6 +10,8 @@ export interface ModelSearchRoute {
   harnessLabel: string;
   backendProfileId: string;
   backendProfileName: string;
+  /** Revision is present for authoritative composer routes. */
+  backendConfigurationRevision?: number;
   providerLabel: string;
   source: "built-in" | "custom";
   /**

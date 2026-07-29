@@ -139,6 +139,8 @@ function profileRoute(
     harnessLabel: modelChooserHarnessLabel(profile.harnessId),
     backendProfileId: profile.id,
     backendProfileName: profile.displayName,
+    backendConfigurationRevision:
+      selection.backendConfigurationRevision,
     providerLabel: provider?.label ?? profile.displayName,
     source: profile.source,
     routeTerms: [
@@ -203,6 +205,8 @@ function fallbackNativeRoutes(
         harnessLabel: modelChooserHarnessLabel(harnessId),
         backendProfileId: backend.id,
         backendProfileName: backend.displayName,
+        backendConfigurationRevision:
+          selection.backendConfigurationRevision,
         providerLabel: provider.label,
         source: "built-in" as const,
         routeTerms: [provider.id],
@@ -260,6 +264,8 @@ export function selectedModelSearchRoute(
     harnessLabel: modelChooserHarnessLabel(selection.harnessId),
     backendProfileId: selection.backendProfileId,
     backendProfileName: selection.backendProfileDisplayName,
+    backendConfigurationRevision:
+      selection.backendConfigurationRevision,
     providerLabel: providerId ?? selection.backendProfileDisplayName,
     source: selection.backendProfileId.startsWith("builtin:")
       ? "built-in"

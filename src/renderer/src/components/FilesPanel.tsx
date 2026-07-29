@@ -14,11 +14,15 @@ import {
   File,
   FileSearch,
   Folder,
+  Pencil,
   RefreshCw,
   Search,
   X,
 } from "lucide-react";
-import type { WorkspaceEntry, WorkspaceFilePreview } from "@shared/contracts";
+import type {
+  WorkspaceEntry,
+  WorkspaceFilePreview,
+} from "@shared/contracts";
 import {
   flattenWorkspaceTree,
   isSafeWorkspaceEntryPath,
@@ -29,6 +33,7 @@ import {
   type WorkspaceTreeRow,
 } from "../utils/workspaceTree";
 import { IconButton, LoadingMark } from "./ui";
+import { FileEditorDialog } from "./FileEditorDialog";
 
 export interface WorkspaceEntriesPage {
   directory: string;
@@ -52,6 +57,16 @@ export type FilesPanelProps = {
   }) => Promise<WorkspaceEntriesPage>;
   onRefresh?: () => void;
   onOpenFile?: (path: string) => void;
+  onSaveFile?: (
+    path: string,
+    content: string,
+    expectedDigest: string,
+  ) => Promise<WorkspaceFilePreview>;
+  canSaveFile?: (
+    path: string,
+    content: string,
+    expectedDigest: string,
+  ) => boolean;
 };
 
 export interface DirectoryPage {
@@ -89,11 +104,11 @@ function safeError(error: unknown, fallback: string): string {
 }
 
 function parentLabel(path: string): string {
-  return workspaceParentPath(path).replaceAll("\\", "/");
+  return workspaceParentPath(path);
 }
 
 function directoryChain(path: string): string[] {
-  const segments = path.replaceAll("\\", "/").split("/");
+  const segments = path.split("/");
   return segments.map((_, index) => segments.slice(0, index + 1).join("/"));
 }
 
@@ -110,6 +125,8 @@ export function FilesPanel({
   onLoadEntries,
   onRefresh,
   onOpenFile,
+  onSaveFile,
+  canSaveFile,
 }: FilesPanelProps): React.JSX.Element {
   const initialPages = freshWorkspaceDirectoryPages(entries, entriesTruncated);
   const [directoryPages, setDirectoryPages] = useState(initialPages);
@@ -121,10 +138,19 @@ export function FilesPanel({
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchState>(EMPTY_SEARCH);
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
+  const [editingFile, setEditingFile] =
+    useState<WorkspaceFilePreview | null>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchGeneration = useRef(0);
   const mounted = useRef(true);
+  const previewEditable = preview !== null
+    && !preview.truncated
+    && canSaveFile?.(
+      preview.path,
+      preview.content,
+      preview.contentDigest,
+    ) === true;
 
   useEffect(() => {
     mounted.current = true;
@@ -501,6 +527,17 @@ export function FilesPanel({
                   <span>{preview.path}</span>
                 </div>
                 <span className="file-language">{preview.language || "text"}</span>
+                {onSaveFile && (
+                  <IconButton
+                    label={previewEditable
+                      ? `Edit ${preview.path} in Inertia`
+                      : `${preview.path} is too large to edit safely in Inertia`}
+                    disabled={!previewEditable}
+                    onClick={() => setEditingFile(preview)}
+                  >
+                    <Pencil size={14} />
+                  </IconButton>
+                )}
                 {onOpenFile && (
                   <IconButton
                     label="Open file in default editor"
@@ -535,6 +572,14 @@ export function FilesPanel({
           )}
         </div>
       </div>
+      {editingFile && onSaveFile && (
+        <FileEditorDialog
+          file={editingFile}
+          canSave={canSaveFile ?? (() => false)}
+          onClose={() => setEditingFile(null)}
+          onSave={onSaveFile}
+        />
+      )}
     </section>
   );
 }

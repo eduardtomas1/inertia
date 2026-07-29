@@ -11,6 +11,14 @@ import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
+import {
+  workspaceFileReferenceFallback,
+} from "../../utils/workspaceFileReference";
+import {
+  workspaceFileWriteCommand,
+  workspaceFileWriteFitsRuntimeFrame,
+  type WorkspaceFileWriteIdentity,
+} from "../../utils/workspaceFileWrite";
 import { useWorkspaceMentions } from "./useWorkspaceMentions";
 
 type WorkspaceEntriesResult = Extract<
@@ -50,7 +58,13 @@ export function useWorkspaceFiles({
   const fileListRequestGenerationRef = useRef(0);
   const filePreviewRequestGenerationRef = useRef(0);
   const actionsRequestGenerationRef = useRef(0);
-  const mentions = useWorkspaceMentions({ project, conversation, request });
+  const automaticallyLoadedAuthorityRef = useRef<string | null>(null);
+  const mentions = useWorkspaceMentions({
+    enabled,
+    project,
+    conversation,
+    request,
+  });
 
   const requestWorkspaceEntries = useCallback(async (options: {
     directory?: string;
@@ -122,6 +136,7 @@ export function useWorkspaceFiles({
   }, [conversation?.id, project?.id, request]);
 
   useEffect(() => {
+    automaticallyLoadedAuthorityRef.current = null;
     fileListRequestGenerationRef.current += 1;
     filePreviewRequestGenerationRef.current += 1;
     actionsRequestGenerationRef.current += 1;
@@ -134,14 +149,28 @@ export function useWorkspaceFiles({
     setFilesLoading(false);
     setFilePreviewLoading(false);
     if (!enabled || !project?.id || !online) return;
-    void Promise.allSettled([
-      ...(loadOnMount ? [loadFiles()] : []),
-      loadActions(),
-    ]);
+    void loadActions();
   }, [
     conversation?.id,
     enabled,
     loadActions,
+    online,
+    project?.id,
+  ]);
+
+  useEffect(() => {
+    if (!enabled || !project?.id || !online || !loadOnMount) return;
+    const authority = `${project.id}\0${conversation?.id ?? ""}`;
+    if (automaticallyLoadedAuthorityRef.current === authority) return;
+    automaticallyLoadedAuthorityRef.current = authority;
+    void loadFiles().catch(() => {
+      if (automaticallyLoadedAuthorityRef.current === authority) {
+        automaticallyLoadedAuthorityRef.current = null;
+      }
+    });
+  }, [
+    conversation?.id,
+    enabled,
     loadFiles,
     loadOnMount,
     online,
@@ -155,19 +184,41 @@ export function useWorkspaceFiles({
     setFilePreview(null);
     setFilePreviewError(null);
     setFilePreviewLoading(true);
-    void request({
-      type: "workspace.file.read",
-      payload: {
-        projectId: project.id,
-        conversationId: conversation?.id,
-        path,
-      },
-    }).then(resultEvent).then((event) => {
+    const readFile = async (
+      candidate: string,
+    ): Promise<WorkspaceFilePreview> => {
+      const event = resultEvent(await request({
+        type: "workspace.file.read",
+        payload: {
+          projectId: project.id,
+          conversationId: conversation?.id,
+          path: candidate,
+        },
+      }));
+      if (event.result.kind !== "workspace.file") {
+        throw new Error("Unexpected file response.");
+      }
+      return event.result.file;
+    };
+    const readReference = async (): Promise<WorkspaceFilePreview> => {
+      try {
+        return await readFile(path);
+      } catch (literalError) {
+        const fallback = workspaceFileReferenceFallback(path);
+        if (!fallback) throw literalError;
+        try {
+          return await readFile(fallback);
+        } catch {
+          throw literalError;
+        }
+      }
+    };
+    void readReference().then((file) => {
       if (
         filePreviewRequestGenerationRef.current === generation
-        && event.result.kind === "workspace.file"
       ) {
-        setFilePreview(event.result.file);
+        setSelectedFile(file.path);
+        setFilePreview(file);
       }
     }).catch((error) => {
       if (filePreviewRequestGenerationRef.current !== generation) return;
@@ -183,6 +234,70 @@ export function useWorkspaceFiles({
     });
   }, [conversation?.id, project, request, setActionError]);
 
+  const saveWorkspaceFile = useCallback(async (
+    path: string,
+    content: string,
+    expectedDigest: string,
+  ): Promise<WorkspaceFilePreview> => {
+    if (!project) throw new Error("Select a project before editing files.");
+    if (
+      !filePreview?.authorityRef
+      || filePreview.path !== path
+      || filePreview.contentDigest !== expectedDigest
+    ) {
+      throw new Error("Reload this file before saving it.");
+    }
+    const identity: WorkspaceFileWriteIdentity = {
+      projectId: project.id,
+      conversationId: conversation?.id,
+      path,
+      authorityRef: filePreview.authorityRef,
+      expectedDigest,
+    };
+    if (!workspaceFileWriteFitsRuntimeFrame(identity, content)) {
+      throw new Error(
+        "This edit is too large to send safely. Shorten the file and try again.",
+      );
+    }
+    const generation = filePreviewRequestGenerationRef.current;
+    const event = resultEvent(await request(
+      workspaceFileWriteCommand(identity, content),
+    ));
+    if (event.result.kind !== "workspace.file") {
+      throw new Error("The local service returned an unexpected file response.");
+    }
+    if (
+      filePreviewRequestGenerationRef.current === generation
+      && selectedFile === path
+    ) {
+      setFilePreview(event.result.file);
+      setFilePreviewError(null);
+    }
+    return event.result.file;
+  }, [conversation?.id, filePreview, project, request, selectedFile]);
+
+  const canSaveWorkspaceFile = useCallback((
+    path: string,
+    content: string,
+    expectedDigest: string,
+  ): boolean => {
+    if (
+      !project
+      || !filePreview?.authorityRef
+      || filePreview.path !== path
+      || filePreview.contentDigest !== expectedDigest
+    ) {
+      return false;
+    }
+    return workspaceFileWriteFitsRuntimeFrame({
+      projectId: project.id,
+      conversationId: conversation?.id,
+      path,
+      authorityRef: filePreview.authorityRef,
+      expectedDigest,
+    }, content);
+  }, [conversation?.id, filePreview, project]);
+
   return {
     workspaceEntries,
     mentionResults: mentions.mentionResults,
@@ -197,6 +312,8 @@ export function useWorkspaceFiles({
     requestWorkspaceEntries,
     loadFiles,
     selectWorkspaceFile,
+    canSaveWorkspaceFile,
+    saveWorkspaceFile,
     searchMentions: mentions.searchMentions,
   };
 }

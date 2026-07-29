@@ -1,20 +1,87 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  cleanupReversalOperations,
+  cleanupReversalOperations as cleanupReversalOperationsWithBroker,
   commitChanges,
   getUnifiedDiff,
-  inspectDiffSelection,
-  revertDiffSelection,
-  undoDiffSelection,
+  inspectDiffSelection as inspectDiffSelectionWithBroker,
+  revertDiffSelection as revertDiffSelectionWithBroker,
+  undoDiffSelection as undoDiffSelectionWithBroker,
   type GitDiffSelection,
+  type ReversalTestHooks,
 } from "../../src/server/git";
 import { REVERSAL_MAX_ACTIVE_BACKUPS, REVERSAL_REGISTRY_REF } from "../../src/server/reversal-registry";
+import { writeAtomic } from "../../src/server/git/reversal-files";
+import {
+  SecureFileError,
+  type RuntimeSecureFileBroker,
+} from "../../src/server/secure-files";
 import { parseUnifiedDiff } from "../../src/shared/diff-review";
+import { SecureFileTestBroker } from "../support/secure-file-test-broker";
+
+const secureFiles = new SecureFileTestBroker();
+
+function unavailableAfterReplace(
+  commit: boolean,
+): RuntimeSecureFileBroker {
+  return {
+    authorizeRoot: (root, signal) =>
+      secureFiles.authorizeRoot(root, signal),
+    verifyRoot: (root, signal) =>
+      secureFiles.verifyRoot(root, signal),
+    read: (root, path, maxBytes, signal) =>
+      secureFiles.read(root, path, maxBytes, signal),
+    replace: async (...args) => {
+      if (commit) await secureFiles.replace(...args);
+      throw new SecureFileError(
+        "unavailable",
+        "The secure file helper stopped before replying.",
+      );
+    },
+  };
+}
+
+function inspectDiffSelection(
+  root: string,
+  selection: GitDiffSelection,
+) {
+  return inspectDiffSelectionWithBroker(root, selection, secureFiles);
+}
+
+function revertDiffSelection(
+  root: string,
+  selection: GitDiffSelection,
+  testHooks?: ReversalTestHooks,
+) {
+  return revertDiffSelectionWithBroker(
+    root,
+    selection,
+    secureFiles,
+    testHooks,
+  );
+}
+
+function undoDiffSelection(root: string, operationId: string) {
+  return undoDiffSelectionWithBroker(root, operationId, secureFiles);
+}
+
+function cleanupReversalOperations(root: string) {
+  return cleanupReversalOperationsWithBroker(root, secureFiles);
+}
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -79,7 +146,7 @@ describe("safe selected diff reversal", () => {
     root: string,
     predicate: (line: ReturnType<typeof parseUnifiedDiff>["files"][number]["hunks"][number]["lines"][number]) => boolean,
   ): Promise<GitDiffSelection> {
-    const diff = await getUnifiedDiff(root);
+    const diff = await getUnifiedDiff(root, {}, undefined, secureFiles);
     expect(diff.truncated).toBe(false);
     const structured = parseUnifiedDiff(diff.text);
     const file = structured.files[0]!;
@@ -116,6 +183,97 @@ describe("safe selected diff reversal", () => {
     expect(git(root, "diff", "--cached")).toContain("BETA");
     expect(git(root, "diff", "--cached")).not.toContain("delta");
     expect(git(root, "diff")).toBe("");
+  });
+
+  it("does not reopen an untracked preview through a swapped parent link", async () => {
+    const root = repository();
+    const outside = mkdtempSync(join(tmpdir(), "inertia-diff-outside-"));
+    roots.push(outside);
+    const nested = join(root, "nested");
+    const originalNested = join(root, "nested-original");
+    mkdirSync(nested);
+    writeFileSync(join(nested, "untracked.txt"), "inside\n");
+    writeFileSync(join(outside, "untracked.txt"), "OUTSIDE_SENTINEL\n");
+    let swapped = false;
+
+    const diff = await getUnifiedDiff(
+      root,
+      {},
+      {
+        afterUntrackedValidated: (path) => {
+          if (swapped || path !== "nested/untracked.txt") return;
+          swapped = true;
+          renameSync(nested, originalNested);
+          symlinkSync(
+            outside,
+            nested,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      },
+      secureFiles,
+    );
+
+    expect(swapped).toBe(true);
+    expect(diff.text).toContain(
+      "Unable to preview untracked file nested/untracked.txt.",
+    );
+    expect(diff.truncated).toBe(true);
+    expect(diff.text).not.toContain("OUTSIDE_SENTINEL");
+  });
+
+  it("marks an oversized untracked preview incomplete before review reconciliation", async () => {
+    const root = repository();
+    writeFileSync(join(root, "large.txt"), "x".repeat(2_048));
+
+    const diff = await getUnifiedDiff(
+      root,
+      { maxBytes: 1_024 },
+      undefined,
+      secureFiles,
+    );
+
+    expect(diff).toMatchObject({
+      filesIncluded: 1,
+      totalFiles: 1,
+      truncated: true,
+    });
+    expect(diff.text).toContain("Unable to preview untracked file large.txt.");
+  });
+
+  it("pins the repository root while previewing untracked content", async () => {
+    const root = repository();
+    const movedRoot = `${root}-moved`;
+    const outside = mkdtempSync(join(tmpdir(), "inertia-diff-root-outside-"));
+    roots.push(movedRoot, outside);
+    writeFileSync(join(root, "untracked.txt"), "inside\n");
+    writeFileSync(join(outside, "untracked.txt"), "OUTSIDE_SENTINEL\n");
+    let swapped = false;
+
+    const diff = await getUnifiedDiff(
+      root,
+      {},
+      {
+        afterUntrackedValidated: (path) => {
+          if (swapped || path !== "untracked.txt") return;
+          swapped = true;
+          renameSync(root, movedRoot);
+          symlinkSync(
+            outside,
+            root,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      },
+      secureFiles,
+    );
+
+    expect(swapped).toBe(true);
+    expect(diff.text).toContain(
+      "Unable to preview untracked file untracked.txt.",
+    );
+    expect(diff.truncated).toBe(true);
+    expect(diff.text).not.toContain("OUTSIDE_SENTINEL");
   });
 
   it("reverses an unstaged-only selection without changing the index", async () => {
@@ -276,7 +434,7 @@ describe("safe selected diff reversal", () => {
     vi.resetModules();
     const reopened = await import("../../src/server/git");
 
-    await reopened.undoDiffSelection(root, result.operation.id);
+    await reopened.undoDiffSelection(root, result.operation.id, secureFiles);
 
     expect(readFileSync(join(root, "example.txt"), "utf8")).toContain("delta");
     expect(readRegistry(root).operations.at(-1)?.status).toBe("undone");
@@ -439,6 +597,150 @@ describe("safe selected diff reversal", () => {
     symlinkSync("target.txt", join(linked, "example.txt"));
     const linkSelection = await selectionFor(linked, (line) => line.kind === "addition" || line.kind === "deletion");
     await expect(inspectDiffSelection(linked, linkSelection)).rejects.toThrow(/type-changed|symbolic links/i);
+  });
+
+  it("never follows a swapped parent while writing reversal content", async () => {
+    const root = repository();
+    const outside = mkdtempSync(join(tmpdir(), "inertia-reversal-outside-"));
+    roots.push(outside);
+    const parent = join(root, "src");
+    const movedParent = join(root, "src-moved");
+    mkdirSync(parent);
+    writeFileSync(join(parent, "example.txt"), "inside\n");
+    writeFileSync(join(outside, "example.txt"), "outside\n");
+    const secureRoot = await secureFiles.authorizeRoot(root);
+
+    await expect(writeAtomic(
+      root,
+      "src/example.txt",
+      Buffer.from("replacement\n"),
+      0o600,
+      Buffer.from("inside\n"),
+      secureFiles,
+      secureRoot,
+      {
+        afterTargetOpened: () => {
+          renameSync(parent, movedParent);
+          symlinkSync(
+            outside,
+            parent,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      },
+    )).rejects.toThrow(/unsafe|moved|changed|outcome/i);
+
+    expect(readFileSync(join(outside, "example.txt"), "utf8"))
+      .toBe("outside\n");
+    expect(readFileSync(join(movedParent, "example.txt"), "utf8"))
+      .toBe("inside\n");
+  });
+
+  it("pins the repository root while writing reversal content", async () => {
+    const root = repository();
+    const movedRoot = `${root}-moved`;
+    const outside = mkdtempSync(
+      join(tmpdir(), "inertia-reversal-root-outside-"),
+    );
+    roots.push(movedRoot, outside);
+    writeFileSync(join(outside, "example.txt"), "alpha\nbeta\ngamma\n");
+    const expected = readFileSync(join(root, "example.txt"));
+    const secureRoot = await secureFiles.authorizeRoot(root);
+
+    await expect(writeAtomic(
+      root,
+      "example.txt",
+      Buffer.from("replacement\n"),
+      0o600,
+      expected,
+      secureFiles,
+      secureRoot,
+      {
+        afterTargetOpened: () => {
+          renameSync(root, movedRoot);
+          symlinkSync(
+            outside,
+            root,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      },
+    )).rejects.toThrow(/unsafe|changed|outcome/i);
+
+    expect(readFileSync(join(outside, "example.txt"), "utf8"))
+      .toBe("alpha\nbeta\ngamma\n");
+    expect(readFileSync(join(movedRoot, "example.txt"), "utf8"))
+      .toBe(expected.toString("utf8"));
+  });
+
+  it("accepts an authoritative committed state after a lost helper reply", async () => {
+    const root = repository();
+    const broker = unavailableAfterReplace(true);
+    const secureRoot = await broker.authorizeRoot(root);
+    const expected = readFileSync(join(root, "example.txt"));
+
+    await expect(writeAtomic(
+      root,
+      "example.txt",
+      Buffer.from("replacement\n"),
+      0o600,
+      expected,
+      broker,
+      secureRoot,
+    )).resolves.toBeUndefined();
+    expect(readFileSync(join(root, "example.txt"), "utf8"))
+      .toBe("replacement\n");
+  });
+
+  it("preserves an unchanged file after a helper fails before commit", async () => {
+    const root = repository();
+    const broker = unavailableAfterReplace(false);
+    const secureRoot = await broker.authorizeRoot(root);
+    const expected = readFileSync(join(root, "example.txt"));
+
+    await expect(writeAtomic(
+      root,
+      "example.txt",
+      Buffer.from("replacement\n"),
+      0o600,
+      expected,
+      broker,
+      secureRoot,
+    )).rejects.toThrow(/stopped before replying/i);
+    expect(readFileSync(join(root, "example.txt"), "utf8"))
+      .toBe(expected.toString("utf8"));
+  });
+
+  it("completes a staged reversal when the committed helper reply is lost", async () => {
+    const root = repository();
+    writeFileSync(
+      join(root, "example.txt"),
+      "alpha\nbeta\ngamma\ndelta\n",
+    );
+    git(root, "add", "example.txt");
+    const selection = await selectionFor(
+      root,
+      (line) => line.kind === "addition" && line.content === "delta",
+    );
+    const broker = unavailableAfterReplace(true);
+    const plan = await inspectDiffSelectionWithBroker(
+      root,
+      selection,
+      broker,
+    );
+
+    const result = await revertDiffSelectionWithBroker(
+      root,
+      { ...selection, expected: plan.validation },
+      broker,
+    );
+
+    expect(result.operation.affectedLayers).toEqual(["index", "worktree"]);
+    expect(readFileSync(join(root, "example.txt"), "utf8"))
+      .toBe("alpha\nbeta\ngamma\n");
+    expect(git(root, "show", ":example.txt"))
+      .toBe("alpha\nbeta\ngamma\n");
+    expect(readRegistry(root).operations.at(-1)?.status).toBe("applied");
   });
 
   it("stages and commits only explicitly selected paths while preserving other staged work", async () => {

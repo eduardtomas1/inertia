@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   Check,
@@ -140,6 +140,12 @@ function formattedContext(tokens: number | null): string {
   return `${Math.round(tokens / 1_000)}K`;
 }
 
+interface BackendCredentialDraft {
+  profileId: string;
+  configurationRevision: number;
+  value: string;
+}
+
 export function ModelBackendsSettings({
   profiles,
   initialProfileId,
@@ -166,15 +172,29 @@ export function ModelBackendsSettings({
   const [draft, setDraft] = useState<ModelBackendProfileDraft | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
-  const [secret, setSecret] = useState("");
+  const [credentialDraft, setCredentialDraft] =
+    useState<BackendCredentialDraft | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const selectionEpochRef = useRef(0);
   const [projectDefaultProjectId, setProjectDefaultProjectId] = useState(
     projects[0]?.id ?? "",
   );
   const selected = profiles.find(({ id }) => id === selectedId) ?? profiles[0] ?? null;
   const selectedProfileId = selected?.id ?? null;
+  const selectedAuthorityRef = useRef({
+    profileId: selectedProfileId,
+    configurationRevision: selected?.configurationRevision ?? null,
+  });
+  selectedAuthorityRef.current = {
+    profileId: selectedProfileId,
+    configurationRevision: selected?.configurationRevision ?? null,
+  };
+  const secret = credentialDraft?.profileId === selectedProfileId
+    && credentialDraft.configurationRevision === selected?.configurationRevision
+    ? credentialDraft.value
+    : "";
   const editingBuiltIn = Boolean(editingId && selected?.source === "built-in");
   const modelChoices = useMemo(() =>
     profiles.flatMap((profile) => profile.enabled
@@ -195,6 +215,17 @@ export function ModelBackendsSettings({
   }, [profiles, selected]);
 
   useEffect(() => {
+    setCredentialDraft((current) =>
+      current
+      && (
+        current.profileId !== selectedProfileId
+        || current.configurationRevision !== selected?.configurationRevision
+      )
+        ? null
+        : current);
+  }, [selected?.configurationRevision, selectedProfileId]);
+
+  useEffect(() => {
     if (!selectedProfileId || draft) return;
     let disposed = false;
     setDetail(null);
@@ -213,18 +244,21 @@ export function ModelBackendsSettings({
   const run = async (
     key: string,
     operation: () => Promise<ModelBackendProfileDetail | void>,
+    isCurrent: () => boolean = () => true,
   ): Promise<void> => {
     if (busy) return;
     setBusy(key);
     setError(null);
     try {
       const value = await operation();
-      if (value) {
+      if (value && isCurrent()) {
         setDetail(value);
         setSelectedId(value.id);
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The backend change could not be saved.");
+      if (isCurrent()) {
+        setError(reason instanceof Error ? reason.message : "The backend change could not be saved.");
+      }
     } finally {
       setBusy(null);
     }
@@ -253,6 +287,7 @@ export function ModelBackendsSettings({
 
   const beginEdit = (profile: ModelBackendProfileDetail): void => {
     if (profile.preset === "native") return;
+    setCredentialDraft(null);
     setEditingId(profile.id);
     setAdvanced(profile.routing.mode === "advanced");
     setDraft({
@@ -380,6 +415,7 @@ export function ModelBackendsSettings({
           className="secondary-button"
           disabled={disabled || Boolean(busy)}
           onClick={() => {
+            setCredentialDraft(null);
             setDraft(defaultDraft());
             setEditingId(null);
             setDetail(null);
@@ -401,6 +437,8 @@ export function ModelBackendsSettings({
               )}
               aria-current={!draft && selected?.id === profile.id ? "true" : undefined}
               onClick={() => {
+                selectionEpochRef.current += 1;
+                setCredentialDraft(null);
                 setDraft(null);
                 setEditingId(null);
                 setSelectedId(profile.id);
@@ -536,17 +574,51 @@ export function ModelBackendsSettings({
                   <span className="backend-profile-icon"><KeyRound size={15} /></span>
                   <span><strong>Backend credential</strong><small>{selected.authState === "configured" ? "Stored in your operating system’s secure vault." : "No usable credential is available for this profile."}</small></span>
                   {selected.authenticationMode !== "none" && (
-                    <input type="password" value={secret} autoComplete="new-password" autoFocus={selected.id === initialProfileId && selected.authState !== "configured"} placeholder={selected.authState === "configured" ? "Replace credential" : "Add credential"} onChange={(event) => setSecret(event.target.value)} />
+                    <input type="password" value={secret} autoComplete="new-password" autoFocus={selected.id === initialProfileId && selected.authState !== "configured"} placeholder={selected.authState === "configured" ? "Replace credential" : "Add credential"} onChange={(event) => setCredentialDraft({
+                      profileId: selected.id,
+                      configurationRevision: selected.configurationRevision,
+                      value: event.target.value,
+                    })} />
                   )}
                   {selected.authenticationMode !== "none" && (
-                    <button type="button" className="secondary-button" disabled={!secret.trim() || disabled || Boolean(busy)} onClick={() => { void run("credential", async () => {
-                      const value = await onSetCredential(selected.id, secret);
-                      setSecret("");
-                      return value;
-                    }); }}>{busy === "credential" ? "Saving…" : selected.authState === "configured" ? "Replace" : "Add"}</button>
+                    <button type="button" className="secondary-button" disabled={!secret.trim() || disabled || Boolean(busy)} onClick={() => {
+                      const pending = credentialDraft;
+                      if (
+                        !pending
+                        || pending.profileId !== selected.id
+                        || pending.configurationRevision
+                          !== selected.configurationRevision
+                      ) {
+                        setCredentialDraft(null);
+                        return;
+                      }
+                      const selectionEpoch = selectionEpochRef.current;
+                      const responseIsCurrent = (): boolean => {
+                        const authority = selectedAuthorityRef.current;
+                        return (
+                          selectionEpochRef.current === selectionEpoch
+                          && authority.profileId === pending.profileId
+                          && authority.configurationRevision
+                            === pending.configurationRevision
+                        );
+                      };
+                      void run(
+                        "credential",
+                        async () => {
+                          const value = await onSetCredential(
+                            pending.profileId,
+                            pending.value,
+                          );
+                          setCredentialDraft((current) =>
+                            current === pending ? null : current);
+                          return value;
+                        },
+                        responseIsCurrent,
+                      );
+                    }}>{busy === "credential" ? "Saving…" : selected.authState === "configured" ? "Replace" : "Add"}</button>
                   )}
                   {selected.authState === "configured" && (
-                    <button type="button" className="icon-button" aria-label="Clear backend credential" disabled={disabled || Boolean(busy)} onClick={() => { void run("clear-credential", () => onClearCredential(selected.id)); }}><Trash2 size={14} /></button>
+                    <button type="button" className="icon-button" aria-label="Clear backend credential" disabled={disabled || Boolean(busy)} onClick={() => { setCredentialDraft(null); void run("clear-credential", () => onClearCredential(selected.id)); }}><Trash2 size={14} /></button>
                   )}
                 </div>
               )}
@@ -587,6 +659,7 @@ export function ModelBackendsSettings({
                   <span><strong>Delete profile</strong><small>Historical turns keep this profile’s safe display identity. Its credential is forgotten.</small></span>
                   {deleteConfirm ? (
                     <span><button type="button" className="secondary-button" onClick={() => setDeleteConfirm(false)}>Cancel</button><button type="button" className="danger-button" disabled={disabled || Boolean(busy)} onClick={() => { void run("delete", async () => {
+                      setCredentialDraft(null);
                       await onDelete(selected.id);
                       setSelectedId(profiles.find(({ id }) => id !== selected.id)?.id ?? null);
                       setDetail(null);

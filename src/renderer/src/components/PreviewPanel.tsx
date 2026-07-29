@@ -5,8 +5,8 @@ import {
   type PreviewNavigationTarget,
 } from "@shared/preview-url";
 import {
-  NATIVE_PREVIEW_OVERLAY_CLOSED,
-  NATIVE_PREVIEW_OVERLAY_OPENED,
+  nativePreviewSuspended,
+  NATIVE_PREVIEW_SUSPENSION_CHANGED,
 } from "../utils/nativePreviewOverlay";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe2, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
@@ -91,42 +91,23 @@ export function PreviewPanel({
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || !onBoundsChange) return;
-    let overlayOpen = Boolean(document.querySelector(
-      ".attachment-preview-backdrop",
-    ));
     const update = () => {
-      if (overlayOpen) {
+      if (nativePreviewSuspended()) {
         onBoundsChange(null);
         return;
       }
       const bounds = stage.getBoundingClientRect();
       onBoundsChange({ x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) });
     };
-    const hideForOverlay = () => {
-      overlayOpen = true;
-      onBoundsChange(null);
-    };
-    const restoreAfterOverlay = () => {
-      overlayOpen = false;
-      update();
-    };
     const observer = new ResizeObserver(update);
     observer.observe(stage);
     window.addEventListener("resize", update);
-    window.addEventListener(NATIVE_PREVIEW_OVERLAY_OPENED, hideForOverlay);
-    window.addEventListener(NATIVE_PREVIEW_OVERLAY_CLOSED, restoreAfterOverlay);
+    window.addEventListener(NATIVE_PREVIEW_SUSPENSION_CHANGED, update);
     update();
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", update);
-      window.removeEventListener(
-        NATIVE_PREVIEW_OVERLAY_OPENED,
-        hideForOverlay,
-      );
-      window.removeEventListener(
-        NATIVE_PREVIEW_OVERLAY_CLOSED,
-        restoreAfterOverlay,
-      );
+      window.removeEventListener(NATIVE_PREVIEW_SUSPENSION_CHANGED, update);
       onBoundsChange(null);
     };
   }, [onBoundsChange, url]);

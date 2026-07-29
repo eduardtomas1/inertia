@@ -1,18 +1,26 @@
 import {
+  chmod,
+  lstat,
   mkdtemp,
+  mkdir,
   readFile,
   readdir,
+  realpath,
+  rename,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AttachmentRegistry,
   cleanupOrphanedAttachments,
+  createAttachmentStorageSession,
+  removeAttachmentStorageSession,
   type AttachmentRegistryLimits,
 } from "../../src/main/attachment-registry";
 
@@ -50,6 +58,128 @@ afterEach(async () => {
 });
 
 describe("main-owned attachment registry", () => {
+  it("uses an unpredictable private session directory and removes it cleanly", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "inertia-attachment-storage-"));
+    directories.push(parent);
+    const root = join(parent, "attachments");
+    const storage = await createAttachmentStorageSession(root);
+
+    expect(dirname(storage.directory)).toBe(await realpath(root));
+    expect(basename(storage.directory)).toMatch(/^session-[A-Za-z0-9_-]{6}$/u);
+    expect(storage.reservation).toEqual({ records: 0, bytes: 0 });
+    if (process.platform !== "win32") {
+      expect((await lstat(root)).mode & 0o777).toBe(0o700);
+      expect((await lstat(storage.directory)).mode & 0o777).toBe(0o700);
+    }
+    if (typeof process.getuid === "function") {
+      expect((await lstat(storage.directory)).uid).toBe(process.getuid());
+    }
+
+    const attachments = new AttachmentRegistry(storage.directory);
+    await attachments.import([{
+      name: "private.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+    await attachments.dispose();
+    await removeAttachmentStorageSession(storage.directory);
+    await expect(readdir(root)).resolves.toEqual([]);
+  });
+
+  it("rejects a pre-created symbolic-link storage root", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "inertia-attachment-storage-"));
+    directories.push(parent);
+    const outside = join(parent, "outside");
+    const root = join(parent, "attachments");
+    await mkdir(outside);
+    await symlink(
+      outside,
+      root,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    await expect(createAttachmentStorageSession(root)).rejects.toThrow(
+      /safe directory/u,
+    );
+    await expect(readdir(outside)).resolves.toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "repairs an owned storage root to private permissions before use",
+    async () => {
+      const parent = await mkdtemp(
+        join(tmpdir(), "inertia-attachment-storage-"),
+      );
+      directories.push(parent);
+      const root = join(parent, "attachments");
+      await mkdir(root);
+      await chmod(root, 0o777);
+
+      const storage = await createAttachmentStorageSession(root);
+
+      expect((await lstat(root)).mode & 0o777).toBe(0o700);
+      expect((await lstat(storage.directory)).mode & 0o777).toBe(0o700);
+      await removeAttachmentStorageSession(storage.directory);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "pins the inspected directory before repairing its permissions",
+    async () => {
+      const parent = await mkdtemp(
+        join(tmpdir(), "inertia-attachment-storage-"),
+      );
+      directories.push(parent);
+      const root = join(parent, "attachments");
+      const displaced = join(parent, "displaced-attachments");
+      const outside = join(parent, "outside");
+      await Promise.all([
+        mkdir(root),
+        mkdir(outside),
+      ]);
+      await Promise.all([
+        chmod(root, 0o777),
+        chmod(outside, 0o777),
+      ]);
+      let swapped = false;
+
+      await expect(createAttachmentStorageSession(root, {
+        chmodDirectory: async (directory, mode) => {
+          if (!swapped) {
+            swapped = true;
+            await rename(root, displaced);
+            await symlink(outside, root, "dir");
+          }
+          await directory.chmod(mode);
+        },
+      })).rejects.toThrow(/could not be secured/u);
+
+      expect(swapped).toBe(true);
+      expect((await lstat(displaced)).mode & 0o777).toBe(0o700);
+      expect((await lstat(outside)).mode & 0o777).toBe(0o777);
+    },
+  );
+
+  it("cleans a prior private session before creating the next one", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "inertia-attachment-storage-"));
+    directories.push(parent);
+    const root = join(parent, "attachments");
+    const previous = await createAttachmentStorageSession(root);
+    const attachments = new AttachmentRegistry(previous.directory);
+    const [attachment] = await attachments.import([{
+      name: "orphan.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    const current = await createAttachmentStorageSession(root);
+
+    await expect(lstat(attachment!.path)).rejects.toThrow();
+    await expect(lstat(previous.directory)).rejects.toThrow();
+    expect(current.reservation).toEqual({ records: 0, bytes: 0 });
+    await removeAttachmentStorageSession(current.directory);
+  });
+
   it("materializes an opaque capability and revalidates its exact bytes", async () => {
     const { registry: attachments } = await registry();
     const [imported] = await attachments.import([{

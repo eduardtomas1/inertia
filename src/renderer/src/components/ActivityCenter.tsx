@@ -23,6 +23,7 @@ import {
   activityWaitingKind,
   type ActivityRunOperationGroup,
 } from "../utils/activityCenter";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { IconButton } from "./ui";
 
 type ActivityCenterProps = {
@@ -146,6 +147,7 @@ export function ActivityCenter({
   const panelRef = useRef<HTMLElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
+  useNativePreviewSuspension(open);
 
   useEffect(() => {
     onCloseRef.current = onClose;

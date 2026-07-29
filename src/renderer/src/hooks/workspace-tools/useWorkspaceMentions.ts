@@ -12,6 +12,7 @@ import {
 } from "../../lib/runtimeCommands";
 
 interface WorkspaceMentionsOptions {
+  enabled: boolean;
   project: Project | null;
   conversation: Conversation | null;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
@@ -23,6 +24,7 @@ interface WorkspaceMentionsOptions {
  * result set.
  */
 export function useWorkspaceMentions({
+  enabled,
   project,
   conversation,
   request,
@@ -33,12 +35,12 @@ export function useWorkspaceMentions({
   useEffect(() => {
     requestGenerationRef.current += 1;
     setMentionResults([]);
-  }, [conversation?.id, project?.id]);
+  }, [conversation?.id, enabled, project?.id]);
 
   const searchMentions = useCallback((query: string) => {
     const normalizedQuery = query.trim();
     const generation = ++requestGenerationRef.current;
-    if (!project || !conversation || !normalizedQuery) {
+    if (!enabled || !project || !conversation || !normalizedQuery) {
       setMentionResults([]);
       return;
     }
@@ -59,7 +61,7 @@ export function useWorkspaceMentions({
     }).catch(() => {
       if (generation === requestGenerationRef.current) setMentionResults([]);
     });
-  }, [conversation, project, request]);
+  }, [conversation, enabled, project, request]);
 
   return { mentionResults, searchMentions };
 }

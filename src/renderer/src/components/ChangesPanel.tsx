@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Sparkles, Square, StickyNote, Trash2, WandSparkles, X } from "lucide-react";
 import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, DiffSelectionReviewAnswer, GitDiffSnapshot } from "@shared/contracts";
 import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, parseUnifiedDiff, selectedLineFingerprint } from "@shared/diff-review";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { IconButton, LoadingMark } from "./ui";
 import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
 
@@ -59,7 +60,9 @@ type ReviewAction = "ask" | "revise" | "revert" | "note";
 type ReviewFilter = "all" | "unreviewed" | "reviewed";
 
 function pathParts(path: string): { name: string; parent: string } {
-  const parts = path.split(/[\\/]/);
+  // Git's wire paths use "/" on every platform. A backslash can be a literal
+  // filename character on POSIX and must remain part of the visible basename.
+  const parts = path.split("/");
   return { name: parts.at(-1) ?? path, parent: parts.slice(0, -1).join("/") };
 }
 
@@ -152,6 +155,7 @@ export function ChangesPanel({
   onAddToPrompt,
 }: ChangesPanelProps): React.JSX.Element {
   const [selection, setSelection] = useState<{ hunkId: string; anchor: number; lineIds: string[] } | null>(null);
+  useNativePreviewSuspension(selection !== null);
   const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);

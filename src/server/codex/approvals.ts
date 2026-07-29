@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { isAbsolute, normalize } from "node:path";
+import { isAbsolute } from "node:path";
 
-import { boundedText, objectValue, type JsonObject } from "./protocol";
+import { objectValue, type JsonObject } from "./protocol";
 import type {
   AgentApprovalDecision,
   AgentApprovalNetworkScope,
@@ -10,6 +10,11 @@ import type {
 } from "../provider/interactions";
 
 const MAX_PERMISSION_ROOTS = 12;
+const APPROVAL_METHODS = new Set([
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval",
+  "item/permissions/requestApproval",
+]);
 
 export interface ParsedCodexApprovalRequest {
   request: AgentApprovalRequest;
@@ -17,76 +22,264 @@ export interface ParsedCodexApprovalRequest {
   requestedPermissions?: JsonObject;
 }
 
-function normalizedFilesystemPath(value: unknown): string | undefined {
-  const path = boundedText(value, 4_096);
-  return path && isAbsolute(path) ? normalize(path) : path;
+export function isCodexApprovalRequestMethod(method: string): boolean {
+  return APPROVAL_METHODS.has(method);
 }
 
-function permissionPath(value: unknown): string | undefined {
+interface PermissionProjection {
+  permissions: JsonObject;
+  roots: AgentApprovalPermissionRoot[];
+}
+
+function strictBoundedText(
+  value: unknown,
+  maxChars: number,
+  rejectControlCharacters = true,
+): string | undefined {
+  if (
+    typeof value !== "string"
+    || (
+      rejectControlCharacters
+        ? /[\u0000-\u001f\u007f]/u.test(value)
+        : value.includes("\0")
+    )
+    || value.length > maxChars
+  ) return undefined;
+  return value.trim().length > 0 ? value : undefined;
+}
+
+function exactFilesystemPath(value: unknown): string | undefined {
+  const path = strictBoundedText(value, 4_096);
+  return path
+    && isAbsolute(path)
+    ? path
+    : undefined;
+}
+
+function hasOnlyKeys(value: JsonObject, keys: readonly string[]): boolean {
+  return Object.keys(value).every((key) => keys.includes(key));
+}
+
+function permissionPath(value: unknown): {
+  display: string;
+  value: JsonObject;
+} | undefined {
   const path = objectValue(value);
   if (!path) return undefined;
-  if (path.type === "path") return normalizedFilesystemPath(path.path);
+  if (path.type === "path") {
+    if (!hasOnlyKeys(path, ["type", "path"])) return undefined;
+    const exact = exactFilesystemPath(path.path);
+    return exact
+      ? { display: exact, value: { type: "path", path: exact } }
+      : undefined;
+  }
   if (path.type === "glob_pattern") {
-    const pattern = boundedText(path.pattern, 4_080);
-    return pattern ? `glob: ${pattern}` : undefined;
+    if (!hasOnlyKeys(path, ["type", "pattern"])) return undefined;
+    const pattern = strictBoundedText(path.pattern, 4_080);
+    return pattern
+      ? {
+          display: `glob: ${pattern}`,
+          value: { type: "glob_pattern", pattern },
+        }
+      : undefined;
   }
   if (path.type !== "special") return undefined;
+  if (!hasOnlyKeys(path, ["type", "value"])) return undefined;
   const special = objectValue(path.value);
-  const kind = boundedText(special?.kind, 80);
-  if (!kind) return undefined;
+  if (!special || !hasOnlyKeys(special, ["kind", "subpath"])) return undefined;
+  const kind = strictBoundedText(special?.kind, 80);
+  if (!kind || kind !== kind.trim()) return undefined;
   const base = kind === "root" ? "/" : kind.replaceAll("_", " ");
-  const subpath = boundedText(special?.subpath, 4_000);
-  return subpath ? `${base}: ${subpath}` : base;
+  const hasSubpath = Object.prototype.hasOwnProperty.call(special, "subpath");
+  const subpath = hasSubpath
+    ? strictBoundedText(special.subpath, 4_000)
+    : undefined;
+  if (hasSubpath && !subpath) return undefined;
+  return {
+    display: subpath ? `${base}: ${subpath}` : base,
+    value: {
+      type: "special",
+      value: {
+        kind,
+        ...(subpath ? { subpath } : {}),
+      },
+    },
+  };
 }
 
-function permissionRoots(value: unknown): AgentApprovalPermissionRoot[] {
+function permissionProjection(value: unknown): PermissionProjection | undefined {
   const profile = objectValue(value);
-  const fileSystem = objectValue(profile?.fileSystem);
-  if (!fileSystem) return [];
+  if (!profile || !hasOnlyKeys(profile, ["network", "fileSystem"])) {
+    return undefined;
+  }
+  const permissions: JsonObject = {};
   const roots: AgentApprovalPermissionRoot[] = [];
   const seen = new Set<string>();
-  const add = (path: unknown, access: "read" | "write", filesystemPath = true): void => {
-    const bounded = filesystemPath ? normalizedFilesystemPath(path) : boundedText(path, 4_096);
-    if (!bounded || roots.length >= MAX_PERMISSION_ROOTS) return;
-    const key = `${access}\0${bounded}`;
-    if (seen.has(key)) return;
+  const add = (
+    display: string,
+    access: "read" | "write",
+  ): "added" | "duplicate" | "overflow" => {
+    const key = `${access}\0${display}`;
+    if (seen.has(key)) return "duplicate";
+    if (roots.length >= MAX_PERMISSION_ROOTS) return "overflow";
     seen.add(key);
-    roots.push({ path: bounded, access });
+    roots.push({ path: display, access });
+    return "added";
   };
-  for (const path of Array.isArray(fileSystem.read) ? fileSystem.read : []) add(path, "read");
-  for (const path of Array.isArray(fileSystem.write) ? fileSystem.write : []) add(path, "write");
-  for (const value of Array.isArray(fileSystem.entries) ? fileSystem.entries : []) {
-    if (roots.length >= MAX_PERMISSION_ROOTS) break;
-    const entry = objectValue(value);
-    if (entry?.access !== "read" && entry?.access !== "write") continue;
-    const typedPath = objectValue(entry.path);
-    add(permissionPath(entry.path), entry.access, typedPath?.type === "path");
+
+  if (Object.prototype.hasOwnProperty.call(profile, "network")) {
+    if (profile.network === null) {
+      permissions.network = null;
+    } else {
+      const network = objectValue(profile.network);
+      if (
+        !network
+        || !hasOnlyKeys(network, ["enabled"])
+        || typeof network.enabled !== "boolean"
+      ) return undefined;
+      permissions.network = { enabled: network.enabled };
+    }
   }
-  return roots;
+
+  if (!Object.prototype.hasOwnProperty.call(profile, "fileSystem")) {
+    return { permissions, roots };
+  }
+  if (profile.fileSystem === null) {
+    permissions.fileSystem = null;
+    return { permissions, roots };
+  }
+  const fileSystem = objectValue(profile.fileSystem);
+  if (
+    !fileSystem
+    || !hasOnlyKeys(fileSystem, ["read", "write", "entries"])
+  ) return undefined;
+  const canonicalFileSystem: JsonObject = {};
+
+  for (const access of ["read", "write"] as const) {
+    if (!Object.prototype.hasOwnProperty.call(fileSystem, access)) continue;
+    const rawPaths = fileSystem[access];
+    if (rawPaths === null) {
+      canonicalFileSystem[access] = null;
+      continue;
+    }
+    if (!Array.isArray(rawPaths)) return undefined;
+    const paths: string[] = [];
+    for (const rawPath of rawPaths) {
+      const path = exactFilesystemPath(rawPath);
+      if (!path) return undefined;
+      const result = add(path, access);
+      if (result === "overflow") return undefined;
+      if (result === "added") paths.push(path);
+    }
+    canonicalFileSystem[access] = paths;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(fileSystem, "entries")) {
+    if (fileSystem.entries === null) {
+      canonicalFileSystem.entries = null;
+    } else {
+      if (!Array.isArray(fileSystem.entries)) return undefined;
+      const entries: JsonObject[] = [];
+      for (const value of fileSystem.entries) {
+        const entry = objectValue(value);
+        if (
+          !entry
+          || !hasOnlyKeys(entry, ["access", "path"])
+          || (entry.access !== "read" && entry.access !== "write")
+        ) return undefined;
+        const path = permissionPath(entry.path);
+        if (!path) return undefined;
+        const result = add(path.display, entry.access);
+        if (result === "overflow") return undefined;
+        if (result === "added") {
+          entries.push({ access: entry.access, path: path.value });
+        }
+      }
+      canonicalFileSystem.entries = entries;
+    }
+  }
+  permissions.fileSystem = canonicalFileSystem;
+  return { permissions, roots };
 }
 
 function networkScope(value: unknown): AgentApprovalNetworkScope | undefined {
   const context = objectValue(value);
-  const host = boundedText(context?.host, 512);
+  if (!context || !hasOnlyKeys(context, ["host", "protocol"])) {
+    return undefined;
+  }
+  const host = strictBoundedText(context?.host, 512);
   const protocol = context?.protocol;
-  if (!host || (protocol !== "http" && protocol !== "https" && protocol !== "socks5Tcp" && protocol !== "socks5Udp")) return undefined;
+  if (
+    !host
+    || host !== host.trim()
+    || (
+      protocol !== "http"
+      && protocol !== "https"
+      && protocol !== "socks5Tcp"
+      && protocol !== "socks5Udp"
+    )
+  ) return undefined;
   return { host, protocol };
 }
 
 export function parseCodexApprovalRequest(method: string, params: JsonObject): ParsedCodexApprovalRequest | undefined {
   const requestId = randomUUID();
-  const command = boundedText(params.command, 4_000);
-  const cwd = normalizedFilesystemPath(params.cwd);
-  const reason = boundedText(params.reason, 1_000);
+  const command = strictBoundedText(params.command, 4_000);
+  const cwd = exactFilesystemPath(params.cwd);
+  const reason = strictBoundedText(params.reason, 1_000, false);
+  const hasAdditionalPermissions = Object.prototype.hasOwnProperty.call(
+    params,
+    "additionalPermissions",
+  );
   const additionalPermissions = objectValue(params.additionalPermissions);
+  if (
+    Object.prototype.hasOwnProperty.call(params, "command")
+    && !command
+  ) return undefined;
+  if (
+    Object.prototype.hasOwnProperty.call(params, "cwd")
+    && params.cwd !== null
+    && !cwd
+  ) return undefined;
+  if (
+    hasAdditionalPermissions
+    && params.additionalPermissions !== null
+    && !additionalPermissions
+  ) return undefined;
+  const additionalPermissionProjection = additionalPermissions
+    ? permissionProjection(additionalPermissions)
+    : undefined;
+  if (additionalPermissions && !additionalPermissionProjection) return undefined;
   const requestedNetworkScope = networkScope(params.networkApprovalContext);
-  const requestedPermissionRoots = permissionRoots(additionalPermissions);
+  if (
+    Object.prototype.hasOwnProperty.call(params, "networkApprovalContext")
+    && params.networkApprovalContext !== null
+    && !requestedNetworkScope
+  ) return undefined;
+  const requestedPermissionRoots = additionalPermissionProjection?.roots ?? [];
   const decisionMap: Record<string, AgentApprovalDecision> = {
     accept: "approve",
     decline: "deny",
     cancel: "cancel",
   };
-  const rawAdvertisedDecisions = Array.isArray(params.availableDecisions) ? params.availableDecisions : undefined;
+  const hasAdvertisedDecisions = Object.prototype.hasOwnProperty.call(
+    params,
+    "availableDecisions",
+  );
+  const rawAdvertisedDecisions = Array.isArray(params.availableDecisions)
+    ? params.availableDecisions
+    : undefined;
+  if (hasAdvertisedDecisions && !rawAdvertisedDecisions) return undefined;
+  if (
+    rawAdvertisedDecisions
+    && (
+      rawAdvertisedDecisions.length === 0
+      || rawAdvertisedDecisions.length > 3
+      || rawAdvertisedDecisions.some(
+        (value) => typeof value !== "string" || !decisionMap[value],
+      )
+    )
+  ) return undefined;
   const advertised: AgentApprovalDecision[] = rawAdvertisedDecisions
     ? rawAdvertisedDecisions.flatMap((value): AgentApprovalDecision[] => typeof value === "string" && decisionMap[value] ? [decisionMap[value]] : [])
     : [];
@@ -112,7 +305,12 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     };
   }
   if (method === "item/fileChange/requestApproval") {
-    const grantRoot = normalizedFilesystemPath(params.grantRoot);
+    const grantRoot = exactFilesystemPath(params.grantRoot);
+    if (
+      Object.prototype.hasOwnProperty.call(params, "grantRoot")
+      && params.grantRoot !== null
+      && !grantRoot
+    ) return undefined;
     return {
       protocol: "decision",
       request: {
@@ -130,18 +328,19 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
   if (method === "item/permissions/requestApproval") {
     const requestedPermissions = objectValue(params.permissions);
     if (!requestedPermissions) return undefined;
-    const roots = permissionRoots(requestedPermissions);
-    const network = objectValue(requestedPermissions.network);
+    const projection = permissionProjection(requestedPermissions);
+    if (!projection) return undefined;
+    const network = objectValue(projection.permissions.network);
     return {
       protocol: "permissions",
-      requestedPermissions,
+      requestedPermissions: projection.permissions,
       request: {
         requestId,
         kind: "permissions",
         title: "Approve additional access",
         ...(cwd ? { cwd } : {}),
         ...(reason ? { reason } : {}),
-        permissionRoots: roots,
+        permissionRoots: projection.roots,
         detail: reason ?? (network?.enabled === true ? "Codex requests network access." : "Codex requests additional file access."),
         availableDecisions: ["approve", "deny", "cancel"],
       },

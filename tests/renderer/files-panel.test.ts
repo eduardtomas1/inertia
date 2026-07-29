@@ -6,6 +6,7 @@ import {
   FilesPanel,
   freshWorkspaceDirectoryPages,
 } from "../../src/renderer/src/components/FilesPanel";
+import { MAX_WORKSPACE_FILE_EDIT_BYTES } from "../../src/shared/contracts";
 
 describe("FilesPanel", () => {
   it("drops cached child directories when the root listing is refreshed", () => {
@@ -32,6 +33,8 @@ describe("FilesPanel", () => {
         content: "# Project",
         truncated: false,
         language: "md",
+        contentDigest: "a".repeat(64),
+        modifiedAt: "2026-07-29T10:00:00.000Z",
       },
       selectedPath: "README.md",
       onSelectFile: vi.fn(),
@@ -74,5 +77,55 @@ describe("FilesPanel", () => {
     expect(errorHtml).toContain('role="alert"');
     expect(errorHtml).toContain("Could not preview file.ts");
     expect(errorHtml).toContain("This file is not valid UTF-8 text.");
+  });
+
+  it("keeps previews above the transport-safe edit limit read-only", () => {
+    const html = renderToStaticMarkup(createElement(FilesPanel, {
+      entries: [{ path: "large.txt", kind: "file" as const }],
+      preview: {
+        path: "large.txt",
+        content: "x".repeat(MAX_WORKSPACE_FILE_EDIT_BYTES + 1),
+        truncated: false,
+        language: "text",
+        contentDigest: "a".repeat(64),
+        modifiedAt: "2026-07-29T10:00:00.000Z",
+      },
+      selectedPath: "large.txt",
+      onSelectFile: vi.fn(),
+      onLoadEntries: vi.fn(),
+      onSaveFile: vi.fn(),
+      canSaveFile: () => false,
+    }));
+
+    expect(html).toContain(
+      'aria-label="large.txt is too large to edit safely in Inertia"',
+    );
+    expect(html).toContain("disabled");
+  });
+
+  it("enables editing only when the exact save command passes preflight", () => {
+    const html = renderToStaticMarkup(createElement(FilesPanel, {
+      entries: [{ path: "ordinary.txt", kind: "file" as const }],
+      preview: {
+        path: "ordinary.txt",
+        content: "ordinary text\n",
+        truncated: false,
+        language: "text",
+        contentDigest: "a".repeat(64),
+        modifiedAt: "2026-07-29T10:00:00.000Z",
+      },
+      selectedPath: "ordinary.txt",
+      onSelectFile: vi.fn(),
+      onLoadEntries: vi.fn(),
+      onSaveFile: vi.fn(),
+      canSaveFile: () => true,
+    }));
+
+    expect(html).toContain(
+      'aria-label="Edit ordinary.txt in Inertia"',
+    );
+    expect(html).not.toContain(
+      'aria-label="ordinary.txt is too large to edit safely in Inertia"',
+    );
   });
 });

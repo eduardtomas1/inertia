@@ -25,13 +25,10 @@ const checkedAt = "2026-07-25T08:00:00.000Z";
 describe.sequential("Codex custom Responses backend integration", () => {
   const roots: string[] = [];
   const managers: ProviderManager[] = [];
-  const originalCapturePath = process.env.INERTIA_CODEX_CUSTOM_CAPTURE;
 
   afterEach(async () => {
     await Promise.all(managers.splice(0).map((manager) => manager.disposeAll()));
     await Promise.all(roots.splice(0).map(removePortableFixture));
-    if (originalCapturePath === undefined) delete process.env.INERTIA_CODEX_CUSTOM_CAPTURE;
-    else process.env.INERTIA_CODEX_CUSTOM_CAPTURE = originalCapturePath;
   });
 
   it("keeps App Server richness while routing through a probed Responses provider", async () => {
@@ -39,7 +36,6 @@ describe.sequential("Codex custom Responses backend integration", () => {
     roots.push(root);
     const command = portableNodeExecutable(root, "codex");
     const capturePath = join(root, "capture.json");
-    process.env.INERTIA_CODEX_CUSTOM_CAPTURE = capturePath;
     writeNodeSubcommand(root, "app-server", `
 const fs = require("node:fs");
 const readline = require("node:readline");
@@ -114,19 +110,31 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       failure: null,
       checkedAt,
     });
+    const privilegedResolver = createCodexResponsesBackendLaunchResolver({
+      profiles: [{
+        profile,
+        baseUrl: "http://127.0.0.1:4312/v1",
+        secretReference: "secret:responses",
+        allowInsecureLocalhost: true,
+      }],
+      resolveSecret: async () => "owned-integration-secret",
+    });
     const manager = new ProviderManager({
       commands: { codex: command },
       backendProfiles: [profile],
       backendProbeResults: [probe],
-      resolveBackendLaunchOptions: createCodexResponsesBackendLaunchResolver({
-        profiles: [{
-          profile,
-          baseUrl: "http://127.0.0.1:4312/v1",
-          secretReference: "secret:responses",
-          allowInsecureLocalhost: true,
-        }],
-        resolveSecret: async () => "owned-integration-secret",
-      }),
+      resolveBackendLaunchOptions: async (input, environment, context) => {
+        const launch = await privilegedResolver(input, environment, context);
+        launch.environment.INERTIA_CODEX_CUSTOM_CAPTURE = capturePath;
+        const releaseAfterStart = launch.releaseAfterStart;
+        return {
+          ...launch,
+          releaseAfterStart: () => {
+            delete launch.environment.INERTIA_CODEX_CUSTOM_CAPTURE;
+            releaseAfterStart?.();
+          },
+        };
+      },
     });
     managers.push(manager);
     const route = manager.resolveModelRoute(modelSelection);

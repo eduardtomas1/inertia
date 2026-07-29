@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import { chatAttachmentKind } from "@shared/attachments";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 
 interface EnvironmentSummaryProps {
@@ -26,6 +27,7 @@ function subagentLabel(
 export function EnvironmentSummary({
   summary,
 }: EnvironmentSummaryProps): React.JSX.Element {
+  useNativePreviewSuspension(true);
   const hasWorkspaceDetails = Boolean(
     summary.changes
     || summary.branch

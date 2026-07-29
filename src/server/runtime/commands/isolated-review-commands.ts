@@ -17,6 +17,7 @@ import {
   requireCurrentReviewSummaryFingerprint,
 } from "../../review-summary";
 import { RuntimeRequestError } from "../../runtime-errors";
+import type { RuntimeSecureFileBroker } from "../../secure-files";
 import {
   IsolatedRunError,
   type IsolatedRunController,
@@ -48,6 +49,7 @@ export interface IsolatedReviewCommandDependencies {
   store: RuntimeStore;
   turns: TurnController;
   isolatedRuns: IsolatedRunController<WebSocket>;
+  secureFiles: RuntimeSecureFileBroker;
   dataDirectory: string;
   enableProviders: boolean;
   reviewSummaryTimeoutMs?: number;
@@ -97,6 +99,7 @@ export function createIsolatedReviewCommandHandler(
           dependencies.store,
           command.payload,
           "ask",
+          dependencies.secureFiles,
         );
         const assembled = assembleReadOnlyReviewRequest(
           dependencies.store.conversationPath(conversation.id),
@@ -202,6 +205,7 @@ export function createIsolatedReviewCommandHandler(
           dependencies.store,
           command.payload,
           "revision",
+          dependencies.secureFiles,
         );
         const beforeFiles = Object.fromEntries(
           parseUnifiedDiff(context.patch).files.map((file) => [
@@ -232,6 +236,8 @@ export function createIsolatedReviewCommandHandler(
               const current = await getUnifiedDiff(
                 dependencies.store.conversationPath(conversation.id),
                 { ignoreWhitespace: command.payload.ignoreWhitespace },
+                undefined,
+                dependencies.secureFiles,
               );
               if (!current.truncated) {
                 reconcileReviews(
@@ -322,6 +328,8 @@ export function createIsolatedReviewCommandHandler(
           const diff = await getUnifiedDiff(
             dependencies.store.conversationPath(conversation.id),
             { ignoreWhitespace: command.payload.ignoreWhitespace },
+            undefined,
+            dependencies.secureFiles,
           );
           if (diff.truncated) {
             throw new RuntimeRequestError(
@@ -391,6 +399,8 @@ export function createIsolatedReviewCommandHandler(
               const current = await getUnifiedDiff(
                 dependencies.store.conversationPath(conversation.id),
                 { ignoreWhitespace: command.payload.ignoreWhitespace },
+                undefined,
+                dependencies.secureFiles,
               );
               requireCurrentReviewSummaryFingerprint(
                 structured.fingerprint,

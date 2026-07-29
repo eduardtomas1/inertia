@@ -10,6 +10,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
   ModelChooserFavoriteButton,
   modelChooserRowFromRoute,
@@ -145,6 +146,7 @@ export function ModelChooser({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
+  useNativePreviewSuspension(open);
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<ModelSourceFilter>({
     kind: "all",

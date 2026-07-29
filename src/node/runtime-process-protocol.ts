@@ -17,6 +17,12 @@ import {
   MAX_CHAT_ATTACHMENT_BYTES,
 } from "../shared/attachments";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments";
+import {
+  parseSecureFileRequest,
+  parseSecureFileResult,
+  type SecureFileRequest,
+  type SecureFileResult,
+} from "./secure-file-protocol";
 
 export interface RuntimeWorkerOptions {
   dataDirectory: string;
@@ -37,7 +43,8 @@ export type RuntimeWorkerCommand =
   | RuntimeCredentialResult
   | RuntimeAttachmentResult
   | RuntimeAttachmentReleaseResult
-  | RuntimeAttachmentRelinquishResult;
+  | RuntimeAttachmentRelinquishResult
+  | RuntimeSecureFileResult;
 
 export type RuntimeCredentialOperation = "resolve" | "status" | "clear" | "forget";
 export type RuntimeCredentialFailureCode = "not-found" | "unavailable" | "invalid";
@@ -120,6 +127,12 @@ export type RuntimeCredentialResult =
       message: string;
     };
 
+export interface RuntimeSecureFileResult {
+  type: "runtime.secure-file-result";
+  requestId: string;
+  result: SecureFileResult;
+}
+
 export type RuntimeWorkerEvent =
   | { type: "runtime.ready"; websocketUrl: string }
   | { type: "runtime.startup-failed"; message: string }
@@ -151,7 +164,11 @@ export type RuntimeWorkerEvent =
       requestId: string;
       operation: RuntimeCredentialOperation;
       secretReference: string;
-    };
+    }
+  | ({
+      type: "runtime.secure-file-request";
+      requestId: string;
+    } & SecureFileRequest);
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -177,6 +194,21 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   }
   if (value.type === "runtime.credential-result") {
     return parseRuntimeCredentialResult(value);
+  }
+  if (
+    value.type === "runtime.secure-file-result"
+    && Object.keys(value).length === 3
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+  ) {
+    const result = parseSecureFileResult(value.result);
+    return result
+      ? {
+          type: "runtime.secure-file-result",
+          requestId: value.requestId,
+          result,
+        }
+      : null;
   }
   if (
     value.type === "runtime.resolve-project-path"
@@ -270,6 +302,21 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       operation: value.operation,
       secretReference: value.secretReference,
     };
+  }
+  if (
+    value.type === "runtime.secure-file-request"
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+  ) {
+    const { type: _type, requestId: _requestId, ...requestValue } = value;
+    const request = parseSecureFileRequest(requestValue);
+    return request
+      ? {
+          type: "runtime.secure-file-request",
+          requestId: value.requestId,
+          ...request,
+        }
+      : null;
   }
   if (
     value.type === "runtime.project-path-resolved"

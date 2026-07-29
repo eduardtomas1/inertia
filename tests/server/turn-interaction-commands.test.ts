@@ -25,7 +25,9 @@ const trustedAttachment: ChatAttachment = {
   path: "/private/runtime/request.png",
 };
 
-function messageCommand(): Extract<ClientCommand, { type: "message.send" }> {
+function messageCommand(
+  activate?: boolean,
+): Extract<ClientCommand, { type: "message.send" }> {
   return {
     type: "message.send",
     requestId: "33333333-3333-4333-8333-333333333333",
@@ -33,6 +35,7 @@ function messageCommand(): Extract<ClientCommand, { type: "message.send" }> {
       conversationId,
       content: "Use the selected attachment.",
       attachments: [requestAttachment],
+      ...(activate === undefined ? {} : { activate }),
     },
   };
 }
@@ -165,6 +168,25 @@ describe("message attachment ownership transfer", () => {
     expect(handlerDependencies.turns.start).toHaveBeenCalledWith(
       "44444444-4444-4444-8444-444444444444",
     );
+  });
+
+  it("preserves a background conversation when queueing a split-pane turn", async () => {
+    const queue = vi.fn(() => ({
+      turn: { id: "44444444-4444-4444-8444-444444444444" },
+    }));
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+    });
+    const handler = createTurnInteractionCommandHandler(handlerDependencies);
+
+    await expect(handler({} as never, messageCommand(false))).resolves.toBe(
+      "handled",
+    );
+    expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId,
+      activateConversation: false,
+    }));
   });
 
   it("settles an accepted queued turn if acknowledgement work throws before start", async () => {

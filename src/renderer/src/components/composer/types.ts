@@ -58,7 +58,7 @@ export interface ComposerProps {
   onClearPromptContext?: () => void;
 }
 
-export type ComposerMenu = "reasoning" | "mode" | "access" | "action" | "more";
+export type ComposerMenu = "reasoning" | "mode" | "access" | "action" | "stash" | "more";
 export type MoreSection = "actions" | "reasoning" | "mode" | "access";
 
 export interface PendingModelRoute {

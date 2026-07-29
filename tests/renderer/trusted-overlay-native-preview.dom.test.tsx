@@ -1,0 +1,250 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import { createRef } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ActivityCenter } from "../../src/renderer/src/components/ActivityCenter";
+import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
+import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
+import { EnvironmentSummary } from "../../src/renderer/src/components/EnvironmentSummary";
+import { ProviderAuthDialog } from "../../src/renderer/src/components/ProviderAuthDialog";
+import { RouteChangeConfirmation } from "../../src/renderer/src/components/composer/RouteChangeConfirmation";
+import {
+  nativePreviewSuspended,
+} from "../../src/renderer/src/utils/nativePreviewOverlay";
+import type {
+  ProviderInfo,
+} from "../../src/shared/contracts";
+import { nativeModelSelection } from "../../src/shared/model-routing";
+
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: class {
+    fit(): void {}
+  },
+}));
+
+vi.mock("@xterm/xterm", () => ({
+  Terminal: class {
+    readonly cols = 90;
+    readonly rows = 24;
+    readonly options: Record<string, unknown> = {};
+
+    loadAddon(): void {}
+    open(): void {}
+    onData(): { dispose: () => void } {
+      return { dispose: () => undefined };
+    }
+    dispose(): void {}
+  },
+}));
+
+class TestResizeObserver implements ResizeObserver {
+  disconnect(): void {}
+  observe(): void {}
+  unobserve(): void {}
+}
+
+const provider: ProviderInfo = {
+  id: "codex",
+  label: "Codex",
+  command: "codex",
+  available: true,
+  version: "1.0.0",
+  executable: "/opt/bin/codex",
+  installState: "installed",
+  authState: "unauthenticated",
+  canRun: false,
+  statusMessage: "Sign in required",
+  models: [],
+  rateLimits: [],
+  metadataState: {
+    models: {
+      freshness: "unavailable",
+      provenance: null,
+      updatedAt: null,
+      lastAttemptedAt: null,
+      refreshing: false,
+    },
+    rateLimits: {
+      freshness: "unavailable",
+      provenance: null,
+      updatedAt: null,
+      lastAttemptedAt: null,
+      refreshing: false,
+    },
+  },
+};
+
+const environmentSummary = {
+  projectName: "Inertia",
+  runtime: { status: "online" as const, label: "Ready" },
+  changes: null,
+  branch: null,
+  checks: [],
+  subagents: [],
+  attachments: [],
+};
+
+async function expectSuspended(): Promise<void> {
+  await waitFor(() => expect(nativePreviewSuspended()).toBe(true));
+}
+
+async function expectRestored(): Promise<void> {
+  await waitFor(() => expect(nativePreviewSuspended()).toBe(false));
+}
+
+describe("trusted overlay native preview suspension", () => {
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      media: "",
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+  });
+
+  it("owns the commit dialog lifecycle", async () => {
+    const view = render(
+      <CommitDialog
+        open
+        repositoryPath="."
+        status={null}
+        diff={{ fingerprint: "empty", files: [] }}
+        reviewStates={[]}
+        busy={false}
+        onClose={vi.fn()}
+        onCommit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("dialog", { name: "Commit changes" }))
+      .toBeInTheDocument();
+    await expectSuspended();
+
+    view.rerender(
+      <CommitDialog
+        open={false}
+        repositoryPath="."
+        status={null}
+        diff={{ fingerprint: "empty", files: [] }}
+        reviewStates={[]}
+        busy={false}
+        onClose={vi.fn()}
+        onCommit={vi.fn()}
+      />,
+    );
+    await expectRestored();
+  });
+
+  it("owns the provider credential dialog lifecycle", async () => {
+    const props = {
+      status: "offline" as const,
+      theme: "dark" as const,
+      fontSize: 13,
+      sendCommand: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+      onClose: vi.fn(),
+    };
+    const view = render(
+      <ProviderAuthDialog provider={provider} {...props} />,
+    );
+
+    expect(screen.getByRole("dialog", { name: "Connect Codex" }))
+      .toBeInTheDocument();
+    await expectSuspended();
+
+    view.rerender(<ProviderAuthDialog provider={null} {...props} />);
+    await expectRestored();
+  });
+
+  it("owns the activity center lifecycle", async () => {
+    const props = {
+      now: Date.now(),
+      runs: [],
+      projects: [],
+      conversations: [],
+      onClose: vi.fn(),
+      onOpenThread: vi.fn(),
+      onOpenLocation: vi.fn(),
+      onOpenTerminal: vi.fn(),
+      onOpenPreview: vi.fn(),
+      onStop: vi.fn(),
+      onRerun: vi.fn(),
+      onMarkSeen: vi.fn(),
+      onAcknowledge: vi.fn(),
+      onDismiss: vi.fn(),
+    };
+    const view = render(<ActivityCenter open {...props} />);
+
+    expect(screen.getByRole("dialog", { name: "Runs" }))
+      .toBeInTheDocument();
+    await expectSuspended();
+
+    view.rerender(<ActivityCenter open={false} {...props} />);
+    await expectRestored();
+  });
+
+  it("owns the command palette lifecycle", async () => {
+    const props = {
+      projects: [],
+      conversations: [],
+      onClose: vi.fn(),
+      onSelectProject: vi.fn(),
+      onSelectConversation: vi.fn(),
+      onNewThread: vi.fn(),
+      onAddProject: vi.fn(),
+      onOpenSettings: vi.fn(),
+    };
+    const view = render(<CommandPalette open {...props} />);
+
+    expect(screen.getByRole("dialog", { name: "Search Inertia" }))
+      .toBeInTheDocument();
+    await expectSuspended();
+
+    view.rerender(<CommandPalette open={false} {...props} />);
+    await expectRestored();
+  });
+
+  it("suspends for the mounted environment summary", async () => {
+    const view = render(<EnvironmentSummary summary={environmentSummary} />);
+
+    expect(screen.getByRole("dialog", { name: "Environment summary" }))
+      .toBeInTheDocument();
+    await expectSuspended();
+
+    view.unmount();
+    await expectRestored();
+  });
+
+  it("suspends for the mounted route-change confirmation", async () => {
+    const view = render(
+      <RouteChangeConfirmation
+        pendingRoute={{
+          selection: nativeModelSelection({
+            providerId: "codex",
+            modelId: "gpt-5.6",
+          }),
+          label: "GPT-5.6",
+          reason: "The active session cannot switch models.",
+        }}
+        creating={false}
+        cancelRef={createRef<HTMLButtonElement>()}
+        canCreate
+        onDismiss={vi.fn()}
+        onCreate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("alertdialog", {
+      name: "Open a new chat for GPT-5.6?",
+    })).toBeInTheDocument();
+    await expectSuspended();
+
+    view.unmount();
+    await expectRestored();
+  });
+});

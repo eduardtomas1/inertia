@@ -3,18 +3,24 @@ import {
   constants,
 } from "node:fs";
 import {
+  type FileHandle,
   lstat,
+  mkdtemp,
   mkdir,
   open,
   readdir,
   realpath,
+  rmdir,
+  stat,
   unlink,
 } from "node:fs/promises";
 import {
   basename,
+  dirname,
   isAbsolute,
   join,
   relative,
+  resolve,
   sep,
 } from "node:path";
 
@@ -30,6 +36,9 @@ const MAX_SESSION_ATTACHMENT_RECORDS = 256;
 const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
 const ATTACHMENT_RELEASE_ATTEMPTS = 3;
 const ATTACHMENT_RELEASE_RETRY_BASE_MS = 25;
+const ATTACHMENT_SESSION_PREFIX = "session-";
+const ATTACHMENT_SESSION_DIRECTORY =
+  /^session-[A-Za-z0-9_-]{6}$/u;
 const TRANSIENT_UNLINK_CODES = new Set([
   "EACCES",
   "EBUSY",
@@ -64,6 +73,22 @@ export interface AttachmentRegistryLimits {
 export interface AttachmentStorageReservation {
   readonly records: number;
   readonly bytes: number;
+}
+
+export interface AttachmentStorageSession {
+  readonly directory: string;
+  readonly reservation: AttachmentStorageReservation;
+}
+
+export interface AttachmentStorageSessionOptions {
+  readonly openDirectory?: (
+    path: string,
+    flags: number,
+  ) => Promise<FileHandle>;
+  readonly chmodDirectory?: (
+    directory: FileHandle,
+    mode: number,
+  ) => Promise<void>;
 }
 
 interface OrphanCleanupOptions {
@@ -122,6 +147,173 @@ function isContained(root: string, target: string): boolean {
   const child = relative(root, target);
   return child === ""
     || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
+}
+
+function sameIdentity(
+  left: { dev: number; ino: number },
+  right: { dev: number; ino: number },
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function assertOwnedDirectory(
+  info: Awaited<ReturnType<typeof lstat>>,
+): void {
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error("Temporary attachment storage is not a safe directory.");
+  }
+  if (
+    typeof process.getuid === "function"
+    && info.uid !== process.getuid()
+  ) {
+    throw new Error("Temporary attachment storage has an unexpected owner.");
+  }
+}
+
+async function securePrivateDirectory(
+  path: string,
+  expectedParent?: string,
+  options: AttachmentStorageSessionOptions = {},
+): Promise<string> {
+  const before = await lstat(path);
+  assertOwnedDirectory(before);
+  if (process.platform !== "win32") {
+    const noFollow = "O_NOFOLLOW" in constants
+      ? constants.O_NOFOLLOW
+      : 0;
+    const directoryOnly = "O_DIRECTORY" in constants
+      ? constants.O_DIRECTORY
+      : 0;
+    const directory = await (options.openDirectory ?? open)(
+      path,
+      constants.O_RDONLY | noFollow | directoryOnly,
+    );
+    try {
+      const pinnedBefore = await directory.stat();
+      assertOwnedDirectory(pinnedBefore);
+      if (!sameIdentity(before, pinnedBefore)) {
+        throw new Error("Temporary attachment storage changed before it was secured.");
+      }
+      await (options.chmodDirectory
+        ?? ((handle, mode) => handle.chmod(mode)))(directory, 0o700);
+      const pinnedAfter = await directory.stat();
+      if (
+        !pinnedAfter.isDirectory()
+        || !sameIdentity(pinnedBefore, pinnedAfter)
+        || (pinnedAfter.mode & 0o777) !== 0o700
+        || (
+          typeof process.getuid === "function"
+          && pinnedAfter.uid !== process.getuid()
+        )
+      ) {
+        throw new Error("Temporary attachment storage could not be secured.");
+      }
+    } finally {
+      await directory.close();
+    }
+  }
+  const canonical = await realpath(path);
+  const named = await lstat(path);
+  const after = await stat(canonical);
+  if (
+    named.isSymbolicLink()
+    || !named.isDirectory()
+    || !after.isDirectory()
+    || !sameIdentity(before, after)
+    || !sameIdentity(named, after)
+    || (
+      process.platform !== "win32"
+      && (after.mode & 0o777) !== 0o700
+    )
+    || (
+      typeof process.getuid === "function"
+      && after.uid !== process.getuid()
+    )
+    || (
+      expectedParent !== undefined
+      && (
+        dirname(canonical) !== expectedParent
+        || !isContained(expectedParent, canonical)
+      )
+    )
+  ) {
+    throw new Error("Temporary attachment storage could not be secured.");
+  }
+  return canonical;
+}
+
+function addReservation(
+  left: AttachmentStorageReservation,
+  right: AttachmentStorageReservation,
+): AttachmentStorageReservation {
+  return {
+    records: Math.min(
+      left.records + right.records,
+      MAX_SESSION_ATTACHMENT_RECORDS,
+    ),
+    bytes: Math.min(
+      left.bytes + right.bytes,
+      MAX_SESSION_ATTACHMENT_BYTES,
+    ),
+  };
+}
+
+async function cleanupOrphanedSessions(
+  root: string,
+  options: AttachmentStorageSessionOptions = {},
+): Promise<AttachmentStorageReservation> {
+  let reservation = await cleanupOrphanedAttachments(root);
+  let names: string[];
+  try {
+    names = await readdir(root);
+  } catch {
+    return fullReservation();
+  }
+  for (const name of names) {
+    if (!ATTACHMENT_SESSION_DIRECTORY.test(name)) continue;
+    let directory: string;
+    try {
+      directory = await securePrivateDirectory(join(root, name), root, options);
+    } catch {
+      return fullReservation();
+    }
+    const orphaned = await cleanupOrphanedAttachments(directory);
+    reservation = addReservation(reservation, orphaned);
+    if (orphaned.records > 0 || orphaned.bytes > 0) continue;
+    try {
+      await rmdir(directory);
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") return fullReservation();
+    }
+  }
+  return reservation;
+}
+
+export async function createAttachmentStorageSession(
+  rootDirectory: string,
+  options: AttachmentStorageSessionOptions = {},
+): Promise<AttachmentStorageSession> {
+  const requestedRoot = resolve(rootDirectory);
+  await mkdir(requestedRoot, { recursive: true, mode: 0o700 });
+  const root = await securePrivateDirectory(requestedRoot, undefined, options);
+  const reservation = await cleanupOrphanedSessions(root, options);
+  const created = await mkdtemp(join(root, ATTACHMENT_SESSION_PREFIX));
+  try {
+    return {
+      directory: await securePrivateDirectory(created, root, options),
+      reservation,
+    };
+  } catch (error) {
+    await rmdir(created).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function removeAttachmentStorageSession(
+  directory: string,
+): Promise<void> {
+  const canonical = await securePrivateDirectory(resolve(directory));
+  await rmdir(canonical);
 }
 
 function assertNotAborted(signal?: AbortSignal): void {
@@ -323,10 +515,18 @@ export class AttachmentRegistry {
     }
 
     const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-    const file = await open(record.path, constants.O_RDONLY | noFollow);
+    const nonBlocking = "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
+    const file = await open(
+      record.path,
+      constants.O_RDONLY | noFollow | nonBlocking,
+    );
     try {
       const before = await file.stat();
-      if (!before.isFile() || before.size !== record.size) {
+      if (
+        !before.isFile()
+        || !sameIdentity(pathInfo, before)
+        || before.size !== record.size
+      ) {
         throw new Error("The registered attachment changed after import.");
       }
       assertNotAborted(signal);

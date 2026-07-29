@@ -246,12 +246,14 @@ const CommentaryRow = memo(function CommentaryRow({
   projectId,
   conversationId,
   defaultCodeWrap,
+  onOpenProjectFile,
 }: {
   entry: Extract<TurnExecutionStreamEntry, { kind: "commentary" }>;
   projectRoot: string;
   projectId: string;
   conversationId: string;
   defaultCodeWrap: boolean;
+  onOpenProjectFile: (path: string) => void;
 }): React.JSX.Element {
   return (
     <article
@@ -266,6 +268,7 @@ const CommentaryRow = memo(function CommentaryRow({
         conversationId={conversationId}
         defaultCodeWrap={defaultCodeWrap}
         streaming={entry.streaming}
+        onOpenProjectFile={onOpenProjectFile}
       />
     </article>
   );
@@ -382,6 +385,7 @@ function ExecutionStream({
   projectId,
   conversationId,
   defaultCodeWrap,
+  onOpenProjectFile,
   onBeforeToggle,
   onAfterToggle,
 }: {
@@ -390,6 +394,7 @@ function ExecutionStream({
   projectId: string;
   conversationId: string;
   defaultCodeWrap: boolean;
+  onOpenProjectFile: (path: string) => void;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
@@ -406,6 +411,7 @@ function ExecutionStream({
                 projectId={projectId}
                 conversationId={conversationId}
                 defaultCodeWrap={defaultCodeWrap}
+                onOpenProjectFile={onOpenProjectFile}
               />
             </div>
           );
@@ -453,6 +459,7 @@ export function SettledWorkDetails({
   projectId,
   conversationId,
   defaultCodeWrap,
+  onOpenProjectFile,
   onBeforeToggle,
   onAfterToggle,
 }: {
@@ -465,6 +472,7 @@ export function SettledWorkDetails({
   projectId: string;
   conversationId: string;
   defaultCodeWrap: boolean;
+  onOpenProjectFile: (path: string) => void;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
@@ -476,6 +484,7 @@ export function SettledWorkDetails({
         projectId={projectId}
         conversationId={conversationId}
         defaultCodeWrap={defaultCodeWrap}
+        onOpenProjectFile={onOpenProjectFile}
         onBeforeToggle={onBeforeToggle}
         onAfterToggle={onAfterToggle}
       />
@@ -500,6 +509,7 @@ export function WorkLog({
   projectId,
   conversationId,
   defaultCodeWrap,
+  onOpenProjectFile,
   onBeforeToggle,
   onAfterToggle,
 }: {
@@ -512,6 +522,7 @@ export function WorkLog({
   projectId: string;
   conversationId: string;
   defaultCodeWrap: boolean;
+  onOpenProjectFile: (path: string) => void;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
@@ -579,6 +590,7 @@ export function WorkLog({
           projectId={projectId}
           conversationId={conversationId}
           defaultCodeWrap={defaultCodeWrap}
+          onOpenProjectFile={onOpenProjectFile}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />
@@ -664,6 +676,7 @@ export function WorkLog({
             projectId={projectId}
             conversationId={conversationId}
             defaultCodeWrap={defaultCodeWrap}
+            onOpenProjectFile={onOpenProjectFile}
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
           />

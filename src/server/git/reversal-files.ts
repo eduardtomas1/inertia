@@ -1,25 +1,14 @@
-import { constants as fsConstants } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
-import {
-  chmod,
-  lstat,
-  open,
-  readFile,
-  realpath,
-  rename,
-  unlink,
-} from "node:fs/promises";
-import {
-  basename,
-  dirname,
-  resolve,
-} from "node:path";
+import { createHash } from "node:crypto";
 
 import {
   MAX_DIFF_BYTES,
   MAX_PATH_LENGTH,
 } from "./constants";
-import { isContained } from "./paths";
+import {
+  SecureFileError,
+  type RuntimeSecureFileBroker,
+  type SecureFileRootCapability,
+} from "../secure-files";
 import { runGit } from "./runner";
 import { GitError } from "./types";
 
@@ -107,74 +96,88 @@ export async function updateIndexEntry(
 }
 
 export async function writeAtomic(
-  root: string,
+  _root: string,
   path: string,
   content: Buffer,
   mode: number,
+  expectedContent: Buffer,
+  secureFiles: RuntimeSecureFileBroker,
+  secureRoot: SecureFileRootCapability,
+  testHooks?: {
+    afterTargetOpened?: () => void | Promise<void>;
+  },
 ): Promise<void> {
-  let canonicalParent: string;
+  const expectedDigest = bufferHash(expectedContent);
+  const desiredDigest = bufferHash(content);
   try {
-    canonicalParent = await realpath(dirname(path));
-  } catch {
-    throw new GitError(
-      "conflict",
-      "The selected file's parent folder is no longer available.",
+    const before = await secureFiles.read(
+      secureRoot,
+      path,
+      MAX_DIFF_BYTES,
     );
-  }
-  if (!isContained(root, canonicalParent)) {
-    throw new GitError(
-      "conflict",
-      "The selected file's parent folder moved outside the repository.",
-    );
-  }
-  const temporary = resolve(
-    dirname(path),
-    `.${basename(path)}.inertia-${randomUUID()}.tmp`,
-  );
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
-  try {
-    handle = await open(temporary, "wx", mode & 0o777);
-    await handle.writeFile(content);
-    await handle.sync();
-    await handle.close();
-    handle = null;
-    await chmod(temporary, mode & 0o777);
-    await rename(temporary, path);
-    try {
-      const directory = await open(dirname(path), fsConstants.O_RDONLY);
-      try {
-        await directory.sync();
-      } finally {
-        await directory.close();
-      }
-    } catch {
-      // Some platforms do not support syncing directory handles.
+    if (before.digest !== expectedDigest) {
+      throw new GitError(
+        "conflict",
+        "The selected file changed before it could be updated.",
+      );
     }
-  } finally {
-    await handle?.close().catch(() => undefined);
-    await unlink(temporary).catch(() => undefined);
+    await testHooks?.afterTargetOpened?.();
+    const replaced = await secureFiles.replace(
+      secureRoot,
+      path,
+      content,
+      before.digest,
+      before.mode,
+      mode,
+      MAX_DIFF_BYTES,
+    );
+    if (replaced.digest !== desiredDigest) {
+      throw new GitError(
+        "conflict",
+        "The selected file could not be verified after it was updated.",
+      );
+    }
+  } catch (error) {
+    if (error instanceof GitError) throw error;
+    if (error instanceof SecureFileError) {
+      const current = await secureFiles.read(
+        secureRoot,
+        path,
+        MAX_DIFF_BYTES,
+      ).catch(() => null);
+      if (current?.digest === desiredDigest) return;
+      if (current?.digest !== expectedDigest) {
+        throw new GitError(
+          "conflict",
+          "The file update outcome could not be verified safely.",
+        );
+      }
+      throw new GitError(
+        error.code === "too-large" ? "output-limit" : "conflict",
+        error.message,
+      );
+    }
+    throw error;
   }
 }
 
 export async function fileStateMatches(
   root: string,
-  absolute: string,
   path: string,
   worktreeOid: string,
   worktreeMode: number,
   indexOid: string,
   indexMode: string,
+  secureFiles: RuntimeSecureFileBroker,
+  secureRoot: SecureFileRootCapability,
 ): Promise<boolean> {
   try {
-    const [info, content, index] = await Promise.all([
-      lstat(absolute),
-      readFile(absolute),
+    const [worktree, index] = await Promise.all([
+      secureFiles.read(secureRoot, path, MAX_DIFF_BYTES),
       readIndexEntry(root, path),
     ]);
-    return info.isFile()
-      && !info.isSymbolicLink()
-      && (info.mode & 0o777) === (worktreeMode & 0o777)
-      && (await hashObject(root, content)) === worktreeOid
+    return (worktree.mode & 0o777) === (worktreeMode & 0o777)
+      && (await hashObject(root, worktree.content)) === worktreeOid
       && index.oid === indexOid
       && index.mode === indexMode;
   } catch {

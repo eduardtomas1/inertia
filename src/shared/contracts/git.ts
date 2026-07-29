@@ -15,6 +15,8 @@ export interface ChangedFile {
 
 export interface GitStatusSnapshot {
   isRepository: boolean;
+  /** Ephemeral runtime-owned reference for diffs from this status snapshot. */
+  authorityRef?: string | null;
   /** Canonical Git toplevel actually inspected for this status snapshot. */
   root: string | null;
   branch: string | null;
@@ -42,6 +44,8 @@ export type WorkspaceGitRepositoryState = "ready" | "error";
  */
 export interface WorkspaceGitRepositorySnapshot {
   repositoryPath: string;
+  /** Ephemeral runtime-owned reference for diffs from this repository status. */
+  authorityRef?: string | null;
   state: WorkspaceGitRepositoryState;
   error: string | null;
   branch: string | null;
@@ -182,6 +186,8 @@ export interface DiffReversalValidation {
 }
 
 export interface DiffReversalPlan {
+  /** Ephemeral runtime-owned reference required to apply this exact plan. */
+  authorityRef?: string;
   filePath: string;
   hunkId: string;
   hunkHeader: string;
@@ -193,6 +199,8 @@ export interface DiffReversalPlan {
 
 export interface DiffReversalOperation {
   id: string;
+  /** Ephemeral runtime-owned reference required to undo this operation. */
+  authorityRef?: string;
   repositoryPath?: string;
   filePath: string;
   selectedLineCount: number;

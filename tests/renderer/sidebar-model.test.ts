@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildLogicalProjectGroups,
+  classicSidebarSearch,
   groupWorkThreads,
   hasUnreadCompletion,
   logicalProjectKey,
@@ -136,6 +137,77 @@ describe("sidebar logical project grouping", () => {
 
     expect(buildLogicalProjectGroups([first, second], "repository")).toHaveLength(2);
     expect(buildLogicalProjectGroups([sameRepository, repositoryRoot], "repository")).toHaveLength(2);
+  });
+});
+
+describe("classic sidebar search", () => {
+  const first = project({
+    id: "one",
+    name: "Inertia",
+    path: "/work/inertia",
+  });
+  const second = project({
+    id: "two",
+    name: "Openbravo",
+    path: "/work/openbravo",
+  });
+  const activeMatch = conversation({
+    id: "active-match",
+    projectId: first.id,
+    title: "Fix provider routing",
+    updatedAt: "2026-07-23T10:00:00.000Z",
+  });
+  const activeSibling = conversation({
+    id: "active-sibling",
+    projectId: first.id,
+    title: "Unrelated work",
+    updatedAt: "2026-07-23T11:00:00.000Z",
+  });
+  const archivedMatch = conversation({
+    id: "archived-match",
+    projectId: second.id,
+    title: "Fix provider routing",
+    archivedAt: "2026-07-23T12:00:00.000Z",
+  });
+
+  it("shows only the matching active chat for a chat-only match", () => {
+    const result = classicSidebarSearch(
+      [first, second],
+      [activeMatch, activeSibling, archivedMatch],
+      "provider",
+    );
+
+    expect(result.projects.map(({ id }) => id)).toEqual([first.id]);
+    expect(
+      result.conversationsByProject.get(first.id)?.map(({ id }) => id),
+    ).toEqual([activeMatch.id]);
+  });
+
+  it("shows every active chat for a project match and never renders archived chats", () => {
+    const result = classicSidebarSearch(
+      [first, second],
+      [activeMatch, activeSibling, archivedMatch],
+      "inertia",
+    );
+
+    expect(result.projects.map(({ id }) => id)).toEqual([first.id]);
+    expect(
+      result.conversationsByProject.get(first.id)?.map(({ id }) => id),
+    ).toEqual([activeSibling.id, activeMatch.id]);
+    expect(
+      [...result.conversationsByProject.values()].flat()
+        .some(({ id }) => id === archivedMatch.id),
+    ).toBe(false);
+  });
+
+  it("does not let an archived chat create a false-positive project match", () => {
+    const result = classicSidebarSearch(
+      [first, second],
+      [activeMatch, activeSibling, archivedMatch],
+      "provider",
+    );
+
+    expect(result.projects.some(({ id }) => id === second.id)).toBe(false);
   });
 });
 

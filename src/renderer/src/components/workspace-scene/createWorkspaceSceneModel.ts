@@ -54,6 +54,13 @@ type ActivityActions = ReturnType<typeof useActivityActions>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 type PlanSteps = ComponentProps<typeof PlanPanel>["steps"];
 
+export function visibleWorkspaceConversation(
+  persisted: Conversation | null,
+  draft: Conversation | null,
+): Conversation | null {
+  return draft ?? persisted;
+}
+
 export interface WorkspaceSceneActions {
   importProject: () => Promise<void>;
   createConversation: (
@@ -114,6 +121,8 @@ export interface WorkspaceSceneModelInput {
   settings: AppSettings;
   busyAction: string | null;
   project: Project | null;
+  draftConversation: Conversation | null;
+  workspaceToolsUnavailable: boolean;
   connection: Connection;
   providerMaintenance: ProviderMaintenance;
   projection: ConversationProjection;
@@ -132,12 +141,20 @@ export interface WorkspaceSceneModelInput {
   setLatestContentVisible: Dispatch<SetStateAction<boolean>>;
 }
 
+export function runtimeConversationReference(
+  conversation: Pick<Conversation, "id"> | null,
+): { conversationId?: string } {
+  return conversation ? { conversationId: conversation.id } : {};
+}
+
 export function createWorkspaceSceneModel({
   view,
   settingsTarget,
   settings,
   busyAction,
   project,
+  draftConversation,
+  workspaceToolsUnavailable,
   connection,
   providerMaintenance,
   projection,
@@ -156,11 +173,18 @@ export function createWorkspaceSceneModel({
   setLatestContentVisible,
 }: WorkspaceSceneModelInput): WorkspaceSceneProps {
   const {
-    conversation,
+    conversation: persistedConversation,
     detail,
     detailState,
     refreshDetail,
   } = projection;
+  const conversation = visibleWorkspaceConversation(
+    persistedConversation,
+    draftConversation,
+  );
+  const runtimeConversation = runtimeConversationReference(
+    persistedConversation,
+  );
   const {
     activeTool,
     setActiveTool,
@@ -256,7 +280,7 @@ export function createWorkspaceSceneModel({
     } : null,
     chat: {
       project,
-      conversation: detail?.conversation ?? null,
+      conversation: detail?.conversation ?? conversation,
       turns: projection.turns,
       messages: projection.messages,
       activities: projection.activities,
@@ -338,7 +362,7 @@ export function createWorkspaceSceneModel({
       onStopSubagent: actions.stopSubagent,
       onStop: actions.stopAgent,
     },
-    resizeHandle: toolsVisible ? {
+    resizeHandle: project && !workspaceToolsUnavailable && toolsVisible ? {
       label: "Resize workspace tools",
       controls: "workspace-content",
       containerRef: workspaceBodyRef,
@@ -357,7 +381,7 @@ export function createWorkspaceSceneModel({
       valueText: (value) => `${value} pixels for workspace tools`,
       className: "workspace-tools-resize-handle",
     } : null,
-    tools: project ? {
+    tools: project && !workspaceToolsUnavailable ? {
       activeTool,
       panel: {
         activeTab: activeTool ?? "terminal",
@@ -399,7 +423,7 @@ export function createWorkspaceSceneModel({
         onLoadRepositoryDiff: workspaceTools.loadWorkspaceRepositoryDiff,
         onOpenWorkspaceFile: (relativePath) => actions.openProjectPath({
           projectId: project.id,
-          ...(conversation ? { conversationId: conversation.id } : {}),
+          ...runtimeConversation,
           relativePath,
           action: "open-externally",
         }),
@@ -439,16 +463,18 @@ export function createWorkspaceSceneModel({
         },
         onOpenFile: (path) => actions.openProjectPath({
           projectId: project.id,
-          ...(conversation ? { conversationId: conversation.id } : {}),
+          ...runtimeConversation,
           relativePath: path,
           action: "open-externally",
         }),
+        canSaveFile: workspaceTools.canSaveWorkspaceFile,
+        onSaveFile: workspaceTools.saveWorkspaceFile,
       },
       filesKey: `files:${project.id}:${conversation?.id ?? "project"}`,
       terminal: {
         visible: toolsVisible && activeTool === "terminal",
         projectId: project.id,
-        ...(conversation ? { conversationId: conversation.id } : {}),
+        ...runtimeConversation,
         projectName: project.name,
         status: connection.status,
         fontSize: settings.terminalFontSize,

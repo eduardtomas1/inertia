@@ -5,6 +5,7 @@ import {
   workspaceDirectoryPathSchema,
   workspaceFilePathSchema,
 } from "./common";
+import { MAX_WORKSPACE_FILE_EDIT_BYTES } from "../workspace";
 
 export const workspaceCommandSchemas = [
   z
@@ -33,6 +34,27 @@ export const workspaceCommandSchemas = [
         projectId: z.string().uuid(),
         conversationId: z.string().uuid().optional(),
         path: workspaceFilePathSchema,
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("workspace.file.write"),
+      payload: z.object({
+        projectId: z.string().uuid(),
+        conversationId: z.string().uuid().optional(),
+        path: workspaceFilePathSchema,
+        authorityRef: z.string().uuid(),
+        expectedDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+        content: z
+          .string()
+          .max(MAX_WORKSPACE_FILE_EDIT_BYTES)
+          .refine(
+            (value) => new TextEncoder().encode(value).byteLength
+              <= MAX_WORKSPACE_FILE_EDIT_BYTES,
+            "The file content exceeds the workspace editing limit.",
+          ),
       }).strict(),
     })
     .strict(),

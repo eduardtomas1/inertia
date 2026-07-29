@@ -7,10 +7,13 @@ import { inspectProjectIdentity } from "../../project-identity";
 import { requireRuntimeDirectory } from "../../runtime-commands";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { TerminalManager } from "../../terminal";
+import type { RuntimeSecureFileBroker } from "../../secure-files";
+import type { SecureFileAuthorityRegistry } from "../secure-file-authorities";
 import {
   listWorkspaceEntries,
   readWorkspaceTextFile,
   searchWorkspaceEntries,
+  writeWorkspaceTextFile,
 } from "../../workspace";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import {
@@ -22,6 +25,8 @@ export interface ProjectWorkspaceCommandDependencies {
   store: RuntimeStore;
   workspaceRuns: WorkspaceRunController<WebSocket>;
   terminals: TerminalManager;
+  secureFiles: RuntimeSecureFileBroker;
+  secureFileAuthorities: SecureFileAuthorityRegistry;
   workspacePath(projectId: string, conversationId?: string): string;
   rememberDeletedConversation(conversationId: string): void;
   broadcastSnapshot(): void;
@@ -38,6 +43,7 @@ export function createProjectWorkspaceCommandHandler(
     "project.update",
     "workspace.entries",
     "workspace.file.read",
+    "workspace.file.write",
     "project.actions",
     "project.action.run",
     "checkpoint.revert",
@@ -50,12 +56,18 @@ export function createProjectWorkspaceCommandHandler(
       case "project.create": {
         const path = requireRuntimeDirectory(command.payload.path);
         const identity = await inspectProjectIdentity(path);
-        dependencies.store.createProject(
+        const project = dependencies.store.createProject(
           command.payload.name,
           path,
           identity,
         );
-        return "mutation";
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: { kind: "project.created", projectId: project.id },
+        });
+        return "handled";
       }
       case "project.select":
         dependencies.store.selectProject(command.payload.projectId);
@@ -112,12 +124,32 @@ export function createProjectWorkspaceCommandHandler(
         return "handled";
       }
       case "workspace.file.read": {
+        const workspacePath = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
+        const secureRoot = await dependencies.secureFiles.authorizeRoot(
+          workspacePath,
+        );
         const file = await readWorkspaceTextFile(
-          dependencies.workspacePath(
-            command.payload.projectId,
-            command.payload.conversationId,
-          ),
+          workspacePath,
           command.payload.path,
+          {
+            secureFiles: dependencies.secureFiles,
+            secureRoot,
+          },
+        );
+        const authorityRef = await dependencies.secureFileAuthorities.issue(
+          socket,
+          "workspace-save",
+          [
+            command.payload.projectId,
+            command.payload.conversationId ?? "",
+            workspacePath,
+            file.path,
+            file.contentDigest,
+          ],
+          secureRoot,
         );
         const extension = file.path.split(".").pop()?.toLowerCase() ?? "text";
         dependencies.send(socket, {
@@ -130,6 +162,68 @@ export function createProjectWorkspaceCommandHandler(
               content: file.content,
               truncated: false,
               language: extension,
+              contentDigest: file.contentDigest,
+              modifiedAt: file.modifiedAt,
+              authorityRef,
+            },
+          },
+        });
+        return "handled";
+      }
+      case "workspace.file.write": {
+        const workspacePath = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
+        const secureRoot = await dependencies.secureFileAuthorities.resolve(
+          socket,
+          command.payload.authorityRef,
+          "workspace-save",
+          [
+            command.payload.projectId,
+            command.payload.conversationId ?? "",
+            workspacePath,
+            command.payload.path,
+            command.payload.expectedDigest,
+          ],
+          { consume: true },
+        );
+        const file = await writeWorkspaceTextFile(
+          workspacePath,
+          command.payload.path,
+          command.payload.content,
+          command.payload.expectedDigest,
+          {
+            secureFiles: dependencies.secureFiles,
+            secureRoot,
+          },
+        );
+        const authorityRef = await dependencies.secureFileAuthorities.issue(
+          socket,
+          "workspace-save",
+          [
+            command.payload.projectId,
+            command.payload.conversationId ?? "",
+            workspacePath,
+            file.path,
+            file.contentDigest,
+          ],
+          secureRoot,
+        );
+        const extension = file.path.split(".").pop()?.toLowerCase() ?? "text";
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "workspace.file",
+            file: {
+              path: file.path,
+              content: file.content,
+              truncated: false,
+              language: extension,
+              contentDigest: file.contentDigest,
+              modifiedAt: file.modifiedAt,
+              authorityRef,
             },
           },
         });

@@ -11,6 +11,7 @@ import type {
   ProjectRow,
   StateRow,
 } from "./rows";
+import type { CreateMessageOptions } from "./types";
 
 export interface PersistenceContext {
   assertAgentTurnIdentity(
@@ -25,6 +26,7 @@ export interface PersistenceContext {
     attachments?: ChatAttachment[],
     turnId?: string | null,
     createdAt?: string,
+    options?: CreateMessageOptions,
   ): ChatMessage;
   database: Database.Database;
   requireAgentTurn(turnId: string): AgentTurnRow;

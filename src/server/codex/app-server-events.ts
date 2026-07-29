@@ -1,4 +1,7 @@
-import { parseCodexApprovalRequest } from "./approvals";
+import {
+  isCodexApprovalRequestMethod,
+  parseCodexApprovalRequest,
+} from "./approvals";
 import {
   commandExecutionLabel,
   type CodexRunPhase,
@@ -189,6 +192,22 @@ export class CodexAppServerEvents {
           : {}),
       });
       this.host.options.onApproval?.(approval);
+      return;
+    }
+    if (isCodexApprovalRequestMethod(method)) {
+      const message =
+        "Codex sent an approval request this client could not safely represent.";
+      this.host.writeMessage({
+        id,
+        error: { code: -32602, message },
+      });
+      this.host.setLastError(message);
+      this.emitActivity(
+        "system",
+        "failed",
+        "Codex requested an unsupported approval shape",
+      );
+      this.host.cancel();
       return;
     }
 

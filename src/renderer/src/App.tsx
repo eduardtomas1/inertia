@@ -6,7 +6,6 @@ import {
   type AgentInputRequest,
   type AppSettings,
   type ChatAttachment,
-  type ClientCommand,
   type Conversation,
   type ModelSelection,
   type Project,
@@ -29,6 +28,7 @@ import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
+import { useDraftConversation } from "./hooks/useDraftConversation";
 import { useActivityActions } from "./hooks/useActivityActions";
 import { useActivityActionRouter } from "./hooks/useActivityActionRouter";
 import {
@@ -49,7 +49,6 @@ import {
   withNewConversationModelSelection,
 } from "./lib/newConversation";
 import { cacheThemePreference, cachedThemePreference, nextQuickTheme } from "./utils/theme";
-import { projectNameFromPath } from "./lib/format";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import {
   commandRefreshesConversationDetail,
@@ -58,6 +57,7 @@ import {
 } from "./lib/runtimeCommands";
 import { planFromText } from "./utils/planFromText";
 import { buildEnvironmentSummary } from "./utils/environmentSummary";
+import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
 import {
   finishLegacyWorkspaceStartupMigration,
   readLegacyWorkspaceStartup,
@@ -74,11 +74,6 @@ import {
 import {
   createWorkspaceTurnActions,
 } from "./components/workspace-scene/createWorkspaceTurnActions";
-
-type ConversationCreatePayload = Extract<
-  ClientCommand,
-  { type: "conversation.create" }
->["payload"];
 
 function useDocumentActive(): boolean {
   const [active, setActive] = useState(
@@ -348,8 +343,81 @@ export default function App(): React.JSX.Element {
         );
       });
   }, []);
+  const sendMessageToConversation = useCallback(async (
+    targetConversationId: string,
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+    activate = true,
+  ): Promise<void> => {
+    setSendingConversationIds((current) =>
+      new Set(current).add(targetConversationId));
+    setActionError(null);
+    try {
+      await sendCommand(withRequestId({
+        type: "message.send",
+        payload: {
+          conversationId: targetConversationId,
+          content,
+          attachments,
+          activate,
+          ...(context ? { context } : {}),
+        },
+      }));
+    } catch (error) {
+      setActionError(error instanceof Error
+        ? error.message
+        : "The message could not be sent.");
+      throw error;
+    } finally {
+      setSendingConversationIds((current) => {
+        const next = new Set(current);
+        next.delete(targetConversationId);
+        return next;
+      });
+    }
+  }, [sendCommand]);
+  const updateConversationById = useCallback((
+    targetConversationId: string,
+    update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>,
+  ): void => {
+    const { modelSelection, ...legacyUpdate } = update;
+    void run(`conversation.update:${targetConversationId}`, {
+      type: "conversation.update",
+      payload: {
+        conversationId: targetConversationId,
+        ...legacyUpdate,
+        ...(modelSelection
+          ? {
+              modelSelection: {
+                ...modelSelection,
+                providerOptions: { ...modelSelection.providerOptions },
+                capabilities: modelSelection.capabilities.map(
+                  (capability) => ({ ...capability }),
+                ),
+              },
+            }
+          : {}),
+      },
+    }).catch(() => undefined);
+  }, [run]);
+  const draftConversation = useDraftConversation({
+    snapshot: connection.snapshot,
+    settings,
+    run,
+    sendMessage: sendMessageToConversation,
+    persistedConversationId: conversation?.id ?? null,
+    updatePersistedConversation: updateConversationById,
+  });
+  const sendMessage = draftConversation.sendFromComposer;
+  const updateConversation = draftConversation.updateConversation;
+  const clearDraftConversation = draftConversation.clear;
+  const discardDraftConversation = draftConversation.discard;
+  const workspaceToolsUnavailableReason = draftWorkspaceToolsUnavailableReason(draftConversation.requiresWorkspaceMaterialization);
+  const workspaceToolsUnavailable = Boolean(workspaceToolsUnavailableReason);
   const workspaceTools = useStableController(
     useWorkspaceTools({
+      enabled: !workspaceToolsUnavailable,
       project,
       conversation,
       detail: conversationDetail,
@@ -361,8 +429,8 @@ export default function App(): React.JSX.Element {
       run,
       setActionError,
       setActiveTool: sceneSetActiveTool,
-      openProjectPath,
-      loadFilesOnMount: sceneActiveTool === "files",
+      loadFilesOnMount:
+        !workspaceToolsUnavailable && sceneActiveTool === "files",
     }),
   );
   const backendProfileActions = useStableController(
@@ -454,9 +522,7 @@ export default function App(): React.JSX.Element {
   const importProject = async () => {
     if (busyAction) return;
     try {
-      const path = await window.inertia.selectDirectory();
-      if (!path) return;
-      await run("project.create", { type: "project.create", payload: { name: projectNameFromPath(path), path } });
+      if (!await draftConversation.importProject()) return;
       setView("workspace");
       setSidebarOpen(false);
       showStartupSurface(effectiveWorkspaceStartupSurface);
@@ -464,6 +530,7 @@ export default function App(): React.JSX.Element {
   };
   const selectProject = (nextProject: Project) => {
     if (nextProject.id === project?.id) return;
+    clearDraftConversation();
     void run("project.select", {
       type: "project.select",
       payload: { projectId: nextProject.id },
@@ -483,6 +550,7 @@ export default function App(): React.JSX.Element {
       }, 0);
       return;
     }
+    clearDraftConversation();
     const nextSplitConversationId = splitConversationAfterPrimaryChange(
       conversation,
       nextConversation,
@@ -510,6 +578,7 @@ export default function App(): React.JSX.Element {
     });
   }, [
     conversation,
+    clearDraftConversation,
     run,
     splitConversation,
     updateSplitConversationId,
@@ -568,6 +637,7 @@ export default function App(): React.JSX.Element {
     location: NewConversationLocation = { kind: "defaults" },
   ) => {
     if (!targetProject) return;
+    discardDraftConversation();
     const backendDefault = connection.snapshot?.backendDefaults?.find(
       ({ scope, projectId }) =>
         scope === "project" && projectId === targetProject.id,
@@ -578,7 +648,7 @@ export default function App(): React.JSX.Element {
       settings,
       location,
     );
-    const payload: ConversationCreatePayload = backendDefault
+    const payload = backendDefault
       ? withNewConversationModelSelection(
         defaultPayload,
         backendDefault.selection,
@@ -604,6 +674,7 @@ export default function App(): React.JSX.Element {
   const createConversationForSelection = async (
     selection: ModelSelection,
   ): Promise<void> => {
+    if (draftConversation.chooseModel(selection)) return;
     if (!project) throw new Error("Select a project before creating a chat.");
     await run("conversation.create", {
       type: "conversation.create",
@@ -614,53 +685,6 @@ export default function App(): React.JSX.Element {
     });
     setView("workspace");
     setSidebarOpen(false);
-  };
-  const sendMessageToConversation = useCallback(async (
-    targetConversationId: string,
-    content: string,
-    attachments: ChatAttachment[],
-    context?: TurnRequestContext,
-  ): Promise<void> => {
-    setSendingConversationIds((current) => {
-      const next = new Set(current);
-      next.add(targetConversationId);
-      return next;
-    });
-    setActionError(null);
-    const command = {
-      type: "message.send" as const,
-      payload: {
-        conversationId: targetConversationId,
-        content,
-        attachments,
-        ...(context ? { context } : {}),
-      },
-    };
-    try {
-      await sendCommand(withRequestId(command));
-    } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "The message could not be sent.",
-      );
-      throw error;
-    } finally {
-      setSendingConversationIds((current) => {
-        const next = new Set(current);
-        next.delete(targetConversationId);
-        return next;
-      });
-    }
-  }, [sendCommand]);
-  const sendMessage = (
-    content: string,
-    attachments: ChatAttachment[],
-    context?: TurnRequestContext,
-  ): Promise<void> => {
-    return conversation
-      ? sendMessageToConversation(conversation.id, content, attachments, context)
-      : Promise.resolve();
   };
   const respondToApproval = async (request: AgentApprovalRequest, decision: AgentApprovalDecision) => {
     await run("agent.approval.respond", {
@@ -673,34 +697,6 @@ export default function App(): React.JSX.Element {
       type: "agent.input.respond",
       payload: { conversationId: request.conversationId, requestId: request.id, answers },
     });
-  };
-  const updateConversationById = useCallback((
-    targetConversationId: string,
-    update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>,
-  ): void => {
-    const { modelSelection, ...legacyUpdate } = update;
-    const payload = modelSelection
-      ? {
-          ...legacyUpdate,
-          modelSelection: {
-            ...modelSelection,
-            providerOptions: { ...modelSelection.providerOptions },
-            capabilities: modelSelection.capabilities.map((capability) => ({ ...capability })),
-          },
-        }
-      : legacyUpdate;
-    void run(`conversation.update:${targetConversationId}`, {
-      type: "conversation.update",
-      payload: {
-        conversationId: targetConversationId,
-        ...payload,
-      },
-    }).catch(() => undefined);
-  }, [run]);
-  const updateConversation = (
-    update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>,
-  ): void => {
-    if (conversation) updateConversationById(conversation.id, update);
   };
   const updateSettings = async (updates: Partial<AppSettings>): Promise<void> => {
     try {
@@ -807,6 +803,8 @@ export default function App(): React.JSX.Element {
     settings,
     busyAction,
     project,
+    draftConversation: draftConversation.conversation,
+    workspaceToolsUnavailable,
     connection,
     providerMaintenance,
     projection: conversationProjection,
@@ -832,6 +830,7 @@ export default function App(): React.JSX.Element {
     conversationProjection,
     desktopTools,
     detailLoading,
+    draftConversation.conversation,
     planSteps,
     project,
     providerMaintenance,
@@ -843,6 +842,7 @@ export default function App(): React.JSX.Element {
     primarySceneLayout,
     workspaceSceneActions,
     workspaceTools,
+    workspaceToolsUnavailable,
   ]);
   const splitWorkspace = useSplitWorkspaceScene({
     conversation,
@@ -948,8 +948,9 @@ export default function App(): React.JSX.Element {
       project={project}
       conversation={conversation}
       splitConversationId={splitConversation?.id ?? null}
-      sceneActiveTool={sceneActiveTool}
+      sceneActiveTool={workspaceToolsUnavailable ? null : sceneActiveTool}
       sceneToggleWorkspaceTools={sceneToggleWorkspaceTools}
+      workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
       environmentSummary={environmentSummary}
       runsSummary={runsSummary}
       gitStatus={gitStatus}

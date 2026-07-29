@@ -104,7 +104,12 @@ function TurnTimelineComponent({
       data-turn-git-artifact-slot={turn.id}
       tabIndex={-1}
     >
-      <UserRequestLayer turn={turn} props={props} />
+      <UserRequestLayer
+        turn={turn}
+        props={props}
+        onBeforeToggle={handleBeforeToggle}
+        onAfterToggle={handleAfterToggle}
+      />
 
       <AgentExecutionLayer
         turn={turn}

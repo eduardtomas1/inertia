@@ -6,6 +6,7 @@ import {
   canTransitionAgentTurnStatus,
   clientCommandSchema,
   isAgentTurnTerminalStatus,
+  MAX_WORKSPACE_FILE_EDIT_BYTES,
   type ServerEvent,
 } from "../src/shared/contracts";
 import { nativeModelSelection } from "../src/shared/model-routing";
@@ -133,6 +134,39 @@ describe("client command contract", () => {
     expect(clientCommandSchema.safeParse(command).success).toBe(false);
   });
 
+  it("accepts conflict-checked workspace writes and rejects unbounded payloads", () => {
+    const base = {
+      type: "workspace.file.write",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId: crypto.randomUUID(),
+        path: "src/example.ts",
+        authorityRef: crypto.randomUUID(),
+        expectedDigest: "a".repeat(64),
+        content: "export const enabled = true;\n",
+      },
+    };
+    expect(clientCommandSchema.safeParse(base).success).toBe(true);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, expectedDigest: "../stale" },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: {
+        ...base.payload,
+        content: "x".repeat(MAX_WORKSPACE_FILE_EDIT_BYTES + 1),
+      },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: {
+        ...base.payload,
+        content: "🙂".repeat(MAX_WORKSPACE_FILE_EDIT_BYTES / 2),
+      },
+    }).success).toBe(false);
+  });
+
   it("accepts only scoped UUID targets for Activity Center mutations", () => {
     const runId = crypto.randomUUID();
     for (const type of [
@@ -204,14 +238,23 @@ describe("client command contract", () => {
       requestId,
       payload: { projectId, directory: "src", query: "Button" },
     }).success).toBe(false);
+    for (const path of [
+      "notes\\draft.md",
+      "a:file.txt",
+      "\\leading-backslash",
+      "safe\\..\\literal-name",
+    ]) {
+      expect(clientCommandSchema.safeParse({
+        type: "workspace.file.read",
+        requestId,
+        payload: { projectId, path },
+      }).success).toBe(true);
+    }
 
     for (const directory of [
       "../outside",
       "src/../../outside",
       "/etc",
-      "\\\\server\\share",
-      "C:\\Windows",
-      "C:Windows",
     ]) {
       expect(clientCommandSchema.safeParse({
         type: "workspace.entries",

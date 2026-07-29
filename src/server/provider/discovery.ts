@@ -1,6 +1,16 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
-import { executableCandidates, providerEnvironment, type ProviderEnvironment } from "../environment";
+import {
+  executableCandidates,
+  providerChildEnvironment,
+  providerEnvironment,
+  type ProviderEnvironment,
+} from "../environment";
+import {
+  requireProcessTreeTermination,
+  terminateProcessTreeAndWait,
+  type ProcessTreeTerminator,
+} from "../process-lifecycle";
 import { providerAuthStatusArgs } from "./auth";
 import { PROVIDER_INFO } from "./catalog";
 import {
@@ -26,11 +36,21 @@ interface ProbeResult {
   output: string;
   started: boolean;
   timedOut: boolean;
+  cleanupConfirmed?: boolean | null;
 }
+
+type ProviderProbeProcess = (
+  executable: string,
+  args: readonly string[],
+  environment: ProviderEnvironment,
+  cwd: string,
+  timeoutMs: number,
+) => Promise<ProbeResult>;
 
 interface ProviderDiscoveryDependencies {
   executableCandidates?: typeof executableCandidates;
-  probeProcess?: typeof probeProcess;
+  probeProcess?: ProviderProbeProcess;
+  terminateProcessTree?: ProcessTreeTerminator;
 }
 
 async function probeProcess(
@@ -39,6 +59,7 @@ async function probeProcess(
   environment: ProviderEnvironment,
   cwd: string,
   timeoutMs: number,
+  terminateProcessTree: ProcessTreeTerminator = terminateProcessTreeAndWait,
 ): Promise<ProbeResult> {
   return await new Promise<ProbeResult>((resolveProbe) => {
     const output = new CappedProviderBuffer(16 * 1024);
@@ -50,7 +71,13 @@ async function probeProcess(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      resolveProbe({ exitCode, output: output.toString(), started, timedOut });
+      resolveProbe({
+        exitCode,
+        output: output.toString(),
+        started,
+        timedOut,
+        cleanupConfirmed: null,
+      });
     };
 
     let child: ChildProcessWithoutNullStreams;
@@ -59,6 +86,7 @@ async function probeProcess(
       child = spawn(invocation.command, invocation.args, {
         cwd,
         env: environment.env,
+        detached: process.platform !== "win32",
         shell: false,
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         windowsHide: true,
@@ -77,9 +105,30 @@ async function probeProcess(
     child.stdin.end();
 
     timer = setTimeout(() => {
+      if (settled) return;
       timedOut = true;
-      try { child.kill("SIGKILL"); } catch { /* The probe may already have exited. */ }
-      finish(null);
+      settled = true;
+      void requireProcessTreeTermination(
+        terminateProcessTree,
+        child,
+        true,
+        "Provider discovery process tree",
+      ).then(
+        () => resolveProbe({
+          exitCode: null,
+          output: output.toString(),
+          started,
+          timedOut,
+          cleanupConfirmed: true,
+        }),
+        () => resolveProbe({
+          exitCode: null,
+          output: output.toString(),
+          started,
+          timedOut,
+          cleanupConfirmed: false,
+        }),
+      );
     }, timeoutMs);
     timer.unref();
   });
@@ -141,12 +190,21 @@ export async function detectProvider(
   dependencies: ProviderDiscoveryDependencies = {},
 ): Promise<ProviderDetection> {
   const resolveCandidates = dependencies.executableCandidates ?? executableCandidates;
-  const runProbe = dependencies.probeProcess ?? probeProcess;
+  const terminateProcessTree = dependencies.terminateProcessTree
+    ?? terminateProcessTreeAndWait;
+  const runProbe: ProviderProbeProcess = dependencies.probeProcess
+    ?? (async (...args) => await probeProcess(...args, terminateProcessTree));
   const provider = PROVIDER_INFO[providerId];
   const command = options.command?.trim() || provider.command;
   const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, 10_000));
   const cwd = options.cwd ?? process.cwd();
-  const environment = await providerEnvironment(options.refreshEnvironment === true);
+  const discoveredEnvironment = await providerEnvironment(
+    options.refreshEnvironment === true,
+  );
+  const environment: ProviderEnvironment = {
+    env: providerChildEnvironment(providerId, discoveredEnvironment.env),
+    pathEntries: discoveredEnvironment.pathEntries,
+  };
   const candidateCommands = providerId === "cursor" && command === PROVIDER_INFO.cursor.command
     ? [command, "cursor-agent"]
     : [command];
@@ -200,6 +258,9 @@ export async function detectProvider(
     ? working.find(({ appServerReady }) => appServerReady) ?? working[0]
     : working[0];
   if (!selected) {
+    const cleanupUnconfirmed = versionProbes.some(
+      ({ probe }) => probe.cleanupConfirmed === false,
+    );
     const cursorWithoutAcp = providerId === "cursor" && versionProbes.some(
       ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
     );
@@ -209,7 +270,9 @@ export async function detectProvider(
       installState: cursorWithoutAcp ? "installed" : "error",
       authState: "unknown",
       canRun: false,
-      statusMessage: cursorWithoutAcp
+      statusMessage: cleanupUnconfirmed
+        ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
+        : cursorWithoutAcp
         ? "Cursor CLI found, but ACP is unavailable"
         : providerId === "codex" ? "Codex CLI was found but failed to start" : statusMessage("error", "unknown"),
     };
@@ -219,7 +282,8 @@ export async function detectProvider(
   const authState = authStateFromProbe(providerId, authProbe);
   const authenticated = authState === "authenticated" || authState === "configured";
   const appServerReady = selected.appServerReady;
-  const canRun = authenticated && appServerReady;
+  const cleanupUnconfirmed = authProbe.cleanupConfirmed === false;
+  const canRun = authenticated && appServerReady && !cleanupUnconfirmed;
   return {
     provider,
     available: true,
@@ -228,7 +292,9 @@ export async function detectProvider(
     installState: "installed",
     authState,
     canRun,
-    statusMessage: providerId === "codex" && !appServerReady
+    statusMessage: cleanupUnconfirmed
+      ? `${provider.name} connection probe timed out, and its process tree could not be confirmed stopped`
+      : providerId === "codex" && !appServerReady
       ? "Codex App Server is unsupported; update the selected CLI"
       : statusMessage("installed", authState),
   };

@@ -79,6 +79,7 @@ interface SplitWorkspaceActions
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
+    activate?: boolean,
   ) => Promise<void>;
   updateConversationById: (
     conversationId: string,
@@ -207,7 +208,6 @@ export function useSplitWorkspaceScene({
     run,
     setActionError,
     setActiveTool: layout.setActiveTool,
-    openProjectPath: actions.openProjectPath,
     loadGitOnMount: layout.activeTool === "changes",
     loadFilesOnMount: layout.activeTool === "files",
   }));
@@ -298,6 +298,7 @@ export function useSplitWorkspaceScene({
           content,
           attachments,
           context,
+          false,
         )
       : Promise.resolve(),
     updateConversation: (
@@ -318,6 +319,8 @@ export function useSplitWorkspaceScene({
       ? busyAction.slice("split:".length)
       : null,
     project: splitProject,
+    draftConversation: null,
+    workspaceToolsUnavailable: false,
     connection,
     providerMaintenance,
     projection,

@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
@@ -75,6 +77,74 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   expect(rendererErrors).toEqual([]);
 });
 
+test("keeps hostile native previews beneath trusted workspace overlays", async () => {
+  await resizeWindow(1440, 920);
+  await ensureWorkspaceTools();
+  await page.getByRole("tab", { name: /Preview/ }).click();
+  const hostilePreviewUrl = `${previewUrl}trusted-overlays`;
+  await page.getByRole("textbox", { name: "Preview address" })
+    .fill(hostilePreviewUrl);
+  await page.getByRole("button", { name: "Go", exact: true }).click();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(true);
+
+  await page.getByRole("button", { name: "Open environment summary" }).click();
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  await expect(page.getByRole("dialog", {
+    name: "Environment summary",
+  })).toBeVisible();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Close environment summary" }).click();
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(true);
+
+  await page.getByRole("button", { name: /^Open runs/u }).click();
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  await expect(page.getByRole("dialog", { name: "Runs" })).toBeVisible();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Close runs" }).click();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(true);
+
+  await page.keyboard.press(
+    process.platform === "darwin" ? "Meta+K" : "Control+K",
+  );
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  await expect(page.getByRole("dialog", { name: "Search Inertia" }))
+    .toBeVisible();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Close search" }).click();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(true);
+
+  const commitButton = page.locator(
+    ".workspace-header .primary-header-button",
+  );
+  await expect(commitButton).toBeEnabled();
+  await commitButton.click();
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  await expect(page.getByRole("dialog", { name: "Commit changes" }))
+    .toBeVisible();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Close commit dialog" }).click();
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(true);
+});
+
 test("navigates the project file hierarchy lazily with an accessible keyboard tree", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const addProject = page.getByRole("button", { name: "Add your first project" });
@@ -92,9 +162,15 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
       }));
     }, workspaceDirectory);
     await addProject.click();
-    await expect(page.getByRole("heading", { name: "Start with a clear chat." }))
+    await expect(page.getByRole("heading", {
+      name: "What should we work on?",
+      level: 3,
+    }))
       .toBeVisible({ timeout: 15_000 });
-    await page.locator(".project-welcome")
+    await page.getByRole("complementary", {
+      name: "Project navigation",
+      exact: true,
+    })
       .getByRole("button", { name: "New chat", exact: true })
       .click();
   }
@@ -131,6 +207,25 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
   await expect(buttonFile).toHaveAttribute("aria-selected", "true");
   await expect(panel.getByLabel("Contents of src/components/Button.tsx"))
     .toContainText("export const Button");
+  await panel.getByRole("button", {
+    name: "Edit src/components/Button.tsx in Inertia",
+  }).click();
+  const editor = page.getByRole("dialog", { name: "Edit Button.tsx" });
+  await expect(editor).toBeVisible();
+  const editorInput = editor.getByRole("textbox", {
+    name: "Edit contents of src/components/Button.tsx",
+  });
+  await editorInput.fill("export const Button = 'edited in Inertia';\n");
+  await editor.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(panel.getByLabel("Contents of src/components/Button.tsx"))
+    .toContainText("edited in Inertia");
+  await expect.poll(
+    () => readFile(
+      join(workspaceDirectory, "src", "components", "Button.tsx"),
+      "utf8",
+    ),
+  ).toContain("edited in Inertia");
 
   const search = panel.getByRole("searchbox", { name: "Search project files" });
   await search.fill("deep");

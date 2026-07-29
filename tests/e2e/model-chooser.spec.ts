@@ -62,9 +62,14 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     const addProject = page.getByRole("button", { name: "Add your first project" });
     await expect(addProject).toBeEnabled();
     await addProject.click();
-    await expect(page.getByRole("heading", { name: "Start with a clear chat." })).toBeVisible();
-    const newChat = page.locator(".project-welcome")
-      .getByRole("button", { name: "New chat", exact: true });
+    await expect(page.getByRole("heading", {
+      name: "What should we work on?",
+      level: 3,
+    })).toBeVisible();
+    const newChat = page.getByRole("complementary", {
+      name: "Project navigation",
+      exact: true,
+    }).getByRole("button", { name: "New chat", exact: true });
     await expect(newChat).toBeVisible();
     await newChat.click();
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();

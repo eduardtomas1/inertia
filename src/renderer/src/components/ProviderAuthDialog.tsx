@@ -4,6 +4,7 @@ import { Terminal } from "@xterm/xterm";
 import { CheckCircle2, PlugZap, X } from "lucide-react";
 import type { ClientCommand, ProviderInfo, ServerEvent, ThemePreference } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { IconButton, LoadingMark } from "./ui";
 
 type ProviderAuthDialogProps = {
@@ -57,6 +58,7 @@ export function ProviderAuthDialog({
   const [error, setError] = useState<string | null>(null);
   const providerId = provider?.id ?? null;
   const providerLabel = provider?.label ?? "provider";
+  useNativePreviewSuspension(provider !== null);
 
   useEffect(() => {
     latestFontSizeRef.current = fontSize;

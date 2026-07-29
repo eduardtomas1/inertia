@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
@@ -18,6 +18,27 @@ import {
 } from "./support/app-fixture";
 
 const execFileAsync = promisify(execFile);
+
+async function stagedAttachmentPath(
+  id: string | undefined,
+  extension: string,
+): Promise<string> {
+  expect(id).toBeTruthy();
+  const root = join(
+    await electronApp.evaluate(({ app: electron }) =>
+      electron.getPath("temp")),
+    "inertia-attachments",
+  );
+  const sessions = (await readdir(root))
+    .filter((name) => /^session-[A-Za-z0-9_-]{6}$/u.test(name));
+  const candidates = await Promise.all(sessions.map(async (session) => {
+    const path = join(root, session, `${id}.${extension}`);
+    return await stat(path).then(() => path, () => null);
+  }));
+  const matches = candidates.filter((path) => path !== null);
+  expect(matches).toHaveLength(1);
+  return matches[0]!;
+}
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -72,19 +93,41 @@ test("starts without a demo and adds the first real project", async () => {
     }));
   }, workspaceDirectory);
   await page.getByRole("button", { name: "Add your first project" }).click();
-  await expect(page.getByRole("heading", { name: "Start with a clear chat." })).toBeVisible();
+  await expect(page.getByRole("heading", {
+    name: "What should we work on?",
+    level: 3,
+  })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   await expect(page.getByRole("dialog", { name: "Environment summary" })).toBeVisible();
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toHaveCount(1);
-  await page.locator(".project-welcome").getByRole("button", { name: "New chat", exact: true }).click();
 
-  await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
+  const databasePath = join(testDirectory, "data", "inertia.sqlite");
+  const conversationCount = (): number => {
+    const database = new Database(databasePath);
+    const row = database.prepare("SELECT COUNT(*) AS count FROM conversations")
+      .get() as { count: number };
+    database.close();
+    return row.count;
+  };
+  expect(conversationCount()).toBe(0);
+
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
+  await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
+  expect(conversationCount()).toBe(0);
+  await page.locator(".workspace-panel")
+    .getByRole("button", { name: "Close workspace tools" })
+    .click();
+
+  await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
+  await expect.poll(conversationCount).toBe(1);
   await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
   await page.getByRole("button", { name: "Open workspace tools" }).click();
   await expect(page.getByRole("dialog", { name: "Environment summary" })).toHaveCount(0);
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
-  const database = new Database(join(testDirectory, "data", "inertia.sqlite"));
+  const database = new Database(databasePath);
   const firstConversation = database.prepare(`
     SELECT provider_session_id, worktree_path
     FROM conversations
@@ -405,11 +448,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
 
   const chosenId = chosenPreviewSource?.split("/").at(-1);
   expect(chosenId).toBeTruthy();
-  const selectedTempPath = join(
-    await electronApp.evaluate(({ app }) => app.getPath("temp")),
-    "inertia-attachments",
-    `${chosenId}.png`,
-  );
+  const selectedTempPath = await stagedAttachmentPath(chosenId, "png");
   await expect.poll(async () => stat(selectedTempPath).then(() => true, () => false)).toBe(true);
   const selectedBytes = await readFile(selectedTempPath);
   const sameSizeReplacement = Buffer.from(selectedBytes);
@@ -449,11 +488,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await expect(attachments.locator("img")).toHaveCount(1);
   const pastedSource = await attachments.locator("img").getAttribute("src");
   const pastedId = pastedSource?.split("/").at(-1);
-  const pastedTempPath = join(
-    await electronApp.evaluate(({ app }) => app.getPath("temp")),
-    "inertia-attachments",
-    `${pastedId}.png`,
-  );
+  const pastedTempPath = await stagedAttachmentPath(pastedId, "png");
   await attachments.getByRole("button", { name: "Remove attachment pasted.png" }).click();
   await expect.poll(async () => stat(pastedTempPath).then(() => true, () => false)).toBe(false);
 
@@ -495,11 +530,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await page.getByRole("button", { name: "Attach images or documents" }).click();
   const unsentSource = await attachments.locator("img").getAttribute("src");
   const unsentId = unsentSource?.split("/").at(-1);
-  const unsentTempPath = join(
-    await electronApp.evaluate(({ app }) => app.getPath("temp")),
-    "inertia-attachments",
-    `${unsentId}.png`,
-  );
+  const unsentTempPath = await stagedAttachmentPath(unsentId, "png");
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(true);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(false);

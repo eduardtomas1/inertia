@@ -5,6 +5,7 @@ import {
 import { startRuntime, type RunningRuntime } from "./index.js";
 import { RuntimeCredentialBrokerClient } from "./runtime/backends/credential-broker-client.js";
 import { RuntimeAttachmentBrokerClient } from "./runtime/attachments/attachment-broker-client.js";
+import { RuntimeSecureFileBrokerClient } from "./runtime/secure-file-broker-client.js";
 
 let runtime: RunningRuntime | null = null;
 let starting = false;
@@ -19,6 +20,7 @@ function post(event: RuntimeWorkerEvent): void {
 
 const credentials = new RuntimeCredentialBrokerClient({ post });
 const attachments = new RuntimeAttachmentBrokerClient(post);
+const secureFiles = new RuntimeSecureFileBrokerClient(post);
 
 async function shutdown(exitCode = 0): Promise<void> {
   if (stopping) return;
@@ -34,6 +36,7 @@ async function shutdown(exitCode = 0): Promise<void> {
   }
   credentials.close();
   attachments.close();
+  secureFiles.close();
   post({ type: "runtime.stopped" });
   process.exit(exitCode);
 }
@@ -59,6 +62,10 @@ parentPort.on("message", (messageEvent) => {
   }
   if (command.type === "runtime.attachment-relinquish-result") {
     attachments.handleRelinquish(command);
+    return;
+  }
+  if (command.type === "runtime.secure-file-result") {
+    secureFiles.handle(command);
     return;
   }
   if (command.type === "runtime.shutdown") {
@@ -97,6 +104,7 @@ parentPort.on("message", (messageEvent) => {
     ...command.options,
     backendCredentials: credentials,
     attachments,
+    secureFiles,
   }).then((startedRuntime) => {
     if (stopping) {
       void startedRuntime.close().finally(() => process.exit(0));

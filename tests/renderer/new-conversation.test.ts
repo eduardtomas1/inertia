@@ -8,6 +8,7 @@ import {
 } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import {
+  buildDraftConversation,
   buildNewConversationPayload,
   conversationContextMismatch,
   withNewConversationModelSelection,
@@ -155,6 +156,31 @@ describe("new conversation isolation", () => {
     expect(isolated.useWorktree).toBe(true);
     expect(isolated).not.toHaveProperty("branch");
     expect(isolated).not.toHaveProperty("worktreePath");
+  });
+
+  it("projects a local draft without creating provider or continuation state", () => {
+    const draft = buildDraftConversation(
+      withNewConversationModelSelection(
+        buildNewConversationPayload(project.id, defaultSettings),
+        viewedConversation.modelSelection,
+      ),
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        now: "2026-07-29T10:00:00.000Z",
+      },
+    );
+
+    expect(draft).toMatchObject({
+      id: "33333333-3333-4333-8333-333333333333",
+      projectId: project.id,
+      title: "New chat",
+      providerId: "claude",
+      status: "idle",
+      providerSessionId: null,
+      continuationIdentity: null,
+      createdAt: "2026-07-29T10:00:00.000Z",
+    });
+    expect(draft.modelSelection).toEqual(viewedConversation.modelSelection);
   });
 });
 

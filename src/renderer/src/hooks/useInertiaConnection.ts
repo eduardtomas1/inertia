@@ -10,9 +10,11 @@ import {
   runtimeResumeUrl,
   RuntimeProjectionSequence,
 } from "../utils/runtimeSequencing";
+import { serializeRuntimeClientCommand } from "@shared/runtime-websocket";
 import {
   deliverDecodedServerEvent,
   notifyConnectionListeners,
+  RuntimeCommandError,
   settlePendingConnectionRequest,
   UNREADABLE_RUNTIME_RESPONSE,
   type PendingConnectionRequest,
@@ -66,7 +68,7 @@ export function useInertiaConnection(): InertiaConnection {
   const rejectPending = useCallback((message: string) => {
     for (const pending of pendingRef.current.values()) {
       window.clearTimeout(pending.timeout);
-      pending.reject(new Error(message));
+      pending.reject(new RuntimeCommandError(message, "ambiguous"));
     }
     pendingRef.current.clear();
   }, []);
@@ -229,22 +231,54 @@ export function useInertiaConnection(): InertiaConnection {
     }
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error("The local service is reconnecting. Try again in a moment."));
+      return Promise.reject(new RuntimeCommandError(
+        "The local service is reconnecting. Try again in a moment.",
+        "not-sent",
+      ));
+    }
+
+    let serialized: string;
+    try {
+      serialized = serializeRuntimeClientCommand(command);
+    } catch (serializationError) {
+      return Promise.reject(
+        serializationError instanceof Error
+          ? new RuntimeCommandError(serializationError.message, "not-sent")
+          : new RuntimeCommandError(
+              "The request could not be validated.",
+              "not-sent",
+            ),
+      );
     }
 
     return new Promise((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         pendingRef.current.delete(command.requestId);
-        reject(new Error("The request took too long to complete."));
+        if (socketRef.current === socket) {
+          // Delivery is now ambiguous. Drop the resumable cursor and reconnect
+          // so the next authoritative snapshot can prove whether the command
+          // changed state instead of leaving callers waiting indefinitely.
+          projectionRef.current.reset();
+          if (socket.readyState === WebSocket.OPEN) socket.close();
+        }
+        reject(new RuntimeCommandError(
+          "The request took too long to complete.",
+          "ambiguous",
+        ));
       }, requestTimeoutMs(command));
 
       pendingRef.current.set(command.requestId, { resolve, reject, timeout });
       try {
-        socket.send(JSON.stringify(command));
+        socket.send(serialized);
       } catch (sendError) {
         window.clearTimeout(timeout);
         pendingRef.current.delete(command.requestId);
-        reject(sendError instanceof Error ? sendError : new Error("The request could not be sent."));
+        reject(new RuntimeCommandError(
+          sendError instanceof Error
+            ? sendError.message
+            : "The request could not be sent.",
+          "not-sent",
+        ));
       }
     });
   }, []);

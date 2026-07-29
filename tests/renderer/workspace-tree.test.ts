@@ -5,6 +5,8 @@ import {
   flattenWorkspaceTree,
   isSafeWorkspaceEntryPath,
   sortWorkspaceEntries,
+  workspaceParentPath,
+  workspacePathName,
   workspaceTreeKeyboardAction,
 } from "../../src/renderer/src/utils/workspaceTree";
 
@@ -15,6 +17,7 @@ function entry(path: string, kind: WorkspaceEntry["kind"]): WorkspaceEntry {
 describe("workspace tree model", () => {
   it("accepts portable case-preserving relative paths and rejects boundary tricks", () => {
     expect(isSafeWorkspaceEntryPath("Src\\Components\\Thing10.ts")).toBe(true);
+    expect(isSafeWorkspaceEntryPath("a:file.ts")).toBe(true);
     expect(isSafeWorkspaceEntryPath("src/components/Thing.ts")).toBe(true);
     for (const path of [
       "",
@@ -23,14 +26,35 @@ describe("workspace tree model", () => {
       "../secret",
       "src/../../secret",
       "/etc/passwd",
-      "\\\\server\\share",
-      "C:\\Windows\\system.ini",
-      "C:system.ini",
       "src//file.ts",
       "src/\0file.ts",
     ]) {
       expect(isSafeWorkspaceEntryPath(path)).toBe(false);
     }
+  });
+
+  it("treats only serialized forward slashes as hierarchy separators", () => {
+    expect(workspacePathName("notes\\draft.md")).toBe("notes\\draft.md");
+    expect(workspaceParentPath("notes\\draft.md")).toBe("");
+    expect(workspacePathName("docs/notes\\draft.md"))
+      .toBe("notes\\draft.md");
+    expect(workspaceParentPath("docs/notes\\draft.md")).toBe("docs");
+
+    const rows = flattenWorkspaceTree(new Map([
+      ["", [
+        entry("docs", "directory"),
+        entry("notes\\draft.md", "file"),
+      ]],
+      ["docs", [entry("docs/notes\\draft.md", "file")]],
+    ]), new Set(["docs"]));
+    expect(rows.map(({ entry: item, parentPath }) => [
+      item.path,
+      parentPath,
+    ])).toEqual([
+      ["docs", ""],
+      ["docs/notes\\draft.md", "docs"],
+      ["notes\\draft.md", ""],
+    ]);
   });
 
   it("sorts directories before files naturally without changing path case", () => {

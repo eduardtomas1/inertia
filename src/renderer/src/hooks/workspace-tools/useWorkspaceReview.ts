@@ -252,6 +252,11 @@ export function useWorkspaceReview({
       );
     }
     const plan = inspected.result.plan;
+    if (!plan.authorityRef) {
+      throw new Error(
+        "The reversal authorization is unavailable. Refresh the diff.",
+      );
+    }
     if (confirmDestructiveActions) {
       const selectedRepositoryPath = selection.repositoryPath ?? ".";
       const displayPath = selectedRepositoryPath === "."
@@ -283,6 +288,7 @@ export function useWorkspaceReview({
         filePath: selection.file.path,
         hunkId: selection.hunk.id,
         lineIds: selection.lineIds,
+        authorityRef: plan.authorityRef,
         expected: plan.validation,
         ...(comment.trim() ? { comment: comment.trim() } : {}),
         ignoreWhitespace,
@@ -294,6 +300,11 @@ export function useWorkspaceReview({
       );
     }
     const operation = reversed.result.operation;
+    if (!operation.authorityRef) {
+      throw new Error(
+        "The Undo authorization is unavailable. Refresh the diff.",
+      );
+    }
     setDiffReversalsByAuthority((current) => retainReversal(
       current,
       owner,
@@ -316,6 +327,11 @@ export function useWorkspaceReview({
     if (!project || !lastDiffReversal) return;
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     const operation = lastDiffReversal;
+    if (!operation.authorityRef) {
+      throw new Error(
+        "The Undo authorization expired. Refresh the diff.",
+      );
+    }
     const restored = resultEvent(await run("git.selection.undo", {
       type: "git.selection.undo",
       payload: {
@@ -323,6 +339,7 @@ export function useWorkspaceReview({
         ...(conversation ? { conversationId: conversation.id } : {}),
         repositoryPath: operation.repositoryPath ?? ".",
         operationId: operation.id,
+        authorityRef: operation.authorityRef,
       },
     }));
     if (restored.result.kind !== "git.diff") {

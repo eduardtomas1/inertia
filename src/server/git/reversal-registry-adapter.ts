@@ -18,6 +18,10 @@ import {
   repositoryRoot,
   validatedPaths,
 } from "./paths";
+import type {
+  RuntimeSecureFileBroker,
+  SecureFileRootCapability,
+} from "../secure-files";
 import {
   fileStateMatches,
   hashObject,
@@ -213,6 +217,8 @@ export async function registryOperation<T>(
 export async function maintainReversalOperations(
   root: string,
   controller: ReversalRegistryController,
+  secureFiles: RuntimeSecureFileBroker,
+  secureRoot: SecureFileRootCapability,
   maxActiveBackups = REVERSAL_MAX_ACTIVE_BACKUPS,
 ): Promise<void> {
   await registryOperation(controller.cleanup(maxActiveBackups));
@@ -235,25 +241,26 @@ export async function maintainReversalOperations(
       );
       continue;
     }
-    const absolute = resolve(root, path);
     const [matchesPreState, matchesPostState] = await Promise.all([
       fileStateMatches(
         root,
-        absolute,
         path,
         operation.preWorktreeOid,
         operation.preWorktreeMode,
         operation.preIndexOid,
         operation.preIndexMode,
+        secureFiles,
+        secureRoot,
       ),
       fileStateMatches(
         root,
-        absolute,
         path,
         operation.postWorktreeOid,
         operation.postWorktreeMode,
         operation.postIndexOid,
         operation.postIndexMode,
+        secureFiles,
+        secureRoot,
       ),
     ]);
     if (operation.status === "applying" && matchesPostState) {
@@ -285,8 +292,15 @@ export async function maintainReversalOperations(
 
 export async function cleanupReversalOperations(
   repositoryPath: string,
+  secureFiles: RuntimeSecureFileBroker,
 ): Promise<void> {
   const root = await repositoryRoot(repositoryPath);
+  const secureRoot = await secureFiles.authorizeRoot(root);
   const controller = await reversalController(root);
-  await maintainReversalOperations(root, controller);
+  await maintainReversalOperations(
+    root,
+    controller,
+    secureFiles,
+    secureRoot,
+  );
 }

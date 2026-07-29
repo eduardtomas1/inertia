@@ -9,10 +9,15 @@ import {
   type RuntimeWorkerCommand,
   type RuntimeWorkerOptions,
 } from "../node/runtime-process-protocol.js";
+import type {
+  SecureFileRequest,
+  SecureFileResult,
+} from "../node/secure-file-protocol.js";
 import {
   RuntimeAttachmentBrokerCoordinator,
   type RuntimeAttachmentBroker,
 } from "./runtime-attachment-broker.js";
+import { forceKillRuntimeProcessTree } from "./runtime-process-tree.js";
 
 export type { RuntimeAttachmentBroker } from "./runtime-attachment-broker.js";
 
@@ -34,6 +39,7 @@ interface RuntimeProcessRecord {
   acceptingReady: boolean;
   reportedFailure: string | null;
   credentialRequestIds: Set<string>;
+  secureFileRequestIds: Set<string>;
   attachmentRequestIds: Set<string>;
   attachmentClaimCounts: Map<string, number>;
   deferredAttachmentReleaseIds: Set<string>;
@@ -55,11 +61,23 @@ interface PendingCredentialRequest {
   controller: AbortController;
 }
 
+interface PendingSecureFileRequest {
+  record: RuntimeProcessRecord;
+  controller: AbortController;
+}
+
 export interface RuntimeCredentialBroker {
   resolve(secretReference: string, signal?: AbortSignal): Promise<string | null>;
   status(secretReference: string, signal?: AbortSignal): Promise<BackendCredentialStatus>;
   clear(secretReference: string, signal?: AbortSignal): Promise<boolean>;
   forget(secretReference: string, signal?: AbortSignal): Promise<boolean>;
+}
+
+export interface RuntimeSecureFileBroker {
+  perform(
+    request: SecureFileRequest,
+    signal?: AbortSignal,
+  ): Promise<SecureFileResult>;
 }
 
 export type RuntimeSupervisorPhase =
@@ -92,6 +110,7 @@ export interface RuntimeSupervisorOptions {
   forceKill?: (pid: number) => void;
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
+  secureFileBroker?: RuntimeSecureFileBroker;
   attachmentBroker?: RuntimeAttachmentBroker;
   attachmentRequestTimeoutMs?: number;
   onStateChange?: (snapshot: RuntimeSupervisorSnapshot) => void;
@@ -131,6 +150,9 @@ export class RuntimeSupervisor {
   private shutdownDeadlineTimer: Timer | null = null;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
   private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
+  private readonly secureFileBroker?: RuntimeSecureFileBroker;
+  private readonly pendingSecureFileRequests =
+    new Map<string, PendingSecureFileRequest>();
   private stopPromise: Promise<boolean> | null = null;
   private resolveStop: ((confirmed: boolean) => void) | null = null;
 
@@ -143,14 +165,9 @@ export class RuntimeSupervisor {
     this.forceKillWaitMs = boundedDuration(options.forceKillWaitMs, DEFAULT_FORCE_KILL_WAIT_MS);
     this.setTimer = options.setTimer ?? setTimeout;
     this.clearTimer = options.clearTimer ?? clearTimeout;
-    this.forceKill = options.forceKill ?? ((pid) => {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        // The utility process may have exited between the timeout and signal.
-      }
-    });
+    this.forceKill = options.forceKill ?? forceKillRuntimeProcessTree;
     this.credentialBroker = options.credentialBroker;
+    this.secureFileBroker = options.secureFileBroker;
     this.credentialRequestTimeoutMs = boundedDuration(
       options.credentialRequestTimeoutMs,
       DEFAULT_CREDENTIAL_REQUEST_TIMEOUT_MS,
@@ -234,6 +251,7 @@ export class RuntimeSupervisor {
     this.websocketUrl = null;
     this.rejectProjectPaths(this.current, "The local service is stopping.");
     this.clearCredentialRequests(this.current);
+    this.clearSecureFileRequests(this.current);
 
     if (!this.current) {
       this.phase = "stopped";
@@ -252,7 +270,7 @@ export class RuntimeSupervisor {
     const child = record.child;
     this.shutdownTimer = this.setTimer(() => {
       this.shutdownTimer = null;
-      child.kill();
+      this.forceTerminate(child);
       this.forceKillTimer = this.setTimer(() => {
         this.forceKillTimer = null;
         if (this.current !== record) return;
@@ -297,6 +315,7 @@ export class RuntimeSupervisor {
       acceptingReady: true,
       reportedFailure: null,
       credentialRequestIds: new Set(),
+      secureFileRequestIds: new Set(),
       attachmentRequestIds: new Set(),
       attachmentClaimCounts: new Map(),
       deferredAttachmentReleaseIds: new Set(),
@@ -323,7 +342,7 @@ export class RuntimeSupervisor {
       record.acceptingReady = false;
       this.lastError = "The runtime process did not become ready in time.";
       this.emitState();
-      child.kill();
+      this.forceTerminate(child);
     }, this.startupTimeoutMs);
     this.emitState();
   }
@@ -335,12 +354,16 @@ export class RuntimeSupervisor {
       this.lastError = "The runtime process sent an invalid lifecycle message.";
       record.acceptingReady = false;
       this.clearTimerValue("startupTimer");
-      record.child.kill();
+      this.forceTerminate(record.child);
       this.emitState();
       return;
     }
     if (event.type === "runtime.credential-request") {
       this.handleCredentialRequest(record, event);
+      return;
+    }
+    if (event.type === "runtime.secure-file-request") {
+      this.handleSecureFileRequest(record, event);
       return;
     }
     if (
@@ -367,6 +390,7 @@ export class RuntimeSupervisor {
       this.lastError = event.message;
       this.clearTimerValue("startupTimer");
       this.clearCredentialRequests(record);
+      this.clearSecureFileRequests(record);
       this.attachmentRequests.clear(record);
       this.emitState();
       return;
@@ -374,6 +398,7 @@ export class RuntimeSupervisor {
     if (event.type === "runtime.stopped") {
       record.acceptingReady = false;
       this.clearCredentialRequests(record);
+      this.clearSecureFileRequests(record);
       this.attachmentRequests.clear(record);
       return;
     }
@@ -399,6 +424,7 @@ export class RuntimeSupervisor {
     this.clearTimerValue("stableTimer");
     this.rejectProjectPaths(record, "The local service stopped before the project path was resolved.");
     this.clearCredentialRequests(record);
+    this.clearSecureFileRequests(record);
     this.attachmentRequests.clear(record);
 
     if (!this.desiredRunning) {
@@ -432,9 +458,18 @@ export class RuntimeSupervisor {
       child.postMessage(message);
     } catch (error) {
       this.lastError = publicProcessError(error, "The runtime process could not receive a lifecycle message.");
-      child.kill();
+      this.forceTerminate(child);
       this.emitState();
     }
+  }
+
+  private forceTerminate(child: UtilityProcess): void {
+    const pid = child.pid;
+    if (pid) {
+      this.forceKill(pid);
+      return;
+    }
+    child.kill();
   }
 
   private clearShutdownTimers(): void {
@@ -582,6 +617,85 @@ export class RuntimeSupervisor {
     );
   }
 
+  private handleSecureFileRequest(
+    record: RuntimeProcessRecord,
+    event: Extract<
+      ReturnType<typeof parseRuntimeWorkerEvent>,
+      { type: "runtime.secure-file-request" }
+    >,
+  ): void {
+    if (!event) return;
+    if (!this.acceptsBrokerRequests(record) || !this.secureFileBroker) {
+      this.post(record.child, {
+        type: "runtime.secure-file-result",
+        requestId: event.requestId,
+        result: {
+          ok: false,
+          code: "unavailable",
+          message: "The secure file service is unavailable.",
+        },
+      });
+      return;
+    }
+    if (record.secureFileRequestIds.has(event.requestId)) {
+      this.post(record.child, {
+        type: "runtime.secure-file-result",
+        requestId: event.requestId,
+        result: {
+          ok: false,
+          code: "invalid",
+          message: "The secure file request identifier was already used.",
+        },
+      });
+      return;
+    }
+    record.secureFileRequestIds.add(event.requestId);
+    if (record.secureFileRequestIds.size > 512) {
+      const oldest = record.secureFileRequestIds.values().next().value;
+      if (typeof oldest === "string") {
+        record.secureFileRequestIds.delete(oldest);
+      }
+    }
+    const controller = new AbortController();
+    const pending: PendingSecureFileRequest = { record, controller };
+    this.pendingSecureFileRequests.set(event.requestId, pending);
+    const {
+      type: _type,
+      requestId: _requestId,
+      ...request
+    } = event;
+    void this.secureFileBroker.perform(request, controller.signal).then(
+      (result) => {
+        if (this.pendingSecureFileRequests.get(event.requestId) !== pending) {
+          return;
+        }
+        this.pendingSecureFileRequests.delete(event.requestId);
+        if (!this.acceptsBrokerRequests(record)) return;
+        this.post(record.child, {
+          type: "runtime.secure-file-result",
+          requestId: event.requestId,
+          result,
+        });
+      },
+      () => {
+        if (this.pendingSecureFileRequests.get(event.requestId) !== pending) {
+          return;
+        }
+        this.pendingSecureFileRequests.delete(event.requestId);
+        if (!this.acceptsBrokerRequests(record)) return;
+        this.post(record.child, {
+          type: "runtime.secure-file-result",
+          requestId: event.requestId,
+          result: {
+            ok: false,
+            code: "unavailable",
+            message: "The secure file operation could not be completed.",
+          },
+        });
+      },
+    );
+  }
+
   private acceptsBrokerRequests(record: RuntimeProcessRecord): boolean {
     return this.current === record
       && this.desiredRunning
@@ -599,6 +713,15 @@ export class RuntimeSupervisor {
       if (pending.record !== record) continue;
       this.pendingCredentialRequests.delete(requestId);
       this.clearTimer(pending.timer);
+      pending.controller.abort();
+    }
+  }
+
+  private clearSecureFileRequests(record: RuntimeProcessRecord | null): void {
+    if (!record) return;
+    for (const [requestId, pending] of this.pendingSecureFileRequests) {
+      if (pending.record !== record) continue;
+      this.pendingSecureFileRequests.delete(requestId);
       pending.controller.abort();
     }
   }

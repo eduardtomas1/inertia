@@ -169,6 +169,51 @@ describe("RuntimeStore repository compatibility", () => {
     store.close();
   });
 
+  it("starts a secondary turn without stealing active selection", async () => {
+    const { store, workspacePath } = await createStore();
+    const project = store.createProject("Primary", workspacePath);
+    const primary = store.createConversation(project.id, "Primary chat");
+    const secondary = store.createConversation(
+      project.id,
+      "Secondary chat",
+      { activate: false },
+    );
+
+    store.beginAgentTurn({
+      id: "secondary-turn",
+      conversationId: secondary.id,
+      runId: "secondary-run",
+      content: "Work in the secondary pane.",
+      activateConversation: false,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "codex-local",
+      model: "provider-default",
+      modelAlias: null,
+      reasoningEffort: "",
+      interactionMode: "build",
+      accessMode: "supervised",
+      providerSessionBefore: null,
+      usageAtStart: null,
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+
+    expect(store.snapshot()).toMatchObject({
+      activeProjectId: project.id,
+      activeConversationId: primary.id,
+    });
+    expect(
+      store.conversationDetail(secondary.id)?.messages,
+    ).toEqual([
+      expect.objectContaining({
+        role: "user",
+        content: "Work in the secondary pane.",
+      }),
+    ]);
+    store.close();
+  });
+
   it("orders persisted transcript segments authoritatively and cascades project removal", async () => {
     const { store, workspacePath } = await createStore();
     const project = store.createProject("Primary", workspacePath);

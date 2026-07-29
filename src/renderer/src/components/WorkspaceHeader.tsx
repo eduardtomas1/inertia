@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Activity, ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { EnvironmentSummary } from "./EnvironmentSummary";
@@ -25,6 +26,7 @@ type WorkspaceHeaderProps = {
   environmentOpen: boolean;
   onOpenSidebar: () => void;
   onToggleTools: () => void;
+  workspaceToolsUnavailableReason?: string | null;
   onSetEnvironmentOpen: (open: boolean) => void;
   onCycleTheme: () => void;
   onOpenSettings: () => void;
@@ -60,6 +62,7 @@ export function WorkspaceHeader({
   environmentOpen,
   onOpenSidebar,
   onToggleTools,
+  workspaceToolsUnavailableReason = null,
   onSetEnvironmentOpen,
   onCycleTheme,
   onOpenSettings,
@@ -77,6 +80,7 @@ export function WorkspaceHeader({
   onToggleActivity,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | null>(null);
+  useNativePreviewSuspension(menu !== null);
   const environmentAnchorRef = useRef<HTMLDivElement>(null);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
   const eyebrow = view === "settings" ? "Personalize your workspace" : project?.name && conversation ? project.name : "Inertia";
@@ -246,7 +250,13 @@ export function WorkspaceHeader({
         </IconButton>
         <IconButton label={`Change theme (current: ${theme})`} onClick={onCycleTheme}><SunMoon size={17} /></IconButton>
         {view === "workspace" ? (
-          <IconButton label={activeTool ? "Close workspace tools" : "Open workspace tools"} aria-pressed={Boolean(activeTool)} onClick={onToggleTools} disabled={!project}>
+          <IconButton
+            label={workspaceToolsUnavailableReason
+              ?? (activeTool ? "Close workspace tools" : "Open workspace tools")}
+            aria-pressed={Boolean(activeTool)}
+            onClick={onToggleTools}
+            disabled={!project || Boolean(workspaceToolsUnavailableReason)}
+          >
             {activeTool ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
           </IconButton>
         ) : (

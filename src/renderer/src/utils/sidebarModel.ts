@@ -6,6 +6,54 @@ import {
 
 export type SidebarThreadStatus = "working" | "approval" | "input" | "failed" | "completed" | "idle";
 
+export interface ClassicSidebarSearchResult {
+  projects: Project[];
+  conversationsByProject: Map<string, Conversation[]>;
+}
+
+/**
+ * Archived chats never participate in classic search. A project-name/path
+ * match exposes its active chats, while a chat-only match exposes only the
+ * matching chats instead of every sibling in the project.
+ */
+export function classicSidebarSearch(
+  projects: readonly Project[],
+  conversations: readonly Conversation[],
+  query: string,
+): ClassicSidebarSearchResult {
+  const needle = query.trim().toLocaleLowerCase();
+  const activeByProject = new Map<string, Conversation[]>();
+  for (const conversation of conversations) {
+    if (conversation.archivedAt !== null) continue;
+    const current = activeByProject.get(conversation.projectId) ?? [];
+    current.push(conversation);
+    activeByProject.set(conversation.projectId, current);
+  }
+  for (const current of activeByProject.values()) {
+    current.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  const visibleProjects: Project[] = [];
+  const conversationsByProject = new Map<string, Conversation[]>();
+  for (const project of projects) {
+    const active = activeByProject.get(project.id) ?? [];
+    const projectMatches = !needle
+      || project.name.toLocaleLowerCase().includes(needle)
+      || project.path.toLocaleLowerCase().includes(needle);
+    const matchingConversations = needle
+      ? active.filter(({ title }) =>
+          title.toLocaleLowerCase().includes(needle))
+      : active;
+    if (!projectMatches && matchingConversations.length === 0) continue;
+    visibleProjects.push(project);
+    conversationsByProject.set(
+      project.id,
+      projectMatches ? active : matchingConversations,
+    );
+  }
+  return { projects: visibleProjects, conversationsByProject };
+}
+
 export interface SidebarThreadView {
   conversation: Conversation;
   run: WorkspaceRun | null;

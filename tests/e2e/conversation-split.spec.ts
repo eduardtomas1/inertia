@@ -91,6 +91,36 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
 
+  await primary.getByRole("button", { name: "Prompt stash" }).click();
+  await primary.getByRole("menu", { name: "Prompt stash" })
+    .getByRole("menuitem", { name: /Stash current prompt/u })
+    .click();
+  await expect(primaryMessage).toHaveValue("");
+  const secondaryStash = secondary.getByRole("button", {
+    name: "Prompt stash, 1 saved",
+  });
+  await expect(secondaryStash).toBeVisible();
+  await secondaryStash.click();
+  await secondary.getByRole("menu", { name: "Prompt stash" })
+    .getByRole("menuitem", { name: /^Draft owned by Inertia/u })
+    .click();
+  await expect(secondaryMessage).toHaveValue("Draft owned by Inertia");
+  await expect(primary.getByRole("button", {
+    name: "Prompt stash, 1 saved",
+  })).toBeVisible();
+  await primaryMessage.fill("Draft owned by Inertia");
+  await secondaryMessage.fill("Draft owned by Companion");
+
+  await secondary.getByRole("button", { name: "Send message" }).click();
+  await expect(split).toBeVisible();
+  await expect(primary).toBeVisible();
+  await expect(secondary).toBeVisible();
+  await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
+  await expect(
+    secondary.getByText("Draft owned by Companion", { exact: true }),
+  ).toBeVisible();
+  await secondaryMessage.fill("Draft owned by Companion");
+
   const primaryFiles = await openPaneTool(primary, primaryTitle, "Files");
   await expect(
     primaryFiles.getByRole("treeitem", { name: "sample.ts", exact: true }),
@@ -205,6 +235,41 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
         contents.getURL() === url)),
     [primaryPreviewUrl, secondaryPreviewUrl],
   )).toBe(true);
+  const previewStorageIsolation = await app.electronApp.evaluate(
+    async ({ BrowserWindow }, urls) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      if (!window) return null;
+      const previews = window.contentView.children
+        .map((view) => Reflect.get(view, "webContents") as
+          | {
+            getURL: () => string;
+            executeJavaScript: (code: string) => Promise<unknown>;
+          }
+          | undefined)
+        .filter((contents): contents is NonNullable<typeof contents> =>
+          Boolean(contents && urls.includes(contents.getURL())));
+      const primaryContents = previews.find(
+        (contents) => contents.getURL() === urls[0],
+      );
+      const secondaryContents = previews.find(
+        (contents) => contents.getURL() === urls[1],
+      );
+      if (!primaryContents || !secondaryContents) return null;
+      await primaryContents.executeJavaScript(`
+        localStorage.setItem("inertia-preview-isolation", "primary");
+        document.cookie = "inertia-preview-isolation=primary; path=/";
+      `);
+      return await secondaryContents.executeJavaScript(`({
+        local: localStorage.getItem("inertia-preview-isolation"),
+        cookie: document.cookie
+      })`);
+    },
+    [primaryPreviewUrl, secondaryPreviewUrl],
+  );
+  expect(previewStorageIsolation).toEqual({
+    local: null,
+    cookie: "",
+  });
 
   await app.electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({

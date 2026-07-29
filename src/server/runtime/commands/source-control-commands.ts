@@ -31,10 +31,10 @@ import {
   TurnGitArtifactError,
   type TurnGitArtifactManager,
 } from "../../turn-git-artifacts";
-import {
-  discoverWorkspaceGitRepositories,
-  resolveWorkspaceGitRepository,
-} from "../../workspace-git";
+import type { RuntimeSecureFileBroker } from "../../secure-files";
+import { repositoryRoot } from "../../git/paths";
+import { discoverWorkspaceGitRepositories } from "../../workspace-git";
+import type { SecureFileAuthorityRegistry } from "../secure-file-authorities";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import {
   defineRuntimeCommandHandler,
@@ -46,6 +46,8 @@ export interface SourceControlCommandDependencies {
   store: RuntimeStore;
   workspaceRuns: WorkspaceRunController<WebSocket>;
   turnGitArtifacts: TurnGitArtifactManager;
+  secureFiles: RuntimeSecureFileBroker;
+  secureFileAuthorities: SecureFileAuthorityRegistry;
   dataDirectory: string;
   workspacePath(projectId: string, conversationId?: string): string;
   broadcastSnapshot(): void;
@@ -79,7 +81,23 @@ export function createSourceControlCommandHandler(
         );
         let status: GitStatusSnapshot;
         try {
-          status = gitStatusSnapshot(await getRepositoryStatus(path));
+          const root = await repositoryRoot(path);
+          const secureRoot = await dependencies.secureFiles.authorizeRoot(root);
+          const inspected = await getRepositoryStatus(secureRoot.root);
+          await dependencies.secureFiles.verifyRoot(secureRoot);
+          const authorityRef =
+            await dependencies.secureFileAuthorities.issue(
+              socket,
+              "git-diff",
+              [
+                command.payload.projectId,
+                command.payload.conversationId ?? "",
+                path,
+                ".",
+              ],
+              secureRoot,
+            );
+          status = gitStatusSnapshot(inspected, authorityRef);
         } catch (error) {
           if (
             !(error instanceof GitError && error.code === "not-repository")
@@ -100,17 +118,29 @@ export function createSourceControlCommandHandler(
           command.payload.projectId,
           command.payload.conversationId,
         );
+        const secureRoot = await dependencies.secureFileAuthorities.resolve(
+          socket,
+          command.payload.authorityRef,
+          "git-diff",
+          [
+            command.payload.projectId,
+            command.payload.conversationId ?? "",
+            path,
+            ".",
+          ],
+        );
         const [diff, status] = await Promise.all([
-          getUnifiedDiff(path, {
+          getUnifiedDiff(secureRoot.root, {
             ...(
               command.payload.path
                 ? { paths: [command.payload.path] }
                 : {}
             ),
             ignoreWhitespace: command.payload.ignoreWhitespace,
-          }),
-          getRepositoryStatus(path),
+          }, undefined, dependencies.secureFiles, secureRoot),
+          getRepositoryStatus(secureRoot.root),
         ]);
+        await dependencies.secureFiles.verifyRoot(secureRoot);
         if (
           command.payload.conversationId
           && !command.payload.path
@@ -148,10 +178,41 @@ export function createSourceControlCommandHandler(
           command.payload.projectId,
           command.payload.conversationId,
         );
-        const status = await discoverWorkspaceGitRepositories(path, {
+        const secureRoots = new Map<string, Awaited<
+          ReturnType<RuntimeSecureFileBroker["authorizeRoot"]>
+        >>();
+        const discovered = await discoverWorkspaceGitRepositories(path, {
           maxRepositories: dependencies.store
             .project(command.payload.projectId).gitRepositoryLimit,
+          secureFiles: dependencies.secureFiles,
+          onRepositoryAuthorized: (repositoryPath, secureRoot) => {
+            secureRoots.set(repositoryPath, secureRoot);
+          },
         });
+        const status = {
+          ...discovered,
+          repositories: await Promise.all(
+            discovered.repositories.map(async (repository) => {
+              const secureRoot = secureRoots.get(repository.repositoryPath);
+              if (!secureRoot || repository.state !== "ready") {
+                return { ...repository, authorityRef: null };
+              }
+              const authorityRef =
+                await dependencies.secureFileAuthorities.issue(
+                  socket,
+                  "git-diff",
+                  [
+                    command.payload.projectId,
+                    command.payload.conversationId ?? "",
+                    path,
+                    repository.repositoryPath,
+                  ],
+                  secureRoot,
+                );
+              return { ...repository, authorityRef };
+            }),
+          ),
+        };
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
@@ -164,18 +225,29 @@ export function createSourceControlCommandHandler(
           command.payload.projectId,
           command.payload.conversationId,
         );
-        const repository = await resolveWorkspaceGitRepository(
-          path,
-          command.payload.repositoryPath,
+        const secureRoot = await dependencies.secureFileAuthorities.resolve(
+          socket,
+          command.payload.authorityRef,
+          "git-diff",
+          [
+            command.payload.projectId,
+            command.payload.conversationId ?? "",
+            path,
+            command.payload.repositoryPath,
+          ],
         );
-        const diff = await getUnifiedDiff(repository.root, {
-          ...(
-            command.payload.path
-              ? { paths: [command.payload.path] }
-              : {}
-          ),
-          ignoreWhitespace: command.payload.ignoreWhitespace,
-        });
+        const [diff, repositoryStatus] = await Promise.all([
+          getUnifiedDiff(secureRoot.root, {
+            ...(
+              command.payload.path
+                ? { paths: [command.payload.path] }
+                : {}
+            ),
+            ignoreWhitespace: command.payload.ignoreWhitespace,
+          }, undefined, dependencies.secureFiles, secureRoot),
+          getRepositoryStatus(secureRoot.root),
+        ]);
+        await dependencies.secureFiles.verifyRoot(secureRoot);
         const reviewMetadataChanged = Boolean(
           command.payload.conversationId
           && !diff.truncated
@@ -197,7 +269,7 @@ export function createSourceControlCommandHandler(
               reviewMetadataChanged,
               patch: diff.text,
               truncated: diff.truncated,
-              files: changedFiles(repository.status),
+              files: changedFiles(repositoryStatus),
             },
           },
         });
@@ -434,7 +506,12 @@ export function createSourceControlCommandHandler(
           ),
         );
         if (command.payload.conversationId) {
-          const current = await getUnifiedDiff(path);
+          const current = await getUnifiedDiff(
+            path,
+            {},
+            undefined,
+            dependencies.secureFiles,
+          );
           if (!current.truncated) {
             reconcileReviews(
               dependencies.store,

@@ -184,6 +184,15 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).not.toContain("turn-user-request-context");
   });
 
+  it("collapses very long requests behind an accessible disclosure", () => {
+    const html = renderRequest("Long pasted requirement. ".repeat(100));
+
+    expect(html).toContain('data-request-content="collapsible"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("Show full message");
+    expect(html).not.toContain("Long pasted requirement. ".repeat(100));
+  });
+
   it("keeps internal execution instructions outside the user request layer", () => {
     const internalInstruction = "Internal provider instructions: never attribute this to the user.";
     const html = renderRequest("Please review the provider route.", { internalInstruction });

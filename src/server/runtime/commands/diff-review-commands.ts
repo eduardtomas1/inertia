@@ -1,6 +1,9 @@
 import type WebSocket from "ws";
 
-import type { ServerEvent } from "../../../shared/contracts";
+import type {
+  DiffReversalValidation,
+  ServerEvent,
+} from "../../../shared/contracts";
 import {
   diffFileFingerprint,
   diffHunkFingerprint,
@@ -16,12 +19,14 @@ import {
   undoDiffSelection,
 } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
+import type { RuntimeSecureFileBroker } from "../../secure-files";
 import { changedFiles } from "../../runtime-snapshots";
 import {
   resolveWorkspaceGitRepository,
   workspaceGitFilePath,
 } from "../../workspace-git";
 import type { WorkspaceRunController } from "../workspace-run-controller";
+import type { SecureFileAuthorityRegistry } from "../secure-file-authorities";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -30,9 +35,59 @@ import {
 export interface DiffReviewCommandDependencies {
   store: RuntimeStore;
   workspaceRuns: WorkspaceRunController<WebSocket>;
+  secureFiles: RuntimeSecureFileBroker;
+  secureFileAuthorities: SecureFileAuthorityRegistry;
   workspacePath(projectId: string, conversationId?: string): string;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
+}
+
+function reversalApplyBinding(
+  projectId: string,
+  conversationId: string | undefined,
+  workspaceRoot: string,
+  repositoryPath: string,
+  selection: {
+    fingerprint: string;
+    filePath: string;
+    hunkId: string;
+    lineIds: readonly string[];
+    ignoreWhitespace?: boolean;
+  },
+  validation: DiffReversalValidation,
+): string[] {
+  return [
+    projectId,
+    conversationId ?? "",
+    workspaceRoot,
+    repositoryPath,
+    selection.fingerprint,
+    selection.filePath,
+    selection.hunkId,
+    JSON.stringify(selection.lineIds),
+    selection.ignoreWhitespace ? "1" : "0",
+    validation.diffFingerprint,
+    validation.fileFingerprint,
+    validation.hunkFingerprint,
+    validation.selectionFingerprint,
+    validation.gitStateFingerprint,
+  ];
+}
+
+function reversalUndoBinding(
+  projectId: string,
+  conversationId: string | undefined,
+  workspaceRoot: string,
+  repositoryPath: string,
+  operationId: string,
+): string[] {
+  return [
+    projectId,
+    conversationId ?? "",
+    workspaceRoot,
+    repositoryPath,
+    operationId,
+  ];
 }
 
 export function createDiffReviewCommandHandler(
@@ -64,22 +119,38 @@ export function createDiffReviewCommandHandler(
           command.payload.conversationId,
         );
         const repositoryPath = command.payload.repositoryPath ?? ".";
-        const repository = await resolveWorkspaceGitRepository(
-          workspaceRoot,
-          repositoryPath,
+        const secureRoot = await dependencies.secureFileAuthorities.resolve(
+          socket,
+          command.payload.authorityRef,
+          "reversal-apply",
+          reversalApplyBinding(
+            command.payload.projectId,
+            command.payload.conversationId,
+            workspaceRoot,
+            repositoryPath,
+            command.payload,
+            command.payload.expected,
+          ),
+          { consume: true },
         );
         const reversed = await dependencies.workspaceRuns.trackSourceControl(
           `Revert ${command.payload.lineIds.length} selected ${command.payload.lineIds.length === 1 ? "line" : "lines"} · ${workspaceGitFilePath(repositoryPath, command.payload.filePath)}`,
           command.payload.projectId,
           command.payload.conversationId,
-          async () => await revertDiffSelection(repository.root, {
-            fingerprint: command.payload.fingerprint,
-            filePath: command.payload.filePath,
-            hunkId: command.payload.hunkId,
-            lineIds: command.payload.lineIds,
-            expected: command.payload.expected,
-            ignoreWhitespace: command.payload.ignoreWhitespace,
-          }),
+          async () => await revertDiffSelection(
+            secureRoot.root,
+            {
+              fingerprint: command.payload.fingerprint,
+              filePath: command.payload.filePath,
+              hunkId: command.payload.hunkId,
+              lineIds: command.payload.lineIds,
+              expected: command.payload.expected,
+              ignoreWhitespace: command.payload.ignoreWhitespace,
+            },
+            dependencies.secureFiles,
+            undefined,
+            secureRoot,
+          ),
         );
         if (command.payload.comment && command.payload.conversationId) {
           dependencies.store.createMessage(
@@ -88,7 +159,20 @@ export function createDiffReviewCommandHandler(
             "system",
           );
         }
-        const status = await getRepositoryStatus(repository.root);
+        const status = await getRepositoryStatus(secureRoot.root);
+        await dependencies.secureFiles.verifyRoot(secureRoot);
+        const authorityRef = await dependencies.secureFileAuthorities.issue(
+          socket,
+          "reversal-undo",
+          reversalUndoBinding(
+            command.payload.projectId,
+            command.payload.conversationId,
+            workspaceRoot,
+            repositoryPath,
+            reversed.operation.id,
+          ),
+          secureRoot,
+        );
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
@@ -102,6 +186,7 @@ export function createDiffReviewCommandHandler(
             operation: {
               ...reversed.operation,
               repositoryPath,
+              authorityRef,
             },
           },
         });
@@ -116,18 +201,46 @@ export function createDiffReviewCommandHandler(
         const repository = await resolveWorkspaceGitRepository(
           workspaceRoot,
           command.payload.repositoryPath ?? ".",
+          dependencies.secureFiles,
         );
-        const plan = await inspectDiffSelection(repository.root, {
-          fingerprint: command.payload.fingerprint,
-          filePath: command.payload.filePath,
-          hunkId: command.payload.hunkId,
-          lineIds: command.payload.lineIds,
-          ignoreWhitespace: command.payload.ignoreWhitespace,
-        });
+        if (!repository.secureRoot) {
+          throw new RuntimeRequestError(
+            "Secure repository access is unavailable.",
+          );
+        }
+        const plan = await inspectDiffSelection(
+          repository.root,
+          {
+            fingerprint: command.payload.fingerprint,
+            filePath: command.payload.filePath,
+            hunkId: command.payload.hunkId,
+            lineIds: command.payload.lineIds,
+            ignoreWhitespace: command.payload.ignoreWhitespace,
+          },
+          dependencies.secureFiles,
+          repository.secureRoot,
+        );
+        const repositoryPath = command.payload.repositoryPath ?? ".";
+        const authorityRef = await dependencies.secureFileAuthorities.issue(
+          socket,
+          "reversal-apply",
+          reversalApplyBinding(
+            command.payload.projectId,
+            command.payload.conversationId,
+            workspaceRoot,
+            repositoryPath,
+            command.payload,
+            plan.validation,
+          ),
+          repository.secureRoot,
+        );
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
-          result: { kind: "git.reversal.plan", plan },
+          result: {
+            kind: "git.reversal.plan",
+            plan: { ...plan, authorityRef },
+          },
         });
         return "handled";
       }
@@ -146,20 +259,33 @@ export function createDiffReviewCommandHandler(
           command.payload.projectId,
           command.payload.conversationId,
         );
-        const repository = await resolveWorkspaceGitRepository(
-          workspaceRoot,
-          command.payload.repositoryPath ?? ".",
+        const repositoryPath = command.payload.repositoryPath ?? ".";
+        const secureRoot = await dependencies.secureFileAuthorities.resolve(
+          socket,
+          command.payload.authorityRef,
+          "reversal-undo",
+          reversalUndoBinding(
+            command.payload.projectId,
+            command.payload.conversationId,
+            workspaceRoot,
+            repositoryPath,
+            command.payload.operationId,
+          ),
+          { consume: true },
         );
         const diff = await dependencies.workspaceRuns.trackSourceControl(
           "Undo selective reversal",
           command.payload.projectId,
           command.payload.conversationId,
           async () => await undoDiffSelection(
-            repository.root,
+            secureRoot.root,
             command.payload.operationId,
+            dependencies.secureFiles,
+            secureRoot,
           ),
         );
-        const status = await getRepositoryStatus(repository.root);
+        const status = await getRepositoryStatus(secureRoot.root);
+        await dependencies.secureFiles.verifyRoot(secureRoot);
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
@@ -190,6 +316,8 @@ export function createDiffReviewCommandHandler(
             paths: [command.payload.path],
             ignoreWhitespace: command.payload.ignoreWhitespace,
           },
+          undefined,
+          dependencies.secureFiles,
         );
         if (current.truncated) {
           throw new RuntimeRequestError(
@@ -237,6 +365,8 @@ export function createDiffReviewCommandHandler(
             paths: [command.payload.path],
             ignoreWhitespace: command.payload.ignoreWhitespace,
           },
+          undefined,
+          dependencies.secureFiles,
         );
         if (current.truncated) {
           throw new RuntimeRequestError(

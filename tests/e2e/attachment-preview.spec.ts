@@ -242,12 +242,7 @@ test("opens secure image and Linux-style clipboard PDF previews", async ({
   expect(openedPath).toContain(join("inertia-attachments", ""));
   expect(await pdfDialog.textContent()).not.toContain(openedPath);
 
-  const pdfId = pdfSource?.split("/").at(-1);
-  const pdfTempPath = join(
-    await electronApp.evaluate(({ app: electron }) => electron.getPath("temp")),
-    "inertia-attachments",
-    `${pdfId}.pdf`,
-  );
+  const pdfTempPath = openedPath;
   const selectedBytes = await readFile(pdfTempPath);
   const replacement = Buffer.from(selectedBytes);
   replacement[replacement.length - 1] =

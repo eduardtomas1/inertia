@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
+import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import { createOpenCodeSdkHarness, readOpenCodeSdkModels } from "../../src/server/provider/opencode-sdk-harness";
 import {
   loopbackPortIsOpen,
@@ -14,7 +15,15 @@ import {
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-type LifecycleScenario = "resume" | "cancel" | "oversized" | "no-image";
+type LifecycleScenario =
+  | "resume"
+  | "cancel"
+  | "stuck-cancel"
+  | "oversized"
+  | "event-flood"
+  | "slow"
+  | "endless"
+  | "no-image";
 
 function lifecycleServerSource(root: string, capturePath: string, scenario: LifecycleScenario): string {
   return `
@@ -54,10 +63,24 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "session.idle", properties: { sessionID } });
       }, 10);
       if (scenario === "oversized") setTimeout(() => sendEvent({ type: "message.updated", properties: { sessionID, payload: "x".repeat(1024 * 1024 + 1) } }), 10);
+      if (scenario === "event-flood") setTimeout(() => {
+        for (let index = 0; index < 2050; index += 1) {
+          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant-" + index, sessionID, role: "assistant" } } });
+        }
+        sendEvent({ type: "session.idle", properties: { sessionID } });
+      }, 10);
+      if (scenario === "slow") setTimeout(() => {
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "too-late", sessionID, role: "assistant" } } });
+      }, 10_000);
+      if (scenario === "endless") setInterval(() => {
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "heartbeat", sessionID, role: "assistant" } } });
+      }, 50);
       return;
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/abort") {
+      if (scenario === "stuck-cancel") return;
       json(res, true);
+      if (scenario === "cancel") return;
       return setTimeout(() => sendEvent({ type: "session.idle", properties: { sessionID } }), 10);
     }
     return json(res, { error: "not found" }, 404);
@@ -108,6 +131,37 @@ const server = http.createServer((req, res) => {
     }
     return json(res, { error: "not found" }, 404);
   });
+});
+server.listen(port, "127.0.0.1", save);
+`;
+}
+
+function stalledMetadataServerSource(
+  capturePath: string,
+  stage: "health" | "provider",
+): string {
+  return `
+const http = require("node:http");
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const port = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
+const captured = [];
+const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
+const json = (res, value) => {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify(value));
+};
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, "http://127.0.0.1");
+  captured.push(url.pathname);
+  save();
+  if (url.pathname === "/global/health") {
+    if (${JSON.stringify(stage)} === "health") return;
+    return json(res, { healthy: true, version: "1.18.4" });
+  }
+  if (url.pathname === "/provider") return;
+  res.writeHead(404);
+  res.end();
 });
 server.listen(port, "127.0.0.1", save);
 `;
@@ -273,6 +327,69 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     expect(captured.find(({ path }) => path === "/question/question-1/reply")?.body).toEqual({ answers: [["Focused"]] });
   });
 
+  it.each([
+    {
+      stage: "health" as const,
+      message: "server health check",
+      expectedPaths: ["/global/health"],
+    },
+    {
+      stage: "provider" as const,
+      message: "provider catalog",
+      expectedPaths: ["/global/health", "/provider"],
+    },
+  ])("bounds and cleans up a stalled OpenCode metadata $stage request", async ({
+    stage,
+    message,
+    expectedPaths,
+  }) => {
+    const root = portableFixtureRoot(`OpenCode stalled metadata ${stage}`);
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      stalledMetadataServerSource(capturePath, stage),
+    );
+
+    await expect(readOpenCodeSdkModels(command, process.env, root, {
+      healthTimeoutMs: 250,
+      providerTimeoutMs: 250,
+    })).rejects.toThrow(message);
+
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      port: number;
+      captured: string[];
+    };
+    expect(capture.captured).toEqual(expect.arrayContaining(expectedPaths));
+    await waitFor(
+      `the stalled OpenCode metadata ${stage} server to close`,
+      async () => !(await loopbackPortIsOpen(capture.port)),
+    );
+  });
+
+  it("rejects model metadata when server cleanup cannot be confirmed", async () => {
+    const root = portableFixtureRoot("OpenCode unconfirmed metadata cleanup");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "resume"),
+    );
+
+    await expect(readOpenCodeSdkModels(command, process.env, root, {
+      terminateProcessTree: async (child, force) => {
+        await terminateProcessTreeAndWait(child, force);
+        return false;
+      },
+    })).rejects.toThrow(
+      "OpenCode metadata server process tree could not be confirmed stopped.",
+    );
+  });
+
   it("resumes the selected session and ignores stale-session events", async () => {
     const root = portableFixtureRoot("OpenCode resume");
     roots.push(root);
@@ -301,6 +418,45 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     expect(captured.some(({ method, path }) => method === "POST" && path === "/session")).toBe(false);
     expect(captured.some(({ method, path }) => method === "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
     expect(captured.some(({ method, path }) => method !== "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
+  });
+
+  it("does not emit completion when owned-server cleanup is unconfirmed", async () => {
+    const root = portableFixtureRoot("OpenCode unconfirmed run cleanup");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "resume"),
+    );
+    const statuses: string[] = [];
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        terminateProcessTree: async (child, force) => {
+          await terminateProcessTreeAndWait(child, force);
+          return false;
+        },
+      })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-unconfirmed-cleanup",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onStatus: ({ status }) => statuses.push(status),
+    })).resolves.toMatchObject({
+      status: "failed",
+      error: "OpenCode server process tree could not be confirmed stopped.",
+    });
+    expect(statuses).not.toContain("completed");
+    expect(statuses.at(-1)).toBe("failed");
   });
 
   it("denies one permission without aborting, then cancels the owned session and settles the turn", async () => {
@@ -342,7 +498,7 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
-  it("cancels through the owned server and leaves no listening process", async () => {
+  it("settles acknowledged cancellation only after the owned server is closed", async () => {
     const root = portableFixtureRoot("OpenCode cancellation");
     roots.push(root);
     const capturePath = join(root, "capture.json");
@@ -350,9 +506,13 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "cancel"));
     const manager = new ProviderManager(
       { commands: { opencode: command }, cancelGraceMs: 500 },
-      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 5_000,
+        eventInactivityDeadlineMs: 5_000,
+      })]),
     );
     let markRunning!: () => void;
+    let promptWasAcceptedWhenRunning = false;
     const running = new Promise<void>((resolve) => { markRunning = resolve; });
     const result = manager.run(nativeProviderRunInput({
       providerId: "opencode",
@@ -361,9 +521,23 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       prompt: "Wait",
       interactionMode: "build",
       access: "supervised",
-    }), { onStatus: ({ status }) => { if (status === "running") markRunning(); } });
+    }), {
+      onStatus: ({ status }) => {
+        if (status !== "running") return;
+        try {
+          const value = JSON.parse(readFileSync(capturePath, "utf8")) as {
+            captured: Array<{ path: string }>;
+          };
+          promptWasAcceptedWhenRunning = value.captured.some(({ path }) => path.endsWith("/prompt_async"));
+        } catch {
+          promptWasAcceptedWhenRunning = false;
+        }
+        markRunning();
+      },
+    });
 
     await running;
+    expect(promptWasAcceptedWhenRunning).toBe(true);
     expect(manager.cancel("opencode-cancel")).toBe(true);
     await expect(result).resolves.toMatchObject({ status: "cancelled" });
     await waitFor("the OpenCode abort request", () => {
@@ -372,8 +546,128 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
         return value.captured.some(({ path }) => path.endsWith("/abort"));
       } catch { return false; }
     });
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      port: number;
+      captured: Array<{ path: string }>;
+    };
+    const promptIndex = capture.captured.findIndex(({ path }) => path.endsWith("/prompt_async"));
+    const abortIndex = capture.captured.findIndex(({ path }) => path.endsWith("/abort"));
+    expect(promptIndex).toBeGreaterThanOrEqual(0);
+    expect(abortIndex).toBeGreaterThan(promptIndex);
+    await waitFor(
+      "the cancelled OpenCode server port to close",
+      async () => !(await loopbackPortIsOpen(capture.port)),
+    );
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("forces bounded cleanup when OpenCode never acknowledges cancellation", async () => {
+    const root = portableFixtureRoot("OpenCode stuck cancellation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "stuck-cancel"));
+    const manager = new ProviderManager(
+      { commands: { opencode: command }, cancelGraceMs: 500 },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    let markRunning!: () => void;
+    const running = new Promise<void>((resolve) => { markRunning = resolve; });
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-stuck-cancel",
+      cwd: root,
+      prompt: "Wait",
+      interactionMode: "build",
+      access: "supervised",
+    }), { onStatus: ({ status }) => { if (status === "running") markRunning(); } });
+
+    await running;
+    expect(manager.cancel("opencode-stuck-cancel")).toBe(true);
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
     const capture = JSON.parse(readFileSync(capturePath, "utf8")) as { port: number };
-    await waitFor("the OpenCode child socket to close", async () => !(await loopbackPortIsOpen(capture.port)));
+    await waitFor(
+      "the unresponsive OpenCode server port to close",
+      async () => !(await loopbackPortIsOpen(capture.port)),
+    );
+    expect(manager.activeConversationIds()).toEqual([]);
+  }, 10_000);
+
+  it("fails and cleans up a slow event stream at the inactivity deadline", async () => {
+    const root = portableFixtureRoot("OpenCode inactive stream");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "slow"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 3_000,
+        eventInactivityDeadlineMs: 300,
+      })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-inactive",
+      cwd: root,
+      prompt: "Wait forever",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("event stream became inactive"),
+    });
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      port: number;
+    };
+    await waitFor(
+      "the inactive OpenCode server to close",
+      async () => !(await loopbackPortIsOpen(capture.port)),
+    );
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("fails and cleans up an active endless stream at the absolute run deadline", async () => {
+    const root = portableFixtureRoot("OpenCode endless stream");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "endless"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 5_000,
+        eventInactivityDeadlineMs: 10_000,
+      })]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-endless",
+      cwd: root,
+      prompt: "Stay active forever",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("maximum run duration"),
+    });
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      port: number;
+    };
+    await waitFor(
+      "the overlong OpenCode server to close",
+      async () => !(await loopbackPortIsOpen(capture.port)),
+    );
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
@@ -416,6 +710,42 @@ server.listen(port, "127.0.0.1", () => console.log("opencode server listening on
       access: "supervised",
       imagePaths: [imagePath],
     }))).resolves.toMatchObject({ status: "failed", error: expect.stringContaining("image input support") });
+  });
+
+  it("fails and cleans up a run that exceeds its aggregate event state budget", async () => {
+    const root = portableFixtureRoot("OpenCode event flood");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      lifecycleServerSource(root, capturePath, "event-flood"),
+    );
+    const manager = new ProviderManager(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-event-flood",
+      cwd: root,
+      prompt: "Start",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("bounded message budget"),
+    });
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      port: number;
+    };
+    await waitFor(
+      "the over-budget OpenCode server to close",
+      async () => !(await loopbackPortIsOpen(capture.port)),
+    );
+    expect(manager.activeConversationIds()).toEqual([]);
   });
 
   it("settles missing and early-exit startup failures", async () => {

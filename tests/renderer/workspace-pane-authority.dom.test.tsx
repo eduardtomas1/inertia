@@ -11,6 +11,7 @@ import type {
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import { useActivityActions } from "../../src/renderer/src/hooks/useActivityActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
+import { openWorkspaceEntry } from "../../src/renderer/src/hooks/useWorkspaceTools";
 import {
   useWorkspaceFiles,
 } from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceFiles";
@@ -95,6 +96,95 @@ const betaChat = conversation(
 );
 
 describe("workspace pane authority", () => {
+  it("routes actual directories to reveal and files to the internal preview", async () => {
+    const openDirectory = vi.fn(async () => undefined);
+    const openFile = vi.fn();
+    const inspectDirectory = vi.fn(async (path: string) => {
+      if (path === "README") throw new Error("not a directory");
+    });
+
+    await expect(openWorkspaceEntry("docs", {
+      inspectDirectory,
+      openDirectory,
+      openFile,
+    })).resolves.toBe("directory");
+    await expect(openWorkspaceEntry("README", {
+      inspectDirectory,
+      openDirectory,
+      openFile,
+    })).resolves.toBe("file");
+
+    expect(openDirectory).toHaveBeenCalledWith("docs");
+    expect(openFile).toHaveBeenCalledWith("README");
+  });
+
+  it("opens literal colon filenames before retrying a Codex source location", async () => {
+    const requests: string[] = [];
+    let literalExists = true;
+    const request = vi.fn((
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "project.actions") {
+        return Promise.resolve(result({
+          kind: "project.actions",
+          actions: [],
+        }));
+      }
+      if (command.type !== "workspace.file.read") {
+        return Promise.reject(new Error("Unexpected command"));
+      }
+      requests.push(command.payload.path);
+      if (
+        command.payload.path === "src/example.ts:42:7"
+        && !literalExists
+      ) {
+        return Promise.reject(new Error("File not found"));
+      }
+      const path = command.payload.path;
+      return Promise.resolve(result({
+        kind: "workspace.file",
+        file: {
+          path,
+          content: "export const value = 1;\n",
+          truncated: false,
+          language: "ts",
+          contentDigest: "a".repeat(64),
+          modifiedAt: "2026-07-29T10:00:00.000Z",
+        },
+      }));
+    });
+    const hook = renderHook(() => useWorkspaceFiles({
+      project: alpha,
+      conversation: alphaChat,
+      enabled: true,
+      loadOnMount: false,
+      online: true,
+      request,
+      setActionError: vi.fn(),
+    }));
+
+    act(() =>
+      hook.result.current.selectWorkspaceFile("src/example.ts:42:7"));
+    await waitFor(() => {
+      expect(hook.result.current.filePreview?.path)
+        .toBe("src/example.ts:42:7");
+    });
+    expect(requests).toEqual(["src/example.ts:42:7"]);
+
+    literalExists = false;
+    requests.length = 0;
+    act(() =>
+      hook.result.current.selectWorkspaceFile("src/example.ts:42:7"));
+    await waitFor(() => {
+      expect(hook.result.current.filePreview?.path).toBe("src/example.ts");
+    });
+    expect(requests).toEqual([
+      "src/example.ts:42:7",
+      "src/example.ts",
+    ]);
+    expect(hook.result.current.selectedFile).toBe("src/example.ts");
+  });
+
   it("does not let delayed project actions replace the new owner's actions", async () => {
     let settleAlpha: ((event: ServerEvent) => void) | null = null;
     const alphaAction: ProjectAction = {
@@ -153,6 +243,119 @@ describe("workspace pane authority", () => {
     expect(hook.result.current.projectActions).toEqual([betaAction]);
   });
 
+  it("preserves an agent-selected file when opening the Files tool loads its tree", async () => {
+    let settlePreview: ((event: ServerEvent) => void) | null = null;
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "project.actions") {
+        return Promise.resolve(result({
+          kind: "project.actions",
+          actions: [],
+        }));
+      }
+      if (command.type === "workspace.entries") {
+        return Promise.resolve(result({
+          kind: "workspace.entries",
+          directory: "",
+          entries: [{ path: "src", kind: "directory" }],
+          truncated: false,
+        }));
+      }
+      if (command.type === "workspace.file.read") {
+        return new Promise((resolve) => {
+          settlePreview = resolve;
+        });
+      }
+      return Promise.reject(new Error("Unexpected command"));
+    });
+    const hook = renderHook(
+      ({ loadOnMount }: { loadOnMount: boolean }) => useWorkspaceFiles({
+        project: alpha,
+        conversation: alphaChat,
+        enabled: true,
+        loadOnMount,
+        online: true,
+        request,
+        setActionError: vi.fn(),
+      }),
+      { initialProps: { loadOnMount: false } },
+    );
+
+    act(() => hook.result.current.selectWorkspaceFile("src/example.ts"));
+    hook.rerender({ loadOnMount: true });
+    await waitFor(() => {
+      expect(hook.result.current.workspaceEntries).toEqual([
+        { path: "src", kind: "directory" },
+      ]);
+    });
+    await act(async () => {
+      settlePreview?.(result({
+        kind: "workspace.file",
+        file: {
+          path: "src/example.ts",
+          content: "export const value = 1;\n",
+          truncated: false,
+          language: "ts",
+          contentDigest: "a".repeat(64),
+          modifiedAt: "2026-07-29T10:00:00.000Z",
+        },
+      }));
+      await Promise.resolve();
+    });
+
+    expect(hook.result.current.selectedFile).toBe("src/example.ts");
+    expect(hook.result.current.filePreview?.path).toBe("src/example.ts");
+  });
+
+  it("does not reload and collapse the Files tree when reopening the same pane", async () => {
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "project.actions") {
+        return Promise.resolve(result({
+          kind: "project.actions",
+          actions: [],
+        }));
+      }
+      if (command.type === "workspace.entries") {
+        return Promise.resolve(result({
+          kind: "workspace.entries",
+          directory: "",
+          entries: [{ path: "src", kind: "directory" }],
+          truncated: false,
+        }));
+      }
+      return Promise.reject(new Error("Unexpected command"));
+    });
+    const hook = renderHook(
+      ({ loadOnMount }: { loadOnMount: boolean }) => useWorkspaceFiles({
+        project: alpha,
+        conversation: alphaChat,
+        enabled: true,
+        loadOnMount,
+        online: true,
+        request,
+        setActionError: vi.fn(),
+      }),
+      { initialProps: { loadOnMount: true } },
+    );
+
+    await waitFor(() => {
+      expect(request.mock.calls.filter(
+        ([command]) => command.type === "workspace.entries",
+      )).toHaveLength(1);
+    });
+    hook.rerender({ loadOnMount: false });
+    hook.rerender({ loadOnMount: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(
+      ([command]) => command.type === "workspace.entries",
+    )).toHaveLength(1);
+    expect(hook.result.current.workspaceEntries).toEqual([
+      { path: "src", kind: "directory" },
+    ]);
+  });
+
   it("discards a delayed Git refresh after the pane changes owner", async () => {
     const alphaResolvers: Array<(event: ServerEvent) => void> = [];
     const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
@@ -171,6 +374,7 @@ describe("workspace pane authority", () => {
           kind: "git.status",
           status: {
             isRepository: true,
+            authorityRef: "66666666-6666-4666-8666-666666666666",
             root: "/beta",
             branch: "main",
             upstream: null,
@@ -303,6 +507,7 @@ describe("workspace pane authority", () => {
     };
     const operation = {
       id: "55555555-5555-4555-8555-555555555555",
+      authorityRef: "77777777-7777-4777-8777-777777777777",
       repositoryPath: ".",
       filePath: file.path,
       selectedLineCount: 1,
@@ -319,6 +524,7 @@ describe("workspace pane authority", () => {
         return Promise.resolve(result({
           kind: "git.reversal.plan",
           plan: {
+            authorityRef: "66666666-6666-4666-8666-666666666666",
             filePath: file.path,
             hunkId: hunk.id,
             hunkHeader: hunk.header,
@@ -406,6 +612,7 @@ describe("workspace pane authority", () => {
           conversationId: alphaChat.id,
           repositoryPath: ".",
           operationId: operation.id,
+          authorityRef: operation.authorityRef,
         },
       });
     });

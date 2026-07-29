@@ -13,32 +13,25 @@ export type WorkspaceTreeKeyboardAction =
   | { type: "open"; path: string }
   | { type: "none" };
 
-function slashPath(path: string): string {
-  return path.replaceAll("\\", "/");
-}
-
 export function isSafeWorkspaceEntryPath(path: string): boolean {
   if (
     typeof path !== "string"
     || path.length === 0
     || path.length > 4_096
     || /[\0\r\n]/u.test(path)
-    || /^[\\/]/u.test(path)
-    || /^[A-Za-z]:/u.test(path)
+    || path.startsWith("/")
   ) return false;
-  const segments = path.split(/[\\/]/u);
+  const segments = path.split("/");
   return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
 }
 
 export function workspacePathName(path: string): string {
-  const normalized = slashPath(path);
-  return normalized.slice(normalized.lastIndexOf("/") + 1);
+  return path.slice(path.lastIndexOf("/") + 1);
 }
 
 export function workspaceParentPath(path: string): string {
-  const normalized = slashPath(path);
-  const separator = normalized.lastIndexOf("/");
-  return separator < 0 ? "" : normalized.slice(0, separator);
+  const separator = path.lastIndexOf("/");
+  return separator < 0 ? "" : path.slice(0, separator);
 }
 
 function compareText(left: string, right: string): number {

@@ -1,4 +1,10 @@
-import { mkdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -6,21 +12,37 @@ import { providerEnvironment } from "../../src/server/environment";
 import { AgentHarnessRegistry, detectProvider, ProviderManager, type ProviderId } from "../../src/server/providers";
 import { providerFailureMessage } from "../../src/server/provider/adapters";
 import { createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
+import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
   portableFixtureRoot,
   portableNodeExecutable,
   removePortableFixture,
+  waitFor,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-const MUTATED_ENVIRONMENT_KEYS = ["HOME", "PATH", "SHELL", "ZDOTDIR", "INERTIA_CAPTURE_PATH", "INERTIA_DISCOVERY_MARKER"] as const;
+const MUTATED_ENVIRONMENT_KEYS = [
+  "CODEX_HOME",
+  "HOME",
+  "PATH",
+  "SHELL",
+  "ZDOTDIR",
+] as const;
 
 describe.sequential("provider runtime", () => {
   const roots: string[] = [];
+  const descendantPids: number[] = [];
   const originalEnvironment = Object.fromEntries(MUTATED_ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]));
 
   afterEach(async () => {
+    for (const pid of descendantPids.splice(0)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // The process-tree cleanup under test may already have removed it.
+      }
+    }
     for (const key of MUTATED_ENVIRONMENT_KEYS) {
       const value = originalEnvironment[key];
       if (value === undefined) delete process.env[key];
@@ -41,6 +63,38 @@ describe.sequential("provider runtime", () => {
       command: portableNodeExecutable(root, name),
       program: writeNodeSubcommand(root, `${name}-fixture`, source),
     };
+  }
+
+  function nodeCommand(root: string, name: string, source: string): string {
+    const program = writeNodeSubcommand(root, `${name}.cjs`, source);
+    if (process.platform === "win32") {
+      const command = join(root, `${name}.cmd`);
+      writeFileSync(
+        command,
+        `@"${process.execPath}" "${program}" %*\r\n`,
+        "utf8",
+      );
+      return command;
+    }
+    const command = join(root, name);
+    const shellLiteral = (value: string): string =>
+      `'${value.replaceAll("'", "'\"'\"'")}'`;
+    writeFileSync(
+      command,
+      `#!/bin/sh\nexec ${shellLiteral(process.execPath)} ${shellLiteral(program)} "$@"\n`,
+      "utf8",
+    );
+    chmodSync(command, 0o700);
+    return command;
+  }
+
+  function processExists(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function codexExecutable(
@@ -70,9 +124,12 @@ if (args[0] === "--help") {
 if (args.length === 0) {
   const messages = [];
   const capture = (message) => {
-    if (!process.env.INERTIA_CAPTURE_PATH) return;
+    if (!process.env.HOME) return;
     messages.push(message);
-    fs.writeFileSync(process.env.INERTIA_CAPTURE_PATH, JSON.stringify({ args: ["app-server", ...args], messages }));
+    fs.writeFileSync(
+      require("node:path").join(process.env.HOME, "invocation.json"),
+      JSON.stringify({ args: ["app-server", ...args], messages }),
+    );
   };
   const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
   let threadId = "11111111-1111-4111-8111-111111111111";
@@ -91,7 +148,7 @@ if (args.length === 0) {
     if (message.method === "turn/start") {
       send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
       send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
-      ${options.stayAlive ? "return;" : `const text = ${JSON.stringify(result)} + (process.env.INERTIA_DISCOVERY_MARKER ? ":" + process.env.INERTIA_DISCOVERY_MARKER : "");
+      ${options.stayAlive ? "return;" : `const text = ${JSON.stringify(result)} + (process.env.CODEX_HOME ? ":" + process.env.CODEX_HOME : "");
       send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: text } });
       return send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });`}
     }
@@ -198,15 +255,14 @@ process.exit(2);
     process.env.HOME = root;
     process.env.ZDOTDIR = root;
     process.env.PATH = path;
-    process.env.INERTIA_CAPTURE_PATH = capturePath;
-    process.env.INERTIA_DISCOVERY_MARKER = "from-discovery";
+    process.env.CODEX_HOME = "from-discovery";
 
     const manager = new ProviderManager({ commands: { codex: "codex" } });
     const detection = await manager.detect("codex", { cwd: root, refreshEnvironment: true });
     expect(detection).toMatchObject({ available: true, version: process.version, executable: realpathSync.native(selectedCommand), authState: "authenticated" });
 
     process.env.PATH = root;
-    process.env.INERTIA_DISCOVERY_MARKER = "after-discovery";
+    process.env.CODEX_HOME = "after-discovery";
     const result = await manager.run(nativeProviderRunInput({
       providerId: "codex",
       conversationId: "resume-conversation",
@@ -253,6 +309,97 @@ process.exit(2);
     expect(detection).toMatchObject({ available: false, installState: "not-installed", authState: "unknown", canRun: false });
     expect(detection.executable).toBeUndefined();
     expect(detection.statusMessage).toBe("Codex CLI not found");
+  });
+
+  it("removes descendants from a timed-out provider discovery probe", async () => {
+    const root = temporaryRoot();
+    const childPidPath = join(root, "discovery-child.pid");
+    const command = nodeCommand(root, "hanging-codex", `
+const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+const descendant = spawn(
+  process.execPath,
+  ["-e", "setInterval(() => {}, 1000)"],
+  { stdio: "ignore" },
+);
+fs.writeFileSync(${JSON.stringify(childPidPath)}, String(descendant.pid));
+setInterval(() => {}, 1000);
+`);
+
+    await expect(detectProvider("codex", {
+      command,
+      cwd: root,
+      refreshEnvironment: true,
+      timeoutMs: 250,
+    })).resolves.toMatchObject({
+      available: false,
+      installState: "error",
+      canRun: false,
+    });
+
+    const descendantPid = Number(readFileSync(childPidPath, "utf8"));
+    descendantPids.push(descendantPid);
+    expect(Number.isSafeInteger(descendantPid)).toBe(true);
+    await waitFor(
+      "the discovery descendant to stop",
+      () => !processExists(descendantPid),
+    );
+  });
+
+  it("reports an unconfirmed timed-out discovery cleanup instead of readiness", async () => {
+    const root = temporaryRoot();
+    const command = nodeCommand(
+      root,
+      "unconfirmed-codex",
+      "setInterval(() => {}, 1000);",
+    );
+
+    await expect(detectProvider("codex", {
+      command,
+      cwd: root,
+      refreshEnvironment: true,
+      timeoutMs: 250,
+    }, {
+      terminateProcessTree: async (child, force) => {
+        await terminateProcessTreeAndWait(child, force);
+        return false;
+      },
+    })).resolves.toMatchObject({
+      available: false,
+      installState: "error",
+      canRun: false,
+      statusMessage: "Codex probe timed out, and its process tree could not be confirmed stopped",
+    });
+  });
+
+  it("does not report readiness after unconfirmed auth-probe cleanup", async () => {
+    const root = temporaryRoot();
+    const command = join(root, "codex");
+
+    await expect(detectProvider("codex", { command, cwd: root }, {
+      executableCandidates: async () => [command],
+      probeProcess: async (_executable, args) => args[0] === "login"
+        ? {
+            started: true,
+            timedOut: true,
+            exitCode: null,
+            output: "",
+            cleanupConfirmed: false,
+          }
+        : {
+            started: true,
+            timedOut: false,
+            exitCode: 0,
+            output: args[0] === "--version"
+              ? "codex 1.2.3"
+              : "codex app-server - Run the app server",
+          },
+    })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      canRun: false,
+      statusMessage: "Codex connection probe timed out, and its process tree could not be confirmed stopped",
+    });
   });
 
   it("reports a candidate with a failing version probe as an installation error", async () => {
@@ -388,17 +535,24 @@ process.exit(2);
   it("requests real partial messages from Claude without duplicating the final assistant event", async () => {
     const root = temporaryRoot();
     const capturePath = join(root, "claude-invocation.json");
-    process.env.INERTIA_CAPTURE_PATH = capturePath;
     const { command, program } = nodeProgram(root, "fake-claude", `
 const fs = require("node:fs");
-fs.writeFileSync(process.env.INERTIA_CAPTURE_PATH, JSON.stringify(process.argv.slice(2)));
+fs.writeFileSync(process.env.INERTIA_TEST_CAPTURE_PATH, JSON.stringify(process.argv.slice(2)));
 console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { text: "Partial " } } }));
 console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { text: "reply" } } }));
 console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Partial reply" }] } }));
 console.log(JSON.stringify({ type: "result", is_error: false }));
 `);
     const manager = new ProviderManager(
-      { commands: { claude: command } },
+      {
+        commands: { claude: command },
+        resolveBackendLaunchOptions: (_input, environment) => ({
+          environment: {
+            ...environment,
+            INERTIA_TEST_CAPTURE_PATH: capturePath,
+          },
+        }),
+      },
       new AgentHarnessRegistry([createCliAgentHarness("claude", { prefixArgs: [program] })]),
     );
 

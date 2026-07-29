@@ -193,6 +193,7 @@ export class TurnLedgerRepository {
         input.attachments ?? [],
         null,
         input.requestedAt,
+        { activateConversation: input.activateConversation },
       );
       const turn = this.create({
         ...input,

@@ -84,6 +84,11 @@ import {
   TrustedAttachmentResolver,
   type RuntimeAttachmentBroker,
 } from "./runtime/attachments/trusted-attachment-resolver";
+import {
+  SecureFileError,
+  type RuntimeSecureFileBroker,
+} from "./secure-files";
+import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 
 export {
   assembleReadOnlyReviewRequest,
@@ -104,6 +109,8 @@ export interface RuntimeOptions {
   attachments?: RuntimeAttachmentBroker;
   /** Test and embedding seam; the desktop runtime uses the default registry. */
   agentHarnessRegistry?: AgentHarnessRegistry;
+  /** Main-owned root-relative file broker for untrusted workspace paths. */
+  secureFiles?: RuntimeSecureFileBroker;
 }
 
 export interface RuntimeBackendCredentialBroker {
@@ -128,6 +135,33 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     options.defaultWorkspacePath,
     { recoverInterruptedRuns: false },
   );
+  const secureFiles: RuntimeSecureFileBroker = options.secureFiles ?? {
+    authorizeRoot: async () => {
+      throw new SecureFileError(
+        "unavailable",
+        "Secure workspace file access is unavailable.",
+      );
+    },
+    verifyRoot: async () => {
+      throw new SecureFileError(
+        "unavailable",
+        "Secure workspace file access is unavailable.",
+      );
+    },
+    read: async () => {
+      throw new SecureFileError(
+        "unavailable",
+        "Secure workspace file access is unavailable.",
+      );
+    },
+    replace: async () => {
+      throw new SecureFileError(
+        "unavailable",
+        "Secure workspace file access is unavailable.",
+      );
+    },
+  };
+  const secureFileAuthorities = new SecureFileAuthorityRegistry(secureFiles);
   const recovery = recoverInterruptedTurns(store);
   if (options.attachments && recovery.recoveredAttachmentIds.length > 0) {
     void Promise.allSettled(recovery.recoveredAttachmentIds.map(
@@ -464,6 +498,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         store,
         workspaceRuns,
         turnGitArtifacts,
+        secureFiles,
+        secureFileAuthorities,
         dataDirectory,
         workspacePath,
         broadcastSnapshot,
@@ -472,6 +508,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createDiffReviewCommandHandler({
         store,
         workspaceRuns,
+        secureFiles,
+        secureFileAuthorities,
         workspacePath,
         broadcastSnapshot,
         send,
@@ -480,6 +518,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         store,
         turns,
         isolatedRuns,
+        secureFiles,
         dataDirectory,
         enableProviders,
         reviewSummaryTimeoutMs: options.reviewSummaryTimeoutMs,
@@ -501,6 +540,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         store,
         workspaceRuns,
         terminals,
+        secureFiles,
+        secureFileAuthorities,
         workspacePath,
         rememberDeletedConversation,
         broadcastSnapshot,
@@ -523,6 +564,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     approvals: () => pendingApprovals.values(),
     inputs: () => pendingInputs.values(),
     plans: () => agentPlans.values(),
+    onDisconnect: (socket) => secureFileAuthorities.clearOwner(socket),
   });
 
   server.on("error", () => { /* Listen errors are surfaced below; later socket errors are isolated. */ });
@@ -564,6 +606,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
       closed = true;
+      secureFileAuthorities.clear();
       terminals.disposeAll();
       await providerMaintenance.dispose();
       await isolatedRuns.dispose(cause);

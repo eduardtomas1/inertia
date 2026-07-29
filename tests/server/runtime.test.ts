@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -24,6 +33,7 @@ import {
 import { RuntimeStore } from "../../src/server/database";
 import { getUnifiedDiff } from "../../src/server/git";
 import { portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
+import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 
 class EventQueue {
   private readonly events: ServerEvent[] = [];
@@ -463,15 +473,22 @@ process.exit(child.status ?? 1);
       requestId: projectRequestId,
       payload: { name: "Inertia", path: workspace },
     });
-    await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-        event.type === "request.ok" && event.requestId === projectRequestId,
-    );
     const projectSnapshot = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> => event.type === "snapshot.updated",
     );
+    const projectCreated = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === projectRequestId
+        && event.result.kind === "project.created",
+    );
     const project = projectSnapshot.snapshot.projects.find(({ name }) => name === "Inertia");
     expect(project?.path).toBe(workspace);
+    expect(
+      projectCreated.result.kind === "project.created"
+        ? projectCreated.result.projectId
+        : null,
+    ).toBe(project?.id);
 
     const conversationRequestId = randomUUID();
     send(client.socket, {
@@ -619,13 +636,15 @@ process.exit(child.status ?? 1);
       payload: { name: "Second project", path: secondWorkspace },
     });
     await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-        event.type === "request.ok" && event.requestId === projectRequestId,
-    );
-    await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"
         && event.snapshot.projects.some(({ name }) => name === "Second project"),
+    );
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === projectRequestId
+        && event.result.kind === "project.created",
     );
 
     const directSelectRequestId = randomUUID();
@@ -1395,6 +1414,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: false,
+      secureFiles: new SecureFileTestBroker(),
     });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
@@ -1404,6 +1424,27 @@ process.exit(child.status ?? 1);
     );
     const projectId = welcome.snapshot.activeProjectId!;
     const conversationId = welcome.snapshot.activeConversationId!;
+    const workspaceRefreshRequestId = randomUUID();
+    send(client.socket, {
+      type: "git.workspace.refresh",
+      requestId: workspaceRefreshRequestId,
+      payload: { projectId, conversationId },
+    });
+    const workspaceRefresh = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === workspaceRefreshRequestId
+        && event.result.kind === "git.workspace.status",
+    );
+    if (workspaceRefresh.result.kind !== "git.workspace.status") {
+      throw new Error("Expected a workspace repository refresh.");
+    }
+    const repositoryAuthority = workspaceRefresh.result.status.repositories
+      .find((candidate) => candidate.repositoryPath === repositoryPath)
+      ?.authorityRef;
+    if (!repositoryAuthority) {
+      throw new Error("Expected a nested repository authority.");
+    }
     const diff = parseUnifiedDiff((await getUnifiedDiff(nested, {
       paths: ["review.ts"],
     })).text);
@@ -1477,6 +1518,7 @@ process.exit(child.status ?? 1);
       payload: {
         projectId,
         conversationId,
+        authorityRef: repositoryAuthority,
         repositoryPath,
         path: file.path,
       },
@@ -1530,6 +1572,7 @@ process.exit(child.status ?? 1);
         filePath: file.path,
         hunkId: hunk.id,
         lineIds,
+        authorityRef: inspected.result.plan.authorityRef,
         expected: inspected.result.plan.validation,
       },
     });
@@ -1554,6 +1597,7 @@ process.exit(child.status ?? 1);
       payload: {
         projectId,
         conversationId,
+        authorityRef: repositoryAuthority,
         repositoryPath,
         path: file.path,
       },
@@ -1597,6 +1641,7 @@ process.exit(child.status ?? 1);
         conversationId,
         repositoryPath,
         operationId: reverted.result.operation.id,
+        authorityRef: reverted.result.operation.authorityRef,
       },
     });
     await client.events.next(

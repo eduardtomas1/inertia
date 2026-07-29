@@ -25,6 +25,7 @@ export const gitCommandSchemas = [
       payload: z
         .object({
           ...projectWithOptionalConversation,
+          authorityRef: z.string().uuid(),
           path: z.string().max(512).optional(),
           ignoreWhitespace: z.boolean().optional(),
         })
@@ -45,6 +46,7 @@ export const gitCommandSchemas = [
       payload: z
         .object({
           ...projectWithOptionalConversation,
+          authorityRef: z.string().uuid(),
           repositoryPath: z.string().min(1).max(4096),
           path: z.string().min(1).max(4096).optional(),
           ignoreWhitespace: z.boolean().optional(),
@@ -103,6 +105,7 @@ export const gitCommandSchemas = [
         filePath: z.string().min(1).max(4096),
         hunkId: z.string().min(1).max(128),
         lineIds: z.array(z.string().min(1).max(160)).min(1).max(500),
+        authorityRef: z.string().uuid(),
         expected: z.object({
           diffFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
           fileFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -123,6 +126,7 @@ export const gitCommandSchemas = [
         ...projectWithOptionalConversation,
         repositoryPath: z.string().min(1).max(4096).optional(),
         operationId: z.string().uuid(),
+        authorityRef: z.string().uuid(),
       }).strict(),
     })
     .strict(),

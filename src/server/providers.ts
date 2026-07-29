@@ -18,7 +18,10 @@ import {
   type ModelBackendProfile,
   type ModelSelection,
 } from "../shared/model-routing";
-import { providerEnvironment } from "./environment";
+import {
+  providerChildEnvironment,
+  providerEnvironment,
+} from "./environment";
 import { validateProviderRunInput } from "./provider/adapters";
 import {
   AgentHarnessRegistry,
@@ -315,11 +318,19 @@ export class ProviderManager {
     if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name} CLI is not installed.`);
     const environment = await providerEnvironment();
     this.processEnvironment = environment.env;
-    const invocation = providerProcessInvocation(executable, providerAuthLoginArgs(providerId), environment.env);
+    const childEnvironment = providerChildEnvironment(
+      providerId,
+      environment.env,
+    );
+    const invocation = providerProcessInvocation(
+      executable,
+      providerAuthLoginArgs(providerId),
+      childEnvironment,
+    );
     return {
       executable: invocation.command,
       args: providerPtyArguments(invocation),
-      env: environment.env,
+      env: childEnvironment,
     };
   }
 
@@ -349,7 +360,13 @@ export class ProviderManager {
     if (!executable) return this.metadataCache.current(providerId);
     const environment = await providerEnvironment();
     this.processEnvironment = environment.env;
-    return await this.metadataCache.metadata(providerId, executable, environment.env, cwd, options);
+    return await this.metadataCache.metadata(
+      providerId,
+      executable,
+      providerChildEnvironment(providerId, environment.env),
+      cwd,
+      options,
+    );
   }
 
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks = {}): Promise<ProviderRunResult> {
@@ -401,7 +418,10 @@ export class ProviderManager {
       turnId,
     );
     const harness = this.harnessRegistry.resolve(input);
-    const baseEnvironment = { ...(this.processEnvironment ?? process.env) };
+    const baseEnvironment = providerChildEnvironment(
+      providerId,
+      this.processEnvironment ?? process.env,
+    );
     let launchOptions: ProviderBackendLaunchOptions = {
       environment: baseEnvironment,
     };
@@ -641,7 +661,7 @@ export class ProviderManager {
    */
   async stopOwned(
     conversationId: string,
-    identity: { runId: string; turnId: string },
+    identity: { runId: string; turnId: string | null },
     graceMs = this.cancelGraceMs,
   ): Promise<OwnedProviderStopResult> {
     const active = this.activeRuns.get(conversationId);
@@ -673,8 +693,11 @@ export class ProviderManager {
 
   async disposeAll(): Promise<void> {
     const active = [...this.activeRuns.entries()];
-    for (const [conversationId] of active) this.cancel(conversationId);
-    await Promise.allSettled(active.map(([, run]) => run.result));
+    await Promise.allSettled(active.map(([conversationId, run]) =>
+      this.stopOwned(
+        conversationId,
+        { runId: run.runId, turnId: run.turnId },
+      )));
   }
 
   respondToApproval(

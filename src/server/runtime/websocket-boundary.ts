@@ -9,6 +9,7 @@ import type {
   AppSnapshot,
   ClientCommand,
 } from "../../shared/contracts";
+import { RUNTIME_WEBSOCKET_MAX_PAYLOAD_BYTES } from "../../shared/runtime-websocket";
 import type { TerminalManager } from "../terminal";
 import {
   isAllowedRuntimeOrigin,
@@ -21,7 +22,7 @@ import type { IsolatedRunController } from "./reviews/isolated-run-controller";
 import type { RuntimeSyncHub } from "./runtime-sync-hub";
 
 export const RUNTIME_WEBSOCKET_LIMITS = {
-  maxPayloadBytes: 256 * 1024,
+  maxPayloadBytes: RUNTIME_WEBSOCKET_MAX_PAYLOAD_BYTES,
   maxClients: 16,
   maxInFlightCommands: 32,
 } as const;
@@ -40,6 +41,7 @@ export interface RuntimeWebSocketBoundaryOptions {
   approvals(): Iterable<AgentApprovalRequest>;
   inputs(): Iterable<AgentInputRequest>;
   plans(): Iterable<AgentPlan>;
+  onDisconnect?(socket: WebSocket): void;
 }
 
 export interface RuntimeWebSocketBoundary {
@@ -57,6 +59,8 @@ export function attachRuntimeWebSocketBoundary(
   const webSockets = new WebSocketServer({
     noServer: true,
     maxPayload: RUNTIME_WEBSOCKET_LIMITS.maxPayloadBytes,
+    // This transport is loopback-only. The checked-in benchmark documents why
+    // zlib CPU/native-memory overhead currently outweighs reduced TCP bytes.
     perMessageDeflate: false,
   });
 
@@ -115,6 +119,7 @@ export function attachRuntimeWebSocketBoundary(
       }
     });
     socket.on("close", () => {
+      options.onDisconnect?.(socket);
       options.runtimeSync.disconnect(socket);
       options.terminals.disposeOwner(socket);
       options.isolatedRuns.stopOwned(socket);

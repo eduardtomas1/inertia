@@ -17,10 +17,7 @@ import {
   attachmentPreviewUrl,
   formatAttachmentSize,
 } from "../utils/composerAttachments";
-import {
-  NATIVE_PREVIEW_OVERLAY_CLOSED,
-  NATIVE_PREVIEW_OVERLAY_OPENED,
-} from "../utils/nativePreviewOverlay";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 
 type AttachmentPreviewDialogProps = {
   attachment: ChatAttachment;
@@ -46,9 +43,9 @@ export function AttachmentPreviewDialog({
   const [openFailed, setOpenFailed] = useState(false);
   const previewKind = attachmentPreviewKind(attachment);
   const previewUrl = attachmentPreviewUrl(attachment);
+  useNativePreviewSuspension(Boolean(previewKind && previewUrl));
 
   useEffect(() => {
-    window.dispatchEvent(new Event(NATIVE_PREVIEW_OVERLAY_OPENED));
     const previous = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
@@ -61,7 +58,6 @@ export function AttachmentPreviewDialog({
     };
     document.addEventListener("keydown", closeOnEscape, true);
     return () => {
-      window.dispatchEvent(new Event(NATIVE_PREVIEW_OVERLAY_CLOSED));
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", closeOnEscape, true);
       if (previous?.isConnected) previous.focus({ preventScroll: true });

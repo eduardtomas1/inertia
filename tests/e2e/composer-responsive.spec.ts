@@ -67,9 +67,13 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await expect(addProject).toBeEnabled();
     await addProject.click();
     await expect(page.getByRole("heading", {
-      name: "Start with a clear chat.",
+      name: "What should we work on?",
+      level: 3,
     })).toBeVisible();
-    await page.locator(".project-welcome")
+    await page.getByRole("complementary", {
+      name: "Project navigation",
+      exact: true,
+    })
       .getByRole("button", { name: "New chat", exact: true })
       .click();
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();

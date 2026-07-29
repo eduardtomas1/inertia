@@ -1,4 +1,11 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -10,6 +17,7 @@ import { nativeModelSelection } from "../../src/shared/model-routing";
 import {
   useWorkspaceMentions,
 } from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceMentions";
+import { Composer } from "../../src/renderer/src/components/Composer";
 
 const project: Project = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -94,11 +102,13 @@ describe("useWorkspaceMentions", () => {
       },
     }));
     const primaryHook = renderHook(() => useWorkspaceMentions({
+      enabled: true,
       project,
       conversation: primary,
       request,
     }));
     const secondaryHook = renderHook(() => useWorkspaceMentions({
+      enabled: true,
       project: secondaryProject,
       conversation: secondary,
       request,
@@ -125,5 +135,78 @@ describe("useWorkspaceMentions", () => {
         conversationId: secondary.id,
       },
     ]);
+  });
+
+  it("does not request workspace entries when a disabled draft types @foo", async () => {
+    const storedValues = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        clear: () => storedValues.clear(),
+        getItem: (key: string) => storedValues.get(key) ?? null,
+        key: (index: number) => [...storedValues.keys()][index] ?? null,
+        get length() {
+          return storedValues.size;
+        },
+        removeItem: (key: string) => storedValues.delete(key),
+        setItem: (key: string, value: string) => storedValues.set(key, value),
+      } satisfies Storage,
+    });
+    const draftConversation = conversation(
+      "66666666-6666-4666-8666-666666666666",
+      project,
+      "/workspace-draft",
+    );
+    const request = vi.fn(async (): Promise<ServerEvent> => {
+      throw new Error("Draft mentions must not reach the runtime.");
+    });
+    const releaseAttachment = async (): Promise<void> => undefined;
+
+    function DisabledDraftComposer(): React.JSX.Element {
+      const mentions = useWorkspaceMentions({
+        enabled: false,
+        project,
+        conversation: draftConversation,
+        request,
+      });
+      return (
+        <Composer
+          conversation={draftConversation}
+          providers={[]}
+          actions={[]}
+          disabled={false}
+          sending={false}
+          running={false}
+          mentionResults={mentions.mentionResults}
+          usage={null}
+          usageDisplayMode="compact"
+          onSend={async () => undefined}
+          onUpdateConversation={() => undefined}
+          onCreateConversationForSelection={async () => undefined}
+          onChooseAttachments={async () => []}
+          onImportAttachments={async () => []}
+          onReleaseAttachment={releaseAttachment}
+          onRunAction={() => undefined}
+          onMentionQuery={mentions.searchMentions}
+          onConnectProvider={() => undefined}
+          onRefreshProvider={() => undefined}
+          onOpenProviderSetup={() => undefined}
+          onOpenBackendSetup={() => undefined}
+          onProbeBackendProfile={async () => undefined}
+          onUsageDisplayModeChange={() => undefined}
+          onStop={async () => undefined}
+        />
+      );
+    }
+
+    render(<DisabledDraftComposer />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "@foo" },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Message" }))
+        .toHaveValue("@foo");
+    });
+    expect(request).not.toHaveBeenCalled();
   });
 });

@@ -2,6 +2,7 @@ import { Folder, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } fro
 import { useEffect, useMemo, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { IconButton } from "./ui";
 
 type CommandPaletteProps = {
@@ -47,6 +48,7 @@ function filterItems(items: PaletteItem[], query: string): PaletteItem[] {
 export function CommandPalette({ open, projects, conversations, onClose, onSelectProject, onSelectConversation, onNewThread, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  useNativePreviewSuspension(open);
 
   const allItems = useMemo(() => {
     const actions: PaletteItem[] = [

@@ -332,15 +332,24 @@ describe("Kimi through Claude runtime lifecycle", () => {
       requestId: createProjectRequestId,
       payload: { name: "Kimi lifecycle", path: workspace },
     });
-    await requestOk(client.events, createProjectRequestId);
+    const projectCreated = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === createProjectRequestId
+        && event.result.kind === "project.created",
+    );
+    if (projectCreated.result.kind !== "project.created") {
+      throw new Error("The Kimi lifecycle project was not created.");
+    }
     const projectSnapshot = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"
         && event.snapshot.projects.some(({ name }) => name === "Kimi lifecycle"),
     );
-    const projectId = projectSnapshot.snapshot.projects.find(
-      ({ name }) => name === "Kimi lifecycle",
-    )!.id;
+    const projectId = projectCreated.result.projectId;
+    expect(projectSnapshot.snapshot.projects).toContainEqual(
+      expect.objectContaining({ id: projectId, name: "Kimi lifecycle" }),
+    );
 
     const createConversationRequestId = randomUUID();
     send(client.socket, {

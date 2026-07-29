@@ -22,12 +22,15 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - See provider-supplied thinking summaries, remaining context, and account usage through one compact context control.
 - Work with streaming conversations, resumable sessions, native plans, agent questions, image and document inputs, cancellation, and supervised approvals whenever the selected provider supports them.
 - Open any second chat beside the current one—even from another project—with its own transcript, draft, files, Git changes, terminal sessions, plan, and preview.
+- Keep up to 12 unfinished text prompts in a local stash with their exact harness, backend, model, and reasoning route, then restore one into either side of a split workspace without moving attachments or credentials.
 - Start from a compact Environment summary of the current branch, changes, active work, delegated agents, and attached context, while keeping the full workspace tools one click away.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
 - Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
 - Search commands, projects, and threads from one keyboard-friendly palette.
 - Resize or collapse either side of the workspace whenever the conversation needs more room.
 - Choose System, Light, or Dark with a restrained glass finish and clear contrast.
+
+![Two independent projects sharing a split Inertia workspace](docs/screenshots/inertia-split-workspace.png)
 
 ### Review changes without losing context
 
@@ -46,12 +49,15 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - Responses render polished Markdown with safe project links, highlighted code, copy and wrap controls, and tables that can be copied as Markdown or CSV.
 - Provider updates and compact tool activity appear in the order they happened. Only adjacent calls fold together, so a new update naturally starts the next stretch of work.
 - The Activity Center keeps the latest meaningful operations close to the active agent, folds older successful calls behind one disclosure, and keeps manual Git work or failures independently visible.
+- Open project-file references from prose or fenced-code labels directly in Files, then edit supported text files in a focused dialog that refuses to overwrite content changed since it was opened.
 - Reasoning summaries, approvals, questions, warnings, final answers, and turn checkpoints stay together in the same chronological turn.
 - Each completed request keeps its original agent, model backend, and model attribution together with a turn-specific before-and-after Git record, when available, that remains useful after the workspace moves on.
 - Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
 - Long transcripts keep stable rows and load their heavier detail separately, while incremental runtime updates resume safely after a restart.
 - The transcript follows live work only while you are near the bottom, so reading earlier context is not interrupted.
 - Delegated agent work remains attached to its parent turn, with compact progress that can be followed without losing the main conversation.
+
+![An active Inertia workstream with interleaved commentary and compact tool activity](docs/screenshots/inertia-workstream.png)
 
 ### Keep the workspace moving
 

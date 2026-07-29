@@ -19,6 +19,10 @@ import {
   type ResponseTurn,
   type TurnGitArtifactSummary,
 } from "./model";
+import {
+  collapsedUserRequestPreview,
+  shouldCollapseUserRequest,
+} from "../userRequestPresentation";
 
 export const TIMELINE_VIRTUALIZATION_MIN_ROWS = 40;
 export const TIMELINE_MINIMAP_MIN_GUTTER = 48;
@@ -328,9 +332,20 @@ function estimateTurnRowSize(
   );
   const requestColumns = estimatedTextColumns((requestWidth - 28) / typographyScale, 86);
 
-  const requestLines = Math.max(1, estimatedWrappedLines(turn.userMessage.content, requestColumns));
+  const estimatedRequestContent = shouldCollapseUserRequest(
+    turn.userMessage.content,
+  )
+    ? collapsedUserRequestPreview(turn.userMessage.content)
+    : turn.userMessage.content;
+  const requestLines = Math.max(
+    1,
+    estimatedWrappedLines(estimatedRequestContent, requestColumns),
+  );
   const attachmentRows = Math.ceil(turn.userMessage.attachments.length / Math.max(1, Math.floor(requestWidth / 180)));
-  const requestHeight = 42 + requestLines * 22 + attachmentRows * 25;
+  const requestHeight = 42
+    + requestLines * 22
+    + attachmentRows * 25
+    + (estimatedRequestContent === turn.userMessage.content ? 0 : 28);
 
   const transcriptActivities = turn.activities.filter(isTranscriptActivity);
   const activeActivityGroups = turn.isActive

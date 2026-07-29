@@ -1,6 +1,9 @@
 import {
+  chmod,
   mkdtemp,
   mkdir,
+  readFile,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -12,11 +15,46 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   listWorkspaceEntries,
-  readWorkspaceTextFile,
+  readWorkspaceTextFile as readWorkspaceTextFileWithBroker,
   searchWorkspaceEntries,
+  writeWorkspaceTextFile as writeWorkspaceTextFileWithBroker,
+  type ReadTextOptions,
+  type WorkspaceWriteOptions,
 } from "../../src/server/workspace";
+import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 
 const temporaryDirectories: string[] = [];
+const secureFiles = new SecureFileTestBroker();
+
+function readWorkspaceTextFile(
+  root: string,
+  path: string,
+  options: Omit<ReadTextOptions, "secureFiles"> = {},
+) {
+  return readWorkspaceTextFileWithBroker(root, path, {
+    ...options,
+    secureFiles,
+  });
+}
+
+function writeWorkspaceTextFile(
+  root: string,
+  path: string,
+  content: string,
+  expectedDigest: string,
+  options: Omit<WorkspaceWriteOptions, "secureFiles"> = {},
+) {
+  return writeWorkspaceTextFileWithBroker(
+    root,
+    path,
+    content,
+    expectedDigest,
+    {
+      ...options,
+      secureFiles,
+    },
+  );
+}
 
 async function temporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "inertia-workspace-tree-"));
@@ -103,15 +141,20 @@ describe("workspace file hierarchy", () => {
       process.platform === "win32" ? "junction" : "dir",
     );
 
-    for (const path of [
+    const invalidPaths = [
       "../outside",
       "safe/../../outside",
-      "safe\\..\\outside",
       "/etc",
-      "\\\\server\\share",
-      "C:\\Windows",
-      "C:Windows",
-    ]) {
+      ...(process.platform === "win32"
+        ? [
+            "safe\\..\\outside",
+            "\\\\server\\share",
+            "C:\\Windows",
+            "C:Windows",
+          ]
+        : []),
+    ];
+    for (const path of invalidPaths) {
       await expect(listWorkspaceEntries(root, path))
         .rejects.toMatchObject({ code: "invalid-input" });
     }
@@ -119,5 +162,267 @@ describe("workspace file hierarchy", () => {
       .rejects.toMatchObject({ code: "unsafe-link" });
     await expect(readWorkspaceTextFile(root, "escape/secret.ts"))
       .rejects.toMatchObject({ code: "unsafe-link" });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "preserves POSIX filename characters through listing, reading, and editing",
+    async () => {
+      const root = await temporaryDirectory();
+      await writeFile(join(root, "notes\\draft.md"), "draft\n");
+      await writeFile(join(root, "a:file.txt"), "colon\n");
+
+      const page = await listWorkspaceEntries(root);
+      expect(page.entries.map(({ path }) => path)).toEqual([
+        "a:file.txt",
+        "notes\\draft.md",
+      ]);
+
+      const preview = await readWorkspaceTextFile(root, "notes\\draft.md");
+      expect(preview).toMatchObject({
+        path: "notes\\draft.md",
+        content: "draft\n",
+      });
+      await expect(writeWorkspaceTextFile(
+        root,
+        "notes\\draft.md",
+        "saved\n",
+        preview.contentDigest,
+      )).resolves.toMatchObject({
+        path: "notes\\draft.md",
+        content: "saved\n",
+      });
+      await expect(readWorkspaceTextFile(root, "a:file.txt"))
+        .resolves.toMatchObject({ path: "a:file.txt", content: "colon\n" });
+    },
+  );
+
+  it("saves text only when the preview digest is still current", async () => {
+    const root = await temporaryDirectory();
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "src", "example.ts"), "const value = 1;\n");
+
+    const preview = await readWorkspaceTextFile(root, "src/example.ts");
+    const saved = await writeWorkspaceTextFile(
+      root,
+      "src/example.ts",
+      "const value = 2;\n",
+      preview.contentDigest,
+    );
+    expect(saved).toMatchObject({
+      path: "src/example.ts",
+      content: "const value = 2;\n",
+      size: 17,
+    });
+    expect(saved.contentDigest).not.toBe(preview.contentDigest);
+
+    await writeFile(join(root, "src", "example.ts"), "external edit\n");
+    await expect(writeWorkspaceTextFile(
+      root,
+      "src/example.ts",
+      "const value = 3;\n",
+      saved.contentDigest,
+    )).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("changed"),
+    });
+    await expect(readWorkspaceTextFile(root, "src/example.ts"))
+      .resolves.toMatchObject({ content: "external edit\n" });
+  });
+
+  it("preserves a UTF-8 BOM through an edit", async () => {
+    const root = await temporaryDirectory();
+    const path = join(root, "windows-script.ts");
+    await writeFile(path, Buffer.from("\uFEFFconst value = 1;\r\n", "utf8"));
+
+    const preview = await readWorkspaceTextFile(root, "windows-script.ts");
+    expect(preview.content).toBe("\uFEFFconst value = 1;\r\n");
+
+    const saved = await writeWorkspaceTextFile(
+      root,
+      "windows-script.ts",
+      preview.content.replace("1", "2"),
+      preview.contentDigest,
+    );
+
+    expect(saved.content).toBe("\uFEFFconst value = 2;\r\n");
+    await expect(readFile(path)).resolves.toEqual(
+      Buffer.from("\uFEFFconst value = 2;\r\n", "utf8"),
+    );
+  });
+
+  it("lets only one concurrent save commit against the same preview", async () => {
+    const root = await temporaryDirectory();
+    await writeFile(join(root, "shared.ts"), "initial\n");
+    const preview = await readWorkspaceTextFile(root, "shared.ts");
+
+    const saves = await Promise.allSettled([
+      writeWorkspaceTextFile(
+        root,
+        "shared.ts",
+        "first writer\n",
+        preview.contentDigest,
+      ),
+      writeWorkspaceTextFile(
+        root,
+        "shared.ts",
+        "second writer\n",
+        preview.contentDigest,
+      ),
+    ]);
+
+    expect(saves.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    const rejected = saves.find(({ status }) => status === "rejected");
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      reason: {
+        code: "conflict",
+        message: expect.stringContaining("changed"),
+      },
+    });
+    const current = await readWorkspaceTextFile(root, "shared.ts");
+    expect(["first writer\n", "second writer\n"]).toContain(current.content);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "writes through the verified file handle without sibling staging",
+    async () => {
+      const root = await temporaryDirectory();
+      await writeFile(join(root, "protected.ts"), "original\n", {
+        mode: 0o600,
+      });
+      const preview = await readWorkspaceTextFile(root, "protected.ts");
+      await chmod(root, 0o500);
+      try {
+        await expect(writeWorkspaceTextFile(
+          root,
+          "protected.ts",
+          "replacement\n",
+          preview.contentDigest,
+        )).resolves.toMatchObject({ content: "replacement\n" });
+      } finally {
+        await chmod(root, 0o700);
+      }
+      await expect(readWorkspaceTextFile(root, "protected.ts"))
+        .resolves.toMatchObject({ content: "replacement\n" });
+    },
+  );
+
+  it("restores the original bytes when a save fails after writing", async () => {
+    const root = await temporaryDirectory();
+    await writeFile(join(root, "recoverable.ts"), "original\n");
+    const preview = await readWorkspaceTextFile(root, "recoverable.ts");
+
+    await expect(writeWorkspaceTextFile(
+      root,
+      "recoverable.ts",
+      "replacement\n",
+      preview.contentDigest,
+      {
+        afterWriteSynced: () => {
+          throw new Error("simulated post-write failure");
+        },
+      },
+    )).rejects.toMatchObject({
+      code: "operation-failed",
+    });
+
+    await expect(readWorkspaceTextFile(root, "recoverable.ts"))
+      .resolves.toMatchObject({
+        content: "original\n",
+        contentDigest: preview.contentDigest,
+      });
+  });
+
+  it("never follows a parent directory swapped after the target is opened", async () => {
+    const root = await temporaryDirectory();
+    const outside = await temporaryDirectory();
+    const parent = join(root, "src");
+    const movedParent = join(root, "src-moved");
+    await mkdir(parent);
+    await writeFile(join(parent, "example.ts"), "inside\n");
+    await writeFile(join(outside, "example.ts"), "outside\n");
+    const preview = await readWorkspaceTextFile(root, "src/example.ts");
+
+    await expect(writeWorkspaceTextFile(
+      root,
+      "src/example.ts",
+      "replacement\n",
+      preview.contentDigest,
+      {
+        afterDigestVerified: async () => {
+          await rename(parent, movedParent);
+          await symlink(
+            outside,
+            parent,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      },
+    )).rejects.toMatchObject({ code: "conflict" });
+
+    await expect(readWorkspaceTextFile(outside, "example.ts"))
+      .resolves.toMatchObject({ content: "outside\n" });
+    await expect(readWorkspaceTextFile(root, "src-moved/example.ts"))
+      .resolves.toMatchObject({ content: "inside\n" });
+  });
+
+  it("pins the workspace root identity across a save transaction", async () => {
+    const container = await temporaryDirectory();
+    const root = join(container, "workspace");
+    const movedRoot = join(container, "workspace-moved");
+    const outside = join(container, "outside");
+    await mkdir(root);
+    await mkdir(outside);
+    await writeFile(join(root, "example.ts"), "inside\n");
+    await writeFile(join(outside, "example.ts"), "inside\n");
+    const preview = await readWorkspaceTextFile(root, "example.ts");
+
+    await expect(writeWorkspaceTextFile(
+      root,
+      "example.ts",
+      "replacement\n",
+      preview.contentDigest,
+      {
+        afterDigestVerified: async () => {
+          await rename(root, movedRoot);
+          await symlink(
+            outside,
+            root,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      },
+    )).rejects.toMatchObject({ code: "conflict" });
+
+    await expect(readFile(join(outside, "example.ts"), "utf8"))
+      .resolves.toBe("inside\n");
+    await expect(readFile(join(movedRoot, "example.ts"), "utf8"))
+      .resolves.toBe("inside\n");
+  });
+
+  it("does not write through symbolic links or accept binary editor content", async () => {
+    const root = await temporaryDirectory();
+    const outside = await temporaryDirectory();
+    await writeFile(join(outside, "secret.ts"), "secret");
+    await symlink(
+      join(outside, "secret.ts"),
+      join(root, "linked.ts"),
+      "file",
+    );
+    await expect(writeWorkspaceTextFile(
+      root,
+      "linked.ts",
+      "changed",
+      "a".repeat(64),
+    )).rejects.toMatchObject({ code: "unsafe-link" });
+
+    await writeFile(join(root, "text.ts"), "text");
+    const preview = await readWorkspaceTextFile(root, "text.ts");
+    await expect(writeWorkspaceTextFile(
+      root,
+      "text.ts",
+      "unsafe\0content",
+      preview.contentDigest,
+    )).rejects.toMatchObject({ code: "not-text" });
   });
 });

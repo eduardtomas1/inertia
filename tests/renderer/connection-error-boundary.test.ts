@@ -6,6 +6,7 @@ import {
   decodeServerEventMessage,
   deliverDecodedServerEvent,
   notifyConnectionListeners,
+  runtimeCommandDelivery,
   settlePendingConnectionRequest,
   UNREADABLE_RUNTIME_RESPONSE,
 } from "../../src/renderer/src/utils/connectionMessages";
@@ -53,9 +54,10 @@ describe("renderer error visibility boundary", () => {
       message: "The first message could not be sent.",
     }));
 
-    expect(commandError).toEqual(
-      new Error("The first message could not be sent."),
-    );
+    expect(commandError).toMatchObject({
+      message: "The first message could not be sent.",
+    });
+    expect(runtimeCommandDelivery(commandError)).toBe("rejected");
     expect(connectionError).toBeNull();
     expect(clearedTimeout).toBe(42);
     expect(pending.size).toBe(0);
@@ -82,8 +84,12 @@ describe("renderer error visibility boundary", () => {
   });
 
   it("keeps file hydration local while surfacing an initial Git refresh failure", () => {
-    const hydrationStart = workspaceToolsSource.indexOf(
-      "void Promise.allSettled([",
+    const hydrationMarker = workspaceToolsSource.indexOf(
+      "void loadActions();",
+    );
+    const hydrationStart = workspaceToolsSource.lastIndexOf(
+      "useEffect(() => {",
+      hydrationMarker,
     );
     const hydrationEnd = workspaceToolsSource.indexOf(
       "\n\n  const selectWorkspaceFile",
@@ -93,6 +99,10 @@ describe("renderer error visibility boundary", () => {
 
     expect(hydrationStart).toBeGreaterThan(-1);
     expect(hydration).not.toContain("setActionError(");
+    expect(hydration).toContain("void loadFiles().catch(() => {");
+    expect(hydration).toContain(
+      "automaticallyLoadedAuthorityRef.current = null;",
+    );
     expect(workspaceGitSource).toMatch(
       /void loadGit\(\)\.catch\(\(error\) => \{[\s\S]*?if \(!cancelled\) \{[\s\S]*?setActionError\(/,
     );

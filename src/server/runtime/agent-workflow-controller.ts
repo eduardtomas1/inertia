@@ -448,7 +448,9 @@ export class AgentWorkflowController {
         providerSessionId: null,
         objective,
         status: input.status,
-        tokenBudget: input.tokenBudget ?? null,
+        tokenBudget: input.tokenBudget === undefined
+          ? existing?.tokenBudget ?? null
+          : input.tokenBudget,
         tokensUsed: null,
         timeUsedSeconds: null,
         createdAt: existing?.createdAt ?? now,

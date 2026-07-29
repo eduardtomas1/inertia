@@ -982,13 +982,26 @@ describe("AgentWorkflowController", () => {
       source: "inertia-local",
       objective: "Track this locally",
       status: "active",
+      tokenBudget: 8_000,
     });
 
     expect(created).toMatchObject({
       source: "inertia-local",
       providerSessionId: null,
       objective: "Track this locally",
+      tokenBudget: 8_000,
     });
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "inertia-local",
+      status: "paused",
+    })).resolves.toMatchObject({ status: "paused", tokenBudget: 8_000 });
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "inertia-local",
+      status: "active",
+      tokenBudget: null,
+    })).resolves.toMatchObject({ status: "active", tokenBudget: null });
     expect(runtime.controller.state("conversation-1")).toMatchObject({
       goalCapability: {
         kind: "inertia-local",

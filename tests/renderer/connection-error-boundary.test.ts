@@ -82,8 +82,12 @@ describe("renderer error visibility boundary", () => {
   });
 
   it("keeps file hydration local while surfacing an initial Git refresh failure", () => {
-    const hydrationStart = workspaceToolsSource.indexOf(
-      "void Promise.allSettled([",
+    const hydrationMarker = workspaceToolsSource.indexOf(
+      "void loadActions();",
+    );
+    const hydrationStart = workspaceToolsSource.lastIndexOf(
+      "useEffect(() => {",
+      hydrationMarker,
     );
     const hydrationEnd = workspaceToolsSource.indexOf(
       "\n\n  const selectWorkspaceFile",
@@ -93,6 +97,7 @@ describe("renderer error visibility boundary", () => {
 
     expect(hydrationStart).toBeGreaterThan(-1);
     expect(hydration).not.toContain("setActionError(");
+    expect(hydration).toContain("void loadFiles().catch(() => undefined);");
     expect(workspaceGitSource).toMatch(
       /void loadGit\(\)\.catch\(\(error\) => \{[\s\S]*?if \(!cancelled\) \{[\s\S]*?setActionError\(/,
     );

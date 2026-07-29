@@ -134,19 +134,19 @@ export function useWorkspaceFiles({
     setFilesLoading(false);
     setFilePreviewLoading(false);
     if (!enabled || !project?.id || !online) return;
-    void Promise.allSettled([
-      ...(loadOnMount ? [loadFiles()] : []),
-      loadActions(),
-    ]);
+    void loadActions();
   }, [
     conversation?.id,
     enabled,
     loadActions,
-    loadFiles,
-    loadOnMount,
     online,
     project?.id,
   ]);
+
+  useEffect(() => {
+    if (!enabled || !project?.id || !online || !loadOnMount) return;
+    void loadFiles().catch(() => undefined);
+  }, [enabled, loadFiles, loadOnMount, online, project?.id]);
 
   const selectWorkspaceFile = useCallback((path: string) => {
     if (!project) return;

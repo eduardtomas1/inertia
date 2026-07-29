@@ -1,22 +1,20 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   lstat,
   open,
   opendir,
   realpath,
-  rename,
   stat,
-  unlink,
 } from "node:fs/promises";
 import {
-  basename,
-  dirname,
   isAbsolute,
   relative,
   resolve,
   sep,
 } from "node:path";
+
+import { MAX_WORKSPACE_FILE_EDIT_BYTES } from "../shared/contracts/workspace";
 
 const MAX_PATH_LENGTH = 4_096;
 const DEFAULT_LIST_LIMIT = 500;
@@ -30,6 +28,7 @@ const MAX_VISITED_ENTRIES = 50_000;
 const DEFAULT_TEXT_BYTES = 1024 * 1024;
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 const PACKAGE_JSON_BYTES = 256 * 1024;
+const workspaceWriteTails = new Map<string, Promise<void>>();
 
 const DEFAULT_IGNORED_DIRECTORIES = new Set([
   ".git",
@@ -249,7 +248,11 @@ async function secureExistingPath(
   root: string,
   relativePath: string,
   expected: "file" | "directory",
-): Promise<{ absolute: string; relativePath: string }> {
+): Promise<{
+  absolute: string;
+  relativePath: string;
+  identity: { dev: number; ino: number };
+}> {
   const normalized = validateRelativePath(relativePath, expected === "directory");
   const absolute = resolve(root, normalized);
   if (!isContained(root, absolute) || (expected === "file" && absolute === root)) {
@@ -275,7 +278,11 @@ async function secureExistingPath(
     if (expected === "directory" && !info.isDirectory()) {
       throw new WorkspaceError("not-directory", "The requested path is not a directory.");
     }
-    return { absolute: canonical, relativePath: slashPath(relative(root, canonical)) || "." };
+    return {
+      absolute: canonical,
+      relativePath: slashPath(relative(root, canonical)) || ".",
+      identity: { dev: info.dev, ino: info.ino },
+    };
   } catch (error) {
     if (error instanceof WorkspaceError) throw error;
     throw new WorkspaceError("not-found", "The requested workspace entry could not be found.");
@@ -416,46 +423,115 @@ export async function searchWorkspaceEntries(
   return { entries, visitedEntries, truncated };
 }
 
-async function readSecureFile(root: string, relativePath: string, maxBytes: number): Promise<WorkspaceTextFile> {
+function sameIdentity(
+  left: { dev: number; ino: number },
+  right: { dev: number; ino: number },
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+async function readTextFileHandle(
+  handle: Awaited<ReturnType<typeof open>>,
+  relativePath: string,
+  maxBytes: number,
+): Promise<WorkspaceTextFile> {
+  const info = await handle.stat();
+  if (!info.isFile()) {
+    throw new WorkspaceError("not-file", "The requested path is not a regular file.");
+  }
+  if (info.size > maxBytes) {
+    throw new WorkspaceError(
+      "file-too-large",
+      `This file is larger than the ${Math.ceil(maxBytes / 1024)} KB viewing limit.`,
+    );
+  }
+  const buffer = Buffer.alloc(maxBytes + 1);
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesRead } = await handle.read(
+      buffer,
+      offset,
+      buffer.length - offset,
+      offset,
+    );
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  if (offset > maxBytes) {
+    throw new WorkspaceError(
+      "file-too-large",
+      `This file is larger than the ${Math.ceil(maxBytes / 1024)} KB viewing limit.`,
+    );
+  }
+  const bytes = buffer.subarray(0, offset);
+  if (bytes.includes(0)) {
+    throw new WorkspaceError(
+      "not-text",
+      "This file does not appear to be UTF-8 text.",
+    );
+  }
+  let content: string;
+  try {
+    content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new WorkspaceError("not-text", "This file is not valid UTF-8 text.");
+  }
+  return {
+    path: relativePath,
+    content,
+    size: offset,
+    modifiedAt: info.mtime.toISOString(),
+    contentDigest: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+async function readSecureFile(
+  root: string,
+  relativePath: string,
+  maxBytes: number,
+): Promise<WorkspaceTextFile> {
   const target = await secureExistingPath(root, relativePath, "file");
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    handle = await open(target.absolute, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    handle = await open(
+      target.absolute,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+    );
     const info = await handle.stat();
-    if (!info.isFile()) throw new WorkspaceError("not-file", "The requested path is not a regular file.");
-    if (info.size > maxBytes) {
-      throw new WorkspaceError("file-too-large", `This file is larger than the ${Math.ceil(maxBytes / 1024)} KB viewing limit.`);
+    if (!sameIdentity(target.identity, info)) {
+      throw new WorkspaceError(
+        "unsafe-link",
+        "The workspace file changed while it was being opened.",
+      );
     }
-    const buffer = Buffer.alloc(maxBytes + 1);
-    let offset = 0;
-    while (offset < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
-      if (bytesRead === 0) break;
-      offset += bytesRead;
-    }
-    if (offset > maxBytes) {
-      throw new WorkspaceError("file-too-large", `This file is larger than the ${Math.ceil(maxBytes / 1024)} KB viewing limit.`);
-    }
-    const bytes = buffer.subarray(0, offset);
-    if (bytes.includes(0)) throw new WorkspaceError("not-text", "This file does not appear to be UTF-8 text.");
-    let content: string;
-    try {
-      content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-      throw new WorkspaceError("not-text", "This file is not valid UTF-8 text.");
-    }
-    return {
-      path: target.relativePath,
-      content,
-      size: offset,
-      modifiedAt: info.mtime.toISOString(),
-      contentDigest: createHash("sha256").update(bytes).digest("hex"),
-    };
+    return await readTextFileHandle(handle, target.relativePath, maxBytes);
   } catch (error) {
     if (error instanceof WorkspaceError) throw error;
     throw new WorkspaceError("operation-failed", "Unable to read this workspace file.");
   } finally {
     await handle?.close().catch(() => undefined);
+  }
+}
+
+async function withWorkspaceWriteLock<T>(
+  key: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const predecessor = workspaceWriteTails.get(key) ?? Promise.resolve();
+  let release = (): void => undefined;
+  const gate = new Promise<void>((resolveGate) => {
+    release = resolveGate;
+  });
+  const tail = predecessor.catch(() => undefined).then(() => gate);
+  workspaceWriteTails.set(key, tail);
+  await predecessor.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (workspaceWriteTails.get(key) === tail) {
+      workspaceWriteTails.delete(key);
+    }
   }
 }
 
@@ -477,10 +553,13 @@ export async function writeWorkspaceTextFile(
   options: ReadTextOptions = {},
 ): Promise<WorkspaceTextFile> {
   const root = await workspaceRoot(workspacePath);
-  const maxBytes = boundedInteger(
-    options.maxBytes,
-    DEFAULT_TEXT_BYTES,
-    MAX_TEXT_BYTES,
+  const maxBytes = Math.min(
+    boundedInteger(
+      options.maxBytes,
+      MAX_WORKSPACE_FILE_EDIT_BYTES,
+      MAX_TEXT_BYTES,
+    ),
+    MAX_WORKSPACE_FILE_EDIT_BYTES,
   );
   if (!/^[a-f0-9]{64}$/u.test(expectedDigest)) {
     throw new WorkspaceError(
@@ -502,57 +581,86 @@ export async function writeWorkspaceTextFile(
     );
   }
 
-  const target = await secureExistingPath(root, relativePath, "file");
-  const initial = await readSecureFile(root, target.relativePath, maxBytes);
-  if (initial.contentDigest !== expectedDigest) {
-    throw new WorkspaceError(
-      "conflict",
-      "This file changed after it was opened. Reload it before saving.",
-    );
-  }
-
-  const targetInfo = await stat(target.absolute);
-  const temporaryPath = resolve(
-    dirname(target.absolute),
-    `.${basename(target.absolute)}.inertia-${randomUUID()}.tmp`,
-  );
-  let temporaryHandle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    temporaryHandle = await open(
-      temporaryPath,
-      fsConstants.O_CREAT
-        | fsConstants.O_EXCL
-        | fsConstants.O_WRONLY
-        | (fsConstants.O_NOFOLLOW ?? 0),
-      targetInfo.mode,
-    );
-    await temporaryHandle.writeFile(bytes);
-    if (process.platform !== "win32") {
-      await temporaryHandle.chmod(targetInfo.mode);
-    }
-    await temporaryHandle.sync();
-    await temporaryHandle.close();
-    temporaryHandle = undefined;
-
-    const current = await readSecureFile(root, target.relativePath, maxBytes);
-    if (current.contentDigest !== expectedDigest) {
-      throw new WorkspaceError(
-        "conflict",
-        "This file changed while it was being saved. Reload it and try again.",
+  const normalized = validateRelativePath(relativePath, false);
+  const writeKey = `${root}\0${normalized}`;
+  return withWorkspaceWriteLock(writeKey, async () => {
+    const target = await secureExistingPath(root, normalized, "file");
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      handle = await open(
+        target.absolute,
+        fsConstants.O_RDWR | (fsConstants.O_NOFOLLOW ?? 0),
       );
+      const opened = await handle.stat();
+      if (!opened.isFile() || !sameIdentity(target.identity, opened)) {
+        throw new WorkspaceError(
+          "unsafe-link",
+          "The workspace file changed while it was being opened.",
+        );
+      }
+      const initial = await readTextFileHandle(
+        handle,
+        target.relativePath,
+        maxBytes,
+      );
+      if (initial.contentDigest !== expectedDigest) {
+        throw new WorkspaceError(
+          "conflict",
+          "This file changed after it was opened. Reload it before saving.",
+        );
+      }
+
+      // Keep the mutation anchored to the already-verified file descriptor.
+      // A parent-directory swap can no longer redirect this write, while the
+      // per-path lock gives concurrent Inertia saves compare-and-swap behavior.
+      let offset = 0;
+      while (offset < bytes.length) {
+        const { bytesWritten } = await handle.write(
+          bytes,
+          offset,
+          bytes.length - offset,
+          offset,
+        );
+        if (bytesWritten === 0) {
+          throw new Error("The workspace file write made no progress.");
+        }
+        offset += bytesWritten;
+      }
+      await handle.truncate(bytes.length);
+      await handle.sync();
+
+      const saved = await readTextFileHandle(
+        handle,
+        target.relativePath,
+        maxBytes,
+      );
+      const savedTarget = await secureExistingPath(
+        root,
+        target.relativePath,
+        "file",
+      ).catch(() => null);
+      if (
+        saved.contentDigest
+          !== createHash("sha256").update(bytes).digest("hex")
+        || !savedTarget
+        || !sameIdentity(target.identity, savedTarget.identity)
+      ) {
+        throw new WorkspaceError(
+          "conflict",
+          "This file changed while it was being saved. Reload it and try again.",
+        );
+      }
+      return saved;
+    } catch (error) {
+      if (error instanceof WorkspaceError) throw error;
+      throw new WorkspaceError(
+        "operation-failed",
+        "Unable to save this workspace file.",
+      );
+    } finally {
+      await handle?.close().catch(() => undefined);
     }
-    await rename(temporaryPath, target.absolute);
-    return readSecureFile(root, target.relativePath, maxBytes);
-  } catch (error) {
-    if (error instanceof WorkspaceError) throw error;
-    throw new WorkspaceError(
-      "operation-failed",
-      "Unable to save this workspace file.",
-    );
-  } finally {
-    await temporaryHandle?.close().catch(() => undefined);
-    await unlink(temporaryPath).catch(() => undefined);
-  }
+  });
 }
 
 async function detectPackageManager(root: string): Promise<PackageManager> {

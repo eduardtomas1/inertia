@@ -5,6 +5,7 @@ import {
   workspaceDirectoryPathSchema,
   workspaceFilePathSchema,
 } from "./common";
+import { MAX_WORKSPACE_FILE_EDIT_BYTES } from "../workspace";
 
 export const workspaceCommandSchemas = [
   z
@@ -45,7 +46,14 @@ export const workspaceCommandSchemas = [
         conversationId: z.string().uuid().optional(),
         path: workspaceFilePathSchema,
         expectedDigest: z.string().regex(/^[a-f0-9]{64}$/u),
-        content: z.string().max(2 * 1024 * 1024),
+        content: z
+          .string()
+          .max(MAX_WORKSPACE_FILE_EDIT_BYTES)
+          .refine(
+            (value) => new TextEncoder().encode(value).byteLength
+              <= MAX_WORKSPACE_FILE_EDIT_BYTES,
+            "The file content exceeds the workspace editing limit.",
+          ),
       }).strict(),
     })
     .strict(),

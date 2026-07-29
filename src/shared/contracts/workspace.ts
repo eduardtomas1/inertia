@@ -26,6 +26,14 @@ export interface WorkspaceFilePreview {
   modifiedAt: string;
 }
 
+/**
+ * Workspace edits travel as one authenticated WebSocket command. Keep the
+ * editable body comfortably below the 256 KiB frame limit so JSON metadata,
+ * UTF-8 expansion, and future bounded fields cannot turn a save into a
+ * transport disconnect.
+ */
+export const MAX_WORKSPACE_FILE_EDIT_BYTES = 192 * 1024;
+
 export interface ProjectAction {
   id: string;
   label: string;

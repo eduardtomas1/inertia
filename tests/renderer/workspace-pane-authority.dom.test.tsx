@@ -153,6 +153,69 @@ describe("workspace pane authority", () => {
     expect(hook.result.current.projectActions).toEqual([betaAction]);
   });
 
+  it("preserves an agent-selected file when opening the Files tool loads its tree", async () => {
+    let settlePreview: ((event: ServerEvent) => void) | null = null;
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "project.actions") {
+        return Promise.resolve(result({
+          kind: "project.actions",
+          actions: [],
+        }));
+      }
+      if (command.type === "workspace.entries") {
+        return Promise.resolve(result({
+          kind: "workspace.entries",
+          directory: "",
+          entries: [{ path: "src", kind: "directory" }],
+          truncated: false,
+        }));
+      }
+      if (command.type === "workspace.file.read") {
+        return new Promise((resolve) => {
+          settlePreview = resolve;
+        });
+      }
+      return Promise.reject(new Error("Unexpected command"));
+    });
+    const hook = renderHook(
+      ({ loadOnMount }: { loadOnMount: boolean }) => useWorkspaceFiles({
+        project: alpha,
+        conversation: alphaChat,
+        enabled: true,
+        loadOnMount,
+        online: true,
+        request,
+        setActionError: vi.fn(),
+      }),
+      { initialProps: { loadOnMount: false } },
+    );
+
+    act(() => hook.result.current.selectWorkspaceFile("src/example.ts"));
+    hook.rerender({ loadOnMount: true });
+    await waitFor(() => {
+      expect(hook.result.current.workspaceEntries).toEqual([
+        { path: "src", kind: "directory" },
+      ]);
+    });
+    await act(async () => {
+      settlePreview?.(result({
+        kind: "workspace.file",
+        file: {
+          path: "src/example.ts",
+          content: "export const value = 1;\n",
+          truncated: false,
+          language: "ts",
+          contentDigest: "a".repeat(64),
+          modifiedAt: "2026-07-29T10:00:00.000Z",
+        },
+      }));
+      await Promise.resolve();
+    });
+
+    expect(hook.result.current.selectedFile).toBe("src/example.ts");
+    expect(hook.result.current.filePreview?.path).toBe("src/example.ts");
+  });
+
   it("discards a delayed Git refresh after the pane changes owner", async () => {
     const alphaResolvers: Array<(event: ServerEvent) => void> = [];
     const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {

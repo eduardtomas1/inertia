@@ -19,7 +19,11 @@ import {
   Search,
   X,
 } from "lucide-react";
-import type { WorkspaceEntry, WorkspaceFilePreview } from "@shared/contracts";
+import {
+  MAX_WORKSPACE_FILE_EDIT_BYTES,
+  type WorkspaceEntry,
+  type WorkspaceFilePreview,
+} from "@shared/contracts";
 import {
   flattenWorkspaceTree,
   isSafeWorkspaceEntryPath,
@@ -135,6 +139,10 @@ export function FilesPanel({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchGeneration = useRef(0);
   const mounted = useRef(true);
+  const previewEditable = preview !== null
+    && !preview.truncated
+    && new TextEncoder().encode(preview.content).byteLength
+      <= MAX_WORKSPACE_FILE_EDIT_BYTES;
 
   useEffect(() => {
     mounted.current = true;
@@ -511,9 +519,12 @@ export function FilesPanel({
                   <span>{preview.path}</span>
                 </div>
                 <span className="file-language">{preview.language || "text"}</span>
-                {onSaveFile && !preview.truncated && (
+                {onSaveFile && (
                   <IconButton
-                    label={`Edit ${preview.path} in Inertia`}
+                    label={previewEditable
+                      ? `Edit ${preview.path} in Inertia`
+                      : `${preview.path} is too large to edit in Inertia`}
+                    disabled={!previewEditable}
                     onClick={() => setEditingFile(preview)}
                   >
                     <Pencil size={14} />

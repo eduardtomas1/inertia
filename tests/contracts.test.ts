@@ -6,6 +6,7 @@ import {
   canTransitionAgentTurnStatus,
   clientCommandSchema,
   isAgentTurnTerminalStatus,
+  MAX_WORKSPACE_FILE_EDIT_BYTES,
   type ServerEvent,
 } from "../src/shared/contracts";
 import { nativeModelSelection } from "../src/shared/model-routing";
@@ -151,7 +152,17 @@ describe("client command contract", () => {
     }).success).toBe(false);
     expect(clientCommandSchema.safeParse({
       ...base,
-      payload: { ...base.payload, content: "x".repeat(2 * 1024 * 1024 + 1) },
+      payload: {
+        ...base.payload,
+        content: "x".repeat(MAX_WORKSPACE_FILE_EDIT_BYTES + 1),
+      },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...base,
+      payload: {
+        ...base.payload,
+        content: "🙂".repeat(MAX_WORKSPACE_FILE_EDIT_BYTES / 2),
+      },
     }).success).toBe(false);
   });
 

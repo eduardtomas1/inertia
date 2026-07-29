@@ -122,7 +122,7 @@ describe("workspace file hierarchy", () => {
       .rejects.toMatchObject({ code: "unsafe-link" });
   });
 
-  it("saves text atomically only when the preview digest is still current", async () => {
+  it("saves text only when the preview digest is still current", async () => {
     const root = await temporaryDirectory();
     await mkdir(join(root, "src"));
     await writeFile(join(root, "src", "example.ts"), "const value = 1;\n");
@@ -153,6 +153,39 @@ describe("workspace file hierarchy", () => {
     });
     await expect(readWorkspaceTextFile(root, "src/example.ts"))
       .resolves.toMatchObject({ content: "external edit\n" });
+  });
+
+  it("lets only one concurrent save commit against the same preview", async () => {
+    const root = await temporaryDirectory();
+    await writeFile(join(root, "shared.ts"), "initial\n");
+    const preview = await readWorkspaceTextFile(root, "shared.ts");
+
+    const saves = await Promise.allSettled([
+      writeWorkspaceTextFile(
+        root,
+        "shared.ts",
+        "first writer\n",
+        preview.contentDigest,
+      ),
+      writeWorkspaceTextFile(
+        root,
+        "shared.ts",
+        "second writer\n",
+        preview.contentDigest,
+      ),
+    ]);
+
+    expect(saves.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    const rejected = saves.find(({ status }) => status === "rejected");
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      reason: {
+        code: "conflict",
+        message: expect.stringContaining("changed"),
+      },
+    });
+    const current = await readWorkspaceTextFile(root, "shared.ts");
+    expect(["first writer\n", "second writer\n"]).toContain(current.content);
   });
 
   it("does not write through symbolic links or accept binary editor content", async () => {

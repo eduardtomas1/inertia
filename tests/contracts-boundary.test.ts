@@ -9,6 +9,7 @@ import * as clientCommandExports from "../src/shared/contracts/client-command";
 import * as eventExports from "../src/shared/contracts/events";
 import * as modelRoutingExports from "../src/shared/model-routing";
 import * as providerMaintenanceExports from "../src/shared/provider-maintenance";
+import * as workspaceExports from "../src/shared/contracts/workspace";
 import { clientCommandSchema } from "../src/shared/contracts/client-command";
 
 describe("shared contracts boundary", () => {
@@ -22,6 +23,7 @@ describe("shared contracts boundary", () => {
       ...appExports,
       ...clientCommandExports,
       ...eventExports,
+      ...workspaceExports,
     };
 
     expect(Object.keys(facadeExports).sort()).toEqual(Object.keys(domainExports).sort());

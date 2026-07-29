@@ -1,4 +1,9 @@
-import { useCallback, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import type {
   AppSettings,
@@ -18,6 +23,11 @@ import {
 } from "../lib/newConversation";
 import { projectNameFromPath } from "../lib/format";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import {
+  forgetPersistedDraftConversation,
+  readPersistedDraftConversation,
+  writePersistedDraftConversation,
+} from "../utils/draftConversationPersistence";
 
 type ConversationCreatePayload = Extract<
   ClientCommand,
@@ -60,16 +70,36 @@ export function useDraftConversation({
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
+    activate?: boolean,
   ) => Promise<void>;
   persistedConversationId: string | null;
   updatePersistedConversation: (
     conversationId: string,
     change: ConversationUpdate,
   ) => void;
-}) {
-  const [draft, setDraft] = useState<DraftConversationState | null>(null);
+  }) {
+  const [draft, setDraft] = useState<DraftConversationState | null>(() => {
+    const stored = readPersistedDraftConversation();
+    return (
+      !persistedConversationId
+      && stored?.conversation.projectId === snapshot?.activeProjectId
+    )
+      ? stored
+      : null;
+  });
+  const draftRef = useRef(draft);
+
+  const replaceDraft = useCallback((
+    next: DraftConversationState | null,
+    persist = true,
+  ): void => {
+    draftRef.current = next;
+    setDraft(next);
+    if (next && persist) writePersistedDraftConversation(next);
+  }, []);
 
   const start = (projectId: string): void => {
+    discard();
     const backendDefault = snapshot?.backendDefaults?.find(
       ({ scope }) => scope === "global",
     );
@@ -80,7 +110,7 @@ export function useDraftConversation({
           backendDefault.selection,
         )
       : defaultPayload;
-    setDraft({
+    replaceDraft({
       conversation: buildDraftConversation(payload),
       payload,
     });
@@ -105,7 +135,60 @@ export function useDraftConversation({
     return true;
   };
 
-  const clear = useCallback((): void => setDraft(null), []);
+  const clear = useCallback((): void => {
+    replaceDraft(null, false);
+  }, [replaceDraft]);
+
+  const discard = useCallback((): void => {
+    const current = draftRef.current ?? readPersistedDraftConversation();
+    replaceDraft(null, false);
+    if (!current) return;
+    forgetPersistedDraftConversation(current.conversation.id);
+    try {
+      window.localStorage.removeItem(
+        `inertia:draft:${current.conversation.id}`,
+      );
+    } catch {
+      // The draft is already unreachable when storage is unavailable.
+    }
+  }, [replaceDraft]);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const current = draftRef.current;
+    if (current) {
+      const projectExists = snapshot.projects.some(
+        ({ id }) => id === current.conversation.projectId,
+      );
+      if (!projectExists) {
+        discard();
+      } else if (
+        persistedConversationId
+        || snapshot.activeProjectId !== current.conversation.projectId
+      ) {
+        replaceDraft(null, false);
+      }
+      return;
+    }
+    if (persistedConversationId) return;
+    const stored = readPersistedDraftConversation();
+    if (!stored) return;
+    const projectExists = snapshot.projects.some(
+      ({ id }) => id === stored.conversation.projectId,
+    );
+    if (!projectExists) {
+      forgetPersistedDraftConversation(stored.conversation.id);
+      return;
+    }
+    if (snapshot.activeProjectId === stored.conversation.projectId) {
+      replaceDraft(stored, false);
+    }
+  }, [
+    discard,
+    persistedConversationId,
+    replaceDraft,
+    snapshot,
+  ]);
 
   const chooseModel = (selection: ModelSelection): boolean => {
     if (!draft) return false;
@@ -113,7 +196,7 @@ export function useDraftConversation({
       draft.payload,
       selection,
     );
-    setDraft({
+    replaceDraft({
       payload,
       conversation: buildDraftConversation(payload, {
         id: draft.conversation.id,
@@ -124,8 +207,9 @@ export function useDraftConversation({
   };
 
   const updateDraft = (change: ConversationUpdate): void => {
-    setDraft((current) => {
-      if (!current) return current;
+    const current = draftRef.current;
+    if (!current) return;
+    const next = (() => {
       const selection = change.modelSelection
         ? {
             ...change.modelSelection,
@@ -164,7 +248,8 @@ export function useDraftConversation({
           accessMode: conversation.accessMode,
         },
       };
-    });
+    })();
+    replaceDraft(next);
   };
 
   const materializeAndSend = async (
@@ -172,17 +257,18 @@ export function useDraftConversation({
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
   ): Promise<boolean> => {
-    if (!draft) return false;
+    const sendingDraft = draftRef.current;
+    if (!sendingDraft) return false;
     const creation = await run("conversation.create:draft", {
       type: "conversation.create",
       payload: {
         ...withNewConversationModelSelection(
-          draft.payload,
-          draft.conversation.modelSelection,
+          sendingDraft.payload,
+          sendingDraft.conversation.modelSelection,
         ),
-        providerId: draft.conversation.providerId,
-        interactionMode: draft.conversation.interactionMode,
-        accessMode: draft.conversation.accessMode,
+        providerId: sendingDraft.conversation.providerId,
+        interactionMode: sendingDraft.conversation.interactionMode,
+        accessMode: sendingDraft.conversation.accessMode,
         activate: false,
       },
     });
@@ -193,14 +279,29 @@ export function useDraftConversation({
       throw new Error("The local service returned an unexpected chat response.");
     }
     const conversationId = creation.result.conversationId;
+    const stillOwnsDraft =
+      draftRef.current?.conversation.id === sendingDraft.conversation.id;
     try {
-      await sendMessage(conversationId, content, attachments, context);
-      window.localStorage.removeItem(
-        `inertia:draft:${draft.conversation.id}`,
+      await sendMessage(
+        conversationId,
+        content,
+        attachments,
+        context,
+        stillOwnsDraft,
       );
-      setDraft((current) => (
-        current?.conversation.id === draft.conversation.id ? null : current
-      ));
+      forgetPersistedDraftConversation(sendingDraft.conversation.id);
+      try {
+        window.localStorage.removeItem(
+          `inertia:draft:${sendingDraft.conversation.id}`,
+        );
+      } catch {
+        // The submitted prompt no longer needs browser persistence.
+      }
+      if (
+        draftRef.current?.conversation.id === sendingDraft.conversation.id
+      ) {
+        replaceDraft(null, false);
+      }
       return true;
     } catch (error) {
       void request({
@@ -241,6 +342,7 @@ export function useDraftConversation({
     start,
     importProject,
     clear,
+    discard,
     chooseModel,
     sendFromComposer,
     updateConversation,

@@ -428,6 +428,7 @@ export default function App(): React.JSX.Element {
   const sendMessage = draftConversation.sendFromComposer;
   const updateConversation = draftConversation.updateConversation;
   const clearDraftConversation = draftConversation.clear;
+  const discardDraftConversation = draftConversation.discard;
   const backendProfileActions = useStableController(
     useBackendProfiles({ request, run }),
   );
@@ -632,7 +633,7 @@ export default function App(): React.JSX.Element {
     location: NewConversationLocation = { kind: "defaults" },
   ) => {
     if (!targetProject) return;
-    clearDraftConversation();
+    discardDraftConversation();
     const backendDefault = connection.snapshot?.backendDefaults?.find(
       ({ scope, projectId }) =>
         scope === "project" && projectId === targetProject.id,

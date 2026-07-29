@@ -585,10 +585,14 @@ export async function writeWorkspaceTextFile(
     );
   }
 
-  const normalized = validateRelativePath(relativePath, false);
-  const writeKey = `${root}\0${normalized}`;
+  const lockTarget = await secureExistingPath(root, relativePath, "file");
+  const writeKey = `${root}\0${lockTarget.relativePath}`;
   return withWorkspaceWriteLock(writeKey, async () => {
-    const target = await secureExistingPath(root, normalized, "file");
+    const target = await secureExistingPath(
+      root,
+      lockTarget.relativePath,
+      "file",
+    );
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
       handle = await open(

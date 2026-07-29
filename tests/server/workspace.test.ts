@@ -170,7 +170,7 @@ describe("workspace file hierarchy", () => {
       ),
       writeWorkspaceTextFile(
         root,
-        "shared.ts",
+        "./shared.ts",
         "second writer\n",
         preview.contentDigest,
       ),

@@ -211,9 +211,7 @@ function MultiSpawnSideEditor({
               },
             })}
           >
-            {reasoningOptions.length === 0 && (
-              <option value="">Provider default</option>
-            )}
+            <option value="">Provider default</option>
             {reasoningOptions.map((effort) => (
               <option value={effort} key={effort}>
                 {reasoningLabel(effort)}
@@ -356,29 +354,37 @@ export function MultiSpawnDialog({
     );
     const routes = routesForSelection(side.selection);
     const selected = selectedModelSearchRoute(routes, side.selection);
+    const exactRoute = routes.find((candidate) =>
+      candidate.harnessId === side.selection.harnessId
+      && candidate.backendProfileId === side.selection.backendProfileId
+      && candidate.modelId === side.selection.modelId);
     const readiness = composerRouteReadiness({
       provider,
       profile,
       selection: side.selection,
     });
     const readinessIssue = readiness.ready ? null : readiness;
-    const routeSelectable = selected.selectable;
+    const routeSelectable = exactRoute?.selectable === true;
     return {
       routes,
       selected,
       providerId,
       ready: routeSelectable && readiness.ready,
-      repairAction: routeSelectable
+      repairAction: exactRoute
         ? readinessIssue?.action ?? null
         : null,
-      statusBadge: routeSelectable
-        ? readinessIssue?.badge ?? "Ready"
+      statusBadge: exactRoute
+        ? readinessIssue?.badge
+          ?? (routeSelectable ? "Ready" : "Unavailable")
         : "Select model",
-      statusTitle: routeSelectable
-        ? readinessIssue?.title ?? "Route ready"
+      statusTitle: exactRoute
+        ? readinessIssue?.title
+          ?? (routeSelectable ? "Route ready" : "Model route unavailable")
         : "Model route unavailable",
-      statusDetail: routeSelectable
-        ? readinessIssue?.detail ?? "The selected route is ready."
+      statusDetail: exactRoute
+        ? readinessIssue?.detail
+          ?? exactRoute.unavailableReason
+          ?? "The selected route is ready."
         : selected.unavailableReason
           ?? "Choose a model route that is currently available.",
     };

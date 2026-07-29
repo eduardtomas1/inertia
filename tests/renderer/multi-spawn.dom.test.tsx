@@ -9,6 +9,8 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AppSnapshot,
+  ModelBackendProfileView,
+  ModelSelection,
   Project,
   ProviderInfo,
   ServerEvent,
@@ -101,6 +103,68 @@ const provider: ProviderInfo = {
       refreshing: false,
     },
   },
+};
+
+const customSelection: ModelSelection = {
+  harnessId: "codex-app-server",
+  backendProfileId: "custom:team",
+  backendProfileDisplayName: "Team gateway",
+  modelId: "team-alpha",
+  alias: "Team Alpha",
+  reasoningEffort: "medium",
+  contextWindowOverride: 120_000,
+  providerOptions: {},
+  capabilities: [],
+  backendConfigurationRevision: 4,
+};
+
+const probeNeededProfile: ModelBackendProfileView = {
+  id: customSelection.backendProfileId,
+  displayName: customSelection.backendProfileDisplayName,
+  protocol: "openai-responses",
+  authenticationMode: "api-key",
+  source: "custom",
+  enabled: true,
+  configurationRevision: customSelection.backendConfigurationRevision,
+  endpointIdentity: "opaque-team-route-4",
+  harnessId: "codex-app-server",
+  preset: "custom",
+  allowInsecureLocalhost: false,
+  credentialGeneration: null,
+  models: [{
+    id: customSelection.modelId,
+    displayName: customSelection.alias ?? customSelection.modelId,
+    contextWindowTokens: 120_000,
+    reasoningOptions: [{
+      value: "medium",
+      label: "Medium",
+      description: "Balanced",
+    }],
+    capabilities: [],
+  }],
+  routing: {
+    mode: "simple",
+    primaryModelId: customSelection.modelId,
+  },
+  capabilityHints: [],
+  createdAt: now,
+  updatedAt: now,
+  endpointHost: "gateway.example.invalid",
+  authState: "configured",
+  connectionState: "not-tested",
+  compatibility: {
+    harnessId: "codex-app-server",
+    backendProfileId: customSelection.backendProfileId,
+    backendProtocol: "openai-responses",
+    state: "unknown",
+    provenance: "unknown",
+    allowsModelSwitchWithinSession: false,
+    reasonCode: "probe-required",
+    reason: "Run a compatibility probe before using this route.",
+  },
+  latestProbe: null,
+  canDelete: true,
+  canDisable: true,
 };
 
 const settings = {
@@ -309,7 +373,11 @@ describe("multi-spawn", () => {
       <MultiSpawnDialog
         open
         snapshot={snapshot}
-        settings={{ ...settings, defaultModel: "" }}
+        settings={{
+          ...settings,
+          defaultModel: "",
+          defaultReasoningEffort: "",
+        }}
         submitting={false}
         error={null}
         onClose={vi.fn()}
@@ -321,6 +389,12 @@ describe("multi-spawn", () => {
 
     expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(2);
     expect(screen.queryByText("Model route unavailable")).not.toBeInTheDocument();
+    const reasoning = screen.getByLabelText("Chat 1 reasoning");
+    expect(reasoning).toHaveValue("");
+    fireEvent.change(reasoning, { target: { value: "high" } });
+    expect(reasoning).toHaveValue("high");
+    fireEvent.change(reasoning, { target: { value: "" } });
+    expect(reasoning).toHaveValue("");
     fireEvent.change(screen.getByLabelText("Shared prompt"), {
       target: { value: "Compare the default route." },
     });
@@ -451,6 +525,39 @@ describe("multi-spawn", () => {
     expect(screen.getByText(
       "Choose two ready routes before launching the duo.",
     )).toBeVisible();
+  });
+
+  it("keeps setup available for an exact custom route that needs a probe", () => {
+    const onOpenBackendSetup = vi.fn();
+    render(
+      <MultiSpawnDialog
+        open
+        snapshot={{
+          ...snapshot,
+          backendProfiles: [probeNeededProfile],
+          backendDefaults: [{
+            scope: "global",
+            projectId: null,
+            selection: customSelection,
+            updatedAt: now,
+          }],
+        }}
+        settings={settings}
+        submitting={false}
+        error={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn(async () => undefined)}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={onOpenBackendSetup}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Launch duo" })).toBeDisabled();
+    expect(screen.getAllByText("Team gateway needs a probe")).toHaveLength(2);
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Open setup" })[0]!,
+    );
+    expect(onOpenBackendSetup).toHaveBeenCalledWith("custom:team");
   });
 
   it("creates both shells before selecting and starting them", async () => {

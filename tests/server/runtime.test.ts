@@ -1028,14 +1028,19 @@ process.exit(child.status ?? 1);
   it("updates a matching provider activity instead of persisting duplicate lifecycle rows", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
-    const { authFile } = fakeCodex(root, [
+    const { authFile, executable } = fakeCodex(root, [
       { type: "item.started", item: { type: "command_execution", command: "npm test" } },
       { type: "item.completed", item: { type: "command_execution", command: "npm test" } },
       { type: "item.completed", item: { type: "agent_message", text: "Activity lifecycle complete." } },
       { type: "turn.completed" },
     ]);
     writeFileSync(authFile, "connected");
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: true });
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: true,
+      codexBinaryPath: executable,
+    });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next(
@@ -1812,8 +1817,13 @@ process.exit(child.status ?? 1);
 
   it("runs provider authentication in an owned terminal and refreshes state after exit", async () => {
     const { root, data, workspace } = temporaryWorkspace();
-    fakeCodex(root);
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: true });
+    const { executable } = fakeCodex(root);
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: true,
+      codexBinaryPath: executable,
+    });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next(
@@ -1875,7 +1885,7 @@ process.exit(child.status ?? 1);
     const lineIds = hunk.lines
       .filter(({ kind }) => kind === "addition" || kind === "deletion")
       .map(({ id }) => id);
-    const { authFile } = fakeCodex(root, [
+    const { authFile, executable } = fakeCodex(root, [
       { type: "item.completed", item: { type: "agent_message", text: "This changes the exported behavior while keeping the review task isolated." } },
       { type: "turn.completed" },
     ]);
@@ -1884,6 +1894,7 @@ process.exit(child.status ?? 1);
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      codexBinaryPath: executable,
     });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
@@ -1954,12 +1965,13 @@ process.exit(child.status ?? 1);
     const structured = parseUnifiedDiff(diff.text);
     const file = structured.files[0]!;
     const hunk = file.hunks[0]!;
-    const { authFile } = fakeCodex(root, [{ type: "approval.request" }]);
+    const { authFile, executable } = fakeCodex(root, [{ type: "approval.request" }]);
     writeFileSync(authFile, "connected");
     const runtime = await startRuntime({
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      codexBinaryPath: executable,
     });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
@@ -2003,12 +2015,17 @@ process.exit(child.status ?? 1);
     const { root, data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
     const diff = await getUnifiedDiff(workspace);
-    const { authFile } = fakeCodex(root, [
+    const { authFile, executable } = fakeCodex(root, [
       { type: "item.completed", item: { type: "agent_message", text: reviewResult(diff.text) } },
       { type: "turn.completed" },
     ]);
     writeFileSync(authFile, "connected");
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: true });
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: true,
+      codexBinaryPath: executable,
+    });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next(
@@ -2066,9 +2083,14 @@ process.exit(child.status ?? 1);
     const { root, data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
     const diff = await getUnifiedDiff(workspace);
-    const { authFile } = fakeCodex(root);
+    const { authFile, executable } = fakeCodex(root);
     writeFileSync(authFile, "connected");
-    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: true });
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: true,
+      codexBinaryPath: executable,
+    });
     runtimes.push(runtime);
     const client = await connect(runtime.websocketUrl);
     const welcome = await client.events.next(
@@ -2170,9 +2192,14 @@ process.exit(child.status ?? 1);
             { type: "item.completed", item: { type: "agent_message", text: reviewResult(diff.text) } },
             { type: "turn.completed", delayMs: 150 },
           ];
-      const { authFile } = fakeCodex(root, runEvents);
+      const { authFile, executable } = fakeCodex(root, runEvents);
       writeFileSync(authFile, "connected");
-      const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: true });
+      const runtime = await startRuntime({
+        dataDirectory: data,
+        defaultWorkspacePath: workspace,
+        enableProviders: true,
+        codexBinaryPath: executable,
+      });
       runtimes.push(runtime);
       const client = await connect(runtime.websocketUrl);
       const welcome = await client.events.next(
@@ -2215,12 +2242,13 @@ process.exit(child.status ?? 1);
     const { root, data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
     const diff = await getUnifiedDiff(workspace);
-    const { authFile } = fakeCodex(root);
+    const { authFile, executable } = fakeCodex(root);
     writeFileSync(authFile, "connected");
     const runtime = await startRuntime({
       dataDirectory: data,
       defaultWorkspacePath: workspace,
       enableProviders: true,
+      codexBinaryPath: executable,
       reviewSummaryTimeoutMs: 20,
     });
     runtimes.push(runtime);

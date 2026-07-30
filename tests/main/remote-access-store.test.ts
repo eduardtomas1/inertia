@@ -74,7 +74,9 @@ describe("Remote Companion encrypted local store", () => {
     expect(raw).not.toContain(keyPair.privateKey);
     expect(raw).not.toContain("Remote Companion disabled");
     expect(await store.load()).toEqual(value);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("does not operate when platform encryption is unavailable", async () => {

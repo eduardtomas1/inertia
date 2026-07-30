@@ -7,6 +7,10 @@ import {
 } from "../remote/browser/src/remote-client";
 import type { BrowserDeviceProfile } from "../remote/browser/src/device-store";
 import { generateRemoteKeyPair } from "../src/shared/remote-crypto";
+import type {
+  RemoteRequest,
+  RemoteResponse,
+} from "../src/shared/remote-protocol";
 
 class FakeBrowserSocket extends EventTarget {
   static instances: FakeBrowserSocket[] = [];
@@ -191,5 +195,95 @@ describe("Remote Companion browser connection ownership", () => {
 
     expect(statuses.at(-1)).toBe("The desktop is offline.");
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("replaces the scheduled poll when conversation selection refreshes", async () => {
+    vi.useFakeTimers();
+    const now = new Date().toISOString();
+    let blockNextState = false;
+    let releaseState = (): void => undefined;
+    const stateReleased = new Promise<void>((resolve) => {
+      releaseState = resolve;
+    });
+    const request = vi.fn(async (
+      value: RemoteRequest,
+    ): Promise<RemoteResponse> => {
+      if (value.type === "state.get") {
+        if (blockNextState) {
+          blockNextState = false;
+          await stateReleased;
+        }
+        return {
+          type: "response",
+          requestId: value.requestId,
+          ok: true,
+          result: {
+            kind: "state",
+            state: {
+              generatedAt: now,
+              projects: [],
+              conversations: [],
+              runs: [],
+            },
+          },
+        };
+      }
+      return {
+        type: "response",
+        requestId: value.requestId,
+        ok: true,
+        result: {
+          kind: "conversation",
+          detail: {
+            generatedAt: now,
+            conversation: {
+              id: value.type === "conversation.get"
+                ? value.conversationId
+                : crypto.randomUUID(),
+              projectId: "project",
+              title: "Conversation",
+              providerLabel: "Provider",
+              status: "idle",
+              pendingLocalApproval: false,
+              updatedAt: now,
+            },
+            messages: [],
+            activities: [],
+            subagents: [],
+            waitingForLocalAction: false,
+          },
+        },
+      };
+    });
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    Object.assign(client as unknown as Record<string, unknown>, {
+      sender: {},
+      request,
+    });
+
+    client.selectConversation(crypto.randomUUID());
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(vi.getTimerCount()).toBe(1);
+
+    blockNextState = true;
+    client.selectConversation(crypto.randomUUID());
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+    expect(vi.getTimerCount()).toBe(0);
+
+    client.selectConversation(crypto.randomUUID());
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(5));
+    expect(vi.getTimerCount()).toBe(1);
+    releaseState();
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(7));
+    expect(vi.getTimerCount()).toBe(1);
   });
 });

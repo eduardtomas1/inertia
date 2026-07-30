@@ -9,10 +9,15 @@ import WebSocket from "ws";
 import {
   closeRemoteSocket,
   REMOTE_SHUTDOWN_TIMEOUT_MS,
+  RemotePrivacyMonitor,
   RemoteSessionAuthenticationBudget,
 } from "../../src/main/remote-access-lifecycle";
 import { RemoteAccessService } from "../../src/main/remote-access-service";
 import { RemoteAccessStore } from "../../src/main/remote-access-store";
+import {
+  generateRemoteKeyPair,
+  remoteRandomSecret,
+} from "../../src/shared/remote-crypto";
 import { REMOTE_LIMITS } from "../../src/shared/remote-protocol";
 
 class FakeSocket extends EventEmitter {
@@ -125,6 +130,67 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
     expect(socket.closeCalls).toBe(1);
     expect(socket.terminateCalls).toBe(1);
     expect(service.state().activeSessions).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("retains a lock during initialization and applies it before reconnecting", async () => {
+    vi.useFakeTimers();
+    const directory = mkdtempSync(join(tmpdir(), "inertia-remote-lock-"));
+    directories.push(directory);
+    const store = new RemoteAccessStore(join(directory, "remote.vault"), {
+      available: () => true,
+      encrypt: (value) => new TextEncoder().encode(value),
+      decrypt: (value) => new TextDecoder().decode(value),
+    });
+    await store.save({
+      version: 1,
+      enabled: true,
+      relayUrl: "ws://127.0.0.1:8787",
+      hostId: crypto.randomUUID(),
+      endpointId: remoteRandomSecret(24),
+      keyPair: await generateRemoteKeyPair(),
+      devices: [],
+      audit: [],
+      receipts: [],
+      usedSessions: [],
+    });
+    const power = new EventEmitter();
+    let service: RemoteAccessService | null = null;
+    const monitor = new RemotePrivacyMonitor(
+      power,
+      (locked) => service?.setPrivacyLocked(locked),
+    );
+    const createSocket = vi.fn(() => new FakeSocket() as unknown as WebSocket);
+    const creating = RemoteAccessService.create({
+      store,
+      runtime: {
+        remoteRequest: async () => {
+          throw new Error("unused");
+        },
+      },
+      autoConnect: false,
+      createSocket,
+      setTimer: setTimeout,
+      clearTimer: clearTimeout,
+    });
+
+    power.emit("lock-screen");
+    service = await creating;
+    service.setPrivacyLocked(monitor.locked);
+    service.startConnections();
+    expect(monitor.locked).toBe(true);
+    expect(createSocket).not.toHaveBeenCalled();
+
+    power.emit("unlock-screen");
+    expect(createSocket).toHaveBeenCalledTimes(1);
+    monitor.shutdown();
+    expect(power.listenerCount("lock-screen")).toBe(0);
+    expect(power.listenerCount("suspend")).toBe(0);
+    expect(power.listenerCount("unlock-screen")).toBe(0);
+
+    const shuttingDown = service.shutdown();
+    await vi.advanceTimersByTimeAsync(REMOTE_SHUTDOWN_TIMEOUT_MS);
+    await shuttingDown;
     expect(vi.getTimerCount()).toBe(0);
   });
 });

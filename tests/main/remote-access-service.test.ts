@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 
 import { createReferenceRelay, type ReferenceRelay } from "../../remote/relay/server.mjs";
@@ -37,11 +37,32 @@ import { RemoteAccessService } from "../../src/main/remote-access-service";
 import { remotePairingComparisonCode as mainComparisonCode } from "../../src/main/remote-access-policy";
 import { RemoteAccessStore } from "../../src/main/remote-access-store";
 
+const remoteCryptoGate = vi.hoisted(() => ({
+  afterPairingOpen: null as (() => Promise<void>) | null,
+}));
+
+vi.mock("../../src/shared/remote-crypto", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../src/shared/remote-crypto")
+  >();
+  return {
+    ...actual,
+    openPairingRequest: async (
+      ...args: Parameters<typeof actual.openPairingRequest>
+    ) => {
+      const result = await actual.openPairingRequest(...args);
+      await remoteCryptoGate.afterPairingOpen?.();
+      return result;
+    },
+  };
+});
+
 const relays: ReferenceRelay[] = [];
 const sockets: WebSocket[] = [];
 const directories: string[] = [];
 
 afterEach(async () => {
+  remoteCryptoGate.afterPairingOpen = null;
   for (const socket of sockets.splice(0)) socket.terminate();
   for (const relay of relays.splice(0)) await relay.close();
   for (const directory of directories.splice(0)) {
@@ -113,6 +134,36 @@ async function nextFrame(
       && message.frame.kind === kind
     ) return message.frame as RemoteCipherFrame;
   }
+}
+
+function nextFrames(
+  socket: WebSocket,
+  kind: RemoteCipherFrame["kind"],
+  count: number,
+): Promise<RemoteCipherFrame[]> {
+  return new Promise((resolve, reject) => {
+    const frames: RemoteCipherFrame[] = [];
+    const timer = setTimeout(() => {
+      socket.off("message", onMessage);
+      reject(new Error("Messages timed out."));
+    }, 2_000);
+    const onMessage = (raw: WebSocket.RawData): void => {
+      const message = JSON.parse(raw.toString()) as Record<string, unknown>;
+      if (
+        message.type !== "relay.frame"
+        || typeof message.frame !== "object"
+        || message.frame === null
+        || !("kind" in message.frame)
+        || message.frame.kind !== kind
+      ) return;
+      frames.push(message.frame as RemoteCipherFrame);
+      if (frames.length !== count) return;
+      clearTimeout(timer);
+      socket.off("message", onMessage);
+      resolve(frames);
+    };
+    socket.on("message", onMessage);
+  });
 }
 
 function sendFrame(
@@ -240,18 +291,97 @@ describe("Remote Companion outbound encrypted service", () => {
     await service.shutdown();
   });
 
+  it("does not commit a pairing after its relay route disconnects", async () => {
+    const relayUrl = await relay();
+    let opened = (): void => undefined;
+    const pairingOpened = new Promise<void>((resolve) => {
+      opened = resolve;
+    });
+    let release = (): void => undefined;
+    const pairingReleased = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    remoteCryptoGate.afterPairingOpen = async () => {
+      opened();
+      await pairingReleased;
+    };
+    let released = false;
+    let observeState = (_state: unknown): void => undefined;
+    const stateAfterRelease = new Promise<ReturnType<RemoteAccessService["state"]>>(
+      (resolve) => {
+        observeState = (state) => {
+          if (released) {
+            resolve(state as ReturnType<RemoteAccessService["state"]>);
+          }
+        };
+      },
+    );
+    const service = await RemoteAccessService.create({
+      store: encryptedStore(),
+      runtime: { remoteRequest: async () => {
+        throw new Error("unused");
+      } },
+      onStateChange: (state) => observeState(state),
+    });
+    await service.setEnabled(true, relayUrl);
+    await waitFor(() => service.state().connection === "online");
+    const invitation = await service.createInvitation();
+    const deviceKeys = await generateRemoteKeyPair();
+    const tunnel = await browserTunnel(relayUrl, invitation.endpointId);
+    sendFrame(
+      tunnel.socket,
+      tunnel.connectionId,
+      await sealPairingRequest(invitation, {
+        type: "pair.request",
+        requestId: crypto.randomUUID(),
+        invitationId: invitation.invitationId,
+        deviceId: crypto.randomUUID(),
+        deviceLabel: "Disconnected browser",
+        devicePublicKey: deviceKeys.publicKey,
+        createdAt: new Date().toISOString(),
+        browserVersion: "0.1.0",
+      }),
+    );
+    await pairingOpened;
+    tunnel.socket.send(JSON.stringify({
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      type: "relay.disconnect",
+      connectionId: tunnel.connectionId,
+    }));
+    expect((await nextMessage(tunnel.socket)).type).toBe(
+      "relay.peer-disconnected",
+    );
+    released = true;
+    release();
+    expect(await stateAfterRelease).toMatchObject({
+      activeSessions: 0,
+      pendingPairings: [],
+    });
+    await service.shutdown();
+  });
+
   it("pairs, scopes, authenticates, delivers exactly once, and revokes", async () => {
     const relayUrl = await relay();
     const store = encryptedStore();
     const projectId = crypto.randomUUID();
     const conversationId = crypto.randomUUID();
     let runtimeCalls = 0;
+    let holdStateRequests = false;
+    let stateRequestsStarted = 0;
+    let releaseStateRequests = (): void => undefined;
+    const stateRequestsReleased = new Promise<void>((resolve) => {
+      releaseStateRequests = resolve;
+    });
     const runtime = {
       remoteRequest: async (
         _subject: unknown,
         request: RemoteRequest,
       ): Promise<RemoteResponse> => {
         runtimeCalls += 1;
+        if (request.type === "state.get" && holdStateRequests) {
+          stateRequestsStarted += 1;
+          await stateRequestsReleased;
+        }
         if (request.type === "prompt.send") {
           return {
             type: "response",
@@ -394,6 +524,58 @@ describe("Remote Companion outbound encrypted service", () => {
       await openSessionData(recipient, duplicateFrame),
     )).toMatchObject({ ok: true });
     expect(runtimeCalls).toBe(1);
+
+    holdStateRequests = true;
+    const firstStateRequest = {
+      type: "state.get" as const,
+      requestId: crypto.randomUUID(),
+    };
+    const secondStateRequest = {
+      type: "state.get" as const,
+      requestId: crypto.randomUUID(),
+    };
+    const stateResponses = nextFrames(
+      sessionTunnel.socket,
+      "session.data",
+      2,
+    );
+    const firstStateFrame = await sealSessionData(
+      sender,
+      session.sessionId,
+      firstStateRequest,
+    );
+    const secondStateFrame = await sealSessionData(
+      sender,
+      session.sessionId,
+      secondStateRequest,
+    );
+    sendFrame(
+      sessionTunnel.socket,
+      sessionTunnel.connectionId,
+      firstStateFrame,
+    );
+    sendFrame(
+      sessionTunnel.socket,
+      sessionTunnel.connectionId,
+      secondStateFrame,
+    );
+    await waitFor(() => stateRequestsStarted === 2);
+    expect(service.state().activeSessions).toBe(1);
+    releaseStateRequests();
+    const concurrentResponses = await stateResponses;
+    const responseIds: string[] = [];
+    for (const frame of concurrentResponses) {
+      if (frame.kind !== "session.data") {
+        throw new Error("Missing concurrent response.");
+      }
+      responseIds.push(remoteResponseSchema.parse(
+        await openSessionData(recipient, frame),
+      ).requestId);
+    }
+    expect(new Set(responseIds)).toEqual(new Set([
+      firstStateRequest.requestId,
+      secondStateRequest.requestId,
+    ]));
 
     const reducedClose = nextFrame(sessionTunnel.socket, "session.close");
     await service.updateDevice(

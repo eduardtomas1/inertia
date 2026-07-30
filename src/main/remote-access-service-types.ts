@@ -15,6 +15,7 @@ import type { RuntimeSupervisor } from "./runtime-supervisor";
 
 export interface PendingRemotePairing {
   connectionId: string;
+  connectionEpoch: number;
   payload: RemotePairingRequestPayload;
   receivedAt: string;
   expiresAt: string;
@@ -23,6 +24,7 @@ export interface PendingRemotePairing {
 
 export interface ActiveRemoteSession {
   connectionId: string;
+  connectionEpoch: number;
   sessionId: string;
   device: PersistedRemoteDevice;
   recipient: RemoteRecipientState;
@@ -33,12 +35,14 @@ export interface ActiveRemoteSession {
   requestTimes: number[];
   promptTimes: number[];
   inFlight: Map<string, RemoteRequest>;
+  outboundTail: Promise<void>;
 }
 
 export interface RemoteAccessServiceOptions {
   store: RemoteAccessStore;
   runtime: Pick<RuntimeSupervisor, "remoteRequest">;
   onStateChange?: (state: RemoteAccessState) => void;
+  autoConnect?: boolean;
   now?: () => Date;
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;

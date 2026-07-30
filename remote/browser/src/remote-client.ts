@@ -66,6 +66,7 @@ export class RemoteCompanionClient {
   private inboundTail: Promise<void> = Promise.resolve();
   private outboundTail: Promise<void> = Promise.resolve();
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private pollGeneration = 0;
   private selectedConversationId: string | null = null;
   private attemptEpoch = 0;
   private profileWriteTail: Promise<void> = Promise.resolve();
@@ -304,7 +305,7 @@ export class RemoteCompanionClient {
         }
       });
       this.callbacks.status("Connected. The desktop remains authoritative.", true);
-      await this.refresh(epoch);
+      await this.refresh(epoch, this.replacePollingLoop());
     } catch (error) {
       if (this.ownsAttempt(epoch)) {
         this.disconnect(publicError(error, "The desktop is offline."));
@@ -314,7 +315,10 @@ export class RemoteCompanionClient {
 
   selectConversation(conversationId: string): void {
     this.selectedConversationId = conversationId;
-    this.refreshOrDisconnect(this.attemptEpoch);
+    this.refreshOrDisconnect(
+      this.attemptEpoch,
+      this.replacePollingLoop(),
+    );
   }
 
   async sendPrompt(conversationId: string, content: string): Promise<void> {
@@ -345,28 +349,31 @@ export class RemoteCompanionClient {
     }
   }
 
-  private async refresh(epoch: number): Promise<void> {
-    if (!this.sender || !this.ownsAttempt(epoch)) return;
+  private async refresh(epoch: number, generation: number): Promise<void> {
+    if (!this.sender || !this.ownsPollingLoop(epoch, generation)) return;
     try {
       const state = await this.request({
         type: "state.get",
         requestId: crypto.randomUUID(),
       });
       if (
-        this.ownsAttempt(epoch)
+        this.ownsPollingLoop(epoch, generation)
         && state.ok
         && state.result.kind === "state"
       ) {
         this.callbacks.shell(state.result.state);
       }
-      if (this.selectedConversationId && this.ownsAttempt(epoch)) {
+      if (
+        this.selectedConversationId
+        && this.ownsPollingLoop(epoch, generation)
+      ) {
         const detail = await this.request({
           type: "conversation.get",
           requestId: crypto.randomUUID(),
           conversationId: this.selectedConversationId,
         });
         if (
-          this.ownsAttempt(epoch)
+          this.ownsPollingLoop(epoch, generation)
           && detail.ok
           && detail.result.kind === "conversation"
         ) {
@@ -374,21 +381,32 @@ export class RemoteCompanionClient {
         }
       }
     } finally {
-      if (this.sender && this.ownsAttempt(epoch)) {
+      if (this.sender && this.ownsPollingLoop(epoch, generation)) {
         this.pollTimer = setTimeout(() => {
           this.pollTimer = null;
-          this.refreshOrDisconnect(epoch);
+          this.refreshOrDisconnect(epoch, generation);
         }, 2_000);
       }
     }
   }
 
-  private refreshOrDisconnect(epoch: number): void {
-    void this.refresh(epoch).catch(() => {
-      if (this.ownsAttempt(epoch)) {
+  private refreshOrDisconnect(epoch: number, generation: number): void {
+    void this.refresh(epoch, generation).catch(() => {
+      if (this.ownsPollingLoop(epoch, generation)) {
         this.disconnect("The desktop is offline.");
       }
     });
+  }
+
+  private replacePollingLoop(): number {
+    if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.pollTimer = null;
+    this.pollGeneration += 1;
+    return this.pollGeneration;
+  }
+
+  private ownsPollingLoop(epoch: number, generation: number): boolean {
+    return this.ownsAttempt(epoch) && generation === this.pollGeneration;
   }
 
   private request(request: RemoteRequest): Promise<RemoteResponse> {
@@ -530,8 +548,7 @@ export class RemoteCompanionClient {
   }
 
   private disconnectTransport(message: string): void {
-    if (this.pollTimer) clearTimeout(this.pollTimer);
-    this.pollTimer = null;
+    this.replacePollingLoop();
     const socket = this.socket;
     this.socket = null;
     this.connectionId = null;

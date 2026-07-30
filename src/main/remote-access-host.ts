@@ -22,6 +22,7 @@ import {
   createRemoteStoreEncryption,
   RemoteAccessStore,
 } from "./remote-access-store";
+import { RemotePrivacyMonitor } from "./remote-access-lifecycle";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -41,10 +42,14 @@ export class RemoteAccessHost {
   private serviceInitialization: Promise<void> | null = null;
   private initializationError: string | null =
     "Remote Companion secure storage is initializing.";
-  private monitoringPower = false;
+  private readonly privacyMonitor: RemotePrivacyMonitor;
   private stopped = false;
 
   private constructor(private readonly options: RemoteAccessHostOptions) {
+    this.privacyMonitor = new RemotePrivacyMonitor(
+      powerMonitor,
+      (locked) => this.service?.setPrivacyLocked(locked),
+    );
     this.registerIpc(options.assertTrusted);
   }
 
@@ -102,22 +107,19 @@ export class RemoteAccessHost {
       onStateChange: (state) => {
         this.emitState(state);
       },
+      autoConnect: false,
     });
     if (this.stopped) {
       await service.shutdown();
       return;
     }
+    service.setPrivacyLocked(this.privacyMonitor.locked);
     this.service = service;
     const state = service.state();
-    if (state.available) {
-      this.monitoringPower = true;
-      powerMonitor.on("lock-screen", this.lock);
-      powerMonitor.on("suspend", this.lock);
-      powerMonitor.on("unlock-screen", this.unlock);
-    }
+    service.startConnections();
     this.initializationError = state.connectionMessage
       ?? "Remote Companion is unavailable.";
-    this.emitState(state);
+    this.emitState(service.state());
   }
 
   state(): RemoteAccessState {
@@ -139,23 +141,10 @@ export class RemoteAccessHost {
 
   async shutdown(): Promise<void> {
     this.stopped = true;
-    if (this.monitoringPower) {
-      powerMonitor.off("lock-screen", this.lock);
-      powerMonitor.off("suspend", this.lock);
-      powerMonitor.off("unlock-screen", this.unlock);
-      this.monitoringPower = false;
-    }
+    this.privacyMonitor.shutdown();
     await this.serviceInitialization;
     await this.service?.shutdown();
   }
-
-  private readonly lock = (): void => {
-    this.service?.setPrivacyLocked(true);
-  };
-
-  private readonly unlock = (): void => {
-    this.service?.setPrivacyLocked(false);
-  };
 
   private emitState(state: RemoteAccessState): void {
     const window = this.options.window();

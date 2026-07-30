@@ -1,9 +1,93 @@
 import WebSocket from "ws";
 
-import { REMOTE_LIMITS } from "../shared/remote-protocol";
+import {
+  sealSessionData,
+  type RemoteSenderState,
+} from "../shared/remote-crypto";
+import {
+  REMOTE_LIMITS,
+  type RemoteCipherFrame,
+  type RemoteResponse,
+} from "../shared/remote-protocol";
 import { takeRemoteRate } from "./remote-access-policy";
 
 export const REMOTE_SHUTDOWN_TIMEOUT_MS = 1_500;
+
+type RemotePowerEvent = "lock-screen" | "suspend" | "unlock-screen";
+
+export interface RemotePowerEvents {
+  on(event: RemotePowerEvent, listener: () => void): unknown;
+  off(event: RemotePowerEvent, listener: () => void): unknown;
+}
+
+export class RemotePrivacyMonitor {
+  private value = false;
+  private stopped = false;
+
+  constructor(
+    private readonly events: RemotePowerEvents,
+    private readonly onChange: (locked: boolean) => void,
+  ) {
+    events.on("lock-screen", this.lock);
+    events.on("suspend", this.lock);
+    events.on("unlock-screen", this.unlock);
+  }
+
+  get locked(): boolean {
+    return this.value;
+  }
+
+  shutdown(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.events.off("lock-screen", this.lock);
+    this.events.off("suspend", this.lock);
+    this.events.off("unlock-screen", this.unlock);
+  }
+
+  private readonly lock = (): void => {
+    this.update(true);
+  };
+
+  private readonly unlock = (): void => {
+    this.update(false);
+  };
+
+  private update(locked: boolean): void {
+    if (this.stopped || this.value === locked) return;
+    this.value = locked;
+    this.onChange(locked);
+  }
+}
+
+interface RemoteOutboundSession {
+  connectionId: string;
+  sessionId: string;
+  sender: RemoteSenderState;
+  outboundTail: Promise<void>;
+}
+
+export async function sendSequencedRemoteResponse(
+  session: RemoteOutboundSession,
+  response: RemoteResponse,
+  isCurrent: () => boolean,
+  send: (
+    connectionId: string,
+    frame: Extract<RemoteCipherFrame, { kind: "session.data" }>,
+  ) => void,
+): Promise<void> {
+  const sending = session.outboundTail.catch(() => undefined).then(async () => {
+    if (!isCurrent()) return;
+    const frame = await sealSessionData(
+      session.sender,
+      session.sessionId,
+      response,
+    );
+    if (isCurrent()) send(session.connectionId, frame);
+  });
+  session.outboundTail = sending;
+  await sending;
+}
 
 export class RemoteSessionAuthenticationBudget {
   private readonly globalTimes: number[] = [];

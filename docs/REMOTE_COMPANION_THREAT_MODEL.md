@@ -53,16 +53,19 @@ trusted only within their existing responsibilities.
 | Pairing replay | Reuse an invitation/request. | One live invitation, five-minute expiry, bounded request-ID replay set, strict request/invitation correlation, local approval. |
 | Session replay/fixation | Reuse a valid opening, force sequence reuse, or pin an old grant. | Fresh UUID/timestamp, persisted used-session IDs, HPKE authenticated context bound to host/device/session, exact sequence, desktop current grant returned encrypted. |
 | Authentication CPU exhaustion | Repeated invalid openings trigger P-256 work across device keys. | Four attempts per relay connection, 24/minute global budget before crypto, at most 16 device keys, relay connection/message limits. Distributed relay/network DoS remains possible. |
-| Malicious project/provider output | XSS, deceptive links, secret/path exfiltration, oversized responses. | Safe projection only, path/credential/code/HTML redaction, user/assistant roles only, UTF-8 byte budget, strict schemas/CSP, DOM `textContent`, no Markdown/HTML execution. Heuristic redaction cannot prove arbitrary prose contains no secret. |
+| Malicious project/provider output | XSS, deceptive links, secret/path exfiltration, oversized responses. | Safe projection only, arbitrary POSIX/Windows absolute-path and file-URL redaction, credential/code/HTML redaction, user/assistant roles only, UTF-8 byte budget, strict schemas/CSP, DOM `textContent`, no Markdown/HTML execution. Ordinary HTTP(S) URLs and surrounding punctuation remain usable. Heuristic redaction cannot prove arbitrary prose contains no secret. |
 | Remote approval abuse | Prompt induces a Full Access, command, destructive, credential, or secret approval remotely. | Remote protocol has no approval/answer capability. Runtime keeps supervised mode and existing provider approval policy; browser only reports that local action is needed. |
 | Prompt/attachment/source leakage | Relay/browser receives sensitive local input, source, attachments, path, or execution payload. | Only explicit remote prompt text and safe projections cross the boundary. No attachment/path/source/diagnostic fields exist in strict schemas. Provider credentials and local capabilities never enter them. |
 | Metadata leakage | Relay learns endpoint/IP/timing/size and opaque frame identifiers. | Minimal routing fields, no clear device ID on session opening, no payload logs/queue. Padding, anonymity, and traffic-shape hiding are not provided. |
 | Browser profile corruption | Malformed IndexedDB changes relay URL, key, or grant. | Strict schema before use, WSS/loopback-WS transport policy, invalid profile deletion and explicit error. |
-| Browser attempt race | Stale pair/reconnect overwrites a newer socket/session or leaves listeners alive. | Monotonic attempt ownership, tracked opening sockets, stale tunnel close, ownership checks after awaits, complete timer/listener cleanup on close/error/timeout. |
+| Browser attempt/poll race | Stale pair/reconnect overwrites a newer socket/session, leaves listeners alive, or selection creates duplicate polling loops beyond the request budget. | Monotonic attempt and poll-generation ownership, one replaceable poll timer, tracked opening sockets, stale tunnel close, ownership checks after awaits, complete timer/listener cleanup on close/error/timeout. |
 | Relay peer-disconnect spoofing | Third connection closes another browser/desktop pair. | Relay verifies the caller owns the connection before disconnecting it. |
-| Denial of service | Oversized/malformed frames, connection churn, stalled close, large workspace, reconnect storm. | Layered size/count/rate/time limits, byte-bounded projections, no compression, exponential capped reconnect, heartbeat, bounded 1.5-second shutdown then terminate. A relay or network can always make the optional feature unavailable. |
+| Relay route lifecycle race | Disconnect or connection-ID reuse lands during asynchronous pairing/session crypto and later commits approval/session state for a dead route. | `peer-connected` creates a desktop-local epoch; disconnect invalidates it synchronously and cleanup is ordered with the per-route frame queue. Post-crypto/persistence commits recheck epoch ownership. Active routes and queued frames are bounded. |
+| Concurrent encrypted frames | Parallel `session.data` opens race HPKE recipient sequence and falsely close a valid session as replay; parallel responses race sender sequence. | One bounded inbound queue per route serializes frame opening only; validated runtime requests remain concurrent. A separate per-session outbound queue seals responses in completion order. |
+| Denial of service | Oversized/malformed frames, connection churn, queued-frame growth, stalled close, large workspace, reconnect storm. | Layered size/count/rate/time limits, eight active peer-route and 16-frame-per-route caps, byte-bounded projections, no compression, exponential capped reconnect, heartbeat, bounded 1.5-second shutdown then terminate. A relay or network can always make the optional feature unavailable. |
 | Stale/offline state | Browser displays old state or duplicates a prompt after uncertainty. | Generated timestamps, two-second live polling only while authenticated, clear offline status, no relay prompt queue, persisted dispatch receipt, no automatic prompt retry. A displayed projection may be up to one poll old. |
 | Revocation race | Revoked/reduced device continues with an old session/grant. | Grant change/revoke increments desktop version and closes sessions. Each request checks current device expiry/revocation; reconnect gets current encrypted grant. Revoked keys are not tried. |
+| Lock during startup | A persisted enabled profile connects while secure-store/service initialization is awaiting, after a lock/suspend event was missed. | Power listeners are subscribed synchronously at host construction. Locked state is retained, applied before explicit connection startup, and listeners are removed on shutdown. |
 | Vault downgrade/corruption or availability stall | Linux plaintext safeStorage fallback, interrupted/unsafe file replacement, or a stuck platform-vault probe exposes keys or blocks startup. | Reused safeStorage availability policy rejects `basic_text`/`unknown`; separate encrypted vault; unique exclusive stages, canonical directory containment, no-follow regular-file reads, bounds/mode, restart recovery, Windows replacement path. Fresh default-off startup does not probe storage or create keys; existing-vault availability is bounded and fails closed. Corrupt/decryption failures disable the feature. |
 
 ## Privacy consequences
@@ -139,12 +142,18 @@ Release-blocking deterministic coverage includes:
 - pairing label spoofing, explicit project choice, device scope/expiry,
   reduction/reconnect, revocation, stolen-key rejection;
 - per-connection/global authentication exhaustion and recovery;
+- back-to-back encrypted request/response sequencing with concurrent runtime
+  work, relay disconnect during gated crypto, stale route ownership, and queue
+  bounds;
 - exact process-boundary validation, timeout, worker restart, and shutdown;
 - delivery dedupe, fixation, uncertain delivery, bounded receipt retention;
 - large workspace/transcript UTF-8 byte bounding;
 - relay origin, peer ownership, offline/no-queue, capacity/rate/size behavior;
-- browser profile schema/clearing, stale-attempt ownership, listener cleanup,
-  IPv4/IPv6 loopback policy, XSS/provider-output inert rendering, strict CSP;
+- browser profile schema/clearing, stale-attempt ownership, single poll-loop
+  replacement, listener cleanup, IPv4/IPv6 loopback policy,
+  XSS/provider-output inert rendering, strict CSP;
+- startup lock retention before connection, power-listener cleanup, arbitrary
+  POSIX path redaction with URL/punctuation preservation;
 - real Electron Chromium pairing, authenticated E2EE state exchange, and
   corrupt IndexedDB recovery.
 

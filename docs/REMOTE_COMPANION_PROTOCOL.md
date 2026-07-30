@@ -12,6 +12,10 @@ The implementation preserves Inertia's existing privilege boundaries:
   replay state, delivery receipts, the audit trail, outbound WebSockets, screen
   lock behavior, and shutdown. Those records live in the separate encrypted
   `remote-access.vault`.
+- Lock, suspend, and unlock listeners are installed synchronously when the
+  Remote Access host is constructed. A lock observed while secure storage is
+  still initializing is retained and applied before a persisted enabled
+  profile may reconnect.
 - The existing `ElectronSafeStorageBackend` availability policy rejects Linux
   `basic_text` and `unknown` backends. Remote access remains unavailable rather
   than storing its host private key or grants through a plaintext fallback.
@@ -104,6 +108,16 @@ Sessions:
    monotonically increasing sequence. A duplicate, skipped, or reordered
    sequence closes the session.
 
+Relay peer routes have desktop-local epochs established only by
+`relay.peer-connected`. Each connection has one bounded inbound frame queue, so
+HPKE recipient sequence advances cannot race. Successfully opened application
+requests are detached from that queue and may remain concurrently active up to
+the in-flight limit. Responses have a separate per-session send queue so their
+HPKE sender sequence advances in completion order. Peer disconnect invalidates
+its epoch immediately, queues cleanup behind earlier frames, and every
+post-crypto commit rechecks current ownership. A dead or reused route therefore
+cannot leave a pending approval or active session.
+
 The suite is RFC 9180 HPKE using DHKEM(P-256, HKDF-SHA256),
 HKDF-SHA256, and AES-256-GCM through `@hpke/core` and platform WebCrypto.
 Protocol-specific `info` and AAD bind the protocol version, purpose, host,
@@ -131,7 +145,10 @@ dedupe ledger.
 
 There is no durable relay queue. If the desktop is absent, the relay reports it
 offline. A request timeout or transport loss reports offline/uncertain; the
-browser does not silently retry a prompt.
+browser does not silently retry a prompt. The browser owns exactly one
+generation-tagged polling loop. Conversation selection and manual refresh
+replace its timer; completion of an older in-flight poll cannot publish state
+or schedule another loop.
 
 ## Authorization matrix
 
@@ -181,8 +198,9 @@ ownership for disconnect, heartbeats clients, and has bounded shutdown.
 
 ## Lifecycle bounds
 
-- Devices: 16; active sessions: 4; pending pairings: 1. A local user must
-  resolve the current security-sensitive approval before creating another.
+- Devices: 16; active peer routes: 8; active sessions: 4; pending pairings: 1.
+  Each route queues at most 16 encrypted frames. A local user must resolve the
+  current security-sensitive approval before creating another.
 - Pairing: five minutes and ten attempts/minute.
 - Session authentication: four attempts/connection and 24/minute globally.
 - Active requests: eight/session; all requests: 120/minute; prompts: six/minute.
@@ -198,5 +216,8 @@ ownership for disconnect, heartbeats clients, and has bounded shutdown.
   shutdown.
 
 Screen lock or suspend disconnects remote sessions and pauses reconnection.
-Unlock reconnects only if the feature remains locally enabled. The desktop UI
-shows enabled/connection state and active remote session count.
+The listener exists before asynchronous vault/service initialization, and a
+retained locked state is applied before connection startup. Unlock reconnects
+only if the feature remains locally enabled. Shutdown removes all three power
+listeners. The desktop UI shows enabled/connection state and active remote
+session count.

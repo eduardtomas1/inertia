@@ -5,12 +5,15 @@ const SECRET_PATTERNS = [
   /\b(Bearer|Basic)\s+\S+/giu,
 ] as const;
 
-const UNIX_ABSOLUTE_PATH =
-  /(^|[\s("'`])\/(?:Users|home|private|tmp|var|opt|run|etc|Volumes)(?:\/[^\s"'`),;:]+)+/gmu;
+const POSIX_ABSOLUTE_PATH =
+  /(^|[\s("'`=[{>,;!?:-])(\/+[^\s"'`<>()[\]{},;!?:/][^\s"'`<>()[\]{},;!?:]*)/gmu;
 const WINDOWS_ABSOLUTE_PATH =
   /\b[A-Za-z]:\\(?:[^\\\s"'`]+\\)*[^\\\s"'`),;:]*/gu;
 const CREDENTIAL_URL =
   /\b([a-z][a-z0-9+.-]*:\/\/)(?:[^/\s@]+)@/giu;
+const LOCAL_FILE_URL =
+  /\bfile:\/\/\/+[^\s"'`<>()[\]{},;!?:]+/giu;
+const WEB_URL_SCHEME = /\b(?:https?|wss?):$/iu;
 const CODE_FENCE = /```[\s\S]*?```/gu;
 const HTML_BLOCK = /<([A-Za-z][A-Za-z0-9-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/gu;
 const DIRECTIONAL_FORMATTING =
@@ -29,7 +32,8 @@ export function sanitizeRemoteContent(
     .replace(CODE_FENCE, "[Code omitted on Remote Companion]")
     .replace(HTML_BLOCK, "[HTML omitted on Remote Companion]")
     .replace(CREDENTIAL_URL, "$1<redacted>@")
-    .replace(UNIX_ABSOLUTE_PATH, "$1<local-path>")
+    .replace(LOCAL_FILE_URL, redactFileUrl)
+    .replace(POSIX_ABSOLUTE_PATH, redactPosixPath)
     .replace(WINDOWS_ABSOLUTE_PATH, "<local-path>");
   for (const pattern of SECRET_PATTERNS) {
     text = text.replace(pattern, (match) =>
@@ -38,6 +42,38 @@ export function sanitizeRemoteContent(
         : "<redacted-secret>");
   }
   return text.slice(0, maximumCharacters);
+}
+
+function redactPosixPath(
+  match: string,
+  prefix: string,
+  path: string,
+  offset: number,
+  source: string,
+): string {
+  if (
+    prefix === ":"
+    && path.startsWith("//")
+    && WEB_URL_SCHEME.test(source.slice(0, offset + prefix.length))
+  ) return match;
+  const { value, punctuation } = trailingPathPunctuation(path);
+  return `${prefix}${value ? "<local-path>" : ""}${punctuation}`;
+}
+
+function redactFileUrl(match: string): string {
+  const { punctuation } = trailingPathPunctuation(match);
+  return `file://<local-path>${punctuation}`;
+}
+
+function trailingPathPunctuation(value: string): {
+  value: string;
+  punctuation: string;
+} {
+  const punctuation = /\.+$/u.exec(value)?.[0] ?? "";
+  return {
+    value: value.slice(0, value.length - punctuation.length),
+    punctuation,
+  };
 }
 
 export function sanitizeRemoteLabel(

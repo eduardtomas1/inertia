@@ -4,7 +4,7 @@ import {
   createAuthenticatedSessionRecipient, createAuthenticatedSessionSender,
   importRemotePublicKey,
   openPairingRequest, openSessionData, openSessionHandshake, remoteRandomSecret,
-  sealPairingResponse, sealSessionData, sealSessionHandshake,
+  sealPairingResponse, sealSessionHandshake,
   type RemoteImportedKeyPair,
 } from "../shared/remote-crypto";
 import {
@@ -12,7 +12,6 @@ import {
   REMOTE_PROTOCOL_VERSION,
   REMOTE_RELAY_VERSION,
   encodedRemoteFrameBytes,
-  relayServerMessageSchema,
   remoteCipherFrameSchema,
   remotePairingRequestPayloadSchema,
   remoteRequestSchema,
@@ -32,9 +31,7 @@ import type {
   PersistedRemoteAccess, PersistedRemoteDevice,
 } from "./remote-access-store";
 import {
-  acceptRemoteDelivery,
   markRemoteDeliveryUncertain,
-  prepareRemoteDelivery,
 } from "./remote-access-delivery";
 import {
   createRemoteAccessIdentity,
@@ -44,14 +41,20 @@ import {
   closeRemoteSocket,
   REMOTE_SHUTDOWN_TIMEOUT_MS,
   RemoteSessionAuthenticationBudget,
+  sendSequencedRemoteResponse,
 } from "./remote-access-lifecycle";
 import {
   DEFAULT_REMOTE_GRANT_MS, MAX_REMOTE_GRANT_MS, MINUTE_MS,
   normalizeRemoteProjectIds, normalizeRemoteScopes, projectRemoteAccessState,
   remoteDeviceIsCurrent, remotePairingComparisonCode,
-  remoteRawDataByteLength, remoteRawDataText, remoteRelayErrorMessage,
-  takeRemoteRate, trimRemoteArray, trimRemoteSet, validateRemoteRelayUrl,
+  remoteRelayErrorMessage, takeRemoteRate, trimRemoteArray, trimRemoteSet,
+  validateRemoteRelayUrl,
 } from "./remote-access-policy";
+import {
+  RemoteRelayDispatcher,
+  type RemoteConnectionEpoch,
+} from "./remote-access-relay-dispatcher";
+import { RemoteRequestDispatcher } from "./remote-access-request-dispatcher";
 import type {
   ActiveRemoteSession, PendingRemotePairing, RemoteAccessServiceOptions,
 } from "./remote-access-service-types";
@@ -72,6 +75,8 @@ export class RemoteAccessService {
   private readonly pendingPairings = new Map<string, PendingRemotePairing>();
   private readonly sessions = new Map<string, ActiveRemoteSession>();
   private readonly sessionByConnection = new Map<string, string>();
+  private readonly relayMessages: RemoteRelayDispatcher;
+  private readonly requests: RemoteRequestDispatcher;
   private readonly pairingRequestIds = new Set<string>();
   private pairingAttemptTimes: number[] = [];
   private readonly sessionAuthenticationBudget =
@@ -101,6 +106,24 @@ export class RemoteAccessService {
       maxPayload: REMOTE_LIMITS.encryptedFrameBytes + 4_096,
       handshakeTimeout: RELAY_HANDSHAKE_TIMEOUT_MS,
     }));
+    this.relayMessages = new RemoteRelayDispatcher({
+      registered: () => this.relayRegistered(),
+      error: (code) => this.relayError(code),
+      frame: async (id, epoch, frame) => {
+        if (!this.stopped) await this.handleFrame(id, epoch, frame);
+      },
+      disconnected: (id, epoch) => this.dropConnection(id, epoch),
+      oversized: () => this.socket?.close(1009, "message too large"),
+    });
+    this.requests = new RemoteRequestDispatcher({
+      runtime: options.runtime,
+      data: () => this.requireData(),
+      now: () => this.now(),
+      persist: async () => await this.persist(),
+      audit: (type, deviceId, detail) => this.audit(type, deviceId, detail),
+      isCurrent: (session) => this.sessions.get(session.sessionId) === session,
+      respond: async (session, response) => await this.respond(session, response),
+    });
   }
 
   static async create(
@@ -111,7 +134,9 @@ export class RemoteAccessService {
       const service = new RemoteAccessService(options, identity.data,
         identity.hostKeyPair);
       service.scheduleSweep();
-      if (identity.data.enabled) service.connect();
+      if (options.autoConnect !== false && identity.data.enabled) {
+        service.connect();
+      }
       return service;
     }
     const service = new RemoteAccessService(
@@ -131,6 +156,10 @@ export class RemoteAccessService {
       pendingPairings: this.pendingPairings.values(),
       invitation: this.invitation,
     });
+  }
+
+  startConnections(): void {
+    if (this.data?.enabled) this.connect();
   }
 
   async setEnabled(enabled: boolean, relayUrl?: string): Promise<void> {
@@ -190,6 +219,13 @@ export class RemoteAccessService {
     const data = this.requireData();
     const pending = this.pendingPairings.get(requestId);
     if (!pending) throw new Error("That pairing request is no longer pending.");
+    if (!this.relayMessages.owns(
+      pending.connectionId,
+      pending.connectionEpoch,
+    )) {
+      this.pendingPairings.delete(requestId);
+      throw new Error("That pairing request is no longer connected.");
+    }
     if (Date.parse(pending.expiresAt) <= this.now().getTime()) {
       this.pendingPairings.delete(requestId);
       throw new Error("That pairing request expired.");
@@ -363,7 +399,7 @@ export class RemoteAccessService {
     });
     socket.on("message", (raw, isBinary) => {
       if (this.socket !== socket || isBinary) return;
-      this.handleRelayMessage(raw);
+      this.relayMessages.receive(raw);
     });
     socket.once("close", () => {
       if (this.socket !== socket) return;
@@ -372,6 +408,7 @@ export class RemoteAccessService {
       this.connectionMessage = this.privacyLocked
         ? "Remote Companion is paused while the desktop is locked."
         : "The relay is offline.";
+      this.relayMessages.reset();
       this.dropAllSessions();
       this.scheduleReconnect();
       this.emitState();
@@ -384,69 +421,46 @@ export class RemoteAccessService {
     });
   }
 
-  private handleRelayMessage(raw: import("ws").RawData): void {
-    if (remoteRawDataByteLength(raw) > REMOTE_LIMITS.encryptedFrameBytes + 4_096) {
-      this.socket?.close(1009, "message too large");
-      return;
-    }
-    let value: unknown;
-    try {
-      value = JSON.parse(remoteRawDataText(raw)) as unknown;
-    } catch {
-      return;
-    }
-    const parsed = relayServerMessageSchema.safeParse(value);
-    if (!parsed.success) return;
-    const message = parsed.data;
-    if (message.type === "relay.registered") {
-      this.connection = "online";
-      this.connectionMessage = null;
-      this.reconnectAttempt = 0;
-      this.emitState();
-      return;
-    }
-    if (message.type === "relay.error") {
-      this.connectionMessage = remoteRelayErrorMessage(message.code);
-      this.emitState();
-      return;
-    }
-    if (message.type === "relay.peer-disconnected") {
-      this.dropConnection(message.connectionId);
-      return;
-    }
-    if (message.type !== "relay.frame") return;
-    if (encodedRemoteFrameBytes(message.frame) > REMOTE_LIMITS.encryptedFrameBytes) {
-      this.dropConnection(message.connectionId);
-      return;
-    }
-    void this.handleFrame(message.connectionId, message.frame).catch(() => {
-      this.dropConnection(message.connectionId);
-    });
+  private relayRegistered(): void {
+    this.connection = "online";
+    this.connectionMessage = null;
+    this.reconnectAttempt = 0;
+    this.emitState();
+  }
+
+  private relayError(
+    code: Parameters<typeof remoteRelayErrorMessage>[0],
+  ): void {
+    this.connectionMessage = remoteRelayErrorMessage(code);
+    this.emitState();
   }
 
   private async handleFrame(
     connectionId: string,
+    epoch: RemoteConnectionEpoch,
     frame: RemoteCipherFrame,
   ): Promise<void> {
     if (frame.kind === "pair.request") {
-      await this.handlePairingRequest(connectionId, frame);
+      await this.handlePairingRequest(connectionId, epoch, frame);
       return;
     }
     if (frame.kind === "session.open") {
-      await this.handleSessionOpen(connectionId, frame);
+      await this.handleSessionOpen(connectionId, epoch, frame);
       return;
     }
     if (frame.kind === "session.data") {
-      await this.handleSessionData(connectionId, frame);
+      await this.handleSessionData(connectionId, epoch, frame);
       return;
     }
     if (frame.kind === "session.close") {
-      this.dropConnection(connectionId);
+      this.relayMessages.invalidate(connectionId, epoch);
+      this.dropConnection(connectionId, epoch);
     }
   }
 
   private async handlePairingRequest(
     connectionId: string,
+    epoch: RemoteConnectionEpoch,
     frame: Extract<RemoteCipherFrame, { kind: "pair.request" }>,
   ): Promise<void> {
     const invitation = this.invitation;
@@ -463,6 +477,7 @@ export class RemoteAccessService {
         frame,
       ),
     );
+    if (!this.relayMessages.owns(connectionId, epoch)) return;
     if (
       payload.invitationId !== invitation.invitationId
       || Math.abs(Date.parse(payload.createdAt) - this.now().getTime())
@@ -474,8 +489,9 @@ export class RemoteAccessService {
     payload.deviceLabel = deviceLabel;
     this.pairingRequestIds.add(payload.requestId);
     trimRemoteSet(this.pairingRequestIds, 512);
-    this.pendingPairings.set(payload.requestId, {
+    const pending: PendingRemotePairing = {
       connectionId,
+      connectionEpoch: epoch,
       payload,
       receivedAt: this.now().toISOString(),
       expiresAt: invitation.expiresAt,
@@ -484,15 +500,18 @@ export class RemoteAccessService {
         payload.devicePublicKey,
         invitation.invitationId,
       ),
-    });
+    };
     this.invitation = null;
     this.audit("pairing.requested", payload.deviceId, "A device requested pairing.");
     await this.persist();
+    if (!this.relayMessages.owns(connectionId, epoch)) return;
+    this.pendingPairings.set(payload.requestId, pending);
     this.emitState();
   }
 
   private async handleSessionOpen(
     connectionId: string,
+    epoch: RemoteConnectionEpoch,
     frame: Extract<RemoteCipherFrame, { kind: "session.open" }>,
   ): Promise<void> {
     const data = this.requireData();
@@ -509,6 +528,7 @@ export class RemoteAccessService {
     const hostKeys = this.requireHostKeyPair();
     for (const device of data.devices) {
       if (!remoteDeviceIsCurrent(device, this.now().getTime())) continue;
+      let authenticated = false;
       try {
         const recipient = await createAuthenticatedSessionRecipient(
           data.hostId,
@@ -526,12 +546,14 @@ export class RemoteAccessService {
             frame.ciphertext,
           ),
         );
+        if (!this.relayMessages.owns(connectionId, epoch)) return;
         if (
           payload.sessionId !== frame.sessionId
           || payload.deviceId !== device.id
           || Math.abs(Date.parse(payload.createdAt) - this.now().getTime())
             > REMOTE_LIMITS.sessionHandshakeTtlMs
         ) continue;
+        authenticated = true;
         const sender = await createAuthenticatedSessionSender(
           data.hostId,
           device.id,
@@ -562,14 +584,16 @@ export class RemoteAccessService {
             serverTime: this.now().toISOString(),
           },
         );
+        if (!this.relayMessages.owns(connectionId, epoch)) return;
         const now = this.now().getTime();
         data.usedSessions.push({
           id: frame.sessionId,
           createdAt: this.now().toISOString(),
         });
         trimRemoteArray(data.usedSessions, REMOTE_LIMITS.deliveryReceipts);
-        this.sessions.set(frame.sessionId, {
+        const session: ActiveRemoteSession = {
           connectionId,
+          connectionEpoch: epoch,
           sessionId: frame.sessionId,
           device,
           recipient,
@@ -580,11 +604,14 @@ export class RemoteAccessService {
           requestTimes: [],
           promptTimes: [],
           inFlight: new Map(),
-        });
-        this.sessionByConnection.set(connectionId, frame.sessionId);
+          outboundTail: Promise.resolve(),
+        };
         device.lastSeenAt = this.now().toISOString();
         this.audit("session.connected", device.id, "A remote session connected.");
         await this.persist();
+        if (!this.relayMessages.owns(connectionId, epoch)) return;
+        this.sessions.set(frame.sessionId, session);
+        this.sessionByConnection.set(connectionId, frame.sessionId);
         this.sendFrame(connectionId, {
           protocolVersion: REMOTE_PROTOCOL_VERSION,
           kind: "session.accept",
@@ -595,7 +622,8 @@ export class RemoteAccessService {
         this.emitState();
         return;
       } catch (error) {
-        if (this.sessions.has(frame.sessionId)) throw error;
+        if (authenticated) throw error;
+        if (!this.relayMessages.owns(connectionId, epoch)) return;
         // Try the next bounded paired-device key without revealing which failed.
       }
     }
@@ -603,10 +631,15 @@ export class RemoteAccessService {
 
   private async handleSessionData(
     connectionId: string,
+    epoch: RemoteConnectionEpoch,
     frame: Extract<RemoteCipherFrame, { kind: "session.data" }>,
   ): Promise<void> {
     const session = this.sessions.get(frame.sessionId);
-    if (!session || session.connectionId !== connectionId) return;
+    if (
+      !session
+      || session.connectionId !== connectionId
+      || session.connectionEpoch !== epoch
+    ) return;
     if (!remoteDeviceIsCurrent(session.device, this.now().getTime())) {
       this.closeSession(session, "expired");
       return;
@@ -628,6 +661,7 @@ export class RemoteAccessService {
       this.closeSession(session, "replay");
       return;
     }
+    if (!this.relayMessages.owns(connectionId, epoch)) return;
     session.lastActivityAt = this.now().getTime();
     if (
       request.type === "prompt.send"
@@ -660,85 +694,29 @@ export class RemoteAccessService {
       return;
     }
     session.inFlight.set(request.requestId, request);
-    try {
-      const receiptResponse = request.type === "prompt.send"
-        ? await this.prepareDelivery(session, request)
-        : null;
-      const response = receiptResponse
-        ?? await this.options.runtime.remoteRequest(session.subject, request);
-      if (request.type === "prompt.send" && response.ok) {
-        await this.acceptDelivery(session, request, response);
-      }
-      if (this.sessions.get(session.sessionId) === session) {
-        await this.respond(session, response);
-      }
-    } catch {
-      if (request.type === "prompt.send") {
-        await this.markDeliveryUncertain(session, request);
-      }
-      if (this.sessions.get(session.sessionId) === session) {
-        await this.respond(session, {
-          type: "response",
-          requestId: request.requestId,
-          ok: false,
-          code: request.type === "prompt.send" ? "uncertain" : "unavailable",
-          message: request.type === "prompt.send"
-            ? "Prompt delivery is uncertain. Do not retry automatically."
-            : "The local runtime is unavailable.",
-        });
-      }
-    } finally {
-      session.inFlight.delete(request.requestId);
-    }
-  }
-
-  private async prepareDelivery(
-    session: ActiveRemoteSession,
-    request: Extract<RemoteRequest, { type: "prompt.send" }>,
-  ): Promise<RemoteResponse | null> {
-    const data = this.requireData();
-    const prepared = prepareRemoteDelivery(
-      data,
-      session.device.id,
-      request,
-      this.now().toISOString(),
-    );
-    if (prepared.changed) await this.persist();
-    return prepared.response;
-  }
-
-  private async acceptDelivery(
-    session: ActiveRemoteSession,
-    request: Extract<RemoteRequest, { type: "prompt.send" }>,
-    response: RemoteResponse,
-  ): Promise<void> {
-    if (!acceptRemoteDelivery(this.requireData(), request, response)) return;
-    this.audit("prompt.accepted", session.device.id, "A remote text prompt was accepted.");
-    await this.persist();
-  }
-
-  private async markDeliveryUncertain(
-    session: ActiveRemoteSession,
-    request: Extract<RemoteRequest, { type: "prompt.send" }>,
-  ): Promise<void> {
-    if (!markRemoteDeliveryUncertain(
-      this.requireData(),
-      request.deliveryId,
-    )) return;
-    this.audit("prompt.uncertain", session.device.id, "A remote prompt has uncertain delivery.");
-    await this.persist();
+    void this.requests.dispatch(session, request).catch(() => {
+      this.relayMessages.invalidate(
+        session.connectionId,
+        session.connectionEpoch,
+      );
+      this.dropConnection(session.connectionId, session.connectionEpoch);
+    });
   }
 
   private async respond(
     session: ActiveRemoteSession,
     response: RemoteResponse,
   ): Promise<void> {
-    const frame = await sealSessionData(
-      session.sender,
-      session.sessionId,
+    await sendSequencedRemoteResponse(
+      session,
       response,
+      () => this.sessions.get(session.sessionId) === session
+        && this.relayMessages.owns(
+          session.connectionId,
+          session.connectionEpoch,
+        ),
+      (connectionId, frame) => this.sendFrame(connectionId, frame),
     );
-    this.sendFrame(session.connectionId, frame);
   }
 
   private sendFrame(connectionId: string, frame: RemoteCipherFrame): void {
@@ -782,13 +760,23 @@ export class RemoteAccessService {
       sessionId: session.sessionId,
       reason,
     });
-    this.dropConnection(session.connectionId);
+    this.relayMessages.invalidate(
+      session.connectionId,
+      session.connectionEpoch,
+    );
+    this.dropConnection(session.connectionId, session.connectionEpoch);
   }
 
-  private dropConnection(connectionId: string): void {
+  private dropConnection(
+    connectionId: string,
+    epoch?: RemoteConnectionEpoch,
+  ): void {
     this.sessionAuthenticationBudget.drop(connectionId);
     for (const [requestId, pending] of this.pendingPairings) {
-      if (pending.connectionId === connectionId) {
+      if (
+        pending.connectionId === connectionId
+        && (epoch === undefined || pending.connectionEpoch === epoch)
+      ) {
         this.pendingPairings.delete(requestId);
       }
     }
@@ -798,6 +786,10 @@ export class RemoteAccessService {
       return;
     }
     const session = this.sessions.get(sessionId);
+    if (session && epoch !== undefined && session.connectionEpoch !== epoch) {
+      this.emitState();
+      return;
+    }
     this.sessionByConnection.delete(connectionId);
     this.sessions.delete(sessionId);
     if (session) {
@@ -822,6 +814,7 @@ export class RemoteAccessService {
   }
 
   private dropAllSessions(): void {
+    this.relayMessages.reset();
     for (const connectionId of this.sessionByConnection.keys()) {
       this.dropConnection(connectionId);
     }

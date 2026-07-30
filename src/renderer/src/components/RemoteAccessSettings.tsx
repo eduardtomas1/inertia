@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Check, Copy, RadioTower, ShieldCheck, Trash2 } from "lucide-react";
 
 import type { Project } from "@shared/contracts";
@@ -34,7 +34,7 @@ export function RemoteAccessSettings({
   const pendingPairingIds = current?.pendingPairings
     .map(({ requestId }) => requestId)
     .join(",") ?? "";
-  useEffect(() => {
+  useLayoutEffect(() => {
     setProjectIds([]);
     setPrompting(false);
   }, [pendingPairingIds]);

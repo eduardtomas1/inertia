@@ -804,6 +804,99 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         END;
       `,
     });
+    migrationExtensions.push({
+      name: "PreserveProviderSubagentStatus",
+      up: `
+        CREATE TABLE subagent_traces_v36 (
+          id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+          conversation_id TEXT NOT NULL
+            REFERENCES conversations(id) ON DELETE CASCADE,
+          run_id TEXT NOT NULL CHECK (length(run_id) BETWEEN 1 AND 200),
+          turn_id TEXT NOT NULL
+            REFERENCES agent_turns(id) ON DELETE CASCADE,
+          provider_id TEXT NOT NULL
+            CHECK (provider_id IN ('codex', 'claude', 'cursor', 'opencode')),
+          provider_task_id TEXT
+            CHECK (provider_task_id IS NULL OR length(provider_task_id) BETWEEN 1 AND 1000),
+          provider_agent_id TEXT
+            CHECK (provider_agent_id IS NULL OR length(provider_agent_id) BETWEEN 1 AND 1000),
+          parent_trace_id TEXT
+            REFERENCES subagent_traces_v36(id) ON DELETE SET NULL,
+          parent_provider_agent_id TEXT
+            CHECK (parent_provider_agent_id IS NULL OR length(parent_provider_agent_id) BETWEEN 1 AND 1000),
+          parent_provider_tool_use_id TEXT
+            CHECK (parent_provider_tool_use_id IS NULL OR length(parent_provider_tool_use_id) BETWEEN 1 AND 1000),
+          provider_tool_use_id TEXT
+            CHECK (provider_tool_use_id IS NULL OR length(provider_tool_use_id) BETWEEN 1 AND 1000),
+          provider_role TEXT
+            CHECK (provider_role IS NULL OR length(provider_role) BETWEEN 1 AND 200),
+          provider_name TEXT
+            CHECK (provider_name IS NULL OR length(provider_name) BETWEEN 1 AND 200),
+          provider_status TEXT
+            CHECK (provider_status IS NULL OR length(provider_status) BETWEEN 1 AND 200),
+          status TEXT NOT NULL CHECK (status IN (
+            'queued', 'spawned', 'running', 'waiting', 'completed', 'failed',
+            'cancelled', 'interrupted', 'unknown', 'lost'
+          )),
+          description TEXT
+            CHECK (description IS NULL OR length(description) BETWEEN 1 AND 4000),
+          progress TEXT
+            CHECK (progress IS NULL OR length(progress) BETWEEN 1 AND 4000),
+          result TEXT
+            CHECK (result IS NULL OR length(result) BETWEEN 1 AND 16000),
+          sequence INTEGER NOT NULL
+            CHECK (sequence BETWEEN 0 AND 2147483647),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (provider_task_id IS NOT NULL OR provider_agent_id IS NOT NULL),
+          CHECK (created_at <= updated_at)
+        );
+        INSERT INTO subagent_traces_v36 (
+          id, conversation_id, run_id, turn_id, provider_id,
+          provider_task_id, provider_agent_id, parent_trace_id,
+          parent_provider_agent_id, parent_provider_tool_use_id,
+          provider_tool_use_id, provider_role, provider_name, provider_status,
+          status, description, progress, result, sequence, created_at, updated_at
+        )
+        SELECT
+          id, conversation_id, run_id, turn_id, provider_id,
+          provider_task_id, provider_agent_id, parent_trace_id,
+          parent_provider_agent_id, parent_provider_tool_use_id,
+          provider_tool_use_id, provider_role, provider_name, NULL,
+          status, description, progress, result, sequence, created_at, updated_at
+        FROM subagent_traces;
+        DROP TABLE subagent_traces;
+        ALTER TABLE subagent_traces_v36 RENAME TO subagent_traces;
+        CREATE INDEX subagent_traces_turn_order_idx
+          ON subagent_traces(turn_id, created_at ASC, sequence ASC, id ASC);
+        CREATE UNIQUE INDEX subagent_traces_task_identity_idx
+          ON subagent_traces(conversation_id, run_id, provider_id, provider_task_id)
+          WHERE provider_task_id IS NOT NULL;
+        CREATE UNIQUE INDEX subagent_traces_agent_identity_idx
+          ON subagent_traces(conversation_id, run_id, provider_id, provider_agent_id)
+          WHERE provider_agent_id IS NOT NULL;
+        CREATE INDEX subagent_traces_parent_idx
+          ON subagent_traces(parent_trace_id, created_at ASC);
+        CREATE INDEX subagents_conversation_created_idx
+          ON subagent_traces(
+            conversation_id,
+            created_at ASC,
+            sequence ASC,
+            id ASC
+          );
+      `,
+    });
+    migrationExtensions.push({
+      name: "PreserveProviderSubagentLiveness",
+      up: `
+        ALTER TABLE subagent_traces
+          ADD COLUMN is_live INTEGER NOT NULL DEFAULT 0
+          CHECK (is_live IN (0, 1));
+        UPDATE subagent_traces
+        SET is_live = 1
+        WHERE status IN ('queued', 'spawned', 'running', 'waiting');
+      `,
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

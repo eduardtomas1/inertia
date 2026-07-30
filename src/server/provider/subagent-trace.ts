@@ -9,6 +9,7 @@ const TERMINAL_SUBAGENT_STATUSES = new Set<SubagentTraceStatus>([
   "completed",
   "failed",
   "cancelled",
+  "interrupted",
   "lost",
 ]);
 

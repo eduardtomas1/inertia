@@ -738,6 +738,193 @@ describe("published database fixtures", () => {
     expect(inspection.pragma("foreign_key_check")).toEqual([]);
     inspection.close();
   });
+
+  it("upgrades v35 delegated traces without losing identities or hierarchy", async () => {
+    const directory = await temporaryDirectory();
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+    const databasePath = join(directory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, workspacePath);
+    const project = store.createProject("Subagent migration", workspacePath);
+    const conversation = store.createConversation(
+      project.id,
+      "Preserved delegated traces",
+    );
+    const turn = store.beginAgentTurn({
+      id: "v35-subagent-turn",
+      conversationId: conversation.id,
+      runId: "v35-subagent-run",
+      content: "Preserve delegated identities.",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    }).turn;
+    const parent = store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      providerId: "codex",
+      providerTaskId: null,
+      providerAgentId: "v35-parent-agent",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "v35-parent-tool",
+      providerRole: "coordinator",
+      providerName: "Migration coordinator",
+      status: "running",
+      isLive: true,
+      description: "Coordinate the upgrade.",
+      progress: "Waiting for the child.",
+      result: null,
+      sequence: 1,
+    })!.trace;
+    const child = store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      providerId: "codex",
+      providerTaskId: null,
+      providerAgentId: "v35-child-agent",
+      parentProviderAgentId: parent.providerAgentId,
+      parentProviderToolUseId: null,
+      providerToolUseId: "v35-child-tool",
+      providerRole: "reviewer",
+      providerName: "Migration reviewer",
+      status: "completed",
+      isLive: false,
+      description: "Verify the upgrade.",
+      progress: null,
+      result: "Verified.",
+      sequence: 2,
+    })!.trace;
+    store.close();
+
+    const v35 = new Database(databasePath);
+    v35.pragma("foreign_keys = OFF");
+    v35.exec(`
+      CREATE TABLE subagent_traces_v35 (
+        id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+        conversation_id TEXT NOT NULL
+          REFERENCES conversations(id) ON DELETE CASCADE,
+        run_id TEXT NOT NULL CHECK (length(run_id) BETWEEN 1 AND 200),
+        turn_id TEXT NOT NULL REFERENCES agent_turns(id) ON DELETE CASCADE,
+        provider_id TEXT NOT NULL
+          CHECK (provider_id IN ('codex', 'claude', 'cursor', 'opencode')),
+        provider_task_id TEXT,
+        provider_agent_id TEXT,
+        parent_trace_id TEXT
+          REFERENCES subagent_traces_v35(id) ON DELETE SET NULL,
+        parent_provider_agent_id TEXT,
+        parent_provider_tool_use_id TEXT,
+        provider_tool_use_id TEXT,
+        provider_role TEXT,
+        provider_name TEXT,
+        status TEXT NOT NULL CHECK (status IN (
+          'spawned', 'running', 'waiting', 'completed', 'failed',
+          'cancelled', 'lost'
+        )),
+        description TEXT,
+        progress TEXT,
+        result TEXT,
+        sequence INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO subagent_traces_v35 (
+        id, conversation_id, run_id, turn_id, provider_id,
+        provider_task_id, provider_agent_id, parent_trace_id,
+        parent_provider_agent_id, parent_provider_tool_use_id,
+        provider_tool_use_id, provider_role, provider_name, status,
+        description, progress, result, sequence, created_at, updated_at
+      )
+      SELECT
+        id, conversation_id, run_id, turn_id, provider_id,
+        provider_task_id, provider_agent_id, parent_trace_id,
+        parent_provider_agent_id, parent_provider_tool_use_id,
+        provider_tool_use_id, provider_role, provider_name, status,
+        description, progress, result, sequence, created_at, updated_at
+      FROM subagent_traces;
+      DROP TABLE subagent_traces;
+      ALTER TABLE subagent_traces_v35 RENAME TO subagent_traces;
+      CREATE INDEX subagent_traces_turn_order_idx
+        ON subagent_traces(turn_id, created_at ASC, sequence ASC, id ASC);
+      CREATE UNIQUE INDEX subagent_traces_task_identity_idx
+        ON subagent_traces(conversation_id, run_id, provider_id, provider_task_id)
+        WHERE provider_task_id IS NOT NULL;
+      CREATE UNIQUE INDEX subagent_traces_agent_identity_idx
+        ON subagent_traces(conversation_id, run_id, provider_id, provider_agent_id)
+        WHERE provider_agent_id IS NOT NULL;
+      CREATE INDEX subagent_traces_parent_idx
+        ON subagent_traces(parent_trace_id, created_at ASC);
+      CREATE INDEX subagents_conversation_created_idx
+        ON subagent_traces(
+          conversation_id,
+          created_at ASC,
+          sequence ASC,
+          id ASC
+        );
+      DELETE FROM schema_migrations WHERE version >= 36;
+    `);
+    v35.pragma("foreign_keys = ON");
+    v35.close();
+
+    const migrated = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    expect(migrated.subagentTrace(parent.id)).toMatchObject({
+      providerAgentId: "v35-parent-agent",
+      providerStatus: null,
+      status: "running",
+      isLive: true,
+    });
+    expect(migrated.subagentTrace(child.id)).toMatchObject({
+      parentTraceId: parent.id,
+      providerStatus: null,
+      status: "completed",
+      isLive: false,
+      result: "Verified.",
+    });
+    const updated = migrated.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      providerId: "codex",
+      providerTaskId: null,
+      providerAgentId: "v35-parent-agent",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "v35-parent-tool",
+      providerRole: null,
+      providerName: null,
+      providerStatus: "interrupted",
+      status: "interrupted",
+      isLive: false,
+      description: null,
+      progress: null,
+      result: "Interrupted after migration.",
+      sequence: 3,
+    })!.trace;
+    expect(updated).toMatchObject({
+      providerStatus: "interrupted",
+      status: "interrupted",
+    });
+    migrated.close();
+
+    const inspection = new Database(databasePath);
+    expect((inspection.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(
+      CURRENT_DATABASE_SCHEMA_VERSION,
+    );
+    expect(inspection.pragma("foreign_key_check")).toEqual([]);
+    inspection.close();
+  });
 });
 
 describe("transactional database migrations", () => {

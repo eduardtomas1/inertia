@@ -698,10 +698,182 @@ describe("Claude Agent SDK harness", () => {
     ]);
   });
 
+  it("keeps a newer unknown task update drainable until its terminal notification", async () => {
+    const root = portableFixtureRoot("Claude SDK future delegate state");
+    roots.push(root);
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeBackgroundTasks(["agent-future"]);
+          yield claudeSystem("task_started", {
+            task_id: "agent-future",
+            tool_use_id: "tool-agent-future",
+            description: "Exercise a newer active state",
+            subagent_type: "researcher",
+          });
+          yield claudeSystem("task_updated", {
+            task_id: "agent-future",
+            patch: { status: "future_active_state" },
+          });
+          yield claudeSuccessResult("Parent finished", "completed");
+          yield claudeBackgroundTasks([]);
+          yield claudeSystem("task_notification", {
+            task_id: "agent-future",
+            tool_use_id: "tool-agent-future",
+            status: "completed",
+            summary: "Future state completed authoritatively",
+          });
+        })(),
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const traces: Array<{
+      providerStatus?: string | null;
+      status: string;
+      isLive: boolean;
+      result: string | null;
+    }> = [];
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-future-delegate-state",
+      cwd: root,
+      prompt: "Keep an unknown active state drainable",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onSubagent: ({ providerStatus, status, isLive, result }) => {
+        traces.push({ providerStatus, status, isLive, result });
+      },
+    })).resolves.toMatchObject({
+      status: "completed",
+      text: "Parent finished",
+    });
+    expect(traces).toEqual([
+      {
+        providerStatus: null,
+        status: "spawned",
+        isLive: true,
+        result: null,
+      },
+      {
+        providerStatus: "future_active_state",
+        status: "unknown",
+        isLive: true,
+        result: null,
+      },
+      {
+        providerStatus: "completed",
+        status: "completed",
+        isLive: false,
+        result: "Future state completed authoritatively",
+      },
+    ]);
+  });
+
+  it("does not let stale task edges revive a terminal delegate or its Stop control", async () => {
+    const root = portableFixtureRoot("Claude SDK stale delegate update");
+    roots.push(root);
+    let stopTaskCalls = 0;
+    let markStaleEdgesObserved!: () => void;
+    const staleEdgesObserved = new Promise<void>((resolve) => {
+      markStaleEdgesObserved = resolve;
+    });
+    let releaseParent!: () => void;
+    const parentReleased = new Promise<void>((resolve) => {
+      releaseParent = resolve;
+    });
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSystem("task_started", {
+            task_id: "agent-terminal",
+            tool_use_id: "tool-agent-terminal",
+            description: "Finish before a stale update",
+            subagent_type: "researcher",
+          });
+          yield claudeSystem("task_notification", {
+            task_id: "agent-terminal",
+            tool_use_id: "tool-agent-terminal",
+            status: "completed",
+            summary: "Finished authoritatively",
+          });
+          yield claudeSystem("task_started", {
+            task_id: "agent-terminal",
+            tool_use_id: "tool-agent-terminal",
+            description: "A stale repeated start",
+            subagent_type: "researcher",
+          });
+          yield claudeSystem("task_updated", {
+            task_id: "agent-terminal",
+            patch: { status: "running" },
+          });
+          yield claudeSystem("task_updated", {
+            task_id: "agent-terminal",
+            patch: { status: "future_active_state" },
+          });
+          markStaleEdgesObserved();
+          await parentReleased;
+          yield claudeSuccessResult("Parent finished", "completed");
+          yield claudeSessionState("idle");
+        })(),
+        {
+          stopTask: async () => {
+            stopTaskCalls += 1;
+          },
+        },
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const traces: Array<{ status: string; isLive: boolean }> = [];
+
+    const run = manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-terminal-stale-update",
+      runId: "claude-terminal-stale-update-run",
+      turnId: "claude-terminal-stale-update-turn",
+      cwd: root,
+      prompt: "Keep terminal state sticky",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onSubagent: (event) => {
+        traces.push({ status: event.status, isLive: event.isLive });
+      },
+    });
+    await staleEdgesObserved;
+    const stopAccepted = manager.stopSubagent(
+      "claude-terminal-stale-update",
+      "agent-terminal",
+      {
+        runId: "claude-terminal-stale-update-run",
+        turnId: "claude-terminal-stale-update-turn",
+      },
+    );
+    releaseParent();
+    await expect(run).resolves.toMatchObject({
+      status: "completed",
+      text: "Parent finished",
+    });
+    await expect(stopAccepted).resolves.toBe(false);
+    expect(stopTaskCalls).toBe(0);
+    expect(traces).toEqual([
+      { status: "spawned", isLive: true },
+      { status: "completed", isLive: false },
+    ]);
+  });
+
   it("bounds a missing terminal delegate notification after parent completion", async () => {
     const root = portableFixtureRoot("Claude SDK missing delegate notification");
     roots.push(root);
     let closeCalls = 0;
+    let drainWaitStartedAt = 0;
     const harness = createClaudeAgentSdkHarness({
       terminalSubagentDrainTimeoutMs: 25,
       createQuery: () => fixtureClaudeQuery(
@@ -712,8 +884,13 @@ describe("Claude Agent SDK harness", () => {
             description: "Await a notification that never arrives",
             subagent_type: "researcher",
           });
+          yield claudeSystem("task_updated", {
+            task_id: "agent-missing-notification",
+            patch: { status: "future_active_state" },
+          });
           yield claudeSuccessResult("Parent still finished", "completed");
           yield claudeBackgroundTasks([]);
+          drainWaitStartedAt = Date.now();
           await new Promise<void>(() => {});
         })(),
         {
@@ -739,6 +916,8 @@ describe("Claude Agent SDK harness", () => {
       status: "completed",
       text: "Parent still finished",
     });
+    expect(drainWaitStartedAt).toBeGreaterThan(0);
+    expect(Date.now() - drainWaitStartedAt).toBeGreaterThanOrEqual(20);
     expect(closeCalls).toBe(1);
     expect(manager.activeConversationIds()).toEqual([]);
   });

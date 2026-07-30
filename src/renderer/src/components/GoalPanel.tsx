@@ -21,11 +21,15 @@ import type {
   AgentTurn,
   AgentWorkflowState,
   SubagentTrace,
-  SubagentTraceStatus,
 } from "@shared/contracts";
 import {
   isLiveSubagentTrace,
+  subagentElapsedMs,
   subagentDisclosureRows,
+  subagentProviderLabel,
+  subagentStatusLabel,
+  subagentTraceDetail,
+  subagentTraceLabel,
 } from "../utils/subagentDisclosure";
 import { formatElapsed } from "../utils/responseTimeline";
 import { MAX_SELECTED_SKILLS } from "./composer/config";
@@ -63,23 +67,8 @@ function goalStatusLabel(status: AgentGoalStatus): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-function subagentStatusLabel(status: SubagentTraceStatus): string {
-  if (status === "spawned") return "Starting";
-  if (status === "running") return "Working";
-  if (status === "waiting") return "Waiting";
-  if (status === "completed") return "Done";
-  if (status === "cancelled") return "Stopped";
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}
-
 function sourceLabel(source: AgentGoalSource): string {
   return source === "codex-native" ? "Codex native" : "Inertia local";
-}
-
-function traceLabel(trace: SubagentTrace): string {
-  return trace.providerName
-    ?? trace.providerRole
-    ?? (trace.providerId === "codex" ? "Codex subagent" : "Claude task");
 }
 
 function goalProgress(goal: AgentGoal): number | null {
@@ -93,19 +82,6 @@ function goalProgress(goal: AgentGoal): number | null {
   return Math.min(100, Math.max(0, Math.round(
     (goal.tokensUsed / goal.tokenBudget) * 100,
   )));
-}
-
-function traceElapsed(
-  trace: SubagentTrace,
-  now: number,
-): number {
-  const startedAt = Date.parse(trace.createdAt);
-  const settledAt = Date.parse(trace.updatedAt);
-  if (!Number.isFinite(startedAt)) return 0;
-  const end = isLiveSubagentTrace(trace) || !Number.isFinite(settledAt)
-    ? now
-    : settledAt;
-  return Math.max(0, end - startedAt);
 }
 
 function nextGoalActions(status: AgentGoalStatus): Array<{
@@ -479,8 +455,8 @@ function SubagentsSection({
             canStop,
             omittedAncestors,
           }) => {
-            const detail = trace.result ?? trace.progress ?? trace.description;
-            const duration = traceElapsed(trace, now);
+            const detail = subagentTraceDetail(trace);
+            const duration = subagentElapsedMs(trace, now);
             const mayFollowUp = Boolean(
               onFollowUpSubagent && canFollowUpSubagent?.(trace),
             );
@@ -500,9 +476,14 @@ function SubagentsSection({
                 <span className="goal-panel-subagent-dot" aria-hidden="true" />
                 <span className="goal-panel-subagent-copy">
                   <span>
-                    <strong>{traceLabel(trace)}</strong>
-                    <small>
-                      {subagentStatusLabel(trace.status)} · {formatElapsed(duration)}
+                    <strong>{subagentTraceLabel(trace)}</strong>
+                    <small
+                      title={trace.providerStatus
+                        ? `Exact provider state: ${trace.providerStatus}`
+                        : undefined}
+                    >
+                      {subagentProviderLabel(trace)} ·{" "}
+                      {subagentStatusLabel(trace)} · {formatElapsed(duration)}
                     </small>
                   </span>
                   {omittedAncestors > 0 && (
@@ -519,7 +500,7 @@ function SubagentsSection({
                     {mayFollowUp && (
                       <button
                         type="button"
-                        aria-label={`Guide parent about ${traceLabel(trace)}`}
+                        aria-label={`Guide parent about ${subagentTraceLabel(trace)}`}
                         onClick={() => followUp?.(trace)}
                       >
                         Guide parent
@@ -528,7 +509,7 @@ function SubagentsSection({
                     {mayStop && (
                       <button
                         type="button"
-                        aria-label={`Stop ${traceLabel(trace)}`}
+                        aria-label={`Stop ${subagentTraceLabel(trace)}`}
                         onClick={() => stop?.(trace)}
                       >
                         <Square size={9} fill="currentColor" aria-hidden="true" />

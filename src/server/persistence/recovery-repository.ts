@@ -57,9 +57,10 @@ export class RecoveryRepository {
     const markSubagents = this.database.prepare(`
       UPDATE subagent_traces
       SET status = 'lost',
+          is_live = 0,
           sequence = sequence + 1,
           updated_at = CASE WHEN updated_at > ? THEN updated_at ELSE ? END
-      WHERE status IN ('spawned', 'running', 'waiting')
+      WHERE is_live = 1
         AND turn_id IN (
           SELECT id FROM agent_turns
           WHERE status IN (

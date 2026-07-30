@@ -161,7 +161,9 @@ export interface SubagentTraceRow {
   provider_tool_use_id: string | null;
   provider_role: string | null;
   provider_name: string | null;
+  provider_status: string | null;
   status: SubagentTraceStatus;
+  is_live: 0 | 1;
   description: string | null;
   progress: string | null;
   result: string | null;

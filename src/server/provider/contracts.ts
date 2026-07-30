@@ -238,7 +238,11 @@ export interface ProviderSubagentEvent extends ProviderEventBase {
   providerToolUseId: string | null;
   providerRole: string | null;
   providerName: string | null;
+  /** Exact provider-authored state; absent for activity-derived updates. */
+  providerStatus?: string | null;
   status: SubagentTraceStatus;
+  /** Whether the provider still considers this delegated work live. */
+  isLive: boolean;
   description: string | null;
   progress: string | null;
   result: string | null;

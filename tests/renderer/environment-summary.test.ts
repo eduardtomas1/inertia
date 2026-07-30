@@ -36,6 +36,7 @@ function run(
 function subagent(
   update: Partial<SubagentTrace> = {},
 ): SubagentTrace {
+  const status = update.status ?? "running";
   return {
     id: crypto.randomUUID(),
     conversationId: "conversation-1",
@@ -50,7 +51,11 @@ function subagent(
     providerToolUseId: null,
     providerRole: "reviewer",
     providerName: "Review",
-    status: "running",
+    providerStatus: null,
+    status,
+    isLive: update.isLive ?? [
+      "queued", "spawned", "running", "waiting",
+    ].includes(status),
     description: null,
     progress: null,
     result: null,

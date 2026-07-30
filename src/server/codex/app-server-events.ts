@@ -3,6 +3,7 @@ import {
   parseCodexApprovalRequest,
 } from "./approvals";
 import {
+  codexSubagentDrainTimeoutMs,
   commandExecutionLabel,
   type CodexRunPhase,
 } from "./app-server-config";
@@ -87,6 +88,42 @@ type CodexSubagentUpdate = Parameters<
   NonNullable<CodexAppServerOptions["onSubagent"]>
 >[0];
 
+type CodexSubagentAuthority = "activity" | "state" | "turn";
+
+const SUBAGENT_AUTHORITY: Record<CodexSubagentAuthority, number> = {
+  activity: 0,
+  state: 1,
+  turn: 2,
+};
+
+const LIVE_SUBAGENT_STATUSES = new Set<CodexSubagentUpdate["status"]>([
+  "queued",
+  "spawned",
+  "running",
+  "waiting",
+]);
+
+const TERMINAL_SUBAGENT_STATUSES =
+  new Set<CodexSubagentUpdate["status"]>([
+    "completed",
+    "failed",
+    "cancelled",
+    "interrupted",
+    "unknown",
+    "lost",
+  ]);
+
+interface CodexSubagentProjection {
+  status: CodexSubagentUpdate["status"];
+  authority: CodexSubagentAuthority;
+  isLive: boolean;
+}
+
+interface PendingParentCompletion {
+  status: CodexAppServerResult["status"];
+  exitCode: number | null;
+}
+
 export class CodexAppServerEvents {
   private readonly pendingApprovals = new Map<string, PendingApproval>();
   private readonly pendingInputs = new Map<string, PendingInput>();
@@ -95,9 +132,37 @@ export class CodexAppServerEvents {
   private readonly childParents = new Map<string, string>();
   private readonly childResults = new Map<string, CappedTextBuffer>();
   private readonly childDeltaItems = new Set<string>();
+  private readonly subagentProjection = new Map<
+    string,
+    CodexSubagentProjection
+  >();
+  private readonly liveSubagentIds = new Set<string>();
   private subagentSequence = 0;
+  private pendingParentCompletion: PendingParentCompletion | null = null;
+  private subagentDrainTimer: NodeJS.Timeout | undefined;
+  private readonly subagentDrainTimeoutMs: number;
 
-  constructor(private readonly host: CodexAppServerEventHost) {}
+  constructor(private readonly host: CodexAppServerEventHost) {
+    this.subagentDrainTimeoutMs = codexSubagentDrainTimeoutMs(
+      host.options.subagentDrainTimeoutMs,
+    );
+  }
+
+  dispose(): void {
+    if (this.subagentDrainTimer) {
+      clearTimeout(this.subagentDrainTimer);
+      this.subagentDrainTimer = undefined;
+    }
+    this.pendingParentCompletion = null;
+    this.liveSubagentIds.clear();
+  }
+
+  cancelPendingParentCompletion(): boolean {
+    if (!this.pendingParentCompletion) return false;
+    this.dispose();
+    this.host.finish("cancelled", null, null);
+    return true;
+  }
 
   settleInteractions(): void {
     for (const { rpcId: id, request, protocol } of
@@ -395,24 +460,74 @@ export class CodexAppServerEvents {
         boundedText(turnError?.message, 4_000) ?? this.host.lastError();
       if (lastError) this.host.setLastError(lastError);
       this.host.setTerminalEvent("turn/completed");
+      const activityPhase = status === "completed"
+        ? "completed"
+        : status === "failed"
+          ? "failed"
+          : "info";
+      const activityLabel = status === "completed"
+        ? "Turn completed"
+        : status === "failed"
+          ? "Turn failed"
+          : status === "interrupted"
+            ? "Turn interrupted"
+            : "Turn ended with an unknown status";
       this.emitActivity(
         "turn",
-        status === "failed" ? "failed" : "completed",
-        status === "failed" ? "Turn failed" : "Turn completed",
+        activityPhase,
+        activityLabel,
       );
       if (this.host.cancelRequested() || status === "interrupted") {
-        this.host.finish("cancelled", null, null);
+        this.completeParentTurn("cancelled", null);
       } else if (status === "failed") {
         this.host.rememberFailure(
           "codex-error",
           "Codex could not complete the turn.",
           lastError,
         );
-        this.host.finish("failed", 1, null);
+        this.completeParentTurn("failed", 1);
+      } else if (status === "completed") {
+        this.completeParentTurn("completed", 0);
       } else {
-        this.host.finish("completed", 0, null);
+        const detail = status
+          ? `Unsupported parent turn status: ${status}`
+          : "The parent turn status was missing.";
+        this.host.rememberFailure(
+          "malformed-protocol",
+          "Codex ended the turn without a supported outcome.",
+          detail,
+        );
+        this.completeParentTurn("failed", 1);
       }
     }
+  }
+
+  private completeParentTurn(
+    status: CodexAppServerResult["status"],
+    exitCode: number | null,
+  ): void {
+    if (status !== "completed" || this.liveSubagentIds.size === 0) {
+      this.host.finish(status, exitCode, null);
+      return;
+    }
+    if (this.pendingParentCompletion) return;
+    this.pendingParentCompletion = { status, exitCode };
+    this.subagentDrainTimer = setTimeout(() => {
+      this.subagentDrainTimer = undefined;
+      this.finishPendingParentCompletion();
+    }, this.subagentDrainTimeoutMs);
+    this.subagentDrainTimer.unref();
+  }
+
+  private finishPendingParentCompletion(): void {
+    const completion = this.pendingParentCompletion;
+    if (!completion) return;
+    this.pendingParentCompletion = null;
+    if (this.subagentDrainTimer) {
+      clearTimeout(this.subagentDrainTimer);
+      this.subagentDrainTimer = undefined;
+    }
+    this.host.finish(completion.status, completion.exitCode, null);
   }
 
   private emitActivity(
@@ -427,23 +542,86 @@ export class CodexAppServerEvents {
   }
 
   private emitSubagent(
-    update: Omit<CodexSubagentUpdate, "sequence">,
+    update: Omit<CodexSubagentUpdate, "sequence" | "isLive">,
+    authority: CodexSubagentAuthority,
+    isLive = LIVE_SUBAGENT_STATUSES.has(update.status),
   ): void {
+    const providerAgentId = update.providerAgentId;
+    if (providerAgentId) {
+      const current = this.subagentProjection.get(providerAgentId);
+      if (current) {
+        const weaker =
+          SUBAGENT_AUTHORITY[authority] < SUBAGENT_AUTHORITY[current.authority];
+        const stronger =
+          SUBAGENT_AUTHORITY[authority] > SUBAGENT_AUTHORITY[current.authority];
+        const clarifiesUnknown =
+          current.status === "unknown"
+          && update.status !== "unknown"
+          && SUBAGENT_AUTHORITY[authority]
+            >= SUBAGENT_AUTHORITY[current.authority];
+        const authoritativelyRevivesTerminalUnknown =
+          !current.isLive
+          && isLive
+          && current.status === "unknown"
+          && update.status !== "unknown"
+          && stronger;
+        if (
+          !current.isLive
+          && isLive
+          && !authoritativelyRevivesTerminalUnknown
+        ) {
+          return;
+        }
+        if (
+          TERMINAL_SUBAGENT_STATUSES.has(current.status)
+          && (
+            weaker
+            || (
+              !stronger
+              && !clarifiesUnknown
+              && update.status !== current.status
+            )
+          )
+        ) {
+          return;
+        }
+      }
+      this.subagentProjection.set(providerAgentId, {
+        status: update.status,
+        authority,
+        isLive,
+      });
+      if (isLive) {
+        this.liveSubagentIds.add(providerAgentId);
+      } else {
+        this.liveSubagentIds.delete(providerAgentId);
+      }
+    }
     this.subagentSequence += 1;
     this.host.options.onSubagent?.({
       sequence: this.subagentSequence,
       ...update,
+      isLive,
     });
+    if (
+      this.pendingParentCompletion
+      && this.liveSubagentIds.size === 0
+    ) {
+      this.finishPendingParentCompletion();
+    }
   }
 
-  private collabStatus(value: unknown): CodexSubagentUpdate["status"] | null {
-    if (value === "pendingInit") return "spawned";
-    if (value === "running") return "running";
-    if (value === "interrupted") return "cancelled";
-    if (value === "completed" || value === "shutdown") return "completed";
-    if (value === "errored") return "failed";
-    if (value === "notFound") return "lost";
-    return null;
+  private collabStatus(
+    providerStatus: string | null,
+  ): CodexSubagentUpdate["status"] | null {
+    if (providerStatus === "pendingInit") return "queued";
+    if (providerStatus === "running") return "running";
+    if (providerStatus === "interrupted") return "interrupted";
+    if (providerStatus === "completed") return "completed";
+    if (providerStatus === "errored") return "failed";
+    if (providerStatus === "notFound") return "lost";
+    if (providerStatus === "shutdown") return "unknown";
+    return providerStatus ? "unknown" : null;
   }
 
   private emitCollabAgentItem(
@@ -474,15 +652,23 @@ export class CodexAppServerEvents {
         this.childParents.set(providerAgentId, senderThreadId);
       }
       const agentState = objectValue(agentsStates[providerAgentId]);
-      const exactStatus = this.collabStatus(agentState?.status);
-      const fallbackStatus: CodexSubagentUpdate["status"] =
+      const providerStatus =
+        boundedText(agentState?.status, 200) ?? null;
+      const exactStatus = this.collabStatus(providerStatus);
+      const fallbackStatus: CodexSubagentUpdate["status"] | null =
         tool === "spawnAgent"
           ? itemPhase === "started" ? "spawned" : "running"
           : tool === "wait"
             ? itemPhase === "started" ? "waiting" : "running"
             : tool === "closeAgent"
-              ? "cancelled"
+              ? null
               : "running";
+      const status = exactStatus ?? fallbackStatus;
+      if (!status) continue;
+      const terminal = TERMINAL_SUBAGENT_STATUSES.has(status);
+      const isLive = status === "unknown"
+        ? providerStatus !== "shutdown"
+        : LIVE_SUBAGENT_STATUSES.has(status);
       this.emitSubagent({
         providerTaskId: null,
         providerAgentId,
@@ -494,13 +680,16 @@ export class CodexAppServerEvents {
         providerToolUseId: toolUseId,
         providerRole: null,
         providerName: null,
-        status: exactStatus ?? fallbackStatus,
+        providerStatus,
+        status,
         description: tool === "spawnAgent" ? prompt : null,
-        progress: boundedText(agentState?.message, 4_000) ?? null,
-        result: exactStatus === "completed"
+        progress: terminal
+          ? null
+          : boundedText(agentState?.message, 4_000) ?? null,
+        result: terminal
           ? boundedText(agentState?.message, 16_000) ?? null
           : null,
-      });
+      }, exactStatus ? "state" : "activity", isLive);
     }
     return true;
   }
@@ -523,15 +712,17 @@ export class CodexAppServerEvents {
       providerToolUseId: boundedText(item.id, 1_000) ?? null,
       providerRole: null,
       providerName: null,
-      status: kind === "started"
+      providerStatus: kind,
+      status: kind === "started" || kind === "interacted"
         ? "running"
         : kind === "interrupted"
-          ? "cancelled"
-          : "running",
+          ? "interrupted"
+          : "unknown",
       description: null,
       progress: null,
       result: null,
-    });
+    }, kind === "started" || kind === "interacted" ? "activity" : "state",
+    kind !== "interrupted");
     return true;
   }
 
@@ -580,11 +771,12 @@ export class CodexAppServerEvents {
         boundedText(thread?.agentNickname, 200)
         ?? boundedText(thread?.name, 200)
         ?? null,
+      providerStatus: null,
       status: "running",
       description: boundedText(thread?.preview, 4_000) ?? null,
       progress: null,
       result: null,
-    });
+    }, "activity");
     return true;
   }
 
@@ -635,11 +827,12 @@ export class CodexAppServerEvents {
             providerToolUseId: itemId ?? null,
             providerRole: null,
             providerName: null,
+            providerStatus: null,
             status: "running",
             description: null,
             progress: boundedText(text, 4_000) ?? null,
             result: null,
-          });
+          }, "activity");
         }
       }
       return true;
@@ -649,6 +842,16 @@ export class CodexAppServerEvents {
     const status = stringValue(turn?.status);
     const turnError = objectValue(turn?.error);
     const result = this.childResults.get(threadId)?.toString();
+    const terminalStatus: CodexSubagentUpdate["status"] =
+      status === "completed"
+        ? "completed"
+        : status === "failed"
+          ? "failed"
+          : status === "interrupted"
+            ? "interrupted"
+            : "unknown";
+    const failure = boundedText(turnError?.message, 16_000) ?? null;
+    const output = boundedText(result, 16_000) ?? null;
     this.emitSubagent({
       providerTaskId: null,
       providerAgentId: threadId,
@@ -660,18 +863,14 @@ export class CodexAppServerEvents {
       providerToolUseId: null,
       providerRole: null,
       providerName: null,
-      status: status === "failed"
-        ? "failed"
-        : status === "interrupted"
-          ? "cancelled"
-          : "completed",
+      providerStatus: boundedText(status, 200) ?? null,
+      status: terminalStatus,
       description: null,
       progress: null,
-      result:
-        boundedText(turnError?.message, 16_000)
-        ?? boundedText(result, 16_000)
-        ?? null,
-    });
+      result: terminalStatus === "failed"
+        ? failure ?? output
+        : output ?? failure,
+    }, "turn");
     this.childResults.delete(threadId);
     return true;
   }

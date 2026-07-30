@@ -217,7 +217,9 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     providerToolUseId: "tool-evidence-scout",
     providerRole: "researcher",
     providerName: "Evidence Scout",
+    providerStatus: "running",
     status: "running",
+    isLive: true,
     description: "Checking the provider lifecycle and exact task identity.",
     progress: "Reviewing authoritative SDK events.",
     result: null,
@@ -237,7 +239,9 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     providerToolUseId: "tool-policy-reader",
     providerRole: "analyst",
     providerName: "Policy Reader",
+    providerStatus: "completed",
     status: "completed",
+    isLive: false,
     description: "Read the typed lifecycle contract.",
     progress: null,
     result: "Confirmed exact IDs and bounded provider-authored text.",
@@ -256,7 +260,9 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     providerToolUseId: "tool-build-verifier",
     providerRole: "verifier",
     providerName: "Build Verifier",
+    providerStatus: "failed",
     status: "failed",
+    isLive: false,
     description: "Run the optional provider check.",
     progress: null,
     result: "The optional check ended without changing the parent run.",
@@ -368,9 +374,9 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     await expect(disclosure.getByText("3 delegated tasks · 1 active", {
       exact: true,
     })).toBeVisible();
-    await disclosure.locator("summary").click();
+    await expect(disclosure).toHaveAttribute("open");
     const delegatedWork = disclosure.getByRole("list", {
-      name: "Delegated agent work",
+      name: "Delegated agent tree",
     });
     await expect(delegatedWork.getByText("Evidence Scout", { exact: true }))
       .toBeVisible();
@@ -378,11 +384,11 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       .toBeVisible();
     await expect(delegatedWork.getByText("Build Verifier", { exact: true }))
       .toBeVisible();
-    await expect(delegatedWork.getByText("Working", { exact: true }))
+    await expect(delegatedWork.getByText(/Claude · Running ·/u))
       .toBeVisible();
-    await expect(delegatedWork.getByText("Done", { exact: true }))
+    await expect(delegatedWork.getByText(/Claude · Completed ·/u))
       .toBeVisible();
-    await expect(delegatedWork.getByText("Failed", { exact: true }))
+    await expect(delegatedWork.getByText(/Claude · Failed ·/u))
       .toBeVisible();
     await expect(delegatedWork.getByRole("button", {
       name: "Stop Evidence Scout",
@@ -391,9 +397,13 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       .toHaveCount(1);
 
     const traceRows = delegatedWork.locator("li");
-    const parentLeft = await traceRows.filter({ hasText: "Evidence Scout" })
+    const parentLeft = await traceRows.filter({
+      has: page.getByText("Evidence Scout", { exact: true }),
+    })
       .evaluate((row) => row.getBoundingClientRect().left);
-    const childLeft = await traceRows.filter({ hasText: "Policy Reader" })
+    const childLeft = await traceRows.filter({
+      has: page.getByText("Policy Reader", { exact: true }),
+    })
       .evaluate((row) => row.getBoundingClientRect().left);
     expect(childLeft).toBeGreaterThan(parentLeft);
 

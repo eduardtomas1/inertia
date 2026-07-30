@@ -562,7 +562,7 @@ describe("TurnController authoritative lifecycle", () => {
       providerToolUseId: "tool-1",
       providerRole: "researcher",
       providerName: "Evidence",
-      status: "running",
+      providerStatus: "future_active_state", status: "unknown", isLive: true,
       description:
         `Check \u001b[31mghp_abcdefghijklmnopqrstuvwxyz in ${runtime.workspace}/private`,
       progress:
@@ -576,7 +576,7 @@ describe("TurnController authoritative lifecycle", () => {
     expect(trace).toMatchObject({
       providerTaskId: "task-1",
       providerRole: "researcher",
-      status: "running",
+      providerStatus: "future_active_state", status: "unknown", isLive: true,
       sequence: 1,
       description: "Check [redacted] in <workspace>/private",
     });
@@ -602,7 +602,7 @@ describe("TurnController authoritative lifecycle", () => {
       providerToolUseId: "tool-1",
       providerRole: null,
       providerName: null,
-      status: "failed",
+      status: "failed", isLive: false,
       description: null,
       progress: null,
       result: "stale",
@@ -619,7 +619,7 @@ describe("TurnController authoritative lifecycle", () => {
       providerToolUseId: "tool-1",
       providerRole: null,
       providerName: null,
-      status: "completed",
+      status: "completed", isLive: false,
       description: null,
       progress: null,
       result: "Verified",
@@ -635,7 +635,7 @@ describe("TurnController authoritative lifecycle", () => {
       providerToolUseId: "tool-1",
       providerRole: null,
       providerName: null,
-      status: "running",
+      status: "running", isLive: true,
       description: null,
       progress: "late replay",
       result: null,
@@ -678,7 +678,7 @@ describe("TurnController authoritative lifecycle", () => {
       providerToolUseId: "tool-deferred-stop",
       providerRole: "researcher",
       providerName: "Evidence",
-      status: "running",
+      status: "running", isLive: true,
       description: "Wait for explicit acknowledgement.",
       progress: null,
       result: null,
@@ -746,7 +746,7 @@ describe("TurnController authoritative lifecycle", () => {
       providerToolUseId: "tool-finishes-during-stop",
       providerRole: "researcher",
       providerName: "Evidence",
-      status: "running",
+      status: "running", isLive: true,
       description: "Finish before the stop acknowledgement.",
       progress: null,
       result: null,
@@ -777,7 +777,7 @@ describe("TurnController authoritative lifecycle", () => {
       providerToolUseId: "tool-finishes-during-stop",
       providerRole: "researcher",
       providerName: "Evidence",
-      status: "completed",
+      status: "completed", isLive: false,
       description: "Finish before the stop acknowledgement.",
       progress: "Finished.",
       result: "Verified.",
@@ -821,7 +821,7 @@ describe("TurnController authoritative lifecycle", () => {
       providerToolUseId: "tool-parent-settles",
       providerRole: "researcher",
       providerName: "Evidence",
-      status: "waiting",
+      status: "waiting", isLive: true,
       description: "Wait for the parent result.",
       progress: "Waiting.",
       result: null,
@@ -881,7 +881,7 @@ describe("TurnController authoritative lifecycle", () => {
       providerToolUseId: "spawn-1",
       providerRole: "worker",
       providerName: null,
-      status: "running",
+      providerStatus: "future_active_state", status: "unknown", isLive: true,
       description: "Inspect",
       progress: null,
       result: null,
@@ -894,7 +894,7 @@ describe("TurnController authoritative lifecycle", () => {
     expect(reopened.conversationDetail(runtime.conversationId)?.subagents)
       .toContainEqual(expect.objectContaining({
         providerAgentId: "child-thread-1",
-        status: "lost",
+        status: "lost", isLive: false,
         sequence: 2,
       }));
     reopened.close();

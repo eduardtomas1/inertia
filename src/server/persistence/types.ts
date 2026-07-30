@@ -177,7 +177,9 @@ export interface UpsertSubagentTraceInput {
   providerToolUseId: string | null;
   providerRole: string | null;
   providerName: string | null;
+  providerStatus?: string | null;
   status: SubagentTraceStatus;
+  isLive: boolean;
   description: string | null;
   progress: string | null;
   result: string | null;

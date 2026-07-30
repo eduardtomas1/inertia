@@ -1,7 +1,6 @@
 import type {
   AgentTurn,
   SubagentTrace,
-  SubagentTraceStatus,
 } from "@shared/contracts";
 
 export interface SubagentDisclosureRow {
@@ -10,14 +9,8 @@ export interface SubagentDisclosureRow {
   canStop: boolean;
 }
 
-const LIVE_STATUSES = new Set<SubagentTraceStatus>([
-  "spawned",
-  "running",
-  "waiting",
-]);
-
 export function isLiveSubagentTrace(trace: SubagentTrace): boolean {
-  return LIVE_STATUSES.has(trace.status);
+  return trace.isLive;
 }
 
 export function canStopSubagentTrace(
@@ -38,6 +31,63 @@ export function canStopSubagentTrace(
     && trace.providerTaskId
     && isLiveSubagentTrace(trace),
   );
+}
+
+export function subagentProviderLabel(trace: SubagentTrace): string {
+  if (trace.providerId === "codex") return "Codex";
+  if (trace.providerId === "claude") return "Claude";
+  if (trace.providerId === "cursor") return "Cursor";
+  return "OpenCode";
+}
+
+export function subagentTraceLabel(trace: SubagentTrace): string {
+  return trace.providerName
+    ?? trace.providerRole
+    ?? `${subagentProviderLabel(trace)} delegated task`;
+}
+
+export function subagentStatusLabel(trace: SubagentTrace): string {
+  const normalized = trace.status === "queued"
+    ? "Queued"
+    : trace.status === "spawned"
+      ? "Starting"
+      : trace.status === "running"
+        ? "Running"
+        : trace.status === "waiting"
+          ? "Waiting"
+          : trace.status === "completed"
+            ? "Completed"
+            : trace.status === "failed"
+              ? "Failed"
+              : trace.status === "cancelled"
+                ? "Cancelled"
+                : trace.status === "interrupted"
+                  ? "Interrupted"
+                  : trace.status === "lost"
+                    ? "Lost"
+                    : "Unknown";
+  return trace.providerStatus && trace.providerStatus !== trace.status
+    ? `${normalized} (${trace.providerStatus})`
+    : normalized;
+}
+
+export function subagentTraceDetail(trace: SubagentTrace): string | null {
+  return isLiveSubagentTrace(trace)
+    ? trace.progress ?? trace.description ?? trace.result
+    : trace.result ?? trace.progress ?? trace.description;
+}
+
+export function subagentElapsedMs(
+  trace: SubagentTrace,
+  now: number,
+): number {
+  const startedAt = Date.parse(trace.createdAt);
+  const updatedAt = Date.parse(trace.updatedAt);
+  if (!Number.isFinite(startedAt)) return 0;
+  const end = isLiveSubagentTrace(trace) || !Number.isFinite(updatedAt)
+    ? now
+    : updatedAt;
+  return Math.max(0, end - startedAt);
 }
 
 export function subagentDisclosureRows(

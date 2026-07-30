@@ -244,6 +244,48 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       send({ method: "turn/completed", params: { threadId: "child-1", turn: { id: "child-turn-1", status: "completed", items: [], error: null } } });
       return;
     }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "parent-before-child") {
+      send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-late", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-late"], prompt: "Finish after the parent", model: null, reasoningEffort: null, agentsStates: { "child-late": { status: "running", message: "Still checking" } } } } });
+      send({ method: "thread/started", params: { thread: { id: "child-late", parentThreadId: threadId, agentNickname: "Late verifier", agentRole: "reviewer", preview: "Finish after the parent" } } });
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      setTimeout(() => {
+        send({ method: "item/completed", params: { threadId: "child-late", turnId: "child-late-turn", item: { type: "agentMessage", id: "child-late-message", text: "Verified after the parent." } } });
+        send({ method: "turn/completed", params: { threadId: "child-late", turn: { id: "child-late-turn", status: "completed", items: [], error: null } } });
+      }, 20);
+      return;
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "completed-then-stale-error") {
+      send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-stale", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-stale"], prompt: "Report the real outcome", model: null, reasoningEffort: null, agentsStates: { "child-stale": { status: "running", message: "Checking" } } } } });
+      send({ method: "thread/started", params: { thread: { id: "child-stale", parentThreadId: threadId, agentNickname: "Outcome verifier", agentRole: "reviewer", preview: "Report the real outcome" } } });
+      send({ method: "item/completed", params: { threadId: "child-stale", turnId: "child-stale-turn", item: { type: "agentMessage", id: "child-stale-message", text: "The child completed successfully." } } });
+      send({ method: "turn/completed", params: { threadId: "child-stale", turn: { id: "child-stale-turn", status: "completed", items: [], error: null } } });
+      send({ method: "item/completed", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "wait-stale", tool: "wait", status: "failed", senderThreadId: threadId, receiverThreadIds: ["child-stale"], prompt: null, model: null, reasoningEffort: null, agentsStates: { "child-stale": { status: "errored", message: "Stale parent summary" } } } } });
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      return;
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "nested-collab") {
+      send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-parent", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-parent"], prompt: "Coordinate nested work", model: null, reasoningEffort: null, agentsStates: { "child-parent": { status: "running", message: "Coordinating" } } } } });
+      send({ method: "thread/started", params: { thread: { id: "child-parent", parentThreadId: threadId, agentNickname: "Coordinator", agentRole: "lead", preview: "Coordinate nested work" } } });
+      send({ method: "item/started", params: { threadId: "child-parent", turnId: "child-parent-turn", item: { type: "collabAgentToolCall", id: "spawn-grandchildren", tool: "spawnAgent", status: "inProgress", senderThreadId: "child-parent", receiverThreadIds: ["grandchild-a", "grandchild-b"], prompt: "Check two independent paths", model: null, reasoningEffort: null, agentsStates: { "grandchild-a": { status: "running", message: "Checking A" }, "grandchild-b": { status: "pendingInit", message: null } } } } });
+      send({ method: "thread/started", params: { thread: { id: "grandchild-a", parentThreadId: "child-parent", agentNickname: "Nested A", agentRole: "tester", preview: "Check path A" } } });
+      send({ method: "thread/started", params: { thread: { id: "grandchild-b", parentThreadId: "child-parent", agentNickname: "Nested B", agentRole: "tester", preview: "Check path B" } } });
+      send({ method: "turn/completed", params: { threadId: "grandchild-a", turn: { id: "grandchild-a-turn", status: "completed", items: [], error: null } } });
+      send({ method: "turn/completed", params: { threadId: "grandchild-b", turn: { id: "grandchild-b-turn", status: "failed", items: [], error: { message: "Path B failed." } } } });
+      send({ method: "turn/completed", params: { threadId: "child-parent", turn: { id: "child-parent-turn", status: "completed", items: [], error: null } } });
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      return;
+    }
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "unknown-collab-state") {
+      send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-unknown", tool: "spawnAgent", status: "completed", senderThreadId: threadId, receiverThreadIds: ["child-future", "child-shutdown"], prompt: "Preserve unknown states", model: null, reasoningEffort: null, agentsStates: { "child-future": { status: "futureState", message: "A newer provider state" }, "child-shutdown": { status: "shutdown", message: "Worker shut down" } } } } });
+      send({ method: "item/completed", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "wait-stale-shutdown", tool: "wait", status: "completed", senderThreadId: threadId, receiverThreadIds: ["child-shutdown"], prompt: null, model: null, reasoningEffort: null, agentsStates: { "child-shutdown": { status: "futureState", message: "A stale live snapshot" } } } } });
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      setTimeout(() => {
+        send({ method: "turn/completed", params: { threadId: "child-shutdown", turn: { id: "child-shutdown-turn", status: "completed", items: [], error: null } } });
+        send({ method: "item/completed", params: { threadId: "child-future", turnId: "child-future-turn", item: { type: "agentMessage", id: "child-future-message", text: "The future state completed directly." } } });
+        send({ method: "turn/completed", params: { threadId: "child-future", turn: { id: "child-future-turn", status: "completed", items: [], error: null } } });
+      }, 20);
+      return;
+    }
     if (
       process.env.INERTIA_APP_SERVER_SCENARIO === "wait-for-interrupt"
       || process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed"
@@ -790,7 +832,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       expect.objectContaining({
         providerAgentId: "child-1",
         providerToolUseId: "spawn-1",
-        status: "spawned",
+        providerStatus: "pendingInit",
+        status: "queued",
       }),
       expect.objectContaining({
         providerAgentId: "child-1",
@@ -816,6 +859,176 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         }],
       },
     });
+  });
+
+  it("drains a direct child outcome when the completed parent arrives first", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "parent-before-child";
+    const manager = trackedManager(fake.command);
+    const subagents: ProviderSubagentEvent[] = [];
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-parent-first",
+      runId: "run-parent-first",
+      turnId: "local-turn-parent-first",
+      cwd: fake.root,
+      prompt: "Let the child finish after the parent.",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onSubagent: (event) => subagents.push(event),
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "completed" });
+    expect(subagents.at(-1)).toMatchObject({
+      providerAgentId: "child-late",
+      providerStatus: "completed",
+      status: "completed",
+      result: "Verified after the parent.",
+    });
+  });
+
+  it("keeps a direct completed outcome over a later stale failed collab summary", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "completed-then-stale-error";
+    const manager = trackedManager(fake.command);
+    const subagents: ProviderSubagentEvent[] = [];
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-real-child-outcome",
+      runId: "run-real-child-outcome",
+      turnId: "local-turn-real-child-outcome",
+      cwd: fake.root,
+      prompt: "Preserve the direct child outcome.",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onSubagent: (event) => subagents.push(event),
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "completed" });
+    expect(subagents.filter(({ providerAgentId }) =>
+      providerAgentId === "child-stale").at(-1)).toMatchObject({
+      providerStatus: "completed",
+      status: "completed",
+      result: "The child completed successfully.",
+    });
+    expect(subagents).not.toContainEqual(expect.objectContaining({
+      providerAgentId: "child-stale",
+      status: "failed",
+    }));
+  });
+
+  it("projects multiple nested children with exact independent outcomes", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "nested-collab";
+    const manager = trackedManager(fake.command);
+    const subagents: ProviderSubagentEvent[] = [];
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-nested-collab",
+      runId: "run-nested-collab",
+      turnId: "local-turn-nested-collab",
+      cwd: fake.root,
+      prompt: "Coordinate nested children.",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onSubagent: (event) => subagents.push(event),
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "completed" });
+    expect(subagents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerAgentId: "grandchild-a",
+        parentProviderAgentId: "child-parent",
+        providerStatus: "completed",
+        status: "completed",
+      }),
+      expect.objectContaining({
+        providerAgentId: "grandchild-b",
+        parentProviderAgentId: "child-parent",
+        providerStatus: "failed",
+        status: "failed",
+        result: "Path B failed.",
+      }),
+      expect.objectContaining({
+        providerAgentId: "child-parent",
+        providerStatus: "completed",
+        status: "completed",
+      }),
+    ]));
+  });
+
+  it("drains a future collab state while preserving terminal shutdown as unknown", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "unknown-collab-state";
+    const manager = trackedManager(fake.command);
+    const subagents: ProviderSubagentEvent[] = [];
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-unknown-collab",
+      runId: "run-unknown-collab",
+      turnId: "local-turn-unknown-collab",
+      cwd: fake.root,
+      prompt: "Do not relabel provider states.",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onSubagent: (event) => subagents.push(event),
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "completed" });
+    expect(subagents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerAgentId: "child-future",
+        providerStatus: "futureState",
+        status: "unknown",
+        isLive: true,
+      }),
+      expect.objectContaining({
+        providerAgentId: "child-shutdown",
+        providerStatus: "shutdown",
+        status: "unknown",
+        isLive: false,
+      }),
+    ]));
+    expect(subagents.filter(({ providerAgentId }) =>
+      providerAgentId === "child-future").at(-1)).toMatchObject({
+      providerStatus: "completed",
+      status: "completed",
+      isLive: false,
+      result: "The future state completed directly.",
+    });
+    expect(subagents.filter(({ providerAgentId }) =>
+      providerAgentId === "child-shutdown")).toEqual([
+      expect.objectContaining({
+        providerStatus: "shutdown",
+        status: "unknown",
+        isLive: false,
+        result: "Worker shut down",
+      }),
+      expect.objectContaining({
+        providerStatus: "completed",
+        status: "completed",
+        isLive: false,
+      }),
+    ]);
+    expect(subagents).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerAgentId: "child-shutdown",
+        providerStatus: "futureState",
+        isLive: true,
+      }),
+    ]));
   });
 
   it("fails closed when App Server rejects full-access policy fields", async () => {

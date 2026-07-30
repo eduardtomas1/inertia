@@ -46,6 +46,11 @@ export interface CodexAppServerOptions {
   access: "supervised" | "auto-edit" | "full";
   /** Testable bound for one JSON-RPC response; defaults to 30 seconds. */
   rpcTimeoutMs?: number;
+  /**
+   * Test seam that may shorten, but never extend, the bounded wait for child
+   * turn outcomes after the parent completes.
+   */
+  subagentDrainTimeoutMs?: number;
   /** Test-only transport bounds; production callers use the hardened defaults. */
   protocolLimits?: {
     maxFrameBytes: number;
@@ -81,7 +86,9 @@ export interface CodexAppServerOptions {
     providerToolUseId: string | null;
     providerRole: string | null;
     providerName: string | null;
-    status: "spawned" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "lost";
+    providerStatus: string | null;
+    status: "queued" | "spawned" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "interrupted" | "unknown" | "lost";
+    isLive: boolean;
     description: string | null;
     progress: string | null;
     result: string | null;

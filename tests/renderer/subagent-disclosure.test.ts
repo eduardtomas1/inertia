@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -8,11 +10,18 @@ import {
   canStopSubagentTrace,
   subagentDisclosureRows,
   subagentDisclosureSummary,
+  subagentStatusLabel,
 } from "../../src/renderer/src/utils/subagentDisclosure";
+
+const styles = readFileSync(
+  new URL("../../src/renderer/src/styles.css", import.meta.url),
+  "utf8",
+);
 
 function trace(
   update: Partial<SubagentTrace> = {},
 ): SubagentTrace {
+  const status = update.status ?? "running";
   return {
     id: "trace-parent",
     conversationId: "conversation-1",
@@ -27,7 +36,11 @@ function trace(
     providerToolUseId: "tool-parent",
     providerRole: "researcher",
     providerName: "Evidence",
-    status: "running",
+    providerStatus: null,
+    status,
+    isLive: update.isLive ?? [
+      "queued", "spawned", "running", "waiting",
+    ].includes(status),
     description: "Inspect",
     progress: null,
     result: null,
@@ -124,7 +137,7 @@ describe("inline delegated-agent disclosure", () => {
       [turn()],
     )).toBe(false);
     expect(canStopSubagentTrace(
-      trace({ status: "completed" }),
+      trace({ status: "completed", isLive: false }),
       [turn()],
     )).toBe(false);
     expect(canStopSubagentTrace(live, [
@@ -133,5 +146,61 @@ describe("inline delegated-agent disclosure", () => {
         completedAt: "2030-01-01T00:01:00.000Z",
       }),
     ])).toBe(false);
+  });
+
+  it("keeps future provider states visibly unknown instead of relabeling them", () => {
+    expect(subagentStatusLabel(trace({
+      providerId: "codex",
+      providerStatus: "futureState",
+      status: "unknown",
+      isLive: true,
+    }))).toBe("Unknown (futureState)");
+    expect(subagentStatusLabel(trace({
+      providerId: "claude",
+      providerStatus: "killed",
+      status: "cancelled",
+      isLive: false,
+    }))).toBe("Cancelled (killed)");
+    expect(canStopSubagentTrace(
+      trace({ providerStatus: "pending", status: "queued" }),
+      [turn()],
+    )).toBe(true);
+    expect(canStopSubagentTrace(
+      trace({
+        providerStatus: "futureState",
+        status: "unknown",
+        isLive: true,
+      }),
+      [turn()],
+    )).toBe(true);
+    expect(subagentDisclosureSummary([
+      trace({
+        providerStatus: "futureState",
+        status: "unknown",
+        isLive: true,
+      }),
+    ])).toBe("1 delegated task · 1 active");
+  });
+
+  it("keeps one intentional danger hover and adjacent focus treatment for Stop", () => {
+    const hoverRules = [...styles.matchAll(
+      /\.subagent-stop-button:hover\s*\{(?<body>[^}]*)\}/gu,
+    )];
+    const focusRules = [...styles.matchAll(
+      /\.subagent-stop-button:focus-visible\s*\{(?<body>[^}]*)\}/gu,
+    )];
+    expect(hoverRules).toHaveLength(1);
+    expect(hoverRules[0]?.groups?.body).toContain("color: var(--danger)");
+    expect(hoverRules[0]?.groups?.body).toContain("var(--danger-soft)");
+    expect(focusRules).toHaveLength(1);
+    expect(focusRules[0]?.groups?.body).toContain("var(--focus-ring)");
+
+    const componentRule = styles.indexOf(".subagent-stop-button {");
+    const hoverRule = styles.indexOf(".subagent-stop-button:hover {");
+    const focusRule = styles.indexOf(".subagent-stop-button:focus-visible {");
+    const usagePopover = styles.indexOf(".usage-popover {");
+    expect(componentRule).toBeLessThan(hoverRule);
+    expect(hoverRule).toBeLessThan(focusRule);
+    expect(focusRule).toBeLessThan(usagePopover);
   });
 });

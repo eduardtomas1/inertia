@@ -435,7 +435,7 @@ export function useConversationProjection({
           [event.activity.conversationId]: [
             ...existing.filter(({ id }) => id !== event.activity.id),
             event.activity,
-          ].slice(-100),
+          ],
         };
       });
       return;
@@ -449,7 +449,7 @@ export function useConversationProjection({
           [event.trace.conversationId]: [
             ...existing.filter(({ id }) => id !== event.trace.id),
             event.trace,
-          ].slice(-128),
+          ],
         };
       });
       return;

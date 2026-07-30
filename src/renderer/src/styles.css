@@ -5704,7 +5704,7 @@ textarea {
   min-width: 0;
   align-content: start;
   gap: 12px;
-  overflow: hidden;
+  overflow: visible;
   padding: 15px;
   border: 1px solid var(--border-strong);
   border-radius: 12px;

@@ -598,6 +598,37 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.messages.at(-1)?.content).toBe("Commentary 69");
   });
 
+  it("retains every unhydrated activity until detail catches up", () => {
+    const source = createEventSource();
+    const hook = renderProjection(source, {
+      enabled: true,
+      targetConversationId: primaryId,
+    });
+
+    for (let index = 0; index < 110; index += 1) {
+      source.emit({
+        type: "agent.activity",
+        activity: {
+          id: `activity-${index}`,
+          conversationId: primaryId,
+          runId: `${primaryId}-run`,
+          turnId: `${primaryId}-turn`,
+          kind: "command",
+          title: `Command ${index}`,
+          detail: null,
+          status: "completed",
+          createdAt: new Date(
+            Date.parse("2026-07-28T12:00:00.000Z") + index,
+          ).toISOString(),
+        },
+      });
+    }
+
+    expect(hook.result.current.activities).toHaveLength(110);
+    expect(hook.result.current.activities[0]?.title).toBe("Command 0");
+    expect(hook.result.current.activities.at(-1)?.title).toBe("Command 109");
+  });
+
   it("retires a live activity once authoritative detail catches up", async () => {
     const source = createEventSource();
     const liveActivity: AgentActivity = {

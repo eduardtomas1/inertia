@@ -463,9 +463,11 @@ describe("useConversationProjection pending interactions", () => {
       conversationId: primaryId,
     });
 
-    await waitFor(() => expect(detailLoads).toBe(3));
-    expect(hook.result.current.streamingText).toBe("");
-    expect(hook.result.current.messages).toEqual(authoritativeMessages);
+    await waitFor(() => {
+      expect(detailLoads).toBe(3);
+      expect(hook.result.current.streamingText).toBe("");
+      expect(hook.result.current.messages).toEqual(authoritativeMessages);
+    });
   });
 
   it("does not reload detail for bounded activity-shell refreshes", async () => {

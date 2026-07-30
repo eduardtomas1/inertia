@@ -589,6 +589,5 @@ export function useConversationProjection({
     streamingReasoning,
     pendingApprovals: approvals,
     pendingInputs: inputRequests,
-    nativePlans,
   };
 }

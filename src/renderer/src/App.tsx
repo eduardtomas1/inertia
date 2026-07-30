@@ -239,9 +239,9 @@ export default function App(): React.JSX.Element {
     detailState: conversationDetailState,
     refreshDetail,
     messages,
+    plans,
     subagents,
     streamingText,
-    nativePlans,
   } = conversationProjection;
   const authProvider = useMemo(
     () => connection.snapshot?.providers.find(({ id }) => id === authProviderId) ?? null,
@@ -267,9 +267,9 @@ export default function App(): React.JSX.Element {
     [connection.snapshot?.runs, conversation],
   );
   const planSteps = useMemo(() => {
-    const nativePlan = conversation ? nativePlans[conversation.id] : undefined;
-    if (nativePlan) {
-      return nativePlan.steps.map((step, index) => ({
+    const latestPlan = plans.at(-1);
+    if (latestPlan) {
+      return latestPlan.steps.map((step, index) => ({
         id: `native-${index}`,
         title: step.step,
         status: step.status === "inProgress" ? "in-progress" as const : step.status,
@@ -277,7 +277,7 @@ export default function App(): React.JSX.Element {
     }
     const text = [...messages].reverse().find((message) => message.role === "assistant")?.content ?? streamingText;
     return planFromText(text, conversation?.status ?? "idle");
-  }, [conversation, messages, nativePlans, streamingText]);
+  }, [conversation?.status, messages, plans, streamingText]);
 
   const {
     run,

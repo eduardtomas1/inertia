@@ -407,6 +407,7 @@ describe("useConversationProjection pending interactions", () => {
       { initialProps: { currentSnapshot: snapshot } },
     );
     await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+    expect(hook.result.current.plans).toEqual([loadedPlan]);
     const messagesBeforeRefresh = hook.result.current.messages;
     const plansBeforeRefresh = hook.result.current.plans;
 

@@ -17,6 +17,7 @@ import {
   createTurnInteractionCommandHandler,
   type TurnInteractionCommandDependencies,
 } from "../../src/server/runtime/commands/turn-interaction-commands";
+import { MESSAGE_SEND_PREPARATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const execFileAsync = promisify(execFile);
@@ -141,6 +142,31 @@ function dependencies(options: {
 }
 
 describe("message attachment ownership transfer", () => {
+  it("rejects safely when aggregate preparation reaches its deadline", async () => {
+    vi.useFakeTimers();
+    const relinquishAll = vi.fn(async () => undefined);
+    const queue = vi.fn();
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll,
+      readiness: vi.fn(() => new Promise(() => undefined)),
+    });
+    const handling = createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    );
+    const rejection = expect(handling).rejects.toThrow(
+      "Preparing this message took too long. No turn was started.",
+    );
+
+    await vi.advanceTimersByTimeAsync(MESSAGE_SEND_PREPARATION_TIMEOUT_MS);
+    await rejection;
+
+    expect(queue).not.toHaveBeenCalled();
+    expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+    vi.useRealTimers();
+  });
+
   it("projects an active follow-up without hydrating the live stream", async () => {
     const followUp: ChatMessage = {
       id: "77777777-7777-4777-8777-777777777777",

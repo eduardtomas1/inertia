@@ -28,6 +28,12 @@ import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
 } from "./command-router";
+import {
+  assertMessageSendPreparationPending,
+  awaitMessageSendPreparation,
+  messageSendPreparationDeadline,
+  messageSendPreparationExpired,
+} from "./message-send-preparation";
 
 export interface TurnInteractionCommandDependencies {
   store: RuntimeStore;
@@ -101,15 +107,17 @@ export function createTurnInteractionCommandHandler(
             "Wait for the current run or read-only review to finish first.",
           );
         }
+        const preparationDeadlineAt = messageSendPreparationDeadline();
         const resolvedAttachments = command.payload.attachments.length === 0
           ? []
-          : await dependencies.attachmentResolver?.resolvePayloads(
-              command.payload.attachments,
-            ) ?? (() => {
-              throw new RuntimeRequestError(
+          : await awaitMessageSendPreparation(
+              dependencies.attachmentResolver?.resolvePayloads(
+                command.payload.attachments,
+              ) ?? Promise.reject(new RuntimeRequestError(
                 "The selected attachment is no longer available or could not be verified.",
-              );
-            })();
+              )),
+              preparationDeadlineAt,
+            );
         const attachments = resolvedAttachments.map(
           ({ attachment }) => attachment,
         );
@@ -119,8 +127,9 @@ export function createTurnInteractionCommandHandler(
           );
         let documentContexts;
         try {
-          documentContexts = await documentAttachmentContexts(
-            resolvedAttachments,
+          documentContexts = await awaitMessageSendPreparation(
+            documentAttachmentContexts(resolvedAttachments),
+            preparationDeadlineAt,
           );
         } catch (error) {
           await relinquishAttachments();
@@ -138,11 +147,13 @@ export function createTurnInteractionCommandHandler(
             dependencies.backendProfileController.validateSelection(
               conversation.modelSelection,
             );
-            const backendReadiness = await dependencies
-              .backendProfileController.readiness(
+            const backendReadiness = await awaitMessageSendPreparation(
+              dependencies.backendProfileController.readiness(
                 conversation.modelSelection,
                 selectedProvider,
-              );
+              ),
+              preparationDeadlineAt,
+            );
             if (backendReadiness && !backendReadiness.ready) {
               throw new RuntimeRequestError(
                 backendReadiness.message
@@ -194,9 +205,12 @@ export function createTurnInteractionCommandHandler(
           ReturnType<AgentWorkflowController["resolveTurnSkills"]>
         >;
         try {
-          resolvedSkills = await dependencies.workflows.resolveTurnSkills(
-            conversation.id,
-            command.payload.skillIds ?? [],
+          resolvedSkills = await awaitMessageSendPreparation(
+            dependencies.workflows.resolveTurnSkills(
+              conversation.id,
+              command.payload.skillIds ?? [],
+            ),
+            preparationDeadlineAt,
           );
         } catch (error) {
           await relinquishAttachments();
@@ -219,16 +233,20 @@ export function createTurnInteractionCommandHandler(
         if (dependencies.enableProviders) {
           try {
             const path = dependencies.store.conversationPath(conversation.id);
-            const status = await getRepositoryStatus(path);
+            const status = await getRepositoryStatus(path, {
+              deadlineAt: preparationDeadlineAt,
+            });
             const captured = await createCheckpoint(
               path,
               join(dependencies.dataDirectory, "checkpoint-indexes"),
               conversation.id,
+              { deadlineAt: preparationDeadlineAt },
             );
             capturedCheckpoint = {
               repositoryPath: path,
               ref: captured.ref,
             };
+            assertMessageSendPreparationPending(preparationDeadlineAt);
             const turnIndex = dependencies.store.checkpointCount(
               conversation.id,
             ) + 1;
@@ -261,10 +279,15 @@ export function createTurnInteractionCommandHandler(
             ) {
               // A checkpoint is protective but not a reason to block a run.
             }
+            if (messageSendPreparationExpired(preparationDeadlineAt)) {
+              await relinquishAttachments();
+              assertMessageSendPreparationPending(preparationDeadlineAt);
+            }
           }
         }
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
         try {
+          assertMessageSendPreparationPending(preparationDeadlineAt);
           dependencies.workflows.assertTurnSkillsCurrent(
             conversation.id,
             resolvedSkills.routeKey,

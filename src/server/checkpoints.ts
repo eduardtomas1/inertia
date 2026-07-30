@@ -10,6 +10,10 @@ export class CheckpointError extends Error {}
 
 type RunResult = { stdout: Buffer; stderr: Buffer };
 
+export interface CheckpointOperationOptions {
+  deadlineAt?: number;
+}
+
 const MAX_CHECKPOINT_PATH_BYTES = 16 * 1024 * 1024;
 const RAW_CHECKPOINT_ATTRIBUTES =
   "* -crlf -filter -ident -text -working-tree-encoding -eol\n";
@@ -49,7 +53,17 @@ function runGit(
   input?: Buffer,
   acceptedExitCodes: readonly number[] = [0],
   maxStdoutBytes = 1024 * 1024,
+  deadlineAt?: number,
 ): Promise<RunResult> {
+  const deadlineTimeoutMs = deadlineAt === undefined
+    ? 20_000
+    : Math.floor(deadlineAt - Date.now());
+  if (deadlineTimeoutMs <= 0) {
+    return Promise.reject(
+      new CheckpointError("Checkpoint operation timed out."),
+    );
+  }
+  const timeoutMs = Math.min(20_000, deadlineTimeoutMs);
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn("git", args, {
       cwd,
@@ -63,7 +77,7 @@ function runGit(
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let stdoutLimitExceeded = false;
-    const timer = setTimeout(() => { child.kill("SIGKILL"); rejectRun(new CheckpointError("Checkpoint operation timed out.")); }, 20_000);
+    const timer = setTimeout(() => { child.kill("SIGKILL"); rejectRun(new CheckpointError("Checkpoint operation timed out.")); }, timeoutMs);
     timer.unref();
     if (input && child.stdin) {
       child.stdin.on("error", () => undefined);
@@ -120,6 +134,7 @@ async function checkpointEnvironment(
   storageDirectory: string,
   checkpointId: string,
   environment: NodeJS.ProcessEnv,
+  deadlineAt?: number,
 ): Promise<{
   environment: NodeJS.ProcessEnv;
   metadataDirectory: string;
@@ -161,6 +176,10 @@ async function checkpointEnvironment(
       repositoryPath,
       checkpointGitArguments(["rev-parse", "--show-object-format"]),
       isolatedConfiguration,
+      undefined,
+      [0],
+      1024 * 1024,
+      deadlineAt,
     )
   ).stdout.toString("utf8").trim();
   const objectDirectory = (
@@ -173,6 +192,10 @@ async function checkpointEnvironment(
         "objects",
       ]),
       isolatedConfiguration,
+      undefined,
+      [0],
+      1024 * 1024,
+      deadlineAt,
     )
   ).stdout.toString("utf8").trim();
   if (
@@ -196,6 +219,10 @@ async function checkpointEnvironment(
       metadataDirectory,
     ],
     isolatedConfiguration,
+    undefined,
+    [0],
+    1024 * 1024,
+    deadlineAt,
   );
   await mkdir(hooksDirectory, { mode: 0o700 });
   await writeFile(
@@ -216,7 +243,12 @@ async function checkpointEnvironment(
   };
 }
 
-export async function createCheckpoint(repositoryPath: string, storageDirectory: string, conversationId: string): Promise<{ id: string; ref: string }> {
+export async function createCheckpoint(
+  repositoryPath: string,
+  storageDirectory: string,
+  conversationId: string,
+  options: CheckpointOperationOptions = {},
+): Promise<{ id: string; ref: string }> {
   const checkpointId = randomUUID();
   const ref = `refs/inertia/checkpoints/${conversationId}/${checkpointId}`;
   await mkdir(storageDirectory, { recursive: true, mode: 0o700 });
@@ -232,7 +264,22 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
   let isolated: Awaited<ReturnType<typeof checkpointEnvironment>> | null = null;
   try {
     let head: string | null = null;
-    try { head = (await runGit(repositoryPath, checkpointGitArguments(["rev-parse", "--verify", "HEAD"]))).stdout.toString("utf8").trim(); } catch { /* Repositories without a first commit are supported. */ }
+    try {
+      head = (
+        await runGit(
+          repositoryPath,
+          checkpointGitArguments(["rev-parse", "--verify", "HEAD"]),
+          process.env,
+          undefined,
+          [0],
+          1024 * 1024,
+          options.deadlineAt,
+        )
+      ).stdout.toString("utf8").trim();
+    } catch {
+      // Repositories without a first commit are supported. A spent aggregate
+      // deadline is caught by the next bounded checkpoint operation.
+    }
     const taggedPaths = (
       await runGit(
         repositoryPath,
@@ -248,6 +295,7 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
         undefined,
         [0],
         MAX_CHECKPOINT_PATH_BYTES,
+        options.deadlineAt,
       )
     ).stdout;
     const includedPaths =
@@ -260,6 +308,7 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
         undefined,
         [0],
         MAX_CHECKPOINT_PATH_BYTES,
+        options.deadlineAt,
       )
     ).stdout;
     isolated = await checkpointEnvironment(
@@ -267,6 +316,7 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
       storageDirectory,
       checkpointId,
       baseEnvironment,
+      options.deadlineAt,
     );
     const environment = isolated.environment;
     if (indexEntries.length > 0) {
@@ -275,12 +325,19 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
         ["update-index", "-z", "--index-info"],
         environment,
         indexEntries,
+        [0],
+        1024 * 1024,
+        options.deadlineAt,
       );
     } else {
       await runGit(
         repositoryPath,
         ["read-tree", "--empty"],
         environment,
+        undefined,
+        [0],
+        1024 * 1024,
+        options.deadlineAt,
       );
     }
     if (includedPaths.length > 0) {
@@ -295,12 +352,35 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
         ]),
         environment,
         includedPaths,
+        [0],
+        1024 * 1024,
+        options.deadlineAt,
       );
     }
-    const tree = (await runGit(repositoryPath, ["write-tree"], environment)).stdout.toString("utf8").trim();
+    const tree = (
+      await runGit(
+        repositoryPath,
+        ["write-tree"],
+        environment,
+        undefined,
+        [0],
+        1024 * 1024,
+        options.deadlineAt,
+      )
+    ).stdout.toString("utf8").trim();
     const commitArgs = ["commit-tree", tree, "-m", "Inertia checkpoint"];
     if (head) commitArgs.push("-p", head);
-    const commit = (await runGit(repositoryPath, commitArgs, environment)).stdout.toString("utf8").trim();
+    const commit = (
+      await runGit(
+        repositoryPath,
+        commitArgs,
+        environment,
+        undefined,
+        [0],
+        1024 * 1024,
+        options.deadlineAt,
+      )
+    ).stdout.toString("utf8").trim();
     // The isolated metadata directory is temporary. Persist the checkpoint
     // reference through the real repository after the object is created.
     await runGit(
@@ -313,6 +393,10 @@ export async function createCheckpoint(repositoryPath: string, storageDirectory:
         commit,
       ]),
       baseEnvironment,
+      undefined,
+      [0],
+      1024 * 1024,
+      options.deadlineAt,
     );
     return { id: checkpointId, ref };
   } finally {

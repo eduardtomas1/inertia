@@ -5,6 +5,10 @@ import {
   clientCommandSchema,
   MAX_WORKSPACE_FILE_EDIT_BYTES,
 } from "../../src/shared/contracts";
+import {
+  MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
+  MESSAGE_SEND_REQUEST_TIMEOUT_MS,
+} from "../../src/shared/runtime-command-timeouts";
 import { useInertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
 import { runtimeCommandDelivery } from "../../src/renderer/src/utils/connectionMessages";
 
@@ -127,7 +131,7 @@ describe("useInertiaConnection", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it("keeps message delivery pending through bounded document preparation", async () => {
+  it("keeps message delivery pending through the server preparation deadline", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
@@ -160,7 +164,16 @@ describe("useInertiaConnection", () => {
     expect(timeoutError).toBeUndefined();
     expect(socket.close).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(
+      MESSAGE_SEND_PREPARATION_TIMEOUT_MS - 15_000,
+    );
+    expect(timeoutError).toBeUndefined();
+    expect(socket.close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(
+      MESSAGE_SEND_REQUEST_TIMEOUT_MS
+        - MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
+    );
     expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
     expect(socket.close).toHaveBeenCalledTimes(1);
   });

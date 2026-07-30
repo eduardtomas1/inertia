@@ -17,6 +17,11 @@ import {
 } from "../shared/contracts";
 import type { OpenProjectPathRequest } from "../shared/desktop";
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
+import type {
+  RemoteAuthorizationSubject,
+  RemoteRequest,
+  RemoteResponse,
+} from "../shared/remote-protocol";
 import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { recoverInterruptedTurns } from "./runtime/turns/turn-recovery";
@@ -95,6 +100,7 @@ import {
   type RuntimeSecureFileBroker,
 } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
+import { RemoteRuntimeGateway } from "./remote-gateway";
 
 export {
   assembleReadOnlyReviewRequest,
@@ -130,6 +136,10 @@ export interface RuntimeBackendCredentialBroker {
 export interface RunningRuntime {
   websocketUrl: string;
   resolveProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
+  remoteRequest: (
+    subject: RemoteAuthorizationSubject,
+    request: RemoteRequest,
+  ) => Promise<RemoteResponse>;
   close: (cause?: "runtime-shutdown" | "runtime-crash") => Promise<void>;
 }
 
@@ -644,9 +654,73 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     broadcastSnapshot();
   });
 
+  const remoteGateway = new RemoteRuntimeGateway({
+    shell: currentSnapshot,
+    detail: (conversationId) => store.conversationDetail(conversationId),
+    isConversationActive: (conversationId) =>
+      turns.isActive(conversationId) || isolatedRuns.has(conversationId),
+    preparePrompt: async (conversation) => {
+      if (!enableProviders) {
+        throw new Error("Provider execution is disabled.");
+      }
+      const selectedProvider = providerInfo.find(
+        ({ id }) => id === conversation.providerId,
+      );
+      backendProfileController.validateSelection(conversation.modelSelection);
+      const backendReadiness = await backendProfileController.readiness(
+        conversation.modelSelection,
+        selectedProvider,
+      );
+      if (backendReadiness && !backendReadiness.ready) {
+        throw new Error(
+          backendReadiness.message ?? "The selected model backend is unavailable.",
+        );
+      }
+      if (!backendReadiness && !selectedProvider?.canRun) {
+        throw new Error(
+          selectedProvider?.statusMessage
+            ?? "This agent is not ready on the desktop.",
+        );
+      }
+    },
+    queuePrompt: (conversationId, content) => {
+      let queued: ReturnType<TurnController["queue"]> | null = null;
+      try {
+        queued = turns.queue({
+          conversationId,
+          content,
+          attachments: [],
+          activateConversation: false,
+          skills: [],
+          rendererOwnerId: null,
+        });
+        broadcast({
+          type: "conversation.detail.invalidated",
+          conversationId,
+        });
+        broadcastSnapshot();
+        if (!turns.start(queued.turn.id)) {
+          throw new Error("The remote turn could not start.");
+        }
+        return { turnId: queued.turn.id };
+      } catch (error) {
+        if (queued) {
+          turns.failBeforeStart(
+            conversationId,
+            error instanceof Error
+              ? error.message
+              : "The remote turn could not start.",
+          );
+        }
+        throw error;
+      }
+    },
+  });
+
   return {
     websocketUrl: `ws://127.0.0.1:${address.port}${websocketPath}`,
     resolveProjectPath: async (request) => (await resolveAuthoritativeProjectPath(store, request)).absolute,
+    remoteRequest: (subject, request) => remoteGateway.request(subject, request),
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
       closed = true;

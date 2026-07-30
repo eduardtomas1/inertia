@@ -23,6 +23,57 @@ const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
 
 describe("runtime process protocol", () => {
+  it("accepts only strict correlated remote requests and responses", () => {
+    const requestId = crypto.randomUUID();
+    const subject = {
+      deviceId: crypto.randomUUID(),
+      sessionId: crypto.randomUUID(),
+      scopes: ["view"],
+      projectIds: [projectId],
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    const request = {
+      type: "state.get",
+      requestId,
+    };
+    const command = {
+      type: "runtime.remote-request",
+      requestId,
+      subject,
+      request,
+    };
+    expect(parseRuntimeWorkerCommand(command)).toEqual(command);
+    expect(parseRuntimeWorkerCommand({
+      ...command,
+      request: { ...request, requestId: crypto.randomUUID() },
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      ...command,
+      sourcePath: "/Users/alice/secret",
+    })).toBeNull();
+
+    const event = {
+      type: "runtime.remote-response",
+      requestId,
+      response: {
+        type: "response",
+        requestId,
+        ok: false,
+        code: "unavailable",
+        message: "The local runtime is unavailable.",
+      },
+    };
+    expect(parseRuntimeWorkerEvent(event)).toEqual(event);
+    expect(parseRuntimeWorkerEvent({
+      ...event,
+      response: {
+        ...event.response,
+        requestId: crypto.randomUUID(),
+      },
+    })).toBeNull();
+  });
+
   it("accepts only absolute bounded startup options", () => {
     expect(parseRuntimeWorkerCommand({
       type: "runtime.start",

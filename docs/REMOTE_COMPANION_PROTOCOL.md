@@ -1,0 +1,202 @@
+# Remote Companion protocol and architecture
+
+Status: experimental protocol version 1, browser version 0.1.0, reference
+relay version 0.1.0. Remote Companion is disabled by default. This repository
+does not deploy or operate a public relay or browser origin.
+
+## Current architecture seams
+
+The implementation preserves Inertia's existing privilege boundaries:
+
+- Electron main owns opt-in state, the host identity, pairing, device grants,
+  replay state, delivery receipts, the audit trail, outbound WebSockets, screen
+  lock behavior, and shutdown. Those records live in the separate encrypted
+  `remote-access.vault`.
+- The existing `ElectronSafeStorageBackend` availability policy rejects Linux
+  `basic_text` and `unknown` backends. Remote access remains unavailable rather
+  than storing its host private key or grants through a plaintext fallback.
+- Remote Access IPC is registered synchronously as an unavailable/initializing
+  host. On a fresh profile, default-off startup checks only that no remote vault
+  exists: it does not probe platform storage, generate a host identity, or
+  write a vault. The first explicit Enable performs those operations.
+  Availability of an existing vault is probed with a 1.5-second fail-closed
+  deadline, so a stalled platform API cannot block application startup.
+- `FileCredentialVaultPersistence` supplies the shared bounded, unique-stage,
+  restrictive-file, restart-recovery, and Windows replacement behavior. The
+  remote vault has its own filename and `.remote-access-vault-` transaction
+  namespace; it is not part of the credential namespace.
+- The preload exposes only local settings, pairing approval, scoped grant
+  update, revocation, and projected state IPC. It never exposes a host/device
+  private key, provider credential, runtime WebSocket capability, filesystem
+  primitive, or provider process control.
+- Electron main sends a strict `runtime.remote-request` to the supervised
+  utility process. The runtime revalidates the authorization subject,
+  project/conversation ownership, current conversation mode, and active-run
+  state. It is still the sole authority for persistence, provider routing,
+  sandboxing, and approval policy.
+- The existing privileged loopback WebSocket remains unchanged and is never
+  sent to a remote browser or relay.
+- The reference relay routes bounded opaque frames between an outbound desktop
+  connection and a browser connection. It has no durable message queue.
+- The independent browser stores one strictly validated device profile in
+  IndexedDB and renders all provider-derived strings through `textContent`.
+
+```mermaid
+flowchart LR
+  B["Browser companion<br/>device private key"] -->|"WSS, encrypted frames"| R["Opaque relay<br/>routing metadata only"]
+  D["Electron main<br/>host key, grants, audit"] -->|"outbound WSS only"| R
+  D -->|"strict remote request<br/>no local capability"| U["Supervised utility runtime"]
+  U --> P["Existing persistence,<br/>provider policy, sandbox, approvals"]
+```
+
+No component opens an inbound network listener on the desktop, requests UPnP,
+or reuses the local runtime capability.
+
+## Topology decision
+
+| Option | Boundary consequence | Recommendation |
+| --- | --- | --- |
+| LAN-only direct pairing | Requires an inbound desktop listener, firewall discovery, address handling, and a larger local-network attack surface. | No-go for this product boundary. |
+| User-managed private network | A user may run the reference relay and browser origin on a Tailscale-style/private network. The desktop still connects outbound. Operational TLS, origin allowlists, availability, and updates remain the user's responsibility. | Supported self-hosting pattern, not an automatic integration. |
+| Inertia-hosted outbound relay | Works across networks without desktop inbound access, but creates material availability, abuse, metadata, incident-response, key-transparency, browser-delivery, and privacy operations. | Recommended only as a later operated service after explicit product and operational decisions. Not deployed here. |
+| No remote access | Leaves the local-only trust model unchanged. | Always available: the feature defaults off and can be disabled or omitted. |
+
+## Versioned frames and data flow
+
+All JSON objects are strict-schema parsed; unknown fields fail. Relay envelopes
+carry protocol version, routing endpoint/connection identifiers, frame kind,
+session/invitation identifiers, sequence where applicable, and ciphertext.
+Application plaintext is capped at 96 KiB and encrypted frames at 128 KiB.
+Projection builders truncate by UTF-8 byte size, keeping the newest useful
+conversations and transcript content.
+
+Pairing:
+
+1. The local user enables Remote Companion and creates a five-minute
+   invitation containing relay URL, opaque endpoint, host identity/public key,
+   invitation ID, random pairing secret, and expiry.
+2. The browser independently rejects any relay URL except `wss://` or loopback
+   `ws://`, creates a device P-256 key pair, and encrypts a strict pairing
+   request with HPKE PSK mode.
+3. Both devices derive and display the same six-digit comparison code from the
+   host public key, device public key, and invitation ID. The local user must
+   compare it and explicitly choose at least one project. Prompt scope is a
+   separate opt-in.
+4. The desktop normalizes the untrusted browser label, removing controls and
+   bidi formatting marks. It persists the grant before returning an
+   authenticated encrypted pairing result.
+
+Sessions:
+
+1. The browser creates a fresh UUID session ID and HPKE authenticated session
+   opening. Clear `session.open` metadata does not contain a device ID.
+2. Before P-256 work, the desktop applies global and per-connection
+   authentication-attempt budgets. It tries at most the bounded set of current
+   device public keys without revealing which key matched.
+3. The desktop rejects used session IDs across process restarts and requires a
+   fresh timestamp. The device key authenticates identity; the desktop's
+   current grant is authoritative. An old browser grant version cannot widen
+   permissions.
+4. The encrypted accept returns current scopes, projects, expiry, and grant
+   version. The browser atomically validates and persists them before sending
+   a request.
+5. Each direction uses a separate authenticated HPKE context and exact
+   monotonically increasing sequence. A duplicate, skipped, or reordered
+   sequence closes the session.
+
+The suite is RFC 9180 HPKE using DHKEM(P-256, HKDF-SHA256),
+HKDF-SHA256, and AES-256-GCM through `@hpke/core` and platform WebCrypto.
+Protocol-specific `info` and AAD bind the protocol version, purpose, host,
+device where encrypted, session/invitation/request ID, and sequence. This is
+use of a reviewed standard primitive, not a new cipher construction.
+
+## Requests, authority, and exactly-once behavior
+
+The only version 1 application requests are:
+
+- `state.get`: safe projects, conversations, and agent-run summaries.
+- `conversation.get`: persisted user/assistant transcript, generic redacted
+  workstream activity, bounded subagent status, and whether a local action is
+  required.
+- `prompt.send`: bounded text to one existing authorized conversation.
+
+For prompts, Electron main persists a bounded delivery receipt as `dispatched`
+before invoking the runtime. An accepted turn records its turn ID. A duplicate
+delivery ID with the same device/conversation/content returns the prior result;
+different content is rejected. A crash or disconnect after dispatch becomes
+`uncertain` and is never retried automatically. The receipt ledger retains the
+newest 512 entries, so exactly-once deduplication is intentionally bounded to
+that retained window. The runtime also keeps a bounded 512-entry in-process
+dedupe ledger.
+
+There is no durable relay queue. If the desktop is absent, the relay reports it
+offline. A request timeout or transport loss reports offline/uncertain; the
+browser does not silently retry a prompt.
+
+## Authorization matrix
+
+| Capability | View grant | Prompt grant | Remote MVP |
+| --- | ---: | ---: | --- |
+| Safe project/conversation shell | Yes | Yes | Available |
+| Safe persisted conversation detail | Yes | Yes | Available |
+| Text prompt to existing supervised conversation | No | Yes | Available |
+| Stop remotely initiated run | No | No | Deferred; exact run ownership is not exposed |
+| Local/Full Access approval | No | No | Prohibited |
+| Secret question or credential operation | No | No | Prohibited |
+| Terminal or provider maintenance/settings | No | No | Prohibited |
+| File browse/upload/download or attachment | No | No | Prohibited |
+| Source path/content or diagnostics | No | No | Prohibited |
+| Git reversal/mutation | No | No | Prohibited |
+| New project/conversation or enabling permission | No | No | Prohibited |
+| Destructive action | No | No | Prohibited |
+
+Every grant is device-specific, requires one or more explicit project IDs,
+expires in at most 90 days, and has a current desktop-controlled version.
+Scope/project/expiry changes close active sessions. The same authenticated
+device may reconnect and receives only the reduced current grant. Revocation
+makes its key ineligible immediately and closes its sessions.
+
+## Browser delivery and relay operations
+
+The browser is an independently versioned static build with no server-side
+session and a strict CSP. The reference relay requires an exact browser Origin
+allowlist; clients without an Origin are reserved for the desktop/reference
+clients. Serve the browser over HTTPS and relay over WSS outside loopback.
+
+CSP cannot protect a user if the browser hosting origin itself serves modified
+first-party JavaScript. A malicious update from that origin could read the
+IndexedDB device key and visible plaintext. Self-hosters should pin source and
+artifacts, publish checksums, minimize administrators, use immutable HTTPS
+delivery, and review updates. A future operated service needs a signed-build
+and incident-response policy; this repository makes no supply-chain
+transparency claim.
+
+The relay sees endpoint and connection identifiers, IP/network timing,
+connection/session/invitation IDs, frame kinds, sequences, sizes, and traffic
+timing. It cannot decrypt or forge authenticated application payloads, but it
+can correlate, delay, drop, replay, reorder, rate-limit, or deny traffic. It
+must not log frame bodies. The reference implementation keeps routing only in
+memory, caps connections/messages/payloads, disables compression, checks peer
+ownership for disconnect, heartbeats clients, and has bounded shutdown.
+
+## Lifecycle bounds
+
+- Devices: 16; active sessions: 4; pending pairings: 1. A local user must
+  resolve the current security-sensitive approval before creating another.
+- Pairing: five minutes and ten attempts/minute.
+- Session authentication: four attempts/connection and 24/minute globally.
+- Active requests: eight/session; all requests: 120/minute; prompts: six/minute.
+- Session idle expiry: 15 minutes; handshake freshness: 60 seconds.
+- Reconnect backoff: capped at 30 seconds; no prompt replay.
+- Relay envelope: 132 KiB; application ciphertext: 128 KiB; plaintext: 96 KiB.
+- Audit events: newest 1,000 persisted; delivery receipts/session IDs: newest
+  512 persisted.
+- Main-to-runtime request: ten-second timeout.
+- Desktop shutdown: graceful WebSocket close for at most 1.5 seconds, then
+  terminate; reconnect, sweep, and request timers are cleared. Any in-flight
+  bounded vault initialization is also awaited before the host finishes
+  shutdown.
+
+Screen lock or suspend disconnects remote sessions and pauses reconnection.
+Unlock reconnects only if the feature remains locally enabled. The desktop UI
+shows enabled/connection state and active remote session count.

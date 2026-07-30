@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { UtilityProcess } from "electron";
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
+import type {
+  RemoteAuthorizationSubject,
+  RemoteRequest,
+  RemoteResponse,
+} from "../shared/remote-protocol";
 
 import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
 import {
@@ -63,6 +68,13 @@ interface PendingCredentialRequest {
   operation: RuntimeCredentialOperation;
   timer: Timer;
   controller: AbortController;
+}
+
+interface PendingRemoteRequest {
+  record: RuntimeProcessRecord;
+  timer: Timer;
+  resolve: (response: RemoteResponse) => void;
+  reject: (error: Error) => void;
 }
 
 interface PendingSecureFileRequest {
@@ -159,6 +171,7 @@ export class RuntimeSupervisor {
   private shutdownTimer: Timer | null = null;
   private shutdownDeadlineTimer: Timer | null = null;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
+  private readonly pendingRemoteRequests = new Map<string, PendingRemoteRequest>();
   private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
   private readonly secureFileBroker?: RuntimeSecureFileBroker;
   private readonly pendingSecureFileRequests =
@@ -229,6 +242,47 @@ export class RuntimeSupervisor {
     });
   }
 
+  remoteRequest(
+    subject: RemoteAuthorizationSubject,
+    request: RemoteRequest,
+  ): Promise<RemoteResponse> {
+    const record = this.current;
+    if (this.phase !== "ready" || !record?.ready) {
+      return Promise.reject(new Error(
+        this.lastError
+          ? `The local service is restarting. ${this.lastError}`
+          : "The local service is starting. Try again in a moment.",
+      ));
+    }
+    if (this.pendingRemoteRequests.has(request.requestId)) {
+      return Promise.reject(new Error(
+        "The remote request identifier is already active.",
+      ));
+    }
+    return new Promise<RemoteResponse>((resolve, reject) => {
+      const timer = this.setTimer(() => {
+        this.pendingRemoteRequests.delete(request.requestId);
+        reject(new Error(
+          request.type === "prompt.send"
+            ? "Remote prompt delivery is uncertain."
+            : "The remote request timed out.",
+        ));
+      }, DEFAULT_REQUEST_TIMEOUT_MS);
+      this.pendingRemoteRequests.set(request.requestId, {
+        record,
+        timer,
+        resolve,
+        reject,
+      });
+      this.post(record.child, {
+        type: "runtime.remote-request",
+        requestId: request.requestId,
+        subject,
+        request,
+      });
+    });
+  }
+
   snapshot(): RuntimeSupervisorSnapshot {
     return {
       phase: this.phase,
@@ -262,6 +316,7 @@ export class RuntimeSupervisor {
     this.clearTimerValue("stableTimer");
     this.websocketUrl = null;
     this.rejectProjectPaths(this.current, "The local service is stopping.");
+    this.rejectRemoteRequests(this.current, "The local service is stopping.");
     this.clearCredentialRequests(this.current);
     this.clearSecureFileRequests(this.current);
     const secureFilesStopped = this.secureFileBroker?.shutdown?.()
@@ -406,6 +461,14 @@ export class RuntimeSupervisor {
       else pending.reject(new Error(event.message));
       return;
     }
+    if (event.type === "runtime.remote-response") {
+      const pending = this.pendingRemoteRequests.get(event.requestId);
+      if (!pending || pending.record !== record) return;
+      this.pendingRemoteRequests.delete(event.requestId);
+      this.clearTimer(pending.timer);
+      pending.resolve(event.response);
+      return;
+    }
     if (event.type === "runtime.startup-failed") {
       record.reportedFailure = event.message;
       record.acceptingReady = false;
@@ -456,6 +519,10 @@ export class RuntimeSupervisor {
     this.clearTimerValue("startupTimer");
     this.clearTimerValue("stableTimer");
     this.rejectProjectPaths(record, "The local service stopped before the project path was resolved.");
+    this.rejectRemoteRequests(
+      record,
+      "The local service stopped before the remote request completed.",
+    );
     this.clearCredentialRequests(record);
     this.clearSecureFileRequests(record);
     this.attachmentRequests.clear(record);
@@ -541,6 +608,19 @@ export class RuntimeSupervisor {
     for (const [requestId, pending] of this.pendingProjectPaths) {
       if (pending.record !== record) continue;
       this.pendingProjectPaths.delete(requestId);
+      this.clearTimer(pending.timer);
+      pending.reject(new Error(message));
+    }
+  }
+
+  private rejectRemoteRequests(
+    record: RuntimeProcessRecord | null,
+    message: string,
+  ): void {
+    if (!record) return;
+    for (const [requestId, pending] of this.pendingRemoteRequests) {
+      if (pending.record !== record) continue;
+      this.pendingRemoteRequests.delete(requestId);
       this.clearTimer(pending.timer);
       pending.reject(new Error(message));
     }

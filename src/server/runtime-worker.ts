@@ -107,6 +107,41 @@ parentPort.on("message", (messageEvent) => {
     );
     return;
   }
+  if (command.type === "runtime.remote-request") {
+    if (!runtime || stopping) {
+      post({
+        type: "runtime.remote-response",
+        requestId: command.requestId,
+        response: {
+          type: "response",
+          requestId: command.requestId,
+          ok: false,
+          code: "unavailable",
+          message: "The local runtime is not ready.",
+        },
+      });
+      return;
+    }
+    void runtime.remoteRequest(command.subject, command.request).then(
+      (response) => post({
+        type: "runtime.remote-response",
+        requestId: command.requestId,
+        response,
+      }),
+      () => post({
+        type: "runtime.remote-response",
+        requestId: command.requestId,
+        response: {
+          type: "response",
+          requestId: command.requestId,
+          ok: false,
+          code: "unavailable",
+          message: "The local runtime could not complete the remote request.",
+        },
+      }),
+    );
+    return;
+  }
   if (starting || runtime || stopping) {
     post({ type: "runtime.startup-failed", message: "The runtime was asked to start more than once." });
     void shutdown(1);

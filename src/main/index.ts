@@ -61,6 +61,7 @@ import {
   hardenDesktopSession,
 } from "./preview-broker.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import { RemoteAccessHost } from "./remote-access-host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
 import {
   WINDOW_APPEARANCE_FILENAME,
@@ -114,6 +115,7 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
+let remoteAccessHost: RemoteAccessHost | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
 let appUpdateService: AppUpdateService | null = null;
 let credentialVault: CredentialVault | null = null;
@@ -878,6 +880,12 @@ async function bootstrap(): Promise<void> {
       }
     },
   });
+  remoteAccessHost = RemoteAccessHost.create({
+    userDataDirectory: app.getPath("userData"),
+    runtime: runtimeSupervisor,
+    window: () => mainWindow,
+    assertTrusted: assertTrustedIpc,
+  });
   registerIpcHandlers();
   runtimeSupervisor.start();
   if (process.env.NODE_ENV === "test") {
@@ -929,6 +937,9 @@ if (!hasSingleInstanceLock) {
     runtimeDiagnostics?.record("app.stop");
 
     void (async () => {
+      const remoteHostToStop = remoteAccessHost;
+      remoteAccessHost = null;
+      await remoteHostToStop?.shutdown().catch(() => undefined);
       let runtimeExitConfirmed = supervisorToStop === null;
       if (supervisorToStop) {
         runtimeExitConfirmed = await supervisorToStop.stop().catch((error: unknown) => {

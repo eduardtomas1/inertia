@@ -1,4 +1,20 @@
 import type { ChatAttachmentMimeType } from "./attachments";
+import type {
+  RemoteAccessState,
+  RemotePairingInvitation,
+  RemoteScope,
+} from "./remote-protocol";
+
+export const REMOTE_ACCESS_IPC = {
+  getState: "inertia:remote-access-state",
+  stateChanged: "inertia:remote-access-state-changed",
+  setEnabled: "inertia:remote-access-set-enabled",
+  createInvitation: "inertia:remote-access-create-invitation",
+  approvePairing: "inertia:remote-access-approve-pairing",
+  denyPairing: "inertia:remote-access-deny-pairing",
+  revokeDevice: "inertia:remote-access-revoke-device",
+  updateDevice: "inertia:remote-access-update-device",
+} as const;
 
 export interface RuntimeConnection {
   websocketUrl: string;
@@ -85,6 +101,98 @@ export function parseOpenProjectPathRequest(value: unknown): OpenProjectPathRequ
   };
 }
 
+export interface RemoteAccessEnableRequest {
+  enabled: boolean;
+  relayUrl: string;
+}
+
+export interface RemotePairingApprovalRequest {
+  requestId: string;
+  scopes: RemoteScope[];
+  projectIds: string[];
+  grantDays: number;
+}
+
+export interface RemoteDeviceUpdateRequest {
+  deviceId: string;
+  scopes: RemoteScope[];
+  projectIds: string[];
+  expiresAt: string;
+}
+
+export function parseRemoteAccessEnableRequest(
+  value: unknown,
+): RemoteAccessEnableRequest | null {
+  if (!plainObject(value) || Object.keys(value).length !== 2) return null;
+  return typeof value.enabled === "boolean"
+    && typeof value.relayUrl === "string"
+    && value.relayUrl.length <= 2_048
+    ? { enabled: value.enabled, relayUrl: value.relayUrl }
+    : null;
+}
+
+export function parseRemotePairingApprovalRequest(
+  value: unknown,
+): RemotePairingApprovalRequest | null {
+  if (!plainObject(value) || Object.keys(value).length !== 4) return null;
+  const scopes = remoteScopes(value.scopes);
+  const projectIds = remoteProjectIds(value.projectIds);
+  return typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+    && scopes
+    && projectIds
+    && typeof value.grantDays === "number"
+    && Number.isInteger(value.grantDays)
+    && value.grantDays >= 1
+    && value.grantDays <= 90
+    ? {
+        requestId: value.requestId,
+        scopes,
+        projectIds,
+        grantDays: value.grantDays,
+      }
+    : null;
+}
+
+export function parseRemoteDeviceUpdateRequest(
+  value: unknown,
+): RemoteDeviceUpdateRequest | null {
+  if (!plainObject(value) || Object.keys(value).length !== 4) return null;
+  const scopes = remoteScopes(value.scopes);
+  const projectIds = remoteProjectIds(value.projectIds);
+  return typeof value.deviceId === "string"
+    && UUID_PATTERN.test(value.deviceId)
+    && scopes
+    && projectIds
+    && typeof value.expiresAt === "string"
+    && Number.isFinite(Date.parse(value.expiresAt))
+    ? {
+        deviceId: value.deviceId,
+        scopes,
+        projectIds,
+        expiresAt: value.expiresAt,
+      }
+    : null;
+}
+
+function plainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function remoteScopes(value: unknown): RemoteScope[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2) return null;
+  if (!value.every((scope) => scope === "view" || scope === "prompt")) return null;
+  return [...new Set(value)] as RemoteScope[];
+}
+
+function remoteProjectIds(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 64) return null;
+  if (!value.every((id) => typeof id === "string" && UUID_PATTERN.test(id))) {
+    return null;
+  }
+  return [...new Set(value)];
+}
+
 export interface DesktopBridge {
   getRuntimeConnection: () => Promise<RuntimeConnection>;
   /** Wakes a reconnect attempt without exposing the runtime URL capability. */
@@ -132,6 +240,22 @@ export interface DesktopBridge {
   setBackendCredential: (request: SetBackendCredentialRequest) => Promise<BackendCredentialState>;
   clearBackendCredential: (request: BackendCredentialProfileRequest) => Promise<BackendCredentialState>;
   getBackendCredentialState: (request: BackendCredentialProfileRequest) => Promise<BackendCredentialState>;
+  getRemoteAccessState: () => Promise<RemoteAccessState>;
+  onRemoteAccessState: (
+    listener: (state: RemoteAccessState) => void,
+  ) => () => void;
+  setRemoteAccessEnabled: (
+    request: RemoteAccessEnableRequest,
+  ) => Promise<RemoteAccessState>;
+  createRemotePairingInvitation: () => Promise<RemotePairingInvitation>;
+  approveRemotePairing: (
+    request: RemotePairingApprovalRequest,
+  ) => Promise<RemoteAccessState>;
+  denyRemotePairing: (requestId: string) => Promise<RemoteAccessState>;
+  revokeRemoteDevice: (deviceId: string) => Promise<RemoteAccessState>;
+  updateRemoteDevice: (
+    request: RemoteDeviceUpdateRequest,
+  ) => Promise<RemoteAccessState>;
   getPlatform: () => string;
 }
 

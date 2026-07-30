@@ -880,6 +880,67 @@ describe("RuntimeSupervisor", () => {
     await expect(interrupted).rejects.toThrow("stopped before the project path was resolved");
   });
 
+  it("correlates, times out, and rejects remote requests across runtime generations", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const subject = {
+      deviceId: crypto.randomUUID(),
+      sessionId: crypto.randomUUID(),
+      scopes: ["view" as const],
+      projectIds: [projectPathRequest.projectId],
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    const request = {
+      type: "state.get" as const,
+      requestId: crypto.randomUUID(),
+    };
+    const resolved = supervisor.remoteRequest(subject, request);
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.remote-request",
+      requestId: request.requestId,
+      subject,
+      request,
+    });
+    children[0].message({
+      type: "runtime.remote-response",
+      requestId: request.requestId,
+      response: {
+        type: "response",
+        requestId: request.requestId,
+        ok: false,
+        code: "unavailable",
+        message: "Not ready.",
+      },
+    });
+    await expect(resolved).resolves.toMatchObject({
+      requestId: request.requestId,
+      ok: false,
+    });
+
+    const timedRequest = {
+      ...request,
+      requestId: crypto.randomUUID(),
+    };
+    const timed = supervisor.remoteRequest(subject, timedRequest);
+    const timedRejection = expect(timed).rejects.toThrow(
+      "remote request timed out",
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    await timedRejection;
+
+    const interrupted = supervisor.remoteRequest(subject, {
+      ...request,
+      requestId: crypto.randomUUID(),
+    });
+    children[0].exit(9);
+    await expect(interrupted).rejects.toThrow(
+      "stopped before the remote request completed",
+    );
+  });
+
   it("reports startup failure and retries only after the failed child exits", () => {
     const { children, supervisor } = createHarness();
     supervisor.start();

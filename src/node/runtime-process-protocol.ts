@@ -18,6 +18,14 @@ import {
 } from "../shared/attachments";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments";
 import {
+  remoteAuthorizationSubjectSchema,
+  remoteRequestSchema,
+  remoteResponseSchema,
+  type RemoteAuthorizationSubject,
+  type RemoteRequest,
+  type RemoteResponse,
+} from "../shared/remote-protocol";
+import {
   parseSecureFileRequest,
   parseSecureFileResult,
   type SecureFileRequest,
@@ -45,6 +53,12 @@ export type RuntimeWorkerCommand =
   | { type: "runtime.start"; options: RuntimeWorkerOptions }
   | { type: "runtime.shutdown" }
   | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
+  | {
+      type: "runtime.remote-request";
+      requestId: string;
+      subject: RemoteAuthorizationSubject;
+      request: RemoteRequest;
+    }
   | RuntimeCredentialResult
   | RuntimeAttachmentResult
   | RuntimeAttachmentReleaseResult
@@ -146,6 +160,11 @@ export type RuntimeWorkerEvent =
   | { type: "runtime.project-path-resolved"; requestId: string; path: string }
   | { type: "runtime.project-path-rejected"; requestId: string; message: string }
   | {
+      type: "runtime.remote-response";
+      requestId: string;
+      response: RemoteResponse;
+    }
+  | {
       type: "runtime.attachment-request";
       requestId: string;
       attachmentId: string;
@@ -213,6 +232,25 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
           type: "runtime.secure-file-result",
           requestId: value.requestId,
           result,
+        }
+      : null;
+  }
+  if (
+    value.type === "runtime.remote-request"
+    && Object.keys(value).length === 4
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+  ) {
+    const subject = remoteAuthorizationSubjectSchema.safeParse(value.subject);
+    const request = remoteRequestSchema.safeParse(value.request);
+    return subject.success
+      && request.success
+      && request.data.requestId === value.requestId
+      ? {
+          type: "runtime.remote-request",
+          requestId: value.requestId,
+          subject: subject.data,
+          request: request.data,
         }
       : null;
   }
@@ -291,6 +329,21 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   if (value.type === "runtime.stopped" && Object.keys(value).length === 1) return { type: "runtime.stopped" };
   if (value.type === "runtime.shutdown-unconfirmed" && Object.keys(value).length === 1) {
     return { type: "runtime.shutdown-unconfirmed" };
+  }
+  if (
+    value.type === "runtime.remote-response"
+    && Object.keys(value).length === 3
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+  ) {
+    const response = remoteResponseSchema.safeParse(value.response);
+    return response.success && response.data.requestId === value.requestId
+      ? {
+          type: "runtime.remote-response",
+          requestId: value.requestId,
+          response: response.data,
+        }
+      : null;
   }
   if (
     (

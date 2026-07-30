@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, Settings, SunMoon } from "lucide-react";
+import { Activity, ChevronDown, Download, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
@@ -7,6 +7,7 @@ import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { EnvironmentSummary } from "./EnvironmentSummary";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { IconButton } from "./ui";
+import { useRemoteAccessState } from "../hooks/useRemoteAccessState";
 
 type WorkspaceHeaderProps = {
   project: Project | null;
@@ -80,6 +81,7 @@ export function WorkspaceHeader({
   onToggleActivity,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | null>(null);
+  const remoteAccess = useRemoteAccessState();
   useNativePreviewSuspension(menu !== null);
   const environmentAnchorRef = useRef<HTMLDivElement>(null);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
@@ -128,6 +130,23 @@ export function WorkspaceHeader({
       </div>
 
       <div className="header-actions no-drag">
+        {remoteAccess?.enabled && (
+          <button
+            type="button"
+            className={`header-button remote-access-indicator${remoteAccess.activeSessions > 0 ? " is-active" : ""}`}
+            aria-label={remoteAccess.activeSessions > 0
+              ? `Remote Companion, ${remoteAccess.activeSessions} active sessions`
+              : `Remote Companion ${remoteAccess.connection}`}
+            onClick={onOpenSettings}
+          >
+            <RadioTower size={14} />
+            <span>
+              {remoteAccess.activeSessions > 0
+                ? `Remote · ${remoteAccess.activeSessions} active`
+                : "Remote on"}
+            </span>
+          </button>
+        )}
         {view === "workspace" && project && (
           <>
             {actions.length > 0 && (

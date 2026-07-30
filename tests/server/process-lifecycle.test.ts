@@ -711,4 +711,43 @@ describe("provider process-tree termination", () => {
       vi.useRealTimers();
     }
   });
+
+  it("allows the bounded node-pty Windows exit-flush delay before confirmation", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const taskkill = fakeTaskkill();
+      const waitForRootExit = vi.fn((_waitMs: number) =>
+        new Promise<boolean>((resolve) => {
+          // node-pty's ConPTY backend delays onExit by this output-flush window
+          // after its root process has already exited.
+          setTimeout(() => resolve(true), 1_000);
+        }));
+      let settled = false;
+      const termination = forceTerminateProcessTreeByPidAndWait(
+        4_242,
+        waitForRootExit,
+        {
+          platform: "win32",
+          spawnProcess: vi.fn(() => taskkill) as never,
+          windowsSystemRoot: "C:\\Windows",
+          waitMs: 1_500,
+        },
+      ).then((confirmed) => {
+        settled = true;
+        return confirmed;
+      });
+      taskkill.emit("close", 0);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).toBe(false);
+      expect(waitForRootExit).toHaveBeenCalledWith(1_400);
+
+      await vi.advanceTimersByTimeAsync(101);
+      await expect(termination).resolves.toBe(true);
+      expect(Date.now()).toBe(1_100);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

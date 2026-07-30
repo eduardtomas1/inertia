@@ -150,7 +150,7 @@ describe("runtime process-tree termination", () => {
   });
 
   it("waits boundedly for Windows tree termination", async () => {
-    const spawnProcessSync = vi.fn(() => ({
+    const spawnProcessSync = vi.fn((..._args: unknown[]) => ({
       status: 0,
       error: undefined,
     }));
@@ -172,12 +172,17 @@ describe("runtime process-tree termination", () => {
       ["/pid", "100", "/t", "/f"],
       {
         env: environment,
-        timeout: 2_000,
+        timeout: expect.any(Number),
         shell: false,
         windowsHide: true,
         stdio: "ignore",
       },
     );
+    const taskkillOptions = spawnProcessSync.mock.calls[0]?.[2] as
+      | { timeout?: number }
+      | undefined;
+    expect(taskkillOptions?.timeout).toBeGreaterThan(0);
+    expect(taskkillOptions?.timeout).toBeLessThanOrEqual(2_000);
     expect(confirmed).toBe(true);
     expect(kill).not.toHaveBeenCalled();
   });

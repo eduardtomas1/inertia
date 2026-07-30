@@ -15,7 +15,13 @@ const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
 const MAX_BUFFERED_OUTPUT = 1024 * 1024;
 const OUTPUT_CHUNK_SIZE = 16 * 1024;
-const TERMINAL_SHUTDOWN_TIMEOUT_MS = 1_000;
+// node-pty's Windows ConPTY backend intentionally delays its public exit event
+// for 1 second while output drains. Leave bounded headroom for that signal and
+// the final resource-settle check while still finishing well before the
+// supervisor's 3-second process-tree fallback.
+const TERMINAL_SHUTDOWN_TIMEOUT_MS = process.platform === "win32"
+  ? 1_500
+  : 1_000;
 
 interface TerminalSession {
   id: string;

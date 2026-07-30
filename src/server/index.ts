@@ -283,6 +283,26 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const broadcast = (event: RuntimeMutationEvent): void => {
     runtimeSync.broadcast(event);
   };
+  const broadcastConversationShell = (conversationId: string): void => {
+    const conversation = store.conversationShell(conversationId);
+    if (!conversation) return;
+    broadcast({
+      type: "conversation.shell.updated",
+      conversation: {
+        ...conversation,
+        pendingApproval: [...pendingApprovals.values()].some(
+          (request) => request.conversationId === conversationId,
+        ),
+        pendingInput: [...pendingInputs.values()].some(
+          (request) => request.conversationId === conversationId,
+        ),
+      },
+      runs: store.workspaceRunsForConversation(conversationId).map((run) => ({
+        ...run,
+        canStop: canStopWorkspaceRun(run),
+      })),
+    });
+  };
   const broadcastSnapshot = (): void => {
     runtimeSync.broadcastSnapshot(currentSnapshot);
   };
@@ -417,6 +437,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     {
       broadcast,
       broadcastSnapshot,
+      broadcastConversationShell,
       providerInfo: () => providerInfo,
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
@@ -508,6 +529,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         attachmentResolver,
         workflows: agentWorkflows,
         providerInfo: () => providerInfo,
+        broadcast,
         broadcastSnapshot,
         send,
       }),

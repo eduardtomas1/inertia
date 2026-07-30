@@ -160,12 +160,15 @@ describe("RuntimeStore repository compatibility", () => {
       END
     `);
 
-    expect(() => store.updateMessageContent(message.id, "Partial response"))
+    expect(() => store.appendMessageContent(message.id, " plus more"))
       .toThrow(/conversation touch rejected/u);
     expect(store.snapshot().messages.find(({ id }) => id === message.id)?.content)
       .toBe("Original response");
 
     inspector.exec("DROP TRIGGER reject_stream_conversation_touch");
+    store.appendMessageContent(message.id, " plus more");
+    expect(store.message(message.id)?.content)
+      .toBe("Original response plus more");
     inspector.close();
     store.close();
   });

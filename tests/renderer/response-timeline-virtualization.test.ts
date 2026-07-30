@@ -10,6 +10,7 @@ import type {
   AgentInputRequest,
   AgentTurn,
   ChatMessage,
+  SubagentTrace,
   TurnGitArtifact,
 } from "../../src/shared/contracts";
 import {
@@ -23,6 +24,7 @@ import {
   shouldShowTurnGitArtifactSummary,
   shouldVirtualizeTimeline,
   stabilizeResponseTimeline,
+  updateResponseTimelineForActivityDelta,
   type ResponseTimelineItem,
   type ResponseTurn,
 } from "../../src/renderer/src/utils/responseTimeline";
@@ -699,16 +701,35 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       item.id === "activity-599-4"
         ? { ...item, detail: "Only the newest event changed." }
         : item);
-    const advanced = stabilizeResponseTimeline(buildResponseTimeline({
+    const advancedBuild = updateResponseTimelineForActivityDelta({
       turns,
       messages,
       activities: changedActivities,
       reasonings: [],
       checkpoints: [],
-    }), stable);
+    }, activities, stable);
+    expect(advancedBuild).not.toBeNull();
+    const advanced = stabilizeResponseTimeline(advancedBuild!, stable);
     expect(advanced).not.toBe(stable);
     expect(advanced.slice(0, -1).every((item, index) => item === stable[index])).toBe(true);
     expect(advanced.at(-1)).not.toBe(stable.at(-1));
+
+    const orphanedActivities = [
+      ...changedActivities,
+      {
+        ...activity("orphan", "turn-599", {
+          detail: "Compatibility activity.",
+        }),
+        turnId: null,
+      },
+    ];
+    expect(updateResponseTimelineForActivityDelta({
+      turns,
+      messages,
+      activities: orphanedActivities,
+      reasonings: [],
+      checkpoints: [],
+    }, changedActivities, advanced)).toBeNull();
   });
 
   it("memoizes settled rows across provider refreshes and isolates live-stream invalidation", () => {
@@ -729,10 +750,15 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       showChangedFileSummaries: true,
       checkpointRestoreDisabled: false,
     } as unknown as ResponseTimelineProps;
-    const memoInput = (turn: ResponseTurn, props: ResponseTimelineProps) => ({
+    const memoInput = (
+      turn: ResponseTurn,
+      props: ResponseTimelineProps,
+      subagents?: SubagentTrace[],
+    ) => ({
       turn,
       props,
       previousArtifactTurnId: null,
+      subagents,
     });
 
     expect(sameTurnTimelineProps(
@@ -750,6 +776,21 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(sameTurnTimelineProps(
       memoInput(settled, baseProps),
       memoInput(settled, { ...baseProps, showTimestamps: true }),
+    )).toBe(false);
+    const localSubagents: SubagentTrace[] = [];
+    expect(sameTurnTimelineProps(
+      memoInput(settled, {
+        ...baseProps,
+        subagents: [],
+      }, localSubagents),
+      memoInput(settled, {
+        ...baseProps,
+        subagents: [],
+      }, localSubagents),
+    )).toBe(true);
+    expect(sameTurnTimelineProps(
+      memoInput(settled, baseProps, localSubagents),
+      memoInput(settled, baseProps, [...localSubagents]),
     )).toBe(false);
   });
 });

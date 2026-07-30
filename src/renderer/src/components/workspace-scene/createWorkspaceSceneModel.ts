@@ -229,9 +229,9 @@ export function createWorkspaceSceneModel({
     && conversation.status !== "running"
     && conversation.status !== "needs-input",
   );
-  const planSummary = conversation
-    && projection.nativePlans[conversation.id]?.explanation
-      ? projection.nativePlans[conversation.id].explanation!
+  const latestPlan = projection.plans.at(-1) ?? null;
+  const planSummary = latestPlan?.explanation
+      ? latestPlan.explanation
       : conversation?.interactionMode === "plan"
         ? "The latest agent response is reflected as a working plan."
         : "Switch the composer to Plan mode and ask the agent to propose an approach.";
@@ -243,7 +243,6 @@ export function createWorkspaceSceneModel({
     && visibleDetailState.state !== "ready"
       ? visibleDetailState
       : null;
-  const latestPlan = projection.plans.at(-1) ?? null;
   const canGuideParent = (trace: SubagentTrace): boolean => {
     if (!isLiveSubagentTrace(trace)) return false;
     const owner = projection.turns.find(({ id }) => id === trace.turnId);

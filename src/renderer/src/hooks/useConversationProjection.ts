@@ -6,6 +6,8 @@ import type {
   AgentInputRequest,
   AgentPlan,
   AppSnapshot,
+  ChatMessage,
+  ConversationShell,
   ConversationDetailViewState,
   ServerEvent,
   SubagentTrace,
@@ -51,6 +53,8 @@ export function useConversationProjection({
   const [detailRefresh, setDetailRefresh] = useState(0);
   const [streamingText, setStreamingText] = useState("");
   const [streamingReasoning, setStreamingReasoning] = useState("");
+  const [liveMessages, setLiveMessages] =
+    useState<Record<string, ChatMessage[]>>({});
   const [liveUsage, setLiveUsage] =
     useState<Record<string, ThreadUsageSnapshot>>({});
   const [liveActivities, setLiveActivities] =
@@ -64,10 +68,16 @@ export function useConversationProjection({
   const [nativePlans, setNativePlans] =
     useState<Record<string, AgentPlan>>({});
   const requestGenerationRef = useRef(0);
+  const terminalRefreshPendingRef = useRef(false);
   const snapshotRef = useRef(snapshot);
+  const conversationRef = useRef<ConversationShell | null>(null);
+  const enabledRef = useRef(enabled);
+  const autoOpenPlanRef = useRef(autoOpenPlan);
   const terminalCallbackRef = useRef(onTerminal);
   const openPlanCallbackRef = useRef(onOpenPlan);
   snapshotRef.current = snapshot;
+  enabledRef.current = enabled;
+  autoOpenPlanRef.current = autoOpenPlan;
   terminalCallbackRef.current = onTerminal;
   openPlanCallbackRef.current = onOpenPlan;
 
@@ -84,10 +94,13 @@ export function useConversationProjection({
       id === conversationId) ?? null,
     [conversationId, snapshot],
   );
+  conversationRef.current = conversation;
   useEffect(() => {
     if (enabled) return;
+    terminalRefreshPendingRef.current = false;
     setStreamingText("");
     setStreamingReasoning("");
+    setLiveMessages({});
     setLiveUsage({});
     setLiveActivities({});
     setLiveSubagents({});
@@ -173,20 +186,31 @@ export function useConversationProjection({
           result,
           shell,
         ));
+      if (
+        result.state === "ready"
+        && terminalRefreshPendingRef.current
+      ) {
+        terminalRefreshPendingRef.current = false;
+        setStreamingText("");
+        setStreamingReasoning("");
+      }
     }).catch((error) => {
       if (generation !== requestGenerationRef.current) return;
-      setDetailState({
-        kind: "conversation.detail",
-        conversationId,
-        state: "failed",
-        message: error instanceof Error
-          ? error.message
-          : "This chat could not be loaded.",
-      });
+      setDetailState((current) => (
+        current?.conversationId === conversationId
+        && current.state === "ready"
+          ? current
+          : {
+              kind: "conversation.detail",
+              conversationId,
+              state: "failed",
+              message: error instanceof Error
+                ? error.message
+                : "This chat could not be loaded.",
+            }
+      ));
     });
   }, [
-    conversation?.latestTurn?.updatedAt,
-    conversation?.updatedAt,
     detailRefresh,
     conversationId,
     request,
@@ -194,27 +218,119 @@ export function useConversationProjection({
   ]);
 
   useEffect(() => {
-    if (!detail) return;
-    const plan = detail.plans.at(-1);
-    if (!plan) return;
-    setNativePlans((current) => ({
-      ...current,
-      [detail.conversation.id]: plan,
-    }));
-  }, [detail]);
+    if (!detail || detail.conversation.id !== conversation?.id) return;
+    const authoritativeMessages = new Map(
+      detail.messages.map((message) => [message.id, message]),
+    );
+    const authoritativeActivities = new Map(
+      detail.activities.map((activity) => [activity.id, activity]),
+    );
+    const authoritativeSubagents = new Map(
+      detail.subagents.map((trace) => [trace.id, trace]),
+    );
+    const authoritativeUsage = detail.usage.find(
+      ({ conversationId }) => conversationId === detail.conversation.id,
+    );
+    const authoritativePlan = detail.plans.at(-1);
+    const conversationId = detail.conversation.id;
+
+    setLiveMessages((current) => {
+      const existing = current[conversationId];
+      if (!existing) return current;
+      const remaining = existing.filter((message) => {
+        const stored = authoritativeMessages.get(message.id);
+        return !stored || stored.content !== message.content;
+      });
+      if (remaining.length === existing.length) return current;
+      const next = { ...current };
+      if (remaining.length > 0) next[conversationId] = remaining;
+      else delete next[conversationId];
+      return next;
+    });
+    setLiveActivities((current) => {
+      const existing = current[conversationId];
+      if (!existing) return current;
+      const remaining = existing.filter((activity) => {
+        const stored = authoritativeActivities.get(activity.id);
+        return !stored
+          || stored.title !== activity.title
+          || stored.detail !== activity.detail
+          || stored.status !== activity.status;
+      });
+      if (remaining.length === existing.length) return current;
+      const next = { ...current };
+      if (remaining.length > 0) next[conversationId] = remaining;
+      else delete next[conversationId];
+      return next;
+    });
+    setLiveSubagents((current) => {
+      const existing = current[conversationId];
+      if (!existing) return current;
+      const remaining = existing.filter((trace) => {
+        const stored = authoritativeSubagents.get(trace.id);
+        return !stored || stored.sequence < trace.sequence;
+      });
+      if (remaining.length === existing.length) return current;
+      const next = { ...current };
+      if (remaining.length > 0) next[conversationId] = remaining;
+      else delete next[conversationId];
+      return next;
+    });
+    if (authoritativeUsage) {
+      setLiveUsage((current) => {
+        const live = current[conversationId];
+        if (!live || live.updatedAt > authoritativeUsage.updatedAt) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
+    }
+    if (authoritativePlan) {
+      setNativePlans((current) => {
+        const live = current[conversationId];
+        if (
+          !live
+          || live.runId !== authoritativePlan.runId
+          || live.turnId !== authoritativePlan.turnId
+          || live.explanation !== authoritativePlan.explanation
+          || JSON.stringify(live.steps) !== JSON.stringify(authoritativePlan.steps)
+        ) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
+    }
+  }, [conversation?.id, detail]);
 
   useEffect(() => subscribe((event) => {
+    const activeConversation = conversationRef.current;
+    const projectionEnabled = enabledRef.current;
     if (event.type === "server.welcome") {
       requestGenerationRef.current += 1;
+      terminalRefreshPendingRef.current = false;
       setDetailState(null);
       setStreamingText("");
       setStreamingReasoning("");
+      setLiveMessages({});
       setLiveUsage({});
       setLiveActivities({});
       setLiveSubagents({});
       setPendingApprovals([]);
       setPendingInputs([]);
       setNativePlans({});
+      return;
+    }
+    if (event.type === "conversation.detail.invalidated") {
+      if (
+        projectionEnabled
+        && event.conversationId === activeConversation?.id
+      ) {
+        setDetailRefresh((current) => current + 1);
+      }
       return;
     }
     if (event.type === "agent.approval.requested") {
@@ -225,8 +341,8 @@ export function useConversationProjection({
         event.request,
       ]);
       if (
-        enabled
-        && event.request.conversationId === conversation?.id
+        projectionEnabled
+        && event.request.conversationId === activeConversation?.id
       ) {
         setStreamingText("");
       }
@@ -247,8 +363,8 @@ export function useConversationProjection({
         event.request,
       ]);
       if (
-        enabled
-        && event.request.conversationId === conversation?.id
+        projectionEnabled
+        && event.request.conversationId === activeConversation?.id
       ) {
         setStreamingText("");
       }
@@ -261,23 +377,52 @@ export function useConversationProjection({
           || conversationId !== event.conversationId));
       return;
     }
-    if (!enabled) return;
+    if (!projectionEnabled) return;
+    if (event.type === "conversation.message.persisted") {
+      if (event.message.conversationId !== activeConversation?.id) return;
+      setLiveMessages((current) => {
+        const existing = current[event.message.conversationId] ?? [];
+        return {
+          ...current,
+          [event.message.conversationId]: [
+            ...existing.filter(({ id }) => id !== event.message.id),
+            event.message,
+          ],
+        };
+      });
+      return;
+    }
+    if (event.type === "agent.commentary.persisted") {
+      if (event.message.conversationId !== activeConversation?.id) return;
+      setLiveMessages((current) => {
+        const existing = current[event.message.conversationId] ?? [];
+        return {
+          ...current,
+          [event.message.conversationId]: [
+            ...existing.filter(({ id }) => id !== event.message.id),
+            event.message,
+          ],
+        };
+      });
+      setStreamingText("");
+      return;
+    }
     if (event.type === "agent.plan.updated") {
-      if (event.plan.conversationId !== conversation?.id) return;
+      if (event.plan.conversationId !== activeConversation?.id) return;
       setNativePlans((current) => ({
         ...current,
         [event.plan.conversationId]: event.plan,
       }));
-      if (event.plan.conversationId === conversation?.id) {
+      if (event.plan.conversationId === activeConversation?.id) {
         setStreamingText("");
-        if (autoOpenPlan) {
+        if (autoOpenPlanRef.current) {
           openPlanCallbackRef.current(event.plan.conversationId);
         }
       }
       return;
     }
     if (event.type === "agent.usage") {
-      if (event.usage.conversationId !== conversation?.id) return;
+      if (event.usage.conversationId !== activeConversation?.id) return;
       setLiveUsage((current) => ({
         ...current,
         [event.usage.conversationId]: event.usage,
@@ -285,7 +430,8 @@ export function useConversationProjection({
       return;
     }
     if (event.type === "agent.activity") {
-      if (event.activity.conversationId !== conversation?.id) return;
+      if (event.activity.conversationId !== activeConversation?.id) return;
+      setStreamingText("");
       setLiveActivities((current) => {
         const existing = current[event.activity.conversationId] ?? [];
         return {
@@ -293,16 +439,13 @@ export function useConversationProjection({
           [event.activity.conversationId]: [
             ...existing.filter(({ id }) => id !== event.activity.id),
             event.activity,
-          ].slice(-100),
+          ],
         };
       });
-      if (event.activity.conversationId === conversation?.id) {
-        setStreamingText("");
-      }
       return;
     }
     if (event.type === "agent.subagent.updated") {
-      if (event.trace.conversationId !== conversation?.id) return;
+      if (event.trace.conversationId !== activeConversation?.id) return;
       setLiveSubagents((current) => {
         const existing = current[event.trace.conversationId] ?? [];
         return {
@@ -310,19 +453,20 @@ export function useConversationProjection({
           [event.trace.conversationId]: [
             ...existing.filter(({ id }) => id !== event.trace.id),
             event.trace,
-          ].slice(-128),
+          ],
         };
       });
       return;
     }
     if (
-      !conversation
+      !activeConversation
       || !("conversationId" in event)
-      || event.conversationId !== conversation.id
+      || event.conversationId !== activeConversation.id
     ) {
       return;
     }
     if (event.type === "agent.started") {
+      terminalRefreshPendingRef.current = false;
       setStreamingText("");
       setStreamingReasoning("");
     }
@@ -335,66 +479,81 @@ export function useConversationProjection({
         `${current}${event.text}`.slice(-500_000));
     }
     if (event.type === "agent.completed" || event.type === "agent.failed") {
-      setStreamingText("");
-      setStreamingReasoning("");
+      terminalRefreshPendingRef.current = true;
       terminalCallbackRef.current();
     }
-  }), [autoOpenPlan, conversation, enabled, subscribe]);
+  }), [subscribe]);
 
   useEffect(() => {
+    terminalRefreshPendingRef.current = false;
     setStreamingText("");
     setStreamingReasoning("");
+    setLiveMessages({});
+    setLiveUsage({});
+    setLiveActivities({});
+    setLiveSubagents({});
+    setNativePlans({});
   }, [conversation?.id]);
 
+  const activeConversationId = conversation?.id ?? null;
   const turns = useMemo(() => detail?.agentTurns ?? [], [detail?.agentTurns]);
   const messages = useMemo(
-    () => [...(detail?.messages ?? [])].sort((a, b) =>
-      a.createdAt.localeCompare(b.createdAt)),
-    [detail?.messages],
+    () => {
+      const merged = new Map<string, ChatMessage>();
+      for (const message of detail?.messages ?? []) merged.set(message.id, message);
+      if (activeConversationId) {
+        for (const message of liveMessages[activeConversationId] ?? []) {
+          merged.set(message.id, message);
+        }
+      }
+      return [...merged.values()].sort((a, b) =>
+        a.createdAt.localeCompare(b.createdAt));
+    },
+    [activeConversationId, detail?.messages, liveMessages],
   );
   const activities = useMemo(() => {
-    if (!conversation) return [];
+    if (!activeConversationId) return [];
     const merged = new Map<string, AgentActivity>();
     for (const activity of detail?.activities ?? []) {
       merged.set(activity.id, activity);
     }
-    for (const activity of liveActivities[conversation.id] ?? []) {
+    for (const activity of liveActivities[activeConversationId] ?? []) {
       merged.set(activity.id, activity);
     }
     return [...merged.values()].sort((a, b) =>
       a.createdAt.localeCompare(b.createdAt));
-  }, [conversation, detail?.activities, liveActivities]);
+  }, [activeConversationId, detail?.activities, liveActivities]);
   const subagents = useMemo(() => {
-    if (!conversation) return [];
+    if (!activeConversationId) return [];
     const merged = new Map<string, SubagentTrace>();
     for (const trace of detail?.subagents ?? []) merged.set(trace.id, trace);
-    for (const trace of liveSubagents[conversation.id] ?? []) {
+    for (const trace of liveSubagents[activeConversationId] ?? []) {
       merged.set(trace.id, trace);
     }
     return [...merged.values()].sort((a, b) =>
       a.createdAt.localeCompare(b.createdAt)
       || a.sequence - b.sequence
       || a.id.localeCompare(b.id));
-  }, [conversation, detail?.subagents, liveSubagents]);
+  }, [activeConversationId, detail?.subagents, liveSubagents]);
   const usage = useMemo(() => {
-    if (!conversation) return null;
-    return liveUsage[conversation.id]
+    if (!activeConversationId) return null;
+    return liveUsage[activeConversationId]
       ?? detail?.usage.find(({ conversationId }) =>
-        conversationId === conversation.id)
+        conversationId === activeConversationId)
       ?? null;
-  }, [conversation, detail?.usage, liveUsage]);
+  }, [activeConversationId, detail?.usage, liveUsage]);
   const plans = useMemo(() => {
-    if (!conversation) return [];
+    if (!activeConversationId) return [];
     const merged = new Map<string, AgentPlan>();
     for (const plan of detail?.plans ?? []) {
       merged.set(`${plan.runId}:${plan.turnId ?? "legacy"}`, plan);
     }
-    const live = nativePlans[conversation.id];
+    const live = nativePlans[activeConversationId];
     if (live) {
       merged.set(`${live.runId}:${live.turnId ?? "legacy"}`, live);
     }
     return [...merged.values()];
-  }, [conversation, detail?.plans, nativePlans]);
+  }, [activeConversationId, detail?.plans, nativePlans]);
   const approvals = useMemo(
     () => pendingApprovals.filter(
       (request) => request.conversationId === conversation?.id,
@@ -430,6 +589,5 @@ export function useConversationProjection({
     streamingReasoning,
     pendingApprovals: approvals,
     pendingInputs: inputRequests,
-    nativePlans,
   };
 }

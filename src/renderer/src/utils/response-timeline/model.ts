@@ -343,6 +343,96 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
   ];
 }
 
+/**
+ * Rebuilds one authoritative turn when an activity projection is the only
+ * changed timeline input. Live command/tool updates are the transcript's
+ * highest-frequency durable mutation, so regrouping every historical record
+ * for each update is avoidable work on long conversations.
+ *
+ * Returning null deliberately falls back to the complete builder whenever the
+ * delta touches compatibility history, more than one turn, or an unowned
+ * record. Truthful ownership is more important than taking the fast path.
+ */
+export function updateResponseTimelineForActivityDelta(
+  input: BuildResponseTimelineInput,
+  previousActivities: AgentActivity[],
+  previousTimeline: ResponseTimelineItem[],
+): ResponseTimelineItem[] | null {
+  if (input.activities === previousActivities) return previousTimeline;
+  const previousById = new Map(
+    previousActivities.map((activity) => [activity.id, activity]),
+  );
+  const nextById = new Map(
+    input.activities.map((activity) => [activity.id, activity]),
+  );
+  const changedTurnIds = new Set<string>();
+  const recordChangedTurn = (
+    activity: AgentActivity | undefined,
+  ): boolean => {
+    if (!activity || activity.turnId === null) return false;
+    changedTurnIds.add(activity.turnId);
+    return changedTurnIds.size <= 1;
+  };
+  for (const activity of input.activities) {
+    const previous = previousById.get(activity.id);
+    if (previous === activity) continue;
+    if (!recordChangedTurn(activity)) return null;
+    if (
+      previous
+      && previous.turnId !== activity.turnId
+      && !recordChangedTurn(previous)
+    ) return null;
+  }
+  for (const activity of previousActivities) {
+    if (nextById.has(activity.id)) continue;
+    if (!recordChangedTurn(activity)) return null;
+  }
+  if (changedTurnIds.size === 0) return previousTimeline;
+
+  const turnId = [...changedTurnIds][0]!;
+  const previousItem = previousTimeline.find(
+    (item) => item.kind === "turn" && item.turn.id === turnId,
+  );
+  const agentTurn = input.turns.find(({ id }) => id === turnId);
+  if (previousItem?.kind !== "turn" || !agentTurn) return null;
+
+  const scoped = buildResponseTimeline({
+    turns: [agentTurn],
+    messages: input.messages.filter(({ turnId: owner }) => owner === turnId),
+    activities: input.activities.filter(
+      ({ turnId: owner }) => owner === turnId,
+    ),
+    reasonings: input.reasonings.filter(
+      ({ turnId: owner }) => owner === turnId,
+    ),
+    plans: input.plans?.filter(({ turnId: owner }) => owner === turnId),
+    approvals: input.approvals?.filter(({ turnId: owner }) => owner === turnId),
+    inputRequests: input.inputRequests?.filter(
+      ({ turnId: owner }) => owner === turnId,
+    ),
+    checkpoints: input.checkpoints.filter(
+      ({ id, turnId: owner }) =>
+        owner === turnId || id === agentTurn.checkpointId,
+    ),
+    gitArtifacts: input.gitArtifacts?.filter(
+      ({ turnId: owner }) => owner === turnId,
+    ),
+  });
+  const rebuilt = scoped.length === 1 && scoped[0]?.kind === "turn"
+    ? scoped[0]
+    : null;
+  if (!rebuilt) return null;
+  const replacement: ResponseTimelineItem = {
+    ...rebuilt,
+    turn: {
+      ...rebuilt.turn,
+      index: previousItem.turn.index,
+    },
+  };
+  return previousTimeline.map((item) =>
+    item.id === turnId ? replacement : item);
+}
+
 function sameReferences<T>(left: T[], right: T[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
 }

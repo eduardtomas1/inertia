@@ -109,7 +109,6 @@ interface AppLayoutProps {
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
   activityOpen: boolean;
   setActivityOpen: Dispatch<SetStateAction<boolean>>;
-  activityNow: number;
   project: Project | null;
   conversation: Conversation | null;
   splitConversationId: string | null;
@@ -148,7 +147,6 @@ export function AppLayout({
   setPaletteOpen,
   activityOpen,
   setActivityOpen,
-  activityNow,
   project,
   conversation,
   splitConversationId,
@@ -445,7 +443,6 @@ export function AppLayout({
         snapshot={connection.snapshot}
         activityOpen={activityOpen}
         paletteOpen={paletteOpen}
-        now={activityNow}
         setActivityOpen={setActivityOpen}
         setPaletteOpen={setPaletteOpen}
         setWorkspaceView={() => setView("workspace")}

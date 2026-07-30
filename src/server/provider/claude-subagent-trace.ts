@@ -85,6 +85,13 @@ export class ClaudeSubagentTraceTracker {
     return this.tasks.get(taskId)?.live === true;
   }
 
+  hasLiveTasks(): boolean {
+    for (const task of this.tasks.values()) {
+      if (task.live) return true;
+    }
+    return false;
+  }
+
   private observeAssistant(record: Record<string, unknown>): void {
     const parentToolUseId = boundedSubagentIdentifier(
       record.parent_tool_use_id,

@@ -4162,9 +4162,19 @@ textarea {
 }
 .composer-popover .prompt-stash-entry > button:first-child {
   min-width: 0;
+  overflow: hidden;
+}
+.composer-popover .prompt-stash-entry > button:first-child > svg {
+  flex: 0 0 auto;
+}
+.composer-popover .prompt-stash-entry .prompt-stash-entry-copy {
+  min-width: 0;
+  overflow: hidden;
 }
 .composer-popover .prompt-stash-entry strong,
 .composer-popover .prompt-stash-entry small {
+  display: block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5569,13 +5579,7 @@ textarea {
 
 .multi-spawn-backdrop {
   overflow-y: auto;
-  background:
-    radial-gradient(
-      circle at 50% 14%,
-      color-mix(in srgb, var(--accent) 9%, transparent),
-      transparent 38%
-    ),
-    rgba(9, 9, 12, 0.54);
+  background: rgba(9, 9, 12, 0.62);
 }
 
 .multi-spawn-dialog {
@@ -5583,18 +5587,14 @@ textarea {
   display: grid;
   width: min(940px, 100%);
   grid-template-rows: auto auto auto auto auto;
-  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-strong));
-  border-radius: 20px;
+  overflow: visible;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
   color: var(--text);
-  background:
-    linear-gradient(
-      155deg,
-      color-mix(in srgb, var(--surface-strong) 98%, var(--accent-soft)),
-      var(--surface-strong) 44%
-    );
+  background: var(--surface-strong);
   box-shadow:
-    0 28px 90px color-mix(in srgb, var(--shadow) 92%, transparent),
-    inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
+    0 30px 84px color-mix(in srgb, var(--shadow) 96%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--text) 3%, transparent);
   animation: quiet-ledger-document-reveal var(--motion-base) var(--motion-ease) both;
 }
 
@@ -5603,8 +5603,8 @@ textarea {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  padding: 17px 18px 15px;
-  border-bottom: 1px solid var(--border);
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .multi-spawn-dialog-mark {
@@ -5612,11 +5612,11 @@ textarea {
   width: 36px;
   height: 36px;
   place-items: center;
-  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
-  border-radius: 11px;
-  color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent-soft) 56%, var(--surface));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 76%, var(--border));
+  border-radius: 10px;
+  color: var(--accent-text);
+  background: var(--accent);
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .multi-spawn-dialog-header h2 {
@@ -5636,7 +5636,9 @@ textarea {
 .multi-spawn-prompt-zone {
   display: grid;
   gap: 7px;
-  padding: 15px 18px 12px;
+  padding: 14px 20px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .multi-spawn-prompt-zone > label {
@@ -5644,7 +5646,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: var(--text-soft);
+  color: var(--text);
   font-size: max(var(--ui-font-secondary), 10px);
   font-weight: 650;
 }
@@ -5667,11 +5669,11 @@ textarea {
   max-height: 190px;
   resize: vertical;
   padding: 12px 13px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
   outline: none;
   color: var(--text);
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  background: var(--surface-strong);
   font-family: inherit;
   font-size: max(calc(var(--ui-font-main) - 1px), 12px);
   line-height: 1.55;
@@ -5690,15 +5692,20 @@ textarea {
   min-width: 0;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: stretch;
-  gap: 10px;
-  padding: 4px 18px 14px;
+  gap: 12px;
+  padding: 16px 20px;
 }
 
 .multi-spawn-pair-arrow {
   display: grid;
-  width: 24px;
+  width: 28px;
+  height: 28px;
+  align-self: center;
   place-items: center;
-  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--text-soft);
+  background: var(--surface);
 }
 
 .multi-spawn-side {
@@ -5706,11 +5713,27 @@ textarea {
   display: grid;
   min-width: 0;
   align-content: start;
-  gap: 11px;
-  padding: 13px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--surface) 74%, transparent);
+  gap: 12px;
+  overflow: visible;
+  padding: 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--shadow) 45%, transparent);
+}
+
+.multi-spawn-side::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: var(--accent);
+  content: "";
+}
+
+.multi-spawn-side[data-route-side="b"]::before {
+  background: var(--question-accent);
 }
 
 .multi-spawn-side > header {
@@ -5735,7 +5758,8 @@ textarea {
 }
 
 .multi-spawn-side > header strong {
-  font-size: max(var(--ui-font-main), 11px);
+  font-size: max(var(--ui-font-main), 12px);
+  letter-spacing: -0.01em;
 }
 
 .multi-spawn-side > header small {
@@ -5748,29 +5772,31 @@ textarea {
   width: 25px;
   height: 25px;
   place-items: center;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  color: var(--text-soft);
-  background: var(--surface-muted);
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 7px;
+  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent-soft) 74%, var(--surface-strong));
   font-size: var(--ui-font-micro);
   font-weight: 750;
+}
+
+.multi-spawn-side[data-route-side="b"] .multi-spawn-side-number {
+  border-color: color-mix(in srgb, var(--question-accent) 42%, var(--border));
+  color: color-mix(in srgb, var(--question-accent) 84%, var(--text));
+  background: color-mix(in srgb, var(--question-surface) 82%, var(--surface-strong));
 }
 
 .multi-spawn-readiness {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 6px;
-  border-radius: 999px;
   color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 10%, transparent);
   font-size: var(--ui-font-micro);
   font-weight: 650;
 }
 
 .multi-spawn-readiness.is-ready {
   color: var(--success-state);
-  background: color-mix(in srgb, var(--success-state) 9%, transparent);
 }
 
 .multi-spawn-field-grid {
@@ -5788,7 +5814,7 @@ textarea {
   display: grid;
   min-width: 0;
   gap: 5px;
-  color: var(--text-muted);
+  color: var(--text-soft);
   font-size: var(--ui-font-micro);
   font-weight: 650;
 }
@@ -5806,7 +5832,7 @@ textarea {
   min-width: 0;
   height: 32px;
   padding: 0 9px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   outline: none;
   color: var(--text);
@@ -5827,7 +5853,7 @@ textarea {
   display: grid;
   min-width: 0;
   gap: 5px;
-  color: var(--text-muted);
+  color: var(--text-soft);
   font-size: var(--ui-font-micro);
   font-weight: 650;
 }
@@ -5842,7 +5868,7 @@ textarea {
   max-width: none;
   min-height: 32px;
   justify-content: flex-start;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: var(--surface-strong);
 }
@@ -5922,8 +5948,9 @@ textarea {
   justify-content: space-between;
   gap: 16px;
   padding: 13px 18px 15px;
-  border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface-strong) 96%, transparent);
+  border-top: 1px solid var(--border-strong);
+  border-radius: 0 0 17px 17px;
+  background: var(--surface);
 }
 
 .multi-spawn-preset-toggle {
@@ -5993,8 +6020,11 @@ textarea {
   }
 
   .multi-spawn-pair-arrow {
-    width: 100%;
+    width: 28px;
     height: 18px;
+    justify-self: center;
+    border: 0;
+    background: transparent;
     transform: rotate(90deg);
   }
 
@@ -8437,6 +8467,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .timeline-minimap button {
+  position: relative;
   width: 6px;
   min-width: 6px;
   height: 3px;
@@ -8445,6 +8476,41 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   border: 0;
   border-radius: 999px;
   background: var(--border-strong);
+}
+
+.timeline-minimap button::after {
+  position: absolute;
+  top: 50%;
+  left: 16px;
+  z-index: 2;
+  display: block;
+  width: max-content;
+  max-width: min(300px, 42vw);
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow-soft);
+  color: var(--text);
+  content: attr(data-request-preview);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  opacity: 0;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  text-align: left;
+  transform: translate(4px, -50%);
+  transition:
+    opacity var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+  white-space: normal;
+}
+
+.timeline-minimap button:hover::after,
+.timeline-minimap button:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%);
 }
 
 .timeline-minimap button:hover,

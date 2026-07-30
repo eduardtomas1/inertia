@@ -36,7 +36,7 @@ export class TurnStreamProjection {
     return new TurnStreamChannel({
       scheduler: this.options.scheduler,
       onProjectionFlush: (flush) => this.broadcast(active(), kind, flush),
-      onPersistenceFlush: () => this.persist(active(), kind),
+      onPersistenceFlush: (flush) => this.persist(active(), kind, flush),
       onTimerError: (error) => {
         const current = active();
         if (current.settled) return;
@@ -63,6 +63,14 @@ export class TurnStreamProjection {
   closeAssistantSegment(active: ActiveTurn): boolean {
     if (!active.assistantSegmentText) return false;
     active.assistantStream.flush();
+    const messageId = active.assistantMessageId;
+    if (!messageId) {
+      throw new Error("Persisted commentary is missing its message identity.");
+    }
+    this.options.hooks.broadcast({
+      type: "agent.commentary.persisted",
+      message: this.options.store.message(messageId),
+    });
     active.assistantSegmentText = "";
     active.assistantMessageId = null;
     return true;
@@ -117,14 +125,22 @@ export class TurnStreamProjection {
   private persist(
     active: ActiveTurn,
     kind: "assistant" | "reasoning",
+    flush: StreamDeltaFlush,
   ): void {
     let recordId: string;
     if (kind === "assistant") {
       if (active.assistantMessageId) {
-        this.options.store.updateMessageContent(
-          active.assistantMessageId,
-          active.assistantSegmentText,
-        );
+        if (flush.replacement) {
+          this.options.store.updateMessageContent(
+            active.assistantMessageId,
+            active.assistantSegmentText,
+          );
+        } else {
+          this.options.store.appendMessageContent(
+            active.assistantMessageId,
+            flush.delta,
+          );
+        }
       } else {
         active.assistantMessageId = this.options.store.createMessage(
           active.conversation.id,
@@ -145,9 +161,16 @@ export class TurnStreamProjection {
           active.turn.id,
         ).id;
       }
-      this.options.store.updateReasoning(active.reasoningId, {
-        content: active.reasoningText,
-      });
+      if (flush.replacement) {
+        this.options.store.updateReasoning(active.reasoningId, {
+          content: active.reasoningText,
+        });
+      } else {
+        this.options.store.appendReasoningContent(
+          active.reasoningId,
+          flush.delta,
+        );
+      }
       recordId = active.reasoningId;
     }
 

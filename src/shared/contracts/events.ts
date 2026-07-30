@@ -16,12 +16,15 @@ import type {
   AgentApprovalRequest,
   AgentInputRequest,
   AgentPlan,
+  ChatMessage,
   SubagentTrace,
   ThreadUsageSnapshot,
 } from "./agent";
 import type {
   AppSnapshot,
+  ConversationShell,
   RuntimeSyncCursor,
+  WorkspaceRun,
 } from "./app";
 import type { ConversationDetailResult } from "./conversation-detail";
 import type {
@@ -56,11 +59,19 @@ export type RuntimeEventScope =
  */
 export type RuntimeMutationEvent =
   | { type: "snapshot.updated"; snapshot: AppSnapshot }
+  | {
+      type: "conversation.shell.updated";
+      conversation: ConversationShell;
+      runs: WorkspaceRun[];
+    }
+  | { type: "conversation.detail.invalidated"; conversationId: string }
+  | { type: "conversation.message.persisted"; message: ChatMessage }
   | { type: "provider.maintenance.updated"; providers: ProviderMaintenanceStatus[] }
   | { type: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
   | { type: "agent.started"; conversationId: string; runId: string; turnId: string }
   | { type: "agent.text"; conversationId: string; runId: string; turnId: string; text: string }
   | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string }
+  | { type: "agent.commentary.persisted"; message: ChatMessage }
   | { type: "agent.usage"; usage: ThreadUsageSnapshot }
   | { type: "agent.activity"; activity: AgentActivity }
   | { type: "agent.subagent.updated"; trace: SubagentTrace }

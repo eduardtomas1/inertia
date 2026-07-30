@@ -249,9 +249,9 @@ export function useSplitWorkspaceScene({
   }));
   const planSteps = useMemo(() => {
     if (!splitConversation) return [];
-    const nativePlan = projection.nativePlans[splitConversation.id];
-    if (nativePlan) {
-      return nativePlan.steps.map((step, index) => ({
+    const latestPlan = projection.plans.at(-1);
+    if (latestPlan) {
+      return latestPlan.steps.map((step, index) => ({
         id: `native-${index}`,
         title: step.step,
         status: step.status === "inProgress"
@@ -266,7 +266,7 @@ export function useSplitWorkspaceScene({
     return planFromText(text, splitConversation.status);
   }, [
     projection.messages,
-    projection.nativePlans,
+    projection.plans,
     projection.streamingText,
     splitConversation,
   ]);

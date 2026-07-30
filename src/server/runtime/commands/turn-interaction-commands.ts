@@ -7,6 +7,7 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type ProviderInfo,
+  type RuntimeMutationEvent,
   type ServerEvent,
 } from "../../../shared/contracts";
 import {
@@ -41,6 +42,7 @@ export interface TurnInteractionCommandDependencies {
   attachmentResolver: TrustedAttachmentResolver | null;
   workflows: AgentWorkflowController;
   providerInfo(): readonly ProviderInfo[];
+  broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
 }
@@ -74,11 +76,11 @@ export function createTurnInteractionCommandHandler(
               "Follow-ups while the agent is working support text only and cannot add skills.",
             );
           }
-          const followedUp = await dependencies.turns.steer(
+          const followUpMessage = await dependencies.turns.steer(
             conversation.id,
             command.payload.content,
           );
-          if (!followedUp) {
+          if (!followUpMessage) {
             throw new RuntimeRequestError(
               "This active agent route cannot accept a follow-up.",
             );
@@ -86,6 +88,10 @@ export function createTurnInteractionCommandHandler(
           dependencies.send(socket, {
             type: "request.ok",
             requestId: command.requestId,
+          });
+          dependencies.broadcast({
+            type: "conversation.message.persisted",
+            message: followUpMessage,
           });
           dependencies.broadcastSnapshot();
           return "handled";
@@ -315,6 +321,10 @@ export function createTurnInteractionCommandHandler(
           dependencies.send(socket, {
             type: "request.ok",
             requestId: command.requestId,
+          });
+          dependencies.broadcast({
+            type: "conversation.detail.invalidated",
+            conversationId: conversation.id,
           });
           dependencies.broadcastSnapshot();
           if (queued) dependencies.turns.start(queued.turn.id);

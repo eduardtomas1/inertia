@@ -603,6 +603,146 @@ describe("Claude Agent SDK harness", () => {
     expect(manager.cachedMetadata("claude").rateLimits).toEqual([]);
   });
 
+  it("settles a final SDK result without waiting for an optional idle edge", async () => {
+    const root = portableFixtureRoot("Claude SDK terminal result");
+    roots.push(root);
+    let releaseIterator!: () => void;
+    const iteratorReleased = new Promise<void>((resolve) => {
+      releaseIterator = resolve;
+    });
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSuccessResult("Sonnet finished", "completed");
+          await iteratorReleased;
+        })(),
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const run = manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-result-without-idle",
+      cwd: root,
+      prompt: "Finish without an idle edge",
+      interactionMode: "build",
+      access: "supervised",
+    }));
+
+    const outcome = await Promise.race([
+      run.then(() => "settled" as const),
+      new Promise<"stalled">((resolve) =>
+        setTimeout(() => resolve("stalled"), 100)),
+    ]);
+    releaseIterator();
+
+    expect(outcome).toBe("settled");
+    await expect(run).resolves.toMatchObject({
+      status: "completed",
+      text: "Sonnet finished",
+    });
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("consumes a late delegate notification after the final parent result", async () => {
+    const root = portableFixtureRoot("Claude SDK late delegate notification");
+    roots.push(root);
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeBackgroundTasks(["agent-late"]);
+          yield claudeSystem("task_started", {
+            task_id: "agent-late",
+            tool_use_id: "tool-agent-late",
+            description: "Inspect the final ordering",
+            subagent_type: "researcher",
+          });
+          yield claudeSuccessResult("Parent finished", "completed");
+          yield claudeBackgroundTasks([]);
+          yield claudeSystem("task_notification", {
+            task_id: "agent-late",
+            tool_use_id: "tool-agent-late",
+            status: "completed",
+            output_file: "/tmp/agent-late",
+            summary: "Final ordering inspected",
+          });
+        })(),
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const traces: Array<{ status: string; result: string | null }> = [];
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-late-delegate-notification",
+      cwd: root,
+      prompt: "Inspect the final ordering",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onSubagent: ({ status, result }) => {
+        traces.push({ status, result });
+      },
+    })).resolves.toMatchObject({
+      status: "completed",
+      text: "Parent finished",
+    });
+    expect(traces).toEqual([
+      { status: "spawned", result: null },
+      { status: "completed", result: "Final ordering inspected" },
+    ]);
+  });
+
+  it("bounds a missing terminal delegate notification after parent completion", async () => {
+    const root = portableFixtureRoot("Claude SDK missing delegate notification");
+    roots.push(root);
+    let closeCalls = 0;
+    const harness = createClaudeAgentSdkHarness({
+      terminalSubagentDrainTimeoutMs: 25,
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeBackgroundTasks(["agent-missing-notification"]);
+          yield claudeSystem("task_started", {
+            task_id: "agent-missing-notification",
+            description: "Await a notification that never arrives",
+            subagent_type: "researcher",
+          });
+          yield claudeSuccessResult("Parent still finished", "completed");
+          yield claudeBackgroundTasks([]);
+          await new Promise<void>(() => {});
+        })(),
+        {
+          close: () => {
+            closeCalls += 1;
+          },
+        },
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-missing-delegate-notification",
+      cwd: root,
+      prompt: "Do not let a missing notification wedge the parent",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "completed",
+      text: "Parent still finished",
+    });
+    expect(closeCalls).toBe(1);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
   it("keeps the run active until delegated work returns, then resumes the same SDK session", async () => {
     const root = portableFixtureRoot("Claude SDK delegated wait");
     roots.push(root);

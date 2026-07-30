@@ -8,6 +8,7 @@ import { describe, expect, it, type Mock, vi } from "vitest";
 
 import type {
   ChatAttachment,
+  ChatMessage,
   ClientCommand,
   ProviderSkillInput,
   ProviderInfo,
@@ -97,6 +98,7 @@ function dependencies(options: {
     } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
     turns: {
       isActive: vi.fn(() => false),
+      steer: vi.fn(async () => null),
       queue: options.queue,
       start: vi.fn(() => true),
       failBeforeStart: vi.fn(() => true),
@@ -127,12 +129,51 @@ function dependencies(options: {
         options.assertTurnSkillsCurrent ?? vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["workflows"],
     providerInfo: () => [provider],
+    broadcast: vi.fn(),
     broadcastSnapshot: vi.fn(),
     send: vi.fn(),
   };
 }
 
 describe("message attachment ownership transfer", () => {
+  it("projects an active follow-up without hydrating the live stream", async () => {
+    const followUp: ChatMessage = {
+      id: "77777777-7777-4777-8777-777777777777",
+      conversationId,
+      turnId: "88888888-8888-4888-8888-888888888888",
+      role: "user",
+      content: "Check the Windows edge too.",
+      attachments: [],
+      createdAt: "2026-07-30T06:00:00.000Z",
+    };
+    const handlerDependencies = dependencies({
+      queue: vi.fn(),
+      relinquishAll: vi.fn(async () => undefined),
+    });
+    vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
+    vi.mocked(handlerDependencies.turns.steer).mockResolvedValue(followUp);
+    const command = messageCommand();
+    command.payload.attachments = [];
+    command.payload.content = followUp.content;
+
+    await expect(
+      createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        command,
+      ),
+    ).resolves.toBe("handled");
+
+    expect(handlerDependencies.broadcast).toHaveBeenCalledWith({
+      type: "conversation.message.persisted",
+      message: followUp,
+    });
+    expect(handlerDependencies.broadcast).not.toHaveBeenCalledWith({
+      type: "conversation.detail.invalidated",
+      conversationId,
+    });
+    expect(handlerDependencies.broadcastSnapshot).toHaveBeenCalledOnce();
+  });
+
   it("relinquishes ownership when provider readiness rejects the send", async () => {
     const relinquishAll = vi.fn(async () => undefined);
     const queue = vi.fn();
@@ -241,6 +282,10 @@ describe("message attachment ownership transfer", () => {
       vi.mocked(handlerDependencies.workflows.assertTurnSkillsCurrent)
         .mock.invocationCallOrder[0],
     ).toBeLessThan(queue.mock.invocationCallOrder[0]!);
+    expect(handlerDependencies.broadcast).toHaveBeenCalledWith({
+      type: "conversation.detail.invalidated",
+      conversationId,
+    });
   });
 
   it("rejects a changed skill route before persisting its checkpoint", async () => {

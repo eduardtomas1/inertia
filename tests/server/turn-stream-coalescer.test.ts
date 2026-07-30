@@ -209,7 +209,7 @@ function providerInfo(): ProviderInfo {
 async function controllerRuntime(
   hookOverrides: Partial<Pick<
     TurnControllerHooks,
-    "broadcast" | "broadcastSnapshot"
+    "broadcast" | "broadcastSnapshot" | "broadcastConversationShell"
   >> = {},
 ): Promise<ControllerRuntime> {
   const directory = await mkdtemp(join(tmpdir(), "inertia-stream-coalescer-"));
@@ -239,6 +239,7 @@ async function controllerRuntime(
     {
       broadcast: hookOverrides.broadcast ?? ((event) => events.push(event)),
       broadcastSnapshot: hookOverrides.broadcastSnapshot ?? (() => undefined),
+      broadcastConversationShell: hookOverrides.broadcastConversationShell,
       providerInfo: () => [providerInfo()],
     },
     {
@@ -498,6 +499,38 @@ describe("TurnStreamChannel performance cadence", () => {
 });
 
 describe("TurnController coalesced streaming", () => {
+  it("projects activity through a bounded shell without rebuilding the full snapshot", async () => {
+    const broadcastSnapshot = vi.fn();
+    const broadcastConversationShell = vi.fn();
+    const runtime = await controllerRuntime({
+      broadcastSnapshot,
+      broadcastConversationShell,
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Inspect one file.",
+    });
+    runtime.controller.start(queued.turn.id);
+    broadcastSnapshot.mockClear();
+    broadcastConversationShell.mockClear();
+
+    runtime.provider.emit({
+      ...providerIdentity(runtime),
+      type: "activity",
+      kind: "tool",
+      phase: "info",
+      label: "Read source",
+    });
+
+    expect(broadcastConversationShell).toHaveBeenCalledTimes(1);
+    expect(broadcastConversationShell)
+      .toHaveBeenCalledWith(runtime.conversationId);
+    expect(broadcastSnapshot).not.toHaveBeenCalled();
+    runtime.controller.cancel(runtime.conversationId);
+    await flushPromises();
+    await closeRuntime(runtime);
+  });
+
   it("reopens every suffix that was visible before an abrupt runtime loss", async () => {
     const runtime = await controllerRuntime();
     const queued = runtime.controller.queue({
@@ -782,8 +815,10 @@ describe("TurnController coalesced streaming", () => {
     });
     const createMessage = vi.spyOn(runtime.store, "createMessage");
     const updateMessage = vi.spyOn(runtime.store, "updateMessageContent");
+    const appendMessage = vi.spyOn(runtime.store, "appendMessageContent");
     const createReasoning = vi.spyOn(runtime.store, "createReasoning");
     const updateReasoning = vi.spyOn(runtime.store, "updateReasoning");
+    const appendReasoning = vi.spyOn(runtime.store, "appendReasoningContent");
     runtime.controller.start(queued.turn.id);
     const identity = providerIdentity(runtime);
 
@@ -831,14 +866,26 @@ describe("TurnController coalesced streaming", () => {
     ]);
     expect(runtime.scheduler.shortTimerCount()).toBe(0);
     expect(createMessage).toHaveBeenCalledTimes(1);
-    expect(updateMessage).toHaveBeenCalledTimes(1);
+    expect(updateMessage).not.toHaveBeenCalled();
+    expect(appendMessage).toHaveBeenCalledTimes(1);
     expect(createReasoning).toHaveBeenCalledTimes(1);
-    expect(updateReasoning).toHaveBeenCalledTimes(2);
+    expect(updateReasoning).not.toHaveBeenCalled();
+    expect(appendReasoning).toHaveBeenCalledTimes(2);
+    expect(runtime.events.filter(({ type }) =>
+      type === "agent.commentary.persisted")).toEqual([
+      expect.objectContaining({
+        message: expect.objectContaining({
+          content: `${"a".repeat(600)}${"b".repeat(350)}`,
+        }),
+      }),
+    ]);
     expect(
       createMessage.mock.calls.length
       + updateMessage.mock.calls.length
+      + appendMessage.mock.calls.length
       + createReasoning.mock.calls.length
-      + updateReasoning.mock.calls.length,
+      + updateReasoning.mock.calls.length
+      + appendReasoning.mock.calls.length,
     ).toBeLessThan(10);
 
     runtime.provider.emit({

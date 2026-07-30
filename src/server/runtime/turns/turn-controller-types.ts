@@ -106,6 +106,11 @@ export interface TurnAttachmentReleaseHookInput {
 export interface TurnControllerHooks {
   broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void;
+  /**
+   * Emits only the mutable shell rows owned by one conversation. Tests and
+   * compatibility callers may omit this and retain the full-snapshot fallback.
+   */
+  broadcastConversationShell?(conversationId: string): void;
   providerInfo(): readonly ProviderInfo[];
   applyProviderMetadata?(event: ProviderMetadataEvent): void;
   onNativeGoalSynchronized?(input: {

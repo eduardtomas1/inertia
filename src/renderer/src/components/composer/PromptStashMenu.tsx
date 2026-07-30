@@ -109,8 +109,10 @@ export function PromptStashMenu({
                     }}
                   >
                     <ArchiveRestore size={14} />
-                    <span>
-                      <strong>{entry.content}</strong>
+                    <span className="prompt-stash-entry-copy">
+                      <strong className="prompt-stash-entry-preview">
+                        {entry.content}
+                      </strong>
                       <small>
                         {restoreReason ?? (
                           <>

@@ -19,6 +19,7 @@ import {
   UNREADABLE_RUNTIME_RESPONSE,
   type PendingConnectionRequest,
 } from "../utils/connectionMessages";
+import { applyConversationShellEvent } from "../utils/runtimeSnapshotProjection";
 
 export type ConnectionStatus = "connecting" | "online" | "offline";
 
@@ -156,6 +157,11 @@ export function useInertiaConnection(): InertiaConnection {
                 event = event.event;
                 if (event.type === "snapshot.updated") {
                   setSnapshot(event.snapshot);
+                } else if (event.type === "conversation.shell.updated") {
+                  const shellEvent = event;
+                  setSnapshot((current) => current
+                    ? applyConversationShellEvent(current, shellEvent)
+                    : current);
                 }
               } else if (event.type === "runtime.sync.completed") {
                 const decision = projectionRef.current.complete(event.sync);
@@ -170,6 +176,11 @@ export function useInertiaConnection(): InertiaConnection {
                 }
               } else if (event.type === "snapshot.updated") {
                 setSnapshot(event.snapshot);
+              } else if (event.type === "conversation.shell.updated") {
+                const shellEvent = event;
+                setSnapshot((current) => current
+                  ? applyConversationShellEvent(current, shellEvent)
+                  : current);
               }
 
               settlePendingConnectionRequest(

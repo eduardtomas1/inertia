@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -59,6 +61,22 @@ function storage(): Storage {
 }
 
 describe("multi-spawn preset", () => {
+  it("keeps the route model palette outside card and dialog clipping", () => {
+    const styles = readFileSync(
+      new URL("../../src/renderer/src/styles.css", import.meta.url),
+      "utf8",
+    );
+    const dialogRules = styles.match(
+      /\.multi-spawn-dialog \{(?<rules>[^}]+)\}/u,
+    )?.groups?.rules;
+    const routeCardRules = styles.match(
+      /\.multi-spawn-side \{(?<rules>[^}]+)\}/u,
+    )?.groups?.rules;
+
+    expect(dialogRules).toContain("overflow: visible");
+    expect(routeCardRules).toContain("overflow: visible");
+  });
+
   it("persists only bounded route identity, reasoning, access, and names", () => {
     const target = storage();
     writeMultiSpawnPreset(target, draft);

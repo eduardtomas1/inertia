@@ -1,15 +1,21 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   defaultSettings,
+  type AgentActivity,
   type AgentApprovalRequest,
   type AgentInputRequest,
+  type AgentPlan,
   type AppSnapshot,
+  type ChatMessage,
   type ConversationShell,
   type ServerEvent,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import {
+  continuationIdentityForSelection,
+  nativeModelSelection,
+} from "../../src/shared/model-routing";
 import { useConversationProjection } from "../../src/renderer/src/hooks/useConversationProjection";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 
@@ -112,11 +118,12 @@ function inputRequest(conversationId: string): AgentInputRequest {
 
 function createEventSource() {
   const listeners = new Set<(event: ServerEvent) => void>();
+  const subscribe = vi.fn((listener: (event: ServerEvent) => void) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  });
   return {
-    subscribe(listener: (event: ServerEvent) => void) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+    subscribe,
     emit(event: ServerEvent) {
       act(() => {
         for (const listener of listeners) listener(event);
@@ -157,6 +164,637 @@ function renderProjection(
 }
 
 describe("useConversationProjection pending interactions", () => {
+  it("keeps the runtime listener stable across unrelated shell refreshes", () => {
+    const source = createEventSource();
+    const request = vi.fn(
+      async (_command: CommandWithoutId): Promise<ServerEvent> => ({
+        type: "request.ok",
+        requestId: crypto.randomUUID(),
+      }),
+    );
+    const hook = renderHook(
+      ({ currentSnapshot }: { currentSnapshot: AppSnapshot }) =>
+        useConversationProjection({
+          snapshot: currentSnapshot,
+          status: "offline",
+          request,
+          subscribe: source.subscribe,
+          enabled: true,
+          autoOpenPlan: false,
+          onOpenPlan: vi.fn(),
+          onTerminal: vi.fn(),
+        }),
+      { initialProps: { currentSnapshot: snapshot } },
+    );
+
+    expect(source.subscribe).toHaveBeenCalledTimes(1);
+    hook.rerender({
+      currentSnapshot: {
+        ...snapshot,
+        conversations: snapshot.conversations.map((item) =>
+          item.id === primaryId
+            ? { ...item, updatedAt: "2026-07-28T12:01:00.000Z" }
+            : item),
+      },
+    });
+    expect(source.subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("reloads only explicit authoritative detail invalidations without rebinding", async () => {
+    const source = createEventSource();
+    let messages: ChatMessage[] = [];
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [],
+              turnGitArtifacts: [],
+              messages,
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : {
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        });
+    const hook = renderHook(
+      ({ currentSnapshot }: { currentSnapshot: AppSnapshot }) =>
+        useConversationProjection({
+          snapshot: currentSnapshot,
+          status: "online",
+          request,
+          subscribe: source.subscribe,
+          enabled: true,
+          autoOpenPlan: false,
+          onOpenPlan: vi.fn(),
+          onTerminal: vi.fn(),
+        }),
+      { initialProps: { currentSnapshot: snapshot } },
+    );
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+
+    messages = [{
+      id: "durable-user-message",
+      conversationId: primaryId,
+      turnId: null,
+      role: "user",
+      content: "A newly persisted request",
+      attachments: [],
+      createdAt: "2026-07-28T12:01:00.000Z",
+    }];
+    source.emit({
+      type: "conversation.detail.invalidated",
+      conversationId: primaryId,
+    });
+
+    await waitFor(() =>
+      expect(hook.result.current.messages).toEqual(messages));
+    expect(source.subscribe).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls.filter(([command]) =>
+      command.type === "conversation.detail.load")).toHaveLength(2);
+  });
+
+  it("projects a follow-up without reloading or duplicating live commentary", async () => {
+    const source = createEventSource();
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : {
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: "I am checking the current implementation.",
+    });
+    const followUp: ChatMessage = {
+      id: "durable-follow-up",
+      conversationId: primaryId,
+      turnId: `${primaryId}-turn`,
+      role: "user",
+      content: "Check the Windows edge too.",
+      attachments: [],
+      createdAt: "2026-07-28T12:01:00.000Z",
+    };
+    source.emit({
+      type: "conversation.message.persisted",
+      message: followUp,
+    });
+
+    await waitFor(() => {
+      expect(hook.result.current.messages).toEqual([followUp]);
+      expect(hook.result.current.streamingText)
+        .toBe("I am checking the current implementation.");
+    });
+    expect(request.mock.calls.filter(([command]) =>
+      command.type === "conversation.detail.load")).toHaveLength(1);
+  });
+
+  it("does not reload an open thread for unrelated full-snapshot refreshes", async () => {
+    const source = createEventSource();
+    const loadedPlan: AgentPlan = {
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      explanation: "Keep the planned timeline stable.",
+      steps: [{
+        step: "Preserve the current projection",
+        status: "inProgress",
+      }],
+    };
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [loadedPlan],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : {
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        });
+    const hook = renderHook(
+      ({ currentSnapshot }: { currentSnapshot: AppSnapshot }) =>
+        useConversationProjection({
+          snapshot: currentSnapshot,
+          status: "online",
+          request,
+          subscribe: source.subscribe,
+          enabled: true,
+          autoOpenPlan: false,
+          onOpenPlan: vi.fn(),
+          onTerminal: vi.fn(),
+        }),
+      { initialProps: { currentSnapshot: snapshot } },
+    );
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+    expect(hook.result.current.plans).toEqual([loadedPlan]);
+    const messagesBeforeRefresh = hook.result.current.messages;
+    const plansBeforeRefresh = hook.result.current.plans;
+
+    const latestSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "default",
+      reasoningEffort: "medium",
+    });
+    const refreshedSnapshot: AppSnapshot = {
+      ...snapshot,
+      conversations: snapshot.conversations.map((item) =>
+        item.id === primaryId
+          ? {
+              ...item,
+              updatedAt: "2026-07-28T12:01:00.000Z",
+              latestTurn: {
+                id: `${primaryId}-turn`,
+                runId: `${primaryId}-run`,
+                providerId: "codex",
+                harnessId: latestSelection.harnessId,
+                backendProfileId: latestSelection.backendProfileId,
+                modelSelection: latestSelection,
+                continuationIdentity:
+                  continuationIdentityForSelection(latestSelection),
+                model: "default",
+                reasoningEffort: "medium",
+                status: "running",
+                requestedAt: "2026-07-28T12:00:30.000Z",
+                startedAt: "2026-07-28T12:00:31.000Z",
+                completedAt: null,
+                terminalReason: null,
+                updatedAt: "2026-07-28T12:01:00.000Z",
+              },
+            }
+          : item),
+    };
+    source.emit({
+      type: "snapshot.updated",
+      snapshot: refreshedSnapshot,
+    });
+    hook.rerender({ currentSnapshot: refreshedSnapshot });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(hook.result.current.detailState?.state).toBe("ready");
+    expect(hook.result.current.messages).toBe(messagesBeforeRefresh);
+    expect(hook.result.current.plans).toBe(plansBeforeRefresh);
+    expect(request.mock.calls.filter(([command]) =>
+      command.type === "conversation.detail.load")).toHaveLength(1);
+  });
+
+  it("keeps the last ready thread visible when a refresh request times out", async () => {
+    const source = createEventSource();
+    let detailLoads = 0;
+    let authoritativeMessages: ChatMessage[] = [];
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type !== "conversation.detail.load") {
+        return {
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        };
+      }
+      detailLoads += 1;
+      if (detailLoads === 2) {
+        throw new Error("The request took too long to complete.");
+      }
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "conversation.detail",
+          conversationId: primaryId,
+          state: "ready",
+          detail: {
+            conversation: conversation(primaryId),
+            agentTurns: [],
+            turnGitArtifacts: [],
+            messages: authoritativeMessages,
+            activities: [],
+            subagents: [],
+            reasonings: [],
+            usage: [],
+            plans: [],
+            goals: [],
+            checkpoints: [],
+            reviewSummaries: [],
+            reviewStates: [],
+            reviewNotes: [],
+          },
+        },
+      };
+    });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detailState?.state).toBe("ready"));
+
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: "The final answer remains visible.",
+    });
+    source.emit({
+      type: "agent.completed",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+    });
+    source.emit({
+      type: "conversation.detail.invalidated",
+      conversationId: primaryId,
+    });
+
+    await waitFor(() => expect(detailLoads).toBe(2));
+    expect(hook.result.current.detailState?.state).toBe("ready");
+    expect(hook.result.current.detail).not.toBeNull();
+    expect(hook.result.current.streamingText)
+      .toBe("The final answer remains visible.");
+
+    authoritativeMessages = [{
+      id: "terminal-assistant-message",
+      conversationId: primaryId,
+      turnId: `${primaryId}-turn`,
+      role: "assistant",
+      content: "The final answer remains visible.",
+      attachments: [],
+      createdAt: "2026-07-28T12:02:00.000Z",
+    }];
+    source.emit({
+      type: "conversation.detail.invalidated",
+      conversationId: primaryId,
+    });
+
+    await waitFor(() => {
+      expect(detailLoads).toBe(3);
+      expect(hook.result.current.streamingText).toBe("");
+      expect(hook.result.current.messages).toEqual(authoritativeMessages);
+    });
+  });
+
+  it("does not reload detail for bounded activity-shell refreshes", async () => {
+    const source = createEventSource();
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : {
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+
+    source.emit({
+      type: "conversation.shell.updated",
+      conversation: {
+        ...conversation(primaryId),
+        updatedAt: "2026-07-28T12:01:00.000Z",
+      },
+      runs: [],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(request.mock.calls.filter(([command]) =>
+      command.type === "conversation.detail.load")).toHaveLength(1);
+  });
+
+  it("projects persisted commentary without waiting for a detail reload", () => {
+    const source = createEventSource();
+    const hook = renderProjection(source, {
+      enabled: true,
+      targetConversationId: primaryId,
+    });
+    const commentary: ChatMessage = {
+      id: "commentary-message",
+      conversationId: primaryId,
+      turnId: `${primaryId}-turn`,
+      role: "assistant",
+      content: "The provider route is safe; now I am checking the renderer.",
+      attachments: [],
+      createdAt: "2026-07-28T12:00:01.000Z",
+    };
+
+    source.emit({
+      type: "agent.commentary.persisted",
+      message: commentary,
+    });
+    source.emit({
+      type: "agent.activity",
+      activity: {
+        id: "commentary-activity",
+        conversationId: primaryId,
+        runId: `${primaryId}-run`,
+        turnId: `${primaryId}-turn`,
+        kind: "command",
+        title: "Run focused tests",
+        detail: null,
+        status: "running",
+        createdAt: "2026-07-28T12:00:02.000Z",
+      },
+    });
+
+    expect(hook.result.current.messages).toEqual([commentary]);
+    expect(hook.result.current.activities).toHaveLength(1);
+  });
+
+  it("retains every unhydrated commentary segment until detail catches up", () => {
+    const source = createEventSource();
+    const hook = renderProjection(source, {
+      enabled: true,
+      targetConversationId: primaryId,
+    });
+
+    for (let index = 0; index < 70; index += 1) {
+      source.emit({
+        type: "agent.commentary.persisted",
+        message: {
+          id: `commentary-${index}`,
+          conversationId: primaryId,
+          turnId: `${primaryId}-turn`,
+          role: "assistant",
+          content: `Commentary ${index}`,
+          attachments: [],
+          createdAt: new Date(
+            Date.parse("2026-07-28T12:00:00.000Z") + index,
+          ).toISOString(),
+        },
+      });
+    }
+
+    expect(hook.result.current.messages).toHaveLength(70);
+    expect(hook.result.current.messages[0]?.content).toBe("Commentary 0");
+    expect(hook.result.current.messages.at(-1)?.content).toBe("Commentary 69");
+  });
+
+  it("retains every unhydrated activity until detail catches up", () => {
+    const source = createEventSource();
+    const hook = renderProjection(source, {
+      enabled: true,
+      targetConversationId: primaryId,
+    });
+
+    for (let index = 0; index < 110; index += 1) {
+      source.emit({
+        type: "agent.activity",
+        activity: {
+          id: `activity-${index}`,
+          conversationId: primaryId,
+          runId: `${primaryId}-run`,
+          turnId: `${primaryId}-turn`,
+          kind: "command",
+          title: `Command ${index}`,
+          detail: null,
+          status: "completed",
+          createdAt: new Date(
+            Date.parse("2026-07-28T12:00:00.000Z") + index,
+          ).toISOString(),
+        },
+      });
+    }
+
+    expect(hook.result.current.activities).toHaveLength(110);
+    expect(hook.result.current.activities[0]?.title).toBe("Command 0");
+    expect(hook.result.current.activities.at(-1)?.title).toBe("Command 109");
+  });
+
+  it("retires a live activity once authoritative detail catches up", async () => {
+    const source = createEventSource();
+    const liveActivity: AgentActivity = {
+      id: "retired-live-activity",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      kind: "command",
+      title: "Run focused tests",
+      detail: null,
+      status: "running",
+      createdAt: "2026-07-28T12:00:02.000Z",
+    };
+    let authoritativeActivities: AgentActivity[] = [];
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: authoritativeActivities,
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : {
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+
+    source.emit({ type: "agent.activity", activity: liveActivity });
+    expect(hook.result.current.activities[0]?.status).toBe("running");
+
+    authoritativeActivities = [liveActivity];
+    act(() => hook.result.current.refreshDetail());
+    await waitFor(() =>
+      expect(request.mock.calls.filter(([command]) =>
+        command.type === "conversation.detail.load")).toHaveLength(2));
+    await waitFor(() =>
+      expect(hook.result.current.activities[0]).toBe(liveActivity));
+
+    authoritativeActivities = [{
+      ...liveActivity,
+      status: "completed",
+    }];
+    act(() => hook.result.current.refreshDetail());
+    await waitFor(() =>
+      expect(hook.result.current.activities[0]?.status).toBe("completed"));
+  });
+
   it("does not let a newly reported plan steal focus unless the user opted in", () => {
     expect(defaultSettings.autoOpenPlan).toBe(false);
     for (const autoOpenPlan of [false, true]) {

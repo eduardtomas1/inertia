@@ -8,6 +8,7 @@ import {
   type Options as ClaudeOptions,
   type PermissionResult,
   type Query,
+  type SDKMessage,
   type SDKUserMessage,
   type SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -49,6 +50,9 @@ const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const CLAUDE_STOP_TASK_TIMEOUT_MS = 2_000;
 const MIN_CLAUDE_STOP_TASK_TIMEOUT_MS = 25;
+const CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 2_000;
+const MIN_CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 25;
+const CLAUDE_MESSAGE_DRAIN_TIMEOUT = Symbol("claude-message-drain-timeout");
 
 export const CLAUDE_AGENT_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -77,6 +81,12 @@ export interface ClaudeAgentSdkHarnessOptions {
    * acknowledgement deadline. Primarily useful for deterministic tests.
    */
   stopTaskTimeoutMs?: number;
+  /**
+   * May shorten, but never extend, the quiet period used to consume terminal
+   * delegate notifications after Claude has already returned the parent
+   * result. Primarily useful for deterministic tests.
+   */
+  terminalSubagentDrainTimeoutMs?: number;
 }
 
 function claudeStopTaskTimeout(value: number | undefined): number {
@@ -91,6 +101,39 @@ function claudeStopTaskTimeout(value: number | undefined): number {
     MIN_CLAUDE_STOP_TASK_TIMEOUT_MS,
     Math.min(value, CLAUDE_STOP_TASK_TIMEOUT_MS),
   );
+}
+
+function claudeTerminalSubagentDrainTimeout(
+  value: number | undefined,
+): number {
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value < 1
+  ) {
+    return CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS;
+  }
+  return Math.max(
+    MIN_CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS,
+    Math.min(value, CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS),
+  );
+}
+
+async function nextClaudeMessage(
+  iterator: AsyncIterator<SDKMessage>,
+  timeoutMs: number | null,
+): Promise<IteratorResult<SDKMessage> | typeof CLAUDE_MESSAGE_DRAIN_TIMEOUT> {
+  if (timeoutMs === null) return await iterator.next();
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<typeof CLAUDE_MESSAGE_DRAIN_TIMEOUT>((resolve) => {
+    timer = setTimeout(() => resolve(CLAUDE_MESSAGE_DRAIN_TIMEOUT), timeoutMs);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([iterator.next(), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function claudeModels(models: Awaited<ReturnType<Query["supportedModels"]>>): ProviderModel[] {
@@ -265,6 +308,9 @@ export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOption
   const stopTaskTimeoutMs = claudeStopTaskTimeout(
     options.stopTaskTimeoutMs,
   );
+  const terminalSubagentDrainTimeoutMs = claudeTerminalSubagentDrainTimeout(
+    options.terminalSubagentDrainTimeoutMs,
+  );
   return {
     id: "claude-agent-sdk",
     providerId: "claude",
@@ -274,6 +320,7 @@ export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOption
       startOptions,
       options.createQuery ?? claudeQuery,
       stopTaskTimeoutMs,
+      terminalSubagentDrainTimeoutMs,
     ),
   };
 }
@@ -282,6 +329,7 @@ function startClaudeRun(
   options: AgentHarnessStartOptions,
   createQuery: ClaudeQueryFactory,
   stopTaskTimeoutMs: number,
+  terminalSubagentDrainTimeoutMs: number,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
   const emitter = createAgentHarnessEmitter(
@@ -310,6 +358,7 @@ function startClaudeRun(
     { kind: "command" | "tool"; label: string }
   >();
   let query: Query | undefined;
+  let messageIterator: AsyncIterator<SDKMessage> | undefined;
   let cancelRequested = false;
   let acceptingFollowUps = false;
   let sessionId = options.input.sessionId;
@@ -463,7 +512,16 @@ function startClaudeRun(
       emitter.status("running");
       let sawStreamText = false;
       let sawOutputText = false;
-      for await (const message of query) {
+      messageIterator = query[Symbol.asyncIterator]();
+      let drainTerminalSubagents = false;
+      while (true) {
+        const next = await nextClaudeMessage(
+          messageIterator,
+          drainTerminalSubagents ? terminalSubagentDrainTimeoutMs : null,
+        );
+        if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT || next.done) break;
+        const message = next.value;
+        drainTerminalSubagents = false;
         eventBudget.observe(message);
         const record = message as unknown as Record<string, unknown>;
         if (typeof record.session_id === "string" && record.session_id !== sessionId) {
@@ -472,7 +530,14 @@ function startClaudeRun(
         }
         const lifecycle = delegateLifecycle.observe(message);
         subagentTracker.observe(message);
-        if (lifecycle.turnEnded) break;
+        if (
+          lifecycle.turnEnded
+          && message.type !== "result"
+          && !subagentTracker.hasLiveTasks()
+        ) break;
+        if (lifecycle.turnEnded && subagentTracker.hasLiveTasks()) {
+          drainTerminalSubagents = true;
+        }
         if (message.type === "stream_event") {
           const delta = objectValue(objectValue(record.event)?.delta);
           const deltaType = stringValue(delta?.type);
@@ -577,6 +642,8 @@ function startClaudeRun(
           if (usage) {
             emitter.rich({ type: "usage", usage });
           }
+          if (lifecycle.turnEnded && !subagentTracker.hasLiveTasks()) break;
+          if (lifecycle.turnEnded) drainTerminalSubagents = true;
           continue;
         }
       }
@@ -614,6 +681,23 @@ function startClaudeRun(
       cancelPending();
       delegateLifecycle.dispose();
       try { query?.close(); } catch { /* The SDK process may already be closed. */ }
+      if (messageIterator?.return) {
+        let timer: NodeJS.Timeout | undefined;
+        try {
+          const timeout = new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, terminalSubagentDrainTimeoutMs);
+            timer.unref();
+          });
+          await Promise.race([
+            messageIterator.return(),
+            timeout,
+          ]);
+        } catch {
+          // Closing an already-exited SDK iterator is best-effort.
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }
     }
   })();
 

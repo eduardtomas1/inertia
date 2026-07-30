@@ -1089,13 +1089,11 @@ describe("TurnController authoritative lifecycle", () => {
     originalTurnId = queued.turn.id;
     expect(runtime.controller.start(queued.turn.id)).toBe(true);
     expect(runtime.provider.input).toBeNull();
-
     resolveBefore();
     await flushPromises();
     expect(runtime.provider.input?.turnId).toBe(queued.turn.id);
     runtime.provider.resolve({ status: "completed", text: "Captured." });
     await flushPromises();
-
     expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
       status: "completed",
       terminalAssistantMessageId: expect.any(String),
@@ -1104,14 +1102,16 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.controller.cancel(runtime.conversationId)).toBe(false);
     expect(captureObservedTerminal).toBe(true);
     expect(releaseObservedTerminal).toBe(true);
-
+    expect(runtime.events).toContainEqual({
+      type: "conversation.detail.invalidated",
+      conversationId: runtime.conversationId,
+    });
     const followUp = runtime.controller.queue({
       conversationId: runtime.conversationId,
       content: "Do not overtake the exact after-state.",
     });
     expect(runtime.controller.start(followUp.turn.id)).toBe(true);
     expect(runtime.provider.input?.turnId).toBe(queued.turn.id);
-
     resolveAfter();
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(runtime.provider.input?.turnId).toBe(followUp.turn.id);

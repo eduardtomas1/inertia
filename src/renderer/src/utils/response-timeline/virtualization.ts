@@ -38,40 +38,44 @@ export const TIMELINE_MINIMAP_MAX_MARKERS = 48;
 export function estimateTimelineRenderWeight(
   timeline: readonly ResponseTimelineItem[],
 ): number {
-  let weight = 0;
-  for (const item of timeline) {
-    if (item.kind === "compatibility") {
-      const textChars = item.compatibility.messages.reduce(
-        (total, message) => total + message.content.length,
-        0,
-      );
-      const detailChars = item.compatibility.activities.reduce(
-        (total, activity) => total + (activity.detail?.length ?? 0),
-        0,
-      );
-      weight += 1
-        + item.compatibility.messages.length / 8
-        + item.compatibility.activities.length / 24
-        + textChars / 40_000
-        + detailChars / 50_000;
-      continue;
-    }
-    const turn = item.turn;
-    const messageChars = turn.assistantMessages.reduce(
+  return timeline.reduce(
+    (weight, item) => weight + estimateTimelineItemRenderWeight(item),
+    0,
+  );
+}
+
+export function estimateTimelineItemRenderWeight(
+  item: ResponseTimelineItem,
+): number {
+  if (item.kind === "compatibility") {
+    const textChars = item.compatibility.messages.reduce(
       (total, message) => total + message.content.length,
-      turn.userMessage.content.length,
+      0,
     );
-    const detailChars = turn.activities.reduce(
+    const detailChars = item.compatibility.activities.reduce(
       (total, activity) => total + (activity.detail?.length ?? 0),
       0,
     );
-    weight += 1
-      + turn.assistantMessages.length / 8
-      + turn.activities.length / 24
-      + messageChars / 40_000
+    return 1
+      + item.compatibility.messages.length / 8
+      + item.compatibility.activities.length / 24
+      + textChars / 40_000
       + detailChars / 50_000;
   }
-  return weight;
+  const turn = item.turn;
+  const messageChars = turn.assistantMessages.reduce(
+    (total, message) => total + message.content.length,
+    turn.userMessage.content.length,
+  );
+  const detailChars = turn.activities.reduce(
+    (total, activity) => total + (activity.detail?.length ?? 0),
+    0,
+  );
+  return 1
+    + turn.assistantMessages.length / 8
+    + turn.activities.length / 24
+    + messageChars / 40_000
+    + detailChars / 50_000;
 }
 
 export function shouldVirtualizeTimeline(

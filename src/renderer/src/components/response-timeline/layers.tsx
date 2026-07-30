@@ -1,10 +1,16 @@
 import { useRef, useState } from "react";
 import {
-  Paperclip,
+  FileText,
+  Image as ImageIcon,
   RotateCcw,
 } from "lucide-react";
 import clsx from "clsx";
-import type { ChatMessage } from "@shared/contracts";
+import {
+  chatAttachmentKind,
+  chatAttachmentTypeLabel,
+  type ChatMessage,
+  type SubagentTrace,
+} from "@shared/contracts";
 import { formatClockTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
 import {
@@ -86,17 +92,23 @@ export function UserRequestLayer({
       )}
       {turn.userMessage.attachments.length > 0 && (
         <ul className="message-attachments turn-user-request-context" aria-label="Request context">
-          {turn.userMessage.attachments.map((attachment) => (
-            <li
-              className="turn-user-request-context-chip"
-              data-request-context-kind="image"
-              key={attachment.id}
-              title={`Image · ${attachment.name}`}
-            >
-              <Paperclip size={12} aria-hidden="true" />
-              <span>Image · {attachment.name}</span>
-            </li>
-          ))}
+          {turn.userMessage.attachments.map((attachment) => {
+            const kind = chatAttachmentKind(attachment.mimeType);
+            const typeLabel = chatAttachmentTypeLabel(attachment.mimeType);
+            return (
+              <li
+                className="turn-user-request-context-chip"
+                data-request-context-kind={kind}
+                key={attachment.id}
+                title={`${typeLabel} · ${attachment.name}`}
+              >
+                {kind === "image"
+                  ? <ImageIcon size={12} aria-hidden="true" />
+                  : <FileText size={12} aria-hidden="true" />}
+                <span>{typeLabel} · {attachment.name}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </article>
@@ -106,6 +118,7 @@ export function UserRequestLayer({
 export function AgentExecutionLayer({
   turn,
   props,
+  subagents,
   providerLabel,
   reasoningContent,
   liveContent,
@@ -116,6 +129,7 @@ export function AgentExecutionLayer({
 }: {
   turn: ResponseTurn;
   props: ResponseTimelineProps;
+  subagents: SubagentTrace[];
   providerLabel: string;
   reasoningContent: string;
   liveContent: string;
@@ -125,9 +139,6 @@ export function AgentExecutionLayer({
   onAfterToggle?: () => void;
 }): React.JSX.Element {
   const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
-  const subagents = (props.subagents ?? []).filter(
-    ({ turnId }) => turnId === turn.agentTurn.id,
-  );
   const statusLabel = turn.agentTurn.status === "queued"
     ? `${providerLabel} is queued`
     : turn.agentTurn.status === "starting"

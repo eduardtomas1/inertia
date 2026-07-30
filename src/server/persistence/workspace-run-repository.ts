@@ -103,6 +103,16 @@ export class WorkspaceRunRepository {
     return workspaceRunFromRow(row);
   }
 
+  forConversation(conversationId: string): WorkspaceRun[] {
+    this.context.requireConversation(conversationId);
+    return (this.context.database.prepare(`
+      SELECT * FROM workspace_runs
+      WHERE conversation_id = ?
+      ORDER BY started_at DESC, id ASC
+      LIMIT 200
+    `).all(conversationId) as WorkspaceRunRow[]).map(workspaceRunFromRow);
+  }
+
   hasActiveForProject(projectId: string): boolean {
     this.context.requireProject(projectId);
     return Boolean(this.context.database.prepare(`

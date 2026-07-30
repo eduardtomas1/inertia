@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+  AgentTurn,
   Conversation,
   ConversationDetail,
   ConversationDetailResult,
   ConversationDetailViewState,
   ConversationShell,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import {
+  continuationIdentityForSelection,
+  nativeModelSelection,
+} from "../../src/shared/model-routing";
 import {
   mergeConversationShell,
   resolveConversationDetail,
@@ -77,6 +81,40 @@ const detail: ConversationDetail = {
   reviewNotes: [],
 };
 
+const agentTurn: AgentTurn = {
+  id: "turn-1",
+  conversationId: conversation.id,
+  runId: "run-1",
+  userMessageId: "message-1",
+  terminalAssistantMessageId: null,
+  providerId: conversation.providerId,
+  modelSelection: conversation.modelSelection,
+  continuationIdentity: continuationIdentityForSelection(
+    conversation.modelSelection,
+  ),
+  harnessId: conversation.modelSelection.harnessId,
+  backendProfileId: conversation.modelSelection.backendProfileId,
+  model: conversation.model,
+  modelAlias: null,
+  reasoningEffort: conversation.reasoningEffort,
+  interactionMode: conversation.interactionMode,
+  accessMode: conversation.accessMode,
+  providerSessionBefore: null,
+  providerSessionAfter: null,
+  requestedAt: conversation.createdAt,
+  startedAt: conversation.createdAt,
+  completedAt: null,
+  status: "running",
+  terminalReason: null,
+  checkpointId: null,
+  usageAtStart: null,
+  usageAtCompletion: null,
+  configurationRevision: 1,
+  association: "authoritative",
+  createdAt: conversation.createdAt,
+  updatedAt: conversation.createdAt,
+};
+
 function result(
   state: ConversationDetailResult["state"],
   conversationId = conversation.id,
@@ -99,6 +137,42 @@ describe("conversation detail projection", () => {
       completedAt: shell.completedAt,
     });
     expect(merged.messages).toEqual(detail.messages);
+  });
+
+  it("projects the latest shell lifecycle onto an already-loaded turn", () => {
+    const updatedAt = "2026-07-25T10:00:30.000Z";
+    const blockedShell: ConversationShell = {
+      ...shell,
+      status: "needs-input",
+      attentionKind: "approval",
+      latestTurn: {
+        id: agentTurn.id,
+        runId: agentTurn.runId,
+        status: "waiting-for-approval",
+        providerId: agentTurn.providerId,
+        harnessId: agentTurn.harnessId,
+        backendProfileId: agentTurn.backendProfileId,
+        modelSelection: agentTurn.modelSelection,
+        continuationIdentity: agentTurn.continuationIdentity,
+        model: agentTurn.model,
+        reasoningEffort: agentTurn.reasoningEffort,
+        requestedAt: agentTurn.requestedAt,
+        startedAt: agentTurn.startedAt,
+        completedAt: null,
+        terminalReason: null,
+        updatedAt,
+      },
+    };
+    const loadedDetail = { ...detail, agentTurns: [agentTurn] };
+    const merged = mergeConversationShell(loadedDetail, blockedShell);
+
+    expect(merged.agentTurns).not.toBe(loadedDetail.agentTurns);
+    expect(merged.agentTurns[0]).toMatchObject({
+      id: agentTurn.id,
+      status: "waiting-for-approval",
+      updatedAt,
+    });
+    expect(merged.messages).toBe(loadedDetail.messages);
   });
 
   it("resolves a matching load and ignores a stale response from another conversation", () => {

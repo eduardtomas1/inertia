@@ -32,7 +32,7 @@ test("launches two truthful routes into a cross-project split", async (
   await sidebar.getByRole("button", { name: "Launch two chats" }).click();
 
   const dialog = page.getByRole("dialog", {
-    name: "Launch two perspectives",
+    name: "Launch a duo",
   });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Ready", { exact: true })).toHaveCount(2);

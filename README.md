@@ -63,7 +63,7 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - Codex-native goals and Inertia-local objectives keep their source visible, while next-turn skills stay route-bound and never expose provider paths or contents.
 - Each completed request keeps its original agent, model backend, and model attribution together with a turn-specific before-and-after Git record, when available, that remains useful after the workspace moves on.
 - Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
-- Long transcripts keep stable rows and load their heavier detail separately, while incremental runtime updates resume safely after a restart.
+- Long transcripts keep stable rows, preview distant requests from the conversation minimap, and load heavier detail only when opened, while bounded runtime updates resume safely after a restart.
 - The transcript follows live work only while you are near the bottom, so reading earlier context is not interrupted.
 - Provider-reported delegated work remains attached to its parent turn. The Goal panel preserves the real hierarchy; **Guide parent** prepares an ordinary parent follow-up, while direct Stop appears only for supported live Claude tasks.
 
@@ -130,13 +130,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.14
+### Version 0.0.15
 
-This release makes parallel work fast without blurring ownership. Duo launches two independently configured agent chats from one prompt, while the Goal workspace brings truthful goals, route-bound skills, and provider-reported delegated agents into the same calm control surface.
+This release keeps long, tool-heavy conversations responsive by replacing repeated full transcript reloads with bounded live projections, incremental timeline work, content-aware virtualization, and lower-amplification durable streaming. The minimap now previews user requests so distant turns are easier to recognize.
 
-Long, activity-heavy conversations now virtualize by real render weight, closed execution details leave the DOM, and streaming is coalesced without sacrificing durable ordering. Cross-project splits, Git and filesystem actions, provider interactions, attachments, previews, and process cleanup also received a broad lifecycle and security hardening pass.
+Claude SDK completion and delegated-task ordering are bounded and truthful, failed refreshes keep the last ready conversation visible, and live commentary, activity, plans, follow-ups, and blocked turn states remain present until authoritative history catches up. Duo setup also has clearer contrast and unclipped model selection.
 
-Download [Inertia v0.0.14](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.14):
+Download [Inertia v0.0.15](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.15):
 
 | Platform | Download |
 | --- | --- |

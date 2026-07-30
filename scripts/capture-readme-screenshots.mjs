@@ -658,7 +658,7 @@ try {
   });
   await sidebar.getByRole("button", { name: "Launch two chats" }).click();
   const duo = page.getByRole("dialog", {
-    name: "Launch two perspectives",
+    name: "Launch a duo",
   });
   await duo.getByRole("textbox", { name: "Shared prompt" }).fill(
     "Review the same implementation independently and compare the safest path.",

@@ -4,6 +4,40 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.15 — 2026-07-30
+
+### Long conversations stay responsive
+
+- Live provider activity now updates conversations through bounded shell, message, commentary, and run projections instead of repeatedly reloading the complete runtime snapshot and transcript.
+- Timeline construction reuses stable message, plan, activity, and subagent inputs, estimates render weight incrementally, and limits elapsed clocks to visible active work.
+- Historical execution details stay out of the DOM until opened, while activity-heavy conversations virtualize from their real content weight instead of waiting for a fixed turn count.
+- Scroll-anchor restoration is time-bounded, and the long-conversation minimap previews each user request on hover or keyboard focus so distant turns are easier to recognize.
+
+### Durable streaming with less write amplification
+
+- Streaming commentary persists before it is shown, but coalesces appends on a measured 240 ms cadence instead of rewriting a growing message roughly every animation interval.
+- Message, conversation, execution-ledger, workspace-run, and snapshot updates retain authoritative ordering across terminal settlement, renderer reconnects, follow-ups, and restart recovery.
+- Live commentary, activities, subagent traces, and terminal text remain visible until authoritative detail has actually hydrated them, including when a refresh times out or disconnects.
+- Approval and provider-question lifecycle changes project into an already loaded turn without replacing its transcript or restoring full-detail reload churn.
+
+### Claude and Duo finish cleanly
+
+- Claude SDK turns settle when the authoritative final result arrives instead of waiting indefinitely for optional idle behavior.
+- Delegated Claude work tolerates roster and terminal-notification reordering, consumes the terminal edge when it exists, and uses bounded quiet and iterator-cleanup fallbacks when it does not.
+- Follow-up messages stay inside the active turn without duplicating the visible assistant prefix.
+- Duo setup has stronger hierarchy and contrast, clearer Route A and Route B ownership, and model palettes that remain visible and keyboard-operable outside their route cards.
+
+### Small details remain truthful
+
+- Persisted plans remain available in both primary and split Plan panels after hydration and unrelated shell updates.
+- Historical attachments distinguish images, PDFs, and other documents instead of relabeling every attachment as an image.
+- Saved prompt previews safely truncate long unbroken text while preserving the full prompt in an accessible tooltip.
+- Failed background refreshes preserve the last ready conversation instead of replacing it with a passive “request took too long” reload state.
+
+### Release confidence
+
+- Architecture checks, lint, four TypeScript projects, unit and integration coverage, portable provider contracts, Electron E2E, production dependency audit, three-OS packaging, package smoke, Electron fuse verification, checksums, and provenance protect the release.
+
 ## 0.0.14 — 2026-07-29
 
 ### Two agent perspectives from one prompt

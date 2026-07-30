@@ -188,7 +188,7 @@ describe("runtime sequence helpers", () => {
     });
   });
 
-  it("replays bounded conversation shells globally and keeps commentary private", () => {
+  it("replays bounded shells globally and scopes detail invalidations and commentary", () => {
     const sequencer = new RuntimeSequencer({ runtimeGeneration: GENERATION });
     const shell = sequencer.commit(() => ({
       type: "conversation.shell.updated",
@@ -207,9 +207,17 @@ describe("runtime sequence helpers", () => {
         createdAt: "2026-07-30T12:00:01.000Z",
       },
     }));
+    const invalidated = sequencer.commit(() => ({
+      type: "conversation.detail.invalidated",
+      conversationId: CONVERSATION_B,
+    }));
 
     expect(runtimeMutationScope(shell.event)).toEqual({ kind: "shell" });
     expect(runtimeMutationScope(commentary.event)).toEqual({
+      kind: "conversation-detail",
+      conversationId: CONVERSATION_B,
+    });
+    expect(runtimeMutationScope(invalidated.event)).toEqual({
       kind: "conversation-detail",
       conversationId: CONVERSATION_B,
     });
@@ -221,6 +229,12 @@ describe("runtime sequence helpers", () => {
     })).toEqual({
       type: "runtime.cursor",
       sync: commentary.sync,
+    });
+    expect(projectRuntimeFrame(invalidated, {
+      conversationIds: [CONVERSATION_A],
+    })).toEqual({
+      type: "runtime.cursor",
+      sync: invalidated.sync,
     });
   });
 

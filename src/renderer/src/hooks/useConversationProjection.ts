@@ -186,17 +186,21 @@ export function useConversationProjection({
         ));
     }).catch((error) => {
       if (generation !== requestGenerationRef.current) return;
-      setDetailState({
-        kind: "conversation.detail",
-        conversationId,
-        state: "failed",
-        message: error instanceof Error
-          ? error.message
-          : "This chat could not be loaded.",
-      });
+      setDetailState((current) => (
+        current?.conversationId === conversationId
+        && current.state === "ready"
+          ? current
+          : {
+              kind: "conversation.detail",
+              conversationId,
+              state: "failed",
+              message: error instanceof Error
+                ? error.message
+                : "This chat could not be loaded.",
+            }
+      ));
     });
   }, [
-    conversation?.latestTurn?.updatedAt,
     detailRefresh,
     conversationId,
     request,
@@ -319,15 +323,10 @@ export function useConversationProjection({
       setNativePlans({});
       return;
     }
-    if (event.type === "snapshot.updated") {
-      const nextConversation = event.snapshot.conversations.find(
-        ({ id }) => id === activeConversation?.id,
-      );
+    if (event.type === "conversation.detail.invalidated") {
       if (
         projectionEnabled
-        && activeConversation
-        && nextConversation
-        && nextConversation.updatedAt !== activeConversation.updatedAt
+        && event.conversationId === activeConversation?.id
       ) {
         setDetailRefresh((current) => current + 1);
       }

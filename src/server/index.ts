@@ -529,6 +529,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         attachmentResolver,
         workflows: agentWorkflows,
         providerInfo: () => providerInfo,
+        broadcast,
         broadcastSnapshot,
         send,
       }),

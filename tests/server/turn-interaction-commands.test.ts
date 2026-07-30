@@ -127,6 +127,7 @@ function dependencies(options: {
         options.assertTurnSkillsCurrent ?? vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["workflows"],
     providerInfo: () => [provider],
+    broadcast: vi.fn(),
     broadcastSnapshot: vi.fn(),
     send: vi.fn(),
   };
@@ -241,6 +242,10 @@ describe("message attachment ownership transfer", () => {
       vi.mocked(handlerDependencies.workflows.assertTurnSkillsCurrent)
         .mock.invocationCallOrder[0],
     ).toBeLessThan(queue.mock.invocationCallOrder[0]!);
+    expect(handlerDependencies.broadcast).toHaveBeenCalledWith({
+      type: "conversation.detail.invalidated",
+      conversationId,
+    });
   });
 
   it("rejects a changed skill route before persisting its checkpoint", async () => {

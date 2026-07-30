@@ -11,7 +11,10 @@ import {
   type ConversationShell,
   type ServerEvent,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import {
+  continuationIdentityForSelection,
+  nativeModelSelection,
+} from "../../src/shared/model-routing";
 import { useConversationProjection } from "../../src/renderer/src/hooks/useConversationProjection";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 
@@ -196,7 +199,7 @@ describe("useConversationProjection pending interactions", () => {
     expect(source.subscribe).toHaveBeenCalledTimes(1);
   });
 
-  it("reloads authoritative durable changes without rebinding the runtime listener", async () => {
+  it("reloads only explicit authoritative detail invalidations without rebinding", async () => {
     const source = createEventSource();
     let messages: ChatMessage[] = [];
     const request = vi.fn(async (
@@ -257,14 +260,8 @@ describe("useConversationProjection pending interactions", () => {
       createdAt: "2026-07-28T12:01:00.000Z",
     }];
     source.emit({
-      type: "snapshot.updated",
-      snapshot: {
-        ...snapshot,
-        conversations: snapshot.conversations.map((item) =>
-          item.id === primaryId
-            ? { ...item, updatedAt: "2026-07-28T12:01:00.000Z" }
-            : item),
-      },
+      type: "conversation.detail.invalidated",
+      conversationId: primaryId,
     });
 
     await waitFor(() =>
@@ -272,6 +269,165 @@ describe("useConversationProjection pending interactions", () => {
     expect(source.subscribe).toHaveBeenCalledTimes(1);
     expect(request.mock.calls.filter(([command]) =>
       command.type === "conversation.detail.load")).toHaveLength(2);
+  });
+
+  it("does not reload an open thread for unrelated full-snapshot refreshes", async () => {
+    const source = createEventSource();
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : {
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        });
+    const hook = renderHook(
+      ({ currentSnapshot }: { currentSnapshot: AppSnapshot }) =>
+        useConversationProjection({
+          snapshot: currentSnapshot,
+          status: "online",
+          request,
+          subscribe: source.subscribe,
+          enabled: true,
+          autoOpenPlan: false,
+          onOpenPlan: vi.fn(),
+          onTerminal: vi.fn(),
+        }),
+      { initialProps: { currentSnapshot: snapshot } },
+    );
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+
+    const latestSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "default",
+      reasoningEffort: "medium",
+    });
+    const refreshedSnapshot: AppSnapshot = {
+      ...snapshot,
+      conversations: snapshot.conversations.map((item) =>
+        item.id === primaryId
+          ? {
+              ...item,
+              updatedAt: "2026-07-28T12:01:00.000Z",
+              latestTurn: {
+                id: `${primaryId}-turn`,
+                runId: `${primaryId}-run`,
+                providerId: "codex",
+                harnessId: latestSelection.harnessId,
+                backendProfileId: latestSelection.backendProfileId,
+                modelSelection: latestSelection,
+                continuationIdentity:
+                  continuationIdentityForSelection(latestSelection),
+                model: "default",
+                reasoningEffort: "medium",
+                status: "running",
+                requestedAt: "2026-07-28T12:00:30.000Z",
+                startedAt: "2026-07-28T12:00:31.000Z",
+                completedAt: null,
+                terminalReason: null,
+                updatedAt: "2026-07-28T12:01:00.000Z",
+              },
+            }
+          : item),
+    };
+    source.emit({
+      type: "snapshot.updated",
+      snapshot: refreshedSnapshot,
+    });
+    hook.rerender({ currentSnapshot: refreshedSnapshot });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(hook.result.current.detailState?.state).toBe("ready");
+    expect(request.mock.calls.filter(([command]) =>
+      command.type === "conversation.detail.load")).toHaveLength(1);
+  });
+
+  it("keeps the last ready thread visible when a refresh request times out", async () => {
+    const source = createEventSource();
+    let detailLoads = 0;
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type !== "conversation.detail.load") {
+        return {
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        };
+      }
+      detailLoads += 1;
+      if (detailLoads > 1) {
+        throw new Error("The request took too long to complete.");
+      }
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "conversation.detail",
+          conversationId: primaryId,
+          state: "ready",
+          detail: {
+            conversation: conversation(primaryId),
+            agentTurns: [],
+            turnGitArtifacts: [],
+            messages: [],
+            activities: [],
+            subagents: [],
+            reasonings: [],
+            usage: [],
+            plans: [],
+            goals: [],
+            checkpoints: [],
+            reviewSummaries: [],
+            reviewStates: [],
+            reviewNotes: [],
+          },
+        },
+      };
+    });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detailState?.state).toBe("ready"));
+
+    source.emit({
+      type: "conversation.detail.invalidated",
+      conversationId: primaryId,
+    });
+
+    await waitFor(() => expect(detailLoads).toBe(2));
+    expect(hook.result.current.detailState?.state).toBe("ready");
+    expect(hook.result.current.detail).not.toBeNull();
   });
 
   it("does not reload detail for bounded activity-shell refreshes", async () => {

@@ -53,6 +53,10 @@ export class TurnArtifactSequencer {
       const barrier = Promise.resolve(artifactFinalization)
         .catch(() => undefined)
         .finally(() => {
+          this.options.hooks.broadcast({
+            type: "conversation.detail.invalidated",
+            conversationId: active.conversation.id,
+          });
           if (
             this.options.barriers.get(active.conversation.id) === barrier
           ) {

@@ -177,6 +177,10 @@ export class TurnSettlementCoordinator {
           turnId: active.turn.id,
           message: "The turn could not be finalized cleanly.",
         });
+        this.options.hooks.broadcast({
+          type: "conversation.detail.invalidated",
+          conversationId: active.conversation.id,
+        });
         this.options.hooks.broadcastSnapshot();
       } catch {
         // A renderer connection must not keep the controller wedged.
@@ -277,6 +281,10 @@ export class TurnSettlementCoordinator {
         turnId: active.turn.id,
       });
     }
+    this.options.hooks.broadcast({
+      type: "conversation.detail.invalidated",
+      conversationId: active.conversation.id,
+    });
     this.options.hooks.broadcastSnapshot();
 
     // Optional repository materialization is deliberately downstream of the

@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   BUILD_MODE_INSTRUCTION,
+  MAX_EXECUTION_PAYLOAD_BYTES,
   assembleTurnRequest,
   parseSanitizedTurnExecutionManifest,
   validateExecutionContextReference,
@@ -295,6 +296,30 @@ describe("bounded structured turn request context", () => {
     expect(JSON.stringify(result.persistence.manifest)).not.toContain(
       documentPath,
     );
+  });
+
+  it("fits the shared multi-document budget beside the largest message and instructions", async () => {
+    const cwd = await workspace();
+    const documents = Array.from({ length: 4 }, (_, index) => ({
+      attachmentId: `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`,
+      label: `Document · brief-${index + 1}.txt`,
+      content: "a".repeat(24 * 1024),
+      truncated: true,
+    }));
+
+    const result = assembleTurnRequest({
+      cwd,
+      visibleContent: "u".repeat(64 * 1024),
+      documentContexts: documents,
+      internalInstructions: [
+        { label: "one", text: "i".repeat(16 * 1024) },
+        { label: "two", text: "j".repeat(16 * 1024) },
+      ],
+    });
+
+    expect(result.persistence.manifest.contextReferenceCount).toBe(4);
+    expect(result.persistence.manifest.assembledPayloadBytes)
+      .toBeLessThanOrEqual(MAX_EXECUTION_PAYLOAD_BYTES);
   });
 
   it("rejects inconsistent manifest totals during privileged debug decoding", () => {

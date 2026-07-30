@@ -7,6 +7,7 @@ import type { ChatAttachment } from "../../../shared/contracts";
 import type { ResolvedAttachmentPayload } from "./trusted-attachment-resolver";
 
 const MAX_DOCUMENT_CONTEXT_BYTES = 64 * 1024;
+export const MAX_DOCUMENT_CONTEXT_TOTAL_BYTES = 96 * 1024;
 const MAX_PDF_PAGES = 80;
 const PDF_EXTRACTION_TIMEOUT_MS = 12_000;
 const require = createRequire(import.meta.url);
@@ -42,16 +43,38 @@ async function loadPdfModule() {
   return pdfjs;
 }
 
-function boundedUtf8(value: string): { value: string; truncated: boolean } {
-  const bytes = Buffer.from(value, "utf8");
-  if (bytes.byteLength <= MAX_DOCUMENT_CONTEXT_BYTES) {
+function jsonStringContentBytes(value: string): number {
+  const encoded = JSON.stringify(value);
+  return Buffer.byteLength(encoded.slice(1, -1), "utf8");
+}
+
+function boundedUtf8(
+  value: string,
+  maximumJsonBytes: number,
+): { value: string; truncated: boolean } {
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (
+    bytes <= MAX_DOCUMENT_CONTEXT_BYTES
+    && jsonStringContentBytes(value) <= maximumJsonBytes
+  ) {
     return { value, truncated: false };
   }
+  let rawBytes = 0;
+  let jsonBytes = 0;
+  let bounded = "";
+  for (const character of value) {
+    const characterRawBytes = Buffer.byteLength(character, "utf8");
+    const characterJsonBytes = jsonStringContentBytes(character);
+    if (
+      rawBytes + characterRawBytes > MAX_DOCUMENT_CONTEXT_BYTES
+      || jsonBytes + characterJsonBytes > maximumJsonBytes
+    ) break;
+    bounded += character;
+    rawBytes += characterRawBytes;
+    jsonBytes += characterJsonBytes;
+  }
   return {
-    value: bytes.subarray(0, MAX_DOCUMENT_CONTEXT_BYTES)
-      .toString("utf8")
-      .replace(/\uFFFD$/u, "")
-      .trimEnd(),
+    value: bounded.trimEnd(),
     truncated: true,
   };
 }
@@ -80,6 +103,7 @@ export function pdfTextItemsToText(items: readonly unknown[]): string {
 async function extractPdfText(
   attachment: ChatAttachment,
   bytes: Uint8Array,
+  maximumJsonBytes: number,
 ): Promise<{ content: string; truncated: boolean }> {
   const { getDocument } = await loadPdfModule();
   const loadingTask = getDocument({
@@ -114,7 +138,7 @@ async function extractPdfText(
       ]);
       const text = pdfTextItemsToText(textContent.items);
       if (text) pages.push(`[Page ${pageNumber}]\n${text}`);
-      const bounded = boundedUtf8(pages.join("\n\n"));
+      const bounded = boundedUtf8(pages.join("\n\n"), maximumJsonBytes);
       if (bounded.truncated) {
         truncated = true;
         return { content: bounded.value, truncated };
@@ -145,6 +169,7 @@ async function extractPdfText(
 function extractTextDocument(
   attachment: ChatAttachment,
   bytes: Uint8Array,
+  maximumJsonBytes: number,
 ): { content: string; truncated: boolean } {
   let content: string;
   try {
@@ -152,7 +177,7 @@ function extractTextDocument(
   } catch {
     throw new Error(`${attachment.name} is not valid UTF-8 text.`);
   }
-  const bounded = boundedUtf8(content.trim());
+  const bounded = boundedUtf8(content.trim(), maximumJsonBytes);
   if (!bounded.value) throw new Error(`${attachment.name} is empty.`);
   return { content: bounded.value, truncated: bounded.truncated };
 }
@@ -160,18 +185,23 @@ function extractTextDocument(
 export async function documentAttachmentContexts(
   payloads: readonly ResolvedAttachmentPayload[],
 ): Promise<DocumentAttachmentContext[]> {
-  return await Promise.all(payloads.flatMap((payload) =>
+  const documents = payloads.flatMap((payload) =>
     payload.attachment.mimeType.startsWith("image/")
       ? []
-      : [payload]).map(async ({ attachment, bytes }) => {
-        const extracted = attachment.mimeType === "application/pdf"
-          ? await extractPdfText(attachment, bytes)
-          : extractTextDocument(attachment, bytes);
-        return {
-          attachmentId: attachment.id,
-          label: `${attachment.mimeType === "application/pdf" ? "PDF" : "Document"} · ${attachment.name}`,
-          content: extracted.content,
-          truncated: extracted.truncated,
-        };
-      }));
+      : [payload]);
+  if (documents.length === 0) return [];
+  const maximumJsonBytes = Math.floor(
+    MAX_DOCUMENT_CONTEXT_TOTAL_BYTES / documents.length,
+  );
+  return await Promise.all(documents.map(async ({ attachment, bytes }) => {
+    const extracted = attachment.mimeType === "application/pdf"
+      ? await extractPdfText(attachment, bytes, maximumJsonBytes)
+      : extractTextDocument(attachment, bytes, maximumJsonBytes);
+    return {
+      attachmentId: attachment.id,
+      label: `${attachment.mimeType === "application/pdf" ? "PDF" : "Document"} · ${attachment.name}`,
+      content: extracted.content,
+      truncated: extracted.truncated,
+    };
+  }));
 }

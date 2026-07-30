@@ -96,6 +96,27 @@ describe("document attachment execution context", () => {
     }]);
   });
 
+  it("shares one bounded payload budget across multiple documents", async () => {
+    const documents = Array.from({ length: 4 }, (_, index) => ({
+      attachment: attachment({
+        id: `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`,
+        name: `brief-${index + 1}.txt`,
+        mimeType: "text/plain" as const,
+      }),
+      bytes: Buffer.from(`Document ${index + 1}\n${"a".repeat(64 * 1024)}`),
+    }));
+
+    const contexts = await documentAttachmentContexts(documents);
+
+    expect(contexts).toHaveLength(4);
+    expect(contexts.every(({ truncated }) => truncated)).toBe(true);
+    expect(contexts.reduce(
+      (total, { content }) =>
+        total + Buffer.byteLength(JSON.stringify(content).slice(1, -1), "utf8"),
+      0,
+    )).toBeLessThanOrEqual(96 * 1024);
+  });
+
   it("rejects PDFs without selectable text instead of pretending they were read", async () => {
     const blank = pdfWithText(" ");
     await expect(documentAttachmentContexts([{

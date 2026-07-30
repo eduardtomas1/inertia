@@ -17,7 +17,10 @@ import type {
   TurnRequestContext,
 } from "../../../shared/contracts";
 import { chatAttachmentKind } from "../../../shared/attachments";
-import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
+import {
+  MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
+  type DocumentAttachmentContext,
+} from "../attachments/document-attachment-context";
 
 export const MAX_EXECUTION_CONTEXT_REFERENCES = 32;
 export const MAX_EXECUTION_MESSAGE_SEGMENTS = 48;
@@ -390,6 +393,14 @@ function materializeContext(
   }
   if ((context.reviewNotes?.length ?? 0) > 16) {
     throw new Error("Execution context contains too many review notes.");
+  }
+  const documentContextBytes = documents.reduce(
+    (total, document) =>
+      total + byteLength(JSON.stringify(document.content).slice(1, -1)),
+    0,
+  );
+  if (documentContextBytes > MAX_DOCUMENT_CONTEXT_TOTAL_BYTES) {
+    throw new Error("Document attachments exceed the shared turn context limit.");
   }
   const materialized = documents.map((document): MaterializedContext => ({
     kind: "attachment",

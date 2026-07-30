@@ -7,6 +7,8 @@ import {
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 
+import { pdfCanvasLayout } from "../utils/pdfCanvasLayout";
+
 interface PdfAttachmentPreviewProps {
   source: string;
   title: string;
@@ -88,19 +90,19 @@ export function PdfAttachmentPreview({
     void document.getPage(pageNumber).then(async (page) => {
       if (cancelled) return;
       const baseline = page.getViewport({ scale: 1 });
-      const displayScale = Math.min(
-        1.65,
-        Math.max(0.45, (stageWidth - 40) / baseline.width),
-      );
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-      const viewport = page.getViewport({ scale: displayScale });
-      const renderViewport = page.getViewport({
-        scale: displayScale * pixelRatio,
+      const layout = pdfCanvasLayout({
+        pageWidth: baseline.width,
+        pageHeight: baseline.height,
+        stageWidth,
+        pixelRatio: window.devicePixelRatio,
       });
-      canvas.width = Math.ceil(renderViewport.width);
-      canvas.height = Math.ceil(renderViewport.height);
-      canvas.style.width = `${Math.ceil(viewport.width)}px`;
-      canvas.style.height = `${Math.ceil(viewport.height)}px`;
+      const renderViewport = page.getViewport({
+        scale: layout.renderScale,
+      });
+      canvas.width = layout.canvasWidth;
+      canvas.height = layout.canvasHeight;
+      canvas.style.width = `${layout.displayWidth}px`;
+      canvas.style.height = `${layout.displayHeight}px`;
       const context = canvas.getContext("2d", { alpha: false });
       if (!context) throw new Error("Canvas is unavailable.");
       const render = page.render({

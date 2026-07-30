@@ -58,6 +58,17 @@ describe("document attachment execution context", () => {
     ])).toBe("example word,\nnext line");
   });
 
+  it("stops converting PDF text items at the per-document boundary", () => {
+    const text = pdfTextItemsToText(Array.from(
+      { length: 100_000 },
+      (_, index) => ({ str: `token-${index} `, hasEOL: false }),
+    ));
+
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(64 * 1024);
+    expect(text).toContain("token-0");
+    expect(text).not.toContain("token-99999");
+  });
+
   it("extracts bounded PDF text without exposing the private source path", async () => {
     const pdf = attachment({});
     const contexts = await documentAttachmentContexts([{

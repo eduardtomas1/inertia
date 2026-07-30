@@ -48,6 +48,43 @@ function jsonStringContentBytes(value: string): number {
   return Buffer.byteLength(encoded.slice(1, -1), "utf8");
 }
 
+interface BoundedTextAccumulator {
+  append(value: string): boolean;
+  content(): string;
+}
+
+function boundedTextAccumulator(
+  maximumJsonBytes: number,
+): BoundedTextAccumulator {
+  const chunks: string[] = [];
+  let rawBytes = 0;
+  let jsonBytes = 0;
+  return {
+    append(value) {
+      let chunk = "";
+      for (const character of value) {
+        const characterRawBytes = Buffer.byteLength(character, "utf8");
+        const characterJsonBytes = jsonStringContentBytes(character);
+        if (
+          rawBytes + characterRawBytes > MAX_DOCUMENT_CONTEXT_BYTES
+          || jsonBytes + characterJsonBytes > maximumJsonBytes
+        ) {
+          if (chunk) chunks.push(chunk);
+          return false;
+        }
+        chunk += character;
+        rawBytes += characterRawBytes;
+        jsonBytes += characterJsonBytes;
+      }
+      if (chunk) chunks.push(chunk);
+      return true;
+    },
+    content() {
+      return chunks.join("").trim();
+    },
+  };
+}
+
 function boundedUtf8(
   value: string,
   maximumJsonBytes: number,
@@ -59,29 +96,16 @@ function boundedUtf8(
   ) {
     return { value, truncated: false };
   }
-  let rawBytes = 0;
-  let jsonBytes = 0;
-  let bounded = "";
-  for (const character of value) {
-    const characterRawBytes = Buffer.byteLength(character, "utf8");
-    const characterJsonBytes = jsonStringContentBytes(character);
-    if (
-      rawBytes + characterRawBytes > MAX_DOCUMENT_CONTEXT_BYTES
-      || jsonBytes + characterJsonBytes > maximumJsonBytes
-    ) break;
-    bounded += character;
-    rawBytes += characterRawBytes;
-    jsonBytes += characterJsonBytes;
-  }
+  const accumulator = boundedTextAccumulator(maximumJsonBytes);
+  accumulator.append(value);
   return {
-    value: bounded.trimEnd(),
+    value: accumulator.content(),
     truncated: true,
   };
 }
 
 export function pdfTextItemsToText(items: readonly unknown[]): string {
-  const lines: string[] = [];
-  let line = "";
+  const accumulator = boundedTextAccumulator(MAX_DOCUMENT_CONTEXT_BYTES);
   for (const item of items) {
     if (
       typeof item !== "object"
@@ -90,14 +114,10 @@ export function pdfTextItemsToText(items: readonly unknown[]): string {
       || typeof (item as Partial<TextItem>).str !== "string"
     ) continue;
     const textItem = item as TextItem;
-    line += textItem.str;
-    if (textItem.hasEOL) {
-      lines.push(line);
-      line = "";
-    }
+    if (!accumulator.append(textItem.str)) break;
+    if (textItem.hasEOL && !accumulator.append("\n")) break;
   }
-  if (line) lines.push(line);
-  return lines.join("\n").trim();
+  return accumulator.content();
 }
 
 async function extractPdfText(
@@ -106,6 +126,7 @@ async function extractPdfText(
   maximumJsonBytes: number,
 ): Promise<{ content: string; truncated: boolean }> {
   const { getDocument } = await loadPdfModule();
+  const deadline = Date.now() + PDF_EXTRACTION_TIMEOUT_MS;
   const loadingTask = getDocument({
     data: new Uint8Array(bytes),
     disableFontFace: true,
@@ -125,26 +146,68 @@ async function extractPdfText(
     });
     const document = await Promise.race([loadingTask.promise, timeoutPromise]);
     const pageLimit = Math.min(document.numPages, MAX_PDF_PAGES);
-    const pages: string[] = [];
+    const accumulator = boundedTextAccumulator(maximumJsonBytes);
+    let hasSelectableText = false;
     let truncated = document.numPages > pageLimit;
     for (let pageNumber = 1; pageNumber <= pageLimit; pageNumber += 1) {
       const page = await Promise.race([
         document.getPage(pageNumber),
         timeoutPromise,
       ]);
-      const textContent = await Promise.race([
-        page.getTextContent(),
-        timeoutPromise,
-      ]);
-      const text = pdfTextItemsToText(textContent.items);
-      if (text) pages.push(`[Page ${pageNumber}]\n${text}`);
-      const bounded = boundedUtf8(pages.join("\n\n"), maximumJsonBytes);
-      if (bounded.truncated) {
-        truncated = true;
-        return { content: bounded.value, truncated };
+      const reader = page.streamTextContent().getReader();
+      let streamDone = false;
+      let pageStarted = false;
+      try {
+        while (!streamDone) {
+          const chunk = await Promise.race([
+            reader.read(),
+            timeoutPromise,
+          ]);
+          streamDone = chunk.done;
+          if (streamDone) break;
+          const items = (chunk.value as { items?: readonly unknown[] }).items;
+          if (!Array.isArray(items)) continue;
+          for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+            if (
+              itemIndex % 256 === 0
+              && Date.now() >= deadline
+            ) {
+              void loadingTask.destroy();
+              throw new Error("PDF text extraction timed out.");
+            }
+            const item = items[itemIndex];
+            if (
+              typeof item !== "object"
+              || item === null
+              || !("str" in item)
+              || typeof (item as Partial<TextItem>).str !== "string"
+            ) continue;
+            const textItem = item as TextItem;
+            let text = textItem.str;
+            if (!pageStarted) {
+              text = text.trimStart();
+              if (!text) continue;
+              const prefix = `${hasSelectableText ? "\n\n" : ""}[Page ${pageNumber}]\n`;
+              if (!accumulator.append(prefix)) {
+                return { content: accumulator.content(), truncated: true };
+              }
+              pageStarted = true;
+              hasSelectableText = true;
+            }
+            if (!accumulator.append(text)) {
+              return { content: accumulator.content(), truncated: true };
+            }
+            if (textItem.hasEOL && !accumulator.append("\n")) {
+              return { content: accumulator.content(), truncated: true };
+            }
+          }
+        }
+      } finally {
+        if (!streamDone) void reader.cancel().catch(() => undefined);
+        reader.releaseLock();
       }
     }
-    const content = pages.join("\n\n").trim();
+    const content = accumulator.content();
     if (!content) {
       throw new Error(
         `${attachment.name} has no selectable text. Convert scanned pages to text before attaching it.`,

@@ -126,4 +126,42 @@ describe("useInertiaConnection", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
+
+  it("keeps message delivery pending through bounded document preparation", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection: vi.fn(async () => ({
+          websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+        })),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0]!;
+    vi.useFakeTimers();
+
+    const command = clientCommandSchema.parse({
+      type: "message.send",
+      requestId: "11111111-1111-4111-8111-111111111111",
+      payload: {
+        conversationId: "22222222-2222-4222-8222-222222222222",
+        content: "Inspect the attached document.",
+        attachments: [],
+      },
+    });
+    let timeoutError: unknown;
+    void hook.result.current.sendCommand(command).catch((error: unknown) => {
+      timeoutError = error;
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(timeoutError).toBeUndefined();
+    expect(socket.close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
+    expect(socket.close).toHaveBeenCalledTimes(1);
+  });
 });

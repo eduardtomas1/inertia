@@ -37,6 +37,11 @@ export interface InertiaConnection {
 
 function requestTimeoutMs(command: ClientCommand): number {
   switch (command.type) {
+    case "message.send":
+      // Document sends can spend up to 12 seconds in verified PDF extraction
+      // before route readiness and a bounded Git checkpoint are prepared.
+      // Keep delivery unambiguous across that complete pre-queue boundary.
+      return 75_000;
     case "git.pull":
     case "git.push":
     case "git.commit":

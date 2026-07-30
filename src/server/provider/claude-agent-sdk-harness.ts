@@ -472,7 +472,7 @@ function startClaudeRun(
         }
         const lifecycle = delegateLifecycle.observe(message);
         subagentTracker.observe(message);
-        if (lifecycle.turnEnded) break;
+        if (lifecycle.turnEnded && message.type !== "result") break;
         if (message.type === "stream_event") {
           const delta = objectValue(objectValue(record.event)?.delta);
           const deltaType = stringValue(delta?.type);
@@ -577,6 +577,7 @@ function startClaudeRun(
           if (usage) {
             emitter.rich({ type: "usage", usage });
           }
+          if (lifecycle.turnEnded) break;
           continue;
         }
       }

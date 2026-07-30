@@ -274,7 +274,7 @@ export class TurnController {
       runId: active.turn.runId,
       turnId: active.turn.id,
     });
-    this.hooks.broadcastSnapshot();
+    this.broadcastConversationShell(active);
     active.timeoutTimer = this.scheduler.setTimeout(() => {
       if (active.settled) return;
       this.providers.cancel(active.conversation.id);
@@ -339,7 +339,9 @@ export class TurnController {
       })
         .catch(() => undefined);
       if (this.store.agentTurn(active.turn.id).status === "starting") {
-        if (this.transition(active, "running")) this.hooks.broadcastSnapshot();
+        if (this.transition(active, "running")) {
+          this.broadcastConversationShell(active);
+        }
       }
     } catch (error) {
       if (active.providerRunStarted) {
@@ -719,6 +721,14 @@ export class TurnController {
     active.inputIds.clear();
     this.activeByConversation.delete(active.conversation.id);
     this.activeByTurn.delete(active.turn.id);
+  }
+
+  private broadcastConversationShell(active: ActiveTurn): void {
+    if (this.hooks.broadcastConversationShell) {
+      this.hooks.broadcastConversationShell(active.conversation.id);
+      return;
+    }
+    this.hooks.broadcastSnapshot();
   }
 
   private track(value: void | Promise<void> | undefined): void {

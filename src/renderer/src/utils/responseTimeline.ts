@@ -15,6 +15,7 @@ export {
   buildResponseTimeline,
   shouldConsolidateSettledWorkIntoRunDetails,
   stabilizeResponseTimeline,
+  updateResponseTimelineForActivityDelta,
   type BuildResponseTimelineInput,
   type ResponseTimelineCompatibility,
   type ResponseTimelineItem,
@@ -33,6 +34,7 @@ export {
 export {
   buildTimelineMinimapMarkers,
   estimateCompletedTurnSpacing,
+  estimateTimelineItemRenderWeight,
   estimateTimelineRenderWeight,
   estimateTimelineRowSize,
   resolveTimelineKeyboardIntent,

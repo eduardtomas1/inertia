@@ -603,6 +603,49 @@ describe("Claude Agent SDK harness", () => {
     expect(manager.cachedMetadata("claude").rateLimits).toEqual([]);
   });
 
+  it("settles a final SDK result without waiting for an optional idle edge", async () => {
+    const root = portableFixtureRoot("Claude SDK terminal result");
+    roots.push(root);
+    let releaseIterator!: () => void;
+    const iteratorReleased = new Promise<void>((resolve) => {
+      releaseIterator = resolve;
+    });
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSuccessResult("Sonnet finished", "completed");
+          await iteratorReleased;
+        })(),
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const run = manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-result-without-idle",
+      cwd: root,
+      prompt: "Finish without an idle edge",
+      interactionMode: "build",
+      access: "supervised",
+    }));
+
+    const outcome = await Promise.race([
+      run.then(() => "settled" as const),
+      new Promise<"stalled">((resolve) =>
+        setTimeout(() => resolve("stalled"), 100)),
+    ]);
+    releaseIterator();
+
+    expect(outcome).toBe("settled");
+    await expect(run).resolves.toMatchObject({
+      status: "completed",
+      text: "Sonnet finished",
+    });
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
   it("keeps the run active until delegated work returns, then resumes the same SDK session", async () => {
     const root = portableFixtureRoot("Claude SDK delegated wait");
     roots.push(root);

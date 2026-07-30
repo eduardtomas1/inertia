@@ -152,4 +152,28 @@ export class TranscriptRepository {
       this.context.database.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), message.conversation_id);
     })();
   }
+
+  appendMessageContent(messageId: string, delta: string): void {
+    if (!delta) return;
+    const message = this.context.database.prepare(
+      "SELECT conversation_id FROM messages WHERE id = ?",
+    ).get(messageId) as { conversation_id: string } | undefined;
+    if (!message) throw new RecordNotFoundError("Message not found.");
+    this.context.database.transaction(() => {
+      this.context.database.prepare(
+        "UPDATE messages SET content = content || ? WHERE id = ?",
+      ).run(delta, messageId);
+      this.context.database.prepare(
+        "UPDATE conversations SET updated_at = ? WHERE id = ?",
+      ).run(new Date().toISOString(), message.conversation_id);
+    })();
+  }
+
+  message(messageId: string): ChatMessage {
+    const row = this.context.database.prepare(
+      "SELECT * FROM messages WHERE id = ?",
+    ).get(messageId) as MessageRow | undefined;
+    if (!row) throw new RecordNotFoundError("Message not found.");
+    return messageFromRow(row);
+  }
 }

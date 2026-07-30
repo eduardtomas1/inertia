@@ -235,6 +235,17 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     const minimap = transcript.getByRole("navigation", { name: "Conversation minimap" });
     await expect(minimap).toBeVisible();
     await expect(minimap.getByRole("button")).toHaveCount(48);
+    const firstMinimapMarker = minimap.getByRole("button").first();
+    await expect(firstMinimapMarker).toHaveAttribute(
+      "data-request-preview",
+      "Turn 1 · Virtualized request 0",
+    );
+    await firstMinimapMarker.hover();
+    await expect.poll(() => firstMinimapMarker.evaluate((element) =>
+      getComputedStyle(element, "::after").opacity)).toBe("1");
+    await expect.poll(() => firstMinimapMarker.evaluate((element) =>
+      getComputedStyle(element, "::after").content))
+      .toContain("Virtualized request 0");
     const separation = await page.evaluate(() => {
       const minimapBounds = document.querySelector(".timeline-minimap")?.getBoundingClientRect();
       const visibleTurn = [...document.querySelectorAll<HTMLElement>(".response-turn")]

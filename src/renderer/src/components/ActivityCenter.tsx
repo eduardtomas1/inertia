@@ -28,7 +28,8 @@ import { IconButton } from "./ui";
 
 type ActivityCenterProps = {
   open: boolean;
-  now: number;
+  /** Deterministic clock override for focused renderer tests. */
+  now?: number;
   runs: WorkspaceRun[];
   projects: Project[];
   conversations: Conversation[];
@@ -125,7 +126,7 @@ function RunOperations({
 
 export function ActivityCenter({
   open,
-  now,
+  now: providedNow,
   runs,
   projects,
   conversations,
@@ -140,6 +141,8 @@ export function ActivityCenter({
   onAcknowledge,
   onDismiss,
 }: ActivityCenterProps): React.JSX.Element | null {
+  const [now, setNow] = useState(Date.now());
+  const visibleNow = providedNow ?? now;
   const [expandedFailure, setExpandedFailure] = useState<string | null>(null);
   const [expandedOperations, setExpandedOperations] = useState<Set<string>>(
     () => new Set(),
@@ -148,6 +151,15 @@ export function ActivityCenter({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   useNativePreviewSuspension(open);
+
+  useEffect(() => {
+    if (!open || providedNow !== undefined) return;
+    setNow(Date.now());
+    if (!runs.some(({ status }) =>
+      status === "running" || status === "waiting")) return;
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [open, providedNow, runs]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -194,8 +206,8 @@ export function ActivityCenter({
   }, [open]);
 
   const presentation = useMemo(
-    () => activityRunPresentation(runs, now),
-    [now, runs],
+    () => activityRunPresentation(runs, visibleNow),
+    [runs, visibleNow],
   );
   const { sections, summary } = presentation;
   if (!open) return null;
@@ -286,7 +298,7 @@ export function ActivityCenter({
                             {run.attentionState === "unseen" && <span className="activity-unread-state">New</span>}
                           </small>
                         </span>
-                        <time dateTime={run.startedAt}>{activityStatusLabel(run, now, waitingKind)}</time>
+                        <time dateTime={run.startedAt}>{activityStatusLabel(run, visibleNow, waitingKind)}</time>
                       </div>
                       {operationGroup && operationGroup.all.length > 0 && (
                         <RunOperations

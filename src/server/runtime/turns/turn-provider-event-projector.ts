@@ -52,6 +52,14 @@ function projectedNativeGoalMatches(
 export class TurnProviderEventProjector {
   constructor(private readonly options: TurnProviderEventProjectorOptions) {}
 
+  private broadcastConversationShell(active: ActiveTurn): void {
+    if (this.options.hooks.broadcastConversationShell) {
+      this.options.hooks.broadcastConversationShell(active.conversation.id);
+      return;
+    }
+    this.options.hooks.broadcastSnapshot();
+  }
+
   project(active: ActiveTurn, event: ProviderEvent): void {
     switch (event.type) {
       case "text":
@@ -86,7 +94,7 @@ export class TurnProviderEventProjector {
           agentActivityStatus(event),
         );
         this.options.hooks.broadcast({ type: "agent.activity", activity });
-        this.options.hooks.broadcastSnapshot();
+        this.broadcastConversationShell(active);
         break;
       }
       case "status":
@@ -96,7 +104,7 @@ export class TurnProviderEventProjector {
           || (event.status === "running"
             && this.options.transition(active, "running"))
         ) {
-          this.options.hooks.broadcastSnapshot();
+          this.broadcastConversationShell(active);
         }
         break;
       case "approval":
@@ -116,9 +124,7 @@ export class TurnProviderEventProjector {
         this.options.interactions.resolveInput(active, event.requestId);
         break;
       case "plan": {
-        if (this.options.streams.closeAssistantSegment(active)) {
-          this.options.hooks.broadcastSnapshot();
-        }
+        this.options.streams.closeAssistantSegment(active);
         const plan: AgentPlan = {
           conversationId: active.conversation.id,
           runId: active.turn.runId,

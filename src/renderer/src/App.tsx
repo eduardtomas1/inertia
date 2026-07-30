@@ -104,7 +104,6 @@ export default function App(): React.JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
-  const [activityNow, setActivityNow] = useState(Date.now());
   const [latestContentVisible, setLatestContentVisible] = useState(false);
   const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
   const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
@@ -137,18 +136,6 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     applyInterfaceScale(settings.interfaceScale);
   }, [settings.interfaceScale]);
-
-  useEffect(() => {
-    setActivityNow(Date.now());
-    const runs = connection.snapshot?.runs ?? [];
-    const hasUnfinishedRun = runs.some(({ status }) => status === "running" || status === "waiting");
-    if (!hasUnfinishedRun) return;
-    const interval = window.setInterval(
-      () => setActivityNow(Date.now()),
-      activityOpen && hasUnfinishedRun ? 1_000 : 60_000,
-    );
-    return () => window.clearInterval(interval);
-  }, [activityOpen, connection.snapshot?.runs]);
 
   useEffect(() => {
     const refreshVisibility = () => setAttentionVisibilityVersion((version) => version + 1);
@@ -270,8 +257,8 @@ export default function App(): React.JSX.Element {
     ? providerMaintenance.operations.get(selectedMaintenanceProviderId) ?? null
     : null;
   const runsSummary = useMemo(
-    () => activityRunSummary(connection.snapshot?.runs ?? [], activityNow),
-    [activityNow, connection.snapshot?.runs],
+    () => activityRunSummary(connection.snapshot?.runs ?? []),
+    [connection.snapshot?.runs],
   );
   const visibleConversationRun = useMemo(
     () => conversation
@@ -879,7 +866,6 @@ export default function App(): React.JSX.Element {
       setPaletteOpen={setPaletteOpen}
       activityOpen={activityOpen}
       setActivityOpen={setActivityOpen}
-      activityNow={activityNow}
       project={project}
       conversation={conversation}
       splitConversationId={splitConversation?.id ?? null}

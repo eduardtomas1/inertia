@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { AppSnapshot, RuntimeMutationEvent } from "../../src/shared/contracts";
+import {
+  type AppSnapshot,
+  type ConversationShell,
+  type RuntimeMutationEvent,
+} from "../../src/shared/contracts";
+import { nativeModelSelection } from "../../src/shared/model-routing";
 import {
   parseRuntimeResumeRequest,
   projectRuntimeFrame,
@@ -31,6 +36,42 @@ function detailEvent(conversationId: string, text: string): RuntimeMutationEvent
     runId: "run",
     turnId: "turn",
     text,
+  };
+}
+
+function conversationShell(
+  id: string,
+  updatedAt = "2026-07-30T12:00:00.000Z",
+): ConversationShell {
+  return {
+    id,
+    projectId: `${id}-project`,
+    title: "Bounded shell",
+    providerId: "codex",
+    modelSelection: nativeModelSelection({
+      providerId: "codex",
+      modelId: "default",
+      reasoningEffort: "medium",
+    }),
+    continuationIdentity: null,
+    model: "default",
+    reasoningEffort: "medium",
+    interactionMode: "build",
+    accessMode: "supervised",
+    status: "running",
+    attentionKind: null,
+    branch: null,
+    worktreePath: null,
+    providerSessionId: null,
+    archivedAt: null,
+    settledAt: null,
+    completedAt: null,
+    lastViewedAt: updatedAt,
+    createdAt: updatedAt,
+    updatedAt,
+    latestTurn: null,
+    pendingApproval: false,
+    pendingInput: false,
   };
 }
 
@@ -144,6 +185,42 @@ describe("runtime sequence helpers", () => {
     })).toEqual({
       type: "runtime.cursor",
       sync: frame.sync,
+    });
+  });
+
+  it("replays bounded conversation shells globally and keeps commentary private", () => {
+    const sequencer = new RuntimeSequencer({ runtimeGeneration: GENERATION });
+    const shell = sequencer.commit(() => ({
+      type: "conversation.shell.updated",
+      conversation: conversationShell(CONVERSATION_B),
+      runs: [],
+    }));
+    const commentary = sequencer.commit(() => ({
+      type: "agent.commentary.persisted",
+      message: {
+        id: "commentary",
+        conversationId: CONVERSATION_B,
+        turnId: "turn",
+        role: "assistant",
+        content: "Private operational commentary.",
+        attachments: [],
+        createdAt: "2026-07-30T12:00:01.000Z",
+      },
+    }));
+
+    expect(runtimeMutationScope(shell.event)).toEqual({ kind: "shell" });
+    expect(runtimeMutationScope(commentary.event)).toEqual({
+      kind: "conversation-detail",
+      conversationId: CONVERSATION_B,
+    });
+    expect(projectRuntimeFrame(shell, {
+      conversationIds: [CONVERSATION_A],
+    })).toBe(shell);
+    expect(projectRuntimeFrame(commentary, {
+      conversationIds: [CONVERSATION_A],
+    })).toEqual({
+      type: "runtime.cursor",
+      sync: commentary.sync,
     });
   });
 

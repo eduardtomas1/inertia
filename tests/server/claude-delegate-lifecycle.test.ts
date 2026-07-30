@@ -36,11 +36,9 @@ describe("Claude delegated lifecycle", () => {
       summary: "Lifecycle inspected",
     }));
     lifecycle.observe(claudeSessionState("running"));
-    lifecycle.observe(
+    expect(lifecycle.observe(
       claudeSuccessResult("Delegate result received", "completed"),
-    );
-
-    expect(lifecycle.observe(claudeSessionState("idle"))).toEqual({
+    )).toEqual({
       turnEnded: true,
     });
     expect(lifecycle.complete()).toMatchObject({
@@ -86,7 +84,9 @@ describe("Claude delegated lifecycle", () => {
 
   it("distinguishes clean process exit from abandoned delegated work", () => {
     const completed = new ClaudeDelegateLifecycle();
-    completed.observe(claudeSuccessResult("Done", "completed"));
+    expect(completed.observe(claudeSuccessResult("Done", "completed"))).toEqual({
+      turnEnded: true,
+    });
     expect(completed.complete()).toMatchObject({
       kind: "result",
       result: { result: "Done" },
@@ -103,6 +103,22 @@ describe("Claude delegated lifecycle", () => {
     expect(new ClaudeDelegateLifecycle().complete()).toEqual({
       kind: "incomplete",
       reason: "missing-result",
+    });
+  });
+
+  it("settles a final parent result when the background level clears without idle", () => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+    lifecycle.observe(claudeBackgroundTasks(["agent-1"]));
+    expect(lifecycle.observe(
+      claudeSuccessResult("Parent resumed", "completed"),
+    )).toEqual({ turnEnded: false });
+
+    expect(lifecycle.observe(claudeBackgroundTasks([]))).toEqual({
+      turnEnded: true,
+    });
+    expect(lifecycle.complete()).toMatchObject({
+      kind: "result",
+      result: { result: "Parent resumed" },
     });
   });
 

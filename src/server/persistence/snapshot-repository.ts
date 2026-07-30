@@ -1,5 +1,6 @@
 import type {
   AppSnapshot,
+  ConversationShell,
   ConversationDetail,
   ProviderInfo,
 } from "../../shared/contracts";
@@ -126,6 +127,23 @@ export class SnapshotRepository {
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,
     };
+  }
+
+  conversationShell(conversationId: string): ConversationShell | null {
+    const row = this.context.database.prepare(
+      "SELECT * FROM conversations WHERE id = ?",
+    ).get(conversationId) as ConversationRow | undefined;
+    if (!row) return null;
+    const latestTurn = this.context.database.prepare(`
+      SELECT * FROM agent_turns
+      WHERE conversation_id = ?
+      ORDER BY requested_at DESC, id DESC
+      LIMIT 1
+    `).get(conversationId) as AgentTurnRow | undefined;
+    return conversationShellFromRow(
+      row,
+      latestTurn ? agentTurnFromRow(latestTurn) : null,
+    );
   }
 
   conversationDetail(conversationId: string): ConversationDetail | null {

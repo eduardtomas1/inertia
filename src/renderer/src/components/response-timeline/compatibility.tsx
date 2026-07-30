@@ -34,6 +34,7 @@ export function CompatibilityTimeline({
             key={turn.id}
             turn={turn}
             props={props}
+            subagents={[]}
             previousArtifactTurnId={null}
           />
         ))}

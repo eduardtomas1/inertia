@@ -13,7 +13,6 @@ interface AppNavigationOverlaysProps {
   snapshot: AppSnapshot | null;
   activityOpen: boolean;
   paletteOpen: boolean;
-  now: number;
   setActivityOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
   setWorkspaceView: () => void;
@@ -39,7 +38,6 @@ export function AppNavigationOverlays({
   snapshot,
   activityOpen,
   paletteOpen,
-  now,
   setActivityOpen,
   setPaletteOpen,
   setWorkspaceView,
@@ -63,7 +61,6 @@ export function AppNavigationOverlays({
     <>
       <ActivityCenter
         open={activityOpen}
-        now={now}
         runs={snapshot?.runs ?? []}
         projects={projects}
         conversations={conversations}

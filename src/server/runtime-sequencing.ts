@@ -45,6 +45,7 @@ interface RetainedRuntimeEvent {
 type ConversationRuntimeMutationEvent = Exclude<
   RuntimeMutationEvent,
   | { type: "snapshot.updated" }
+  | { type: "conversation.shell.updated" }
   | { type: "provider.maintenance.updated" }
   | { type: "provider.maintenance.operation" }
 >;
@@ -53,6 +54,8 @@ function detailConversationId(event: ConversationRuntimeMutationEvent): string {
   switch (event.type) {
     case "agent.usage":
       return event.usage.conversationId;
+    case "agent.commentary.persisted":
+      return event.message.conversationId;
     case "agent.activity":
       return event.activity.conversationId;
     case "agent.subagent.updated":
@@ -73,6 +76,7 @@ function detailConversationId(event: ConversationRuntimeMutationEvent): string {
 export function runtimeMutationScope(event: RuntimeMutationEvent): RuntimeEventScope {
   switch (event.type) {
     case "snapshot.updated":
+    case "conversation.shell.updated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":
       return { kind: "shell" };

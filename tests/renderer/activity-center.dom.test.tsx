@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -70,6 +70,37 @@ function run(overrides: Partial<WorkspaceRun>): WorkspaceRun {
 }
 
 describe("ActivityCenter agent operation disclosure", () => {
+  it("owns its elapsed clock only while the activity center is visible", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-07-28T08:00:10.000Z");
+    const props = {
+      runs: [run({})],
+      projects: [project],
+      conversations: [conversation],
+      onClose: vi.fn(),
+      onOpenThread: vi.fn(),
+      onOpenLocation: vi.fn(),
+      onOpenTerminal: vi.fn(),
+      onOpenPreview: vi.fn(),
+      onStop: vi.fn(),
+      onRerun: vi.fn(),
+      onMarkSeen: vi.fn(),
+      onAcknowledge: vi.fn(),
+      onDismiss: vi.fn(),
+    };
+    const view = render(<ActivityCenter open {...props} />);
+
+    expect(screen.getByText("Running · 10s")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(screen.getByText("Running · 11s")).toBeInTheDocument();
+
+    view.rerender(<ActivityCenter open={false} {...props} />);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
   it("shows only three latest operations until the accessible disclosure opens", async () => {
     const user = userEvent.setup();
     const operations = Array.from({ length: 5 }, (_, index) => run({

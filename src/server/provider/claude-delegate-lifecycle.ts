@@ -12,8 +12,10 @@ export type ClaudeDelegateCompletion =
 
 /**
  * Provider-private gate between Claude's per-turn results and the neutral
- * harness result. Claude can emit an intermediate result to release SDK stdin,
- * then keep the CLI process alive while background agents report back.
+ * harness result. A non-deferred result is terminal even when the persistent
+ * SDK input stream remains open for another prompt. Claude can also emit an
+ * intermediate result to release SDK stdin while background agents report
+ * back; only that explicitly deferred path waits for the parent to resume.
  */
 export class ClaudeDelegateLifecycle {
   private liveBackgroundTaskIds = new Set<string>();
@@ -27,11 +29,15 @@ export class ClaudeDelegateLifecycle {
 
   observe(message: SDKMessage): { turnEnded: boolean } {
     if (message.type === "result") {
-      this.latestResult = {
+      const candidate = {
         message,
         deferred: isDeferredResult(message, this.liveBackgroundTaskIds.size > 0),
       };
-      return { turnEnded: false };
+      this.latestResult = candidate;
+      return {
+        turnEnded: !candidate.deferred
+          && this.liveBackgroundTaskIds.size === 0,
+      };
     }
 
     if (message.type !== "system") {
@@ -54,7 +60,11 @@ export class ClaudeDelegateLifecycle {
           .map((task) => task.task_id)
           .filter((taskId) => taskId.length > 0),
       );
-      return { turnEnded: false };
+      return {
+        turnEnded: this.liveBackgroundTaskIds.size === 0
+          && this.latestResult !== undefined
+          && !this.latestResult.deferred,
+      };
     }
 
     if (
@@ -62,9 +72,10 @@ export class ClaudeDelegateLifecycle {
       && message.state === "idle"
       && this.latestResult
     ) {
-      // The SDK defines idle as occurring after heldBackResult is flushed and
-      // the background-agent drain loop exits. It supersedes stale edge/level
-      // ordering and is the earliest safe point to close this one-turn query.
+      // Idle remains an authoritative fallback after the SDK flushes a held
+      // result and exits its background-agent drain loop. Ordinary final
+      // results settle earlier because persistent prompt input can keep the
+      // iterator open without another idle edge.
       this.endedAtAuthoritativeIdle = true;
       this.liveBackgroundTaskIds.clear();
       return { turnEnded: true };

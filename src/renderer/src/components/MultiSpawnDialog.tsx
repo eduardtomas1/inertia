@@ -1,11 +1,11 @@
 import {
-  ArrowRight,
+  ArrowLeftRight,
   Brain,
   Check,
+  Columns2,
   Folder,
   KeyRound,
   ShieldCheck,
-  Sparkles,
   X,
   Zap,
 } from "lucide-react";
@@ -129,13 +129,14 @@ function MultiSpawnSideEditor({
   return (
     <section
       className="multi-spawn-side"
+      data-route-side={index === 0 ? "a" : "b"}
       aria-labelledby={`multi-spawn-side-heading-${index}`}
     >
       <header>
         <span className="multi-spawn-side-number">{index + 1}</span>
         <span>
           <strong id={`multi-spawn-side-heading-${index}`}>
-            {index === 0 ? "First perspective" : "Second perspective"}
+            {index === 0 ? "Route A" : "Route B"}
           </strong>
           <small>
             {routeState.selected.harnessLabel} ·{" "}
@@ -490,12 +491,12 @@ export function MultiSpawnDialog({
       >
         <header className="multi-spawn-dialog-header">
           <span className="multi-spawn-dialog-mark">
-            <Zap size={17} fill="currentColor" />
+            <Columns2 size={18} />
           </span>
           <span>
-            <h2 id="multi-spawn-title">Launch two perspectives</h2>
+            <h2 id="multi-spawn-title">Launch a duo</h2>
             <p id="multi-spawn-description">
-              One prompt, two independent agent routes, one split workspace.
+              Send one brief to two independent routes. Both chats open side by side.
             </p>
           </span>
           <IconButton
@@ -509,7 +510,7 @@ export function MultiSpawnDialog({
 
         <div className="multi-spawn-prompt-zone">
           <label htmlFor="multi-spawn-prompt">
-            <span><Sparkles size={12} /> Shared prompt</span>
+            <span>Brief for both chats</span>
             <small>{draft.prompt.trim().length.toLocaleString("en-US")} / 20,000</small>
           </label>
           <textarea
@@ -538,7 +539,7 @@ export function MultiSpawnDialog({
             onRepair={() => openRepair(0)}
           />
           <span className="multi-spawn-pair-arrow" aria-hidden="true">
-            <ArrowRight size={15} />
+            <ArrowLeftRight size={15} />
           </span>
           <MultiSpawnSideEditor
             index={1}
@@ -581,7 +582,7 @@ export function MultiSpawnDialog({
               })}
             />
             <span>
-              <strong>Use as my default duo</strong>
+              <strong>Save this pairing</strong>
               <small>Saves names, routes, reasoning, and access locally.</small>
             </span>
           </label>

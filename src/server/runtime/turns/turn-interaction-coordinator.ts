@@ -42,6 +42,14 @@ export interface TurnInteractionCoordinatorOptions {
 export class TurnInteractionCoordinator {
   constructor(private readonly options: TurnInteractionCoordinatorOptions) {}
 
+  private broadcastConversationShell(active: ActiveTurn): void {
+    if (this.options.hooks.broadcastConversationShell) {
+      this.options.hooks.broadcastConversationShell(active.conversation.id);
+      return;
+    }
+    this.options.hooks.broadcastSnapshot();
+  }
+
   respondToApproval(
     active: ActiveTurn | undefined,
     conversationId: string,
@@ -145,7 +153,7 @@ export class TurnInteractionCoordinator {
       type: "agent.approval.requested",
       request: pending,
     });
-    this.options.hooks.broadcastSnapshot();
+    this.broadcastConversationShell(active);
   }
 
   resolveApproval(
@@ -209,7 +217,7 @@ export class TurnInteractionCoordinator {
       type: "agent.input.requested",
       request: pending,
     });
-    this.options.hooks.broadcastSnapshot();
+    this.broadcastConversationShell(active);
   }
 
   resolveInput(active: ActiveTurn, requestId: string): void {
@@ -274,7 +282,7 @@ export class TurnInteractionCoordinator {
         this.projectConversation(active, "running");
       }
     }
-    this.options.hooks.broadcastSnapshot();
+    this.broadcastConversationShell(active);
   }
 
   private projectWaiting(

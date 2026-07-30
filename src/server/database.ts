@@ -13,6 +13,7 @@ import {
   type CheckpointSummary,
   type Conversation,
   type ConversationDetail,
+  type ConversationShell,
   type DiffReviewNote,
   type DiffReviewState,
   type DiffReviewSummary,
@@ -219,6 +220,10 @@ export class RuntimeStore {
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
     return this.snapshotRepository.shellSnapshot(providers);
+  }
+
+  conversationShell(conversationId: string): ConversationShell | null {
+    return this.snapshotRepository.conversationShell(conversationId);
   }
 
   conversationDetail(conversationId: string): ConversationDetail | null {
@@ -429,6 +434,14 @@ export class RuntimeStore {
     this.transcriptRepository.updateMessageContent(messageId, content);
   }
 
+  appendMessageContent(messageId: string, delta: string): void {
+    this.transcriptRepository.appendMessageContent(messageId, delta);
+  }
+
+  message(messageId: string): ChatMessage {
+    return this.transcriptRepository.message(messageId);
+  }
+
   upsertAgentPlan(plan: AgentPlan): void {
     this.executionLedgerRepository.upsertAgentPlan(plan);
   }
@@ -524,6 +537,10 @@ export class RuntimeStore {
     update: Partial<Pick<AgentReasoning, "content" | "status">>,
   ): AgentReasoning {
     return this.executionLedgerRepository.updateReasoning(id, update);
+  }
+
+  appendReasoningContent(id: string, delta: string): AgentReasoning {
+    return this.executionLedgerRepository.appendReasoningContent(id, delta);
   }
 
   upsertUsage(
@@ -630,6 +647,10 @@ export class RuntimeStore {
 
   workspaceRun(id: string): WorkspaceRun {
     return this.workspaceRunRepository.get(id);
+  }
+
+  workspaceRunsForConversation(conversationId: string): WorkspaceRun[] {
+    return this.workspaceRunRepository.forConversation(conversationId);
   }
 
   hasActiveWorkspaceRunForProject(projectId: string): boolean {

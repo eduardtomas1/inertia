@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import clsx from "clsx";
+import type { SubagentTrace } from "@shared/contracts";
 import { activeWorkIdentityLabel } from "../../utils/finalAnswerIdentity";
 import type { ResponseTurn } from "../../utils/responseTimeline";
 import {
@@ -22,12 +23,14 @@ function TurnTimelineComponent({
   turn,
   props,
   previousArtifactTurnId,
+  subagents,
   onBeforeToggle,
   onAfterToggle,
 }: {
   turn: ResponseTurn;
   props: ResponseTimelineProps;
   previousArtifactTurnId: string | null;
+  subagents?: SubagentTrace[];
   onBeforeToggle?: (turnId: string) => void;
   onAfterToggle?: (turnId: string) => void;
 }): React.JSX.Element {
@@ -114,6 +117,7 @@ function TurnTimelineComponent({
       <AgentExecutionLayer
         turn={turn}
         props={props}
+        subagents={subagents ?? []}
         providerLabel={providerLabel}
         reasoningContent={reasoningContent}
         liveContent={liveContent}
@@ -145,6 +149,7 @@ export function sameTurnTimelineProps(
     turn: ResponseTurn;
     props: ResponseTimelineProps;
     previousArtifactTurnId: string | null;
+    subagents?: SubagentTrace[];
     onBeforeToggle?: (turnId: string) => void;
     onAfterToggle?: (turnId: string) => void;
   },
@@ -152,6 +157,7 @@ export function sameTurnTimelineProps(
     turn: ResponseTurn;
     props: ResponseTimelineProps;
     previousArtifactTurnId: string | null;
+    subagents?: SubagentTrace[];
     onBeforeToggle?: (turnId: string) => void;
     onAfterToggle?: (turnId: string) => void;
   },
@@ -160,6 +166,7 @@ export function sameTurnTimelineProps(
   const right = next.props;
   return previous.turn === next.turn
     && previous.previousArtifactTurnId === next.previousArtifactTurnId
+    && previous.subagents === next.subagents
     && previous.onBeforeToggle === next.onBeforeToggle
     && previous.onAfterToggle === next.onAfterToggle
     && left.projectRoot === right.projectRoot
@@ -179,7 +186,6 @@ export function sameTurnTimelineProps(
     && left.onOpenTurnFile === right.onOpenTurnFile
     && left.onStop === right.onStop
     && left.onStopSubagent === right.onStopSubagent
-    && left.subagents === right.subagents
     && (!next.turn.isActive || (
       left.streamingText === right.streamingText
       && left.streamingReasoning === right.streamingReasoning

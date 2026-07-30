@@ -1077,15 +1077,19 @@ process.exit(child.status ?? 1);
         event.type === "agent.activity" && event.activity.kind === "command" && event.activity.status === "running",
     );
     const runningCheck = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-        event.type === "snapshot.updated"
-        && event.snapshot.runs.some((run) =>
+      (event): event is Extract<
+        ServerEvent,
+        { type: "conversation.shell.updated" }
+      > =>
+        event.type === "conversation.shell.updated"
+        && event.conversation.id === conversationId
+        && event.runs.some((run) =>
           run.conversationId === conversationId
           && run.kind === "check"
           && run.label === "npm test"
           && run.status === "running"),
     );
-    const commandRun = runningCheck.snapshot.runs.find((run) =>
+    const commandRun = runningCheck.runs.find((run) =>
       run.conversationId === conversationId
       && run.kind === "check"
       && run.label === "npm test");
@@ -1100,9 +1104,13 @@ process.exit(child.status ?? 1);
     );
     expect(completed.activity).toMatchObject({ id: started.activity.id, runId: started.activity.runId, title: "npm test" });
     await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-        event.type === "snapshot.updated"
-        && event.snapshot.runs.some((run) =>
+      (event): event is Extract<
+        ServerEvent,
+        { type: "conversation.shell.updated" }
+      > =>
+        event.type === "conversation.shell.updated"
+        && event.conversation.id === conversationId
+        && event.runs.some((run) =>
           run.id === commandRun?.id
           && run.status === "succeeded"
           && run.finishedAt !== null),

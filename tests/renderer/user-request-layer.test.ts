@@ -170,10 +170,27 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain('disabled=""');
     expect(html).toContain('aria-label="Request context"');
     expect(html).toContain('data-request-context-kind="image"');
-    expect(html).toContain("Image · reference.png");
+    expect(html).toContain("PNG image · reference.png");
     expect(html).not.toContain("/workspace/reference.png");
-    expect(html.indexOf("Image · reference.png"))
+    expect(html.indexOf("PNG image · reference.png"))
       .toBeGreaterThan(html.indexOf("Please inspect this reference."));
+  });
+
+  it("labels historical documents truthfully without exposing their private path", () => {
+    const html = renderRequest("Review the attached brief.", {
+      attachment: {
+        id: "attachment-pdf",
+        name: "brief.pdf",
+        path: "/private/runtime/brief.pdf",
+        mimeType: "application/pdf",
+        size: 4_096,
+      },
+    });
+
+    expect(html).toContain('data-request-context-kind="document"');
+    expect(html).toContain("PDF document · brief.pdf");
+    expect(html).not.toContain("/private/runtime/brief.pdf");
+    expect(html).not.toContain("Image · brief.pdf");
   });
 
   it("uses the wider document treatment only for long persisted request prose", () => {

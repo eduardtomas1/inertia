@@ -11,13 +11,14 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   InterfaceScale,
   ResponseDensity,
+  SubagentTrace,
 } from "@shared/contracts";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../utils/interfaceScale";
 import {
   buildResponseTimeline,
   buildTimelineMinimapMarkers,
+  estimateTimelineItemRenderWeight,
   estimateTimelineRowSize,
-  estimateTimelineRenderWeight,
   resolveTimelineKeyboardIntent,
   shouldAdjustTimelineScrollPosition,
   shouldConsolidateSettledWorkIntoRunDetails,
@@ -26,6 +27,8 @@ import {
   shouldShowTurnGitArtifactSummary,
   shouldVirtualizeTimeline,
   stabilizeResponseTimeline,
+  updateResponseTimelineForActivityDelta,
+  type BuildResponseTimelineInput,
   type ResponseTimelineItem,
 } from "../../utils/responseTimeline";
 import { CompatibilityTimeline } from "./compatibility";
@@ -216,6 +219,8 @@ interface TimelineMarker {
   number: number;
 }
 
+const EMPTY_SUBAGENTS: SubagentTrace[] = [];
+
 function TimelineMinimap({
   activeIndex,
   left,
@@ -257,6 +262,7 @@ function TimelineMinimap({
             key={marker.id}
             aria-current={index === activeMarker ? "true" : undefined}
             aria-label={`Go to turn ${marker.number}: ${marker.label}`}
+            data-request-preview={`Turn ${marker.number} · ${marker.label}`}
             tabIndex={index === activeMarker ? 0 : -1}
             title={`Turn ${marker.number}: ${marker.label}`}
             onClick={() => onNavigate(marker.timelineIndex, "turn")}
@@ -269,6 +275,19 @@ function TimelineMinimap({
 
 export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Element {
   const previousTimeline = useRef<ResponseTimelineItem[]>([]);
+  const previousBuild = useRef<{
+    input: BuildResponseTimelineInput;
+    timeline: ResponseTimelineItem[];
+  } | null>(null);
+  const renderWeightCache = useRef(
+    new WeakMap<ResponseTimelineItem, number>(),
+  );
+  const rowEstimateCache = useRef(
+    new WeakMap<ResponseTimelineItem, Map<string, number>>(),
+  );
+  const previousSubagentsByTurn = useRef(
+    new Map<string, SubagentTrace[]>(),
+  );
   const pendingLayoutAnchor = useRef<TimelineLayoutAnchor | null>(null);
   const captureLayoutAnchorRef = useRef<() => void>(() => undefined);
   const restoreLayoutAnchorRef = useRef<() => void>(() => undefined);
@@ -278,17 +297,39 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     // event is synchronous and arrives before Chromium applies new metrics.
     window.requestAnimationFrame(() => restoreLayoutAnchorRef.current());
   }, []);
-  const builtTimeline = useMemo(() => buildResponseTimeline({
-    turns: props.turns,
-    messages: props.messages,
-    activities: props.activities,
-    reasonings: props.reasonings,
-    plans: props.plans,
-    approvals: props.approvals,
-    inputRequests: props.inputRequests,
-    checkpoints: props.checkpoints,
-    gitArtifacts: props.gitArtifacts,
-  }), [
+  const builtTimeline = useMemo(() => {
+    const input: BuildResponseTimelineInput = {
+      turns: props.turns,
+      messages: props.messages,
+      activities: props.activities,
+      reasonings: props.reasonings,
+      plans: props.plans,
+      approvals: props.approvals,
+      inputRequests: props.inputRequests,
+      checkpoints: props.checkpoints,
+      gitArtifacts: props.gitArtifacts,
+    };
+    const previous = previousBuild.current;
+    const activityOnly = previous !== null
+      && previous.input.turns === input.turns
+      && previous.input.messages === input.messages
+      && previous.input.reasonings === input.reasonings
+      && previous.input.plans === input.plans
+      && previous.input.approvals === input.approvals
+      && previous.input.inputRequests === input.inputRequests
+      && previous.input.checkpoints === input.checkpoints
+      && previous.input.gitArtifacts === input.gitArtifacts;
+    const incremental = activityOnly
+      ? updateResponseTimelineForActivityDelta(
+          input,
+          previous.input.activities,
+          previous.timeline,
+        )
+      : null;
+    const timeline = incremental ?? buildResponseTimeline(input);
+    previousBuild.current = { input, timeline };
+    return timeline;
+  }, [
     props.activities,
     props.approvals,
     props.checkpoints,
@@ -324,16 +365,27 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     }
     return result;
   }, [timeline]);
-  const renderWeight = useMemo(
-    () => estimateTimelineRenderWeight(timeline),
-    [timeline],
-  );
+  const renderWeight = useMemo(() => timeline.reduce((total, item) => {
+    const cached = renderWeightCache.current.get(item);
+    if (cached !== undefined) return total + cached;
+    const weight = estimateTimelineItemRenderWeight(item);
+    renderWeightCache.current.set(item, weight);
+    return total + weight;
+  }, 0), [timeline]);
   const virtualized = shouldVirtualizeTimeline(timeline.length, renderWeight);
   const estimateLayout = useTimelineEstimateLayout(
     props.timelineElementRef,
     props.conversationId,
     captureLayoutAnchorBeforeChange,
   );
+  const estimateKey = [
+    estimateLayout.availableWidth,
+    estimateLayout.interfaceScale,
+    estimateLayout.responseDensity,
+    props.autoCollapseWorkLog ? "collapsed" : "expanded",
+    props.showThinking ? "thinking" : "hidden-thinking",
+    props.showChangedFileSummaries ? "files" : "hidden-files",
+  ].join(":");
   const getItemKey = useCallback(
     (index: number) => timeline[index]?.id ?? `missing-${index}`,
     [timeline],
@@ -341,11 +393,14 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
   const estimateSize = useCallback((index: number) => {
     const item = timeline[index];
     if (!item) return 280;
+    const cachedByLayout = rowEstimateCache.current.get(item);
+    const cached = cachedByLayout?.get(estimateKey);
+    if (cached !== undefined) return cached;
     const artifact = item.kind === "turn" ? item.turn.gitArtifact : null;
     const expandsConsolidatedWork = item.kind === "turn"
       && !props.autoCollapseWorkLog
       && shouldConsolidateSettledWorkIntoRunDetails(item.turn);
-    return estimateTimelineRowSize(item, {
+    const estimate = estimateTimelineRowSize(item, {
       ...estimateLayout,
       workDetailsExpanded: !props.autoCollapseWorkLog,
       runDetailsExpanded: expandsConsolidatedWork,
@@ -354,11 +409,20 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
         && artifact !== null
         && shouldShowTurnGitArtifactSummary(artifact),
     });
+    const nextCache = cachedByLayout ?? new Map<string, number>();
+    if (!nextCache.has(estimateKey) && nextCache.size >= 12) {
+      const oldestKey = nextCache.keys().next().value;
+      if (oldestKey !== undefined) nextCache.delete(oldestKey);
+    }
+    nextCache.set(estimateKey, estimate);
+    rowEstimateCache.current.set(item, nextCache);
+    return estimate;
   }, [
     props.autoCollapseWorkLog,
     props.showChangedFileSummaries,
     props.showThinking,
     estimateLayout,
+    estimateKey,
     timeline,
   ]);
   const virtualizer = useVirtualizer({
@@ -445,7 +509,7 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     let attempts = 0;
     let stableFrames = 0;
     const settleUntil = performance.now() + 2_000;
-    const maximumSettleFrames = 360;
+    const maximumSettleFrames = 120;
     const removeIntentListeners = (): void => {
       scrollElement.removeEventListener("wheel", cancelForUserIntent);
       scrollElement.removeEventListener("touchstart", cancelForUserIntent);
@@ -478,7 +542,10 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
           virtualizer.scrollToIndex(anchorIndex, { align: "start", behavior: "auto" });
         }
         attempts += 1;
-        if (attempts < maximumSettleFrames) {
+        if (
+          attempts < maximumSettleFrames
+          && performance.now() < settleUntil
+        ) {
           window.requestAnimationFrame(restore);
         } else {
           finishRestoration();
@@ -493,7 +560,8 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
       attempts += 1;
       if (
         attempts < maximumSettleFrames
-        && (performance.now() < settleUntil || stableFrames < 8)
+        && performance.now() < settleUntil
+        && stableFrames < 8
       ) {
         window.requestAnimationFrame(restore);
       } else {
@@ -630,6 +698,26 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
       number: turnItems[marker.index]!.turn.index,
       timelineIndex: turnItems[marker.index]!.timelineIndex,
     })), [turnItems]);
+  const subagentsByTurn = useMemo(() => {
+    const grouped = new Map<string, SubagentTrace[]>();
+    for (const trace of props.subagents ?? []) {
+      const current = grouped.get(trace.turnId);
+      if (current) current.push(trace);
+      else grouped.set(trace.turnId, [trace]);
+    }
+    for (const [turnId, traces] of grouped) {
+      const previous = previousSubagentsByTurn.current.get(turnId);
+      if (
+        previous
+        && previous.length === traces.length
+        && previous.every((trace, index) => trace === traces[index])
+      ) {
+        grouped.set(turnId, previous);
+      }
+    }
+    previousSubagentsByTurn.current = grouped;
+    return grouped;
+  }, [props.subagents]);
 
   const focusTimelineItem = useCallback((
     index: number,
@@ -701,6 +789,7 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
       <TurnTimeline
         turn={item.turn}
         props={props}
+        subagents={subagentsByTurn.get(item.turn.id) ?? EMPTY_SUBAGENTS}
         previousArtifactTurnId={previousComparableTurn.get(item.turn.id) ?? null}
         onBeforeToggle={captureExpansionAnchor}
         onAfterToggle={restoreExpansionAnchor}

@@ -299,7 +299,7 @@ describe("multi-spawn", () => {
     );
 
     expect(screen.getByRole("dialog", {
-      name: "Launch two perspectives",
+      name: "Launch a duo",
     })).toBeVisible();
     expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(2);
     expect(screen.getByText(

@@ -8,30 +8,26 @@ import {
 
 const PROCESS_TREE_TIMEOUT_MS = 2_000;
 const PROCESS_TREE_POLL_MS = 10;
-const processTreeSleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 
 interface RuntimeTreeDependencies {
   platform: NodeJS.Platform;
   kill: typeof process.kill;
   spawnProcessSync: typeof spawnSync;
   environment: NodeJS.ProcessEnv;
+  deadlineAt: number;
   now: () => number;
-  sleep: (waitMs: number) => void;
+  setTimer: typeof setTimeout;
 }
 
 export const runtimeDescendantPids = posixDescendantPids;
 
-function sleepSynchronously(waitMs: number): void {
-  Atomics.wait(processTreeSleepBuffer, 0, 0, waitMs);
-}
-
-function waitForDescendantsExit(
+async function waitForDescendantsExit(
   descendants: readonly number[],
   kill: typeof process.kill,
   deadlineAt: number,
   now: () => number,
-  sleep: (waitMs: number) => void,
-): boolean {
+  setTimer: typeof setTimeout,
+): Promise<boolean> {
   const remaining = new Set(descendants);
   while (remaining.size > 0) {
     for (const pid of remaining) {
@@ -44,7 +40,13 @@ function waitForDescendantsExit(
     if (remaining.size === 0) return true;
     const remainingMs = Math.trunc(deadlineAt - now());
     if (remainingMs <= 0) return false;
-    sleep(Math.max(1, Math.min(PROCESS_TREE_POLL_MS, remainingMs)));
+    await new Promise<void>((resolve) => {
+      const timer = setTimer(
+        resolve,
+        Math.max(1, Math.min(PROCESS_TREE_POLL_MS, remainingMs)),
+      );
+      timer.unref();
+    });
   }
   return true;
 }
@@ -70,28 +72,34 @@ function inheritedWindowsSystemRoot(
  * to finish. A direct-child fallback is best effort only and is never reported
  * as confirmed process-tree cleanup.
  */
-export function forceKillRuntimeProcessTree(
+export async function forceKillRuntimeProcessTree(
   runtimePid: number,
   dependencies: Partial<RuntimeTreeDependencies> = {},
-): boolean {
+): Promise<boolean> {
   if (!Number.isSafeInteger(runtimePid) || runtimePid <= 1) return true;
   const platform = dependencies.platform ?? process.platform;
   const kill = dependencies.kill ?? process.kill;
   const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
   const environment = dependencies.environment ?? process.env;
   const now = dependencies.now ?? Date.now;
-  const sleep = dependencies.sleep ?? sleepSynchronously;
+  const deadlineAt = dependencies.deadlineAt
+    ?? now() + PROCESS_TREE_TIMEOUT_MS;
+  const setTimer = dependencies.setTimer ?? setTimeout;
   if (platform === "win32") {
     const systemRoot = inheritedWindowsSystemRoot(environment);
     let terminated = false;
-    if (systemRoot) {
+    const remainingMs = Math.trunc(deadlineAt - now());
+    if (systemRoot && remainingMs > 0) {
       try {
         const result = spawnProcessSync(
           win32.join(systemRoot, "System32", "taskkill.exe"),
           ["/pid", String(runtimePid), "/t", "/f"],
           {
             env: environment,
-            timeout: PROCESS_TREE_TIMEOUT_MS,
+            timeout: Math.max(
+              1,
+              Math.min(PROCESS_TREE_TIMEOUT_MS, remainingMs),
+            ),
             shell: false,
             windowsHide: true,
             stdio: "ignore",
@@ -108,7 +116,6 @@ export function forceKillRuntimeProcessTree(
     return terminated;
   }
 
-  const deadlineAt = now() + PROCESS_TREE_TIMEOUT_MS;
   const killed = forceKillPosixProcessTreeWithStatus(runtimePid, {
     kill,
     spawnProcessSync,
@@ -117,11 +124,11 @@ export function forceKillRuntimeProcessTree(
     now,
   });
   return killed.snapshotConfirmed
-    && waitForDescendantsExit(
+    && await waitForDescendantsExit(
       killed.descendants,
       kill,
       deadlineAt,
       now,
-      sleep,
+      setTimer,
     );
 }

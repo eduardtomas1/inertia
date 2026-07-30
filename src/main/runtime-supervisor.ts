@@ -286,12 +286,12 @@ export class RuntimeSupervisor {
     ]).then(([runtimeConfirmed, secureFilesConfirmed]) => (
       runtimeConfirmed && secureFilesConfirmed
     ));
-    this.post(this.current.child, { type: "runtime.shutdown" });
     const record = this.current;
     const child = record.child;
     const shutdownDeadlineMs =
       this.shutdownGraceMs + this.forceKillWaitMs * 2;
     record.shutdownDeadlineAt = Date.now() + shutdownDeadlineMs;
+    this.post(child, { type: "runtime.shutdown" });
     this.shutdownTimer = this.setTimer(() => {
       this.shutdownTimer = null;
       this.forceTerminate(child);

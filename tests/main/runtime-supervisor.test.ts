@@ -1002,6 +1002,25 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.snapshot().phase).toBe("stopped");
   });
 
+  it("owns the full shutdown deadline before posting to the worker", async () => {
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    vi.spyOn(children[0], "postMessage").mockImplementationOnce(() => {
+      throw new Error("worker port closed");
+    });
+    const shutdownDeadlineAt = Date.now() + 2_000;
+
+    const stopped = supervisor.stop();
+
+    expect(forceKill).toHaveBeenCalledWith(10_000, shutdownDeadlineAt);
+    expect(forceKill).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    children[0].exit(137);
+    await expect(stopped).resolves.toBe(true);
+  });
+
   it("executes the supervisor tree fallback while an unconfirmed runtime close keeps the worker alive", async () => {
     const { children, forceKill, supervisor } = createHarness();
     supervisor.start();

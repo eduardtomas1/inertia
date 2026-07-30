@@ -204,12 +204,15 @@ export interface AgentActivity {
 }
 
 export type SubagentTraceStatus =
+  | "queued"
   | "spawned"
   | "running"
   | "waiting"
   | "completed"
   | "failed"
   | "cancelled"
+  | "interrupted"
+  | "unknown"
   | "lost";
 
 /**
@@ -231,6 +234,8 @@ export interface SubagentTrace {
   providerToolUseId: string | null;
   providerRole: string | null;
   providerName: string | null;
+  /** Exact bounded provider status when the transport exposes one. */
+  providerStatus: string | null;
   status: SubagentTraceStatus;
   description: string | null;
   progress: string | null;

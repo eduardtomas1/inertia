@@ -444,6 +444,7 @@ export function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
     providerToolUseId: row.provider_tool_use_id,
     providerRole: row.provider_role,
     providerName: row.provider_name,
+    providerStatus: row.provider_status,
     status: row.status,
     description: row.description,
     progress: row.progress,

@@ -10,6 +10,8 @@ export const MAX_CODEX_TEXT_CHARS = 4 * 1024 * 1024;
 export const MAX_CODEX_DIAGNOSTIC_CHARS = 32 * 1024;
 export const CODEX_RPC_TIMEOUT_MS = 30_000;
 export const CODEX_TRANSPORT_CLOSE_GRACE_MS = 100;
+export const CODEX_SUBAGENT_DRAIN_TIMEOUT_MS = 2_000;
+const MIN_CODEX_SUBAGENT_DRAIN_TIMEOUT_MS = 25;
 
 export type CodexRunPhase =
   | "opening"
@@ -21,6 +23,22 @@ export interface CodexAccessPolicy {
   approvalPolicy: "untrusted" | "on-request" | "never";
   threadSandbox: "read-only" | "workspace-write" | "danger-full-access";
   turnSandboxPolicy: JsonObject;
+}
+
+export function codexSubagentDrainTimeoutMs(
+  value: CodexAppServerOptions["subagentDrainTimeoutMs"],
+): number {
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value < 1
+  ) {
+    return CODEX_SUBAGENT_DRAIN_TIMEOUT_MS;
+  }
+  return Math.max(
+    MIN_CODEX_SUBAGENT_DRAIN_TIMEOUT_MS,
+    Math.min(value, CODEX_SUBAGENT_DRAIN_TIMEOUT_MS),
+  );
 }
 
 export function codexProtocolLimits(

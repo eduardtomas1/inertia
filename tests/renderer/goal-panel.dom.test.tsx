@@ -156,6 +156,7 @@ function trace(update: Partial<SubagentTrace> = {}): SubagentTrace {
     providerToolUseId: "tool-1",
     providerRole: "researcher",
     providerName: "Audit",
+    providerStatus: null,
     status: "running",
     description: "Inspect provider boundaries",
     progress: "Reading capability contracts",

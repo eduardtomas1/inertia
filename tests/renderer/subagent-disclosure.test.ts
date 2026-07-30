@@ -8,6 +8,7 @@ import {
   canStopSubagentTrace,
   subagentDisclosureRows,
   subagentDisclosureSummary,
+  subagentStatusLabel,
 } from "../../src/renderer/src/utils/subagentDisclosure";
 
 function trace(
@@ -27,6 +28,7 @@ function trace(
     providerToolUseId: "tool-parent",
     providerRole: "researcher",
     providerName: "Evidence",
+    providerStatus: null,
     status: "running",
     description: "Inspect",
     progress: null,
@@ -133,5 +135,22 @@ describe("inline delegated-agent disclosure", () => {
         completedAt: "2030-01-01T00:01:00.000Z",
       }),
     ])).toBe(false);
+  });
+
+  it("keeps future provider states visibly unknown instead of relabeling them", () => {
+    expect(subagentStatusLabel(trace({
+      providerId: "codex",
+      providerStatus: "futureState",
+      status: "unknown",
+    }))).toBe("Unknown (futureState)");
+    expect(subagentStatusLabel(trace({
+      providerId: "claude",
+      providerStatus: "killed",
+      status: "cancelled",
+    }))).toBe("Cancelled (killed)");
+    expect(canStopSubagentTrace(
+      trace({ providerStatus: "pending", status: "queued" }),
+      [turn()],
+    )).toBe(true);
   });
 });

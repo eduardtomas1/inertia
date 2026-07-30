@@ -1054,6 +1054,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       providerToolUseId: "tool-atomic-recovery",
       providerRole: "reviewer",
       providerName: "Atomic Recovery Reviewer",
+      providerStatus: "running",
       status: "running",
       description: "Verify recovery transaction boundaries.",
       progress: "Waiting for recovery.",
@@ -1107,6 +1108,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       terminalReason: null,
     });
     expect(reopened.subagentTrace(subagent!.id)).toMatchObject({
+      providerStatus: "running",
       status: "running",
       sequence: 4,
     });
@@ -1122,6 +1124,125 @@ describe("RuntimeStore conversation lifecycle", () => {
         status: "running",
       }),
     );
+    reopened.close();
+  });
+
+  it("persists exact provider subagent states and new terminal outcomes across restart", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const conversation = store.snapshot().conversations[0]!;
+    const userMessage = store.createMessage(
+      conversation.id,
+      "Persist the exact delegated state.",
+    );
+    const turn = store.createAgentTurn({
+      id: "turn-provider-subagent-state",
+      conversationId: conversation.id,
+      runId: "run-provider-subagent-state",
+      userMessageId: userMessage.id,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "legacy:codex:codex-app-server",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    const created = store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      providerId: "codex",
+      providerTaskId: null,
+      providerAgentId: "child-provider-state",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "spawn-provider-state",
+      providerRole: "reviewer",
+      providerName: "Provider state reviewer",
+      providerStatus: "pendingInit",
+      status: "queued",
+      description: "Preserve the provider state.",
+      progress: null,
+      result: null,
+      sequence: 1,
+    })?.trace;
+    expect(created).toBeDefined();
+    const unknown = store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      providerId: "codex",
+      providerTaskId: null,
+      providerAgentId: "child-provider-state",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "spawn-provider-state",
+      providerRole: null,
+      providerName: null,
+      providerStatus: "futureState",
+      status: "unknown",
+      description: null,
+      progress: null,
+      result: null,
+      sequence: 2,
+    })?.trace;
+    expect(unknown).toMatchObject({
+      providerStatus: "futureState",
+      status: "unknown",
+    });
+    const clarified = store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      providerId: "codex",
+      providerTaskId: null,
+      providerAgentId: "child-provider-state",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "spawn-provider-state",
+      providerRole: null,
+      providerName: null,
+      providerStatus: "running",
+      status: "running",
+      description: null,
+      progress: "The provider clarified that the child is still active.",
+      result: null,
+      sequence: 3,
+    })?.trace;
+    expect(clarified).toMatchObject({
+      providerStatus: "running",
+      status: "running",
+    });
+    store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      providerId: "codex",
+      providerTaskId: null,
+      providerAgentId: "child-provider-state",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "spawn-provider-state",
+      providerRole: null,
+      providerName: null,
+      providerStatus: "interrupted",
+      status: "interrupted",
+      description: null,
+      progress: null,
+      result: "The provider interrupted this child.",
+      sequence: 4,
+    });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.subagentTrace(created!.id)).toMatchObject({
+      providerStatus: "interrupted",
+      status: "interrupted",
+      result: "The provider interrupted this child.",
+      sequence: 4,
+    });
     reopened.close();
   });
 

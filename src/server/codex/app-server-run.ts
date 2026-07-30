@@ -185,6 +185,7 @@ export function startCodexAppServerRun(
     settlePendingRequests(
       "Codex App Server stopped before responding.",
     );
+    events?.dispose();
     events?.settleInteractions();
     void (async () => {
       let finalStatus = status;
@@ -281,6 +282,7 @@ export function startCodexAppServerRun(
     if (settled) return;
     cancelRequested = true;
     events.settleInteractions();
+    if (events.cancelPendingParentCompletion()) return;
     if (force || !spawned || !providerThreadId || !activeTurnId) {
       requestProcessTermination(force);
       return;

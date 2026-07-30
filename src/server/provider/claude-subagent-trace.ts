@@ -206,21 +206,24 @@ export class ClaudeSubagentTraceTracker {
       patch.description,
       MAX_SUBAGENT_DESCRIPTION_CHARS,
     ) ?? state.description;
-    const status = patch.status === "pending"
-      ? "spawned"
-      : patch.status === "running"
+    const providerStatus = boundedSubagentIdentifier(patch.status, 200);
+    const status = providerStatus === "pending"
+      ? "queued"
+      : providerStatus === "running"
         ? "running"
-        : patch.status === "paused"
+        : providerStatus === "paused"
           ? "waiting"
-          : patch.status === "completed"
+          : providerStatus === "completed"
             ? "completed"
-            : patch.status === "failed"
+            : providerStatus === "failed"
               ? "failed"
-              : patch.status === "killed"
+              : providerStatus === "killed"
                 ? "cancelled"
-                : null;
+                : providerStatus
+                  ? "unknown"
+                  : null;
     if (!status) return;
-    state.live = status === "spawned"
+    state.live = status === "queued"
       || status === "running"
       || status === "waiting";
     this.emitState(
@@ -228,6 +231,7 @@ export class ClaudeSubagentTraceTracker {
       status,
       null,
       boundedSubagentText(patch.error, MAX_SUBAGENT_RESULT_CHARS),
+      providerStatus,
     );
   }
 
@@ -236,13 +240,16 @@ export class ClaudeSubagentTraceTracker {
     if (!taskId || this.ignoredTaskIds.has(taskId)) return;
     const state = this.tasks.get(taskId);
     if (!state) return;
-    const status = record.status === "completed"
+    const providerStatus = boundedSubagentIdentifier(record.status, 200);
+    const status = providerStatus === "completed"
       ? "completed"
-      : record.status === "failed"
+      : providerStatus === "failed"
         ? "failed"
-        : record.status === "stopped"
+        : providerStatus === "stopped"
           ? "cancelled"
-          : null;
+          : providerStatus
+            ? "unknown"
+            : null;
     if (!status) return;
     state.live = false;
     this.emitState(
@@ -250,6 +257,7 @@ export class ClaudeSubagentTraceTracker {
       status,
       null,
       boundedSubagentText(record.summary, MAX_SUBAGENT_RESULT_CHARS),
+      providerStatus,
     );
   }
 
@@ -301,6 +309,7 @@ export class ClaudeSubagentTraceTracker {
       output.status === "completed" ? "completed" : "running",
       null,
       boundedSubagentText(result, MAX_SUBAGENT_RESULT_CHARS),
+      output.status,
     );
   }
 
@@ -309,6 +318,7 @@ export class ClaudeSubagentTraceTracker {
     status: SubagentUpdate["status"],
     progress: string | null = null,
     result: string | null = null,
+    providerStatus: string | null = null,
   ): void {
     this.sequence += 1;
     this.emit({
@@ -320,6 +330,7 @@ export class ClaudeSubagentTraceTracker {
       providerToolUseId: state.toolUseId || null,
       providerRole: state.role,
       providerName: state.name,
+      providerStatus,
       status,
       description: state.description,
       progress,

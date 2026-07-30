@@ -97,6 +97,7 @@ describe("Claude delegated-agent projection", () => {
         sequence: 3,
         providerTaskId: "task-parent",
         providerAgentId: "agent-parent",
+        providerStatus: "completed",
         status: "completed",
         result: "Found the exact cause.",
       }),
@@ -145,6 +146,100 @@ describe("Claude delegated-agent projection", () => {
       providerToolUseId: "tool-child",
       providerRole: "reviewer",
     });
+  });
+
+  it("preserves waiting, failed, and stopped provider states exactly", () => {
+    const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => {
+      updates.push(event);
+    });
+    tracker.observe(sdkMessage({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [{
+          type: "tool_use",
+          id: "tool-stateful",
+          name: "Agent",
+          input: {
+            subagent_type: "reviewer",
+            description: "Review state handling",
+          },
+        }],
+      },
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-stateful",
+      tool_use_id: "tool-stateful",
+      description: "Review state handling",
+      subagent_type: "reviewer",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "task-stateful",
+      patch: { status: "paused" },
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "task-stateful",
+      status: "failed",
+      summary: "The review found a blocking error.",
+    }));
+    tracker.observe(sdkMessage({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [{
+          type: "tool_use",
+          id: "tool-stopped",
+          name: "Agent",
+          input: {
+            subagent_type: "reviewer",
+            description: "Review cancellation handling",
+          },
+        }],
+      },
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-stopped",
+      tool_use_id: "tool-stopped",
+      description: "Review cancellation handling",
+      subagent_type: "reviewer",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "task-stopped",
+      status: "stopped",
+      summary: "The provider stopped this task.",
+    }));
+
+    expect(updates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerTaskId: "task-stateful",
+        providerStatus: "paused",
+        status: "waiting",
+      }),
+      expect.objectContaining({
+        providerTaskId: "task-stateful",
+        providerStatus: "failed",
+        status: "failed",
+        result: "The review found a blocking error.",
+      }),
+      expect.objectContaining({
+        providerTaskId: "task-stopped",
+        providerStatus: "stopped",
+        status: "cancelled",
+        result: "The provider stopped this task.",
+      }),
+    ]));
+    expect(tracker.hasLiveTasks()).toBe(false);
   });
 });
 

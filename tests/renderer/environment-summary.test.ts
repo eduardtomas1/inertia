@@ -50,6 +50,7 @@ function subagent(
     providerToolUseId: null,
     providerRole: "reviewer",
     providerName: "Review",
+    providerStatus: null,
     status: "running",
     description: null,
     progress: null,

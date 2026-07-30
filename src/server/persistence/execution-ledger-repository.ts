@@ -224,6 +224,7 @@ export class ExecutionLedgerRepository {
       providerToolUseId,
       providerRole: safeSubagentLabel(input.providerRole, workspaceRoot),
       providerName: safeSubagentLabel(input.providerName, workspaceRoot),
+      providerStatus: boundedSubagentIdentifier(input.providerStatus, 200),
       description: sanitizeProviderActivityDetail(
         input.description,
         { workspaceRoot, maxChars: MAX_SUBAGENT_DESCRIPTION_CHARS },
@@ -258,6 +259,7 @@ export class ExecutionLedgerRepository {
             ),
             provider_role = COALESCE(@providerRole, provider_role),
             provider_name = COALESCE(@providerName, provider_name),
+            provider_status = COALESCE(@providerStatus, provider_status),
             status = @status,
             description = COALESCE(@description, description),
             progress = COALESCE(@progress, progress),
@@ -303,14 +305,16 @@ export class ExecutionLedgerRepository {
         provider_task_id, provider_agent_id, parent_trace_id,
         parent_provider_agent_id, parent_provider_tool_use_id,
         provider_tool_use_id, provider_role,
-        provider_name, status, description, progress, result, sequence,
+        provider_name, provider_status, status,
+        description, progress, result, sequence,
         created_at, updated_at
       ) VALUES (
         @id, @conversationId, @runId, @turnId, @providerId,
         @providerTaskId, @providerAgentId, @parentTraceId,
         @parentProviderAgentId, @parentProviderToolUseId,
         @providerToolUseId, @providerRole,
-        @providerName, @status, @description, @progress, @result, @sequence,
+        @providerName, @providerStatus, @status,
+        @description, @progress, @result, @sequence,
         @createdAt, @updatedAt
       )
     `).run(trace);
@@ -327,7 +331,7 @@ export class ExecutionLedgerRepository {
     const rows = this.context.database.prepare(`
       SELECT * FROM subagent_traces
       WHERE turn_id = ?
-        AND status IN ('spawned', 'running', 'waiting')
+        AND status IN ('queued', 'spawned', 'running', 'waiting')
       ORDER BY created_at ASC, sequence ASC, id ASC
     `).all(turnId) as SubagentTraceRow[];
     if (rows.length === 0) return [];
@@ -335,7 +339,7 @@ export class ExecutionLedgerRepository {
       UPDATE subagent_traces
       SET status = ?, sequence = sequence + 1, updated_at = ?
       WHERE id = ?
-        AND status IN ('spawned', 'running', 'waiting')
+        AND status IN ('queued', 'spawned', 'running', 'waiting')
     `);
     this.context.database.transaction(() => {
       for (const row of rows) update.run(status, now, row.id);

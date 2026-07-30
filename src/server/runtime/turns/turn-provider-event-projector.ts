@@ -230,6 +230,7 @@ export class TurnProviderEventProjector {
           providerToolUseId: event.providerToolUseId,
           providerRole: event.providerRole,
           providerName: event.providerName,
+          providerStatus: event.providerStatus ?? null,
           status: event.status,
           description: event.description,
           progress: event.progress,

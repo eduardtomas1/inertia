@@ -7,15 +7,47 @@ import {
 } from "../node/posix-process-tree.js";
 
 const PROCESS_TREE_TIMEOUT_MS = 2_000;
+const PROCESS_TREE_POLL_MS = 10;
+const processTreeSleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 
 interface RuntimeTreeDependencies {
   platform: NodeJS.Platform;
   kill: typeof process.kill;
   spawnProcessSync: typeof spawnSync;
   environment: NodeJS.ProcessEnv;
+  now: () => number;
+  sleep: (waitMs: number) => void;
 }
 
 export const runtimeDescendantPids = posixDescendantPids;
+
+function sleepSynchronously(waitMs: number): void {
+  Atomics.wait(processTreeSleepBuffer, 0, 0, waitMs);
+}
+
+function waitForDescendantsExit(
+  descendants: readonly number[],
+  kill: typeof process.kill,
+  deadlineAt: number,
+  now: () => number,
+  sleep: (waitMs: number) => void,
+): boolean {
+  const remaining = new Set(descendants);
+  while (remaining.size > 0) {
+    for (const pid of remaining) {
+      try {
+        kill(pid, 0);
+      } catch {
+        remaining.delete(pid);
+      }
+    }
+    if (remaining.size === 0) return true;
+    const remainingMs = Math.trunc(deadlineAt - now());
+    if (remainingMs <= 0) return false;
+    sleep(Math.max(1, Math.min(PROCESS_TREE_POLL_MS, remainingMs)));
+  }
+  return true;
+}
 
 function inheritedWindowsSystemRoot(
   environment: NodeJS.ProcessEnv,
@@ -47,6 +79,8 @@ export function forceKillRuntimeProcessTree(
   const kill = dependencies.kill ?? process.kill;
   const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
   const environment = dependencies.environment ?? process.env;
+  const now = dependencies.now ?? Date.now;
+  const sleep = dependencies.sleep ?? sleepSynchronously;
   if (platform === "win32") {
     const systemRoot = inheritedWindowsSystemRoot(environment);
     let terminated = false;
@@ -74,10 +108,20 @@ export function forceKillRuntimeProcessTree(
     return terminated;
   }
 
+  const deadlineAt = now() + PROCESS_TREE_TIMEOUT_MS;
   const killed = forceKillPosixProcessTreeWithStatus(runtimePid, {
     kill,
     spawnProcessSync,
     rootProcessGroup: false,
+    deadlineAt,
+    now,
   });
-  return killed.snapshotConfirmed;
+  return killed.snapshotConfirmed
+    && waitForDescendantsExit(
+      killed.descendants,
+      kill,
+      deadlineAt,
+      now,
+      sleep,
+    );
 }

@@ -33,7 +33,10 @@ describe("runtime process-tree termination", () => {
   });
 
   it("freezes and kills every discovered POSIX descendant", () => {
-    const kill = vi.fn();
+    const kill = vi.fn((_pid: number, signal?: number | NodeJS.Signals): true => {
+      if (signal === 0) throw new Error("process exited");
+      return true;
+    });
     const spawnProcessSync = vi.fn(() => ({
       pid: 1,
       output: [],
@@ -69,11 +72,16 @@ describe("runtime process-tree termination", () => {
       [-101, "SIGKILL"],
       [101, "SIGKILL"],
       [100, "SIGKILL"],
+      [102, 0],
+      [101, 0],
     ]);
   });
 
   it("freezes descendants discovered during the POSIX snapshot race", () => {
-    const kill = vi.fn();
+    const kill = vi.fn((_pid: number, signal?: number | NodeJS.Signals): true => {
+      if (signal === 0) throw new Error("process exited");
+      return true;
+    });
     const tables = [
       "100 1\n101 100\n",
       "100 1\n101 100\n102 101\n",
@@ -93,7 +101,35 @@ describe("runtime process-tree termination", () => {
     expect(spawnProcessSync).toHaveBeenCalledTimes(3);
     expect(kill.mock.calls).toContainEqual([-102, "SIGSTOP"]);
     expect(kill.mock.calls).toContainEqual([102, "SIGKILL"]);
-    expect(kill.mock.calls.at(-1)).toEqual([100, "SIGKILL"]);
+    expect(kill.mock.calls).toContainEqual([102, 0]);
+  });
+
+  it("reports POSIX cleanup as unconfirmed while a captured descendant survives", () => {
+    let now = 0;
+    const sleep = vi.fn((waitMs: number) => {
+      now += waitMs;
+    });
+    const kill = vi.fn((pid: number, signal?: number | NodeJS.Signals): true => {
+      if (signal === 0 && pid !== 101) throw new Error("process exited");
+      return true;
+    });
+    const spawnProcessSync = vi.fn(() => ({
+      stdout: "100 1\n101 100\n",
+      status: 0,
+    }));
+
+    const confirmed = forceKillRuntimeProcessTree(100, {
+      platform: "linux",
+      kill,
+      spawnProcessSync: spawnProcessSync as never,
+      now: () => now,
+      sleep,
+    });
+
+    expect(confirmed).toBe(false);
+    expect(kill).toHaveBeenCalledWith(101, 0);
+    expect(sleep).toHaveBeenCalled();
+    expect(now).toBe(2_000);
   });
 
   it("waits boundedly for Windows tree termination", () => {

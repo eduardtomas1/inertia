@@ -10,6 +10,7 @@ export interface PosixProcessTreeDependencies {
   spawnProcessSync: typeof spawnSync;
   rootProcessGroup: boolean;
   deadlineAt: number;
+  now: () => number;
 }
 
 export interface PosixProcessTreeKillResult {
@@ -61,6 +62,7 @@ export function forceKillPosixProcessTreeWithStatus(
   const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
   const rootProcessGroup = dependencies.rootProcessGroup === true;
   const deadlineAt = dependencies.deadlineAt ?? Number.POSITIVE_INFINITY;
+  const now = dependencies.now ?? Date.now;
 
   if (rootProcessGroup) {
     try { kill(-rootPid, "SIGSTOP"); } catch { /* It may not be a group leader. */ }
@@ -71,7 +73,7 @@ export function forceKillPosixProcessTreeWithStatus(
   let killOrder: number[] = [];
   let snapshotConfirmed = false;
   for (let pass = 0; pass < MAX_FREEZE_PASSES; pass += 1) {
-    const remainingMs = deadlineAt - Date.now();
+    const remainingMs = deadlineAt - now();
     if (remainingMs <= 0) break;
     let descendants: number[] = [];
     let snapshotRead = false;

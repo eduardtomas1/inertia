@@ -774,10 +774,18 @@ describe("Claude Agent SDK harness", () => {
     ]);
   });
 
-  it("does not let stale task updates revive a terminal delegate or its Stop control", async () => {
+  it("does not let stale task edges revive a terminal delegate or its Stop control", async () => {
     const root = portableFixtureRoot("Claude SDK stale delegate update");
     roots.push(root);
     let stopTaskCalls = 0;
+    let markStaleEdgesObserved!: () => void;
+    const staleEdgesObserved = new Promise<void>((resolve) => {
+      markStaleEdgesObserved = resolve;
+    });
+    let releaseParent!: () => void;
+    const parentReleased = new Promise<void>((resolve) => {
+      releaseParent = resolve;
+    });
     const harness = createClaudeAgentSdkHarness({
       createQuery: () => fixtureClaudeQuery(
         (async function* (): AsyncGenerator<SDKMessage> {
@@ -793,6 +801,12 @@ describe("Claude Agent SDK harness", () => {
             status: "completed",
             summary: "Finished authoritatively",
           });
+          yield claudeSystem("task_started", {
+            task_id: "agent-terminal",
+            tool_use_id: "tool-agent-terminal",
+            description: "A stale repeated start",
+            subagent_type: "researcher",
+          });
           yield claudeSystem("task_updated", {
             task_id: "agent-terminal",
             patch: { status: "running" },
@@ -801,6 +815,8 @@ describe("Claude Agent SDK harness", () => {
             task_id: "agent-terminal",
             patch: { status: "future_active_state" },
           });
+          markStaleEdgesObserved();
+          await parentReleased;
           yield claudeSuccessResult("Parent finished", "completed");
           yield claudeSessionState("idle");
         })(),
@@ -816,9 +832,8 @@ describe("Claude Agent SDK harness", () => {
       new AgentHarnessRegistry([harness]),
     );
     const traces: Array<{ status: string; isLive: boolean }> = [];
-    let stopAccepted: Promise<boolean> | null = null;
 
-    await expect(manager.run(nativeProviderRunInput({
+    const run = manager.run(nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-terminal-stale-update",
       runId: "claude-terminal-stale-update-run",
@@ -830,14 +845,19 @@ describe("Claude Agent SDK harness", () => {
     }), {
       onSubagent: (event) => {
         traces.push({ status: event.status, isLive: event.isLive });
-        if (event.status !== "completed" || stopAccepted) return;
-        stopAccepted = manager.stopSubagent(
-          event.conversationId,
-          event.providerTaskId!,
-          { runId: event.runId, turnId: event.turnId! },
-        );
       },
-    })).resolves.toMatchObject({
+    });
+    await staleEdgesObserved;
+    const stopAccepted = manager.stopSubagent(
+      "claude-terminal-stale-update",
+      "agent-terminal",
+      {
+        runId: "claude-terminal-stale-update-run",
+        turnId: "claude-terminal-stale-update-turn",
+      },
+    );
+    releaseParent();
+    await expect(run).resolves.toMatchObject({
       status: "completed",
       text: "Parent finished",
     });

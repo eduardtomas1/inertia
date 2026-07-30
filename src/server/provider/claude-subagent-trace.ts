@@ -126,6 +126,7 @@ export class ClaudeSubagentTraceTracker {
     const taskId = boundedSubagentIdentifier(record.task_id);
     const toolUseId = boundedSubagentIdentifier(record.tool_use_id);
     if (!taskId) return;
+    if (this.tasks.get(taskId)?.terminal) return;
     const metadata = toolUseId ? this.tools.get(toolUseId) : undefined;
     const subagentType = boundedSubagentIdentifier(record.subagent_type, 200);
     const taskType = boundedSubagentIdentifier(record.task_type, 200);

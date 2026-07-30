@@ -199,6 +199,14 @@ describe("Claude delegated-agent projection", () => {
     const updateCountAfterTerminalNotification = updates.length;
     tracker.observe(sdkMessage({
       type: "system",
+      subtype: "task_started",
+      task_id: "task-stateful",
+      tool_use_id: "tool-stateful",
+      description: "A stale repeated start",
+      subagent_type: "reviewer",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
       subtype: "task_updated",
       task_id: "task-stateful",
       patch: { status: "running" },

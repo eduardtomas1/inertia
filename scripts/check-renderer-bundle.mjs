@@ -8,7 +8,9 @@ const budgets = {
   entryJavaScript: 700 * kibibyte,
   entryCss: 330 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
-  totalJavaScript: 1_900 * kibibyte,
+  coreJavaScript: 1_900 * kibibyte,
+  deferredPdfJavaScript: 500 * kibibyte,
+  deferredPdfWorker: 1_350 * kibibyte,
 };
 
 function formatBytes(bytes) {
@@ -37,9 +39,20 @@ const assetNames = await readdir(assetDirectory);
 const transcriptJavaScript = assetNames.find(
   (name) => /^ResponseTimeline-.*\.js$/u.test(name),
 );
+const deferredPdfJavaScript = assetNames.find(
+  (name) => /^pdf-.*\.js$/u.test(name),
+);
+const deferredPdfWorker = assetNames.find(
+  (name) => /^pdf\.worker\.min-.*\.mjs$/u.test(name),
+);
 if (!transcriptJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred transcript chunk.",
+  );
+}
+if (!deferredPdfJavaScript || !deferredPdfWorker) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred PDF engine.",
   );
 }
 
@@ -47,6 +60,12 @@ const entryJavaScriptBytes = await assetBytes(entryJavaScript);
 const entryCssBytes = await assetBytes(entryCss);
 const transcriptJavaScriptBytes = await assetBytes(
   `assets/${transcriptJavaScript}`,
+);
+const deferredPdfJavaScriptBytes = await assetBytes(
+  `assets/${deferredPdfJavaScript}`,
+);
+const deferredPdfWorkerBytes = await assetBytes(
+  `assets/${deferredPdfWorker}`,
 );
 const javaScriptSizes = await Promise.all(
   assetNames
@@ -57,11 +76,15 @@ const totalJavaScriptBytes = javaScriptSizes.reduce(
   (total, bytes) => total + bytes,
   0,
 );
+const coreJavaScriptBytes =
+  totalJavaScriptBytes - deferredPdfJavaScriptBytes;
 const measurements = {
   entryJavaScript: entryJavaScriptBytes,
   entryCss: entryCssBytes,
   transcriptJavaScript: transcriptJavaScriptBytes,
-  totalJavaScript: totalJavaScriptBytes,
+  coreJavaScript: coreJavaScriptBytes,
+  deferredPdfJavaScript: deferredPdfJavaScriptBytes,
+  deferredPdfWorker: deferredPdfWorkerBytes,
 };
 const failures = Object.entries(measurements)
   .filter(([name, bytes]) => bytes > budgets[name])

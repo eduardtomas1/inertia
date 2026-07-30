@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type WebSocket from "ws";
 
 import {
-  chatAttachmentKind,
   type AgentApprovalRequest,
   type AgentInputRequest,
   type ProviderInfo,
@@ -18,12 +17,13 @@ import {
 import type { RuntimeStore } from "../../database";
 import { getRepositoryStatus, GitError } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
+import { documentAttachmentContexts } from "../attachments/document-attachment-context";
+import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
-import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -101,27 +101,33 @@ export function createTurnInteractionCommandHandler(
             "Wait for the current run or read-only review to finish first.",
           );
         }
-        const attachments = command.payload.attachments.length === 0
+        const resolvedAttachments = command.payload.attachments.length === 0
           ? []
-          : await dependencies.attachmentResolver?.resolveAll(
+          : await dependencies.attachmentResolver?.resolvePayloads(
               command.payload.attachments,
             ) ?? (() => {
               throw new RuntimeRequestError(
                 "The selected attachment is no longer available or could not be verified.",
               );
             })();
+        const attachments = resolvedAttachments.map(
+          ({ attachment }) => attachment,
+        );
         const relinquishAttachments = () =>
           dependencies.attachmentResolver?.relinquishAll(
             attachments.map(({ id }) => id),
           );
-        if (
-          attachments.some(
-            ({ mimeType }) => chatAttachmentKind(mimeType) === "document",
-          )
-        ) {
+        let documentContexts;
+        try {
+          documentContexts = await documentAttachmentContexts(
+            resolvedAttachments,
+          );
+        } catch (error) {
           await relinquishAttachments();
           throw new RuntimeRequestError(
-            "Document attachments are preview-only and cannot be sent to the selected provider.",
+            error instanceof Error
+              ? error.message
+              : "The selected document could not be read.",
           );
         }
         if (dependencies.enableProviders) {
@@ -279,6 +285,7 @@ export function createTurnInteractionCommandHandler(
                 conversationId: conversation.id,
                 content: command.payload.content,
                 attachments,
+                documentContexts,
                 activateConversation: command.payload.activate,
                 context: command.payload.context,
                 checkpointId,

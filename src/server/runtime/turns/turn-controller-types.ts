@@ -26,6 +26,7 @@ import type {
   ProviderRunResult,
 } from "../../provider/contracts";
 import type { HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
+import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
 import type { DeltaTimerScheduler } from "./turn-stream-coalescer";
 import type { TurnStreamChannel } from "./turn-stream-channel";
 
@@ -136,6 +137,8 @@ export interface QueueTurnRequest {
   content: string;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];
+  /** Server-derived only. Renderer commands never provide extracted document text. */
+  documentContexts?: readonly DocumentAttachmentContext[];
   context?: TurnRequestContext;
   activateConversation?: boolean;
   /** Server-constructed only. Renderer command schemas never accept this. */

@@ -261,12 +261,12 @@ describe("bounded structured turn request context", () => {
     expect(JSON.stringify(result.persistence.manifest)).not.toContain(imagePath);
   });
 
-  it("rejects document attachments instead of pretending a provider consumed them", async () => {
+  it("persists verified document text as bounded structured context", async () => {
     const cwd = await workspace();
     const documentPath = join(cwd, "notes.pdf");
     await writeFile(documentPath, "%PDF-1.7\n%%EOF\n");
 
-    expect(() => assembleTurnRequest({
+    const result = assembleTurnRequest({
       cwd,
       visibleContent: "Inspect this document.",
       attachments: [{
@@ -276,7 +276,25 @@ describe("bounded structured turn request context", () => {
         mimeType: "application/pdf",
         size: 15,
       }],
-    })).toThrow(/preview-only/u);
+      documentContexts: [{
+        attachmentId: "11111111-1111-4111-8111-111111111111",
+        label: "PDF · notes.pdf",
+        content: "[Page 1]\nDocument context",
+        truncated: false,
+      }],
+    });
+
+    expect(result.imagePaths).toEqual([]);
+    expect(result.executionPrompt).toContain("Document context");
+    expect(result.persistence.manifest.references).toEqual([
+      expect.objectContaining({
+        kind: "attachment",
+        label: "PDF · notes.pdf",
+      }),
+    ]);
+    expect(JSON.stringify(result.persistence.manifest)).not.toContain(
+      documentPath,
+    );
   });
 
   it("rejects inconsistent manifest totals during privileged debug decoding", () => {

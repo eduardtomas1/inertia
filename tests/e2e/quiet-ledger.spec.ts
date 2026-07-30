@@ -111,40 +111,19 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(activeTurn.getByRole("button", { name: "Stop Codex · OpenAI run" })).toBeVisible();
     await expect(activeTurn.locator(".turn-working-elapsed")).toHaveAttribute("aria-live", "off");
     await captureScenario("active-turn");
-    const normalMotion = await activeTurn.locator(
-      "[data-active-work-region]",
-    ).evaluate((element) => ({
-      mediaMatches: window.matchMedia(
-        "(prefers-reduced-motion: reduce)",
-      ).matches,
-      washAnimation: getComputedStyle(element, "::before").animationName,
-    }));
-    expect(normalMotion).toEqual({
-      mediaMatches: false,
-      washAnimation: "active-work-tonal-wash",
-    });
+    const workingLabel = activeTurn.locator(".turn-working-status strong");
+    expect(await page.evaluate(() =>
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(false);
+    expect(await workingLabel.evaluate((element) =>
+      getComputedStyle(element).animationName)).toBe("active-work-text-wave");
     await page.emulateMedia({ reducedMotion: "reduce" });
-    const reducedMotion = await activeTurn.locator(
-      "[data-active-work-region]",
-    ).evaluate((element) => {
-      const runningGlyph = element.querySelector(
-        ".agent-activity.is-running svg",
-      );
-      return {
-        mediaMatches: window.matchMedia(
-          "(prefers-reduced-motion: reduce)",
-        ).matches,
-        washAnimation: getComputedStyle(element, "::before").animationName,
-        glyphAnimation: runningGlyph
-          ? getComputedStyle(runningGlyph).animationName
-          : null,
-      };
-    });
-    expect(reducedMotion).toEqual({
-      mediaMatches: true,
-      washAnimation: "none",
-      glyphAnimation: "none",
-    });
+    expect(await page.evaluate(() =>
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
+    expect(await workingLabel.evaluate((element) =>
+      getComputedStyle(element).animationName)).toBe("none");
+    expect(await activeTurn.locator(".agent-activity.is-running svg")
+      .evaluate((element) => getComputedStyle(element).animationName))
+      .toBe("none");
     await page.emulateMedia({ reducedMotion: "no-preference" });
 
     await publishFixtureEvent({

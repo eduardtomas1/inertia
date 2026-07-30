@@ -50,7 +50,9 @@ describe("cohesive composer dock", () => {
     expect(toolbarSource).toContain('data-composer-zone="controls"');
     expect(inputSource).toContain('className="provider-readiness"');
     expect(inputSource).toContain("<ComposerAttachmentList");
-    expect(inputSource).toContain('className="composer-attachment-boundary"');
+    expect(inputSource).not.toContain(
+      'className="composer-attachment-boundary"',
+    );
     expect(inputSource).toContain('aria-label="Message"');
     expect(toolbarSource).toContain('className="composer-toolbar"');
     expect(inputSource.indexOf('className="provider-readiness"'))
@@ -149,6 +151,6 @@ describe("cohesive composer dock", () => {
     expect(inputSource).toContain('aria-label="Project files"');
     expect(inputSource).toContain('aria-label="Composer commands"');
     expect(routeConfirmationSource).toContain('role="alertdialog"');
-    expect(composerSource).toContain("documentAttachmentSendBoundary");
+    expect(composerSource).not.toContain("documentAttachmentSendBoundary");
   });
 });

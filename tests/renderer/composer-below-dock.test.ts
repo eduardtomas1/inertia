@@ -53,10 +53,10 @@ describe("composer below-dock cleanup", () => {
     for (const marker of [
       'className="provider-readiness"',
       "<ComposerAttachmentList",
-      'className="composer-attachment-boundary"',
     ]) {
       expect(inputSource, marker).toContain(marker);
     }
+    expect(inputSource).not.toContain("composer-attachment-boundary");
     expect(inputSource).toContain('? "Add a follow-up while the agent works…"');
     expect(toolbarSource).toContain('className="secondary-button composer-follow-up-button"');
     expect(toolbarSource).toContain('className="composer-follow-up-unavailable"');

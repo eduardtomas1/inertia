@@ -30,7 +30,6 @@ export interface ComposerInputZoneProps {
   onClearPromptContext?: () => void;
   attachments: ChatAttachment[];
   onRemoveAttachment: (attachment: ChatAttachment) => void;
-  attachmentSendBoundary: string | null;
   pendingRoute: PendingModelRoute | null;
   creatingRouteConversation: boolean;
   routeCancelRef: RefObject<HTMLButtonElement | null>;
@@ -65,7 +64,6 @@ export function ComposerInputZone({
   onClearPromptContext,
   attachments,
   onRemoveAttachment,
-  attachmentSendBoundary,
   pendingRoute,
   creatingRouteConversation,
   routeCancelRef,
@@ -166,11 +164,6 @@ export function ComposerInputZone({
           attachments={attachments}
           onRemove={onRemoveAttachment}
         />
-        {attachmentSendBoundary && (
-          <p className="composer-attachment-boundary" role="status">
-            {attachmentSendBoundary}
-          </p>
-        )}
         {pendingRoute && (
           <RouteChangeConfirmation
             pendingRoute={pendingRoute}

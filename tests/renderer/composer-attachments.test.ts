@@ -10,7 +10,6 @@ import { ComposerAttachmentList } from "../../src/renderer/src/components/Compos
 import {
   attachmentPreviewKind,
   attachmentPreviewUrl,
-  documentAttachmentSendBoundary,
   formatAttachmentSize,
   mergeComposerAttachments,
 } from "../../src/renderer/src/utils/composerAttachments";
@@ -113,16 +112,6 @@ describe("composer attachment previews", () => {
     expect(html).toContain(">Remove</span>");
     expect(html).not.toContain(document.path);
     expect(html).not.toContain("file://");
-  });
-
-  it("blocks unsupported document sending honestly while preserving image sends", () => {
-    expect(documentAttachmentSendBoundary([attachment("image")])).toBeNull();
-    expect(documentAttachmentSendBoundary([
-      attachment("document", {
-        name: "notes.txt",
-        mimeType: "text/plain",
-      }),
-    ])).toMatch(/cannot read documents/u);
   });
 
   it("keeps attachment layout bounded without permitting raw file URLs", () => {

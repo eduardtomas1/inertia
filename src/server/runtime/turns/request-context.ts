@@ -17,6 +17,7 @@ import type {
   TurnRequestContext,
 } from "../../../shared/contracts";
 import { chatAttachmentKind } from "../../../shared/attachments";
+import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
 
 export const MAX_EXECUTION_CONTEXT_REFERENCES = 32;
 export const MAX_EXECUTION_MESSAGE_SEGMENTS = 48;
@@ -39,6 +40,7 @@ export const BUILD_MODE_INSTRUCTION = [
 ].join(" ");
 
 export type TurnExecutionContextKind =
+  | "attachment"
   | "file"
   | "diff"
   | "terminal"
@@ -106,6 +108,8 @@ export interface AssembleTurnRequestInput {
   interactionMode?: InteractionMode;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];
+  /** Privileged, bounded document text derived from verified attachment bytes. */
+  documentContexts?: readonly DocumentAttachmentContext[];
   context?: TurnRequestContext;
   internalInstructions?: readonly HiddenProviderInstruction[];
 }
@@ -118,6 +122,7 @@ interface MaterializedContext {
 }
 
 const CONTEXT_KINDS = new Set<TurnExecutionContextKind>([
+  "attachment",
   "file",
   "diff",
   "terminal",
@@ -363,7 +368,14 @@ function materializeFileReferences(
   });
 }
 
-function materializeContext(cwd: string, context: TurnRequestContext = {}): MaterializedContext[] {
+function materializeContext(
+  cwd: string,
+  context: TurnRequestContext = {},
+  documents: readonly DocumentAttachmentContext[] = [],
+): MaterializedContext[] {
+  if (documents.length > 8) {
+    throw new Error("Execution context contains too many document attachments.");
+  }
   if ((context.fileReferences?.length ?? 0) > 16) {
     throw new Error("Execution context contains too many file references.");
   }
@@ -379,7 +391,19 @@ function materializeContext(cwd: string, context: TurnRequestContext = {}): Mate
   if ((context.reviewNotes?.length ?? 0) > 16) {
     throw new Error("Execution context contains too many review notes.");
   }
-  const materialized = materializeFileReferences(cwd, context.fileReferences ?? []);
+  const materialized = documents.map((document): MaterializedContext => ({
+    kind: "attachment",
+    label: boundedLabel(document.label, "Document attachment label"),
+    content: boundedText(
+      document.content,
+      `Document attachment ${document.label}`,
+      MAX_EXECUTION_CONTEXT_BLOB_BYTES,
+    ),
+    truncated: document.truncated,
+  }));
+  materialized.push(
+    ...materializeFileReferences(cwd, context.fileReferences ?? []),
+  );
 
   for (const selection of context.diffSelections ?? []) {
     const path = boundedLabel(selection.path, "Diff path");
@@ -521,20 +545,13 @@ function validateImages(
   attachments: readonly ChatAttachment[],
   requestedPaths: readonly string[] | undefined,
 ): { imagePaths: string[]; imageBytes: number } {
-  const documentCount = attachments.filter(({ mimeType }) =>
-    chatAttachmentKind(mimeType) === "document").length;
-  if (documentCount > 0) {
-    throw new Error(
-      documentCount === 1
-        ? "Document attachments are preview-only and cannot be sent to this provider."
-        : `${documentCount} document attachments are preview-only and cannot be sent to this provider.`,
-    );
-  }
-  const paths = requestedPaths ?? attachments.map(({ path }) => path);
+  const images = attachments.filter(({ mimeType }) =>
+    chatAttachmentKind(mimeType) === "image");
+  const paths = requestedPaths ?? images.map(({ path }) => path);
   if (paths.length > MAX_IMAGE_COUNT) {
     throw new Error(`Attach at most ${MAX_IMAGE_COUNT} images to one turn.`);
   }
-  const declaredByPath = new Map(attachments.map((attachment) => [attachment.path, attachment]));
+  const declaredByPath = new Map(images.map((attachment) => [attachment.path, attachment]));
   const seen = new Set<string>();
   let imageBytes = 0;
   const imagePaths = paths.map((path) => {
@@ -566,7 +583,11 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     "Visible user message",
     MAX_VISIBLE_MESSAGE_BYTES,
   );
-  const contexts = materializeContext(input.cwd, input.context);
+  const contexts = materializeContext(
+    input.cwd,
+    input.context,
+    input.documentContexts,
+  );
   const { imagePaths, imageBytes } = validateImages(
     input.attachments ?? [],
     input.imagePaths,

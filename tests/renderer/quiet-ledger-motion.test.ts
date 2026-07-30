@@ -187,7 +187,7 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(quietLedgerReducedMotion).toContain("transform: none");
   });
 
-  it("pauses live timers and paint-heavy wash work while the document is inactive", () => {
+  it("pauses live timers and the active text signal while the document is inactive", () => {
     expect(activitySource).toContain('document.visibilityState !== "visible"');
     expect(activitySource).toContain("!document.hasFocus()");
     expect(activitySource).toContain('document.addEventListener("visibilitychange", synchronize)');
@@ -202,8 +202,8 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(activitySource).toContain("instead of sorting the complete workstream");
     expect(css).toContain('data-document-active="false"');
     expect(css).toContain("animation-play-state: paused");
-    expect(css).toContain("will-change: auto");
-    expect(css).toContain("contain: paint");
+    expect(css).toContain("active-work-text-wave");
+    expect(css).not.toContain("active-work-tonal-wash");
   });
 
   it("keeps completion on the same keyed row and leaves follow/virtualization behavior untouched", () => {

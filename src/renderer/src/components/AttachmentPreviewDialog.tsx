@@ -1,5 +1,6 @@
 import { ExternalLink, FileText, X } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useId,
   useRef,
@@ -18,6 +19,7 @@ import {
   formatAttachmentSize,
 } from "../utils/composerAttachments";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { PdfAttachmentPreview } from "./PdfAttachmentPreview";
 
 type AttachmentPreviewDialogProps = {
   attachment: ChatAttachment;
@@ -43,6 +45,7 @@ export function AttachmentPreviewDialog({
   const [openFailed, setOpenFailed] = useState(false);
   const previewKind = attachmentPreviewKind(attachment);
   const previewUrl = attachmentPreviewUrl(attachment);
+  const markLoadFailed = useCallback(() => setLoadFailed(true), []);
   useNativePreviewSuspension(Boolean(previewKind && previewUrl));
 
   useEffect(() => {
@@ -139,14 +142,14 @@ export function AttachmentPreviewDialog({
                   <img
                     src={previewUrl}
                     alt={attachment.name}
-                    onError={() => setLoadFailed(true)}
+                    onError={markLoadFailed}
                   />
                 )
               : (
-                  <iframe
-                    src={previewUrl}
-                    title={`PDF preview: ${attachment.name}`}
-                    onError={() => setLoadFailed(true)}
+                  <PdfAttachmentPreview
+                    source={previewUrl}
+                    title={attachment.name}
+                    onFailure={markLoadFailed}
                   />
                 )}
         </div>

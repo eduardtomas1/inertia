@@ -201,6 +201,9 @@ export class RuntimeStore {
       this.database.pragma("foreign_keys = ON");
       this.database.pragma("busy_timeout = 5000");
       this.database.pragma("journal_mode = WAL");
+      // NORMAL keeps committed transactions crash-consistent in WAL mode
+      // without forcing every streamed update through a full filesystem sync.
+      // A sudden host power loss may still lose the newest OS-buffered commits.
       this.database.pragma("synchronous = NORMAL");
       this.database.pragma("cache_size = -16000");
       this.database.pragma("mmap_size = 268435456");

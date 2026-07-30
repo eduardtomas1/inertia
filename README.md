@@ -130,13 +130,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.15
+### Version 0.0.16
 
-This release keeps long, tool-heavy conversations responsive by replacing repeated full transcript reloads with bounded live projections, incremental timeline work, content-aware virtualization, and lower-amplification durable streaming. The minimap now previews user requests so distant turns are easier to recognize.
+This release makes the whole application cheaper to start, render, and keep open. Initial renderer JavaScript falls from approximately 3.16 MiB to 609.2 KiB, heavy workspace surfaces load only when needed, and hard bundle budgets prevent that startup improvement from quietly regressing.
 
-Claude SDK completion and delegated-task ordering are bounded and truthful, failed refreshes keep the last ready conversation visible, and live commentary, activity, plans, follow-ups, and blocked turn states remain present until authoritative history catches up. Duo setup also has clearer contrast and unclipped model selection.
+Long conversations now virtualize by their real text, tool, and activity weight; closed history leaves the DOM; pathological Markdown highlighting stays bounded; and background snapshots, replay state, Git reconciliation, and conversation queries perform less redundant work. Explicit command acknowledgements, durable ordering, trusted overlays, and native-preview security remain authoritative.
 
-Download [Inertia v0.0.15](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.15):
+Download [Inertia v0.0.16](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.16):
 
 | Platform | Download |
 | --- | --- |

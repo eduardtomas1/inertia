@@ -4,6 +4,36 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.16 — 2026-07-30
+
+### A smaller application before the first conversation opens
+
+- Initial renderer JavaScript falls from approximately 3.16 MiB to 609.2 KiB, while entry CSS falls from approximately 377 KiB to 276.1 KiB.
+- Transcript, workspace tools, Activity Center, command palette, settings, dialogs, and terminal assets now load as focused deferred chunks instead of competing with the first secure window paint.
+- Bundle budgets cap entry JavaScript, entry CSS, the deferred transcript chunk, and total renderer JavaScript so future features cannot silently undo the reduction.
+- The secure window begins loading concurrently with private attachment reconciliation, and a narrow privileged readiness signal reconnects the renderer as soon as the supervised runtime is available.
+
+### Long histories pay for what is visible
+
+- Transcript virtualization now responds to message length, tool-detail size, activity volume, and compatibility-history weight, beginning at 14 ordinary rows or 10 already-heavy rows.
+- Closed historical execution details leave the DOM, hot timeline and sidebar projections reuse stable inputs, and scroll-anchor restoration uses a cached target with a bounded 600 ms stabilization window.
+- Streaming answers skip expensive syntax highlighting until settled. Oversized or unusually tall code remains safe readable text instead of monopolizing the renderer.
+- Workspace tools, dialogs, trusted overlays, and terminal resources retain their focus, ownership, and native-preview suspension behavior across lazy-loading boundaries.
+
+### Less background runtime and persistence churn
+
+- Background snapshot invalidations coalesce over a bounded 32 ms window, while authoritative command acknowledgements and explicit lifecycle boundaries still flush immediately.
+- Runtime replay no longer retains redundant complete snapshots, and reconnects continue through the existing authoritative fresh-hydration path.
+- Conversation-detail reads use scoped ordering indexes and a windowed latest-turn query; streamed deltas no longer rewrite conversation timestamps on every append.
+- Git-artifact reconciliation reads a narrow revision instead of constructing a complete application snapshot.
+- SQLite uses WAL with `synchronous=NORMAL` intentionally: committed transactions remain crash-consistent, but the newest operating-system-buffered commits are not promised to survive sudden host power loss.
+
+### Review and release confidence
+
+- Native previews suspend from the always-loaded trusted status boundary before a deferred provider-auth dialog can appear.
+- Window creation participates directly in the concurrent startup barrier so an early renderer or resource failure is observed immediately.
+- Architecture checks, lint, four TypeScript projects, 1,573 unit and integration tests, 177 portable provider contracts, 40 Electron scenarios, production audit, renderer bundle budgets, and exact-head Linux, macOS, and Windows packaging gates protect the release.
+
 ## 0.0.15 — 2026-07-30
 
 ### Long conversations stay responsive

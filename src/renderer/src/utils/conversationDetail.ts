@@ -32,7 +32,32 @@ export function mergeConversationShell(
     createdAt: shell.createdAt,
     updatedAt: shell.updatedAt,
   };
-  return { ...detail, conversation };
+  const latestTurn = shell.latestTurn;
+  if (!latestTurn) return { ...detail, conversation };
+  const turnIndex = detail.agentTurns.findIndex(
+    ({ id }) => id === latestTurn.id,
+  );
+  if (turnIndex < 0) return { ...detail, conversation };
+  const turn = detail.agentTurns[turnIndex]!;
+  if (
+    turn.status === latestTurn.status
+    && turn.startedAt === latestTurn.startedAt
+    && turn.completedAt === latestTurn.completedAt
+    && turn.terminalReason === latestTurn.terminalReason
+    && turn.updatedAt === latestTurn.updatedAt
+  ) {
+    return { ...detail, conversation };
+  }
+  const agentTurns = [...detail.agentTurns];
+  agentTurns[turnIndex] = {
+    ...turn,
+    status: latestTurn.status,
+    startedAt: latestTurn.startedAt,
+    completedAt: latestTurn.completedAt,
+    terminalReason: latestTurn.terminalReason,
+    updatedAt: latestTurn.updatedAt,
+  };
+  return { ...detail, conversation, agentTurns };
 }
 
 /**

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { ChatAttachment } from "../../src/shared/contracts";
-import { documentAttachmentContexts } from "../../src/server/runtime/attachments/document-attachment-context";
+import {
+  documentAttachmentContexts,
+  pdfTextItemsToText,
+} from "../../src/server/runtime/attachments/document-attachment-context";
 
 function pdfWithText(text: string): Uint8Array {
   const stream = `BT /F1 22 Tf 72 720 Td (${text}) Tj ET`;
@@ -44,6 +47,17 @@ function attachment(
 }
 
 describe("document attachment execution context", () => {
+  it("preserves PDF.js text-item spacing and punctuation", () => {
+    expect(pdfTextItemsToText([
+      { str: "exam", hasEOL: false },
+      { str: "ple", hasEOL: false },
+      { str: " ", hasEOL: false },
+      { str: "word", hasEOL: false },
+      { str: ",", hasEOL: true },
+      { str: "next line", hasEOL: false },
+    ])).toBe("example word,\nnext line");
+  });
+
   it("extracts bounded PDF text without exposing the private source path", async () => {
     const pdf = attachment({});
     const contexts = await documentAttachmentContexts([{

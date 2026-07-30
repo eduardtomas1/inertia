@@ -56,7 +56,7 @@ function boundedUtf8(value: string): { value: string; truncated: boolean } {
   };
 }
 
-function pageText(items: readonly unknown[]): string {
+export function pdfTextItemsToText(items: readonly unknown[]): string {
   const lines: string[] = [];
   let line = "";
   for (const item of items) {
@@ -66,15 +66,15 @@ function pageText(items: readonly unknown[]): string {
       || !("str" in item)
       || typeof (item as Partial<TextItem>).str !== "string"
     ) continue;
-    const text = (item as TextItem).str.trim();
-    if (text) line = line ? `${line} ${text}` : text;
-    if ((item as TextItem).hasEOL && line) {
+    const textItem = item as TextItem;
+    line += textItem.str;
+    if (textItem.hasEOL) {
       lines.push(line);
       line = "";
     }
   }
   if (line) lines.push(line);
-  return lines.join("\n");
+  return lines.join("\n").trim();
 }
 
 async function extractPdfText(
@@ -112,7 +112,7 @@ async function extractPdfText(
         page.getTextContent(),
         timeoutPromise,
       ]);
-      const text = pageText(textContent.items);
+      const text = pdfTextItemsToText(textContent.items);
       if (text) pages.push(`[Page ${pageNumber}]\n${text}`);
       const bounded = boundedUtf8(pages.join("\n\n"));
       if (bounded.truncated) {

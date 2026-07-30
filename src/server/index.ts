@@ -26,6 +26,7 @@ import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadat
 import { ProviderMaintenanceController } from "./provider/maintenance-controller";
 import type { ProviderMaintenanceTarget } from "./provider/maintenance-capabilities";
 import { TerminalManager } from "./terminal";
+import { runRuntimeShutdownPhases } from "./runtime-shutdown";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
 import { inspectProjectIdentity } from "./project-identity";
@@ -651,35 +652,33 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       closed = true;
       snapshotBroadcasts.close();
       secureFileAuthorities.clear();
-      let shutdownError: unknown;
-      const attempt = async (
-        operation: () => void | Promise<void>,
-      ): Promise<void> => {
-        try {
-          await operation();
-        } catch (error) {
-          shutdownError ??= error;
-        }
-      };
-      await attempt(() => terminals.disposeAll());
-      await attempt(() => providerMaintenance.dispose());
-      await attempt(() => isolatedRuns.dispose(cause));
-      await attempt(() => turns.dispose(cause));
-      await attempt(async () => {
-        await artifactReconciliation;
+      await runRuntimeShutdownPhases({
+        independentDrains: [
+          () => terminals.disposeAll(),
+          () => providerMaintenance.dispose(),
+        ],
+        stopIsolatedRuns: () => isolatedRuns.dispose(cause),
+        disposeTurnsAndProviders: () => turns.dispose(cause),
+        settleArtifacts: async () => {
+          await artifactReconciliation;
+        },
+        terminateClients: () => {
+          runtimeSync.terminateAll((client) => client.terminate());
+        },
+        closeServer: async () => {
+          const results = await Promise.allSettled([
+            webSocketBoundary.close(),
+            new Promise<void>((resolveClose) =>
+              server.close(() => resolveClose())),
+          ]);
+          const failed = results.find(
+            (result): result is PromiseRejectedResult =>
+              result.status === "rejected",
+          );
+          if (failed) throw failed.reason;
+        },
+        closeStore: () => store.close(),
       });
-      await attempt(() => {
-        runtimeSync.terminateAll((client) => client.terminate());
-      });
-      await attempt(async () => {
-        await Promise.all([
-          webSocketBoundary.close(),
-          new Promise<void>((resolveClose) =>
-            server.close(() => resolveClose())),
-        ]);
-      });
-      await attempt(() => store.close());
-      if (shutdownError !== undefined) throw shutdownError;
     },
   };
 }

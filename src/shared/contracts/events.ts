@@ -65,6 +65,7 @@ export type RuntimeMutationEvent =
       runs: WorkspaceRun[];
     }
   | { type: "conversation.detail.invalidated"; conversationId: string }
+  | { type: "conversation.message.persisted"; message: ChatMessage }
   | { type: "provider.maintenance.updated"; providers: ProviderMaintenanceStatus[] }
   | { type: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
   | { type: "agent.started"; conversationId: string; runId: string; turnId: string }

@@ -60,11 +60,7 @@ export class ClaudeDelegateLifecycle {
           .map((task) => task.task_id)
           .filter((taskId) => taskId.length > 0),
       );
-      return {
-        turnEnded: this.liveBackgroundTaskIds.size === 0
-          && this.latestResult !== undefined
-          && !this.latestResult.deferred,
-      };
+      return { turnEnded: this.canEndTurn() };
     }
 
     if (
@@ -81,7 +77,7 @@ export class ClaudeDelegateLifecycle {
       return { turnEnded: true };
     }
 
-    return { turnEnded: false };
+    return { turnEnded: this.canEndTurn() };
   }
 
   complete(): ClaudeDelegateCompletion {
@@ -102,6 +98,12 @@ export class ClaudeDelegateLifecycle {
     this.liveBackgroundTaskIds.clear();
     this.latestResult = undefined;
     this.endedAtAuthoritativeIdle = false;
+  }
+
+  private canEndTurn(): boolean {
+    return this.liveBackgroundTaskIds.size === 0
+      && this.latestResult !== undefined
+      && !this.latestResult.deferred;
   }
 }
 

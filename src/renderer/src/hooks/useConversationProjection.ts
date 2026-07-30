@@ -388,6 +388,20 @@ export function useConversationProjection({
       return;
     }
     if (!projectionEnabled) return;
+    if (event.type === "conversation.message.persisted") {
+      if (event.message.conversationId !== activeConversation?.id) return;
+      setLiveMessages((current) => {
+        const existing = current[event.message.conversationId] ?? [];
+        return {
+          ...current,
+          [event.message.conversationId]: [
+            ...existing.filter(({ id }) => id !== event.message.id),
+            event.message,
+          ],
+        };
+      });
+      return;
+    }
     if (event.type === "agent.commentary.persisted") {
       if (event.message.conversationId !== activeConversation?.id) return;
       setLiveMessages((current) => {

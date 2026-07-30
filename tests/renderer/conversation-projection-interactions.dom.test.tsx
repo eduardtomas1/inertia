@@ -271,6 +271,82 @@ describe("useConversationProjection pending interactions", () => {
       command.type === "conversation.detail.load")).toHaveLength(2);
   });
 
+  it("projects a follow-up without reloading or duplicating live commentary", async () => {
+    const source = createEventSource();
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : {
+          type: "request.ok",
+          requestId: crypto.randomUUID(),
+        });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+
+    source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: "I am checking the current implementation.",
+    });
+    const followUp: ChatMessage = {
+      id: "durable-follow-up",
+      conversationId: primaryId,
+      turnId: `${primaryId}-turn`,
+      role: "user",
+      content: "Check the Windows edge too.",
+      attachments: [],
+      createdAt: "2026-07-28T12:01:00.000Z",
+    };
+    source.emit({
+      type: "conversation.message.persisted",
+      message: followUp,
+    });
+
+    await waitFor(() => {
+      expect(hook.result.current.messages).toEqual([followUp]);
+      expect(hook.result.current.streamingText)
+        .toBe("I am checking the current implementation.");
+    });
+    expect(request.mock.calls.filter(([command]) =>
+      command.type === "conversation.detail.load")).toHaveLength(1);
+  });
+
   it("does not reload an open thread for unrelated full-snapshot refreshes", async () => {
     const source = createEventSource();
     const request = vi.fn(async (

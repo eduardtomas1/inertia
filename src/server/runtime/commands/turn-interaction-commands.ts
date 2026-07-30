@@ -76,11 +76,11 @@ export function createTurnInteractionCommandHandler(
               "Follow-ups while the agent is working support text only and cannot add skills.",
             );
           }
-          const followedUp = await dependencies.turns.steer(
+          const followUpMessage = await dependencies.turns.steer(
             conversation.id,
             command.payload.content,
           );
-          if (!followedUp) {
+          if (!followUpMessage) {
             throw new RuntimeRequestError(
               "This active agent route cannot accept a follow-up.",
             );
@@ -90,8 +90,8 @@ export function createTurnInteractionCommandHandler(
             requestId: command.requestId,
           });
           dependencies.broadcast({
-            type: "conversation.detail.invalidated",
-            conversationId: conversation.id,
+            type: "conversation.message.persisted",
+            message: followUpMessage,
           });
           dependencies.broadcastSnapshot();
           return "handled";

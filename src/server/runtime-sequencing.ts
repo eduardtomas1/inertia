@@ -54,6 +54,8 @@ function detailConversationId(event: ConversationRuntimeMutationEvent): string {
   switch (event.type) {
     case "conversation.detail.invalidated":
       return event.conversationId;
+    case "conversation.message.persisted":
+      return event.message.conversationId;
     case "agent.usage":
       return event.usage.conversationId;
     case "agent.commentary.persisted":

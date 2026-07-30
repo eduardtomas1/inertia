@@ -98,15 +98,17 @@ export class SnapshotRepository {
     const state = this.state();
     const latestTurns = new Map(
       (this.context.database.prepare(`
-        SELECT turn.*
-        FROM agent_turns AS turn
-        WHERE turn.id = (
-          SELECT candidate.id
-          FROM agent_turns AS candidate
-          WHERE candidate.conversation_id = turn.conversation_id
-          ORDER BY candidate.requested_at DESC, candidate.id DESC
-          LIMIT 1
+        SELECT *
+        FROM (
+          SELECT
+            agent_turns.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY conversation_id
+              ORDER BY requested_at DESC, id DESC
+            ) AS conversation_rank
+          FROM agent_turns
         )
+        WHERE conversation_rank = 1
       `).all() as AgentTurnRow[])
         .map(agentTurnFromRow)
         .map((turn) => [turn.conversationId, turn] as const),

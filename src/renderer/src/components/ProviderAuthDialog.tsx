@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
 import { CheckCircle2, PlugZap, X } from "lucide-react";
 import type { ClientCommand, ProviderInfo, ServerEvent, ThemePreference } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";

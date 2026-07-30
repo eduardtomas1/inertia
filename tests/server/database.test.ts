@@ -75,6 +75,23 @@ describe("RuntimeStore conversation lifecycle", () => {
     store.close();
   });
 
+  it("indexes conversation-detail ordering without a temporary sort", async () => {
+    const { databasePath, store } = await createStore();
+    store.close();
+    const database = new Database(databasePath, { readonly: true });
+    const plan = database.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT * FROM messages
+      WHERE conversation_id = ?
+      ORDER BY created_at ASC, id ASC
+    `).all("conversation") as Array<{ detail: string }>;
+    expect(plan.map(({ detail }) => detail).join("\n"))
+      .toContain("messages_conversation_created_idx");
+    expect(plan.map(({ detail }) => detail).join("\n"))
+      .not.toContain("USE TEMP B-TREE");
+    database.close();
+  });
+
   it("persists authoritative turns with an immutable execution configuration and boundary usage", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     const conversation = store.snapshot().conversations[0]!;

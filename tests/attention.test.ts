@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  indexConversationWorkspaceRuns,
   selectConversationWorkspaceRun,
   workspaceRunAttentionView,
 } from "../src/shared/attention";
@@ -93,5 +94,43 @@ describe("canonical workspace attention", () => {
       startedAt: "2026-07-23T08:00:00.000Z",
     });
     expect(selectConversationWorkspaceRun(latest.conversationId!, [older, latest, active])).toBe(active);
+  });
+
+  it("indexes canonical agent runs for many chats in one projection", () => {
+    const firstConversation = run({
+      id: "11111111-1111-4111-8111-111111111111",
+      conversationId: "33333333-3333-4333-8333-333333333301",
+      startedAt: "2026-07-23T10:00:00.000Z",
+    });
+    const secondConversationSettled = run({
+      id: "11111111-1111-4111-8111-111111111112",
+      conversationId: "33333333-3333-4333-8333-333333333302",
+      startedAt: "2026-07-23T11:00:00.000Z",
+    });
+    const secondConversationActive = run({
+      id: "11111111-1111-4111-8111-111111111113",
+      conversationId: secondConversationSettled.conversationId,
+      status: "running",
+      finishedAt: null,
+      startedAt: "2026-07-23T09:00:00.000Z",
+    });
+    const nonAgent = run({
+      id: "11111111-1111-4111-8111-111111111114",
+      kind: "check",
+      conversationId: firstConversation.conversationId,
+      startedAt: "2026-07-23T12:00:00.000Z",
+    });
+
+    const indexed = indexConversationWorkspaceRuns([
+      firstConversation,
+      secondConversationSettled,
+      secondConversationActive,
+      nonAgent,
+    ]);
+
+    expect(indexed.get(firstConversation.conversationId!))
+      .toBe(firstConversation);
+    expect(indexed.get(secondConversationSettled.conversationId!))
+      .toBe(secondConversationActive);
   });
 });

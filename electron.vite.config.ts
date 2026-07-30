@@ -7,6 +7,8 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      target: "node22",
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
@@ -19,6 +21,8 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      target: "node22",
+      sourcemap: false,
       rollupOptions: {
         input: resolve("src/preload/index.ts"),
         output: {
@@ -38,6 +42,11 @@ export default defineConfig({
       },
     },
     build: {
+      target: "chrome150",
+      minify: "esbuild",
+      sourcemap: false,
+      cssCodeSplit: true,
+      chunkSizeWarningLimit: 850,
       rollupOptions: {
         input: resolve("src/renderer/index.html"),
       },

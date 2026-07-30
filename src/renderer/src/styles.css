@@ -4392,6 +4392,11 @@ textarea {
 .workspace-panel-content > * { min-width: 0; min-height: 0; flex: 1; }
 .workspace-panel-content > .terminal-panel { width: 100%; flex-basis: auto; border-left: 0; }
 .workspace-panel-content > .terminal-tabs-panel { width: 100%; }
+.workspace-tool-loading {
+  display: grid;
+  min-height: 96px;
+  place-items: center;
+}
 
 @container (max-width: 430px) {
   .workspace-panel-tab span:not(.workspace-panel-badge) { display: none; }

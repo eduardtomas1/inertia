@@ -96,10 +96,6 @@ describe("RuntimeSequencer", () => {
     const sequencer = new RuntimeSequencer({ runtimeGeneration: GENERATION });
     sequencer.commit(() => detailEvent(CONVERSATION_A, "a"));
     sequencer.commit(() => detailEvent(CONVERSATION_B, "private-b"));
-    sequencer.commit((sync) => ({
-      type: "snapshot.updated",
-      snapshot: { ...snapshot(), sync },
-    }));
 
     const replay = sequencer.replay(GENERATION, 0, {
       conversationIds: [CONVERSATION_A],
@@ -109,10 +105,32 @@ describe("RuntimeSequencer", () => {
     expect(replay.frames.map(({ type }) => type)).toEqual([
       "runtime.event",
       "runtime.cursor",
-      "runtime.event",
     ]);
     expect(JSON.stringify(replay.frames)).not.toContain("private-b");
-    expect(replay.frames.map(({ sync }) => sync.latestSequence)).toEqual([1, 2, 3]);
+    expect(replay.frames.map(({ sync }) => sync.latestSequence)).toEqual([1, 2]);
+  });
+
+  it("uses shell snapshots as fresh-hydration boundaries instead of replay payloads", () => {
+    const sequencer = new RuntimeSequencer({ runtimeGeneration: GENERATION });
+    sequencer.commit(() => detailEvent(CONVERSATION_A, "before snapshot"));
+    const shell = sequencer.commit((sync) => ({
+      type: "snapshot.updated",
+      snapshot: { ...snapshot(), sync },
+    }));
+    sequencer.commit(() => detailEvent(CONVERSATION_A, "after snapshot"));
+
+    expect(sequencer.replay(GENERATION, 0, {
+      conversationIds: [CONVERSATION_A],
+    })).toMatchObject({ kind: "refresh", reason: "cursor-too-old" });
+    const replay = sequencer.replay(GENERATION, shell.sync.latestSequence, {
+      conversationIds: [CONVERSATION_A],
+    });
+    expect(replay).toMatchObject({
+      kind: "replay",
+      frames: [{
+        event: { type: "agent.text", text: "after snapshot" },
+      }],
+    });
   });
 
   it("keeps a subscription switch contiguous while detail events race on either side", () => {

@@ -1,5 +1,7 @@
 import {
+  lazy,
   memo,
+  Suspense,
   useRef,
   type ComponentProps,
   type CSSProperties,
@@ -10,16 +12,42 @@ import {
 import { ChatWorkspace } from "./ChatWorkspace";
 import { ConversationSplitView } from "./ConversationSplitView";
 import { ConversationDetailState } from "./ConversationDetailState";
-import { FilesPanel } from "./FilesPanel";
-import { HistoricalDiffPanel } from "./HistoricalDiffPanel";
-import { GoalPanel } from "./GoalPanel";
 import { PaneResizeHandle } from "./PaneResizeHandle";
-import { PlanPanel } from "./PlanPanel";
-import { PreviewPanel } from "./PreviewPanel";
-import { SettingsView } from "./SettingsView";
-import { TerminalPanel } from "./TerminalPanel";
-import { WorkspaceChangesPanel } from "./WorkspaceChangesPanel";
+import { LoadingMark } from "./ui";
 import { WorkspacePanel, type WorkspacePanelTab } from "./WorkspacePanel";
+
+const FilesPanel = lazy(async () => ({
+  default: (await import("./FilesPanel")).FilesPanel,
+}));
+const HistoricalDiffPanel = lazy(async () => ({
+  default: (await import("./HistoricalDiffPanel")).HistoricalDiffPanel,
+}));
+const GoalPanel = lazy(async () => ({
+  default: (await import("./GoalPanel")).GoalPanel,
+}));
+const PlanPanel = lazy(async () => ({
+  default: (await import("./PlanPanel")).PlanPanel,
+}));
+const PreviewPanel = lazy(async () => ({
+  default: (await import("./PreviewPanel")).PreviewPanel,
+}));
+const SettingsView = lazy(async () => ({
+  default: (await import("./SettingsView")).SettingsView,
+}));
+const TerminalPanel = lazy(async () => ({
+  default: (await import("./TerminalPanel")).TerminalPanel,
+}));
+const WorkspaceChangesPanel = lazy(async () => ({
+  default: (await import("./WorkspaceChangesPanel")).WorkspaceChangesPanel,
+}));
+
+function WorkspaceToolFallback(): JSX.Element {
+  return (
+    <div className="workspace-tool-loading" aria-busy="true">
+      <LoadingMark label="Loading workspace tool" />
+    </div>
+  );
+}
 
 export interface WorkspaceToolScene {
   activeTool: WorkspacePanelTab | null;
@@ -86,22 +114,24 @@ function WorkspaceToolSurface({
       {resizeHandle && <PaneResizeHandle {...resizeHandle} />}
       {tools && (
         <WorkspacePanel {...tools.panel}>
-          {tools.activeTool === "changes" && (
-            tools.historicalDiff
-              ? <HistoricalDiffPanel {...tools.historicalDiff} />
-              : <WorkspaceChangesPanel {...tools.changes} />
-          )}
-          {tools.activeTool === "files" && (
-            <FilesPanel key={tools.filesKey} {...tools.files} />
-          )}
-          {terminalLifecycleRef.current.activated && (
-            <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
-          )}
-          {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
-          {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
-          {tools.activeTool === "preview" && (
-            <PreviewPanel {...tools.preview} />
-          )}
+          <Suspense fallback={<WorkspaceToolFallback />}>
+            {tools.activeTool === "changes" && (
+              tools.historicalDiff
+                ? <HistoricalDiffPanel {...tools.historicalDiff} />
+                : <WorkspaceChangesPanel {...tools.changes} />
+            )}
+            {tools.activeTool === "files" && (
+              <FilesPanel key={tools.filesKey} {...tools.files} />
+            )}
+            {terminalLifecycleRef.current.activated && (
+              <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
+            )}
+            {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
+            {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
+            {tools.activeTool === "preview" && (
+              <PreviewPanel {...tools.preview} />
+            )}
+          </Suspense>
         </WorkspacePanel>
       )}
     </>
@@ -155,7 +185,9 @@ function WorkspaceSceneView({
   return (
     <>
       {view === "settings" ? (
-        <SettingsView {...settings} />
+        <Suspense fallback={<LoadingMark label="Loading settings" />}>
+          <SettingsView {...settings} />
+        </Suspense>
       ) : splitScene ? (
         <ConversationSplitView
           primary={(

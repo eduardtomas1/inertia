@@ -2,6 +2,7 @@ import type {
   Dispatch,
   SetStateAction,
 } from "react";
+import { lazy, Suspense } from "react";
 import type {
   AppSettings,
   Conversation,
@@ -18,16 +19,14 @@ import type { useInertiaConnection } from "../hooks/useInertiaConnection";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
 import type { useWorkspaceLayout } from "../hooks/useWorkspaceLayout";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { useStableActions } from "../hooks/useStableController";
 import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { ActivityRunSummary } from "../utils/activityCenter";
 import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
-import { CommitDialog } from "./CommitDialog";
-import {
-  MultiSpawnDialog,
-} from "./MultiSpawnDialog";
+import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { Sidebar } from "./Sidebar";
 import { WorkspaceHeader } from "./WorkspaceHeader";
@@ -39,6 +38,13 @@ import {
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
 import { resultEvent } from "../lib/runtimeCommands";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
+
+const CommitDialog = lazy(async () => ({
+  default: (await import("./CommitDialog")).CommitDialog,
+}));
+const MultiSpawnDialog = lazy(async () => ({
+  default: (await import("./MultiSpawnDialog")).MultiSpawnDialog,
+}));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
@@ -120,8 +126,8 @@ interface AppLayoutProps {
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
   projectActions: ProjectAction[];
-  reviewStates: Parameters<typeof CommitDialog>[0]["reviewStates"];
-  structuredDiff: Parameters<typeof CommitDialog>[0]["diff"];
+  reviewStates: CommitDialogProps["reviewStates"];
+  structuredDiff: CommitDialogProps["diff"];
   multiSpawn: MultiSpawnController;
   scene: WorkspaceSceneProps;
   providerAuth: Parameters<typeof AppStatusOverlays>[0]["providerAuth"];
@@ -184,8 +190,101 @@ export function AppLayout({
   useNativePreviewSuspension(
     Boolean(visibleError)
       || providerQuotaNotices.notices.length > 0
-      || Boolean(appUpdate.visible && appUpdate.status),
+      || Boolean(appUpdate.visible && appUpdate.status)
+      || commitDialogOpen
+      || multiSpawn.open,
   );
+  const sidebarActions = useStableActions({
+    close: () => setSidebarOpen(false),
+    viewChange: setView,
+    importProject: () => void actions.importProject(),
+    selectProject: actions.selectProject,
+    selectConversation: actions.selectConversation,
+    openConversationInSplit: actions.openConversationInSplit,
+    closeConversationSplit: actions.closeConversationSplit,
+    createConversation: actions.createConversation,
+    openMultiSpawn: multiSpawn.openDialog,
+    renameConversation: (thread: Conversation, title: string) => {
+      void actions.run("conversation.update", {
+        type: "conversation.update",
+        payload: { conversationId: thread.id, title },
+      }).catch(() => undefined);
+    },
+    archiveConversation: (thread: Conversation) => {
+      void actions.run("conversation.archive", {
+        type: "conversation.archive",
+        payload: { conversationId: thread.id },
+      }).catch(() => undefined);
+    },
+    settleConversation: (thread: Conversation) => {
+      void actions.run("conversation.settle", {
+        type: "conversation.settle",
+        payload: { conversationId: thread.id },
+      }).catch(() => undefined);
+    },
+    restoreConversation: (thread: Conversation) => {
+      void actions.run("conversation.unsettle", {
+        type: "conversation.unsettle",
+        payload: { conversationId: thread.id },
+      }).catch(() => undefined);
+    },
+    deleteConversation: (thread: Conversation) => {
+      const confirmed = !settings.confirmDestructiveActions
+        || window.confirm(`Delete “${thread.title}”? This cannot be undone.`);
+      if (confirmed) {
+        void actions.run("conversation.delete", {
+          type: "conversation.delete",
+          payload: { conversationId: thread.id },
+        }).catch(() => undefined);
+      }
+    },
+    acknowledgeRun: actions.acknowledgeActivity,
+    dismissRun: actions.dismissActivity,
+    openProject: (item: Project) => actions.openProjectPath({
+      projectId: item.id,
+      relativePath: ".",
+      action: "open-externally",
+    }),
+    renameProject: (item: Project, name: string) => {
+      void actions.run("project.update", {
+        type: "project.update",
+        payload: { projectId: item.id, name },
+      }).catch(() => undefined);
+    },
+    setProjectGrouping: (
+      item: Project,
+      groupingMode: Project["groupingMode"],
+    ) => {
+      void actions.run("project.update", {
+        type: "project.update",
+        payload: { projectId: item.id, groupingMode },
+      }).catch(() => undefined);
+    },
+    setProjectGitRepositoryLimit: (
+      item: Project,
+      gitRepositoryLimit: number,
+    ) => {
+      void actions.run("project.update", {
+        type: "project.update",
+        payload: { projectId: item.id, gitRepositoryLimit },
+      }).catch(() => undefined);
+    },
+    sidebarModeChange: (sidebarMode: AppSettings["sidebarMode"]) => {
+      void actions.updateSettings({ sidebarMode });
+    },
+    removeProject: (item: Project) => {
+      const confirmed = !settings.confirmDestructiveActions
+        || window.confirm(
+          `Remove “${item.name}” from Inertia? Files on disk will not be deleted.`,
+        );
+      if (confirmed) {
+        void actions.run("project.remove", {
+          type: "project.remove",
+          payload: { projectId: item.id },
+        }).catch(() => undefined);
+      }
+    },
+  });
 
   return (
     <div
@@ -206,90 +305,31 @@ export function AppLayout({
           view={view}
           open={sidebarOpen}
           busy={busyAction === "project.create"}
-          onClose={() => setSidebarOpen(false)}
-          onViewChange={setView}
-          onImportProject={() => void actions.importProject()}
-          onSelectProject={actions.selectProject}
-          onSelectConversation={actions.selectConversation}
+          onClose={sidebarActions.close}
+          onViewChange={sidebarActions.viewChange}
+          onImportProject={sidebarActions.importProject}
+          onSelectProject={sidebarActions.selectProject}
+          onSelectConversation={sidebarActions.selectConversation}
           splitConversationId={splitConversationId}
-          onOpenConversationInSplit={actions.openConversationInSplit}
-          onCloseConversationSplit={actions.closeConversationSplit}
-          onCreateConversation={actions.createConversation}
-          onOpenMultiSpawn={multiSpawn.openDialog}
-          onRenameConversation={(thread, title) => {
-            void actions.run("conversation.update", {
-              type: "conversation.update",
-              payload: { conversationId: thread.id, title },
-            }).catch(() => undefined);
-          }}
-          onArchiveConversation={(thread) => {
-            void actions.run("conversation.archive", {
-              type: "conversation.archive",
-              payload: { conversationId: thread.id },
-            }).catch(() => undefined);
-          }}
-          onSettleConversation={(thread) => {
-            void actions.run("conversation.settle", {
-              type: "conversation.settle",
-              payload: { conversationId: thread.id },
-            }).catch(() => undefined);
-          }}
-          onRestoreConversation={(thread) => {
-            void actions.run("conversation.unsettle", {
-              type: "conversation.unsettle",
-              payload: { conversationId: thread.id },
-            }).catch(() => undefined);
-          }}
-          onDeleteConversation={(thread) => {
-            const confirmed = !settings.confirmDestructiveActions
-              || window.confirm(`Delete “${thread.title}”? This cannot be undone.`);
-            if (confirmed) {
-              void actions.run("conversation.delete", {
-                type: "conversation.delete",
-                payload: { conversationId: thread.id },
-              }).catch(() => undefined);
-            }
-          }}
-          onAcknowledgeRun={actions.acknowledgeActivity}
-          onDismissRun={actions.dismissActivity}
-          onOpenProject={(item) => actions.openProjectPath({
-            projectId: item.id,
-            relativePath: ".",
-            action: "open-externally",
-          })}
-          onRenameProject={(item, name) => {
-            void actions.run("project.update", {
-              type: "project.update",
-              payload: { projectId: item.id, name },
-            }).catch(() => undefined);
-          }}
-          onSetProjectGrouping={(item, groupingMode) => {
-            void actions.run("project.update", {
-              type: "project.update",
-              payload: { projectId: item.id, groupingMode },
-            }).catch(() => undefined);
-          }}
-          onSetProjectGitRepositoryLimit={(item, gitRepositoryLimit) => {
-            void actions.run("project.update", {
-              type: "project.update",
-              payload: { projectId: item.id, gitRepositoryLimit },
-            }).catch(() => undefined);
-          }}
-          onSidebarModeChange={(sidebarMode) => {
-            void actions.updateSettings({ sidebarMode });
-          }}
-          onRemoveProject={(item) => {
-            const confirmed = !settings.confirmDestructiveActions
-              || window.confirm(
-                `Remove “${item.name}” from Inertia? Files on disk will not be deleted.`,
-              );
-            if (confirmed) {
-              void actions.run("project.remove", {
-                type: "project.remove",
-                payload: { projectId: item.id },
-              }).catch(() => undefined);
-            }
-          }}
+          onOpenConversationInSplit={sidebarActions.openConversationInSplit}
+          onCloseConversationSplit={sidebarActions.closeConversationSplit}
+          onCreateConversation={sidebarActions.createConversation}
+          onOpenMultiSpawn={sidebarActions.openMultiSpawn}
+          onRenameConversation={sidebarActions.renameConversation}
+          onArchiveConversation={sidebarActions.archiveConversation}
+          onSettleConversation={sidebarActions.settleConversation}
+          onRestoreConversation={sidebarActions.restoreConversation}
+          onDeleteConversation={sidebarActions.deleteConversation}
+          onAcknowledgeRun={sidebarActions.acknowledgeRun}
+          onDismissRun={sidebarActions.dismissRun}
+          onOpenProject={sidebarActions.openProject}
+          onRenameProject={sidebarActions.renameProject}
+          onSetProjectGrouping={sidebarActions.setProjectGrouping}
+          onSetProjectGitRepositoryLimit={
+            sidebarActions.setProjectGitRepositoryLimit
+          }
+          onSidebarModeChange={sidebarActions.sidebarModeChange}
+          onRemoveProject={sidebarActions.removeProject}
         />
       )}
 
@@ -415,30 +455,38 @@ export function AppLayout({
         </div>
       </section>
 
-      <CommitDialog
-        open={commitDialogOpen}
-        repositoryPath="."
-        status={gitStatus}
-        reviewStates={reviewStates}
-        diff={structuredDiff}
-        busy={busyAction === "git.commit" || busyAction === "git.push"}
-        onClose={() => setCommitDialogOpen(false)}
-        onCommit={async (...args) => {
-          await actions.commit(...args);
-          setCommitDialogOpen(false);
-        }}
-      />
-      <MultiSpawnDialog
-        open={multiSpawn.open}
-        snapshot={connection.snapshot}
-        settings={settings}
-        submitting={multiSpawn.submitting}
-        error={multiSpawn.error}
-        onClose={multiSpawn.closeDialog}
-        onSubmit={multiSpawn.submit}
-        onOpenProviderSetup={actions.openProviderSetup}
-        onOpenBackendSetup={actions.openBackendSetup}
-      />
+      {commitDialogOpen && (
+        <Suspense fallback={null}>
+          <CommitDialog
+            open
+            repositoryPath="."
+            status={gitStatus}
+            reviewStates={reviewStates}
+            diff={structuredDiff}
+            busy={busyAction === "git.commit" || busyAction === "git.push"}
+            onClose={() => setCommitDialogOpen(false)}
+            onCommit={async (...args) => {
+              await actions.commit(...args);
+              setCommitDialogOpen(false);
+            }}
+          />
+        </Suspense>
+      )}
+      {multiSpawn.open && (
+        <Suspense fallback={null}>
+          <MultiSpawnDialog
+            open
+            snapshot={connection.snapshot}
+            settings={settings}
+            submitting={multiSpawn.submitting}
+            error={multiSpawn.error}
+            onClose={multiSpawn.closeDialog}
+            onSubmit={multiSpawn.submit}
+            onOpenProviderSetup={actions.openProviderSetup}
+            onOpenBackendSetup={actions.openBackendSetup}
+          />
+        </Suspense>
+      )}
       <AppNavigationOverlays
         snapshot={connection.snapshot}
         activityOpen={activityOpen}

@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useLayoutEffect,
   type RefObject,
 } from "react";
@@ -9,17 +10,24 @@ export function useTextareaAutosize(
   textareaRef: RefObject<HTMLTextAreaElement | null>,
   content: string,
 ): void {
+  const syncHeight = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "0px";
+    const contentHeight = textarea.scrollHeight;
+    textarea.style.height = `${Math.min(contentHeight, MAX_TEXTAREA_HEIGHT_PX)}px`;
+    textarea.style.overflowY = contentHeight > MAX_TEXTAREA_HEIGHT_PX
+      ? "auto"
+      : "hidden";
+  }, [textareaRef]);
+
+  useLayoutEffect(() => {
+    syncHeight();
+  }, [content, syncHeight]);
+
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    const syncHeight = () => {
-      textarea.style.height = "0px";
-      const contentHeight = textarea.scrollHeight;
-      textarea.style.height = `${Math.min(contentHeight, MAX_TEXTAREA_HEIGHT_PX)}px`;
-      textarea.style.overflowY = contentHeight > MAX_TEXTAREA_HEIGHT_PX
-        ? "auto"
-        : "hidden";
-    };
     let observedWidth = textarea.getBoundingClientRect().width;
     const observer = new ResizeObserver(([entry]) => {
       const nextWidth = entry?.contentRect.width ?? observedWidth;
@@ -27,8 +35,7 @@ export function useTextareaAutosize(
       observedWidth = nextWidth;
       syncHeight();
     });
-    syncHeight();
     observer.observe(textarea);
     return () => observer.disconnect();
-  }, [content, textareaRef]);
+  }, [syncHeight, textareaRef]);
 }

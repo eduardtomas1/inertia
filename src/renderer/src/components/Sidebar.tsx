@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   Activity,
   Archive,
@@ -38,7 +38,8 @@ import {
   groupWorkThreads,
   nextSidebarNavigationIndex,
   sidebarThreadView,
-  sortActivityThreads,
+  sidebarThreadViewMap,
+  sortSidebarThreadViews,
   type SidebarThreadStatus,
 } from "../utils/sidebarModel";
 import { IconButton, LoadingMark } from "./ui";
@@ -97,7 +98,7 @@ function groupingLabel(mode: ProjectGroupingMode): string {
   return "Keep separate";
 }
 
-export function Sidebar({
+function SidebarView({
   snapshot,
   connectionStatus,
   view,
@@ -219,23 +220,45 @@ export function Sidebar({
     () => new Map((snapshot?.projects ?? []).map((project) => [project.id, project])),
     [snapshot?.projects],
   );
+  const threadViewsById = useMemo(
+    () => sidebarThreadViewMap(
+      snapshot?.conversations ?? [],
+      snapshot?.activeConversationId ?? null,
+      snapshot?.runs ?? [],
+    ),
+    [
+      snapshot?.activeConversationId,
+      snapshot?.conversations,
+      snapshot?.runs,
+    ],
+  );
   const activityThreads = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     const visibleProjectIds = new Set(visibleProjects.map(({ id }) => id));
-    return sortActivityThreads(
-      (snapshot?.conversations ?? []).filter((conversation) => (
+    return sortSidebarThreadViews(
+      (snapshot?.conversations ?? [])
+        .filter((conversation) => (
         visibleProjectIds.has(conversation.projectId)
         && (!needle
           || conversation.title.toLocaleLowerCase().includes(needle)
           || projectById.get(conversation.projectId)?.name.toLocaleLowerCase().includes(needle))
-      )),
-      snapshot?.activeConversationId ?? null,
-      snapshot?.runs ?? [],
+        ))
+        .map((conversation) => threadViewsById.get(conversation.id)!),
     );
-  }, [projectById, query, snapshot?.activeConversationId, snapshot?.conversations, snapshot?.runs, visibleProjects]);
-  const activeThreads = activityThreads.filter(({ hidden, settled }) => !settled && !hidden);
-  const settledThreads = activityThreads.filter(({ settled }) => settled);
-  const workSections = groupWorkThreads(activityThreads);
+  }, [
+    projectById,
+    query,
+    snapshot?.conversations,
+    threadViewsById,
+    visibleProjects,
+  ]);
+  const { activeThreads, settledThreads, workSections } = useMemo(() => ({
+    activeThreads: activityThreads.filter(
+      ({ hidden, settled }) => !settled && !hidden,
+    ),
+    settledThreads: activityThreads.filter(({ settled }) => settled),
+    workSections: groupWorkThreads(activityThreads),
+  }), [activityThreads]);
   const visibleHistory = settledThreads.slice(0, historyVisible);
   const activeRenameProject = renamingProject ? projectById.get(renamingProject) : undefined;
 
@@ -344,7 +367,8 @@ export function Sidebar({
       run.conversationId === conversation.id && (run.status === "running" || run.status === "waiting")
     )) ?? false;
     const canSettle = !hasActiveWork && conversation.status !== "running" && conversation.status !== "needs-input";
-    const thread = sidebarThreadView(conversation, snapshot?.activeConversationId ?? null, snapshot?.runs ?? []);
+    const thread = threadViewsById.get(conversation.id)
+      ?? sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
     const runAttention = thread.run ? workspaceRunAttentionView(thread.run) : null;
     const isSplitConversation = splitConversationId === conversation.id;
     const canOpenInSplit = Boolean(
@@ -415,7 +439,8 @@ export function Sidebar({
   );
 
   const activityRow = (conversation: Conversation, variant: "card" | "history") => {
-    const model = sidebarThreadView(conversation, snapshot?.activeConversationId ?? null, snapshot?.runs ?? []);
+    const model = threadViewsById.get(conversation.id)
+      ?? sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
     const project = projectById.get(conversation.projectId);
     const isActive = snapshot?.activeConversationId === conversation.id && view === "workspace";
     return (
@@ -628,7 +653,11 @@ export function Sidebar({
                     {isExpanded && (
                       <div className="conversation-list" aria-label={`${project.name} threads`}>
                         {conversations.map((conversation) => {
-                          const thread = sidebarThreadView(conversation, snapshot?.activeConversationId ?? null, snapshot?.runs ?? []);
+                          const thread = threadViewsById.get(conversation.id)
+                            ?? sidebarThreadView(
+                              conversation,
+                              snapshot?.activeConversationId ?? null,
+                            );
                           return (
                             <div className={clsx("conversation-item", thread.unread && "is-unread")} key={conversation.id}>
                               {renaming === conversation.id ? renameForm(conversation) : (
@@ -709,3 +738,6 @@ export function Sidebar({
     </>
   );
 }
+
+export const Sidebar = memo(SidebarView);
+Sidebar.displayName = "Sidebar";

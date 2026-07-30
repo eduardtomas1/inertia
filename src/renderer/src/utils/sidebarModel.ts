@@ -1,5 +1,6 @@
 import type { Conversation, Project, ProjectGroupingMode, WorkspaceRun } from "@shared/contracts";
 import {
+  indexConversationWorkspaceRuns,
   selectConversationWorkspaceRun,
   workspaceRunAttentionView,
 } from "../../../shared/attention";
@@ -130,12 +131,11 @@ export function hasUnreadCompletion(conversation: Conversation, activeConversati
   return conversation.completedAt > conversation.lastViewedAt;
 }
 
-export function sidebarThreadView(
+function sidebarThreadViewForRun(
   conversation: Conversation,
   activeConversationId: string | null,
-  runs: readonly WorkspaceRun[] = [],
+  run: WorkspaceRun | null,
 ): SidebarThreadView {
-  const run = selectConversationWorkspaceRun(conversation.id, runs);
   const runAttention = run ? workspaceRunAttentionView(run) : null;
   const status: SidebarThreadStatus = run?.status === "waiting"
     ? conversation.attentionKind === "approval" ? "approval" : "input"
@@ -168,6 +168,34 @@ export function sidebarThreadView(
   };
 }
 
+export function sidebarThreadView(
+  conversation: Conversation,
+  activeConversationId: string | null,
+  runs: readonly WorkspaceRun[] = [],
+): SidebarThreadView {
+  return sidebarThreadViewForRun(
+    conversation,
+    activeConversationId,
+    selectConversationWorkspaceRun(conversation.id, runs),
+  );
+}
+
+export function sidebarThreadViewMap(
+  conversations: readonly Conversation[],
+  activeConversationId: string | null,
+  runs: readonly WorkspaceRun[] = [],
+): ReadonlyMap<string, SidebarThreadView> {
+  const runsByConversation = indexConversationWorkspaceRuns(runs);
+  return new Map(conversations.map((conversation) => [
+    conversation.id,
+    sidebarThreadViewForRun(
+      conversation,
+      activeConversationId,
+      runsByConversation.get(conversation.id) ?? null,
+    ),
+  ]));
+}
+
 const statusPriority: Record<SidebarThreadStatus, number> = {
   approval: 0,
   input: 1,
@@ -182,9 +210,21 @@ export function sortActivityThreads(
   activeConversationId: string | null,
   runs: readonly WorkspaceRun[] = [],
 ): SidebarThreadView[] {
-  return conversations
+  const views = sidebarThreadViewMap(
+    conversations,
+    activeConversationId,
+    runs,
+  );
+  return sortSidebarThreadViews(conversations
     .filter(({ archivedAt }) => archivedAt === null)
-    .map((conversation) => sidebarThreadView(conversation, activeConversationId, runs))
+    .map((conversation) => views.get(conversation.id)!));
+}
+
+export function sortSidebarThreadViews(
+  threads: readonly SidebarThreadView[],
+): SidebarThreadView[] {
+  return [...threads]
+    .filter(({ conversation }) => conversation.archivedAt === null)
     .sort((a, b) => (
       Number(a.settled) - Number(b.settled)
       || Number(b.needsAttention) - Number(a.needsAttention)

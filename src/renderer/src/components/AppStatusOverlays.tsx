@@ -1,12 +1,15 @@
-import type { ComponentProps } from "react";
+import { lazy, Suspense, type ComponentProps } from "react";
 import { AlertCircle, X } from "lucide-react";
 
 import type { useAppUpdate } from "../hooks/useAppUpdate";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
 import { AppUpdateNotice } from "./AppUpdateNotice";
-import { ProviderAuthDialog } from "./ProviderAuthDialog";
 import { ProviderQuotaNotices } from "./ProviderQuotaNotices";
 import { IconButton } from "./ui";
+
+const ProviderAuthDialog = lazy(async () => ({
+  default: (await import("./ProviderAuthDialog")).ProviderAuthDialog,
+}));
 
 interface AppStatusOverlaysProps {
   providerAuth: ComponentProps<typeof ProviderAuthDialog>;
@@ -25,7 +28,11 @@ export function AppStatusOverlays({
 }: AppStatusOverlaysProps): React.JSX.Element {
   return (
     <>
-      <ProviderAuthDialog {...providerAuth} />
+      {providerAuth.provider && (
+        <Suspense fallback={null}>
+          <ProviderAuthDialog {...providerAuth} />
+        </Suspense>
+      )}
       {appUpdate.visible && appUpdate.status && (
         <AppUpdateNotice
           status={appUpdate.status}

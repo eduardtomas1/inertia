@@ -100,6 +100,10 @@ describe("composer Send and Stop", () => {
     expect(composerSource).toContain("textareaRef.current?.focus()");
     expect(chatWorkspaceSource).toContain("onStop: () => Promise<void>;");
     expect(chatWorkspaceSource).toContain(
+      "const stopTimeline = useCallback(() => {",
+    );
+    expect(chatWorkspaceSource).toContain("onStop={stopTimeline}");
+    expect(chatWorkspaceSource).not.toContain(
       "onStop={() => { void onStop().catch(() => undefined); }}",
     );
   });

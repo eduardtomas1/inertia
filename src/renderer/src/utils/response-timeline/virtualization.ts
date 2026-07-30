@@ -24,8 +24,9 @@ import {
   shouldCollapseUserRequest,
 } from "../userRequestPresentation";
 
-export const TIMELINE_VIRTUALIZATION_MIN_ROWS = 40;
-export const TIMELINE_VIRTUALIZATION_MIN_WEIGHT = 40;
+export const TIMELINE_VIRTUALIZATION_MIN_ROWS = 14;
+export const TIMELINE_VIRTUALIZATION_MIN_WEIGHTED_ROWS = 10;
+export const TIMELINE_VIRTUALIZATION_MIN_WEIGHT = 10;
 export const TIMELINE_MINIMAP_MIN_GUTTER = 48;
 export const TIMELINE_MINIMAP_MAX_MARKERS = 48;
 
@@ -86,7 +87,10 @@ export function shouldVirtualizeTimeline(
     && Number.isFinite(renderWeight)
     && (
       rowCount >= TIMELINE_VIRTUALIZATION_MIN_ROWS
-      || renderWeight >= TIMELINE_VIRTUALIZATION_MIN_WEIGHT
+      || (
+        rowCount >= TIMELINE_VIRTUALIZATION_MIN_WEIGHTED_ROWS
+        && renderWeight >= TIMELINE_VIRTUALIZATION_MIN_WEIGHT
+      )
     );
 }
 
@@ -199,13 +203,28 @@ function estimatedTextColumns(width: number, maximum: number): number {
 
 function estimatedColumnLength(value: string): number {
   let columns = 0;
-  for (const character of value) {
-    if (character === "\t") {
+  const maximumColumns = 48_000;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit === 9) {
       columns += 4;
       continue;
     }
-    const codePoint = character.codePointAt(0) ?? 0;
+    let codePoint = codeUnit;
+    if (
+      codeUnit >= 0xd800
+      && codeUnit <= 0xdbff
+      && index + 1 < value.length
+    ) {
+      const trailing = value.charCodeAt(index + 1);
+      if (trailing >= 0xdc00 && trailing <= 0xdfff) {
+        codePoint = ((codeUnit - 0xd800) * 0x400)
+          + trailing - 0xdc00 + 0x10000;
+        index += 1;
+      }
+    }
     columns += codePoint > 0x2e7f ? 2 : 1;
+    if (columns >= maximumColumns) return maximumColumns;
   }
   return columns;
 }

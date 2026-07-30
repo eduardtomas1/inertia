@@ -69,6 +69,7 @@ import {
 
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
+  runtimeReady: "inertia:runtime-ready",
   selectDirectory: "inertia:select-directory",
   selectCodexExecutable: "inertia:select-codex-executable",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
@@ -681,7 +682,7 @@ function finishQuitAfterCleanup(): void {
 
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
-  runtimeDiagnostics.record("app.start");
+  setImmediate(() => runtimeDiagnostics?.record("app.start"));
   const testUpdateVersion = process.env.NODE_ENV === "test"
     && typeof process.env.INERTIA_TEST_APP_UPDATE_VERSION === "string"
     && /^v?\d+\.\d+\.\d+$/u.test(process.env.INERTIA_TEST_APP_UPDATE_VERSION)
@@ -714,6 +715,11 @@ async function bootstrap(): Promise<void> {
     ),
   );
 
+  registerAppProtocol();
+  // Paint the secure renderer while private attachment storage is reconciled.
+  // The renderer can show its bounded starting state until the runtime-ready
+  // signal arrives; orphan cleanup no longer blocks the first window.
+  const windowReady = createWindow();
   const [, , attachmentStorage] = await Promise.all([
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
@@ -723,7 +729,6 @@ async function bootstrap(): Promise<void> {
   const orphanReservation = attachmentStorage.reservation;
   attachmentReservation = orphanReservation;
 
-  registerAppProtocol();
   packageSmokeFilePath = process.env.NODE_ENV === "test"
     && typeof process.env.INERTIA_PACKAGE_SMOKE_FILE === "string"
     && process.env.INERTIA_PACKAGE_SMOKE_FILE.length <= 4096
@@ -787,6 +792,13 @@ async function bootstrap(): Promise<void> {
     ),
     onStateChange: (snapshot) => {
       runtimeDiagnostics?.recordState(snapshot);
+      if (
+        snapshot.phase === "ready"
+        && mainWindow
+        && !mainWindow.isDestroyed()
+      ) {
+        mainWindow.webContents.send(IPC.runtimeReady);
+      }
       if (snapshot.phase === "restarting" && snapshot.lastError) {
         console.error("The local runtime stopped; restart scheduled", snapshot.lastError);
       }
@@ -825,7 +837,7 @@ async function bootstrap(): Promise<void> {
       }),
     });
   }
-  await createWindow();
+  await windowReady;
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();

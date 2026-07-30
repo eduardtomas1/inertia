@@ -77,4 +77,43 @@ describe("ResponseMarkdown project files", () => {
       action: "reveal",
     });
   });
+
+  it("preserves interactive code state across an equivalent parent render", () => {
+    const props = {
+      content: "```ts\nconst stable = true;\n```",
+      projectRoot: "/workspace",
+      projectId: "11111111-1111-4111-8111-111111111111",
+      defaultCodeWrap: false,
+    } as const;
+    const view = render(<ResponseMarkdown {...props} />);
+    const wrap = screen.getByRole("button", { name: "Wrap" });
+    fireEvent.click(wrap);
+    expect(wrap).toHaveAttribute("aria-pressed", "true");
+    expect(wrap).toHaveAttribute("title", "Disable code wrapping");
+
+    view.rerender(<ResponseMarkdown {...props} />);
+
+    expect(screen.getByRole("button", { name: "Wrap" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("renders very large code blocks without synchronous highlighting", () => {
+    const code = Array.from(
+      { length: 2_001 },
+      (_, index) => `const line${index} = ${index};`,
+    ).join("\n");
+    const { container } = render(
+      <ResponseMarkdown
+        content={`\`\`\`ts\n${code}\n\`\`\``}
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+      />,
+    );
+
+    expect(container.querySelector("code.language-ts")).not.toBeNull();
+    expect(container.querySelector("code.hljs")).toBeNull();
+  });
 });

@@ -95,6 +95,7 @@ const DEFAULT_TIMELINE_ESTIMATE_LAYOUT: TimelineEstimateLayout = {
   interfaceScale: "default",
   responseDensity: "default",
 };
+const TIMELINE_WIDTH_ESTIMATE_BUCKET = 16;
 
 function useTimelineEstimateLayout(
   timelineElementRef: RefObject<HTMLDivElement | null> | undefined,
@@ -113,7 +114,12 @@ function useTimelineEstimateLayout(
     let lastLayout = DEFAULT_TIMELINE_ESTIMATE_LAYOUT;
     const measure = (): void => {
       const next = {
-        availableWidth: Math.max(320, Math.round(timelineElement.clientWidth)),
+        availableWidth: Math.max(
+          320,
+          Math.round(
+            timelineElement.clientWidth / TIMELINE_WIDTH_ESTIMATE_BUCKET,
+          ) * TIMELINE_WIDTH_ESTIMATE_BUCKET,
+        ),
         interfaceScale: currentInterfaceScale(),
         responseDensity: currentResponseDensity(timelineElement),
       };
@@ -345,6 +351,8 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     previousTimeline.current = next;
     return next;
   }, [builtTimeline]);
+  const timelineRef = useRef(timeline);
+  timelineRef.current = timeline;
   const previousComparableTurn = useMemo(() => {
     const result = new Map<string, string>();
     const previousByWorktree = new Map<string, string>();
@@ -387,8 +395,8 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     props.showChangedFileSummaries ? "files" : "hidden-files",
   ].join(":");
   const getItemKey = useCallback(
-    (index: number) => timeline[index]?.id ?? `missing-${index}`,
-    [timeline],
+    (index: number) => timelineRef.current[index]?.id ?? `missing-${index}`,
+    [],
   );
   const estimateSize = useCallback((index: number) => {
     const item = timeline[index];
@@ -436,6 +444,21 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     followOnAppend: false,
     useAnimationFrameWithResizeObserver: true,
   });
+  const initiallyFollowedConversation = useRef<string | null>(null);
+  useEffect(() => {
+    if (!virtualized || timeline.length === 0) return;
+    if (initiallyFollowedConversation.current === props.conversationId) return;
+    initiallyFollowedConversation.current = props.conversationId;
+    virtualizer.scrollToIndex(timeline.length - 1, {
+      align: "end",
+      behavior: "auto",
+    });
+  }, [
+    props.conversationId,
+    timeline.length,
+    virtualized,
+    virtualizer,
+  ]);
   type ExpansionAnchor = {
     sequence: number;
     sourceTurnId: string;
@@ -508,8 +531,9 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     let cancelled = false;
     let attempts = 0;
     let stableFrames = 0;
-    const settleUntil = performance.now() + 2_000;
-    const maximumSettleFrames = 120;
+    let anchorRow: HTMLElement | null = null;
+    const settleUntil = performance.now() + 600;
+    const maximumSettleFrames = 30;
     const removeIntentListeners = (): void => {
       scrollElement.removeEventListener("wheel", cancelForUserIntent);
       scrollElement.removeEventListener("touchstart", cancelForUserIntent);
@@ -533,10 +557,12 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
         finishRestoration();
         return;
       }
-      const row = rowId
-        ? [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")]
-            .find((element) => element.dataset.responseRowId === rowId)
-        : null;
+      if (!anchorRow?.isConnected && rowId) {
+        anchorRow = [...root.querySelectorAll<HTMLElement>(
+          "[data-response-row-id]",
+        )].find((element) => element.dataset.responseRowId === rowId) ?? null;
+      }
+      const row = anchorRow;
       if (!row) {
         if (anchorIndex >= 0 && attempts % 4 === 0) {
           virtualizer.scrollToIndex(anchorIndex, { align: "start", behavior: "auto" });
@@ -561,7 +587,7 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
       if (
         attempts < maximumSettleFrames
         && performance.now() < settleUntil
-        && stableFrames < 8
+        && stableFrames < 4
       ) {
         window.requestAnimationFrame(restore);
       } else {

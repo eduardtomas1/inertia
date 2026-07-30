@@ -113,6 +113,22 @@ describe("Minimal Workstream active text signal", () => {
     );
   });
 
+  it("keeps the working label visible in forced-colors mode", () => {
+    const forcedColors = css.slice(
+      css.lastIndexOf("@media (forced-colors: active)"),
+    );
+    const forcedColorsTextRule = cssBlock(
+      forcedColors,
+      '[data-active-work-region][data-active-work-state="running"] .turn-working-status strong',
+    );
+
+    expect(forcedColorsTextRule).toContain("color: CanvasText");
+    expect(forcedColorsTextRule).toContain("background: none");
+    expect(forcedColorsTextRule).toContain(
+      "-webkit-text-fill-color: currentColor",
+    );
+  });
+
   it("keeps running glyph motion scoped to the authoritative active region", () => {
     expect(css).toContain(
       "[data-active-work-region] .turn-work-log .agent-activity.is-running > svg",

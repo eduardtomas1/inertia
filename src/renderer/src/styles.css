@@ -11967,3 +11967,14 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   grid-column: 1;
   grid-row: 2;
 }
+
+@media (forced-colors: active) {
+  [data-active-work-region][data-active-work-state="queued"] .turn-working-status strong,
+  [data-active-work-region][data-active-work-state="starting"] .turn-working-status strong,
+  [data-active-work-region][data-active-work-state="running"] .turn-working-status strong {
+    color: CanvasText;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    forced-color-adjust: auto;
+  }
+}

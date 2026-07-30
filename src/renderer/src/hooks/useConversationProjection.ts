@@ -386,7 +386,7 @@ export function useConversationProjection({
           [event.message.conversationId]: [
             ...existing.filter(({ id }) => id !== event.message.id),
             event.message,
-          ].slice(-64),
+          ],
         };
       });
       setStreamingText("");
@@ -479,64 +479,65 @@ export function useConversationProjection({
     setNativePlans({});
   }, [conversation?.id]);
 
+  const activeConversationId = conversation?.id ?? null;
   const turns = useMemo(() => detail?.agentTurns ?? [], [detail?.agentTurns]);
   const messages = useMemo(
     () => {
       const merged = new Map<string, ChatMessage>();
       for (const message of detail?.messages ?? []) merged.set(message.id, message);
-      if (conversation) {
-        for (const message of liveMessages[conversation.id] ?? []) {
+      if (activeConversationId) {
+        for (const message of liveMessages[activeConversationId] ?? []) {
           merged.set(message.id, message);
         }
       }
       return [...merged.values()].sort((a, b) =>
         a.createdAt.localeCompare(b.createdAt));
     },
-    [conversation, detail?.messages, liveMessages],
+    [activeConversationId, detail?.messages, liveMessages],
   );
   const activities = useMemo(() => {
-    if (!conversation) return [];
+    if (!activeConversationId) return [];
     const merged = new Map<string, AgentActivity>();
     for (const activity of detail?.activities ?? []) {
       merged.set(activity.id, activity);
     }
-    for (const activity of liveActivities[conversation.id] ?? []) {
+    for (const activity of liveActivities[activeConversationId] ?? []) {
       merged.set(activity.id, activity);
     }
     return [...merged.values()].sort((a, b) =>
       a.createdAt.localeCompare(b.createdAt));
-  }, [conversation, detail?.activities, liveActivities]);
+  }, [activeConversationId, detail?.activities, liveActivities]);
   const subagents = useMemo(() => {
-    if (!conversation) return [];
+    if (!activeConversationId) return [];
     const merged = new Map<string, SubagentTrace>();
     for (const trace of detail?.subagents ?? []) merged.set(trace.id, trace);
-    for (const trace of liveSubagents[conversation.id] ?? []) {
+    for (const trace of liveSubagents[activeConversationId] ?? []) {
       merged.set(trace.id, trace);
     }
     return [...merged.values()].sort((a, b) =>
       a.createdAt.localeCompare(b.createdAt)
       || a.sequence - b.sequence
       || a.id.localeCompare(b.id));
-  }, [conversation, detail?.subagents, liveSubagents]);
+  }, [activeConversationId, detail?.subagents, liveSubagents]);
   const usage = useMemo(() => {
-    if (!conversation) return null;
-    return liveUsage[conversation.id]
+    if (!activeConversationId) return null;
+    return liveUsage[activeConversationId]
       ?? detail?.usage.find(({ conversationId }) =>
-        conversationId === conversation.id)
+        conversationId === activeConversationId)
       ?? null;
-  }, [conversation, detail?.usage, liveUsage]);
+  }, [activeConversationId, detail?.usage, liveUsage]);
   const plans = useMemo(() => {
-    if (!conversation) return [];
+    if (!activeConversationId) return [];
     const merged = new Map<string, AgentPlan>();
     for (const plan of detail?.plans ?? []) {
       merged.set(`${plan.runId}:${plan.turnId ?? "legacy"}`, plan);
     }
-    const live = nativePlans[conversation.id];
+    const live = nativePlans[activeConversationId];
     if (live) {
       merged.set(`${live.runId}:${live.turnId ?? "legacy"}`, live);
     }
     return [...merged.values()];
-  }, [conversation, detail?.plans, nativePlans]);
+  }, [activeConversationId, detail?.plans, nativePlans]);
   const approvals = useMemo(
     () => pendingApprovals.filter(
       (request) => request.conversationId === conversation?.id,

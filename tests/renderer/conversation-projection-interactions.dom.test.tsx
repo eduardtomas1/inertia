@@ -320,6 +320,8 @@ describe("useConversationProjection pending interactions", () => {
       { initialProps: { currentSnapshot: snapshot } },
     );
     await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+    const messagesBeforeRefresh = hook.result.current.messages;
+    const plansBeforeRefresh = hook.result.current.plans;
 
     const latestSelection = nativeModelSelection({
       providerId: "codex",
@@ -362,6 +364,8 @@ describe("useConversationProjection pending interactions", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(hook.result.current.detailState?.state).toBe("ready");
+    expect(hook.result.current.messages).toBe(messagesBeforeRefresh);
+    expect(hook.result.current.plans).toBe(plansBeforeRefresh);
     expect(request.mock.calls.filter(([command]) =>
       command.type === "conversation.detail.load")).toHaveLength(1);
   });
@@ -527,6 +531,35 @@ describe("useConversationProjection pending interactions", () => {
 
     expect(hook.result.current.messages).toEqual([commentary]);
     expect(hook.result.current.activities).toHaveLength(1);
+  });
+
+  it("retains every unhydrated commentary segment until detail catches up", () => {
+    const source = createEventSource();
+    const hook = renderProjection(source, {
+      enabled: true,
+      targetConversationId: primaryId,
+    });
+
+    for (let index = 0; index < 70; index += 1) {
+      source.emit({
+        type: "agent.commentary.persisted",
+        message: {
+          id: `commentary-${index}`,
+          conversationId: primaryId,
+          turnId: `${primaryId}-turn`,
+          role: "assistant",
+          content: `Commentary ${index}`,
+          attachments: [],
+          createdAt: new Date(
+            Date.parse("2026-07-28T12:00:00.000Z") + index,
+          ).toISOString(),
+        },
+      });
+    }
+
+    expect(hook.result.current.messages).toHaveLength(70);
+    expect(hook.result.current.messages[0]?.content).toBe("Commentary 0");
+    expect(hook.result.current.messages.at(-1)?.content).toBe("Commentary 69");
   });
 
   it("retires a live activity once authoritative detail catches up", async () => {

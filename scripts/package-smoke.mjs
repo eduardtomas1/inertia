@@ -169,6 +169,37 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   return { command, directory, profile };
 }
 
+async function createPdfFixture(root) {
+  const inputPath = join(root, "package-smoke.pdf");
+  const resultPath = join(root, "package-smoke-pdf-result.json");
+  const text = "Packaged PDF extraction works";
+  const stream = `BT /F1 22 Tf 72 720 Td (${text}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+      + "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(pdf, "ascii"));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = Buffer.byteLength(pdf, "ascii");
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  pdf += offsets
+    .map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`)
+    .join("");
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+  pdf += `startxref\n${xrefOffset}\n%%EOF\n`;
+  await writeFile(inputPath, pdf, "ascii");
+  return { inputPath, resultPath, text };
+}
+
 async function requirePackagedCodex(websocketUrl, expectedExecutable) {
   const canonicalExpectedExecutable = await realpath(expectedExecutable);
   await new Promise((resolveCodex, rejectCodex) => {
@@ -271,6 +302,7 @@ try {
     mkdir(profileDirectory, { recursive: true }),
   ]);
   const packagedCodex = await createWindowsCodexFixture(temporaryRoot, workspaceDirectory);
+  const packagedPdf = await createPdfFixture(temporaryRoot);
   const launchArguments = [
     `--user-data-dir=${profileDirectory}`,
     ...(process.platform === "linux" && process.env.INERTIA_PACKAGE_SMOKE_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
@@ -283,6 +315,8 @@ try {
       INERTIA_DATA_DIR: dataDirectory,
       INERTIA_WORKSPACE_DIR: workspaceDirectory,
       INERTIA_PACKAGE_SMOKE_FILE: markerPath,
+      INERTIA_PACKAGE_SMOKE_PDF_INPUT: packagedPdf.inputPath,
+      INERTIA_PACKAGE_SMOKE_PDF_RESULT: packagedPdf.resultPath,
       ...(packagedCodex ? {
         INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: packagedCodex.command,
         APPDATA: packagedCodex.profile,
@@ -317,6 +351,18 @@ try {
     }),
   ]);
   const runtimeWasObserved = processExists(readiness.runtimePid);
+  const pdfResult = await waitUntil(
+    () => readJsonIfPresent(packagedPdf.resultPath),
+    2_000,
+    "packaged PDF extraction result",
+  );
+  if (
+    pdfResult.ok !== true
+    || typeof pdfResult.content !== "string"
+    || !pdfResult.content.includes(packagedPdf.text)
+  ) {
+    throw new Error("The packaged PDF stack returned an invalid smoke result.");
+  }
   if (packagedCodex) await requirePackagedCodex(readiness.websocketUrl, packagedCodex.command);
 
   // Provider discovery deliberately keeps the packaged app alive before
@@ -345,7 +391,7 @@ try {
   if (process.platform !== "win32") {
     await waitUntil(() => !processGroupExists(readiness.mainPid), CLEANUP_TIMEOUT_MS, "packaged app process-group cleanup");
   }
-  console.log(`Packaged smoke passed (${process.platform}/${process.arch}); main=${readiness.mainPid}, runtime=${readiness.runtimePid}, generation=${readiness.generation}, runtimeObserved=${runtimeWasObserved}, exit=${exit.code ?? exit.signal ?? "unknown"}.`);
+  console.log(`Packaged smoke passed (${process.platform}/${process.arch}); main=${readiness.mainPid}, runtime=${readiness.runtimePid}, generation=${readiness.generation}, runtimeObserved=${runtimeWasObserved}, pdfExtraction=true, exit=${exit.code ?? exit.signal ?? "unknown"}.`);
 } catch (error) {
   const detail = error instanceof Error ? error.message : String(error);
   if (stdout.trim()) console.error(`Packaged app stdout:\n${stdout.trim()}`);

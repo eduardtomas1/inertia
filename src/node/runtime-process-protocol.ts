@@ -34,6 +34,11 @@ export interface RuntimeWorkerOptions {
   attachmentRoot?: string;
   /** Safe configuration only; credential values remain in the main-process vault. */
   kimiClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
+  /** Test-only packaged-runtime proof that the native PDF stack can execute. */
+  packageSmokePdf?: {
+    inputPath: string;
+    resultPath: string;
+  };
 }
 
 export type RuntimeWorkerCommand =
@@ -225,16 +230,27 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const hasKimiProfiles = Object.hasOwn(options, "kimiClaudeProfiles");
   const hasCodexBinaryPath = Object.hasOwn(options, "codexBinaryPath");
   const hasAttachmentRoot = Object.hasOwn(options, "attachmentRoot");
+  const hasPackageSmokePdf = Object.hasOwn(options, "packageSmokePdf");
   if (
     optionKeys.length !== 3
       + Number(hasKimiProfiles)
       + Number(hasCodexBinaryPath)
       + Number(hasAttachmentRoot)
+      + Number(hasPackageSmokePdf)
     || !runtimePath(options.dataDirectory)
     || !runtimePath(options.defaultWorkspacePath)
     || typeof options.enableProviders !== "boolean"
     || (hasCodexBinaryPath && !runtimePath(options.codexBinaryPath))
     || (hasAttachmentRoot && !runtimePath(options.attachmentRoot))
+    || (
+      hasPackageSmokePdf
+      && (
+        !plainObject(options.packageSmokePdf)
+        || Object.keys(options.packageSmokePdf).length !== 2
+        || !runtimePath(options.packageSmokePdf.inputPath)
+        || !runtimePath(options.packageSmokePdf.resultPath)
+      )
+    )
   ) return null;
   const kimiClaudeProfiles: ClaudeCompatibleBackendProfile[] = [];
   if (hasKimiProfiles) {
@@ -257,6 +273,14 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       ...(hasCodexBinaryPath ? { codexBinaryPath: options.codexBinaryPath as string } : {}),
       ...(hasAttachmentRoot ? { attachmentRoot: options.attachmentRoot as string } : {}),
       ...(hasKimiProfiles ? { kimiClaudeProfiles } : {}),
+      ...(hasPackageSmokePdf
+        ? {
+            packageSmokePdf: {
+              inputPath: (options.packageSmokePdf as Record<string, unknown>).inputPath as string,
+              resultPath: (options.packageSmokePdf as Record<string, unknown>).resultPath as string,
+            },
+          }
+        : {}),
     },
   };
 }

@@ -743,6 +743,20 @@ async function bootstrap(): Promise<void> {
     && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED)
     ? process.env.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED
     : null;
+  const packageSmokePdfInput = process.env.NODE_ENV === "test"
+    && typeof process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT === "string"
+    && process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT.length <= 4096
+    && !process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT.includes("\0")
+    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT)
+    ? process.env.INERTIA_PACKAGE_SMOKE_PDF_INPUT
+    : null;
+  const packageSmokePdfResult = process.env.NODE_ENV === "test"
+    && typeof process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT === "string"
+    && process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT.length <= 4096
+    && !process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT.includes("\0")
+    && isAbsolute(process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT)
+    ? process.env.INERTIA_PACKAGE_SMOKE_PDF_RESULT
+    : null;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
     attachmentBroker: {
@@ -775,6 +789,14 @@ async function bootstrap(): Promise<void> {
       attachmentRoot: attachmentDirectory(),
       enableProviders: process.env.NODE_ENV !== "test" || Boolean(packageSmokeCodexExecutable),
       ...(packageSmokeCodexExecutable ? { codexBinaryPath: packageSmokeCodexExecutable } : {}),
+      ...(packageSmokePdfInput && packageSmokePdfResult
+        ? {
+            packageSmokePdf: {
+              inputPath: packageSmokePdfInput,
+              resultPath: packageSmokePdfResult,
+            },
+          }
+        : {}),
       kimiClaudeProfiles: [
         builtInKimiClaudeBackendProfile(
           backendSecretReferenceForProfile(KIMI_CLAUDE_BUILTIN_PROFILE_ID),

@@ -58,4 +58,20 @@ describe("composer structured request context", () => {
       context: { fileReferences: [{ path: "src/example.ts" }] },
     });
   });
+
+  it("uses a file-neutral prompt for attachment-only requests", () => {
+    expect(buildComposerTurnRequest(
+      "",
+      [{
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "brief.pdf",
+        path: "/private/runtime/brief.pdf",
+        mimeType: "application/pdf",
+        size: 128,
+      }],
+      null,
+    )).toEqual({
+      visibleContent: "Please inspect the attached file.",
+    });
+  });
 });

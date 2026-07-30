@@ -55,8 +55,16 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain("acknowledged:");
     expect(smoke).toContain('type: "provider.refresh"');
     expect(smoke).toContain('frame?.type === "runtime.event" ? frame.event : frame');
-    expect(await source("src/main/index.ts")).toContain(
+    expect(smoke).toContain("INERTIA_PACKAGE_SMOKE_PDF_INPUT");
+    expect(smoke).toContain("packaged PDF extraction result");
+    expect(smoke).toContain("pdfExtraction=true");
+    const main = await source("src/main/index.ts");
+    expect(main).toContain(
       "codexBinaryPath: packageSmokeCodexExecutable",
+    );
+    expect(main).toContain("packageSmokePdf:");
+    expect(await source("src/server/runtime-worker.ts")).toContain(
+      "await runPackagedPdfSmoke(",
     );
   });
 

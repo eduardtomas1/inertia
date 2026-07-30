@@ -218,16 +218,6 @@ export function useConversationProjection({
   ]);
 
   useEffect(() => {
-    if (!detail) return;
-    const plan = detail.plans.at(-1);
-    if (!plan) return;
-    setNativePlans((current) => ({
-      ...current,
-      [detail.conversation.id]: plan,
-    }));
-  }, [detail]);
-
-  useEffect(() => {
     if (!detail || detail.conversation.id !== conversation?.id) return;
     const authoritativeMessages = new Map(
       detail.messages.map((message) => [message.id, message]),

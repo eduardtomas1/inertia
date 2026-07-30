@@ -6,6 +6,7 @@ import {
   type AgentActivity,
   type AgentApprovalRequest,
   type AgentInputRequest,
+  type AgentPlan,
   type AppSnapshot,
   type ChatMessage,
   type ConversationShell,
@@ -349,6 +350,16 @@ describe("useConversationProjection pending interactions", () => {
 
   it("does not reload an open thread for unrelated full-snapshot refreshes", async () => {
     const source = createEventSource();
+    const loadedPlan: AgentPlan = {
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      explanation: "Keep the planned timeline stable.",
+      steps: [{
+        step: "Preserve the current projection",
+        status: "inProgress",
+      }],
+    };
     const request = vi.fn(async (
       command: CommandWithoutId,
     ): Promise<ServerEvent> => command.type === "conversation.detail.load"
@@ -368,7 +379,7 @@ describe("useConversationProjection pending interactions", () => {
               subagents: [],
               reasonings: [],
               usage: [],
-              plans: [],
+              plans: [loadedPlan],
               goals: [],
               checkpoints: [],
               reviewSummaries: [],

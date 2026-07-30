@@ -97,4 +97,42 @@ describe("PromptStashMenu", () => {
     fireEvent.click(remove);
     expect(onRemove).toHaveBeenCalledWith(entry.id);
   });
+
+  it("keeps an unbroken saved prompt inside its bounded preview", () => {
+    const longEntry: PromptStashEntry = {
+      ...entry,
+      id: "saved-long",
+      content: `Inspect-${"provider-route-".repeat(40)}`,
+    };
+    function LongEntryHarness(): React.JSX.Element {
+      const controller = useComposerMenus();
+      return (
+        <PromptStashMenu
+          entries={[longEntry]}
+          canStash
+          blockedReason={null}
+          restoreBlockedReason={() => null}
+          menuController={controller}
+          onStash={vi.fn()}
+          onRestore={vi.fn()}
+          onRemove={vi.fn()}
+        />
+      );
+    }
+    render(<LongEntryHarness />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Prompt stash, 1 saved",
+    }));
+    const restore = screen.getByRole("menuitem", {
+      name: new RegExp(`^${longEntry.content}`, "u"),
+    });
+    expect(restore).toHaveAttribute("title", longEntry.content);
+    expect(
+      restore.querySelector(".prompt-stash-entry-copy"),
+    ).toHaveClass("prompt-stash-entry-copy");
+    expect(
+      restore.querySelector(".prompt-stash-entry-preview"),
+    ).toHaveTextContent(longEntry.content);
+  });
 });

@@ -4162,9 +4162,19 @@ textarea {
 }
 .composer-popover .prompt-stash-entry > button:first-child {
   min-width: 0;
+  overflow: hidden;
+}
+.composer-popover .prompt-stash-entry > button:first-child > svg {
+  flex: 0 0 auto;
+}
+.composer-popover .prompt-stash-entry .prompt-stash-entry-copy {
+  min-width: 0;
+  overflow: hidden;
 }
 .composer-popover .prompt-stash-entry strong,
 .composer-popover .prompt-stash-entry small {
+  display: block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

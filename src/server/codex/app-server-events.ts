@@ -116,6 +116,7 @@ const TERMINAL_SUBAGENT_STATUSES =
 interface CodexSubagentProjection {
   status: CodexSubagentUpdate["status"];
   authority: CodexSubagentAuthority;
+  isLive: boolean;
 }
 
 interface PendingParentCompletion {
@@ -548,7 +549,7 @@ export class CodexAppServerEvents {
     const providerAgentId = update.providerAgentId;
     if (providerAgentId) {
       const current = this.subagentProjection.get(providerAgentId);
-      if (current && TERMINAL_SUBAGENT_STATUSES.has(current.status)) {
+      if (current) {
         const weaker =
           SUBAGENT_AUTHORITY[authority] < SUBAGENT_AUTHORITY[current.authority];
         const stronger =
@@ -558,9 +559,29 @@ export class CodexAppServerEvents {
           && update.status !== "unknown"
           && SUBAGENT_AUTHORITY[authority]
             >= SUBAGENT_AUTHORITY[current.authority];
+        const authoritativelyRevivesTerminalUnknown =
+          !current.isLive
+          && isLive
+          && current.status === "unknown"
+          && update.status !== "unknown"
+          && stronger;
         if (
-          weaker
-          || (!stronger && !clarifiesUnknown && update.status !== current.status)
+          !current.isLive
+          && isLive
+          && !authoritativelyRevivesTerminalUnknown
+        ) {
+          return;
+        }
+        if (
+          TERMINAL_SUBAGENT_STATUSES.has(current.status)
+          && (
+            weaker
+            || (
+              !stronger
+              && !clarifiesUnknown
+              && update.status !== current.status
+            )
+          )
         ) {
           return;
         }
@@ -568,6 +589,7 @@ export class CodexAppServerEvents {
       this.subagentProjection.set(providerAgentId, {
         status: update.status,
         authority,
+        isLive,
       });
       if (isLive) {
         this.liveSubagentIds.add(providerAgentId);

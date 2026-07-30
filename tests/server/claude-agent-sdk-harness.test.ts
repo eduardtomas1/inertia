@@ -774,6 +774,81 @@ describe("Claude Agent SDK harness", () => {
     ]);
   });
 
+  it("does not let stale task updates revive a terminal delegate or its Stop control", async () => {
+    const root = portableFixtureRoot("Claude SDK stale delegate update");
+    roots.push(root);
+    let stopTaskCalls = 0;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: () => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSystem("task_started", {
+            task_id: "agent-terminal",
+            tool_use_id: "tool-agent-terminal",
+            description: "Finish before a stale update",
+            subagent_type: "researcher",
+          });
+          yield claudeSystem("task_notification", {
+            task_id: "agent-terminal",
+            tool_use_id: "tool-agent-terminal",
+            status: "completed",
+            summary: "Finished authoritatively",
+          });
+          yield claudeSystem("task_updated", {
+            task_id: "agent-terminal",
+            patch: { status: "running" },
+          });
+          yield claudeSystem("task_updated", {
+            task_id: "agent-terminal",
+            patch: { status: "future_active_state" },
+          });
+          yield claudeSuccessResult("Parent finished", "completed");
+          yield claudeSessionState("idle");
+        })(),
+        {
+          stopTask: async () => {
+            stopTaskCalls += 1;
+          },
+        },
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const traces: Array<{ status: string; isLive: boolean }> = [];
+    let stopAccepted: Promise<boolean> | null = null;
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-terminal-stale-update",
+      runId: "claude-terminal-stale-update-run",
+      turnId: "claude-terminal-stale-update-turn",
+      cwd: root,
+      prompt: "Keep terminal state sticky",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onSubagent: (event) => {
+        traces.push({ status: event.status, isLive: event.isLive });
+        if (event.status !== "completed" || stopAccepted) return;
+        stopAccepted = manager.stopSubagent(
+          event.conversationId,
+          event.providerTaskId!,
+          { runId: event.runId, turnId: event.turnId! },
+        );
+      },
+    })).resolves.toMatchObject({
+      status: "completed",
+      text: "Parent finished",
+    });
+    await expect(stopAccepted).resolves.toBe(false);
+    expect(stopTaskCalls).toBe(0);
+    expect(traces).toEqual([
+      { status: "spawned", isLive: true },
+      { status: "completed", isLive: false },
+    ]);
+  });
+
   it("bounds a missing terminal delegate notification after parent completion", async () => {
     const root = portableFixtureRoot("Claude SDK missing delegate notification");
     roots.push(root);

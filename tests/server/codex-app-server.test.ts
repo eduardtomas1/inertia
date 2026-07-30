@@ -277,8 +277,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "unknown-collab-state") {
       send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-unknown", tool: "spawnAgent", status: "completed", senderThreadId: threadId, receiverThreadIds: ["child-future", "child-shutdown"], prompt: "Preserve unknown states", model: null, reasoningEffort: null, agentsStates: { "child-future": { status: "futureState", message: "A newer provider state" }, "child-shutdown": { status: "shutdown", message: "Worker shut down" } } } } });
+      send({ method: "item/completed", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "wait-stale-shutdown", tool: "wait", status: "completed", senderThreadId: threadId, receiverThreadIds: ["child-shutdown"], prompt: null, model: null, reasoningEffort: null, agentsStates: { "child-shutdown": { status: "futureState", message: "A stale live snapshot" } } } } });
       send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
       setTimeout(() => {
+        send({ method: "turn/completed", params: { threadId: "child-shutdown", turn: { id: "child-shutdown-turn", status: "completed", items: [], error: null } } });
         send({ method: "item/completed", params: { threadId: "child-future", turnId: "child-future-turn", item: { type: "agentMessage", id: "child-future-message", text: "The future state completed directly." } } });
         send({ method: "turn/completed", params: { threadId: "child-future", turn: { id: "child-future-turn", status: "completed", items: [], error: null } } });
       }, 20);
@@ -1007,12 +1009,26 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       result: "The future state completed directly.",
     });
     expect(subagents.filter(({ providerAgentId }) =>
-      providerAgentId === "child-shutdown").at(-1)).toMatchObject({
-      providerStatus: "shutdown",
-      status: "unknown",
-      isLive: false,
-      result: "Worker shut down",
-    });
+      providerAgentId === "child-shutdown")).toEqual([
+      expect.objectContaining({
+        providerStatus: "shutdown",
+        status: "unknown",
+        isLive: false,
+        result: "Worker shut down",
+      }),
+      expect.objectContaining({
+        providerStatus: "completed",
+        status: "completed",
+        isLive: false,
+      }),
+    ]);
+    expect(subagents).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerAgentId: "child-shutdown",
+        providerStatus: "futureState",
+        isLive: true,
+      }),
+    ]));
   });
 
   it("fails closed when App Server rejects full-access policy fields", async () => {

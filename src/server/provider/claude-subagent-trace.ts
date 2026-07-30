@@ -25,6 +25,7 @@ interface ClaudeTaskState extends ClaudeAgentTool {
   taskId: string;
   agentId: string | null;
   live: boolean;
+  terminal: boolean;
 }
 
 const SUBAGENT_TASK_TYPES = new Set([
@@ -151,6 +152,7 @@ export class ClaudeSubagentTraceTracker {
       ) ?? metadata?.description ?? null,
       agentId: null,
       live: true,
+      terminal: false,
     };
     this.tasks.set(taskId, state);
     if (state.toolUseId) this.taskByToolUse.set(state.toolUseId, taskId);
@@ -177,11 +179,13 @@ export class ClaudeSubagentTraceTracker {
         ) ?? metadata?.description ?? null,
         agentId: null,
         live: true,
+        terminal: false,
       };
       this.tasks.set(taskId, state);
       if (state.toolUseId) this.taskByToolUse.set(state.toolUseId, taskId);
     }
     if (!state) return;
+    if (state.terminal) return;
     state.description = boundedSubagentText(
       record.description,
       MAX_SUBAGENT_DESCRIPTION_CHARS,
@@ -201,7 +205,7 @@ export class ClaudeSubagentTraceTracker {
     if (!taskId || this.ignoredTaskIds.has(taskId)) return;
     const state = this.tasks.get(taskId);
     const patch = objectValue(record.patch);
-    if (!state || !patch) return;
+    if (!state || !patch || state.terminal) return;
     state.description = boundedSubagentText(
       patch.description,
       MAX_SUBAGENT_DESCRIPTION_CHARS,
@@ -227,6 +231,7 @@ export class ClaudeSubagentTraceTracker {
       || status === "running"
       || status === "waiting"
       || status === "unknown";
+    state.terminal = !state.live;
     this.emitState(
       state,
       status,
@@ -253,6 +258,7 @@ export class ClaudeSubagentTraceTracker {
             : null;
     if (!status) return;
     state.live = false;
+    state.terminal = true;
     this.emitState(
       state,
       status,
@@ -292,10 +298,13 @@ export class ClaudeSubagentTraceTracker {
         ) ?? metadata?.description ?? null,
         agentId,
         live: output.status === "async_launched",
+        terminal: output.status === "completed",
       };
     } else {
+      if (state.terminal && output.status === "async_launched") return;
       state.agentId = agentId;
       state.live = output.status === "async_launched";
+      state.terminal = output.status === "completed";
     }
     const result = Array.isArray(output.content)
       ? output.content.flatMap((value) => {

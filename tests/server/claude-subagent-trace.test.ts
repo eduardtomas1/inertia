@@ -196,6 +196,22 @@ describe("Claude delegated-agent projection", () => {
       status: "failed",
       summary: "The review found a blocking error.",
     }));
+    const updateCountAfterTerminalNotification = updates.length;
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "task-stateful",
+      patch: { status: "running" },
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "task-stateful",
+      patch: { status: "future_active_state" },
+    }));
+    expect(updates).toHaveLength(updateCountAfterTerminalNotification);
+    expect(tracker.isLiveTask("task-stateful")).toBe(false);
+    expect(tracker.hasLiveTasks()).toBe(false);
     tracker.observe(sdkMessage({
       type: "assistant",
       parent_tool_use_id: null,

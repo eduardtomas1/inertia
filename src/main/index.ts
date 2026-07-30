@@ -719,8 +719,8 @@ async function bootstrap(): Promise<void> {
   // Paint the secure renderer while private attachment storage is reconciled.
   // The renderer can show its bounded starting state until the runtime-ready
   // signal arrives; orphan cleanup no longer blocks the first window.
-  const windowReady = createWindow();
-  const [, , attachmentStorage] = await Promise.all([
+  const [, , , attachmentStorage] = await Promise.all([
+    createWindow(),
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
     createAttachmentStorageSession(attachmentStorageRoot()),
@@ -837,7 +837,6 @@ async function bootstrap(): Promise<void> {
       }),
     });
   }
-  await windowReady;
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();

@@ -2,6 +2,7 @@ import { lazy, Suspense, type ComponentProps } from "react";
 import { AlertCircle, X } from "lucide-react";
 
 import type { useAppUpdate } from "../hooks/useAppUpdate";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
 import { AppUpdateNotice } from "./AppUpdateNotice";
 import { ProviderQuotaNotices } from "./ProviderQuotaNotices";
@@ -26,6 +27,10 @@ export function AppStatusOverlays({
   error,
   onDismissError,
 }: AppStatusOverlaysProps): React.JSX.Element {
+  // Own preview suspension from this always-loaded boundary. The credential
+  // dialog itself remains lazy, so waiting for its chunk would briefly leave
+  // native preview content above the trusted authentication flow.
+  useNativePreviewSuspension(Boolean(providerAuth.provider));
   return (
     <>
       {providerAuth.provider && (

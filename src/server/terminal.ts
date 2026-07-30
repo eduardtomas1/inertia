@@ -10,7 +10,7 @@ const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
 const MAX_BUFFERED_OUTPUT = 1024 * 1024;
 const OUTPUT_CHUNK_SIZE = 16 * 1024;
-const TERMINAL_SHUTDOWN_TIMEOUT_MS = 5_000;
+const TERMINAL_SHUTDOWN_TIMEOUT_MS = 2_000;
 
 interface TerminalSession {
   id: string;

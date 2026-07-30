@@ -9,6 +9,9 @@ function runtimeWithClose(
   return {
     websocketUrl: "ws://127.0.0.1:1/runtime/test",
     resolveProjectPath: vi.fn(),
+    remoteRequest: vi.fn(async () => {
+      throw new Error("unused");
+    }),
     close,
   };
 }

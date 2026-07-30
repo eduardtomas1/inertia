@@ -423,7 +423,7 @@ export class TurnController {
       || trace.turnId !== active.turn.id
       || trace.providerId !== "claude"
       || !trace.providerTaskId
-      || !["queued", "spawned", "running", "waiting"].includes(trace.status)
+      || !trace.isLive
     ) return false;
     const accepted = await this.providers.stopSubagent(
       conversationId,
@@ -451,9 +451,7 @@ export class TurnController {
       || currentTrace.turnId !== trace.turnId
       || currentTrace.providerId !== trace.providerId
       || currentTrace.providerTaskId !== trace.providerTaskId
-      || !["queued", "spawned", "running", "waiting"].includes(
-        currentTrace.status,
-      )
+      || !currentTrace.isLive
     ) return false;
     const stopped = this.store.upsertSubagentTrace({
       conversationId: currentTrace.conversationId,
@@ -469,6 +467,7 @@ export class TurnController {
       providerName: currentTrace.providerName,
       providerStatus: currentTrace.providerStatus,
       status: "cancelled",
+      isLive: false,
       description: currentTrace.description,
       progress: "Stopped by the user.",
       result: currentTrace.result,

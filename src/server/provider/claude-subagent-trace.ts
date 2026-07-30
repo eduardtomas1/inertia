@@ -333,6 +333,7 @@ export class ClaudeSubagentTraceTracker {
       providerName: state.name,
       providerStatus,
       status,
+      isLive: state.live,
       description: state.description,
       progress,
       result,

@@ -733,6 +733,7 @@ describe("Claude Agent SDK harness", () => {
     const traces: Array<{
       providerStatus?: string | null;
       status: string;
+      isLive: boolean;
       result: string | null;
     }> = [];
 
@@ -744,23 +745,30 @@ describe("Claude Agent SDK harness", () => {
       interactionMode: "build",
       access: "supervised",
     }), {
-      onSubagent: ({ providerStatus, status, result }) => {
-        traces.push({ providerStatus, status, result });
+      onSubagent: ({ providerStatus, status, isLive, result }) => {
+        traces.push({ providerStatus, status, isLive, result });
       },
     })).resolves.toMatchObject({
       status: "completed",
       text: "Parent finished",
     });
     expect(traces).toEqual([
-      { providerStatus: null, status: "spawned", result: null },
+      {
+        providerStatus: null,
+        status: "spawned",
+        isLive: true,
+        result: null,
+      },
       {
         providerStatus: "future_active_state",
         status: "unknown",
+        isLive: true,
         result: null,
       },
       {
         providerStatus: "completed",
         status: "completed",
+        isLive: false,
         result: "Future state completed authoritatively",
       },
     ]);

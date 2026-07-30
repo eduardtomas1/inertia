@@ -990,23 +990,27 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         providerAgentId: "child-future",
         providerStatus: "futureState",
         status: "unknown",
+        isLive: true,
       }),
       expect.objectContaining({
         providerAgentId: "child-shutdown",
         providerStatus: "shutdown",
         status: "unknown",
+        isLive: false,
       }),
     ]));
     expect(subagents.filter(({ providerAgentId }) =>
       providerAgentId === "child-future").at(-1)).toMatchObject({
       providerStatus: "completed",
       status: "completed",
+      isLive: false,
       result: "The future state completed directly.",
     });
     expect(subagents.filter(({ providerAgentId }) =>
       providerAgentId === "child-shutdown").at(-1)).toMatchObject({
       providerStatus: "shutdown",
       status: "unknown",
+      isLive: false,
       result: "Worker shut down",
     });
   });

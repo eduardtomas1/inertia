@@ -1,7 +1,6 @@
 import type {
   AgentTurn,
   SubagentTrace,
-  SubagentTraceStatus,
 } from "@shared/contracts";
 
 export interface SubagentDisclosureRow {
@@ -10,15 +9,8 @@ export interface SubagentDisclosureRow {
   canStop: boolean;
 }
 
-const LIVE_STATUSES = new Set<SubagentTraceStatus>([
-  "queued",
-  "spawned",
-  "running",
-  "waiting",
-]);
-
 export function isLiveSubagentTrace(trace: SubagentTrace): boolean {
-  return LIVE_STATUSES.has(trace.status);
+  return trace.isLive;
 }
 
 export function canStopSubagentTrace(

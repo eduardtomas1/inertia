@@ -17,6 +17,7 @@ function event(
   sequence: number,
   providerStatus: string,
   status: ProviderSubagentEvent["status"],
+  isLive: boolean,
 ): ProviderSubagentEvent {
   return {
     providerId: "codex",
@@ -34,6 +35,7 @@ function event(
     providerName: "State reviewer",
     providerStatus,
     status,
+    isLive,
     description: "Preserve exact state.",
     progress: null,
     result: status === "interrupted" ? "Provider interrupted the child." : null,
@@ -78,14 +80,15 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       },
     } as ActiveTurn;
 
-    projector.project(active, event(1, "pendingInit", "queued"));
-    projector.project(active, event(2, "interrupted", "interrupted"));
+    projector.project(active, event(1, "pendingInit", "queued", true));
+    projector.project(active, event(2, "interrupted", "interrupted", false));
 
     expect(upsertSubagentTrace).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         providerStatus: "pendingInit",
         status: "queued",
+        isLive: true,
       }),
     );
     expect(upsertSubagentTrace).toHaveBeenNthCalledWith(
@@ -93,6 +96,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       expect.objectContaining({
         providerStatus: "interrupted",
         status: "interrupted",
+        isLive: false,
       }),
     );
     expect(broadcast).toHaveBeenLastCalledWith({

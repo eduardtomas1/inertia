@@ -88,6 +88,7 @@ export interface CodexAppServerOptions {
     providerName: string | null;
     providerStatus: string | null;
     status: "queued" | "spawned" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "interrupted" | "unknown" | "lost";
+    isLive: boolean;
     description: string | null;
     progress: string | null;
     result: string | null;

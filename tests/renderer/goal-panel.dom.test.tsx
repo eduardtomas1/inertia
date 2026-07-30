@@ -142,6 +142,7 @@ function turn(update: Partial<AgentTurn> = {}): AgentTurn {
 }
 
 function trace(update: Partial<SubagentTrace> = {}): SubagentTrace {
+  const status = update.status ?? "running";
   return {
     id: "trace-1",
     conversationId: "conversation-1",
@@ -157,7 +158,10 @@ function trace(update: Partial<SubagentTrace> = {}): SubagentTrace {
     providerRole: "researcher",
     providerName: "Audit",
     providerStatus: null,
-    status: "running",
+    status,
+    isLive: update.isLive ?? [
+      "queued", "spawned", "running", "waiting",
+    ].includes(status),
     description: "Inspect provider boundaries",
     progress: "Reading capability contracts",
     result: null,

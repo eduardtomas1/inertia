@@ -21,6 +21,7 @@ const styles = readFileSync(
 function trace(
   update: Partial<SubagentTrace> = {},
 ): SubagentTrace {
+  const status = update.status ?? "running";
   return {
     id: "trace-parent",
     conversationId: "conversation-1",
@@ -36,7 +37,10 @@ function trace(
     providerRole: "researcher",
     providerName: "Evidence",
     providerStatus: null,
-    status: "running",
+    status,
+    isLive: update.isLive ?? [
+      "queued", "spawned", "running", "waiting",
+    ].includes(status),
     description: "Inspect",
     progress: null,
     result: null,
@@ -133,7 +137,7 @@ describe("inline delegated-agent disclosure", () => {
       [turn()],
     )).toBe(false);
     expect(canStopSubagentTrace(
-      trace({ status: "completed" }),
+      trace({ status: "completed", isLive: false }),
       [turn()],
     )).toBe(false);
     expect(canStopSubagentTrace(live, [
@@ -149,16 +153,33 @@ describe("inline delegated-agent disclosure", () => {
       providerId: "codex",
       providerStatus: "futureState",
       status: "unknown",
+      isLive: true,
     }))).toBe("Unknown (futureState)");
     expect(subagentStatusLabel(trace({
       providerId: "claude",
       providerStatus: "killed",
       status: "cancelled",
+      isLive: false,
     }))).toBe("Cancelled (killed)");
     expect(canStopSubagentTrace(
       trace({ providerStatus: "pending", status: "queued" }),
       [turn()],
     )).toBe(true);
+    expect(canStopSubagentTrace(
+      trace({
+        providerStatus: "futureState",
+        status: "unknown",
+        isLive: true,
+      }),
+      [turn()],
+    )).toBe(true);
+    expect(subagentDisclosureSummary([
+      trace({
+        providerStatus: "futureState",
+        status: "unknown",
+        isLive: true,
+      }),
+    ])).toBe("1 delegated task · 1 active");
   });
 
   it("keeps one intentional danger hover and adjacent focus treatment for Stop", () => {

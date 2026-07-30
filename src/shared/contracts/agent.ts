@@ -237,6 +237,12 @@ export interface SubagentTrace {
   /** Exact bounded provider status when the transport exposes one. */
   providerStatus: string | null;
   status: SubagentTraceStatus;
+  /**
+   * Authoritative lifecycle liveness. This is separate from status because a
+   * future provider state can be truthfully unknown while still representing
+   * active, drainable work.
+   */
+  isLive: boolean;
   description: string | null;
   progress: string | null;
   result: string | null;

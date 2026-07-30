@@ -193,11 +193,19 @@ export class ExecutionLedgerRepository {
     }
     if (
       existing
-      && isTerminalSubagentStatus(existing.status)
-      && !isTerminalSubagentStatus(input.status)
+      && existing.is_live === 0
+      && (
+        input.isLive
+        || (existing.status !== "unknown" && input.status === "unknown")
+      )
     ) {
       return { trace: subagentTraceFromRow(existing), changed: false };
     }
+    if (
+      input.status === "unknown"
+        ? typeof input.isLive !== "boolean"
+        : input.isLive === isTerminalSubagentStatus(input.status)
+    ) return null;
 
     const parentProviderAgentId = boundedSubagentIdentifier(
       input.parentProviderAgentId,
@@ -276,6 +284,7 @@ export class ExecutionLedgerRepository {
             provider_name = COALESCE(@providerName, provider_name),
             provider_status = COALESCE(@providerStatus, provider_status),
             status = @status,
+            is_live = @isLive,
             description = COALESCE(@description, description),
             progress = COALESCE(@progress, progress),
             result = COALESCE(@result, result),
@@ -286,6 +295,7 @@ export class ExecutionLedgerRepository {
         id: existing.id,
         ...normalized,
         status: input.status,
+        isLive: input.isLive ? 1 : 0,
         sequence: input.sequence,
         updatedAt: now < existing.updated_at ? existing.updated_at : now,
       });
@@ -310,6 +320,7 @@ export class ExecutionLedgerRepository {
       providerId: input.providerId,
       ...normalized,
       status: input.status,
+      isLive: input.isLive,
       sequence: input.sequence,
       createdAt: now,
       updatedAt: now,
@@ -320,7 +331,7 @@ export class ExecutionLedgerRepository {
         provider_task_id, provider_agent_id, parent_trace_id,
         parent_provider_agent_id, parent_provider_tool_use_id,
         provider_tool_use_id, provider_role,
-        provider_name, provider_status, status,
+        provider_name, provider_status, status, is_live,
         description, progress, result, sequence,
         created_at, updated_at
       ) VALUES (
@@ -328,11 +339,14 @@ export class ExecutionLedgerRepository {
         @providerTaskId, @providerAgentId, @parentTraceId,
         @parentProviderAgentId, @parentProviderToolUseId,
         @providerToolUseId, @providerRole,
-        @providerName, @providerStatus, @status,
+        @providerName, @providerStatus, @status, @isLive,
         @description, @progress, @result, @sequence,
         @createdAt, @updatedAt
       )
-    `).run(trace);
+    `).run({
+      ...trace,
+      isLive: trace.isLive ? 1 : 0,
+    });
     this.linkSubagentChildren(trace.id);
     return { trace, changed: true };
   }
@@ -346,15 +360,15 @@ export class ExecutionLedgerRepository {
     const rows = this.context.database.prepare(`
       SELECT * FROM subagent_traces
       WHERE turn_id = ?
-        AND status IN ('queued', 'spawned', 'running', 'waiting')
+        AND is_live = 1
       ORDER BY created_at ASC, sequence ASC, id ASC
     `).all(turnId) as SubagentTraceRow[];
     if (rows.length === 0) return [];
     const update = this.context.database.prepare(`
       UPDATE subagent_traces
-      SET status = ?, sequence = sequence + 1, updated_at = ?
+      SET status = ?, is_live = 0, sequence = sequence + 1, updated_at = ?
       WHERE id = ?
-        AND status IN ('queued', 'spawned', 'running', 'waiting')
+        AND is_live = 1
     `);
     this.context.database.transaction(() => {
       for (const row of rows) update.run(status, now, row.id);

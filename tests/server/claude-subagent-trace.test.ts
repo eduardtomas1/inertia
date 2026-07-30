@@ -232,22 +232,26 @@ describe("Claude delegated-agent projection", () => {
         providerTaskId: "task-stateful",
         providerStatus: "paused",
         status: "waiting",
+        isLive: true,
       }),
       expect.objectContaining({
         providerTaskId: "task-stateful",
         providerStatus: "future_active_state",
         status: "unknown",
+        isLive: true,
       }),
       expect.objectContaining({
         providerTaskId: "task-stateful",
         providerStatus: "failed",
         status: "failed",
+        isLive: false,
         result: "The review found a blocking error.",
       }),
       expect.objectContaining({
         providerTaskId: "task-stopped",
         providerStatus: "stopped",
         status: "cancelled",
+        isLive: false,
         result: "The provider stopped this task.",
       }),
     ]));

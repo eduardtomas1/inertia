@@ -541,9 +541,9 @@ export class CodexAppServerEvents {
   }
 
   private emitSubagent(
-    update: Omit<CodexSubagentUpdate, "sequence">,
+    update: Omit<CodexSubagentUpdate, "sequence" | "isLive">,
     authority: CodexSubagentAuthority,
-    drainable = LIVE_SUBAGENT_STATUSES.has(update.status),
+    isLive = LIVE_SUBAGENT_STATUSES.has(update.status),
   ): void {
     const providerAgentId = update.providerAgentId;
     if (providerAgentId) {
@@ -569,7 +569,7 @@ export class CodexAppServerEvents {
         status: update.status,
         authority,
       });
-      if (drainable) {
+      if (isLive) {
         this.liveSubagentIds.add(providerAgentId);
       } else {
         this.liveSubagentIds.delete(providerAgentId);
@@ -579,6 +579,7 @@ export class CodexAppServerEvents {
     this.host.options.onSubagent?.({
       sequence: this.subagentSequence,
       ...update,
+      isLive,
     });
     if (
       this.pendingParentCompletion
@@ -643,7 +644,7 @@ export class CodexAppServerEvents {
       const status = exactStatus ?? fallbackStatus;
       if (!status) continue;
       const terminal = TERMINAL_SUBAGENT_STATUSES.has(status);
-      const drainable = status === "unknown"
+      const isLive = status === "unknown"
         ? providerStatus !== "shutdown"
         : LIVE_SUBAGENT_STATUSES.has(status);
       this.emitSubagent({
@@ -666,7 +667,7 @@ export class CodexAppServerEvents {
         result: terminal
           ? boundedText(agentState?.message, 16_000) ?? null
           : null,
-      }, exactStatus ? "state" : "activity", drainable);
+      }, exactStatus ? "state" : "activity", isLive);
     }
     return true;
   }

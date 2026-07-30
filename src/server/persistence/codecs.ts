@@ -446,6 +446,7 @@ export function subagentTraceFromRow(row: SubagentTraceRow): SubagentTrace {
     providerName: row.provider_name,
     providerStatus: row.provider_status,
     status: row.status,
+    isLive: row.is_live === 1,
     description: row.description,
     progress: row.progress,
     result: row.result,

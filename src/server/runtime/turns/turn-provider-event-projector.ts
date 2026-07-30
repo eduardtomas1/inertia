@@ -232,6 +232,7 @@ export class TurnProviderEventProjector {
           providerName: event.providerName,
           providerStatus: event.providerStatus ?? null,
           status: event.status,
+          isLive: event.isLive,
           description: event.description,
           progress: event.progress,
           result: event.result,

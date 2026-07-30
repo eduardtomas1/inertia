@@ -11,6 +11,7 @@ import type {
 const NOW = Date.parse("2030-01-01T00:00:10.000Z");
 
 function trace(update: Partial<SubagentTrace> = {}): SubagentTrace {
+  const status = update.status ?? "running";
   return {
     id: "trace-parent",
     conversationId: "conversation-1",
@@ -26,7 +27,10 @@ function trace(update: Partial<SubagentTrace> = {}): SubagentTrace {
     providerRole: "researcher",
     providerName: "Evidence scout",
     providerStatus: "running",
-    status: "running",
+    status,
+    isLive: update.isLive ?? [
+      "queued", "spawned", "running", "waiting",
+    ].includes(status),
     description: "Inspect the repository.",
     progress: "Reading the provider adapter.",
     result: null,
@@ -118,10 +122,21 @@ describe("delegated-agent timeline disclosure", () => {
       status: "queued",
       sequence: 3,
     });
+    const futureClaude = trace({
+      id: "trace-future",
+      providerTaskId: "task-future",
+      providerAgentId: null,
+      providerToolUseId: "tool-future",
+      providerName: "Future-state worker",
+      providerStatus: "futureState",
+      status: "unknown",
+      isLive: true,
+      sequence: 4,
+    });
 
     render(
       <SubagentDisclosure
-        subagents={[parent, child, unsupportedCodex]}
+        subagents={[parent, child, unsupportedCodex, futureClaude]}
         turns={[turn()]}
         onStopSubagent={onStop}
         now={NOW}
@@ -129,7 +144,7 @@ describe("delegated-agent timeline disclosure", () => {
     );
 
     const disclosure = screen.getByText(
-      "3 delegated tasks · 3 active",
+      "4 delegated tasks · 4 active",
     ).closest("details");
     expect(disclosure).toHaveAttribute("open");
     expect(screen.getByText("Claude · Running · 10s")).toHaveAttribute(
@@ -144,10 +159,15 @@ describe("delegated-agent timeline disclosure", () => {
       "title",
       "Exact provider state: pendingInit",
     );
+    expect(screen.getByText("Claude · Unknown (futureState) · 10s"))
+      .toHaveAttribute("title", "Exact provider state: futureState");
     expect(screen.getByText("Child of Evidence scout.")).toBeInTheDocument();
     expect(screen.queryByRole("button", {
       name: "Stop Build verifier",
     })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {
+      name: "Stop Future-state worker",
+    })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", {
       name: "Stop Policy reader",
@@ -166,6 +186,7 @@ describe("delegated-agent timeline disclosure", () => {
       providerName: "Completed verifier",
       providerStatus: "completed",
       status: "completed",
+      isLive: false,
       progress: null,
       result: "All checks passed.",
       updatedAt: "2030-01-01T00:00:07.000Z",

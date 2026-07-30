@@ -163,6 +163,7 @@ export interface SubagentTraceRow {
   provider_name: string | null;
   provider_status: string | null;
   status: SubagentTraceStatus;
+  is_live: 0 | 1;
   description: string | null;
   progress: string | null;
   result: string | null;

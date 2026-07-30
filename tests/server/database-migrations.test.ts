@@ -778,6 +778,7 @@ describe("published database fixtures", () => {
       providerRole: "coordinator",
       providerName: "Migration coordinator",
       status: "running",
+      isLive: true,
       description: "Coordinate the upgrade.",
       progress: "Waiting for the child.",
       result: null,
@@ -796,6 +797,7 @@ describe("published database fixtures", () => {
       providerRole: "reviewer",
       providerName: "Migration reviewer",
       status: "completed",
+      isLive: false,
       description: "Verify the upgrade.",
       progress: null,
       result: "Verified.",
@@ -867,7 +869,7 @@ describe("published database fixtures", () => {
           sequence ASC,
           id ASC
         );
-      DELETE FROM schema_migrations WHERE version = 36;
+      DELETE FROM schema_migrations WHERE version >= 36;
     `);
     v35.pragma("foreign_keys = ON");
     v35.close();
@@ -879,11 +881,13 @@ describe("published database fixtures", () => {
       providerAgentId: "v35-parent-agent",
       providerStatus: null,
       status: "running",
+      isLive: true,
     });
     expect(migrated.subagentTrace(child.id)).toMatchObject({
       parentTraceId: parent.id,
       providerStatus: null,
       status: "completed",
+      isLive: false,
       result: "Verified.",
     });
     const updated = migrated.upsertSubagentTrace({
@@ -900,6 +904,7 @@ describe("published database fixtures", () => {
       providerName: null,
       providerStatus: "interrupted",
       status: "interrupted",
+      isLive: false,
       description: null,
       progress: null,
       result: "Interrupted after migration.",

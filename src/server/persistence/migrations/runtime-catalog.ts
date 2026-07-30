@@ -886,6 +886,17 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
           );
       `,
     });
+    migrationExtensions.push({
+      name: "PreserveProviderSubagentLiveness",
+      up: `
+        ALTER TABLE subagent_traces
+          ADD COLUMN is_live INTEGER NOT NULL DEFAULT 0
+          CHECK (is_live IN (0, 1));
+        UPDATE subagent_traces
+        SET is_live = 1
+        WHERE status IN ('queued', 'spawned', 'running', 'waiting');
+      `,
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

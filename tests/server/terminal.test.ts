@@ -32,14 +32,15 @@ function fakeTerminal(): {
 }
 
 describe("TerminalManager", () => {
-  it("waits for an owned terminal to exit during runtime shutdown", async () => {
+  it("awaits a terminal already closing after its owner disconnects", async () => {
     const terminal = fakeTerminal();
     const manager = new TerminalManager({
       spawnTerminal: vi.fn(() => terminal.pty),
       shutdownTimeoutMs: 100,
     });
+    const owner = {} as WebSocket;
     manager.createProcess(
-      {} as WebSocket,
+      owner,
       process.cwd(),
       "test-shell",
       [],
@@ -48,6 +49,7 @@ describe("TerminalManager", () => {
       24,
     );
 
+    manager.disposeOwner(owner);
     let shutdownFinished = false;
     const shutdown = manager.disposeAll().then(() => {
       shutdownFinished = true;
@@ -61,5 +63,38 @@ describe("TerminalManager", () => {
     await shutdown;
 
     expect(shutdownFinished).toBe(true);
+  });
+
+  it("reports a bounded timeout for a disconnected terminal that never exits", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = fakeTerminal();
+      const manager = new TerminalManager({
+        spawnTerminal: vi.fn(() => terminal.pty),
+        shutdownTimeoutMs: 20,
+      });
+      const owner = {} as WebSocket;
+      manager.createProcess(
+        owner,
+        process.cwd(),
+        "test-shell",
+        [],
+        {},
+        80,
+        24,
+      );
+
+      manager.disposeOwner(owner);
+      const shutdown = manager.disposeAll();
+      const rejected = expect(shutdown).rejects.toThrow(
+        "A terminal process did not exit during runtime shutdown.",
+      );
+      await vi.advanceTimersByTimeAsync(20);
+
+      await rejected;
+      expect(terminal.pty.kill).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

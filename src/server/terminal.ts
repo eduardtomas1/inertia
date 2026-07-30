@@ -51,8 +51,10 @@ function send(socket: WebSocket, event: ServerEvent): void {
 
 export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
+  private readonly closingSessions = new Set<Promise<void>>();
   private readonly spawnTerminal: typeof spawn;
   private readonly shutdownTimeoutMs: number;
+  private closingFailure: Error | null = null;
 
   constructor(options: TerminalManagerOptions = {}) {
     this.spawnTerminal = options.spawnTerminal ?? spawn;
@@ -153,13 +155,37 @@ export class TerminalManager {
 
   disposeOwner(owner: WebSocket): void {
     for (const session of this.sessions.values()) {
-      if (session.owner === owner) this.dispose(session.id, true);
+      if (session.owner === owner) this.trackDisposal(session);
     }
   }
 
   async disposeAll(): Promise<void> {
-    await Promise.all([...this.sessions.values()].map((session) =>
-      this.disposeAndWait(session)));
+    for (const session of this.sessions.values()) {
+      this.trackDisposal(session);
+    }
+    const failureBeforeWait = this.closingFailure;
+    this.closingFailure = null;
+    const closing = [...this.closingSessions];
+    const results = await Promise.allSettled(closing);
+    for (const promise of closing) this.closingSessions.delete(promise);
+    const trackedFailure = this.closingFailure;
+    this.closingFailure = null;
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult =>
+        result.status === "rejected",
+    );
+    const failure = failureBeforeWait
+      ?? trackedFailure
+      ?? (
+        rejected?.reason instanceof Error
+          ? rejected.reason
+          : rejected
+            ? new TerminalError(
+                "A terminal process did not exit during runtime shutdown.",
+              )
+            : null
+      );
+    if (failure) throw failure;
   }
 
   private ownedSession(owner: WebSocket, terminalId: string): TerminalSession {
@@ -208,6 +234,22 @@ export class TerminalManager {
       }, this.shutdownTimeoutMs);
       this.dispose(session.id, true);
     });
+  }
+
+  private trackDisposal(session: TerminalSession): void {
+    const closing = this.disposeAndWait(session);
+    this.closingSessions.add(closing);
+    void closing.then(
+      () => this.closingSessions.delete(closing),
+      (error: unknown) => {
+        this.closingSessions.delete(closing);
+        this.closingFailure ??= error instanceof Error
+          ? error
+          : new TerminalError(
+              "A terminal process did not exit during runtime shutdown.",
+            );
+      },
+    );
   }
 }
 

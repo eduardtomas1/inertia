@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   validateAttachmentImport,
+  validateSelectedAttachmentOpen,
+  validateSelectedAttachmentRead,
   validateSelectedAttachmentStats,
 } from "../../src/main/attachment-import";
 import {
@@ -51,6 +53,41 @@ describe("privileged attachment import validation", () => {
       isFile: true,
       isSymbolicLink: false,
     }])).not.toThrow();
+  });
+
+  it("rejects a regular-file replacement between selection and open", () => {
+    const selected = {
+      dev: 1n,
+      ino: 2n,
+      isFile: true,
+      isSymbolicLink: false,
+    };
+
+    expect(() => validateSelectedAttachmentOpen(selected, {
+      ...selected,
+      ino: 3n,
+    })).toThrow(/changed while it was being opened/u);
+    expect(() => validateSelectedAttachmentOpen(selected, selected))
+      .not.toThrow();
+  });
+
+  it("rejects same-size content changes while a selected file is read", () => {
+    const before = {
+      dev: 1n,
+      ino: 2n,
+      size: 128n,
+      mtimeNs: 3n,
+      ctimeNs: 4n,
+      isFile: true,
+      isSymbolicLink: false,
+    };
+
+    expect(() => validateSelectedAttachmentRead(before, {
+      ...before,
+      mtimeNs: before.mtimeNs + 1n,
+      ctimeNs: before.ctimeNs + 1n,
+    })).toThrow(/changed while it was being read/u);
+    expect(() => validateSelectedAttachmentRead(before, before)).not.toThrow();
   });
 
   it.each([

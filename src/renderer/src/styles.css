@@ -5577,7 +5577,7 @@ textarea {
   display: grid;
   width: min(940px, 100%);
   grid-template-rows: auto auto auto auto auto;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--border-strong);
   border-radius: 18px;
   color: var(--text);
@@ -5939,6 +5939,7 @@ textarea {
   gap: 16px;
   padding: 13px 18px 15px;
   border-top: 1px solid var(--border-strong);
+  border-radius: 0 0 17px 17px;
   background: var(--surface);
 }
 

@@ -22,6 +22,10 @@ interface TerminalSession {
   pty: IPty;
   dataListener: IDisposable;
   exitListener: IDisposable;
+  exitObserved: boolean;
+  exitWaiters: Set<() => void>;
+  terminationRequested: boolean;
+  closing: Promise<void> | null;
   onExit?: (exitCode: number) => void;
 }
 
@@ -66,7 +70,7 @@ export class TerminalManager {
     pid: number,
     waitForExit: WaitForProcessExit,
   ) => Promise<boolean>;
-  private closingFailure: Error | null = null;
+  private readonly closingFailures = new Map<string, Error>();
 
   constructor(options: TerminalManagerOptions = {}) {
     this.spawnTerminal = options.spawnTerminal ?? spawn;
@@ -128,6 +132,7 @@ export class TerminalManager {
       throw new TerminalError("Unable to start a terminal for this project.");
     }
 
+    let session!: TerminalSession;
     const dataListener = pseudoterminal.onData((data) => {
       onOutput?.(data);
       for (let offset = 0; offset < data.length; offset += OUTPUT_CHUNK_SIZE) {
@@ -135,11 +140,27 @@ export class TerminalManager {
       }
     });
     const exitListener = pseudoterminal.onExit(({ exitCode }) => {
+      session.exitObserved = true;
+      for (const resolveExit of session.exitWaiters) resolveExit();
+      session.exitWaiters.clear();
+      if (session.terminationRequested) return;
       this.dispose(id, false);
       send(owner, { type: "terminal.exit", terminalId: id, exitCode });
       onExit?.(exitCode);
     });
-    this.sessions.set(id, { id, owner, pty: pseudoterminal, dataListener, exitListener, onExit });
+    session = {
+      id,
+      owner,
+      pty: pseudoterminal,
+      dataListener,
+      exitListener,
+      exitObserved: false,
+      exitWaiters: new Set(),
+      terminationRequested: false,
+      closing: null,
+      onExit,
+    };
+    this.sessions.set(id, session);
     return id;
   }
 
@@ -156,7 +177,7 @@ export class TerminalManager {
   }
 
   close(owner: WebSocket, terminalId: string): void {
-    this.trackDisposal(this.ownedSession(owner, terminalId));
+    void this.trackDisposal(this.ownedSession(owner, terminalId, true));
   }
 
   /**
@@ -164,36 +185,32 @@ export class TerminalManager {
    * This is intentionally not exposed through the client protocol by terminal
    * ID, so callers must first resolve an owned run on the server.
    */
-  closeManaged(terminalId: string): boolean {
+  async closeManaged(terminalId: string): Promise<boolean> {
     const session = this.sessions.get(terminalId);
     if (!session) return false;
-    this.trackDisposal(session);
+    await this.trackDisposal(session);
     return true;
   }
 
   disposeOwner(owner: WebSocket): void {
     for (const session of this.sessions.values()) {
-      if (session.owner === owner) this.trackDisposal(session);
+      if (session.owner === owner) void this.trackDisposal(session);
     }
   }
 
   async disposeAll(): Promise<void> {
     for (const session of this.sessions.values()) {
-      this.trackDisposal(session);
+      void this.trackDisposal(session);
     }
-    const failureBeforeWait = this.closingFailure;
-    this.closingFailure = null;
     const closing = [...this.closingSessions];
     const results = await Promise.allSettled(closing);
     for (const promise of closing) this.closingSessions.delete(promise);
-    const trackedFailure = this.closingFailure;
-    this.closingFailure = null;
+    const trackedFailure = this.closingFailures.values().next().value;
     const rejected = results.find(
       (result): result is PromiseRejectedResult =>
         result.status === "rejected",
     );
-    const failure = failureBeforeWait
-      ?? trackedFailure
+    const failure = trackedFailure
       ?? (
         rejected?.reason instanceof Error
           ? rejected.reason
@@ -206,9 +223,19 @@ export class TerminalManager {
     if (failure) throw failure;
   }
 
-  private ownedSession(owner: WebSocket, terminalId: string): TerminalSession {
+  private ownedSession(
+    owner: WebSocket,
+    terminalId: string,
+    includeTerminating = false,
+  ): TerminalSession {
     const session = this.sessions.get(terminalId);
-    if (!session || session.owner !== owner) throw new TerminalError("Terminal not found.");
+    if (
+      !session
+      || session.owner !== owner
+      || (session.terminationRequested && !includeTerminating)
+    ) {
+      throw new TerminalError("Terminal not found.");
+    }
     return session;
   }
 
@@ -231,47 +258,49 @@ export class TerminalManager {
   private disposeAndWait(session: TerminalSession): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let settled = false;
-      let exitObserved = false;
-      let resolveObservedExit!: () => void;
-      const observedExit = new Promise<void>((resolveExit) => {
-        resolveObservedExit = resolveExit;
-      });
       const waitForExit: WaitForProcessExit = (waitMs) => {
-        if (exitObserved) return Promise.resolve(true);
+        if (session.exitObserved) return Promise.resolve(true);
         return new Promise<boolean>((resolveWait) => {
           let waitSettled = false;
           const finishWait = (didExit: boolean): void => {
             if (waitSettled) return;
             waitSettled = true;
             clearTimeout(waitTimer);
+            session.exitWaiters.delete(observeExit);
             resolveWait(didExit);
           };
+          const observeExit = (): void => finishWait(true);
+          session.exitWaiters.add(observeExit);
           const waitTimer = setTimeout(() => finishWait(false), waitMs);
-          void observedExit.then(() => finishWait(true));
         });
       };
       const finish = (error?: Error): void => {
         if (settled) return;
         settled = true;
-        exitListener.dispose();
         if (error) reject(error);
         else resolve();
       };
-      const exitListener = session.pty.onExit(() => {
-        exitObserved = true;
-        resolveObservedExit();
-      });
-      this.dispose(session.id, false);
-      session.onExit?.(130);
+      session.terminationRequested = true;
       // Start with the root still alive. On POSIX the terminator freezes it
       // before snapshotting descendants, preventing a prompt root exit from
       // reparenting a surviving background process beyond discovery.
       void this.terminateProcessTree(session.pty.pid, waitForExit).then(
-        (confirmed) => finish(confirmed
-          ? undefined
-          : new TerminalError(
+        (confirmed) => {
+          if (!confirmed) {
+            finish(new TerminalError(
               "A terminal process tree could not be confirmed stopped during runtime shutdown.",
-            )),
+            ));
+            return;
+          }
+          this.dispose(session.id, false);
+          try {
+            session.onExit?.(130);
+          } catch {
+            // The owned tree is already confirmed stopped; lifecycle
+            // observers must not turn that confirmation into a retryable leak.
+          }
+          finish();
+        },
         () => finish(new TerminalError(
           "A terminal process tree could not be confirmed stopped during runtime shutdown.",
         )),
@@ -279,20 +308,28 @@ export class TerminalManager {
     });
   }
 
-  private trackDisposal(session: TerminalSession): void {
+  private trackDisposal(session: TerminalSession): Promise<void> {
+    if (session.closing) return session.closing;
     const closing = this.disposeAndWait(session);
+    session.closing = closing;
     this.closingSessions.add(closing);
     void closing.then(
-      () => this.closingSessions.delete(closing),
+      () => {
+        this.closingSessions.delete(closing);
+        this.closingFailures.delete(session.id);
+        if (session.closing === closing) session.closing = null;
+      },
       (error: unknown) => {
         this.closingSessions.delete(closing);
-        this.closingFailure ??= error instanceof Error
+        this.closingFailures.set(session.id, error instanceof Error
           ? error
           : new TerminalError(
               "A terminal process did not exit during runtime shutdown.",
-            );
+            ));
+        if (session.closing === closing) session.closing = null;
       },
     );
+    return closing;
   }
 }
 

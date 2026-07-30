@@ -420,7 +420,7 @@ export function createTurnInteractionCommandHandler(
           );
         }
         if (activity.kind === "check" || activity.kind === "service") {
-          if (!dependencies.workspaceRuns.stopManagedAction(activity.id)) {
+          if (!await dependencies.workspaceRuns.stopManagedAction(activity.id)) {
             throw new RuntimeRequestError(
               "That process is no longer owned by the local runtime.",
             );

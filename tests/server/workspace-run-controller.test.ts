@@ -16,6 +16,7 @@ class FakeTerminals implements WorkspaceActionTerminalManager<object> {
   readonly inputs: Array<{ terminalId: string; data: string }> = [];
   failCreate = false;
   failInput = false;
+  closeManagedFailure: Error | null = null;
   private sequence = 0;
   private readonly sessions = new Map<string, {
     onExit?: (exitCode: number) => void;
@@ -46,8 +47,9 @@ class FakeTerminals implements WorkspaceActionTerminalManager<object> {
     this.finish(terminalId, 130);
   }
 
-  closeManaged(terminalId: string): boolean {
+  async closeManaged(terminalId: string): Promise<boolean> {
     if (!this.sessions.has(terminalId)) return false;
+    if (this.closeManagedFailure) throw this.closeManagedFailure;
     this.finish(terminalId, 130);
     return true;
   }
@@ -160,14 +162,68 @@ describe("workspace run controller", () => {
 
       runtime.terminals.output(terminalId, "ready at \u001b[36mhttp://localhost:45678\u001b[0m");
       expect(runtime.store.workspaceRun(running.id).port).toBe(45678);
-      expect(runtime.controller.stopManagedAction(running.id)).toBe(true);
+      await expect(
+        runtime.controller.stopManagedAction(running.id),
+      ).resolves.toBe(true);
       expect(runtime.store.workspaceRun(running.id)).toMatchObject({
         status: "cancelled",
         detail: "Stopped",
       });
       expect(runtime.controller.canStopManagedAction(runtime.store.workspaceRun(running.id))).toBe(false);
-      expect(runtime.controller.stopManagedAction(running.id)).toBe(false);
+      await expect(
+        runtime.controller.stopManagedAction(running.id),
+      ).resolves.toBe(false);
       expect(runtime.broadcastSnapshot).toHaveBeenCalledTimes(3);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("retains managed action control when terminal shutdown is unconfirmed", async () => {
+    const runtime = await fixture();
+    try {
+      await runtime.controller.startAction({
+        owner: {},
+        cwd: runtime.workspace,
+        projectId: runtime.project.id,
+        conversationId: runtime.conversation.id,
+        actionId: "preview",
+        cols: 80,
+        rows: 24,
+        onStarted: vi.fn(),
+      });
+      const running = runtime.store.shellSnapshot().runs.find(
+        (run) => run.actionId === "preview",
+      )!;
+      runtime.terminals.closeManagedFailure = new Error(
+        "process tree still running",
+      );
+
+      await expect(
+        runtime.controller.stopManagedAction(running.id),
+      ).rejects.toThrow("process tree still running");
+      expect(runtime.store.workspaceRun(running.id)).toMatchObject({
+        status: "running",
+      });
+      expect(
+        runtime.controller.canStopManagedAction(
+          runtime.store.workspaceRun(running.id),
+        ),
+      ).toBe(true);
+
+      runtime.terminals.closeManagedFailure = null;
+      await expect(
+        runtime.controller.stopManagedAction(running.id),
+      ).resolves.toBe(true);
+      expect(runtime.store.workspaceRun(running.id)).toMatchObject({
+        status: "cancelled",
+        detail: "Stopped",
+      });
+      expect(
+        runtime.controller.canStopManagedAction(
+          runtime.store.workspaceRun(running.id),
+        ),
+      ).toBe(false);
     } finally {
       runtime.store.close();
     }
@@ -231,7 +287,9 @@ describe("workspace run controller", () => {
           finishedAt: expect.any(String),
         });
         expect(runtime.controller.canStopManagedAction(failed)).toBe(false);
-        expect(runtime.controller.stopManagedAction(failed.id)).toBe(false);
+        await expect(
+          runtime.controller.stopManagedAction(failed.id),
+        ).resolves.toBe(false);
         expect(runtime.broadcastSnapshot).toHaveBeenCalledTimes(1);
       } finally {
         runtime.store.close();

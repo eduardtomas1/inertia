@@ -44,14 +44,16 @@ function fakeTerminal(): {
   emitExit: () => void;
   pty: IPty;
 } {
-  const exitListeners = new Set<() => void>();
-  const disposable = (callback: () => void): IDisposable => ({
+  const exitListeners = new Set<(event: { exitCode: number }) => void>();
+  const disposable = (
+    callback: (event: { exitCode: number }) => void,
+  ): IDisposable => ({
     dispose: () => exitListeners.delete(callback),
   });
   const pty = {
     pid: 42,
     onData: vi.fn(() => ({ dispose: vi.fn() })),
-    onExit: vi.fn((callback: () => void) => {
+    onExit: vi.fn((callback: (event: { exitCode: number }) => void) => {
       exitListeners.add(callback);
       return disposable(callback);
     }),
@@ -60,7 +62,7 @@ function fakeTerminal(): {
   } as unknown as IPty;
   return {
     emitExit: () => {
-      for (const listener of exitListeners) listener();
+      for (const listener of exitListeners) listener({ exitCode: 0 });
     },
     pty,
   };
@@ -313,5 +315,91 @@ describe("TerminalManager", () => {
     confirmTree(true);
     await shutdown;
     expect(shutdownFinished).toBe(true);
+  });
+
+  it("only acknowledges a managed close after tree cleanup is confirmed", async () => {
+    const terminal = fakeTerminal();
+    let confirmTree!: (confirmed: boolean) => void;
+    const terminateProcessTree = vi.fn(() =>
+      new Promise<boolean>((resolveTree) => {
+        confirmTree = resolveTree;
+      }));
+    const manager = new TerminalManager({
+      spawnTerminal: vi.fn(() => terminal.pty),
+      terminateProcessTree,
+    });
+    const owner = {} as WebSocket;
+    const onExit = vi.fn();
+    const terminalId = manager.createProcess(
+      owner,
+      process.cwd(),
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+      onExit,
+    );
+
+    let acknowledged = false;
+    const closing = manager.closeManaged(terminalId).then((closed) => {
+      acknowledged = closed;
+      return closed;
+    });
+    terminal.emitExit();
+    await Promise.resolve();
+
+    expect(terminateProcessTree).toHaveBeenCalledWith(
+      42,
+      expect.any(Function),
+    );
+    expect(acknowledged).toBe(false);
+    expect(onExit).not.toHaveBeenCalled();
+
+    confirmTree(true);
+    await expect(closing).resolves.toBe(true);
+    expect(acknowledged).toBe(true);
+    expect(onExit).toHaveBeenCalledOnce();
+    expect(onExit).toHaveBeenCalledWith(130);
+  });
+
+  it("retains managed shutdown control after confirmation failure and permits retry", async () => {
+    const terminal = fakeTerminal();
+    const terminateProcessTree = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const manager = new TerminalManager({
+      spawnTerminal: vi.fn(() => terminal.pty),
+      terminateProcessTree,
+    });
+    const owner = {} as WebSocket;
+    const onExit = vi.fn();
+    const terminalId = manager.createProcess(
+      owner,
+      process.cwd(),
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+      onExit,
+    );
+
+    await expect(manager.closeManaged(terminalId)).rejects.toThrow(
+      "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+    );
+    terminal.emitExit();
+    await Promise.resolve();
+    expect(onExit).not.toHaveBeenCalled();
+    expect(() => manager.input(owner, terminalId, "echo unsafe")).toThrow(
+      "Terminal not found.",
+    );
+
+    await expect(manager.closeManaged(terminalId)).resolves.toBe(true);
+    expect(terminateProcessTree).toHaveBeenCalledTimes(2);
+    expect(onExit).toHaveBeenCalledOnce();
+    expect(onExit).toHaveBeenCalledWith(130);
+    await expect(manager.closeManaged(terminalId)).resolves.toBe(false);
+    await expect(manager.disposeAll()).resolves.toBeUndefined();
   });
 });

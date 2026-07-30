@@ -35,7 +35,7 @@ export interface WorkspaceActionTerminalManager<Owner> {
   ): string;
   input(owner: Owner, terminalId: string, data: string): void;
   close(owner: Owner, terminalId: string): void;
-  closeManaged(terminalId: string): boolean;
+  closeManaged(terminalId: string): Promise<boolean>;
 }
 
 export interface WorkspaceAction {
@@ -233,9 +233,10 @@ export class WorkspaceRunController<Owner> {
     );
   }
 
-  stopManagedAction(runId: string): boolean {
+  async stopManagedAction(runId: string): Promise<boolean> {
     const managed = this.managedActions.get(runId);
-    return managed !== undefined && this.terminals.closeManaged(managed.terminalId);
+    return managed !== undefined
+      && await this.terminals.closeManaged(managed.terminalId);
   }
 
   async trackSourceControl<T>(

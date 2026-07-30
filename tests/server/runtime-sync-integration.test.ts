@@ -214,16 +214,14 @@ describe("runtime incremental synchronization", () => {
     resumeUrl.searchParams.set("runtimeGeneration", cursor.runtimeGeneration);
     resumeUrl.searchParams.set("afterSequence", String(cursor.latestSequence));
     const resumed = await connect(resumeUrl.toString());
-    const resumeFrame = await resumed.next(
-      (event): event is Extract<ServerEvent, { type: "runtime.resumed" }> =>
-        event.type === "runtime.resumed",
+    const refreshed = await resumed.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
     );
-    expect(resumeFrame.sync.latestSequence).toBe(published.sync.latestSequence);
-    const replayed = await resumed.next(
-      (event): event is Extract<ServerEvent, { type: "runtime.event" }> =>
-        event.type === "runtime.event",
+    expect(refreshed.sync?.latestSequence).toBe(
+      published.sync.latestSequence,
     );
-    expect(replayed.sync).toEqual(published.sync);
+    expect(refreshed.snapshot.settings.compactSidebar).toBe(true);
     const completed = await resumed.next(
       (event): event is Extract<ServerEvent, { type: "runtime.sync.completed" }> =>
         event.type === "runtime.sync.completed",

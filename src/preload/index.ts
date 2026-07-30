@@ -7,6 +7,7 @@ import type {
 
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
+  runtimeReady: "inertia:runtime-ready",
   selectDirectory: "inertia:select-directory",
   selectCodexExecutable: "inertia:select-codex-executable",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
@@ -32,6 +33,11 @@ const IPC = {
 const bridge: DesktopBridge = Object.freeze({
   getRuntimeConnection: () =>
     ipcRenderer.invoke(IPC.getRuntimeConnection) as Promise<RuntimeConnection>,
+  onRuntimeReady: (listener: () => void) => {
+    const handler = () => listener();
+    ipcRenderer.on(IPC.runtimeReady, handler);
+    return () => ipcRenderer.removeListener(IPC.runtimeReady, handler);
+  },
   selectDirectory: () => ipcRenderer.invoke(IPC.selectDirectory) as Promise<string | null>,
   selectCodexExecutable: () => ipcRenderer.invoke(IPC.selectCodexExecutable) as Promise<string | null>,
   revealRuntimeLogs: () => ipcRenderer.invoke(IPC.revealRuntimeLogs) as Promise<string>,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type {
   ChatAttachment,
@@ -650,15 +650,15 @@ export function Composer({
         }
       : { reasoningEffort });
   };
-  const modelRoutes = buildComposerModelRoutes(
+  const modelRoutes = useMemo(() => buildComposerModelRoutes(
     providers,
     backendProfiles,
     conversation.modelSelection,
-  );
-  const selectedModelRoute = selectedModelSearchRoute(
+  ), [backendProfiles, conversation.modelSelection, providers]);
+  const selectedModelRoute = useMemo(() => selectedModelSearchRoute(
     modelRoutes,
     conversation.modelSelection,
-  );
+  ), [conversation.modelSelection, modelRoutes]);
   const chooseModelRoute = (route: ComposerModelRoute): void => {
     const transition = resolveModelRouteTransition({
       projectId: conversation.projectId,

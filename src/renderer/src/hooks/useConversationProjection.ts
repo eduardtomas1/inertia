@@ -5,13 +5,16 @@ import type {
   AgentApprovalRequest,
   AgentInputRequest,
   AgentPlan,
+  AgentReasoning,
   AppSnapshot,
   ChatMessage,
+  CheckpointSummary,
   ConversationShell,
   ConversationDetailViewState,
   ServerEvent,
   SubagentTrace,
   ThreadUsageSnapshot,
+  TurnGitArtifact,
 } from "@shared/contracts";
 import {
   mergeConversationShell,
@@ -19,6 +22,30 @@ import {
 } from "../utils/conversationDetail";
 import type { ConnectionStatus } from "./useInertiaConnection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+
+const EMPTY_REASONINGS: AgentReasoning[] = [];
+const EMPTY_CHECKPOINTS: CheckpointSummary[] = [];
+const EMPTY_GIT_ARTIFACTS: TurnGitArtifact[] = [];
+
+function compareCreatedRecords(
+  left: { createdAt: string; id: string },
+  right: { createdAt: string; id: string },
+): number {
+  if (left.createdAt < right.createdAt) return -1;
+  if (left.createdAt > right.createdAt) return 1;
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+}
+
+function compareCreatedAt(
+  left: { createdAt: string },
+  right: { createdAt: string },
+): number {
+  return left.createdAt < right.createdAt
+    ? -1
+    : left.createdAt > right.createdAt
+      ? 1
+      : 0;
+}
 
 export interface ConversationProjectionOptions {
   snapshot: AppSnapshot | null;
@@ -506,8 +533,7 @@ export function useConversationProjection({
           merged.set(message.id, message);
         }
       }
-      return [...merged.values()].sort((a, b) =>
-        a.createdAt.localeCompare(b.createdAt));
+      return [...merged.values()].sort(compareCreatedRecords);
     },
     [activeConversationId, detail?.messages, liveMessages],
   );
@@ -520,8 +546,7 @@ export function useConversationProjection({
     for (const activity of liveActivities[activeConversationId] ?? []) {
       merged.set(activity.id, activity);
     }
-    return [...merged.values()].sort((a, b) =>
-      a.createdAt.localeCompare(b.createdAt));
+    return [...merged.values()].sort(compareCreatedRecords);
   }, [activeConversationId, detail?.activities, liveActivities]);
   const subagents = useMemo(() => {
     if (!activeConversationId) return [];
@@ -531,9 +556,9 @@ export function useConversationProjection({
       merged.set(trace.id, trace);
     }
     return [...merged.values()].sort((a, b) =>
-      a.createdAt.localeCompare(b.createdAt)
+      compareCreatedAt(a, b)
       || a.sequence - b.sequence
-      || a.id.localeCompare(b.id));
+      || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }, [activeConversationId, detail?.subagents, liveSubagents]);
   const usage = useMemo(() => {
     if (!activeConversationId) return null;
@@ -580,10 +605,10 @@ export function useConversationProjection({
     messages,
     activities,
     subagents,
-    reasonings: detail?.reasonings ?? [],
+    reasonings: detail?.reasonings ?? EMPTY_REASONINGS,
     plans,
-    checkpoints: detail?.checkpoints ?? [],
-    turnGitArtifacts: detail?.turnGitArtifacts ?? [],
+    checkpoints: detail?.checkpoints ?? EMPTY_CHECKPOINTS,
+    turnGitArtifacts: detail?.turnGitArtifacts ?? EMPTY_GIT_ARTIFACTS,
     usage,
     streamingText,
     streamingReasoning,

@@ -266,6 +266,13 @@ export default function App(): React.JSX.Element {
       : null,
     [connection.snapshot?.runs, conversation],
   );
+  const latestAssistantContent = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index]!;
+      if (message.role === "assistant") return message.content;
+    }
+    return "";
+  }, [messages]);
   const planSteps = useMemo(() => {
     const latestPlan = plans.at(-1);
     if (latestPlan) {
@@ -275,9 +282,14 @@ export default function App(): React.JSX.Element {
         status: step.status === "inProgress" ? "in-progress" as const : step.status,
       }));
     }
-    const text = [...messages].reverse().find((message) => message.role === "assistant")?.content ?? streamingText;
+    const text = latestAssistantContent || streamingText;
     return planFromText(text, conversation?.status ?? "idle");
-  }, [conversation?.status, messages, plans, streamingText]);
+  }, [
+    conversation?.status,
+    latestAssistantContent,
+    plans,
+    streamingText,
+  ]);
 
   const {
     run,

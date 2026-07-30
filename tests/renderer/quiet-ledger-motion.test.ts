@@ -210,7 +210,7 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(turnSource).toContain("data-response-row-id={turn.id}");
     expect(turnSource).toContain("data-turn-id={turn.id}");
     expect(viewportSource).toContain(
-      "(index: number) => timeline[index]?.id ?? `missing-${index}`",
+      "(index: number) => timelineRef.current[index]?.id ?? `missing-${index}`",
     );
     expect(viewportSource).toContain("key={virtualItem.key}");
     expect(viewportSource).toContain(

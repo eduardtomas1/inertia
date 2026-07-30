@@ -1222,8 +1222,8 @@ describe("authoritative response timeline", () => {
       label: "Request 0 with a stable label",
     });
     expect(markers.at(-1)).toMatchObject({ index: 119, id: "turn-119" });
-    expect(shouldVirtualizeTimeline(39)).toBe(false);
-    expect(shouldVirtualizeTimeline(40)).toBe(true);
+    expect(shouldVirtualizeTimeline(9)).toBe(false);
+    expect(shouldVirtualizeTimeline(10)).toBe(true);
     expect(shouldShowTimelineMinimap(120, 47)).toBe(false);
     expect(shouldShowTimelineMinimap(120, 48)).toBe(true);
 

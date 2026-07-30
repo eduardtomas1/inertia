@@ -236,6 +236,21 @@ export class GitArtifactRepository {
     `).all() as TurnGitArtifactRow[]).map(storedTurnGitArtifactFromRow);
   }
 
+  revision(): string {
+    return JSON.stringify(this.context.database.prepare(`
+      SELECT
+        id,
+        status,
+        completeness,
+        patch_state,
+        patch_digest,
+        captured_at,
+        updated_at
+      FROM turn_git_artifacts
+      ORDER BY id ASC
+    `).all());
+  }
+
   patchDigests(): Set<string> {
     return new Set((this.context.database.prepare(`
       SELECT DISTINCT patch_digest AS digest

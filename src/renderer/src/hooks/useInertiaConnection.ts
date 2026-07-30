@@ -79,9 +79,19 @@ export function useInertiaConnection(): InertiaConnection {
     let reconnectTimer: number | undefined;
     let attempt = 0;
     let forceSnapshot = false;
+    let connectInFlight = false;
+
+    const scheduleConnect = (delay: number): void => {
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = undefined;
+        void connect();
+      }, delay);
+    };
 
     const connect = async () => {
-      if (disposed) return;
+      if (disposed || connectInFlight || socketRef.current) return;
+      connectInFlight = true;
       setStatus("connecting");
 
       try {
@@ -205,7 +215,7 @@ export function useInertiaConnection(): InertiaConnection {
             ? 0
             : Math.min(8_000, 600 * 2 ** attempt) + Math.round(Math.random() * 250);
           attempt += 1;
-          reconnectTimer = window.setTimeout(connect, delay);
+          scheduleConnect(delay);
         });
 
         socket.addEventListener("error", () => {
@@ -217,14 +227,21 @@ export function useInertiaConnection(): InertiaConnection {
         setError(connectionError instanceof Error ? connectionError.message : "The local service is unavailable.");
         const delay = Math.min(8_000, 600 * 2 ** attempt);
         attempt += 1;
-        reconnectTimer = window.setTimeout(connect, delay);
+        scheduleConnect(delay);
+      } finally {
+        connectInFlight = false;
       }
     };
 
+    const stopRuntimeReady = window.inertia?.onRuntimeReady?.(() => {
+      attempt = 0;
+      scheduleConnect(0);
+    });
     void connect();
 
     return () => {
       disposed = true;
+      stopRuntimeReady?.();
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       const socket = socketRef.current;
       socketRef.current = null;

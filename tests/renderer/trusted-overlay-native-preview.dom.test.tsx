@@ -6,6 +6,7 @@ import { ActivityCenter } from "../../src/renderer/src/components/ActivityCenter
 import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
 import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
 import { EnvironmentSummary } from "../../src/renderer/src/components/EnvironmentSummary";
+import { AppStatusOverlays } from "../../src/renderer/src/components/AppStatusOverlays";
 import { ProviderAuthDialog } from "../../src/renderer/src/components/ProviderAuthDialog";
 import { RouteChangeConfirmation } from "../../src/renderer/src/components/composer/RouteChangeConfirmation";
 import {
@@ -158,6 +159,52 @@ describe("trusted overlay native preview suspension", () => {
     await expectSuspended();
 
     view.rerender(<ProviderAuthDialog provider={null} {...props} />);
+    await expectRestored();
+  });
+
+  it("suspends before the lazy provider credential dialog mounts", async () => {
+    const providerAuth = {
+      provider,
+      status: "offline" as const,
+      theme: "dark" as const,
+      fontSize: 13,
+      sendCommand: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+      onClose: vi.fn(),
+    };
+    const appUpdate = {
+      status: null,
+      checking: false,
+      visible: false,
+      check: vi.fn(async () => undefined),
+      dismiss: vi.fn(),
+      openRelease: vi.fn(async () => undefined),
+    };
+    const providerQuotaNotices = {
+      notices: [],
+      dismiss: vi.fn(),
+    };
+    const view = render(
+      <AppStatusOverlays
+        providerAuth={providerAuth}
+        appUpdate={appUpdate}
+        providerQuotaNotices={providerQuotaNotices}
+        error={null}
+        onDismissError={vi.fn()}
+      />,
+    );
+
+    expect(nativePreviewSuspended()).toBe(true);
+
+    view.rerender(
+      <AppStatusOverlays
+        providerAuth={{ ...providerAuth, provider: null }}
+        appUpdate={appUpdate}
+        providerQuotaNotices={providerQuotaNotices}
+        error={null}
+        onDismissError={vi.fn()}
+      />,
+    );
     await expectRestored();
   });
 

@@ -142,7 +142,7 @@ describe("RuntimeStore repository compatibility", () => {
     store.close();
   });
 
-  it("keeps streamed message content and conversation activity atomic", async () => {
+  it("persists streamed message content without reordering the conversation", async () => {
     const { databasePath, store, workspacePath } = await createStore();
     const project = store.createProject("Streaming", workspacePath);
     const conversation = store.createConversation(project.id, "Streaming");
@@ -151,6 +151,7 @@ describe("RuntimeStore repository compatibility", () => {
       "Original response",
       "assistant",
     );
+    const updatedAt = store.conversation(conversation.id).updatedAt;
     const inspector = new Database(databasePath);
     inspector.exec(`
       CREATE TRIGGER reject_stream_conversation_touch
@@ -160,15 +161,15 @@ describe("RuntimeStore repository compatibility", () => {
       END
     `);
 
-    expect(() => store.appendMessageContent(message.id, " plus more"))
-      .toThrow(/conversation touch rejected/u);
-    expect(store.snapshot().messages.find(({ id }) => id === message.id)?.content)
-      .toBe("Original response");
-
-    inspector.exec("DROP TRIGGER reject_stream_conversation_touch");
     store.appendMessageContent(message.id, " plus more");
     expect(store.message(message.id)?.content)
       .toBe("Original response plus more");
+    store.updateMessageContent(message.id, "Replacement response");
+    expect(store.message(message.id)?.content).toBe("Replacement response");
+    expect(store.conversation(conversation.id).updatedAt).toBe(updatedAt);
+    expect(() => store.appendMessageContent("missing-message", "delta"))
+      .toThrow(/Message not found/u);
+    inspector.exec("DROP TRIGGER reject_stream_conversation_touch");
     inspector.close();
     store.close();
   });

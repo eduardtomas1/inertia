@@ -43,6 +43,9 @@ export function useProviderQuotaNotices(
   providers: readonly ProviderInfo[],
 ): ProviderQuotaNoticeController {
   const stateRef = useRef<PersistedQuotaNotificationState>(readState());
+  const serializedStateRef = useRef(serializeQuotaNotificationState(
+    stateRef.current,
+  ));
   const [notices, setNotices] = useState<QuotaNotification[]>([]);
 
   const dismiss = useCallback((noticeId: string): void => {
@@ -52,7 +55,11 @@ export function useProviderQuotaNotices(
   useEffect(() => {
     const evaluation = evaluateQuotaNotifications(providers, stateRef.current);
     stateRef.current = evaluation.state;
-    writeState(evaluation.state);
+    const serialized = serializeQuotaNotificationState(evaluation.state);
+    if (serialized !== serializedStateRef.current) {
+      serializedStateRef.current = serialized;
+      writeState(evaluation.state);
+    }
     if (evaluation.notices.length === 0) return;
     setNotices((current) => {
       const byId = new Map(current.map((notice) => [notice.id, notice]));

@@ -200,8 +200,12 @@ export class RuntimeStore {
     try {
       this.database.pragma("foreign_keys = ON");
       this.database.pragma("busy_timeout = 5000");
-      this.migrate();
       this.database.pragma("journal_mode = WAL");
+      this.database.pragma("synchronous = NORMAL");
+      this.database.pragma("cache_size = -16000");
+      this.database.pragma("mmap_size = 268435456");
+      this.database.pragma("temp_store = MEMORY");
+      this.migrate();
       this.initializeState();
       if (options.recoverInterruptedRuns !== false) this.recoverInterruptedRuns();
     } catch (error) {
@@ -342,6 +346,10 @@ export class RuntimeStore {
 
   pendingTurnGitArtifacts(): StoredTurnGitArtifact[] {
     return this.gitArtifactRepository.pending();
+  }
+
+  turnGitArtifactRevision(): string {
+    return this.gitArtifactRepository.revision();
   }
 
   turnGitPatchDigests(): Set<string> {

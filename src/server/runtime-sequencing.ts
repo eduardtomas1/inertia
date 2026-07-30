@@ -184,6 +184,16 @@ export class RuntimeSequencer {
   }
 
   private retain(frame: Extract<RuntimeSequencedFrame, { type: "runtime.event" }>): void {
+    if (frame.event.type === "snapshot.updated") {
+      // A shell snapshot is authoritative but highly redundant. Retaining
+      // several multi-conversation snapshots wastes memory and makes resumed
+      // renderers parse stale states in sequence. Missing one now forces the
+      // existing fresh-hydration path instead.
+      this.replayFloor = frame.sync.latestSequence;
+      this.retained.length = 0;
+      this.retainedBytes = 0;
+      return;
+    }
     const bytes = Buffer.byteLength(JSON.stringify(frame), "utf8");
     if (bytes > this.maxReplayBytes) {
       this.replayFloor = frame.sync.latestSequence;

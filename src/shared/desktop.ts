@@ -87,6 +87,8 @@ export function parseOpenProjectPathRequest(value: unknown): OpenProjectPathRequ
 
 export interface DesktopBridge {
   getRuntimeConnection: () => Promise<RuntimeConnection>;
+  /** Wakes a reconnect attempt without exposing the runtime URL capability. */
+  onRuntimeReady: (listener: () => void) => () => void;
   selectDirectory: () => Promise<string | null>;
   selectCodexExecutable: () => Promise<string | null>;
   /** Reveals Inertia's fixed local diagnostics directory; no caller-supplied path is accepted. */

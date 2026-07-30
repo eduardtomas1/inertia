@@ -94,6 +94,37 @@ function compareRunRecency(a: WorkspaceRun, b: WorkspaceRun): number {
   return b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id);
 }
 
+function runIsOperational(run: WorkspaceRun): boolean {
+  return run.status === "running" || run.status === "waiting";
+}
+
+/**
+ * Indexes the canonical agent run for every conversation in one pass. A live
+ * or waiting run wins over settled history; within either class the newest
+ * run wins. Sidebar projections use this to avoid filtering and sorting the
+ * entire run ledger once per visible chat.
+ */
+export function indexConversationWorkspaceRuns(
+  runs: readonly WorkspaceRun[],
+): ReadonlyMap<string, WorkspaceRun> {
+  const indexed = new Map<string, WorkspaceRun>();
+  for (const run of runs) {
+    if (run.kind !== "agent" || run.conversationId === null) continue;
+    const existing = indexed.get(run.conversationId);
+    if (
+      !existing
+      || (
+        runIsOperational(run) === runIsOperational(existing)
+          ? compareRunRecency(run, existing) < 0
+          : runIsOperational(run)
+      )
+    ) {
+      indexed.set(run.conversationId, run);
+    }
+  }
+  return indexed;
+}
+
 /**
  * Selects the single canonical agent run representing a conversation in Work.
  * A live/waiting run wins; otherwise the latest run wins even when dismissed,
@@ -103,10 +134,5 @@ export function selectConversationWorkspaceRun(
   conversationId: string,
   runs: readonly WorkspaceRun[],
 ): WorkspaceRun | null {
-  const candidates = runs
-    .filter((run) => run.kind === "agent" && run.conversationId === conversationId)
-    .sort(compareRunRecency);
-  return candidates.find((run) => run.status === "running" || run.status === "waiting")
-    ?? candidates[0]
-    ?? null;
+  return indexConversationWorkspaceRuns(runs).get(conversationId) ?? null;
 }

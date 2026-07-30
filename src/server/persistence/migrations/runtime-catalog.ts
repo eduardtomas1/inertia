@@ -743,6 +743,26 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         UPDATE app_state SET auto_open_plan = 0;
       `,
     });
+    migrationExtensions.push({
+      name: "OptimizeConversationDetailIndexes",
+      up: `
+        CREATE INDEX IF NOT EXISTS messages_conversation_created_idx
+          ON messages(conversation_id, created_at ASC, id ASC);
+        CREATE INDEX IF NOT EXISTS activities_conversation_created_idx
+          ON activities(conversation_id, created_at ASC, id ASC);
+        CREATE INDEX IF NOT EXISTS reasonings_conversation_created_idx
+          ON agent_reasonings(conversation_id, created_at ASC, id ASC);
+        CREATE INDEX IF NOT EXISTS checkpoints_conversation_created_idx
+          ON checkpoints(conversation_id, created_at ASC, id ASC);
+        CREATE INDEX IF NOT EXISTS subagents_conversation_created_idx
+          ON subagent_traces(
+            conversation_id,
+            created_at ASC,
+            sequence ASC,
+            id ASC
+          );
+      `,
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

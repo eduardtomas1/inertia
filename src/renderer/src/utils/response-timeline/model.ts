@@ -215,7 +215,13 @@ function buildTurn(
       })()
     : (indexes.checkpointsByTurn.get(agentTurn.id) ?? [])
       .find((item) => item.conversationId === agentTurn.conversationId) ?? null;
-  const importantActivities = activities.filter(activityNeedsAttention);
+  const importantActivities: AgentActivity[] = [];
+  const foldableActivities: AgentActivity[] = [];
+  for (const activity of activities) {
+    (activityNeedsAttention(activity)
+      ? importantActivities
+      : foldableActivities).push(activity);
+  }
 
   return {
     id: agentTurn.id,
@@ -244,7 +250,7 @@ function buildTurn(
     toolCallCount: activities.filter(({ kind }) =>
       kind === "tool" || kind === "command" || kind === "file").length,
     importantActivities,
-    foldableActivities: activities.filter((activity) => !activityNeedsAttention(activity)),
+    foldableActivities,
   };
 }
 

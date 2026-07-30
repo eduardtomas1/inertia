@@ -263,7 +263,9 @@ describe("turn Git artifacts", () => {
       runtime.repository,
     );
     const recovered = new TurnGitArtifactManager(reopened, runtime.data);
+    const fullSnapshot = vi.spyOn(reopened, "snapshot");
     await recovered.reconcile();
+    expect(fullSnapshot).not.toHaveBeenCalled();
     expect(reopened.turnGitArtifact(turn.id)).toMatchObject({
       status: "ready",
       completeness: "complete",

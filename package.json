@@ -13,8 +13,9 @@
   "scripts": {
     "dev": "electron-vite dev",
     "prebuild": "npm run notices:generate",
-    "build": "npm run typecheck && electron-vite build",
-    "build:bundle": "electron-vite build",
+    "build": "npm run typecheck && electron-vite build && npm run check:renderer-bundle",
+    "build:bundle": "electron-vite build && npm run check:renderer-bundle",
+    "check:renderer-bundle": "node scripts/check-renderer-bundle.mjs",
     "preview": "electron-vite preview",
     "check:architecture": "node scripts/check-architecture.mjs",
     "lint": "npm run lint:standard && npm run lint:type-aware",

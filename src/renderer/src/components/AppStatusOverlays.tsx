@@ -1,12 +1,16 @@
-import type { ComponentProps } from "react";
+import { lazy, Suspense, type ComponentProps } from "react";
 import { AlertCircle, X } from "lucide-react";
 
 import type { useAppUpdate } from "../hooks/useAppUpdate";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
 import { AppUpdateNotice } from "./AppUpdateNotice";
-import { ProviderAuthDialog } from "./ProviderAuthDialog";
 import { ProviderQuotaNotices } from "./ProviderQuotaNotices";
 import { IconButton } from "./ui";
+
+const ProviderAuthDialog = lazy(async () => ({
+  default: (await import("./ProviderAuthDialog")).ProviderAuthDialog,
+}));
 
 interface AppStatusOverlaysProps {
   providerAuth: ComponentProps<typeof ProviderAuthDialog>;
@@ -23,9 +27,17 @@ export function AppStatusOverlays({
   error,
   onDismissError,
 }: AppStatusOverlaysProps): React.JSX.Element {
+  // Own preview suspension from this always-loaded boundary. The credential
+  // dialog itself remains lazy, so waiting for its chunk would briefly leave
+  // native preview content above the trusted authentication flow.
+  useNativePreviewSuspension(Boolean(providerAuth.provider));
   return (
     <>
-      <ProviderAuthDialog {...providerAuth} />
+      {providerAuth.provider && (
+        <Suspense fallback={null}>
+          <ProviderAuthDialog {...providerAuth} />
+        </Suspense>
+      )}
       {appUpdate.visible && appUpdate.status && (
         <AppUpdateNotice
           status={appUpdate.status}

@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useId,
@@ -49,9 +51,12 @@ import type {
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { shouldFollowTimeline } from "../utils/responseTimeline";
 import { Composer } from "./Composer";
-import { ResponseTimeline } from "./ResponseTimeline";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
+
+const ResponseTimeline = lazy(async () => ({
+  default: (await import("./ResponseTimeline")).ResponseTimeline,
+}));
 
 type ChatWorkspaceProps = {
   embedded?: boolean;
@@ -208,6 +213,9 @@ export function ChatWorkspace({
   );
   const Root = embedded ? "section" : "main";
   const keyboardHelpId = useId();
+  const stopTimeline = useCallback(() => {
+    void onStop().catch(() => undefined);
+  }, [onStop]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
@@ -332,45 +340,47 @@ export function ChatWorkspace({
           {messages.length === 0 && turns.length === 0 && (
             <div className="empty-thread"><span className="empty-thread-icon"><Code2 size={20} /></span><h3>What should we work on?</h3><p>Describe the outcome you want. The details can take shape together.</p></div>
           )}
-          <ResponseTimeline
-            turns={turns}
-            messages={messages}
-            activities={activities}
-            subagents={subagents}
-            reasonings={reasonings}
-            plans={plans}
-            checkpoints={checkpoints}
-            gitArtifacts={turnGitArtifacts}
-            projectRoot={projectRoot}
-            projectId={project.id}
-            conversationId={conversation.id}
-            providers={providers}
-            streamingText={streamingText}
-            streamingReasoning={streamingReasoning}
-            approvals={approvals}
-            inputRequests={inputRequests}
-            showTimestamps={showTimestamps}
-            showThinking={showThinking}
-            defaultCodeWrap={defaultCodeWrap}
-            autoCollapseWorkLog={autoCollapseWorkLog}
-            showChangedFileSummaries={showChangedFileSummaries}
-            scrollElementRef={scrollRef}
-            timelineElementRef={timelineRef}
-            checkpointRestoreDisabled={turns.some(({ status }) =>
-              status === "queued"
-              || status === "starting"
-              || status === "running"
-              || status === "waiting-for-approval"
-              || status === "waiting-for-input")}
-            onRespondToApproval={onRespondToApproval}
-            onRespondToInput={onRespondToInput}
-            onRevertCheckpoint={onRevertCheckpoint}
-            onOpenTurnDiff={onOpenTurnDiff}
-            onCompareTurnArtifacts={onCompareTurnArtifacts}
-            onOpenTurnFile={onOpenTurnFile}
-            onStop={() => { void onStop().catch(() => undefined); }}
-            onStopSubagent={onStopSubagent}
-          />
+          <Suspense fallback={<LoadingMark label="Loading conversation" />}>
+            <ResponseTimeline
+              turns={turns}
+              messages={messages}
+              activities={activities}
+              subagents={subagents}
+              reasonings={reasonings}
+              plans={plans}
+              checkpoints={checkpoints}
+              gitArtifacts={turnGitArtifacts}
+              projectRoot={projectRoot}
+              projectId={project.id}
+              conversationId={conversation.id}
+              providers={providers}
+              streamingText={streamingText}
+              streamingReasoning={streamingReasoning}
+              approvals={approvals}
+              inputRequests={inputRequests}
+              showTimestamps={showTimestamps}
+              showThinking={showThinking}
+              defaultCodeWrap={defaultCodeWrap}
+              autoCollapseWorkLog={autoCollapseWorkLog}
+              showChangedFileSummaries={showChangedFileSummaries}
+              scrollElementRef={scrollRef}
+              timelineElementRef={timelineRef}
+              checkpointRestoreDisabled={turns.some(({ status }) =>
+                status === "queued"
+                || status === "starting"
+                || status === "running"
+                || status === "waiting-for-approval"
+                || status === "waiting-for-input")}
+              onRespondToApproval={onRespondToApproval}
+              onRespondToInput={onRespondToInput}
+              onRevertCheckpoint={onRevertCheckpoint}
+              onOpenTurnDiff={onOpenTurnDiff}
+              onCompareTurnArtifacts={onCompareTurnArtifacts}
+              onOpenTurnFile={onOpenTurnFile}
+              onStop={stopTimeline}
+              onStopSubagent={onStopSubagent}
+            />
+          </Suspense>
         </div>
       </div>
 

@@ -49,6 +49,7 @@ import {
 import type { AgentHarnessRegistry } from "./provider/agent-harness-registry";
 import type { ClaudeCompatibleBackendProfile } from "../shared/claude-backend-profiles";
 import { RuntimeSyncHub } from "./runtime/runtime-sync-hub";
+import { SnapshotBroadcastCoalescer } from "./runtime/snapshot-broadcast-coalescer";
 import { WorkspaceRunController } from "./runtime/workspace-run-controller";
 import {
   createRuntimeCommandExecutor,
@@ -303,9 +304,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       })),
     });
   };
-  const broadcastSnapshot = (): void => {
+  const snapshotBroadcasts = new SnapshotBroadcastCoalescer(() => {
     runtimeSync.broadcastSnapshot(currentSnapshot);
-  };
+  });
+  const broadcastSnapshot = (): void => snapshotBroadcasts.request();
+  const flushSnapshot = (): void => snapshotBroadcasts.flush();
   workspaceRuns = new WorkspaceRunController(
     store,
     terminals,
@@ -512,7 +515,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         deletedConversationIds,
         dataDirectory,
         rememberDeletedConversation,
-        broadcastSnapshot,
+        broadcastSnapshot: flushSnapshot,
         publicError,
         send,
       }),
@@ -588,7 +591,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
     ],
     send,
-    broadcastSnapshot,
+    broadcastSnapshot: flushSnapshot,
     publicError,
   });
 
@@ -646,6 +649,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
       closed = true;
+      snapshotBroadcasts.close();
       secureFileAuthorities.clear();
       terminals.disposeAll();
       await providerMaintenance.dispose();

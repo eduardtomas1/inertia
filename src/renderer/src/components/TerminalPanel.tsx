@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
 import { Columns2, Maximize2, Plus, RotateCcw, TerminalSquare, X } from "lucide-react";
 import type { ClientCommand, ServerEvent, ThemePreference } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";

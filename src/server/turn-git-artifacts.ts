@@ -295,7 +295,7 @@ export class TurnGitArtifactManager {
   }
 
   async reconcile(): Promise<boolean> {
-    const before = JSON.stringify(this.store.snapshot().turnGitArtifacts);
+    const before = this.store.turnGitArtifactRevision();
     for (const artifact of this.store.pendingTurnGitArtifacts()) {
       const turn = this.store.agentTurn(artifact.turnId);
       if (
@@ -322,7 +322,7 @@ export class TurnGitArtifactManager {
       });
     }
     await this.prune();
-    return JSON.stringify(this.store.snapshot().turnGitArtifacts) !== before;
+    return this.store.turnGitArtifactRevision() !== before;
   }
 
   async #finalizeBounded(input: CaptureTurnGitArtifactInput): Promise<void> {

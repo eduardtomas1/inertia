@@ -394,11 +394,10 @@ describe("runtime sync hub", () => {
       plans: [],
     });
     expect(runtime.events.get("resumed")?.map(({ type }) => type)).toEqual([
-      "runtime.resumed",
-      "runtime.event",
+      "server.welcome",
       "runtime.sync.completed",
     ]);
-    expect(beforeFreshSnapshot).not.toHaveBeenCalled();
+    expect(beforeFreshSnapshot).toHaveBeenCalledTimes(1);
 
     runtime.hub.connect("reset", {
       kind: "resume",
@@ -416,7 +415,7 @@ describe("runtime sync hub", () => {
       "server.welcome",
       "runtime.sync.completed",
     ]);
-    expect(beforeFreshSnapshot).toHaveBeenCalledTimes(1);
+    expect(beforeFreshSnapshot).toHaveBeenCalledTimes(2);
 
     const terminated: string[] = [];
     runtime.hub.terminateAll((socket) => terminated.push(socket));

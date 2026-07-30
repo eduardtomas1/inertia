@@ -1,6 +1,7 @@
 import {
   Children,
   isValidElement,
+  memo,
   useEffect,
   useMemo,
   useRef,
@@ -78,6 +79,14 @@ const sanitizeSchema = {
     ],
   },
 };
+const REMARK_PLUGINS: NonNullable<
+  ComponentProps<typeof ReactMarkdown>["remarkPlugins"]
+> = [remarkGfm, preserveCodeMeta];
+const REHYPE_PLUGINS: NonNullable<
+  ComponentProps<typeof ReactMarkdown>["rehypePlugins"]
+> = [rehypeRaw, [rehypeSanitize, sanitizeSchema]];
+const MAX_HIGHLIGHT_CHARS = 50_000;
+const MAX_HIGHLIGHT_LINES = 2_000;
 
 type ResponseMarkdownProps = {
   content: string;
@@ -287,7 +296,13 @@ function codeMeta(meta: string | undefined): { label: string; file: string | nul
 
 function HighlightedCode({ code, language, enabled }: { code: string; language: string; enabled: boolean }): React.JSX.Element {
   const html = useMemo(() => {
-    if (!enabled || !language || !hljs.getLanguage(language)) return null;
+    if (
+      !enabled
+      || !language
+      || code.length > MAX_HIGHLIGHT_CHARS
+      || code.split("\n", MAX_HIGHLIGHT_LINES + 1).length > MAX_HIGHLIGHT_LINES
+      || !hljs.getLanguage(language)
+    ) return null;
     try {
       return hljs.highlight(code, { language, ignoreIllegals: true }).value;
     } catch {
@@ -372,7 +387,7 @@ export function stabilizeStreamingMarkdown(content: string): string {
   return `${content}\n${marker}`;
 }
 
-export function ResponseMarkdown({
+function ResponseMarkdownComponent({
   content,
   projectRoot,
   projectId,
@@ -382,54 +397,66 @@ export function ResponseMarkdown({
   onOpenProjectFile,
 }: ResponseMarkdownProps): React.JSX.Element {
   const renderedContent = streaming ? stabilizeStreamingMarkdown(content) : content;
+  const components = useMemo<
+    NonNullable<ComponentProps<typeof ReactMarkdown>["components"]>
+  >(() => ({
+    a: ({ href = "", children, ...props }) => {
+      const target = resolveResponseLink(projectRoot, href);
+      if (target.kind === "external") {
+        return <a {...props} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
+      }
+      if (target.kind === "project") {
+        return <a {...props} href={href} onClick={(event) => {
+          event.preventDefault();
+          if (
+            onOpenProjectFile
+            && !responseLinkHasDirectoryHint(href)
+          ) {
+            onOpenProjectFile(target.relativePath);
+            return;
+          }
+          void window.inertia.openProjectPath({
+            projectId,
+            ...(conversationId ? { conversationId } : {}),
+            relativePath: target.relativePath,
+            action: target.action,
+          }).catch(() => undefined);
+        }}>{children}</a>;
+      }
+      if (target.kind === "anchor") return <a {...props} href={target.href}>{children}</a>;
+      return <span className="response-unsafe-link" title="This link was blocked because it is outside the project or uses an unsafe protocol.">{children}</span>;
+    },
+    pre: ({ children }) => (
+      <CodeBlock
+        defaultWrap={defaultCodeWrap}
+        streaming={streaming}
+        projectRoot={projectRoot}
+        onOpenProjectFile={onOpenProjectFile}
+      >
+        {children}
+      </CodeBlock>
+    ),
+    table: MarkdownTable,
+    details: ({ children, ...props }) => <details {...props} className="response-details">{children}</details>,
+  }), [
+    conversationId,
+    defaultCodeWrap,
+    onOpenProjectFile,
+    projectId,
+    projectRoot,
+    streaming,
+  ]);
   return (
     <div className={`response-markdown${streaming ? " is-streaming" : ""}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, preserveCodeMeta]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
-        components={{
-          a: ({ href = "", children, ...props }) => {
-            const target = resolveResponseLink(projectRoot, href);
-            if (target.kind === "external") {
-              return <a {...props} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
-            }
-            if (target.kind === "project") {
-              return <a {...props} href={href} onClick={(event) => {
-                event.preventDefault();
-                if (
-                  onOpenProjectFile
-                  && !responseLinkHasDirectoryHint(href)
-                ) {
-                  onOpenProjectFile(target.relativePath);
-                  return;
-                }
-                void window.inertia.openProjectPath({
-                  projectId,
-                  ...(conversationId ? { conversationId } : {}),
-                  relativePath: target.relativePath,
-                  action: target.action,
-                }).catch(() => undefined);
-              }}>{children}</a>;
-            }
-            if (target.kind === "anchor") return <a {...props} href={target.href}>{children}</a>;
-            return <span className="response-unsafe-link" title="This link was blocked because it is outside the project or uses an unsafe protocol.">{children}</span>;
-          },
-          pre: ({ children }) => (
-            <CodeBlock
-              defaultWrap={defaultCodeWrap}
-              streaming={streaming}
-              projectRoot={projectRoot}
-              onOpenProjectFile={onOpenProjectFile}
-            >
-              {children}
-            </CodeBlock>
-          ),
-          table: MarkdownTable,
-          details: ({ children, ...props }) => <details {...props} className="response-details">{children}</details>,
-        }}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={components}
       >
         {renderedContent}
       </ReactMarkdown>
     </div>
   );
 }
+
+export const ResponseMarkdown = memo(ResponseMarkdownComponent);

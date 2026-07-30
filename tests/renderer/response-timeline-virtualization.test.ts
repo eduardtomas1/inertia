@@ -294,10 +294,12 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       (total, entry) => total + (entry.detail?.length ?? 0),
       0,
     )).toBeGreaterThan(3_400_000);
-    expect(shouldVirtualizeTimeline(timeline.length)).toBe(false);
+    expect(shouldVirtualizeTimeline(timeline.length)).toBe(true);
     expect(weight).toBeGreaterThan(40);
     expect(shouldVirtualizeTimeline(timeline.length, weight)).toBe(true);
-    expect(shouldVirtualizeTimeline(12, 12)).toBe(false);
+    expect(shouldVirtualizeTimeline(9, 9)).toBe(false);
+    expect(shouldVirtualizeTimeline(9, 10)).toBe(false);
+    expect(shouldVirtualizeTimeline(10, 10)).toBe(true);
     expect(elapsed).toBeLessThan(250);
   });
 

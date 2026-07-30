@@ -5,7 +5,7 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { unreviewedCommitHunks } from "../lib/commitReview";
 import { IconButton, LoadingMark } from "./ui";
 
-type CommitDialogProps = {
+export type CommitDialogProps = {
   open: boolean;
   repositoryPath: string;
   status: GitStatusSnapshot | null;

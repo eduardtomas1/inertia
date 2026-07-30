@@ -33,6 +33,35 @@ afterEach(() => {
 });
 
 describe("useInertiaConnection", () => {
+  it("reconnects immediately when the utility runtime announces readiness", async () => {
+    let announceReady: (() => void) | undefined;
+    const getRuntimeConnection = vi.fn()
+      .mockRejectedValueOnce(new Error("The local service is starting."))
+      .mockResolvedValue({
+        websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+      });
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection,
+        onRuntimeReady: vi.fn((listener: () => void) => {
+          announceReady = listener;
+          return vi.fn();
+        }),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+
+    renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(getRuntimeConnection).toHaveBeenCalledTimes(1));
+    expect(FakeWebSocket.instances).toHaveLength(0);
+
+    announceReady?.();
+
+    await waitFor(() => expect(getRuntimeConnection).toHaveBeenCalledTimes(2));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
   it("rejects an escaped oversized command without sending or closing", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,

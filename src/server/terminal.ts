@@ -6,7 +6,8 @@ import WebSocket from "ws";
 
 import type { ServerEvent } from "../shared/contracts";
 import {
-  forceTerminateProcessTreeByPidAndWait,
+  createOwnedPidProcessTreeTermination,
+  type OwnedPidProcessTreeTermination,
   type WaitForProcessExit,
 } from "./process-lifecycle";
 
@@ -26,12 +27,17 @@ interface TerminalSession {
   exitWaiters: Set<() => void>;
   terminationRequested: boolean;
   closing: Promise<void> | null;
+  terminateProcessTree: OwnedPidProcessTreeTermination | null;
   onExit?: (exitCode: number) => void;
 }
 
 export interface TerminalManagerOptions {
   spawnTerminal?: typeof spawn;
   shutdownTimeoutMs?: number;
+  createProcessTreeTermination?: (
+    pid: number,
+    waitForExit: WaitForProcessExit,
+  ) => OwnedPidProcessTreeTermination;
   terminateProcessTree?: (
     pid: number,
     waitForExit: WaitForProcessExit,
@@ -66,10 +72,10 @@ export class TerminalManager {
   private readonly closingSessions = new Set<Promise<void>>();
   private readonly spawnTerminal: typeof spawn;
   private readonly shutdownTimeoutMs: number;
-  private readonly terminateProcessTree: (
+  private readonly createProcessTreeTermination: (
     pid: number,
     waitForExit: WaitForProcessExit,
-  ) => Promise<boolean>;
+  ) => OwnedPidProcessTreeTermination;
   private readonly closingFailures = new Map<string, Error>();
 
   constructor(options: TerminalManagerOptions = {}) {
@@ -83,12 +89,18 @@ export class TerminalManager {
         30_000,
       ),
     );
-    this.terminateProcessTree = options.terminateProcessTree
-      ?? ((pid, waitForExit) => forceTerminateProcessTreeByPidAndWait(
-        pid,
-        waitForExit,
-        { waitMs: this.shutdownTimeoutMs },
-      ));
+    const terminateProcessTree = options.terminateProcessTree;
+    this.createProcessTreeTermination = options.createProcessTreeTermination
+      ?? ((pid, waitForExit) => {
+        if (terminateProcessTree) {
+          return () => terminateProcessTree(pid, waitForExit);
+        }
+        return createOwnedPidProcessTreeTermination(
+          pid,
+          waitForExit,
+          { waitMs: this.shutdownTimeoutMs },
+        );
+      });
   }
 
   create(
@@ -158,6 +170,7 @@ export class TerminalManager {
       exitWaiters: new Set(),
       terminationRequested: false,
       closing: null,
+      terminateProcessTree: null,
       onExit,
     };
     this.sessions.set(id, session);
@@ -284,7 +297,11 @@ export class TerminalManager {
       // Start with the root still alive. On POSIX the terminator freezes it
       // before snapshotting descendants, preventing a prompt root exit from
       // reparenting a surviving background process beyond discovery.
-      void this.terminateProcessTree(session.pty.pid, waitForExit).then(
+      session.terminateProcessTree ??= this.createProcessTreeTermination(
+        session.pty.pid,
+        waitForExit,
+      );
+      void session.terminateProcessTree().then(
         (confirmed) => {
           if (!confirmed) {
             finish(new TerminalError(

@@ -368,9 +368,10 @@ describe("TerminalManager", () => {
     const terminateProcessTree = vi.fn()
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
+    const createProcessTreeTermination = vi.fn(() => terminateProcessTree);
     const manager = new TerminalManager({
       spawnTerminal: vi.fn(() => terminal.pty),
-      terminateProcessTree,
+      createProcessTreeTermination,
     });
     const owner = {} as WebSocket;
     const onExit = vi.fn();
@@ -396,6 +397,11 @@ describe("TerminalManager", () => {
     );
 
     await expect(manager.closeManaged(terminalId)).resolves.toBe(true);
+    expect(createProcessTreeTermination).toHaveBeenCalledOnce();
+    expect(createProcessTreeTermination).toHaveBeenCalledWith(
+      42,
+      expect.any(Function),
+    );
     expect(terminateProcessTree).toHaveBeenCalledTimes(2);
     expect(onExit).toHaveBeenCalledOnce();
     expect(onExit).toHaveBeenCalledWith(130);

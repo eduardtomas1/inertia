@@ -15,7 +15,6 @@ const MAX_TERMINALS_PER_CLIENT = 4;
 const MAX_BUFFERED_OUTPUT = 1024 * 1024;
 const OUTPUT_CHUNK_SIZE = 16 * 1024;
 const TERMINAL_SHUTDOWN_TIMEOUT_MS = 1_000;
-const TERMINAL_TREE_SHUTDOWN_TIMEOUT_MS = 1_000;
 
 interface TerminalSession {
   id: string;
@@ -84,7 +83,7 @@ export class TerminalManager {
       ?? ((pid, waitForExit) => forceTerminateProcessTreeByPidAndWait(
         pid,
         waitForExit,
-        { waitMs: TERMINAL_TREE_SHUTDOWN_TIMEOUT_MS },
+        { waitMs: this.shutdownTimeoutMs },
       ));
   }
 
@@ -157,8 +156,7 @@ export class TerminalManager {
   }
 
   close(owner: WebSocket, terminalId: string): void {
-    this.ownedSession(owner, terminalId);
-    this.dispose(terminalId, true);
+    this.trackDisposal(this.ownedSession(owner, terminalId));
   }
 
   /**
@@ -167,8 +165,9 @@ export class TerminalManager {
    * ID, so callers must first resolve an owned run on the server.
    */
   closeManaged(terminalId: string): boolean {
-    if (!this.sessions.has(terminalId)) return false;
-    this.dispose(terminalId, true);
+    const session = this.sessions.get(terminalId);
+    if (!session) return false;
+    this.trackDisposal(session);
     return true;
   }
 
@@ -232,7 +231,6 @@ export class TerminalManager {
   private disposeAndWait(session: TerminalSession): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let settled = false;
-      let escalating = false;
       let exitObserved = false;
       let resolveObservedExit!: () => void;
       const observedExit = new Promise<void>((resolveExit) => {
@@ -255,7 +253,6 @@ export class TerminalManager {
       const finish = (error?: Error): void => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
         exitListener.dispose();
         if (error) reject(error);
         else resolve();
@@ -263,27 +260,22 @@ export class TerminalManager {
       const exitListener = session.pty.onExit(() => {
         exitObserved = true;
         resolveObservedExit();
-        if (!escalating) finish();
       });
-      const timer = setTimeout(() => {
-        escalating = true;
-        try {
-          session.pty.kill();
-        } catch {
-          // The terminal may have exited while the timeout fired.
-        }
-        void this.terminateProcessTree(session.pty.pid, waitForExit).then(
-          (confirmed) => finish(confirmed
-            ? undefined
-            : new TerminalError(
-                "A terminal process tree could not be confirmed stopped during runtime shutdown.",
-              )),
-          () => finish(new TerminalError(
-            "A terminal process tree could not be confirmed stopped during runtime shutdown.",
-          )),
-        );
-      }, this.shutdownTimeoutMs);
-      this.dispose(session.id, true);
+      this.dispose(session.id, false);
+      session.onExit?.(130);
+      // Start with the root still alive. On POSIX the terminator freezes it
+      // before snapshotting descendants, preventing a prompt root exit from
+      // reparenting a surviving background process beyond discovery.
+      void this.terminateProcessTree(session.pty.pid, waitForExit).then(
+        (confirmed) => finish(confirmed
+          ? undefined
+          : new TerminalError(
+              "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+            )),
+        () => finish(new TerminalError(
+          "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+        )),
+      );
     });
   }
 

@@ -34,7 +34,10 @@ import {
   type RemoteSessionAcceptPayload,
 } from "../../src/shared/remote-protocol";
 import { RemoteAccessService } from "../../src/main/remote-access-service";
-import { remotePairingComparisonCode as mainComparisonCode } from "../../src/main/remote-access-policy";
+import {
+  DEFAULT_REMOTE_RELAY_URL,
+  remotePairingComparisonCode as mainComparisonCode,
+} from "../../src/main/remote-access-policy";
 import { RemoteAccessStore } from "../../src/main/remote-access-store";
 
 const remoteCryptoGate = vi.hoisted(() => ({
@@ -342,6 +345,28 @@ async function pairedServiceFixture(options: {
 }
 
 describe("Remote Companion outbound encrypted service", () => {
+  it("connects to the reference relay with the product default URL", async () => {
+    const value = await createReferenceRelay();
+    relays.push(value);
+    expect(value.address()).toMatchObject({ port: 8787 });
+    const service = await RemoteAccessService.create({
+      store: encryptedStore(),
+      runtime: { remoteRequest: async () => {
+        throw new Error("unused");
+      } },
+    });
+
+    await service.setEnabled(true);
+    await waitFor(() => service.state().connection === "online");
+
+    expect(service.state()).toMatchObject({
+      enabled: true,
+      relayUrl: DEFAULT_REMOTE_RELAY_URL,
+      connection: "online",
+    });
+    await service.shutdown();
+  });
+
   it("defers first-time identity creation until Remote Companion is enabled", async () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-remote-service-"));
     directories.push(directory);
@@ -365,7 +390,7 @@ describe("Remote Companion outbound encrypted service", () => {
     expect(existsSync(file)).toBe(false);
     await service.setEnabled(false);
     expect(existsSync(file)).toBe(false);
-    await service.setEnabled(true, "ws://127.0.0.1:8787");
+    await service.setEnabled(true, DEFAULT_REMOTE_RELAY_URL);
     expect(existsSync(file)).toBe(true);
     await service.shutdown();
   });

@@ -27,7 +27,8 @@ Run the loopback relay:
 node remote/relay/server.mjs
 ```
 
-It listens on `127.0.0.1:8787` by default. Serve
+It listens on `127.0.0.1:8787` by default, with WebSockets at
+`ws://127.0.0.1:8787/remote`; this is also the desktop product default. Serve
 `remote/browser/dist` from a local static HTTP server and include that exact
 origin in `INERTIA_REMOTE_ALLOWED_ORIGINS` when starting the relay. Browser
 `dist` is generated and intentionally ignored; do not commit it.

@@ -23,6 +23,7 @@ import {
   RemoteAccessStore,
 } from "./remote-access-store";
 import { RemotePrivacyMonitor } from "./remote-access-lifecycle";
+import { DEFAULT_REMOTE_RELAY_URL } from "./remote-access-policy";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -127,7 +128,7 @@ export class RemoteAccessHost {
       available: this.initializationError === null,
       enabled: false,
       relayUrl: this.initializationError === null
-        ? "ws://127.0.0.1:8787"
+        ? DEFAULT_REMOTE_RELAY_URL
         : "",
       connection: "disabled",
       connectionMessage: this.initializationError,

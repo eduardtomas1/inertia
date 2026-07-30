@@ -40,7 +40,7 @@ describe("Remote Companion persistence authority", () => {
     const data: PersistedRemoteAccess = {
       version: 1,
       enabled: false,
-      relayUrl: "ws://127.0.0.1:8787",
+      relayUrl: "ws://127.0.0.1:8787/remote",
       hostId: crypto.randomUUID(),
       endpointId: "endpoint",
       keyPair: {

@@ -53,7 +53,7 @@ describe("Remote Companion encrypted local store", () => {
     const value: PersistedRemoteAccess = {
       version: 1,
       enabled: false,
-      relayUrl: "ws://127.0.0.1:8787",
+      relayUrl: "ws://127.0.0.1:8787/remote",
       hostId: crypto.randomUUID(),
       endpointId: "opaque_endpoint",
       keyPair,
@@ -145,7 +145,7 @@ describe("Remote Companion encrypted local store", () => {
     const value: PersistedRemoteAccess = {
       version: 1,
       enabled: false,
-      relayUrl: "ws://127.0.0.1:8787",
+      relayUrl: "ws://127.0.0.1:8787/remote",
       hostId: crypto.randomUUID(),
       endpointId: "recovered_endpoint",
       keyPair,
@@ -190,7 +190,7 @@ describe("Remote Companion encrypted local store", () => {
     const base: PersistedRemoteAccess = {
       version: 1,
       enabled: false,
-      relayUrl: "ws://127.0.0.1:8787",
+      relayUrl: "ws://127.0.0.1:8787/remote",
       hostId: crypto.randomUUID(),
       endpointId: "windows_endpoint",
       keyPair: first,

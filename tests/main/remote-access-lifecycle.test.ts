@@ -122,7 +122,7 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
       setTimer: setTimeout,
       clearTimer: clearTimeout,
     });
-    await service.setEnabled(true, "ws://127.0.0.1:8787");
+    await service.setEnabled(true, "ws://127.0.0.1:8787/remote");
     const shuttingDown = service.shutdown();
     await vi.advanceTimersByTimeAsync(REMOTE_SHUTDOWN_TIMEOUT_MS);
     await shuttingDown;
@@ -145,7 +145,7 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
     await store.save({
       version: 1,
       enabled: true,
-      relayUrl: "ws://127.0.0.1:8787",
+      relayUrl: "ws://127.0.0.1:8787/remote",
       hostId: crypto.randomUUID(),
       endpointId: remoteRandomSecret(24),
       keyPair: await generateRemoteKeyPair(),
@@ -240,7 +240,7 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
     await store.save({
       version: 1,
       enabled: true,
-      relayUrl: "ws://127.0.0.1:8787",
+      relayUrl: "ws://127.0.0.1:8787/remote",
       hostId: crypto.randomUUID(),
       endpointId: remoteRandomSecret(24),
       keyPair: await generateRemoteKeyPair(),

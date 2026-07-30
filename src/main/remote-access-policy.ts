@@ -18,6 +18,7 @@ import type { PendingRemotePairing } from "./remote-access-service-types";
 export const MINUTE_MS = 60_000;
 export const MAX_REMOTE_GRANT_MS = 90 * 24 * 60 * 60 * 1_000;
 export const DEFAULT_REMOTE_GRANT_MS = 30 * 24 * 60 * 60 * 1_000;
+export const DEFAULT_REMOTE_RELAY_URL = "ws://127.0.0.1:8787/remote";
 
 export function validateRemoteRelayUrl(value: string): string {
   const url = new URL(value.trim());
@@ -133,7 +134,7 @@ export function projectRemoteAccessState(input: {
     available: input.storageAvailable && input.storeError === null,
     enabled: data?.enabled ?? false,
     relayUrl: data?.relayUrl
-      ?? (input.storageAvailable ? "ws://127.0.0.1:8787" : ""),
+      ?? (input.storageAvailable ? DEFAULT_REMOTE_RELAY_URL : ""),
     connection: data?.enabled ? input.connection : "disabled",
     connectionMessage: input.storeError ?? input.connectionMessage,
     activeSessions: input.activeSessions,

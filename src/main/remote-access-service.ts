@@ -41,7 +41,7 @@ import {
   terminateRemoteSocket,
 } from "./remote-access-lifecycle";
 import {
-  DEFAULT_REMOTE_GRANT_MS, projectRemoteAccessState,
+  DEFAULT_REMOTE_GRANT_MS, DEFAULT_REMOTE_RELAY_URL, projectRemoteAccessState,
   remoteDeviceIsCurrent, remotePairingComparisonCode,
   remoteRelayErrorMessage, takeRemoteRate, trimRemoteArray, trimRemoteSet,
   validateRemoteRelayUrl,
@@ -177,7 +177,7 @@ export class RemoteAccessService {
       : validateRemoteRelayUrl(relayUrl);
     if (!enabled && !this.data) return;
     const data = this.data ?? await this.initializeIdentity(
-      normalizedRelay ?? "ws://127.0.0.1:8787",
+      normalizedRelay ?? DEFAULT_REMOTE_RELAY_URL,
     );
     if (normalizedRelay !== undefined) data.relayUrl = normalizedRelay;
     if (!enabled) {

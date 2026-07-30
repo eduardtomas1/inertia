@@ -197,7 +197,7 @@ describe("Remote Companion browser connection ownership", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("replaces the scheduled poll when conversation selection refreshes", async () => {
+  it("keeps one polling loop across repeated conversation selection refreshes", async () => {
     vi.useFakeTimers();
     const now = new Date().toISOString();
     let blockNextState = false;
@@ -282,8 +282,19 @@ describe("Remote Companion browser connection ownership", () => {
     releaseState();
     await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
 
-    await vi.advanceTimersByTimeAsync(2_000);
-    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(7));
+    for (let index = 0; index < 20; index += 1) {
+      client.selectConversation(crypto.randomUUID());
+    }
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(26));
     expect(vi.getTimerCount()).toBe(1);
+
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      const callsBeforePoll = request.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.waitFor(() => {
+        expect(request).toHaveBeenCalledTimes(callsBeforePoll + 2);
+      });
+      expect(vi.getTimerCount()).toBe(1);
+    }
   });
 });

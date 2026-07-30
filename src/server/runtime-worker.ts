@@ -7,10 +7,12 @@ import { RuntimeCredentialBrokerClient } from "./runtime/backends/credential-bro
 import { RuntimeAttachmentBrokerClient } from "./runtime/attachments/attachment-broker-client.js";
 import { runPackagedPdfSmoke } from "./runtime/attachments/package-smoke-pdf.js";
 import { RuntimeSecureFileBrokerClient } from "./runtime/secure-file-broker-client.js";
+import { completeRuntimeWorkerShutdown } from "./runtime-worker-shutdown.js";
 
 let runtime: RunningRuntime | null = null;
 let starting = false;
 let stopping = false;
+let shutdownExitCode = 0;
 const parentPort = process.parentPort;
 
 if (!parentPort) throw new Error("The runtime worker must run as an Electron utility process.");
@@ -23,23 +25,33 @@ const credentials = new RuntimeCredentialBrokerClient({ post });
 const attachments = new RuntimeAttachmentBrokerClient(post);
 const secureFiles = new RuntimeSecureFileBrokerClient(post);
 
+async function finishShutdown(
+  activeRuntime: RunningRuntime | null,
+  exitCode: number,
+): Promise<void> {
+  await completeRuntimeWorkerShutdown({
+    runtime: activeRuntime,
+    cause: exitCode === 0 ? "runtime-shutdown" : "runtime-crash",
+    exitCode,
+    closeBrokers: () => {
+      credentials.close();
+      attachments.close();
+      secureFiles.close();
+    },
+    post,
+    exit: (code) => process.exit(code),
+  });
+}
+
 async function shutdown(exitCode = 0): Promise<void> {
+  if (exitCode !== 0) shutdownExitCode = exitCode;
   if (stopping) return;
   stopping = true;
   const activeRuntime = runtime;
   runtime = null;
-  if (activeRuntime) {
-    try {
-      await activeRuntime.close(exitCode === 0 ? "runtime-shutdown" : "runtime-crash");
-    } catch {
-      exitCode = 1;
-    }
-  }
-  credentials.close();
-  attachments.close();
-  secureFiles.close();
-  post({ type: "runtime.stopped" });
-  process.exit(exitCode);
+  // startRuntime owns completion if a shutdown request races its startup.
+  if (starting && !activeRuntime) return;
+  await finishShutdown(activeRuntime, shutdownExitCode);
 }
 
 parentPort.on("message", (messageEvent) => {
@@ -115,19 +127,28 @@ parentPort.on("message", (messageEvent) => {
         );
       }
     } catch (error) {
-      await startedRuntime.close("runtime-crash").catch(() => undefined);
-      throw error;
+      starting = false;
+      const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 800) : "";
+      post({ type: "runtime.startup-failed", message: detail || "The local runtime could not start." });
+      await finishShutdown(startedRuntime, 1);
+      return;
     }
+    starting = false;
     if (stopping) {
-      void startedRuntime.close().finally(() => process.exit(0));
+      await finishShutdown(startedRuntime, shutdownExitCode);
       return;
     }
     runtime = startedRuntime;
     post({ type: "runtime.ready", websocketUrl: startedRuntime.websocketUrl });
-  }).catch((error: unknown) => {
+  }).catch(async (error: unknown) => {
+    starting = false;
     const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 800) : "";
     post({ type: "runtime.startup-failed", message: detail || "The local runtime could not start." });
-    void shutdown(1);
+    if (stopping) {
+      await finishShutdown(null, 1);
+      return;
+    }
+    await shutdown(1);
   });
 });
 

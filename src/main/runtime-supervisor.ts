@@ -409,6 +409,17 @@ export class RuntimeSupervisor {
       this.emitState();
       return;
     }
+    if (event.type === "runtime.shutdown-unconfirmed") {
+      record.acceptingReady = false;
+      this.lastError = "The runtime could not confirm complete process cleanup.";
+      this.clearTimerValue("startupTimer");
+      this.clearCredentialRequests(record);
+      this.clearSecureFileRequests(record);
+      this.attachmentRequests.clear(record);
+      this.forceTerminate(record.child);
+      this.emitState();
+      return;
+    }
     if (event.type === "runtime.stopped") {
       record.acceptingReady = false;
       this.clearCredentialRequests(record);

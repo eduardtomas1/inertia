@@ -999,6 +999,28 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.snapshot().phase).toBe("stopped");
   });
 
+  it("executes the supervisor tree fallback while an unconfirmed runtime close keeps the worker alive", async () => {
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    let settled = false;
+    const stopped = supervisor.stop().then((confirmed) => {
+      settled = true;
+      return confirmed;
+    });
+    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+
+    expect(settled).toBe(false);
+    expect(forceKill).toHaveBeenCalledWith(10_000);
+
+    children[0].exit(137);
+    await expect(stopped).resolves.toBe(true);
+    vi.runAllTimers();
+    expect(forceKill).toHaveBeenCalledOnce();
+  });
+
   it("reports shutdown as unconfirmed when forced tree termination cannot be verified", async () => {
     const { children, forceKill, supervisor } = createHarness();
     forceKill.mockReturnValue(false);

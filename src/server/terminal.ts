@@ -5,12 +5,17 @@ import { spawn, type IDisposable, type IPty } from "node-pty";
 import WebSocket from "ws";
 
 import type { ServerEvent } from "../shared/contracts";
+import {
+  forceTerminateProcessTreeByPidAndWait,
+  type WaitForProcessExit,
+} from "./process-lifecycle";
 
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
 const MAX_BUFFERED_OUTPUT = 1024 * 1024;
 const OUTPUT_CHUNK_SIZE = 16 * 1024;
-const TERMINAL_SHUTDOWN_TIMEOUT_MS = 2_000;
+const TERMINAL_SHUTDOWN_TIMEOUT_MS = 1_000;
+const TERMINAL_TREE_SHUTDOWN_TIMEOUT_MS = 1_000;
 
 interface TerminalSession {
   id: string;
@@ -24,6 +29,10 @@ interface TerminalSession {
 export interface TerminalManagerOptions {
   spawnTerminal?: typeof spawn;
   shutdownTimeoutMs?: number;
+  terminateProcessTree?: (
+    pid: number,
+    waitForExit: WaitForProcessExit,
+  ) => Promise<boolean>;
 }
 
 function userShell(): { executable: string; args: string[] } {
@@ -54,6 +63,10 @@ export class TerminalManager {
   private readonly closingSessions = new Set<Promise<void>>();
   private readonly spawnTerminal: typeof spawn;
   private readonly shutdownTimeoutMs: number;
+  private readonly terminateProcessTree: (
+    pid: number,
+    waitForExit: WaitForProcessExit,
+  ) => Promise<boolean>;
   private closingFailure: Error | null = null;
 
   constructor(options: TerminalManagerOptions = {}) {
@@ -67,6 +80,12 @@ export class TerminalManager {
         30_000,
       ),
     );
+    this.terminateProcessTree = options.terminateProcessTree
+      ?? ((pid, waitForExit) => forceTerminateProcessTreeByPidAndWait(
+        pid,
+        waitForExit,
+        { waitMs: TERMINAL_TREE_SHUTDOWN_TIMEOUT_MS },
+      ));
   }
 
   create(
@@ -213,6 +232,26 @@ export class TerminalManager {
   private disposeAndWait(session: TerminalSession): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let settled = false;
+      let escalating = false;
+      let exitObserved = false;
+      let resolveObservedExit!: () => void;
+      const observedExit = new Promise<void>((resolveExit) => {
+        resolveObservedExit = resolveExit;
+      });
+      const waitForExit: WaitForProcessExit = (waitMs) => {
+        if (exitObserved) return Promise.resolve(true);
+        return new Promise<boolean>((resolveWait) => {
+          let waitSettled = false;
+          const finishWait = (didExit: boolean): void => {
+            if (waitSettled) return;
+            waitSettled = true;
+            clearTimeout(waitTimer);
+            resolveWait(didExit);
+          };
+          const waitTimer = setTimeout(() => finishWait(false), waitMs);
+          void observedExit.then(() => finishWait(true));
+        });
+      };
       const finish = (error?: Error): void => {
         if (settled) return;
         settled = true;
@@ -221,16 +260,28 @@ export class TerminalManager {
         if (error) reject(error);
         else resolve();
       };
-      const exitListener = session.pty.onExit(() => finish());
+      const exitListener = session.pty.onExit(() => {
+        exitObserved = true;
+        resolveObservedExit();
+        if (!escalating) finish();
+      });
       const timer = setTimeout(() => {
+        escalating = true;
         try {
           session.pty.kill();
         } catch {
           // The terminal may have exited while the timeout fired.
         }
-        finish(new TerminalError(
-          "A terminal process did not exit during runtime shutdown.",
-        ));
+        void this.terminateProcessTree(session.pty.pid, waitForExit).then(
+          (confirmed) => finish(confirmed
+            ? undefined
+            : new TerminalError(
+                "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+              )),
+          () => finish(new TerminalError(
+            "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+          )),
+        );
       }, this.shutdownTimeoutMs);
       this.dispose(session.id, true);
     });

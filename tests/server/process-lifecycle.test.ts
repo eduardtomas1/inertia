@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createOwnedProcessTreeTermination,
+  forceTerminateProcessTreeByPidAndWait,
   ProcessTreeTerminationError,
   requireProcessTreeTermination,
   terminateProcessTree,
@@ -495,5 +496,95 @@ describe("provider process-tree termination", () => {
 
     expect(Date.now() - startedAt).toBeLessThan(500);
     expect(killProcess).toHaveBeenCalledWith(4_243, "SIGKILL");
+  });
+
+  it("confirms a PID-owned POSIX tree only after descendants and the root exit", async () => {
+    const running = new Set([4_242, 4_243]);
+    const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+      const target = Math.abs(pid);
+      if (signal === 0) {
+        if (!running.has(target)) throw new Error("process gone");
+        return true as const;
+      }
+      if (signal === "SIGKILL") running.delete(target);
+      return true as const;
+    });
+    const waitForRootExit = vi.fn(async (_waitMs: number) =>
+      !running.has(4_242));
+
+    await expect(forceTerminateProcessTreeByPidAndWait(
+      4_242,
+      waitForRootExit,
+      {
+        platform: "linux",
+        killProcess,
+        spawnProcessSync: vi.fn(() => ({
+          status: 0,
+          stdout: "4243 4242\n",
+        })) as never,
+        waitMs: 25,
+      },
+    )).resolves.toBe(true);
+
+    expect(killProcess).toHaveBeenCalledWith(4_243, "SIGKILL");
+    expect(killProcess).toHaveBeenCalledWith(-4_242, "SIGKILL");
+    const rootExitBudget = waitForRootExit.mock.calls[0]?.[0];
+    expect(rootExitBudget).toBeGreaterThan(0);
+    expect(rootExitBudget).toBeLessThanOrEqual(25);
+  });
+
+  it("does not confirm a PID-owned Windows tree when trusted taskkill fails", async () => {
+    const taskkill = fakeTaskkill();
+    const waitForRootExit = vi.fn(async () => true);
+    const termination = forceTerminateProcessTreeByPidAndWait(
+      4_242,
+      waitForRootExit,
+      {
+        platform: "win32",
+        spawnProcess: vi.fn(() => taskkill) as never,
+        windowsSystemRoot: "C:\\Windows",
+        waitMs: 25,
+      },
+    );
+
+    taskkill.emit("close", 1);
+
+    await expect(termination).resolves.toBe(false);
+    expect(waitForRootExit).not.toHaveBeenCalled();
+  });
+
+  it("shares one bounded Windows deadline across taskkill, root exit, and resource settling", async () => {
+    vi.useFakeTimers();
+    try {
+      const taskkill = fakeTaskkill();
+      const waitForRootExit = vi.fn((waitMs: number) =>
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => resolve(true), waitMs);
+        }));
+      let settled = false;
+      const termination = forceTerminateProcessTreeByPidAndWait(
+        4_242,
+        waitForRootExit,
+        {
+          platform: "win32",
+          spawnProcess: vi.fn(() => taskkill) as never,
+          windowsSystemRoot: "C:\\Windows",
+          waitMs: 1_000,
+        },
+      ).then((confirmed) => {
+        settled = true;
+        return confirmed;
+      });
+      setTimeout(() => taskkill.emit("close", 0), 600);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).toBe(false);
+      expect(waitForRootExit).toHaveBeenCalledWith(300);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(termination).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

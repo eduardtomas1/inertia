@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { win32 } from "node:path";
 
 import {
-  forceKillPosixProcessTree,
+  forceKillPosixProcessTreeWithStatus,
   posixDescendantPids,
 } from "../node/posix-process-tree.js";
 
@@ -74,10 +74,10 @@ export function forceKillRuntimeProcessTree(
     return terminated;
   }
 
-  forceKillPosixProcessTree(runtimePid, {
+  const killed = forceKillPosixProcessTreeWithStatus(runtimePid, {
     kill,
     spawnProcessSync,
     rootProcessGroup: false,
   });
-  return true;
+  return killed.snapshotConfirmed;
 }

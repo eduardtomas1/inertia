@@ -54,12 +54,23 @@ describe("TimelineMinimap", () => {
       screen.getByRole("tooltip").id,
     );
 
+    fireEvent.pointerLeave(first);
+    fireEvent.focus(first);
+    expect(first).toHaveAttribute("data-emphasized", "true");
+    expect(screen.getAllByRole("tooltip")).toHaveLength(1);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Turn 1 · Inspect the lifecycle boundary",
+    );
+
     fireEvent.pointerEnter(second);
     expect(first).not.toHaveAttribute("data-emphasized");
     expect(second).toHaveAttribute("data-emphasized", "true");
     expect(screen.getAllByRole("tooltip")).toHaveLength(1);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Turn 2 · Verify the focused regression",
+    );
 
-    fireEvent.focus(first);
+    fireEvent.pointerLeave(second);
     expect(first).toHaveAttribute("data-emphasized", "true");
     expect(second).not.toHaveAttribute("data-emphasized");
     expect(screen.getAllByRole("tooltip")).toHaveLength(1);
@@ -72,8 +83,7 @@ describe("TimelineMinimap", () => {
     expect(second).toHaveAttribute("data-emphasized", "true");
     expect(screen.getAllByRole("tooltip")).toHaveLength(1);
 
-    second.blur();
-    fireEvent.pointerLeave(second);
+    fireEvent.blur(second);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     expect(second).not.toHaveAttribute("aria-describedby");
 

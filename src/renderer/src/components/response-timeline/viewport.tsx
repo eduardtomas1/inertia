@@ -240,7 +240,7 @@ export function TimelineMinimap({
 }): React.JSX.Element {
   const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
   const [focusedMarkerId, setFocusedMarkerId] = useState<string | null>(null);
-  const previewedMarkerId = focusedMarkerId ?? hoveredMarkerId;
+  const previewedMarkerId = hoveredMarkerId ?? focusedMarkerId;
   let activeMarker = 0;
   markers.forEach((marker, index) => {
     if (marker.timelineIndex <= activeIndex) activeMarker = index;

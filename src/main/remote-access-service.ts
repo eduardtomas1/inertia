@@ -1,9 +1,8 @@
-import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import {
   createAuthenticatedSessionRecipient, createAuthenticatedSessionSender,
   importRemotePublicKey,
-  openPairingRequest, openSessionData, openSessionHandshake, remoteRandomSecret,
+  openPairingRequest, openSessionData, openSessionHandshake,
   sealPairingResponse, sealSessionHandshake,
   type RemoteImportedKeyPair,
 } from "../shared/remote-crypto";
@@ -26,10 +25,7 @@ import {
   type RemoteResponse,
   type RemoteScope,
 } from "../shared/remote-protocol";
-import { sanitizeRemoteLabel } from "../shared/remote-sanitizer";
-import type {
-  PersistedRemoteAccess, PersistedRemoteDevice,
-} from "./remote-access-store";
+import type { PersistedRemoteAccess } from "./remote-access-store";
 import {
   markRemoteDeliveryUncertain,
 } from "./remote-access-delivery";
@@ -42,14 +38,21 @@ import {
   REMOTE_SHUTDOWN_TIMEOUT_MS,
   RemoteSessionAuthenticationBudget,
   sendSequencedRemoteResponse,
+  terminateRemoteSocket,
 } from "./remote-access-lifecycle";
 import {
-  DEFAULT_REMOTE_GRANT_MS, MAX_REMOTE_GRANT_MS, MINUTE_MS,
-  normalizeRemoteProjectIds, normalizeRemoteScopes, projectRemoteAccessState,
+  DEFAULT_REMOTE_GRANT_MS, projectRemoteAccessState,
   remoteDeviceIsCurrent, remotePairingComparisonCode,
   remoteRelayErrorMessage, takeRemoteRate, trimRemoteArray, trimRemoteSet,
   validateRemoteRelayUrl,
 } from "./remote-access-policy";
+import {
+  applyRemotePairingGrant,
+  revokeRemoteDevice,
+  updateRemoteDeviceGrant,
+} from "./remote-access-devices";
+import { appendRemoteAudit, RemoteAccessPersistenceQueue } from "./remote-access-persistence";
+import { createRemotePairingInvitation, sanitizeRemoteDeviceLabel } from "./remote-access-pairing";
 import {
   RemoteRelayDispatcher,
   type RemoteConnectionEpoch,
@@ -88,7 +91,7 @@ export class RemoteAccessService {
   private stopped = false;
   private storeError: string | null = null;
   private identityInitialization: Promise<void> | null = null;
-  private persistQueue: Promise<void> = Promise.resolve();
+  private readonly persistence: RemoteAccessPersistenceQueue;
 
   private constructor(
     private readonly options: RemoteAccessServiceOptions,
@@ -106,6 +109,12 @@ export class RemoteAccessService {
       maxPayload: REMOTE_LIMITS.encryptedFrameBytes + 4_096,
       handshakeTimeout: RELAY_HANDSHAKE_TIMEOUT_MS,
     }));
+    this.persistence = new RemoteAccessPersistenceQueue(
+      options.store,
+      () => this.failClosedStore(
+        "The encrypted Remote Companion store could not be saved.",
+      ),
+    );
     this.relayMessages = new RemoteRelayDispatcher({
       registered: () => this.relayRegistered(),
       error: (code) => this.relayError(code),
@@ -171,17 +180,31 @@ export class RemoteAccessService {
       normalizedRelay ?? "ws://127.0.0.1:8787",
     );
     if (normalizedRelay !== undefined) data.relayUrl = normalizedRelay;
-    if (enabled === data.enabled) {
-      if (enabled && !this.socket) this.connect();
+    if (!enabled) {
+      const changed = data.enabled;
+      data.enabled = false;
+      if (changed) {
+        this.audit(
+          "remote.disabled",
+          null,
+          "Remote Companion disabled.",
+        );
+      }
+      const socket = this.disconnect("disabled", false, false);
+      terminateRemoteSocket(socket);
       await this.persist();
+      this.emitState();
       return;
     }
-    data.enabled = enabled;
-    this.audit(enabled ? "remote.enabled" : "remote.disabled", null,
-      enabled ? "Remote Companion enabled." : "Remote Companion disabled.");
+    if (data.enabled) {
+      await this.persist();
+      if (!this.socket) this.connect();
+      return;
+    }
+    data.enabled = true;
+    this.audit("remote.enabled", null, "Remote Companion enabled.");
     await this.persist();
-    if (enabled) this.connect();
-    else this.disconnect("disabled", false);
+    this.connect();
     this.emitState();
   }
 
@@ -191,18 +214,7 @@ export class RemoteAccessService {
     if (this.pendingPairings.size >= REMOTE_LIMITS.pendingPairings) {
       throw new Error("Too many pairing requests are pending.");
     }
-    const invitation: RemotePairingInvitation = {
-      protocolVersion: REMOTE_PROTOCOL_VERSION,
-      relayUrl: data.relayUrl,
-      endpointId: data.endpointId,
-      hostId: data.hostId,
-      hostPublicKey: data.keyPair.publicKey,
-      invitationId: randomUUID(),
-      pairingSecret: remoteRandomSecret(),
-      expiresAt: new Date(
-        this.now().getTime() + REMOTE_LIMITS.pairingTtlMs,
-      ).toISOString(),
-    };
+    const invitation = createRemotePairingInvitation(data, this.now());
     this.invitation = invitation;
     this.audit("pairing.created", null, "A short-lived pairing invitation was created.");
     await this.persist();
@@ -230,39 +242,14 @@ export class RemoteAccessService {
       this.pendingPairings.delete(requestId);
       throw new Error("That pairing request expired.");
     }
-    const normalizedScopes = normalizeRemoteScopes(scopes);
-    const normalizedProjects = normalizeRemoteProjectIds(projectIds);
-    if (
-      data.devices.filter(({ revokedAt }) => revokedAt === null).length
-      >= REMOTE_LIMITS.devices
-    ) throw new Error("The paired-device limit has been reached.");
-    const expiresAt = new Date(
-      this.now().getTime() + Math.max(
-        MINUTE_MS,
-        Math.min(Math.trunc(grantMs), MAX_REMOTE_GRANT_MS),
-      ),
-    ).toISOString();
-    const device: PersistedRemoteDevice = {
-      id: pending.payload.deviceId,
-      label: pending.payload.deviceLabel,
-      publicKey: pending.payload.devicePublicKey,
-      scopes: normalizedScopes,
-      projectIds: normalizedProjects,
-      createdAt: this.now().toISOString(),
-      expiresAt,
-      lastSeenAt: null,
-      revokedAt: null,
-      grantVersion: 1,
-    };
-    const existing = data.devices.findIndex(({ id }) => id === device.id);
-    if (existing >= 0) {
-      const previous = data.devices[existing]!;
-      device.createdAt = previous.createdAt;
-      device.grantVersion = previous.grantVersion + 1;
-      data.devices[existing] = device;
-    } else {
-      data.devices.push(device);
-    }
+    const device = applyRemotePairingGrant({
+      data,
+      pending,
+      scopes,
+      projectIds,
+      grantMs,
+      now: this.now(),
+    });
     this.pendingPairings.delete(requestId);
     this.invitation = null;
     this.audit("pairing.accepted", device.id, "A device was paired.");
@@ -278,7 +265,7 @@ export class RemoteAccessService {
         hostId: data.hostId,
         scopes: device.scopes,
         projectIds: device.projectIds,
-        expiresAt,
+        expiresAt: device.expiresAt,
         grantVersion: device.grantVersion,
       },
     );
@@ -308,12 +295,14 @@ export class RemoteAccessService {
   }
 
   async revokeDevice(deviceId: string): Promise<void> {
-    const device = this.requireDevice(deviceId);
-    if (device.revokedAt) return;
-    device.revokedAt = this.now().toISOString();
-    device.grantVersion += 1;
+    const device = revokeRemoteDevice(
+      this.requireData(),
+      deviceId,
+      this.now(),
+    );
+    if (!device) return;
     this.audit("device.revoked", device.id, "A paired device was revoked.");
-    this.closeDeviceSessions(device.id, "revoked");
+    this.closeDeviceSessions(device.id, "revoked", false);
     await this.persist();
     this.emitState();
   }
@@ -324,19 +313,16 @@ export class RemoteAccessService {
     projectIds: string[],
     expiresAt: string,
   ): Promise<void> {
-    const device = this.requireDevice(deviceId);
-    const expiry = Date.parse(expiresAt);
-    if (
-      !Number.isFinite(expiry)
-      || expiry <= this.now().getTime()
-      || expiry > this.now().getTime() + MAX_REMOTE_GRANT_MS
-    ) throw new Error("Choose an expiry within 90 days.");
-    device.scopes = normalizeRemoteScopes(scopes);
-    device.projectIds = normalizeRemoteProjectIds(projectIds);
-    device.expiresAt = new Date(expiry).toISOString();
-    device.grantVersion += 1;
+    const device = updateRemoteDeviceGrant({
+      data: this.requireData(),
+      deviceId,
+      scopes,
+      projectIds,
+      expiresAt,
+      now: this.now(),
+    });
     this.audit("device.scope-changed", device.id, "Device permissions changed.");
-    this.closeDeviceSessions(device.id, "revoked");
+    this.closeDeviceSessions(device.id, "revoked", false);
     await this.persist();
     this.emitState();
   }
@@ -362,7 +348,7 @@ export class RemoteAccessService {
       this.clearTimer,
       REMOTE_SHUTDOWN_TIMEOUT_MS,
     );
-    await this.persistQueue.catch(() => undefined);
+    await this.persistence.drain();
   }
 
   private connect(): void {
@@ -484,7 +470,7 @@ export class RemoteAccessService {
         > REMOTE_LIMITS.pairingTtlMs
       || this.pairingRequestIds.has(payload.requestId)
     ) return;
-    const deviceLabel = sanitizeRemoteLabel(payload.deviceLabel, 80);
+    const deviceLabel = sanitizeRemoteDeviceLabel(payload.deviceLabel);
     if (!deviceLabel) return;
     payload.deviceLabel = deviceLabel;
     this.pairingRequestIds.add(payload.requestId);
@@ -744,15 +730,19 @@ export class RemoteAccessService {
   private closeDeviceSessions(
     deviceId: string,
     reason: Extract<RemoteCipherFrame, { kind: "session.close" }>["reason"],
+    persistChanges = true,
   ): void {
     for (const session of this.sessions.values()) {
-      if (session.device.id === deviceId) this.closeSession(session, reason);
+      if (session.device.id === deviceId) {
+        this.closeSession(session, reason, persistChanges);
+      }
     }
   }
 
   private closeSession(
     session: ActiveRemoteSession,
     reason: Extract<RemoteCipherFrame, { kind: "session.close" }>["reason"],
+    persistChanges = true,
   ): void {
     this.sendFrame(session.connectionId, {
       protocolVersion: REMOTE_PROTOCOL_VERSION,
@@ -764,12 +754,17 @@ export class RemoteAccessService {
       session.connectionId,
       session.connectionEpoch,
     );
-    this.dropConnection(session.connectionId, session.connectionEpoch);
+    this.dropConnection(
+      session.connectionId,
+      session.connectionEpoch,
+      persistChanges,
+    );
   }
 
   private dropConnection(
     connectionId: string,
     epoch?: RemoteConnectionEpoch,
+    persistChanges = true,
   ): void {
     this.sessionAuthenticationBudget.drop(connectionId);
     for (const [requestId, pending] of this.pendingPairings) {
@@ -792,7 +787,7 @@ export class RemoteAccessService {
     }
     this.sessionByConnection.delete(connectionId);
     this.sessions.delete(sessionId);
-    if (session) {
+    if (session && !this.storeError) {
       for (const request of session.inFlight.values()) {
         if (request.type === "prompt.send") {
           if (markRemoteDeliveryUncertain(
@@ -808,15 +803,15 @@ export class RemoteAccessService {
         }
       }
       this.audit("session.disconnected", session.device.id, "A remote session disconnected.");
-      void this.persist().catch(() => undefined);
+      if (persistChanges) void this.persist().catch(() => undefined);
     }
     this.emitState();
   }
 
-  private dropAllSessions(): void {
+  private dropAllSessions(persistChanges = true): void {
     this.relayMessages.reset();
     for (const connectionId of this.sessionByConnection.keys()) {
-      this.dropConnection(connectionId);
+      this.dropConnection(connectionId, undefined, persistChanges);
     }
     this.pendingPairings.clear();
   }
@@ -824,6 +819,7 @@ export class RemoteAccessService {
   private disconnect(
     reason: Extract<RemoteCipherFrame, { kind: "session.close" }>["reason"],
     reconnect: boolean,
+    persistChanges = true,
   ): WebSocket | null {
     for (const session of this.sessions.values()) {
       this.sendFrame(session.connectionId, {
@@ -833,7 +829,7 @@ export class RemoteAccessService {
         reason,
       });
     }
-    this.dropAllSessions();
+    this.dropAllSessions(persistChanges);
     this.sessionAuthenticationBudget.clear();
     const socket = this.socket;
     this.socket = null;
@@ -925,8 +921,11 @@ export class RemoteAccessService {
       this.data = data;
       this.hostKeyPair = hostKeyPair;
       this.scheduleSweep();
-    }).catch(() => {
-      this.storeError = "The encrypted Remote Companion store could not be created.";
+    }).catch((error: unknown) => {
+      this.failClosedStore(
+        "The encrypted Remote Companion store could not be created.",
+      );
+      throw error;
     }).finally(() => {
       this.identityInitialization = null;
     });
@@ -950,24 +949,32 @@ export class RemoteAccessService {
     return this.hostKeyPair;
   }
 
-  private requireDevice(deviceId: string): PersistedRemoteDevice {
-    const device = this.requireData().devices.find(({ id }) => id === deviceId);
-    if (!device) throw new Error("That paired device was not found.");
-    return device;
+  private persist(): Promise<void> {
+    return this.persistence.save(this.requireData());
   }
 
-  private persist(): Promise<void> {
-    const data = this.requireData();
-    trimRemoteArray(data.audit, REMOTE_LIMITS.auditEvents);
-    trimRemoteArray(data.receipts, REMOTE_LIMITS.deliveryReceipts);
-    const snapshot = structuredClone(data);
-    const pending = this.persistQueue
-      .catch(() => undefined)
-      .then(async () => {
-        await this.options.store.save(snapshot);
-      });
-    this.persistQueue = pending;
-    return pending;
+  private failClosedStore(message: string): void {
+    if (this.storeError) return;
+    this.storeError = message;
+    if (this.data) this.data.enabled = false;
+    this.hostKeyPair = null;
+    this.invitation = null;
+    this.pendingPairings.clear();
+    this.pairingRequestIds.clear();
+    this.pairingAttemptTimes = [];
+    this.sessionAuthenticationBudget.clear();
+    this.relayMessages.reset();
+    this.sessions.clear();
+    this.sessionByConnection.clear();
+    this.clearReconnect();
+    if (this.sweepTimer) this.clearTimer(this.sweepTimer);
+    this.sweepTimer = null;
+    const socket = this.socket;
+    this.socket = null;
+    terminateRemoteSocket(socket);
+    this.connection = "disabled";
+    this.connectionMessage = null;
+    this.emitState();
   }
 
   private audit(
@@ -975,15 +982,13 @@ export class RemoteAccessService {
     deviceId: string | null,
     detail: string,
   ): void {
-    const data = this.requireData();
-    data.audit.push({
-      id: randomUUID(),
+    appendRemoteAudit(
+      this.requireData(),
       type,
       deviceId,
-      detail: sanitizeRemoteLabel(detail, 240) ?? "Remote event.",
-      createdAt: this.now().toISOString(),
-    });
-    trimRemoteArray(data.audit, REMOTE_LIMITS.auditEvents);
+      detail,
+      this.now(),
+    );
   }
 
   private emitState(): void {

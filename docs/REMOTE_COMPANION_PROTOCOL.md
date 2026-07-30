@@ -13,9 +13,11 @@ The implementation preserves Inertia's existing privilege boundaries:
   lock behavior, and shutdown. Those records live in the separate encrypted
   `remote-access.vault`.
 - Lock, suspend, and unlock listeners are installed synchronously when the
-  Remote Access host is constructed. A lock observed while secure storage is
-  still initializing is retained and applied before a persisted enabled
-  profile may reconnect.
+  Remote Access host is constructed, before the current idle state is sampled.
+  A reported `locked` or `unknown` state fails closed. A lock observed during
+  sampling or while secure storage is still initializing is retained and
+  applied before a persisted enabled profile may reconnect. Platforms without
+  a usable idle-state probe retain event-based enforcement.
 - The existing `ElectronSafeStorageBackend` availability policy rejects Linux
   `basic_text` and `unknown` backends. Remote access remains unavailable rather
   than storing its host private key or grants through a plaintext fallback.
@@ -29,6 +31,11 @@ The implementation preserves Inertia's existing privilege boundaries:
   restrictive-file, restart-recovery, and Windows replacement behavior. The
   remote vault has its own filename and `.remote-access-vault-` transaction
   namespace; it is not part of the credential namespace.
+- Vault writes are serialized. The first save failure poisons that queue and
+  synchronously makes Remote Companion unavailable and disabled for the
+  process, clears pairing/session authority and timers, terminates the relay
+  socket, and preserves the write error for the caller. Disable and revocation
+  tear down live access before their durable write.
 - The preload exposes only local settings, pairing approval, scoped grant
   update, revocation, and projected state IPC. It never exposes a host/device
   private key, provider credential, runtime WebSocket capability, filesystem
@@ -38,6 +45,11 @@ The implementation preserves Inertia's existing privilege boundaries:
   project/conversation ownership, current conversation mode, and active-run
   state. It is still the sole authority for persistence, provider routing,
   sandboxing, and approval policy.
+- Provider readiness may await. Immediately after that await, the runtime
+  reloads authoritative conversation detail and synchronously revalidates
+  project ownership, Supervised mode, and inactive state before the synchronous
+  queue call. A local change returns unavailable, forbidden, or busy without
+  queueing.
 - The existing privileged loopback WebSocket remains unchanged and is never
   sent to a remote browser or relay.
 - The reference relay routes bounded opaque frames between an outbound desktop
@@ -216,8 +228,9 @@ ownership for disconnect, heartbeats clients, and has bounded shutdown.
   shutdown.
 
 Screen lock or suspend disconnects remote sessions and pauses reconnection.
-The listener exists before asynchronous vault/service initialization, and a
-retained locked state is applied before connection startup. Unlock reconnects
-only if the feature remains locally enabled. Shutdown removes all three power
-listeners. The desktop UI shows enabled/connection state and active remote
-session count.
+Listeners exist before the initial idle-state sample and asynchronous
+vault/service initialization. The monitor starts conservatively locked, keeps
+a lock event that races the sample, and applies retained state before connection
+startup. Unlock reconnects only if the feature remains locally enabled.
+Shutdown removes all three power listeners. The desktop UI shows
+enabled/connection state and active remote session count.

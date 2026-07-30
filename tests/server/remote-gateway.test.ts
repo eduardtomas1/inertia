@@ -63,6 +63,65 @@ function fixture() {
   };
 }
 
+function deferred() {
+  let resolve = (): void => undefined;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function promptRaceFixture() {
+  const base = fixture();
+  let currentDetail = base.store.conversationDetail(
+    base.firstConversation.id,
+  );
+  let active = false;
+  let queueCalls = 0;
+  const entered = deferred();
+  const release = deferred();
+  const gateway = new RemoteRuntimeGateway({
+    shell: () => base.store.shellSnapshot(),
+    detail: () => currentDetail,
+    isConversationActive: () => active,
+    preparePrompt: async () => {
+      entered.resolve();
+      await release.promise;
+    },
+    queuePrompt: () => ({
+      turnId: `remote-race-${++queueCalls}`,
+    }),
+    now: () => new Date("2030-01-01T00:00:00.000Z"),
+  });
+  const request: Extract<RemoteRequest, { type: "prompt.send" }> = {
+    type: "prompt.send",
+    requestId: crypto.randomUUID(),
+    deliveryId: crypto.randomUUID(),
+    conversationId: base.firstConversation.id,
+    content: "Continue safely",
+  };
+  const promptingSubject: RemoteAuthorizationSubject = {
+    ...base.subject,
+    scopes: ["view", "prompt"],
+  };
+  return {
+    ...base,
+    gateway,
+    request,
+    promptingSubject,
+    entered: entered.promise,
+    release: release.resolve,
+    detail: () => currentDetail,
+    setDetail: (value: typeof currentDetail) => {
+      currentDetail = value;
+    },
+    setActive: (value: boolean) => {
+      active = value;
+    },
+    queueCalls: () => queueCalls,
+  };
+}
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -194,6 +253,90 @@ describe("Remote Companion runtime authority", () => {
     expect(fixed).toMatchObject({ ok: false, code: "invalid" });
     expect(queued()).toBe(1);
     store.close();
+  });
+
+  it("does not queue when Supervised access widens during readiness", async () => {
+    const race = promptRaceFixture();
+    const response = race.gateway.request(
+      race.promptingSubject,
+      race.request,
+    );
+    await race.entered;
+    race.setDetail({
+      ...race.detail()!,
+      conversation: {
+        ...race.detail()!.conversation,
+        accessMode: "full",
+      },
+    });
+    race.release();
+
+    expect(await response).toMatchObject({
+      ok: false,
+      code: "forbidden",
+    });
+    expect(race.queueCalls()).toBe(0);
+    race.store.close();
+  });
+
+  it("does not queue when project authority changes during readiness", async () => {
+    const race = promptRaceFixture();
+    const response = race.gateway.request(
+      race.promptingSubject,
+      race.request,
+    );
+    await race.entered;
+    race.setDetail({
+      ...race.detail()!,
+      conversation: {
+        ...race.detail()!.conversation,
+        projectId: race.secondProject.id,
+      },
+    });
+    race.release();
+
+    expect(await response).toMatchObject({
+      ok: false,
+      code: "not-found",
+    });
+    expect(race.queueCalls()).toBe(0);
+    race.store.close();
+  });
+
+  it("does not queue when a conversation disappears during readiness", async () => {
+    const race = promptRaceFixture();
+    const response = race.gateway.request(
+      race.promptingSubject,
+      race.request,
+    );
+    await race.entered;
+    race.setDetail(null);
+    race.release();
+
+    expect(await response).toMatchObject({
+      ok: false,
+      code: "not-found",
+    });
+    expect(race.queueCalls()).toBe(0);
+    race.store.close();
+  });
+
+  it("does not queue when a local run starts during readiness", async () => {
+    const race = promptRaceFixture();
+    const response = race.gateway.request(
+      race.promptingSubject,
+      race.request,
+    );
+    await race.entered;
+    race.setActive(true);
+    race.release();
+
+    expect(await response).toMatchObject({
+      ok: false,
+      code: "busy",
+    });
+    expect(race.queueCalls()).toBe(0);
+    race.store.close();
   });
 
   it("retains only the bounded newest delivery identifiers", async () => {

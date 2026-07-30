@@ -262,6 +262,85 @@ async function waitFor(
   }
 }
 
+async function pendingPairingFixture(options: {
+  createSocket?: (url: string) => WebSocket;
+  onStateChange?: (
+    state: ReturnType<RemoteAccessService["state"]>,
+  ) => void;
+} = {}) {
+  const relayUrl = await relay();
+  const store = encryptedStore();
+  const service = await RemoteAccessService.create({
+    store,
+    runtime: {
+      remoteRequest: async () => {
+        throw new Error("unused");
+      },
+    },
+    createSocket: options.createSocket,
+    onStateChange: options.onStateChange,
+  });
+  await service.setEnabled(true, relayUrl);
+  await waitFor(() => service.state().connection === "online");
+  const invitation = await service.createInvitation();
+  const deviceKeys = await generateRemoteKeyPair();
+  const deviceId = crypto.randomUUID();
+  const requestId = crypto.randomUUID();
+  const tunnel = await browserTunnel(relayUrl, invitation.endpointId);
+  sendFrame(
+    tunnel.socket,
+    tunnel.connectionId,
+    await sealPairingRequest(invitation, {
+      type: "pair.request",
+      requestId,
+      invitationId: invitation.invitationId,
+      deviceId,
+      deviceLabel: "Persistence test browser",
+      devicePublicKey: deviceKeys.publicKey,
+      createdAt: new Date().toISOString(),
+      browserVersion: "0.1.0",
+    }),
+  );
+  await waitFor(() => service.state().pendingPairings.length === 1);
+  return {
+    relayUrl,
+    store,
+    service,
+    invitation,
+    deviceKeys,
+    deviceId,
+    requestId,
+    tunnel,
+  };
+}
+
+async function pairedServiceFixture(options: {
+  createSocket?: (url: string) => WebSocket;
+  onStateChange?: (
+    state: ReturnType<RemoteAccessService["state"]>,
+  ) => void;
+  scopes?: Array<"view" | "prompt">;
+} = {}) {
+  const pairing = await pendingPairingFixture(options);
+  const projectId = crypto.randomUUID();
+  const response = nextFrame(pairing.tunnel.socket, "pair.response");
+  await pairing.service.approvePairing(
+    pairing.requestId,
+    options.scopes ?? ["view"],
+    [projectId],
+  );
+  expect(await response).toMatchObject({ kind: "pair.response" });
+  pairing.tunnel.socket.terminate();
+  const session = await openAuthenticatedSession({
+    relayUrl: pairing.relayUrl,
+    invitation: pairing.invitation,
+    deviceId: pairing.deviceId,
+    deviceKeys: pairing.deviceKeys,
+    grantVersion: 1,
+  });
+  return { ...pairing, projectId, session };
+}
+
 describe("Remote Companion outbound encrypted service", () => {
   it("defers first-time identity creation until Remote Companion is enabled", async () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-remote-service-"));
@@ -358,6 +437,113 @@ describe("Remote Companion outbound encrypted service", () => {
       pendingPairings: [],
     });
     await service.shutdown();
+  });
+
+  it("fails closed when disabling cannot be persisted with a live session", async () => {
+    const createSocket = vi.fn((url: string) => new WebSocket(url));
+    const states: Array<ReturnType<RemoteAccessService["state"]>> = [];
+    const paired = await pairedServiceFixture({
+      createSocket,
+      onStateChange: (state) => states.push(state),
+    });
+    expect(paired.service.state().activeSessions).toBe(1);
+    const socketCount = createSocket.mock.calls.length;
+    const save = vi.spyOn(paired.store, "save").mockRejectedValueOnce(
+      new Error("vault write failed"),
+    );
+
+    await expect(paired.service.setEnabled(false)).rejects.toThrow(
+      "vault write failed",
+    );
+    expect(paired.service.state()).toMatchObject({
+      available: false,
+      enabled: false,
+      connection: "disabled",
+      activeSessions: 0,
+      pendingPairings: [],
+      invitation: null,
+    });
+    expect(states.at(-1)).toMatchObject({
+      available: false,
+      enabled: false,
+      activeSessions: 0,
+    });
+    paired.service.startConnections();
+    paired.service.setPrivacyLocked(true);
+    paired.service.setPrivacyLocked(false);
+    expect(createSocket).toHaveBeenCalledTimes(socketCount);
+    save.mockRestore();
+    expect((await paired.store.load())?.enabled).toBe(true);
+    await paired.service.shutdown();
+  });
+
+  it("does not admit a device when pairing persistence fails", async () => {
+    const createSocket = vi.fn((url: string) => new WebSocket(url));
+    const pairing = await pendingPairingFixture({ createSocket });
+    const projectId = crypto.randomUUID();
+    const save = vi.spyOn(pairing.store, "save").mockRejectedValueOnce(
+      new Error("pairing vault write failed"),
+    );
+
+    await expect(pairing.service.approvePairing(
+      pairing.requestId,
+      ["view", "prompt"],
+      [projectId],
+    )).rejects.toThrow("pairing vault write failed");
+    expect(pairing.service.state()).toMatchObject({
+      available: false,
+      enabled: false,
+      connection: "disabled",
+      activeSessions: 0,
+      pendingPairings: [],
+      invitation: null,
+    });
+    await expect(openAuthenticatedSession({
+      relayUrl: pairing.relayUrl,
+      invitation: pairing.invitation,
+      deviceId: pairing.deviceId,
+      deviceKeys: pairing.deviceKeys,
+      grantVersion: 1,
+    })).rejects.toThrow();
+    save.mockRestore();
+    expect((await pairing.store.load())?.devices).toEqual([]);
+    await pairing.service.shutdown();
+  });
+
+  it("fails closed instead of applying an unpersisted grant widening", async () => {
+    const createSocket = vi.fn((url: string) => new WebSocket(url));
+    const paired = await pairedServiceFixture({
+      createSocket,
+      scopes: ["view"],
+    });
+    const save = vi.spyOn(paired.store, "save").mockRejectedValueOnce(
+      new Error("grant vault write failed"),
+    );
+
+    await expect(paired.service.updateDevice(
+      paired.deviceId,
+      ["view", "prompt"],
+      [paired.projectId],
+      new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(),
+    )).rejects.toThrow("grant vault write failed");
+    expect(paired.service.state()).toMatchObject({
+      available: false,
+      enabled: false,
+      connection: "disabled",
+      activeSessions: 0,
+      pendingPairings: [],
+      invitation: null,
+    });
+    await expect(openAuthenticatedSession({
+      relayUrl: paired.relayUrl,
+      invitation: paired.invitation,
+      deviceId: paired.deviceId,
+      deviceKeys: paired.deviceKeys,
+      grantVersion: 1,
+    })).rejects.toThrow();
+    save.mockRestore();
+    expect((await paired.store.load())?.devices[0]?.scopes).toEqual(["view"]);
+    await paired.service.shutdown();
   });
 
   it("pairs, scopes, authenticates, delivers exactly once, and revokes", async () => {

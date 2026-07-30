@@ -182,29 +182,28 @@ export class RemoteRuntimeGateway {
           );
     }
     const detail = this.dependencies.detail(request.conversationId);
-    if (!detail || !subject.projectIds.includes(detail.conversation.projectId)) {
-      return failedResponse(
-        request.requestId,
-        "not-found",
-        "That conversation is unavailable to this device.",
-      );
-    }
-    if (detail.conversation.accessMode !== "supervised") {
-      return failedResponse(
-        request.requestId,
-        "forbidden",
-        "Remote prompting requires Supervised access on the desktop.",
-      );
-    }
-    if (this.dependencies.isConversationActive(request.conversationId)) {
-      return failedResponse(
-        request.requestId,
-        "busy",
-        "Wait for the active run to finish on the desktop.",
-      );
-    }
+    if (!detail) return unavailableConversationResponse(request.requestId);
+    const initialRejection = this.promptBoundaryRejection(
+      subject,
+      request,
+      detail,
+    );
+    if (initialRejection) return initialRejection;
     try {
+      // Desktop readiness checks can await provider state. Re-read and
+      // synchronously revalidate the remote boundary immediately before the
+      // synchronous queue operation so a local change cannot widen authority.
       await this.dependencies.preparePrompt(detail.conversation);
+      const currentDetail = this.dependencies.detail(request.conversationId);
+      if (!currentDetail) {
+        return unavailableConversationResponse(request.requestId);
+      }
+      const currentRejection = this.promptBoundaryRejection(
+        subject,
+        request,
+        currentDetail,
+      );
+      if (currentRejection) return currentRejection;
       const queued = this.dependencies.queuePrompt(
         request.conversationId,
         request.content,
@@ -230,6 +229,31 @@ export class RemoteRuntimeGateway {
     }
   }
 
+  private promptBoundaryRejection(
+    subject: RemoteAuthorizationSubject,
+    request: Extract<RemoteRequest, { type: "prompt.send" }>,
+    detail: ConversationDetail,
+  ): RemoteResponse | null {
+    if (!subject.projectIds.includes(detail.conversation.projectId)) {
+      return unavailableConversationResponse(request.requestId);
+    }
+    if (detail.conversation.accessMode !== "supervised") {
+      return failedResponse(
+        request.requestId,
+        "forbidden",
+        "Remote prompting requires Supervised access on the desktop.",
+      );
+    }
+    if (this.dependencies.isConversationActive(request.conversationId)) {
+      return failedResponse(
+        request.requestId,
+        "busy",
+        "Wait for the active run to finish on the desktop.",
+      );
+    }
+    return null;
+  }
+
   private rememberReceipt(
     request: Extract<RemoteRequest, { type: "prompt.send" }>,
     response: RemoteResponse,
@@ -244,6 +268,14 @@ export class RemoteRuntimeGateway {
       if (typeof oldest === "string") this.receipts.delete(oldest);
     }
   }
+}
+
+function unavailableConversationResponse(requestId: string): RemoteResponse {
+  return failedResponse(
+    requestId,
+    "not-found",
+    "That conversation is unavailable to this device.",
+  );
 }
 
 function projectShell(

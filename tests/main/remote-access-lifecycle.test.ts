@@ -133,6 +133,101 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("keeps an initially locked desktop offline until unlock", async () => {
+    vi.useFakeTimers();
+    const directory = mkdtempSync(join(tmpdir(), "inertia-remote-lock-"));
+    directories.push(directory);
+    const store = new RemoteAccessStore(join(directory, "remote.vault"), {
+      available: () => true,
+      encrypt: (value) => new TextEncoder().encode(value),
+      decrypt: (value) => new TextDecoder().decode(value),
+    });
+    await store.save({
+      version: 1,
+      enabled: true,
+      relayUrl: "ws://127.0.0.1:8787",
+      hostId: crypto.randomUUID(),
+      endpointId: remoteRandomSecret(24),
+      keyPair: await generateRemoteKeyPair(),
+      devices: [],
+      audit: [],
+      receipts: [],
+      usedSessions: [],
+    });
+    const power = Object.assign(new EventEmitter(), {
+      getSystemIdleState: vi.fn((_idleThreshold: number) => "locked" as const),
+    });
+    let service: RemoteAccessService | null = null;
+    const monitor = new RemotePrivacyMonitor(
+      power,
+      (locked) => service?.setPrivacyLocked(locked),
+    );
+    const createSocket = vi.fn(() => new FakeSocket() as unknown as WebSocket);
+    service = await RemoteAccessService.create({
+      store,
+      runtime: {
+        remoteRequest: async () => {
+          throw new Error("unused");
+        },
+      },
+      autoConnect: false,
+      createSocket,
+      setTimer: setTimeout,
+      clearTimer: clearTimeout,
+    });
+
+    service.setPrivacyLocked(monitor.locked);
+    service.startConnections();
+    expect(power.getSystemIdleState).toHaveBeenCalledWith(60);
+    expect(monitor.locked).toBe(true);
+    expect(createSocket).not.toHaveBeenCalled();
+
+    power.emit("unlock-screen");
+    expect(createSocket).toHaveBeenCalledTimes(1);
+    monitor.shutdown();
+    const shuttingDown = service.shutdown();
+    await vi.advanceTimersByTimeAsync(REMOTE_SHUTDOWN_TIMEOUT_MS);
+    await shuttingDown;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("fails closed for an unknown initial state but tolerates unsupported probes", () => {
+    const unknownPower = Object.assign(new EventEmitter(), {
+      getSystemIdleState: () => "unknown" as const,
+    });
+    const unknown = new RemotePrivacyMonitor(
+      unknownPower,
+      () => undefined,
+    );
+    expect(unknown.locked).toBe(true);
+    unknown.shutdown();
+
+    const unsupportedPower = Object.assign(new EventEmitter(), {
+      getSystemIdleState: () => {
+        throw new Error("unsupported");
+      },
+    });
+    const unsupported = new RemotePrivacyMonitor(
+      unsupportedPower,
+      () => undefined,
+    );
+    expect(unsupported.locked).toBe(false);
+    unsupported.shutdown();
+  });
+
+  it("cannot miss a lock emitted during the initial state sample", () => {
+    const power = Object.assign(new EventEmitter(), {
+      getSystemIdleState: () => {
+        power.emit("lock-screen");
+        return "active" as const;
+      },
+    });
+    const monitor = new RemotePrivacyMonitor(power, () => undefined);
+
+    expect(monitor.locked).toBe(true);
+    monitor.shutdown();
+  });
+
   it("retains a lock during initialization and applies it before reconnecting", async () => {
     vi.useFakeTimers();
     const directory = mkdtempSync(join(tmpdir(), "inertia-remote-lock-"));

@@ -16,12 +16,16 @@ export const REMOTE_SHUTDOWN_TIMEOUT_MS = 1_500;
 type RemotePowerEvent = "lock-screen" | "suspend" | "unlock-screen";
 
 export interface RemotePowerEvents {
+  getSystemIdleState?(
+    idleThreshold: number,
+  ): "active" | "idle" | "locked" | "unknown";
   on(event: RemotePowerEvent, listener: () => void): unknown;
   off(event: RemotePowerEvent, listener: () => void): unknown;
 }
 
 export class RemotePrivacyMonitor {
-  private value = false;
+  private value = true;
+  private observedPowerEvent = false;
   private stopped = false;
 
   constructor(
@@ -31,6 +35,10 @@ export class RemotePrivacyMonitor {
     events.on("lock-screen", this.lock);
     events.on("suspend", this.lock);
     events.on("unlock-screen", this.unlock);
+    const sampledLocked = initialPrivacyLocked(events);
+    if (!this.observedPowerEvent || sampledLocked) {
+      this.value = sampledLocked;
+    }
   }
 
   get locked(): boolean {
@@ -46,10 +54,12 @@ export class RemotePrivacyMonitor {
   }
 
   private readonly lock = (): void => {
+    this.observedPowerEvent = true;
     this.update(true);
   };
 
   private readonly unlock = (): void => {
+    this.observedPowerEvent = true;
     this.update(false);
   };
 
@@ -57,6 +67,18 @@ export class RemotePrivacyMonitor {
     if (this.stopped || this.value === locked) return;
     this.value = locked;
     this.onChange(locked);
+  }
+}
+
+function initialPrivacyLocked(events: RemotePowerEvents): boolean {
+  if (typeof events.getSystemIdleState !== "function") return false;
+  try {
+    const state = events.getSystemIdleState(60);
+    return state === "locked" || state === "unknown";
+  } catch {
+    // Older or unsupported Electron platforms may expose no usable probe.
+    // Future lock/suspend events still enforce the privacy boundary.
+    return false;
   }
 }
 
@@ -158,4 +180,13 @@ export async function closeRemoteSocket(
     socket.once("error", onError);
     timer = setTimer(() => finish(true), timeoutMs);
   });
+}
+
+export function terminateRemoteSocket(socket: WebSocket | null): void {
+  if (!socket) return;
+  try {
+    socket.terminate();
+  } catch {
+    // The socket is already unusable.
+  }
 }

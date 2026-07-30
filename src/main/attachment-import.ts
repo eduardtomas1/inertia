@@ -87,12 +87,20 @@ export function validateSelectedAttachmentRead(
   }
 }
 
+export function validateSelectedAttachmentCount(count: number): void {
+  if (
+    !Number.isSafeInteger(count)
+    || count < 0
+    || count > MAX_CHAT_ATTACHMENTS
+  ) {
+    throw new Error(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
+  }
+}
+
 export function validateSelectedAttachmentStats(
   files: readonly SelectedAttachmentStat[],
 ): void {
-  if (files.length > MAX_CHAT_ATTACHMENTS) {
-    throw new Error(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
-  }
+  validateSelectedAttachmentCount(files.length);
   let selectedBytes = 0;
   for (const file of files) {
     if (!file.isFile || file.isSymbolicLink) {

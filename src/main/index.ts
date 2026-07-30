@@ -35,6 +35,7 @@ import {
 } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import {
+  validateSelectedAttachmentCount,
   validateSelectedAttachmentOpen,
   validateSelectedAttachmentRead,
   validateSelectedAttachmentStats,
@@ -395,6 +396,7 @@ function registerIpcHandlers(): void {
       properties: ["openFile", "multiSelections"],
     });
     if (result.canceled) return [];
+    validateSelectedAttachmentCount(result.filePaths.length);
     const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
     const nonBlocking = "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
     const selectedFiles: Array<{
@@ -405,7 +407,7 @@ function registerIpcHandlers(): void {
       file: Awaited<ReturnType<typeof open>>;
     }> = [];
     try {
-      for (const path of result.filePaths.slice(0, MAX_CHAT_ATTACHMENTS)) {
+      for (const path of result.filePaths) {
         const pathInfo = await lstat(path, { bigint: true });
         if (!pathInfo.isFile() || pathInfo.isSymbolicLink()) {
           throw new Error("The selected attachment is not a safe regular file.");

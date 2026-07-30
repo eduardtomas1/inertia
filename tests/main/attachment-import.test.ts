@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   validateAttachmentImport,
+  validateSelectedAttachmentCount,
   validateSelectedAttachmentOpen,
   validateSelectedAttachmentRead,
   validateSelectedAttachmentStats,
 } from "../../src/main/attachment-import";
 import {
+  MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
 } from "../../src/shared/attachments";
@@ -20,6 +22,13 @@ const webp = Buffer.from("RIFF\0\0\0\0WEBP", "binary");
 const pdf = Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n", "ascii");
 
 describe("privileged attachment import validation", () => {
+  it("rejects an oversized selection instead of silently truncating it", () => {
+    expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS + 1))
+      .toThrow(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
+    expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS))
+      .not.toThrow();
+  });
+
   it("rejects unsafe or oversized chosen-file stats before selected bytes are read", () => {
     expect(() => validateSelectedAttachmentStats([{
       size: 10,

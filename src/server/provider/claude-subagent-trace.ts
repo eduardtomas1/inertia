@@ -225,7 +225,8 @@ export class ClaudeSubagentTraceTracker {
     if (!status) return;
     state.live = status === "queued"
       || status === "running"
-      || status === "waiting";
+      || status === "waiting"
+      || status === "unknown";
     this.emitState(
       state,
       status,

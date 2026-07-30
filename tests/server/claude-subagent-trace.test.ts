@@ -184,6 +184,13 @@ describe("Claude delegated-agent projection", () => {
     }));
     tracker.observe(sdkMessage({
       type: "system",
+      subtype: "task_updated",
+      task_id: "task-stateful",
+      patch: { status: "future_active_state" },
+    }));
+    expect(tracker.hasLiveTasks()).toBe(true);
+    tracker.observe(sdkMessage({
+      type: "system",
       subtype: "task_notification",
       task_id: "task-stateful",
       status: "failed",
@@ -225,6 +232,11 @@ describe("Claude delegated-agent projection", () => {
         providerTaskId: "task-stateful",
         providerStatus: "paused",
         status: "waiting",
+      }),
+      expect.objectContaining({
+        providerTaskId: "task-stateful",
+        providerStatus: "future_active_state",
+        status: "unknown",
       }),
       expect.objectContaining({
         providerTaskId: "task-stateful",

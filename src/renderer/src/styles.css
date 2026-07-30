@@ -3627,6 +3627,11 @@ textarea {
   background: color-mix(in srgb, var(--danger-soft) 42%, transparent);
 }
 
+.subagent-stop-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
 .composer-toolbar .icon-button,
 .composer-toolbar .composer-pill,
 .composer-toolbar .selected-model-chip,
@@ -4012,16 +4017,6 @@ textarea {
   color: var(--text-muted);
   background: transparent;
   cursor: pointer;
-}
-
-.subagent-stop-button:hover {
-  color: var(--text);
-  background: var(--surface-hover);
-}
-
-.subagent-stop-button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
 }
 
 .usage-popover-close:hover {

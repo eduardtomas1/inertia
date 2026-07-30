@@ -68,6 +68,18 @@ function safeSubagentLabel(
   })?.replace(/\s+/gu, " ").trim() || null;
 }
 
+function safeSubagentProviderStatus(
+  value: unknown,
+  workspaceRoot: string,
+): string | null {
+  const bounded = boundedSubagentIdentifier(value, 200);
+  if (!bounded) return null;
+  return sanitizeProviderActivityDetail(bounded, {
+    workspaceRoot,
+    maxChars: 200,
+  })?.replace(/\s+/gu, " ").trim() || "[redacted]";
+}
+
 export class ExecutionLedgerRepository {
   constructor(private readonly context: ExecutionLedgerPersistenceContext) {}
 
@@ -224,7 +236,10 @@ export class ExecutionLedgerRepository {
       providerToolUseId,
       providerRole: safeSubagentLabel(input.providerRole, workspaceRoot),
       providerName: safeSubagentLabel(input.providerName, workspaceRoot),
-      providerStatus: boundedSubagentIdentifier(input.providerStatus, 200),
+      providerStatus: safeSubagentProviderStatus(
+        input.providerStatus,
+        workspaceRoot,
+      ),
       description: sanitizeProviderActivityDetail(
         input.description,
         { workspaceRoot, maxChars: MAX_SUBAGENT_DESCRIPTION_CHARS },

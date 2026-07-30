@@ -278,6 +278,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     if (process.env.INERTIA_APP_SERVER_SCENARIO === "unknown-collab-state") {
       send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-unknown", tool: "spawnAgent", status: "completed", senderThreadId: threadId, receiverThreadIds: ["child-future", "child-shutdown"], prompt: "Preserve unknown states", model: null, reasoningEffort: null, agentsStates: { "child-future": { status: "futureState", message: "A newer provider state" }, "child-shutdown": { status: "shutdown", message: "Worker shut down" } } } } });
       send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+      setTimeout(() => {
+        send({ method: "item/completed", params: { threadId: "child-future", turnId: "child-future-turn", item: { type: "agentMessage", id: "child-future-message", text: "The future state completed directly." } } });
+        send({ method: "turn/completed", params: { threadId: "child-future", turn: { id: "child-future-turn", status: "completed", items: [], error: null } } });
+      }, 20);
       return;
     }
     if (
@@ -960,7 +964,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     ]));
   });
 
-  it("preserves unknown and shutdown provider states without inventing success", async () => {
+  it("drains a future collab state while preserving terminal shutdown as unknown", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "unknown-collab-state";
@@ -993,9 +997,18 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         status: "unknown",
       }),
     ]));
-    expect(subagents).not.toContainEqual(expect.objectContaining({
+    expect(subagents.filter(({ providerAgentId }) =>
+      providerAgentId === "child-future").at(-1)).toMatchObject({
+      providerStatus: "completed",
       status: "completed",
-    }));
+      result: "The future state completed directly.",
+    });
+    expect(subagents.filter(({ providerAgentId }) =>
+      providerAgentId === "child-shutdown").at(-1)).toMatchObject({
+      providerStatus: "shutdown",
+      status: "unknown",
+      result: "Worker shut down",
+    });
   });
 
   it("fails closed when App Server rejects full-access policy fields", async () => {

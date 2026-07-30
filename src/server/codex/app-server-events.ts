@@ -543,6 +543,7 @@ export class CodexAppServerEvents {
   private emitSubagent(
     update: Omit<CodexSubagentUpdate, "sequence">,
     authority: CodexSubagentAuthority,
+    drainable = LIVE_SUBAGENT_STATUSES.has(update.status),
   ): void {
     const providerAgentId = update.providerAgentId;
     if (providerAgentId) {
@@ -568,7 +569,7 @@ export class CodexAppServerEvents {
         status: update.status,
         authority,
       });
-      if (LIVE_SUBAGENT_STATUSES.has(update.status)) {
+      if (drainable) {
         this.liveSubagentIds.add(providerAgentId);
       } else {
         this.liveSubagentIds.delete(providerAgentId);
@@ -642,6 +643,9 @@ export class CodexAppServerEvents {
       const status = exactStatus ?? fallbackStatus;
       if (!status) continue;
       const terminal = TERMINAL_SUBAGENT_STATUSES.has(status);
+      const drainable = status === "unknown"
+        ? providerStatus !== "shutdown"
+        : LIVE_SUBAGENT_STATUSES.has(status);
       this.emitSubagent({
         providerTaskId: null,
         providerAgentId,
@@ -662,7 +666,7 @@ export class CodexAppServerEvents {
         result: terminal
           ? boundedText(agentState?.message, 16_000) ?? null
           : null,
-      }, exactStatus ? "state" : "activity");
+      }, exactStatus ? "state" : "activity", drainable);
     }
     return true;
   }
@@ -694,7 +698,8 @@ export class CodexAppServerEvents {
       description: null,
       progress: null,
       result: null,
-    }, kind === "started" || kind === "interacted" ? "activity" : "state");
+    }, kind === "started" || kind === "interacted" ? "activity" : "state",
+    kind !== "interrupted");
     return true;
   }
 

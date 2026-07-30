@@ -1168,7 +1168,10 @@ describe("RuntimeStore conversation lifecycle", () => {
       result: null,
       sequence: 1,
     })?.trace;
-    expect(created).toBeDefined();
+    expect(created).toMatchObject({
+      providerStatus: "pendingInit",
+      status: "queued",
+    });
     const unknown = store.upsertSubagentTrace({
       conversationId: conversation.id,
       runId: turn.runId,
@@ -1181,7 +1184,8 @@ describe("RuntimeStore conversation lifecycle", () => {
       providerToolUseId: "spawn-provider-state",
       providerRole: null,
       providerName: null,
-      providerStatus: "futureState",
+      providerStatus:
+        `futureState OPENAI_API_KEY=sk-providerstatus123456789 ${workspacePath}/private`,
       status: "unknown",
       description: null,
       progress: null,
@@ -1189,9 +1193,14 @@ describe("RuntimeStore conversation lifecycle", () => {
       sequence: 2,
     })?.trace;
     expect(unknown).toMatchObject({
-      providerStatus: "futureState",
+      providerStatus: "futureState [redacted] <workspace>/private",
       status: "unknown",
     });
+    expect(store.conversationDetail(conversation.id)?.subagents)
+      .toContainEqual(expect.objectContaining({
+        providerStatus: "futureState [redacted] <workspace>/private",
+        status: "unknown",
+      }));
     const clarified = store.upsertSubagentTrace({
       conversationId: conversation.id,
       runId: turn.runId,

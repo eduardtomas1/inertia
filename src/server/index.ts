@@ -651,17 +651,35 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       closed = true;
       snapshotBroadcasts.close();
       secureFileAuthorities.clear();
-      terminals.disposeAll();
-      await providerMaintenance.dispose();
-      await isolatedRuns.dispose(cause);
-      await turns.dispose(cause);
-      await artifactReconciliation;
-      runtimeSync.terminateAll((client) => client.terminate());
-      await Promise.all([
-        webSocketBoundary.close(),
-        new Promise<void>((resolveClose) => server.close(() => resolveClose())),
-      ]);
-      store.close();
+      let shutdownError: unknown;
+      const attempt = async (
+        operation: () => void | Promise<void>,
+      ): Promise<void> => {
+        try {
+          await operation();
+        } catch (error) {
+          shutdownError ??= error;
+        }
+      };
+      await attempt(() => terminals.disposeAll());
+      await attempt(() => providerMaintenance.dispose());
+      await attempt(() => isolatedRuns.dispose(cause));
+      await attempt(() => turns.dispose(cause));
+      await attempt(async () => {
+        await artifactReconciliation;
+      });
+      await attempt(() => {
+        runtimeSync.terminateAll((client) => client.terminate());
+      });
+      await attempt(async () => {
+        await Promise.all([
+          webSocketBoundary.close(),
+          new Promise<void>((resolveClose) =>
+            server.close(() => resolveClose())),
+        ]);
+      });
+      await attempt(() => store.close());
+      if (shutdownError !== undefined) throw shutdownError;
     },
   };
 }

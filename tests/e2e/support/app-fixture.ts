@@ -425,8 +425,9 @@ export async function createAppFixture(
       await rm(testDirectory, {
         recursive: true,
         force: true,
-        maxRetries: 8,
-        retryDelay: 100,
+        ...(process.platform === "win32"
+          ? { maxRetries: 8, retryDelay: 100 }
+          : {}),
       });
     },
   };

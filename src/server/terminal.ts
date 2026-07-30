@@ -10,6 +10,7 @@ const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
 const MAX_BUFFERED_OUTPUT = 1024 * 1024;
 const OUTPUT_CHUNK_SIZE = 16 * 1024;
+const TERMINAL_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 interface TerminalSession {
   id: string;
@@ -18,6 +19,11 @@ interface TerminalSession {
   dataListener: IDisposable;
   exitListener: IDisposable;
   onExit?: (exitCode: number) => void;
+}
+
+export interface TerminalManagerOptions {
+  spawnTerminal?: typeof spawn;
+  shutdownTimeoutMs?: number;
 }
 
 function userShell(): { executable: string; args: string[] } {
@@ -45,6 +51,21 @@ function send(socket: WebSocket, event: ServerEvent): void {
 
 export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
+  private readonly spawnTerminal: typeof spawn;
+  private readonly shutdownTimeoutMs: number;
+
+  constructor(options: TerminalManagerOptions = {}) {
+    this.spawnTerminal = options.spawnTerminal ?? spawn;
+    this.shutdownTimeoutMs = Math.max(
+      1,
+      Math.min(
+        Math.trunc(
+          options.shutdownTimeoutMs ?? TERMINAL_SHUTDOWN_TIMEOUT_MS,
+        ),
+        30_000,
+      ),
+    );
+  }
 
   create(
     owner: WebSocket,
@@ -76,7 +97,7 @@ export class TerminalManager {
     const id = randomUUID();
     let pseudoterminal: IPty;
     try {
-      pseudoterminal = spawn(executable, typeof args === "string" ? args : [...args], {
+      pseudoterminal = this.spawnTerminal(executable, typeof args === "string" ? args : [...args], {
         name: "xterm-256color",
         cols,
         rows,
@@ -136,8 +157,9 @@ export class TerminalManager {
     }
   }
 
-  disposeAll(): void {
-    for (const terminalId of this.sessions.keys()) this.dispose(terminalId, true);
+  async disposeAll(): Promise<void> {
+    await Promise.all([...this.sessions.values()].map((session) =>
+      this.disposeAndWait(session)));
   }
 
   private ownedSession(owner: WebSocket, terminalId: string): TerminalSession {
@@ -160,6 +182,32 @@ export class TerminalManager {
       }
       session.onExit?.(130);
     }
+  }
+
+  private disposeAndWait(session: TerminalSession): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        exitListener.dispose();
+        if (error) reject(error);
+        else resolve();
+      };
+      const exitListener = session.pty.onExit(() => finish());
+      const timer = setTimeout(() => {
+        try {
+          session.pty.kill();
+        } catch {
+          // The terminal may have exited while the timeout fired.
+        }
+        finish(new TerminalError(
+          "A terminal process did not exit during runtime shutdown.",
+        ));
+      }, this.shutdownTimeoutMs);
+      this.dispose(session.id, true);
+    });
   }
 }
 

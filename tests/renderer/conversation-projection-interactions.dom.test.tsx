@@ -373,6 +373,7 @@ describe("useConversationProjection pending interactions", () => {
   it("keeps the last ready thread visible when a refresh request times out", async () => {
     const source = createEventSource();
     let detailLoads = 0;
+    let authoritativeMessages: ChatMessage[] = [];
     const request = vi.fn(async (
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
@@ -383,7 +384,7 @@ describe("useConversationProjection pending interactions", () => {
         };
       }
       detailLoads += 1;
-      if (detailLoads > 1) {
+      if (detailLoads === 2) {
         throw new Error("The request took too long to complete.");
       }
       return {
@@ -397,7 +398,7 @@ describe("useConversationProjection pending interactions", () => {
             conversation: conversation(primaryId),
             agentTurns: [],
             turnGitArtifacts: [],
-            messages: [],
+            messages: authoritativeMessages,
             activities: [],
             subagents: [],
             reasonings: [],
@@ -425,6 +426,19 @@ describe("useConversationProjection pending interactions", () => {
     await waitFor(() => expect(hook.result.current.detailState?.state).toBe("ready"));
 
     source.emit({
+      type: "agent.text",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      text: "The final answer remains visible.",
+    });
+    source.emit({
+      type: "agent.completed",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+    });
+    source.emit({
       type: "conversation.detail.invalidated",
       conversationId: primaryId,
     });
@@ -432,6 +446,26 @@ describe("useConversationProjection pending interactions", () => {
     await waitFor(() => expect(detailLoads).toBe(2));
     expect(hook.result.current.detailState?.state).toBe("ready");
     expect(hook.result.current.detail).not.toBeNull();
+    expect(hook.result.current.streamingText)
+      .toBe("The final answer remains visible.");
+
+    authoritativeMessages = [{
+      id: "terminal-assistant-message",
+      conversationId: primaryId,
+      turnId: `${primaryId}-turn`,
+      role: "assistant",
+      content: "The final answer remains visible.",
+      attachments: [],
+      createdAt: "2026-07-28T12:02:00.000Z",
+    }];
+    source.emit({
+      type: "conversation.detail.invalidated",
+      conversationId: primaryId,
+    });
+
+    await waitFor(() => expect(detailLoads).toBe(3));
+    expect(hook.result.current.streamingText).toBe("");
+    expect(hook.result.current.messages).toEqual(authoritativeMessages);
   });
 
   it("does not reload detail for bounded activity-shell refreshes", async () => {

@@ -68,6 +68,7 @@ export function useConversationProjection({
   const [nativePlans, setNativePlans] =
     useState<Record<string, AgentPlan>>({});
   const requestGenerationRef = useRef(0);
+  const terminalRefreshPendingRef = useRef(false);
   const snapshotRef = useRef(snapshot);
   const conversationRef = useRef<ConversationShell | null>(null);
   const enabledRef = useRef(enabled);
@@ -96,6 +97,7 @@ export function useConversationProjection({
   conversationRef.current = conversation;
   useEffect(() => {
     if (enabled) return;
+    terminalRefreshPendingRef.current = false;
     setStreamingText("");
     setStreamingReasoning("");
     setLiveMessages({});
@@ -184,6 +186,14 @@ export function useConversationProjection({
           result,
           shell,
         ));
+      if (
+        result.state === "ready"
+        && terminalRefreshPendingRef.current
+      ) {
+        terminalRefreshPendingRef.current = false;
+        setStreamingText("");
+        setStreamingReasoning("");
+      }
     }).catch((error) => {
       if (generation !== requestGenerationRef.current) return;
       setDetailState((current) => (
@@ -311,6 +321,7 @@ export function useConversationProjection({
     const projectionEnabled = enabledRef.current;
     if (event.type === "server.welcome") {
       requestGenerationRef.current += 1;
+      terminalRefreshPendingRef.current = false;
       setDetailState(null);
       setStreamingText("");
       setStreamingReasoning("");
@@ -451,6 +462,7 @@ export function useConversationProjection({
       return;
     }
     if (event.type === "agent.started") {
+      terminalRefreshPendingRef.current = false;
       setStreamingText("");
       setStreamingReasoning("");
     }
@@ -463,13 +475,13 @@ export function useConversationProjection({
         `${current}${event.text}`.slice(-500_000));
     }
     if (event.type === "agent.completed" || event.type === "agent.failed") {
-      setStreamingText("");
-      setStreamingReasoning("");
+      terminalRefreshPendingRef.current = true;
       terminalCallbackRef.current();
     }
   }), [subscribe]);
 
   useEffect(() => {
+    terminalRefreshPendingRef.current = false;
     setStreamingText("");
     setStreamingReasoning("");
     setLiveMessages({});

@@ -4,6 +4,33 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.17 — 2026-07-30
+
+### Graphite Ink gives the workspace a calmer edge
+
+- Dark mode now uses a near-black graphite canvas with clearer elevation, selection, focus, and muted-text contrast instead of a blue-leaning surface stack.
+- Active agents communicate progress through a restrained animated identity-text wave rather than a detached status circle or broad loading wash.
+- Code, diffs, inline code, and syntax tokens use a compact semantic palette that stays legible without turning the transcript into a rainbow.
+- Light mode, forced colours, interface scaling, response density, and reduced-motion behavior retain explicit readable fallbacks.
+
+### PDFs become real prompt context
+
+- Images, PDFs, and supported documents can be pasted or attached, previewed at a useful size, removed, and sent without the composer becoming falsely blocked.
+- Linux clipboard PDFs with missing MIME metadata are identified from their verified file content instead of being rejected before the prompt can run.
+- Providers receive bounded text extracted from the exact privileged attachment claim; image paths remain image-only, and unsupported documents stay honestly identified rather than being relabeled.
+- PDF extraction is limited by pages, time, dimensions, pixels, per-document text, and aggregate prompt context so an oversized or malformed document cannot monopolize the local runtime.
+
+### Delivery and persistence stay authoritative
+
+- Document preparation shares the bounded send deadline with route readiness, skills, Git context, and checkpoints. A timed-out or cancelled request releases its privileged attachment claims instead of leaking work in the background.
+- Renderer and runtime deadlines leave enough room for ordinary PDF extraction while still failing with a specific, recoverable explanation.
+- An append-only schema migration persists attachment execution-context references alongside existing file, diff, terminal, and review-note context, including upgrades from the released v0.0.16 database.
+- Package smoke now exercises the shipped PDF worker and native canvas path, including known-text extraction, so Linux, macOS, and Windows artifacts validate the feature they distribute.
+
+### Release confidence
+
+- Architecture checks, lint, four TypeScript projects, 1,596 unit and integration tests, portable provider contracts, focused PDF Electron E2E, production dependency audit, exact-head Codex review, and green Linux, macOS, and Windows packaging gates protect the release.
+
 ## 0.0.16 — 2026-07-30
 
 ### A smaller application before the first conversation opens

@@ -130,13 +130,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.16
+### Version 0.0.17
 
-This release makes the whole application cheaper to start, render, and keep open. Initial renderer JavaScript falls from approximately 3.16 MiB to 609.2 KiB, heavy workspace surfaces load only when needed, and hard bundle budgets prevent that startup improvement from quietly regressing.
+This release introduces **Graphite Ink**: a near-black dark canvas, clearer elevation and focus, calmer code and diff highlighting, and a restrained animated identity wave while an agent is working. Light mode, forced colours, reduced motion, interface scaling, and response density retain deliberate readable variants.
 
-Long conversations now virtualize by their real text, tool, and activity weight; closed history leaves the DOM; pathological Markdown highlighting stays bounded; and background snapshots, replay state, Git reconciliation, and conversation queries perform less redundant work. Explicit command acknowledgements, durable ordering, trusted overlays, and native-preview security remain authoritative.
+PDFs and supported documents are now first-class prompt context. They can be pasted or attached, previewed, removed, and sent on Linux, macOS, and Windows; privileged extraction verifies the exact file and applies strict page, time, dimension, pixel, and text bounds before provider delivery.
 
-Download [Inertia v0.0.16](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.16):
+Download [Inertia v0.0.17](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.17):
 
 | Platform | Download |
 | --- | --- |

@@ -141,6 +141,7 @@ export interface RuntimeSecureFileResult {
 export type RuntimeWorkerEvent =
   | { type: "runtime.ready"; websocketUrl: string }
   | { type: "runtime.startup-failed"; message: string }
+  | { type: "runtime.shutdown-unconfirmed" }
   | { type: "runtime.stopped" }
   | { type: "runtime.project-path-resolved"; requestId: string; path: string }
   | { type: "runtime.project-path-rejected"; requestId: string; message: string }
@@ -288,6 +289,9 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
 export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | null {
   if (!plainObject(value) || typeof value.type !== "string") return null;
   if (value.type === "runtime.stopped" && Object.keys(value).length === 1) return { type: "runtime.stopped" };
+  if (value.type === "runtime.shutdown-unconfirmed" && Object.keys(value).length === 1) {
+    return { type: "runtime.shutdown-unconfirmed" };
+  }
   if (
     (
       value.type === "runtime.attachment-request"

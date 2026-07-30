@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   validateAttachmentImport,
+  validateSelectedAttachmentCount,
+  validateSelectedAttachmentOpen,
+  validateSelectedAttachmentRead,
   validateSelectedAttachmentStats,
 } from "../../src/main/attachment-import";
 import {
+  MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
 } from "../../src/shared/attachments";
@@ -18,6 +22,13 @@ const webp = Buffer.from("RIFF\0\0\0\0WEBP", "binary");
 const pdf = Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n", "ascii");
 
 describe("privileged attachment import validation", () => {
+  it("rejects an oversized selection instead of silently truncating it", () => {
+    expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS + 1))
+      .toThrow(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
+    expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS))
+      .not.toThrow();
+  });
+
   it("rejects unsafe or oversized chosen-file stats before selected bytes are read", () => {
     expect(() => validateSelectedAttachmentStats([{
       size: 10,
@@ -51,6 +62,41 @@ describe("privileged attachment import validation", () => {
       isFile: true,
       isSymbolicLink: false,
     }])).not.toThrow();
+  });
+
+  it("rejects a regular-file replacement between selection and open", () => {
+    const selected = {
+      dev: 1n,
+      ino: 2n,
+      isFile: true,
+      isSymbolicLink: false,
+    };
+
+    expect(() => validateSelectedAttachmentOpen(selected, {
+      ...selected,
+      ino: 3n,
+    })).toThrow(/changed while it was being opened/u);
+    expect(() => validateSelectedAttachmentOpen(selected, selected))
+      .not.toThrow();
+  });
+
+  it("rejects same-size content changes while a selected file is read", () => {
+    const before = {
+      dev: 1n,
+      ino: 2n,
+      size: 128n,
+      mtimeNs: 3n,
+      ctimeNs: 4n,
+      isFile: true,
+      isSymbolicLink: false,
+    };
+
+    expect(() => validateSelectedAttachmentRead(before, {
+      ...before,
+      mtimeNs: before.mtimeNs + 1n,
+      ctimeNs: before.ctimeNs + 1n,
+    })).toThrow(/changed while it was being read/u);
+    expect(() => validateSelectedAttachmentRead(before, before)).not.toThrow();
   });
 
   it.each([

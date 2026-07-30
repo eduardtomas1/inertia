@@ -9,6 +9,13 @@ export interface PosixProcessTreeDependencies {
   kill: typeof process.kill;
   spawnProcessSync: typeof spawnSync;
   rootProcessGroup: boolean;
+  deadlineAt: number;
+  now: () => number;
+}
+
+export interface PosixProcessTreeKillResult {
+  descendants: number[];
+  snapshotConfirmed: boolean;
 }
 
 export function posixDescendantPids(
@@ -44,14 +51,18 @@ export function posixDescendantPids(
  * Freezes an owned POSIX process tree, rescans for children created during the
  * snapshot race, then force-kills descendants before their parents.
  */
-export function forceKillPosixProcessTree(
+export function forceKillPosixProcessTreeWithStatus(
   rootPid: number,
   dependencies: Partial<PosixProcessTreeDependencies> = {},
-): number[] {
-  if (!Number.isSafeInteger(rootPid) || rootPid <= 1) return [];
+): PosixProcessTreeKillResult {
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 1) {
+    return { descendants: [], snapshotConfirmed: true };
+  }
   const kill = dependencies.kill ?? process.kill;
   const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
   const rootProcessGroup = dependencies.rootProcessGroup === true;
+  const deadlineAt = dependencies.deadlineAt ?? Number.POSITIVE_INFINITY;
+  const now = dependencies.now ?? Date.now;
 
   if (rootProcessGroup) {
     try { kill(-rootPid, "SIGSTOP"); } catch { /* It may not be a group leader. */ }
@@ -60,28 +71,40 @@ export function forceKillPosixProcessTree(
 
   const frozen = new Set<number>();
   let killOrder: number[] = [];
+  let snapshotConfirmed = false;
   for (let pass = 0; pass < MAX_FREEZE_PASSES; pass += 1) {
+    const remainingMs = deadlineAt - now();
+    if (remainingMs <= 0) break;
     let descendants: number[] = [];
+    let snapshotRead = false;
     try {
       const table = spawnProcessSync(
         PROCESS_TABLE_COMMAND,
         ["-axo", "pid=,ppid="],
         {
           encoding: "utf8",
-          timeout: PROCESS_SNAPSHOT_TIMEOUT_MS,
+          timeout: Math.max(
+            1,
+            Math.min(PROCESS_SNAPSHOT_TIMEOUT_MS, Math.trunc(remainingMs)),
+          ),
           maxBuffer: PROCESS_TABLE_MAX_BYTES,
           shell: false,
         },
       );
       if (table.status === 0 && typeof table.stdout === "string") {
+        snapshotRead = true;
         descendants = posixDescendantPids(rootPid, table.stdout);
       }
     } catch {
-      // The owned process group remains the bounded fallback when available.
+      // Callers treat a missing stabilized snapshot as unconfirmed cleanup.
     }
+    if (!snapshotRead) continue;
     killOrder = descendants;
     const newlyDiscovered = descendants.filter((pid) => !frozen.has(pid));
-    if (newlyDiscovered.length === 0) break;
+    if (newlyDiscovered.length === 0) {
+      snapshotConfirmed = true;
+      break;
+    }
     for (const pid of [...newlyDiscovered].reverse()) {
       try { kill(-pid, "SIGSTOP"); } catch { /* Not a process-group leader. */ }
       try { kill(pid, "SIGSTOP"); } catch { /* Already stopped with its group. */ }
@@ -101,5 +124,15 @@ export function forceKillPosixProcessTree(
     try { kill(-rootPid, "SIGKILL"); } catch { /* The group may already be gone. */ }
   }
   try { kill(rootPid, "SIGKILL"); } catch { /* Already gone. */ }
-  return targets;
+  return { descendants: targets, snapshotConfirmed };
+}
+
+export function forceKillPosixProcessTree(
+  rootPid: number,
+  dependencies: Partial<PosixProcessTreeDependencies> = {},
+): number[] {
+  return forceKillPosixProcessTreeWithStatus(
+    rootPid,
+    dependencies,
+  ).descendants;
 }

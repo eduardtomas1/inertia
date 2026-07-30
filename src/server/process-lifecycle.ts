@@ -5,7 +5,10 @@ import {
 } from "node:child_process";
 import { win32 } from "node:path";
 
-import { forceKillPosixProcessTree } from "../node/posix-process-tree";
+import {
+  forceKillPosixProcessTree,
+  forceKillPosixProcessTreeWithStatus,
+} from "../node/posix-process-tree";
 
 const DEFAULT_TERMINATION_WAIT_MS = 2_000;
 const PROCESS_GROUP_POLL_MS = 10;
@@ -24,6 +27,8 @@ export interface AwaitableProcessLifecycleDependencies
   waitMs?: number;
 }
 
+export type WaitForProcessExit = (waitMs: number) => Promise<boolean>;
+
 export type ProcessTreeTerminator = (
   child: ChildProcess,
   force: boolean,
@@ -32,6 +37,8 @@ export type ProcessTreeTerminator = (
 export type OwnedProcessTreeTermination = (
   force: boolean,
 ) => Promise<void>;
+
+export type OwnedPidProcessTreeTermination = () => Promise<boolean>;
 
 export class ProcessTreeTerminationError extends Error {
   readonly code = "process-tree-termination-unconfirmed";
@@ -253,7 +260,10 @@ function waitForPosixProcessGroupExit(
         resolve(false);
         return;
       }
-      setTimeout(inspect, PROCESS_GROUP_POLL_MS);
+      setTimeout(
+        inspect,
+        Math.max(1, Math.min(PROCESS_GROUP_POLL_MS, deadline - Date.now())),
+      );
     };
     inspect();
   });
@@ -283,7 +293,10 @@ function waitForPosixProcessesExit(
         resolve(false);
         return;
       }
-      setTimeout(inspect, PROCESS_GROUP_POLL_MS);
+      setTimeout(
+        inspect,
+        Math.max(1, Math.min(PROCESS_GROUP_POLL_MS, deadline - Date.now())),
+      );
     };
     inspect();
   });
@@ -334,6 +347,109 @@ function terminateWindowsProcessTree(
     taskkill.once("error", onError);
     taskkill.once("close", onClose);
   });
+}
+
+/**
+ * Force-terminates a process tree when the owner exposes a PID and an
+ * awaitable exit signal rather than a Node ChildProcess. The caller must
+ * observe exit before invoking this function so a fast termination cannot be
+ * missed.
+ */
+export async function forceTerminateProcessTreeByPidAndWait(
+  pid: number,
+  waitForRootExit: WaitForProcessExit,
+  dependencies: AwaitableProcessLifecycleDependencies = {},
+): Promise<boolean> {
+  return await createOwnedPidProcessTreeTermination(
+    pid,
+    waitForRootExit,
+    dependencies,
+  )();
+}
+
+/**
+ * Owns one PID-backed process-tree termination attempt for its full lifetime.
+ *
+ * The first call snapshots and signals the tree while the root PID is still
+ * known to belong to the caller. Later calls only repeat confirmation for
+ * that original attempt. They never re-snapshot or re-signal numeric PIDs,
+ * which may have been recycled after a delayed root or descendant exit.
+ */
+export function createOwnedPidProcessTreeTermination(
+  pid: number,
+  waitForRootExit: WaitForProcessExit,
+  dependencies: AwaitableProcessLifecycleDependencies = {},
+): OwnedPidProcessTreeTermination {
+  const platform = dependencies.platform ?? process.platform;
+  const spawnProcess = dependencies.spawnProcess ?? spawn;
+  const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
+  const killProcess = dependencies.killProcess ?? process.kill;
+  const windowsSystemRoot = dependencies.windowsSystemRoot === undefined
+    ? inheritedWindowsSystemRoot()
+    : dependencies.windowsSystemRoot;
+  const waitMs = boundedWaitMs(dependencies.waitMs);
+  let started = false;
+  let treeTerminationConfirmed = false;
+  let snapshotConfirmed = false;
+  let descendants: readonly number[] = [];
+
+  return async () => {
+    if (!Number.isSafeInteger(pid) || pid <= 1) return false;
+    const deadlineAt = Date.now() + waitMs;
+
+    if (platform === "win32") {
+      if (!started) {
+        started = true;
+        treeTerminationConfirmed = await terminateWindowsProcessTree(
+          pid,
+          true,
+          spawnProcess,
+          windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
+          waitMs,
+        );
+      }
+      if (!treeTerminationConfirmed) return false;
+      const rootExitWaitMs = Math.trunc(
+        deadlineAt - Date.now() - WINDOWS_RESOURCE_SETTLE_MS,
+      );
+      if (rootExitWaitMs <= 0 || !await waitForRootExit(rootExitWaitMs)) {
+        return false;
+      }
+      const settleMs = Math.min(
+        WINDOWS_RESOURCE_SETTLE_MS,
+        Math.max(0, deadlineAt - Date.now()),
+      );
+      if (settleMs <= 0) return false;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, settleMs);
+      });
+      return true;
+    }
+
+    if (!started) {
+      started = true;
+      // node-pty creates POSIX terminals with forkpty, making the shell root
+      // the process-group leader. A stabilized descendant snapshot also
+      // catches children that created their own groups before the root froze.
+      const killed = forceKillPosixProcessTreeWithStatus(pid, {
+        kill: killProcess,
+        spawnProcessSync,
+        rootProcessGroup: true,
+        deadlineAt,
+      });
+      snapshotConfirmed = killed.snapshotConfirmed;
+      descendants = killed.descendants;
+    }
+    if (!snapshotConfirmed) return false;
+    const exitWaitMs = Math.trunc(deadlineAt - Date.now());
+    if (exitWaitMs <= 0) return false;
+    const [groupExited, descendantsExited, rootExited] = await Promise.all([
+      waitForPosixProcessGroupExit(pid, killProcess, exitWaitMs),
+      waitForPosixProcessesExit(descendants, killProcess, exitWaitMs),
+      waitForRootExit(exitWaitMs),
+    ]);
+    return groupExited && descendantsExited && rootExited;
+  };
 }
 
 /**

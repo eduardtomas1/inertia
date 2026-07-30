@@ -71,7 +71,10 @@ function createHarness(options: {
   attachmentRequestTimeoutMs?: number;
 } = {}) {
   const children: FakeUtilityProcess[] = [];
-  const forceKill = vi.fn(() => true);
+  const forceKill = vi.fn((
+    _pid: number,
+    _deadlineAt: number,
+  ): boolean | Promise<boolean> => true);
   const supervisor = new RuntimeSupervisor({
     workerOptions: {
       dataDirectory,
@@ -969,13 +972,13 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.snapshot().restartAttempt).toBe(0);
   });
 
-  it("kills a child that never becomes ready and waits for exit before replacing it", () => {
+  it("kills a child that never becomes ready and waits for exit before replacing it", async () => {
     const { children, forceKill, supervisor } = createHarness();
     supervisor.start();
     children[0].spawn();
-    vi.advanceTimersByTime(2_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     expect(children[0].killCalls).toBe(0);
-    expect(forceKill).toHaveBeenCalledWith(10_000);
+    expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
     expect(children).toHaveLength(1);
     expect(() => supervisor.connection()).toThrow("did not become ready");
     children[0].exit(1);
@@ -999,6 +1002,70 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.snapshot().phase).toBe("stopped");
   });
 
+  it("owns the full shutdown deadline before posting to the worker", async () => {
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    vi.spyOn(children[0], "postMessage").mockImplementationOnce(() => {
+      throw new Error("worker port closed");
+    });
+    const shutdownDeadlineAt = Date.now() + 2_000;
+
+    const stopped = supervisor.stop();
+
+    expect(forceKill).toHaveBeenCalledWith(10_000, shutdownDeadlineAt);
+    expect(forceKill).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    children[0].exit(137);
+    await expect(stopped).resolves.toBe(true);
+  });
+
+  it("executes the supervisor tree fallback while an unconfirmed runtime close keeps the worker alive", async () => {
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    let settled = false;
+    const stopped = supervisor.stop().then((confirmed) => {
+      settled = true;
+      return confirmed;
+    });
+    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+
+    expect(settled).toBe(false);
+    expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
+
+    children[0].exit(137);
+    await expect(stopped).resolves.toBe(true);
+    vi.runAllTimers();
+    expect(forceKill).toHaveBeenCalledOnce();
+  });
+
+  it("reuses an early tree fallback through grace and the final deadline", async () => {
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const stopped = supervisor.stop();
+    const shutdownDeadlineAt = Date.now() + 2_000;
+    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    await Promise.resolve();
+    expect(forceKill).toHaveBeenCalledWith(10_000, shutdownDeadlineAt);
+    expect(forceKill).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(forceKill).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(stopped).resolves.toBe(false);
+    expect(forceKill).toHaveBeenCalledOnce();
+
+    children[0].exit(137);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
   it("reports shutdown as unconfirmed when forced tree termination cannot be verified", async () => {
     const { children, forceKill, supervisor } = createHarness();
     forceKill.mockReturnValue(false);
@@ -1007,8 +1074,8 @@ describe("RuntimeSupervisor", () => {
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
 
     const stopped = supervisor.stop();
-    vi.advanceTimersByTime(1_000);
-    expect(forceKill).toHaveBeenCalledWith(10_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
     expect(supervisor.snapshot().lastError).toBe(
       "The runtime process tree could not be confirmed stopped.",
     );
@@ -1036,7 +1103,7 @@ describe("RuntimeSupervisor", () => {
     expect(children).toHaveLength(1);
   });
 
-  it("reports an unconfirmed stop without releasing attachments from a live utility process", async () => {
+  it("keeps one force-kill attempt within the responsive supervisor deadline", async () => {
     const attachmentBroker: RuntimeAttachmentBroker = {
       resolve: vi.fn(async () => trustedAttachment),
       release: vi.fn(async () => true),
@@ -1044,6 +1111,11 @@ describe("RuntimeSupervisor", () => {
     const { children, forceKill, supervisor } = createHarness({
       attachmentBroker,
     });
+    let resolveForceKill!: (confirmed: boolean) => void;
+    forceKill.mockImplementation(() =>
+      new Promise<boolean>((resolve) => {
+        resolveForceKill = resolve;
+      }));
     supervisor.start();
     children[0].spawn();
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
@@ -1055,24 +1127,32 @@ describe("RuntimeSupervisor", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
 
-    const stopped = supervisor.stop();
-    vi.advanceTimersByTime(1_000);
+    let stopSettled = false;
+    const stopped = supervisor.stop().then((confirmed) => {
+      stopSettled = true;
+      return confirmed;
+    });
+    const shutdownDeadlineAt = Date.now() + 2_000;
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(children[0].killCalls).toBe(0);
-    expect(forceKill).toHaveBeenCalledWith(10_000);
-    vi.advanceTimersByTime(500);
-    expect(forceKill).toHaveBeenCalledWith(10_000);
-    expect(forceKill).toHaveBeenCalledTimes(2);
-    vi.advanceTimersByTime(500);
-    expect(forceKill).toHaveBeenCalledTimes(3);
+    expect(forceKill).toHaveBeenCalledWith(10_000, shutdownDeadlineAt);
+    expect(forceKill).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(forceKill).toHaveBeenCalledOnce();
+    expect(stopSettled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     await expect(stopped).resolves.toBe(false);
+    expect(forceKill).toHaveBeenCalledOnce();
     expect(supervisor.snapshot()).toMatchObject({
       phase: "stopping",
       pid: 10_000,
-      lastError: expect.stringContaining("shutdown deadline"),
+      lastError: "The runtime process tree could not be confirmed stopped.",
     });
     expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
     expect(attachmentBroker.release).not.toHaveBeenCalled();
 
+    resolveForceKill(false);
+    await vi.advanceTimersByTimeAsync(0);
     children[0].exit(137);
     await vi.advanceTimersByTimeAsync(0);
     expect(supervisor.snapshot()).toMatchObject({

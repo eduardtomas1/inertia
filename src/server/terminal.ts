@@ -5,11 +5,23 @@ import { spawn, type IDisposable, type IPty } from "node-pty";
 import WebSocket from "ws";
 
 import type { ServerEvent } from "../shared/contracts";
+import {
+  createOwnedPidProcessTreeTermination,
+  type OwnedPidProcessTreeTermination,
+  type WaitForProcessExit,
+} from "./process-lifecycle";
 
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
 const MAX_BUFFERED_OUTPUT = 1024 * 1024;
 const OUTPUT_CHUNK_SIZE = 16 * 1024;
+// node-pty's Windows ConPTY backend intentionally delays its public exit event
+// for 1 second while output drains. Leave bounded headroom for that signal and
+// the final resource-settle check while still finishing well before the
+// supervisor's 3-second process-tree fallback.
+const TERMINAL_SHUTDOWN_TIMEOUT_MS = process.platform === "win32"
+  ? 1_500
+  : 1_000;
 
 interface TerminalSession {
   id: string;
@@ -17,7 +29,25 @@ interface TerminalSession {
   pty: IPty;
   dataListener: IDisposable;
   exitListener: IDisposable;
+  exitObserved: boolean;
+  exitWaiters: Set<() => void>;
+  terminationRequested: boolean;
+  closing: Promise<void> | null;
+  terminateProcessTree: OwnedPidProcessTreeTermination | null;
   onExit?: (exitCode: number) => void;
+}
+
+export interface TerminalManagerOptions {
+  spawnTerminal?: typeof spawn;
+  shutdownTimeoutMs?: number;
+  createProcessTreeTermination?: (
+    pid: number,
+    waitForExit: WaitForProcessExit,
+  ) => OwnedPidProcessTreeTermination;
+  terminateProcessTree?: (
+    pid: number,
+    waitForExit: WaitForProcessExit,
+  ) => Promise<boolean>;
 }
 
 function userShell(): { executable: string; args: string[] } {
@@ -45,6 +75,39 @@ function send(socket: WebSocket, event: ServerEvent): void {
 
 export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
+  private readonly closingSessions = new Set<Promise<void>>();
+  private readonly spawnTerminal: typeof spawn;
+  private readonly shutdownTimeoutMs: number;
+  private readonly createProcessTreeTermination: (
+    pid: number,
+    waitForExit: WaitForProcessExit,
+  ) => OwnedPidProcessTreeTermination;
+  private readonly closingFailures = new Map<string, Error>();
+
+  constructor(options: TerminalManagerOptions = {}) {
+    this.spawnTerminal = options.spawnTerminal ?? spawn;
+    this.shutdownTimeoutMs = Math.max(
+      1,
+      Math.min(
+        Math.trunc(
+          options.shutdownTimeoutMs ?? TERMINAL_SHUTDOWN_TIMEOUT_MS,
+        ),
+        30_000,
+      ),
+    );
+    const terminateProcessTree = options.terminateProcessTree;
+    this.createProcessTreeTermination = options.createProcessTreeTermination
+      ?? ((pid, waitForExit) => {
+        if (terminateProcessTree) {
+          return () => terminateProcessTree(pid, waitForExit);
+        }
+        return createOwnedPidProcessTreeTermination(
+          pid,
+          waitForExit,
+          { waitMs: this.shutdownTimeoutMs },
+        );
+      });
+  }
 
   create(
     owner: WebSocket,
@@ -76,7 +139,7 @@ export class TerminalManager {
     const id = randomUUID();
     let pseudoterminal: IPty;
     try {
-      pseudoterminal = spawn(executable, typeof args === "string" ? args : [...args], {
+      pseudoterminal = this.spawnTerminal(executable, typeof args === "string" ? args : [...args], {
         name: "xterm-256color",
         cols,
         rows,
@@ -87,6 +150,7 @@ export class TerminalManager {
       throw new TerminalError("Unable to start a terminal for this project.");
     }
 
+    let session!: TerminalSession;
     const dataListener = pseudoterminal.onData((data) => {
       onOutput?.(data);
       for (let offset = 0; offset < data.length; offset += OUTPUT_CHUNK_SIZE) {
@@ -94,11 +158,28 @@ export class TerminalManager {
       }
     });
     const exitListener = pseudoterminal.onExit(({ exitCode }) => {
+      session.exitObserved = true;
+      for (const resolveExit of session.exitWaiters) resolveExit();
+      session.exitWaiters.clear();
+      if (session.terminationRequested) return;
       this.dispose(id, false);
       send(owner, { type: "terminal.exit", terminalId: id, exitCode });
       onExit?.(exitCode);
     });
-    this.sessions.set(id, { id, owner, pty: pseudoterminal, dataListener, exitListener, onExit });
+    session = {
+      id,
+      owner,
+      pty: pseudoterminal,
+      dataListener,
+      exitListener,
+      exitObserved: false,
+      exitWaiters: new Set(),
+      terminationRequested: false,
+      closing: null,
+      terminateProcessTree: null,
+      onExit,
+    };
+    this.sessions.set(id, session);
     return id;
   }
 
@@ -115,8 +196,7 @@ export class TerminalManager {
   }
 
   close(owner: WebSocket, terminalId: string): void {
-    this.ownedSession(owner, terminalId);
-    this.dispose(terminalId, true);
+    void this.trackDisposal(this.ownedSession(owner, terminalId, true));
   }
 
   /**
@@ -124,25 +204,57 @@ export class TerminalManager {
    * This is intentionally not exposed through the client protocol by terminal
    * ID, so callers must first resolve an owned run on the server.
    */
-  closeManaged(terminalId: string): boolean {
-    if (!this.sessions.has(terminalId)) return false;
-    this.dispose(terminalId, true);
+  async closeManaged(terminalId: string): Promise<boolean> {
+    const session = this.sessions.get(terminalId);
+    if (!session) return false;
+    await this.trackDisposal(session);
     return true;
   }
 
   disposeOwner(owner: WebSocket): void {
     for (const session of this.sessions.values()) {
-      if (session.owner === owner) this.dispose(session.id, true);
+      if (session.owner === owner) void this.trackDisposal(session);
     }
   }
 
-  disposeAll(): void {
-    for (const terminalId of this.sessions.keys()) this.dispose(terminalId, true);
+  async disposeAll(): Promise<void> {
+    for (const session of this.sessions.values()) {
+      void this.trackDisposal(session);
+    }
+    const closing = [...this.closingSessions];
+    const results = await Promise.allSettled(closing);
+    for (const promise of closing) this.closingSessions.delete(promise);
+    const trackedFailure = this.closingFailures.values().next().value;
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult =>
+        result.status === "rejected",
+    );
+    const failure = trackedFailure
+      ?? (
+        rejected?.reason instanceof Error
+          ? rejected.reason
+          : rejected
+            ? new TerminalError(
+                "A terminal process did not exit during runtime shutdown.",
+              )
+            : null
+      );
+    if (failure) throw failure;
   }
 
-  private ownedSession(owner: WebSocket, terminalId: string): TerminalSession {
+  private ownedSession(
+    owner: WebSocket,
+    terminalId: string,
+    includeTerminating = false,
+  ): TerminalSession {
     const session = this.sessions.get(terminalId);
-    if (!session || session.owner !== owner) throw new TerminalError("Terminal not found.");
+    if (
+      !session
+      || session.owner !== owner
+      || (session.terminationRequested && !includeTerminating)
+    ) {
+      throw new TerminalError("Terminal not found.");
+    }
     return session;
   }
 
@@ -160,6 +272,87 @@ export class TerminalManager {
       }
       session.onExit?.(130);
     }
+  }
+
+  private disposeAndWait(session: TerminalSession): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const waitForExit: WaitForProcessExit = (waitMs) => {
+        if (session.exitObserved) return Promise.resolve(true);
+        return new Promise<boolean>((resolveWait) => {
+          let waitSettled = false;
+          const finishWait = (didExit: boolean): void => {
+            if (waitSettled) return;
+            waitSettled = true;
+            clearTimeout(waitTimer);
+            session.exitWaiters.delete(observeExit);
+            resolveWait(didExit);
+          };
+          const observeExit = (): void => finishWait(true);
+          session.exitWaiters.add(observeExit);
+          const waitTimer = setTimeout(() => finishWait(false), waitMs);
+        });
+      };
+      const finish = (error?: Error): void => {
+        if (settled) return;
+        settled = true;
+        if (error) reject(error);
+        else resolve();
+      };
+      session.terminationRequested = true;
+      // Start with the root still alive. On POSIX the terminator freezes it
+      // before snapshotting descendants, preventing a prompt root exit from
+      // reparenting a surviving background process beyond discovery.
+      session.terminateProcessTree ??= this.createProcessTreeTermination(
+        session.pty.pid,
+        waitForExit,
+      );
+      void session.terminateProcessTree().then(
+        (confirmed) => {
+          if (!confirmed) {
+            finish(new TerminalError(
+              "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+            ));
+            return;
+          }
+          this.dispose(session.id, false);
+          try {
+            session.onExit?.(130);
+          } catch {
+            // The owned tree is already confirmed stopped; lifecycle
+            // observers must not turn that confirmation into a retryable leak.
+          }
+          finish();
+        },
+        () => finish(new TerminalError(
+          "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+        )),
+      );
+    });
+  }
+
+  private trackDisposal(session: TerminalSession): Promise<void> {
+    if (session.closing) return session.closing;
+    const closing = this.disposeAndWait(session);
+    session.closing = closing;
+    this.closingSessions.add(closing);
+    void closing.then(
+      () => {
+        this.closingSessions.delete(closing);
+        this.closingFailures.delete(session.id);
+        if (session.closing === closing) session.closing = null;
+      },
+      (error: unknown) => {
+        this.closingSessions.delete(closing);
+        this.closingFailures.set(session.id, error instanceof Error
+          ? error
+          : new TerminalError(
+              "A terminal process did not exit during runtime shutdown.",
+            ));
+        if (session.closing === closing) session.closing = null;
+      },
+    );
+    return closing;
   }
 }
 

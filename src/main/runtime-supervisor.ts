@@ -38,6 +38,9 @@ interface RuntimeProcessRecord {
   ready: boolean;
   acceptingReady: boolean;
   processTreeTerminationConfirmed: boolean;
+  processTreeTermination: Promise<boolean> | null;
+  processTreeTerminationSettled: boolean;
+  shutdownDeadlineAt: number | null;
   reportedFailure: string | null;
   credentialRequestIds: Set<string>;
   secureFileRequestIds: Set<string>;
@@ -109,7 +112,10 @@ export interface RuntimeSupervisorOptions {
   forceKillWaitMs?: number;
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;
-  forceKill?: (pid: number) => boolean;
+  forceKill?: (
+    pid: number,
+    deadlineAt: number,
+  ) => boolean | Promise<boolean>;
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
   secureFileBroker?: RuntimeSecureFileBroker;
@@ -132,7 +138,10 @@ export class RuntimeSupervisor {
   private readonly forceKillWaitMs: number;
   private readonly setTimer: typeof setTimeout;
   private readonly clearTimer: typeof clearTimeout;
-  private readonly forceKill: (pid: number) => boolean;
+  private readonly forceKill: (
+    pid: number,
+    deadlineAt: number,
+  ) => boolean | Promise<boolean>;
   private readonly credentialBroker?: RuntimeCredentialBroker;
   private readonly credentialRequestTimeoutMs: number;
   private readonly attachmentRequests: RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
@@ -148,7 +157,6 @@ export class RuntimeSupervisor {
   private startupTimer: Timer | null = null;
   private stableTimer: Timer | null = null;
   private shutdownTimer: Timer | null = null;
-  private forceKillTimer: Timer | null = null;
   private shutdownDeadlineTimer: Timer | null = null;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
   private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
@@ -167,7 +175,9 @@ export class RuntimeSupervisor {
     this.forceKillWaitMs = boundedDuration(options.forceKillWaitMs, DEFAULT_FORCE_KILL_WAIT_MS);
     this.setTimer = options.setTimer ?? setTimeout;
     this.clearTimer = options.clearTimer ?? clearTimeout;
-    this.forceKill = options.forceKill ?? forceKillRuntimeProcessTree;
+    this.forceKill = options.forceKill
+      ?? ((pid, deadlineAt) =>
+        forceKillRuntimeProcessTree(pid, { deadlineAt }));
     this.credentialBroker = options.credentialBroker;
     this.secureFileBroker = options.secureFileBroker;
     this.credentialRequestTimeoutMs = boundedDuration(
@@ -276,31 +286,26 @@ export class RuntimeSupervisor {
     ]).then(([runtimeConfirmed, secureFilesConfirmed]) => (
       runtimeConfirmed && secureFilesConfirmed
     ));
-    this.post(this.current.child, { type: "runtime.shutdown" });
     const record = this.current;
     const child = record.child;
+    const shutdownDeadlineMs =
+      this.shutdownGraceMs + this.forceKillWaitMs * 2;
+    record.shutdownDeadlineAt = Date.now() + shutdownDeadlineMs;
+    this.post(child, { type: "runtime.shutdown" });
     this.shutdownTimer = this.setTimer(() => {
       this.shutdownTimer = null;
       this.forceTerminate(child);
-      this.forceKillTimer = this.setTimer(() => {
-        this.forceKillTimer = null;
-        if (this.current !== record) return;
-        const pid = child.pid;
-        if (pid) this.forceTerminate(child);
-      }, this.forceKillWaitMs);
     }, this.shutdownGraceMs);
     this.shutdownDeadlineTimer = this.setTimer(() => {
       this.shutdownDeadlineTimer = null;
       if (this.current !== record) return;
-      const pid = child.pid;
-      if (pid) this.forceTerminate(child);
       this.lastError = record.processTreeTerminationConfirmed
         ? "The runtime process did not report exit before the shutdown deadline; forced termination was requested."
         : "The runtime process tree could not be confirmed stopped.";
       this.emitState();
       this.resolveStop?.(false);
       this.resolveStop = null;
-    }, this.shutdownGraceMs + this.forceKillWaitMs * 2);
+    }, shutdownDeadlineMs);
     return this.stopPromise;
   }
 
@@ -327,6 +332,9 @@ export class RuntimeSupervisor {
       ready: false,
       acceptingReady: true,
       processTreeTerminationConfirmed: true,
+      processTreeTermination: null,
+      processTreeTerminationSettled: false,
+      shutdownDeadlineAt: null,
       reportedFailure: null,
       credentialRequestIds: new Set(),
       secureFileRequestIds: new Set(),
@@ -409,6 +417,17 @@ export class RuntimeSupervisor {
       this.emitState();
       return;
     }
+    if (event.type === "runtime.shutdown-unconfirmed") {
+      record.acceptingReady = false;
+      this.lastError = "The runtime could not confirm complete process cleanup.";
+      this.clearTimerValue("startupTimer");
+      this.clearCredentialRequests(record);
+      this.clearSecureFileRequests(record);
+      this.attachmentRequests.clear(record);
+      this.forceTerminate(record.child);
+      this.emitState();
+      return;
+    }
     if (event.type === "runtime.stopped") {
       record.acceptingReady = false;
       this.clearCredentialRequests(record);
@@ -479,19 +498,34 @@ export class RuntimeSupervisor {
 
   private forceTerminate(child: UtilityProcess): void {
     const pid = child.pid;
-    if (pid) {
-      let confirmed = false;
+    const record = this.current;
+    if (pid && record?.child === child) {
+      if (record.processTreeTermination) return;
+      record.processTreeTerminationConfirmed = false;
+      const deadlineAt = record.shutdownDeadlineAt
+        ?? Date.now() + this.forceKillWaitMs * 2;
+      let resolveTermination!: (confirmed: boolean) => void;
+      const termination = new Promise<boolean>((resolve) => {
+        resolveTermination = resolve;
+      });
+      record.processTreeTermination = termination;
       try {
-        confirmed = this.forceKill(pid);
+        void Promise.resolve(this.forceKill(pid, deadlineAt)).then(
+          resolveTermination,
+          () => resolveTermination(false),
+        );
       } catch {
-        // Normalize every termination failure to the same observable state.
+        resolveTermination(false);
       }
-      const record = this.current;
-      if (!confirmed && record?.child === child) {
-        record.processTreeTerminationConfirmed = false;
-        this.lastError = "The runtime process tree could not be confirmed stopped.";
-        this.emitState();
-      }
+      void termination.then((confirmed) => {
+        record.processTreeTerminationConfirmed = confirmed;
+        record.processTreeTerminationSettled = true;
+        if (!confirmed && this.current === record) {
+          this.lastError =
+            "The runtime process tree could not be confirmed stopped.";
+          this.emitState();
+        }
+      });
       return;
     }
     child.kill();
@@ -499,7 +533,6 @@ export class RuntimeSupervisor {
 
   private clearShutdownTimers(): void {
     this.clearTimerValue("shutdownTimer");
-    this.clearTimerValue("forceKillTimer");
     this.clearTimerValue("shutdownDeadlineTimer");
   }
 
@@ -753,6 +786,14 @@ export class RuntimeSupervisor {
 
   private settleStopped(record: RuntimeProcessRecord): void {
     if (this.current !== record || this.desiredRunning) return;
+    if (
+      record.processTreeTermination
+      && !record.processTreeTerminationSettled
+    ) {
+      void record.processTreeTermination.then(() =>
+        this.settleStopped(record));
+      return;
+    }
     this.current = null;
     this.websocketUrl = null;
     this.clearShutdownTimers();
@@ -762,7 +803,7 @@ export class RuntimeSupervisor {
     this.resolveStop = null;
   }
 
-  private clearTimerValue(key: "restartTimer" | "startupTimer" | "stableTimer" | "shutdownTimer" | "forceKillTimer" | "shutdownDeadlineTimer"): void {
+  private clearTimerValue(key: "restartTimer" | "startupTimer" | "stableTimer" | "shutdownTimer" | "shutdownDeadlineTimer"): void {
     const timer = this[key];
     if (!timer) return;
     this.clearTimer(timer);

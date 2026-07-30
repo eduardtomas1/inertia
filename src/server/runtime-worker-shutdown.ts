@@ -1,0 +1,34 @@
+import type { RuntimeWorkerEvent } from "../node/runtime-process-protocol.js";
+import type { RunningRuntime } from "./index.js";
+
+interface RuntimeWorkerShutdownOptions {
+  runtime: RunningRuntime | null;
+  cause: "runtime-shutdown" | "runtime-crash";
+  exitCode: number;
+  closeBrokers: () => void;
+  post: (event: RuntimeWorkerEvent) => void;
+  exit: (code: number) => void;
+}
+
+/**
+ * A failed runtime close means owned process cleanup was not confirmed. Keep
+ * the utility process alive so its supervisor can still discover and
+ * terminate the complete descendant tree.
+ */
+export async function completeRuntimeWorkerShutdown(
+  options: RuntimeWorkerShutdownOptions,
+): Promise<void> {
+  let shutdownConfirmed = true;
+  try {
+    await options.runtime?.close(options.cause);
+  } catch {
+    shutdownConfirmed = false;
+  }
+  options.closeBrokers();
+  if (!shutdownConfirmed) {
+    options.post({ type: "runtime.shutdown-unconfirmed" });
+    return;
+  }
+  options.post({ type: "runtime.stopped" });
+  options.exit(options.exitCode);
+}

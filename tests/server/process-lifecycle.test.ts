@@ -3,7 +3,9 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createOwnedPidProcessTreeTermination,
   createOwnedProcessTreeTermination,
+  forceTerminateProcessTreeByPidAndWait,
   ProcessTreeTerminationError,
   requireProcessTreeTermination,
   terminateProcessTree,
@@ -495,5 +497,257 @@ describe("provider process-tree termination", () => {
 
     expect(Date.now() - startedAt).toBeLessThan(500);
     expect(killProcess).toHaveBeenCalledWith(4_243, "SIGKILL");
+  });
+
+  it("confirms a PID-owned POSIX tree only after descendants and the root exit", async () => {
+    const running = new Set([4_242, 4_243]);
+    const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+      const target = Math.abs(pid);
+      if (signal === 0) {
+        if (!running.has(target)) throw new Error("process gone");
+        return true as const;
+      }
+      if (signal === "SIGKILL") running.delete(target);
+      return true as const;
+    });
+    const waitForRootExit = vi.fn(async (_waitMs: number) =>
+      !running.has(4_242));
+
+    await expect(forceTerminateProcessTreeByPidAndWait(
+      4_242,
+      waitForRootExit,
+      {
+        platform: "linux",
+        killProcess,
+        spawnProcessSync: vi.fn(() => ({
+          status: 0,
+          stdout: "4243 4242\n",
+        })) as never,
+        waitMs: 25,
+      },
+    )).resolves.toBe(true);
+
+    expect(killProcess).toHaveBeenCalledWith(4_243, "SIGKILL");
+    expect(killProcess).toHaveBeenCalledWith(-4_242, "SIGKILL");
+    const rootExitBudget = waitForRootExit.mock.calls[0]?.[0];
+    expect(rootExitBudget).toBeGreaterThan(0);
+    expect(rootExitBudget).toBeLessThanOrEqual(25);
+  });
+
+  it("retries confirmation without re-signalling the original POSIX identities", async () => {
+    vi.useFakeTimers();
+    try {
+      const running = new Set([4_242, 4_243]);
+      const killProcess = vi.fn((
+        pid: number,
+        signal?: NodeJS.Signals | number,
+      ) => {
+        if (signal === 0) {
+          if (!running.has(Math.abs(pid))) throw new Error("process gone");
+        }
+        return true as const;
+      });
+      const spawnProcessSync = vi.fn(() => ({
+        status: 0,
+        stdout: "4243 4242\n",
+      }));
+      const waitForRootExit = vi.fn(async () => !running.has(4_242));
+      const terminate = createOwnedPidProcessTreeTermination(
+        4_242,
+        waitForRootExit,
+        {
+          platform: "linux",
+          killProcess,
+          spawnProcessSync: spawnProcessSync as never,
+          waitMs: 25,
+        },
+      );
+
+      const first = terminate();
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(first).resolves.toBe(false);
+      const signalsAfterFirstAttempt = killProcess.mock.calls.filter(
+        ([, signal]) => signal !== 0,
+      );
+      running.clear();
+
+      await expect(terminate()).resolves.toBe(true);
+      expect(spawnProcessSync).toHaveBeenCalledTimes(2);
+      expect(killProcess.mock.calls.filter(
+        ([, signal]) => signal !== 0,
+      )).toEqual(signalsAfterFirstAttempt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not signal a recycled descendant PID during confirmation retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const running = new Set([4_242, 4_243]);
+      const killProcess = vi.fn((
+        pid: number,
+        signal?: NodeJS.Signals | number,
+      ) => {
+        if (signal === 0) {
+          if (!running.has(Math.abs(pid))) throw new Error("process gone");
+        }
+        return true as const;
+      });
+      const spawnProcessSync = vi.fn(() => ({
+        status: 0,
+        stdout: "4243 4242\n",
+      }));
+      const rootExited = vi.fn(async () => !running.has(4_242));
+      const terminate = createOwnedPidProcessTreeTermination(
+        4_242,
+        rootExited,
+        {
+          platform: "linux",
+          killProcess,
+          spawnProcessSync: spawnProcessSync as never,
+          waitMs: 25,
+        },
+      );
+
+      const first = terminate();
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(first).resolves.toBe(false);
+      const signalsAfterFirstAttempt = killProcess.mock.calls.filter(
+        ([, signal]) => signal !== 0,
+      );
+      running.delete(4_242);
+      running.delete(4_243);
+      // The original child exited, but another process now owns its numeric
+      // PID. Confirmation must fail closed without signalling that process.
+      running.add(4_243);
+
+      const retry = terminate();
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(retry).resolves.toBe(false);
+      expect(spawnProcessSync).toHaveBeenCalledTimes(2);
+      expect(killProcess.mock.calls.filter(
+        ([, signal]) => signal !== 0,
+      )).toEqual(signalsAfterFirstAttempt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not confirm a PID-owned Windows tree when trusted taskkill fails", async () => {
+    const taskkill = fakeTaskkill();
+    const waitForRootExit = vi.fn(async () => true);
+    const termination = forceTerminateProcessTreeByPidAndWait(
+      4_242,
+      waitForRootExit,
+      {
+        platform: "win32",
+        spawnProcess: vi.fn(() => taskkill) as never,
+        windowsSystemRoot: "C:\\Windows",
+        waitMs: 25,
+      },
+    );
+
+    taskkill.emit("close", 1);
+
+    await expect(termination).resolves.toBe(false);
+    expect(waitForRootExit).not.toHaveBeenCalled();
+  });
+
+  it("does not retarget a recycled Windows root after taskkill fails", async () => {
+    const taskkill = fakeTaskkill();
+    const spawnProcess = vi.fn(() => taskkill);
+    const waitForRootExit = vi.fn(async () => true);
+    const terminate = createOwnedPidProcessTreeTermination(
+      4_242,
+      waitForRootExit,
+      {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: "C:\\Windows",
+        waitMs: 25,
+      },
+    );
+    const first = terminate();
+    taskkill.emit("close", 1);
+
+    await expect(first).resolves.toBe(false);
+    await expect(terminate()).resolves.toBe(false);
+    expect(spawnProcess).toHaveBeenCalledOnce();
+    expect(waitForRootExit).not.toHaveBeenCalled();
+  });
+
+  it("shares one bounded Windows deadline across taskkill, root exit, and resource settling", async () => {
+    vi.useFakeTimers();
+    try {
+      const taskkill = fakeTaskkill();
+      const waitForRootExit = vi.fn((waitMs: number) =>
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => resolve(true), waitMs);
+        }));
+      let settled = false;
+      const termination = forceTerminateProcessTreeByPidAndWait(
+        4_242,
+        waitForRootExit,
+        {
+          platform: "win32",
+          spawnProcess: vi.fn(() => taskkill) as never,
+          windowsSystemRoot: "C:\\Windows",
+          waitMs: 1_000,
+        },
+      ).then((confirmed) => {
+        settled = true;
+        return confirmed;
+      });
+      setTimeout(() => taskkill.emit("close", 0), 600);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).toBe(false);
+      expect(waitForRootExit).toHaveBeenCalledWith(300);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(termination).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("allows the bounded node-pty Windows exit-flush delay before confirmation", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const taskkill = fakeTaskkill();
+      const waitForRootExit = vi.fn((_waitMs: number) =>
+        new Promise<boolean>((resolve) => {
+          // node-pty's ConPTY backend delays onExit by this output-flush window
+          // after its root process has already exited.
+          setTimeout(() => resolve(true), 1_000);
+        }));
+      let settled = false;
+      const termination = forceTerminateProcessTreeByPidAndWait(
+        4_242,
+        waitForRootExit,
+        {
+          platform: "win32",
+          spawnProcess: vi.fn(() => taskkill) as never,
+          windowsSystemRoot: "C:\\Windows",
+          waitMs: 1_500,
+        },
+      ).then((confirmed) => {
+        settled = true;
+        return confirmed;
+      });
+      taskkill.emit("close", 0);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).toBe(false);
+      expect(waitForRootExit).toHaveBeenCalledWith(1_400);
+
+      await vi.advanceTimersByTimeAsync(101);
+      await expect(termination).resolves.toBe(true);
+      expect(Date.now()).toBe(1_100);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

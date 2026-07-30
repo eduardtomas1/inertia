@@ -201,6 +201,10 @@ describe("runtime process protocol", () => {
       message: "SQLite unavailable",
     });
     expect(parseRuntimeWorkerEvent({ type: "runtime.startup-failed", message: "x".repeat(1001) })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.shutdown-unconfirmed" })).toEqual({
+      type: "runtime.shutdown-unconfirmed",
+    });
+    expect(parseRuntimeWorkerEvent({ type: "runtime.shutdown-unconfirmed", extra: true })).toBeNull();
     expect(parseRuntimeWorkerEvent({ type: "runtime.stopped", extra: true })).toBeNull();
   });
 

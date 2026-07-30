@@ -218,7 +218,7 @@ function useTimelineGutter(
   return gutter;
 }
 
-interface TimelineMarker {
+export interface TimelineMarker {
   timelineIndex: number;
   id: string;
   label: string;
@@ -227,7 +227,7 @@ interface TimelineMarker {
 
 const EMPTY_SUBAGENTS: SubagentTrace[] = [];
 
-function TimelineMinimap({
+export function TimelineMinimap({
   activeIndex,
   left,
   markers,
@@ -238,6 +238,9 @@ function TimelineMinimap({
   markers: TimelineMarker[];
   onNavigate: (index: number, target: TimelineJumpTarget) => void;
 }): React.JSX.Element {
+  const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
+  const [focusedMarkerId, setFocusedMarkerId] = useState<string | null>(null);
+  const previewedMarkerId = hoveredMarkerId ?? focusedMarkerId;
   let activeMarker = 0;
   markers.forEach((marker, index) => {
     if (marker.timelineIndex <= activeIndex) activeMarker = index;
@@ -267,12 +270,34 @@ function TimelineMinimap({
             type="button"
             key={marker.id}
             aria-current={index === activeMarker ? "true" : undefined}
+            aria-describedby={
+              previewedMarkerId === marker.id
+                ? `timeline-minimap-preview-${marker.id}`
+                : undefined
+            }
             aria-label={`Go to turn ${marker.number}: ${marker.label}`}
-            data-request-preview={`Turn ${marker.number} · ${marker.label}`}
+            data-emphasized={
+              previewedMarkerId === marker.id ? "true" : undefined
+            }
             tabIndex={index === activeMarker ? 0 : -1}
-            title={`Turn ${marker.number}: ${marker.label}`}
+            onPointerEnter={() => setHoveredMarkerId(marker.id)}
+            onPointerLeave={() => setHoveredMarkerId((current) =>
+              current === marker.id ? null : current)}
+            onFocus={() => setFocusedMarkerId(marker.id)}
+            onBlur={() => setFocusedMarkerId((current) =>
+              current === marker.id ? null : current)}
             onClick={() => onNavigate(marker.timelineIndex, "turn")}
-          />
+          >
+            {previewedMarkerId === marker.id && (
+              <span
+                id={`timeline-minimap-preview-${marker.id}`}
+                className="timeline-minimap-preview"
+                role="tooltip"
+              >
+                {`Turn ${marker.number} · ${marker.label}`}
+              </span>
+            )}
+          </button>
         ))}
       </nav>
     </div>

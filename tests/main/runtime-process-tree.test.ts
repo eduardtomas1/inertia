@@ -32,8 +32,11 @@ describe("runtime process-tree termination", () => {
     ].join("\n"))).toEqual([102, 101, 103]);
   });
 
-  it("freezes and kills every discovered POSIX descendant", () => {
-    const kill = vi.fn();
+  it("freezes and kills every discovered POSIX descendant", async () => {
+    const kill = vi.fn((_pid: number, signal?: number | NodeJS.Signals): true => {
+      if (signal === 0) throw new Error("process exited");
+      return true;
+    });
     const spawnProcessSync = vi.fn(() => ({
       pid: 1,
       output: [],
@@ -43,7 +46,7 @@ describe("runtime process-tree termination", () => {
       signal: null,
       error: undefined,
     }));
-    forceKillRuntimeProcessTree(100, {
+    await forceKillRuntimeProcessTree(100, {
       platform: "linux",
       kill,
       spawnProcessSync: spawnProcessSync as never,
@@ -69,11 +72,16 @@ describe("runtime process-tree termination", () => {
       [-101, "SIGKILL"],
       [101, "SIGKILL"],
       [100, "SIGKILL"],
+      [102, 0],
+      [101, 0],
     ]);
   });
 
-  it("freezes descendants discovered during the POSIX snapshot race", () => {
-    const kill = vi.fn();
+  it("freezes descendants discovered during the POSIX snapshot race", async () => {
+    const kill = vi.fn((_pid: number, signal?: number | NodeJS.Signals): true => {
+      if (signal === 0) throw new Error("process exited");
+      return true;
+    });
     const tables = [
       "100 1\n101 100\n",
       "100 1\n101 100\n102 101\n",
@@ -84,7 +92,7 @@ describe("runtime process-tree termination", () => {
       status: 0,
     }));
 
-    forceKillRuntimeProcessTree(100, {
+    await forceKillRuntimeProcessTree(100, {
       platform: "darwin",
       kill,
       spawnProcessSync: spawnProcessSync as never,
@@ -93,11 +101,56 @@ describe("runtime process-tree termination", () => {
     expect(spawnProcessSync).toHaveBeenCalledTimes(3);
     expect(kill.mock.calls).toContainEqual([-102, "SIGSTOP"]);
     expect(kill.mock.calls).toContainEqual([102, "SIGKILL"]);
-    expect(kill.mock.calls.at(-1)).toEqual([100, "SIGKILL"]);
+    expect(kill.mock.calls).toContainEqual([102, 0]);
   });
 
-  it("waits boundedly for Windows tree termination", () => {
-    const spawnProcessSync = vi.fn(() => ({
+  it("keeps the event loop responsive while a surviving descendant remains unconfirmed", async () => {
+    vi.useFakeTimers();
+    try {
+      const kill = vi.fn((
+        pid: number,
+        signal?: number | NodeJS.Signals,
+      ): true => {
+        if (signal === 0 && pid !== 101) {
+          throw new Error("process exited");
+        }
+        return true;
+      });
+      const spawnProcessSync = vi.fn(() => ({
+        stdout: "100 1\n101 100\n",
+        status: 0,
+      }));
+      let eventLoopProgressed = false;
+      let settled = false;
+      const deadlineAt = Date.now() + 25;
+      const termination = forceKillRuntimeProcessTree(100, {
+        platform: "linux",
+        kill,
+        spawnProcessSync: spawnProcessSync as never,
+        deadlineAt,
+      }).then((confirmed) => {
+        settled = true;
+        return confirmed;
+      });
+      setTimeout(() => {
+        eventLoopProgressed = true;
+      }, 5);
+
+      await vi.advanceTimersByTimeAsync(5);
+      expect(eventLoopProgressed).toBe(true);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(termination).resolves.toBe(false);
+      expect(kill).toHaveBeenCalledWith(101, 0);
+      expect(Date.now()).toBe(deadlineAt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits boundedly for Windows tree termination", async () => {
+    const spawnProcessSync = vi.fn((..._args: unknown[]) => ({
       status: 0,
       error: undefined,
     }));
@@ -107,7 +160,7 @@ describe("runtime process-tree termination", () => {
       PATH: "",
     };
 
-    const confirmed = forceKillRuntimeProcessTree(100, {
+    const confirmed = await forceKillRuntimeProcessTree(100, {
       platform: "win32",
       environment,
       kill,
@@ -119,20 +172,25 @@ describe("runtime process-tree termination", () => {
       ["/pid", "100", "/t", "/f"],
       {
         env: environment,
-        timeout: 2_000,
+        timeout: expect.any(Number),
         shell: false,
         windowsHide: true,
         stdio: "ignore",
       },
     );
+    const taskkillOptions = spawnProcessSync.mock.calls[0]?.[2] as
+      | { timeout?: number }
+      | undefined;
+    expect(taskkillOptions?.timeout).toBeGreaterThan(0);
+    expect(taskkillOptions?.timeout).toBeLessThanOrEqual(2_000);
     expect(confirmed).toBe(true);
     expect(kill).not.toHaveBeenCalled();
   });
 
-  it("reports Windows tree cleanup as unconfirmed when taskkill fails", () => {
+  it("reports Windows tree cleanup as unconfirmed when taskkill fails", async () => {
     const kill = vi.fn();
 
-    const confirmed = forceKillRuntimeProcessTree(100, {
+    const confirmed = await forceKillRuntimeProcessTree(100, {
       platform: "win32",
       environment: { SystemRoot: "C:\\Windows" },
       kill,
@@ -146,11 +204,11 @@ describe("runtime process-tree termination", () => {
     expect(kill).toHaveBeenCalledWith(100, "SIGKILL");
   });
 
-  it("does not search PATH when the trusted Windows system root is unavailable", () => {
+  it("does not search PATH when the trusted Windows system root is unavailable", async () => {
     const kill = vi.fn();
     const spawnProcessSync = vi.fn();
 
-    const confirmed = forceKillRuntimeProcessTree(100, {
+    const confirmed = await forceKillRuntimeProcessTree(100, {
       platform: "win32",
       environment: { PATH: "C:\\untrusted" },
       kill,
@@ -198,7 +256,7 @@ describe("runtime process-tree termination", () => {
       );
       expect(descendantPid).toBeGreaterThan(1);
       try {
-        const confirmed = forceKillRuntimeProcessTree(parent.pid!, {
+        const confirmed = await forceKillRuntimeProcessTree(parent.pid!, {
           environment: {
             ...process.env,
             PATH: "",
@@ -252,7 +310,7 @@ describe("runtime process-tree termination", () => {
       );
       expect(descendantPid).toBeGreaterThan(1);
       try {
-        forceKillRuntimeProcessTree(parent.pid!);
+        await forceKillRuntimeProcessTree(parent.pid!);
         await Promise.all([
           waitForProcessExit(parent.pid!),
           waitForProcessExit(descendantPid),

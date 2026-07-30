@@ -39,12 +39,68 @@ export interface SelectedAttachmentStat {
   readonly isSymbolicLink: boolean;
 }
 
+export interface SelectedAttachmentIdentity {
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly isFile: boolean;
+  readonly isSymbolicLink: boolean;
+}
+
+export interface SelectedAttachmentReadSnapshot
+  extends SelectedAttachmentIdentity {
+  readonly size: bigint;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+}
+
+export function validateSelectedAttachmentOpen(
+  selected: SelectedAttachmentIdentity,
+  opened: SelectedAttachmentIdentity,
+): void {
+  if (
+    !selected.isFile
+    || selected.isSymbolicLink
+    || !opened.isFile
+    || opened.isSymbolicLink
+  ) {
+    throw new Error("The selected attachment is not a safe regular file.");
+  }
+  if (selected.dev !== opened.dev || selected.ino !== opened.ino) {
+    throw new Error("A selected attachment changed while it was being opened.");
+  }
+}
+
+export function validateSelectedAttachmentRead(
+  before: SelectedAttachmentReadSnapshot,
+  after: SelectedAttachmentReadSnapshot,
+): void {
+  if (
+    !after.isFile
+    || after.isSymbolicLink
+    || before.dev !== after.dev
+    || before.ino !== after.ino
+    || before.size !== after.size
+    || before.mtimeNs !== after.mtimeNs
+    || before.ctimeNs !== after.ctimeNs
+  ) {
+    throw new Error("A selected attachment changed while it was being read.");
+  }
+}
+
+export function validateSelectedAttachmentCount(count: number): void {
+  if (
+    !Number.isSafeInteger(count)
+    || count < 0
+    || count > MAX_CHAT_ATTACHMENTS
+  ) {
+    throw new Error(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
+  }
+}
+
 export function validateSelectedAttachmentStats(
   files: readonly SelectedAttachmentStat[],
 ): void {
-  if (files.length > MAX_CHAT_ATTACHMENTS) {
-    throw new Error(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
-  }
+  validateSelectedAttachmentCount(files.length);
   let selectedBytes = 0;
   for (const file of files) {
     if (!file.isFile || file.isSymbolicLink) {

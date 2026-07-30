@@ -35,7 +35,11 @@ import {
 } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import {
+  validateSelectedAttachmentCount,
+  validateSelectedAttachmentOpen,
+  validateSelectedAttachmentRead,
   validateSelectedAttachmentStats,
+  type SelectedAttachmentReadSnapshot,
 } from "./attachment-import.js";
 import {
   AttachmentRegistry,
@@ -392,26 +396,52 @@ function registerIpcHandlers(): void {
       properties: ["openFile", "multiSelections"],
     });
     if (result.canceled) return [];
+    validateSelectedAttachmentCount(result.filePaths.length);
     const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+    const nonBlocking = "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
     const selectedFiles: Array<{
       path: string;
       size: number;
       isFile: boolean;
+      snapshot: SelectedAttachmentReadSnapshot;
       file: Awaited<ReturnType<typeof open>>;
     }> = [];
     try {
-      for (const path of result.filePaths.slice(0, MAX_CHAT_ATTACHMENTS)) {
-        const pathInfo = await lstat(path);
+      for (const path of result.filePaths) {
+        const pathInfo = await lstat(path, { bigint: true });
         if (!pathInfo.isFile() || pathInfo.isSymbolicLink()) {
           throw new Error("The selected attachment is not a safe regular file.");
         }
-        const file = await open(path, constants.O_RDONLY | noFollow);
+        const file = await open(
+          path,
+          constants.O_RDONLY | noFollow | nonBlocking,
+        );
         try {
-          const info = await file.stat();
+          const info = await file.stat({ bigint: true });
+          validateSelectedAttachmentOpen({
+            dev: pathInfo.dev,
+            ino: pathInfo.ino,
+            isFile: pathInfo.isFile(),
+            isSymbolicLink: pathInfo.isSymbolicLink(),
+          }, {
+            dev: info.dev,
+            ino: info.ino,
+            isFile: info.isFile(),
+            isSymbolicLink: info.isSymbolicLink(),
+          });
           selectedFiles.push({
             path,
-            size: info.size,
+            size: Number(info.size),
             isFile: info.isFile(),
+            snapshot: {
+              dev: info.dev,
+              ino: info.ino,
+              size: info.size,
+              mtimeNs: info.mtimeNs,
+              ctimeNs: info.ctimeNs,
+              isFile: info.isFile(),
+              isSymbolicLink: info.isSymbolicLink(),
+            },
             file,
           });
         } catch (error) {
@@ -449,6 +479,16 @@ function registerIpcHandlers(): void {
         if (offset !== data.length || extraBytes !== 0) {
           throw new Error("A selected attachment changed while it was being read.");
         }
+        const after = await selected.file.stat({ bigint: true });
+        validateSelectedAttachmentRead(selected.snapshot, {
+          dev: after.dev,
+          ino: after.ino,
+          size: after.size,
+          mtimeNs: after.mtimeNs,
+          ctimeNs: after.ctimeNs,
+          isFile: after.isFile(),
+          isSymbolicLink: after.isSymbolicLink(),
+        });
         values.push({
           name: basename(selected.path),
           mimeType: "",

@@ -763,6 +763,47 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
           );
       `,
     });
+    migrationExtensions.push({
+      name: "PersistAttachmentExecutionContext",
+      up: `
+        DROP TRIGGER IF EXISTS turn_execution_context_refs_prune_blob;
+        CREATE TABLE turn_execution_context_refs_v35 (
+          turn_id TEXT NOT NULL REFERENCES agent_turns(id) ON DELETE CASCADE,
+          ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 31),
+          digest TEXT NOT NULL
+            REFERENCES turn_execution_context_blobs(digest) ON DELETE RESTRICT,
+          kind TEXT NOT NULL CHECK (
+            kind IN (
+              'attachment', 'file', 'diff', 'terminal', 'preview', 'review-note'
+            )
+          ),
+          label TEXT NOT NULL CHECK (length(label) BETWEEN 1 AND 4096),
+          byte_size INTEGER NOT NULL CHECK (byte_size BETWEEN 1 AND 65536),
+          truncated INTEGER NOT NULL CHECK (truncated IN (0, 1)),
+          PRIMARY KEY (turn_id, ordinal)
+        );
+        INSERT INTO turn_execution_context_refs_v35 (
+          turn_id, ordinal, digest, kind, label, byte_size, truncated
+        )
+        SELECT turn_id, ordinal, digest, kind, label, byte_size, truncated
+        FROM turn_execution_context_refs;
+        DROP TABLE turn_execution_context_refs;
+        ALTER TABLE turn_execution_context_refs_v35
+          RENAME TO turn_execution_context_refs;
+        CREATE INDEX turn_execution_context_refs_digest_idx
+          ON turn_execution_context_refs(digest);
+        CREATE TRIGGER turn_execution_context_refs_prune_blob
+        AFTER DELETE ON turn_execution_context_refs
+        BEGIN
+          DELETE FROM turn_execution_context_blobs
+          WHERE digest = OLD.digest
+            AND NOT EXISTS (
+              SELECT 1 FROM turn_execution_context_refs
+              WHERE turn_execution_context_refs.digest = OLD.digest
+            );
+        END;
+      `,
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

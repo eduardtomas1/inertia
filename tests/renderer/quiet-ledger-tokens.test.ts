@@ -28,9 +28,8 @@ describe("Minimal Workstream tokens", () => {
       "--execution-muted-text",
       "--execution-separator",
       "--activity-rail-border",
-      "--active-work-gradient-primary",
-      "--active-work-gradient-secondary",
-      "--active-work-gradient-opacity",
+      "--active-work-text-rest",
+      "--active-work-text-highlight",
       "--final-answer-text",
       "--metadata-text",
       "--user-request-tint",
@@ -67,8 +66,8 @@ describe("Minimal Workstream tokens", () => {
       expect(root, `missing ${token}`).toContain(`${token}:`);
     }
 
-    expect(root).toContain("--active-work-gradient-primary: var(--status-working)");
-    expect(root).toContain("--active-work-gradient-secondary: var(--accent)");
+    expect(root).toContain("--active-work-text-rest:");
+    expect(root).toContain("--active-work-text-highlight:");
     expect(root).toContain("--approval-accent: var(--status-approval)");
     expect(root).toContain("--question-accent: var(--status-input)");
     expect(root).toContain("--success-accent: var(--status-completed)");

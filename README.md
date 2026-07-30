@@ -115,7 +115,7 @@ Download the build for your platform, add a project, then open **Settings → Pr
 
 You only need one ready provider to begin. If none is available yet, projects, files, Git review, and terminals still work; agent runs remain disabled with a route-specific explanation instead of failing after you send a message.
 
-To run Inertia from source, use Node.js 22:
+To run Inertia from source, use Node.js 22.13 or newer in the Node 22 line:
 
 ```bash
 npm ci

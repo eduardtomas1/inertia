@@ -154,10 +154,26 @@ test("opens secure image and Linux-style clipboard PDF previews", async ({
   await pdfTrigger.click();
 
   const pdfDialog = page.getByRole("dialog", { name: "linux-clipboard.pdf" });
-  const pdfFrame = pdfDialog.getByTitle(
-    "PDF preview: linux-clipboard.pdf",
-  );
-  await expect(pdfFrame).toBeVisible();
+  const pdfCanvas = pdfDialog.getByRole("img", {
+    name: "linux-clipboard.pdf, page 1",
+  });
+  await expect(pdfCanvas).toBeVisible();
+  await expect.poll(() => pdfCanvas.evaluate((element) => {
+    const canvas = element as HTMLCanvasElement;
+    return { width: canvas.width, height: canvas.height };
+  })).toMatchObject({
+    width: expect.any(Number),
+    height: expect.any(Number),
+  });
+  expect(await pdfCanvas.evaluate((element) =>
+    (element as HTMLCanvasElement).width)).toBeGreaterThan(100);
+  await expect(pdfDialog.getByText("1 / 1", { exact: true })).toBeVisible();
+  await expect(pdfDialog.getByRole("button", {
+    name: "Previous PDF page",
+  })).toBeDisabled();
+  await expect(pdfDialog.getByRole("button", {
+    name: "Next PDF page",
+  })).toBeDisabled();
   const pdfClose = pdfDialog.getByRole("button", {
     name: "Close preview of linux-clipboard.pdf",
   });
@@ -168,7 +184,7 @@ test("opens secure image and Linux-style clipboard PDF previews", async ({
   })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(pdfClose).toBeFocused();
-  const pdfSource = await pdfFrame.getAttribute("src");
+  const pdfSource = await pdfTrigger.getAttribute("data-preview-source");
   expect(pdfSource).toMatch(
     /^inertia:\/\/bundle\/attachment-preview\/[0-9a-f-]{36}$/u,
   );
@@ -200,13 +216,15 @@ test("opens secure image and Linux-style clipboard PDF previews", async ({
   await app.resizeWindow(520, 700);
   const pdfGeometry = await pdfDialog.evaluate((element) => {
     const dialog = element.getBoundingClientRect();
-    const frame = element.querySelector("iframe")?.getBoundingClientRect();
+    const preview = element.querySelector(
+      ".pdf-attachment-preview",
+    )?.getBoundingClientRect();
     return {
       dialogLeft: dialog.left,
       dialogTop: dialog.top,
       dialogRight: dialog.right,
       dialogBottom: dialog.bottom,
-      frameHeight: frame?.height ?? 0,
+      previewHeight: preview?.height ?? 0,
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
     };
@@ -215,7 +233,7 @@ test("opens secure image and Linux-style clipboard PDF previews", async ({
   expect(pdfGeometry.dialogTop).toBeGreaterThanOrEqual(0);
   expect(pdfGeometry.dialogRight).toBeLessThanOrEqual(pdfGeometry.viewportWidth);
   expect(pdfGeometry.dialogBottom).toBeLessThanOrEqual(pdfGeometry.viewportHeight);
-  expect(pdfGeometry.frameHeight).toBeGreaterThan(300);
+  expect(pdfGeometry.previewHeight).toBeGreaterThan(300);
   const darkScreenshot = testInfo.outputPath("pdf-preview-dark-narrow.png");
   await page.screenshot({ animations: "disabled", path: darkScreenshot });
   await testInfo.attach("pdf-preview-dark-narrow", {
@@ -267,5 +285,45 @@ test("opens secure image and Linux-style clipboard PDF previews", async ({
     async ({ net }, url) => (await net.fetch(url)).status,
     pdfSource!,
   )).toBe(404);
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("sends a Linux-style pasted PDF as verified agent context", async () => {
+  const pdfBytes = readablePdf();
+  await app.resizeWindow(1_280, 820);
+  const composer = page.locator(".composer");
+  const textarea = composer.getByRole("textbox", { name: "Message" });
+  await textarea.evaluate(
+    (element, bytes) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(
+        [new Uint8Array(bytes)],
+        "linux-send.pdf",
+        { type: "" },
+      ));
+      const event = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: transfer });
+      element.dispatchEvent(event);
+    },
+    [...pdfBytes],
+  );
+  const attachments = composer.getByRole("list", { name: "Attachments" });
+  await expect(attachments.getByText("linux-send.pdf", { exact: true }))
+    .toBeVisible();
+  await textarea.fill("Summarize the attached PDF.");
+  await expect(composer.getByRole("button", { name: "Send message" }))
+    .toBeEnabled();
+  await composer.getByRole("button", { name: "Send message" }).click();
+
+  // The generic app fixture intentionally has no live provider process, so a
+  // successfully accepted request appears in the recovered-history projection
+  // rather than an authoritative turn.
+  const acceptedRequest = page.getByRole("region", {
+    name: "Recovered legacy and orphaned history",
+  }).getByText("Summarize the attached PDF.", { exact: true });
+  await expect(acceptedRequest).toBeVisible();
+  await expect(attachments).toHaveCount(0);
+  await expect(textarea).toHaveValue("");
+  await expect(page.getByRole("alert")).toHaveCount(0);
   expect(app.rendererErrors).toEqual([]);
 });

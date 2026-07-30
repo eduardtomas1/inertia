@@ -146,9 +146,17 @@ export function parseNumstat(
   return result;
 }
 
-export async function hasHead(root: string): Promise<boolean> {
+export interface GitStatusOptions {
+  deadlineAt?: number;
+}
+
+export async function hasHead(
+  root: string,
+  options: GitStatusOptions = {},
+): Promise<boolean> {
   try {
     await runGitInspection(root, ["rev-parse", "--verify", "HEAD"], {
+      deadlineAt: options.deadlineAt,
       maxOutputBytes: 256,
       failureMessage: "Unable to inspect the current commit.",
     });
@@ -163,12 +171,14 @@ export async function hasHead(root: string): Promise<boolean> {
 
 export async function getRepositoryStatus(
   repositoryPath: string,
+  options: GitStatusOptions = {},
 ): Promise<GitRepositoryStatus> {
-  const root = await repositoryRoot(repositoryPath);
+  const root = await repositoryRoot(repositoryPath, options);
   const statusResult = await runGitInspection(
     root,
     ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],
     {
+      deadlineAt: options.deadlineAt,
       maxOutputBytes: DEFAULT_OUTPUT_BYTES,
       truncateOutput: true,
       failureMessage: "Unable to read the repository status.",
@@ -177,7 +187,7 @@ export async function getRepositoryStatus(
   const parsed = parsePorcelain(statusResult.stdout);
   const statsResult = await runGitInspection(
     root,
-    (await hasHead(root))
+    (await hasHead(root, options))
       ? [
           "diff",
           "--numstat",
@@ -197,6 +207,7 @@ export async function getRepositoryStatus(
           "--",
         ],
     {
+      deadlineAt: options.deadlineAt,
       maxOutputBytes: DEFAULT_OUTPUT_BYTES,
       truncateOutput: true,
       failureMessage: "Unable to calculate repository change totals.",

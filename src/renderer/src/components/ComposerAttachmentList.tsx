@@ -77,6 +77,7 @@ export function ComposerAttachmentList({
                     <button
                       type="button"
                       className="composer-attachment-open"
+                      data-preview-source={previewUrl ?? undefined}
                       aria-label={`Preview attachment ${attachment.name}`}
                       onClick={() => setPreviewAttachment(attachment)}
                     >

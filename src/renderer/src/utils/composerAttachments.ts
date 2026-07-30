@@ -68,14 +68,3 @@ export function attachmentPreviewUrl(attachment: ChatAttachment): string | null 
   if (!attachmentPreviewKind(attachment)) return null;
   return `inertia://bundle/attachment-preview/${encodeURIComponent(attachment.id)}`;
 }
-
-export function documentAttachmentSendBoundary(
-  attachments: readonly ChatAttachment[],
-): string | null {
-  const count = attachments.filter(({ mimeType }) =>
-    chatAttachmentKind(mimeType) === "document").length;
-  if (count === 0) return null;
-  return count === 1
-    ? "Document preview is available, but this route cannot read documents. Remove it before sending."
-    : `Document preview is available, but this route cannot read these ${count} documents. Remove them before sending.`;
-}

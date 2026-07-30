@@ -69,6 +69,28 @@ describe("Git checkpoints", () => {
     return root;
   }
 
+  it("stops checkpoint preparation at an aggregate deadline", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const conversationId = randomUUID();
+
+    await expect(createCheckpoint(
+      root,
+      indexes,
+      conversationId,
+      { deadlineAt: Date.now() - 1 },
+    )).rejects.toEqual(
+      new CheckpointError("Checkpoint operation timed out."),
+    );
+    expect(git(
+      root,
+      "for-each-ref",
+      "--format=%(refname)",
+      `refs/inertia/checkpoints/${conversationId}/`,
+    )).toBe("");
+  });
+
   it("restores tracked and checkpointed files while preserving later untracked files", async () => {
     const root = repository();
     const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));

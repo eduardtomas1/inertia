@@ -49,6 +49,7 @@ export function prepareTurnRequest(
     interactionMode: conversation.interactionMode,
     attachments,
     imagePaths: request.imagePaths,
+    documentContexts: request.documentContexts,
     context: request.context,
     internalInstructions: request.internalInstructions,
   });

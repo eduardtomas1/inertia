@@ -778,7 +778,9 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const manager = new ProviderManager(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        runDeadlineMs: 3_000,
+        // Keep the absolute deadline well outside the inactivity boundary so
+        // slower Windows process startup cannot decide which behavior wins.
+        runDeadlineMs: 10_000,
         eventInactivityDeadlineMs: 300,
         terminateProcessTree: terminateOwnedProcessTree,
       })]),

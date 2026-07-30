@@ -416,10 +416,9 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   expect(chosenPreviewSource).not.toContain(testDirectory);
   expect(await page.locator(".composer").textContent()).not.toContain(testDirectory);
   await expect(page.getByText(
-    "Document preview is available, but this route cannot read documents. Remove it before sending.",
-    { exact: true },
-  )).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
+    /Document preview is available, but this route cannot read/u,
+  )).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
 
   await resizeWindow(520, 720);
   const attachmentBounds = await attachments.evaluate((list) => {

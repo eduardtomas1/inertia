@@ -10,7 +10,11 @@ import {
   MAX_DIFF_FILES,
   MAX_PATH_LENGTH,
 } from "./constants";
-import { runGit, runGitInspection } from "./runner";
+import {
+  runGit,
+  runGitInspection,
+  type RunGitInspectionOptions,
+} from "./runner";
 import { GitError } from "./types";
 
 export function isContained(root: string, target: string): boolean {
@@ -42,12 +46,16 @@ async function requireDirectory(path: string): Promise<string> {
   }
 }
 
-export async function repositoryRoot(repositoryPath: string): Promise<string> {
+export async function repositoryRoot(
+  repositoryPath: string,
+  options: Pick<RunGitInspectionOptions, "deadlineAt"> = {},
+): Promise<string> {
   const directory = await requireDirectory(repositoryPath);
   const result = await runGitInspection(
     directory,
     ["rev-parse", "--show-toplevel"],
     {
+      deadlineAt: options.deadlineAt,
       maxOutputBytes: MAX_PATH_LENGTH,
       failureMessage: "Unable to inspect this Git repository.",
     },

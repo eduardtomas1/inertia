@@ -587,6 +587,157 @@ describe("published database fixtures", () => {
     expect(inspection.pragma("foreign_key_check")).toEqual([]);
     inspection.close();
   });
+
+  it("upgrades v34 execution context without losing references and accepts attachments", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "execution-context-v34.sqlite");
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+    const context = (
+      kind: "attachment" | "review-note",
+      label: string,
+      content: string,
+    ) => {
+      const digest = createHash("sha256").update(content).digest("hex");
+      const reference = `sha256:${digest}`;
+      const byteSize = Buffer.byteLength(content, "utf8");
+      return {
+        manifest: {
+          version: 1 as const,
+          visibleMessageBytes: 1,
+          imageCount: 0,
+          imageBytes: 0,
+          contextReferenceCount: 1,
+          uniqueContextBlobCount: 1,
+          contextBytes: byteSize,
+          internalInstructionCount: 0,
+          internalInstructionBytes: 0,
+          executionSegmentCount: 2,
+          assembledPayloadBytes: byteSize + 1,
+          references: [{
+            kind,
+            label,
+            reference,
+            byteSize,
+            truncated: false,
+          }],
+        },
+        blobs: [{
+          reference,
+          digest,
+          byteSize,
+          content,
+        }],
+      };
+    };
+    const turnInput = {
+      providerId: "codex" as const,
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high" as const,
+      interactionMode: "build" as const,
+      accessMode: "supervised" as const,
+      configurationRevision: 0,
+      association: "authoritative" as const,
+    };
+
+    const store = new RuntimeStore(databasePath, workspacePath);
+    const project = store.createProject("Execution context migration", workspacePath);
+    const conversation = store.createConversation(project.id, "Preserved context");
+    const legacyTurn = store.beginAgentTurn({
+      ...turnInput,
+      id: "v34-context-turn",
+      conversationId: conversation.id,
+      runId: "v34-context-run",
+      content: "Preserve the existing review note.",
+      executionContext: context(
+        "review-note",
+        "Review note · migration",
+        "Preserved review context.",
+      ),
+    }).turn;
+    store.close();
+
+    const legacy = new Database(databasePath);
+    legacy.exec(`
+      DROP TRIGGER turn_execution_context_refs_prune_blob;
+      CREATE TABLE turn_execution_context_refs_v34 (
+        turn_id TEXT NOT NULL REFERENCES agent_turns(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 31),
+        digest TEXT NOT NULL
+          REFERENCES turn_execution_context_blobs(digest) ON DELETE RESTRICT,
+        kind TEXT NOT NULL CHECK (
+          kind IN ('file', 'diff', 'terminal', 'preview', 'review-note')
+        ),
+        label TEXT NOT NULL CHECK (length(label) BETWEEN 1 AND 4096),
+        byte_size INTEGER NOT NULL CHECK (byte_size BETWEEN 1 AND 65536),
+        truncated INTEGER NOT NULL CHECK (truncated IN (0, 1)),
+        PRIMARY KEY (turn_id, ordinal)
+      );
+      INSERT INTO turn_execution_context_refs_v34 (
+        turn_id, ordinal, digest, kind, label, byte_size, truncated
+      )
+      SELECT turn_id, ordinal, digest, kind, label, byte_size, truncated
+      FROM turn_execution_context_refs;
+      DROP TABLE turn_execution_context_refs;
+      ALTER TABLE turn_execution_context_refs_v34
+        RENAME TO turn_execution_context_refs;
+      CREATE INDEX turn_execution_context_refs_digest_idx
+        ON turn_execution_context_refs(digest);
+      CREATE TRIGGER turn_execution_context_refs_prune_blob
+      AFTER DELETE ON turn_execution_context_refs
+      BEGIN
+        DELETE FROM turn_execution_context_blobs
+        WHERE digest = OLD.digest
+          AND NOT EXISTS (
+            SELECT 1 FROM turn_execution_context_refs
+            WHERE turn_execution_context_refs.digest = OLD.digest
+          );
+      END;
+      DELETE FROM schema_migrations WHERE version = 35;
+    `);
+    legacy.close();
+
+    const migrated = new RuntimeStore(databasePath, workspacePath);
+    expect(migrated.turnExecutionManifest(legacyTurn.id)?.references).toEqual([
+      expect.objectContaining({
+        kind: "review-note",
+        label: "Review note · migration",
+      }),
+    ]);
+    const attachmentTurn = migrated.beginAgentTurn({
+      ...turnInput,
+      id: "v35-attachment-turn",
+      conversationId: conversation.id,
+      runId: "v35-attachment-run",
+      content: "Inspect the attached document.",
+      executionContext: context(
+        "attachment",
+        "PDF · specification.pdf",
+        "Verified document context.",
+      ),
+    }).turn;
+    migrated.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.turnExecutionManifest(attachmentTurn.id)?.references).toEqual([
+      expect.objectContaining({
+        kind: "attachment",
+        label: "PDF · specification.pdf",
+      }),
+    ]);
+    reopened.close();
+
+    const inspection = new Database(databasePath);
+    expect((inspection.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(
+      CURRENT_DATABASE_SCHEMA_VERSION,
+    );
+    expect(inspection.pragma("foreign_key_check")).toEqual([]);
+    inspection.close();
+  });
 });
 
 describe("transactional database migrations", () => {

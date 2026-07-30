@@ -24,10 +24,7 @@ import {
 } from "../../utils/modelChooserRoutes";
 import { resolveModelRouteTransition } from "../../utils/modelRouteTransition";
 import { buildComposerTurnRequest } from "../../utils/requestContext";
-import {
-  documentAttachmentSendBoundary,
-  mergeComposerAttachments,
-} from "../../utils/composerAttachments";
+import { mergeComposerAttachments } from "../../utils/composerAttachments";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
   composerFollowUpState,
@@ -576,10 +573,8 @@ export function Composer({
   const composedLength = (message.trim() || (attachments.length > 0 ? "Please inspect the attached file." : "Please review the selected diff context.")).length;
   const typedMessageLimit = MAX_CHAT_MESSAGE_CHARS;
   const messageFits = composedLength <= MAX_CHAT_MESSAGE_CHARS;
-  const attachmentSendBoundary = documentAttachmentSendBoundary(attachments);
   const sendEligible = (Boolean(message.trim()) || attachments.length > 0 || Boolean(promptContext))
     && messageFits
-    && attachmentSendBoundary === null
     && routeReadiness.ready
     && !disabled;
   const primaryAction = composerPrimaryActionState({
@@ -763,7 +758,6 @@ export function Composer({
           onClearPromptContext={clearPromptContext}
           attachments={attachments}
           onRemoveAttachment={removeAttachment}
-          attachmentSendBoundary={attachmentSendBoundary}
           pendingRoute={pendingRoute}
           creatingRouteConversation={creatingRouteConversation}
           routeCancelRef={routeCancelRef}

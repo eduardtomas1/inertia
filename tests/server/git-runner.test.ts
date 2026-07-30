@@ -41,6 +41,23 @@ function processExists(pid: number): boolean {
 }
 
 describe("Git runner locale", () => {
+  it("does not start Git after an aggregate operation deadline has expired", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-deadline-"));
+    temporaryDirectories.push(directory);
+    const terminateProcessTree = vi.fn(async () => true);
+
+    await expect(runGit(directory, ["status"], {
+      deadlineAt: Date.now() - 1,
+      failureMessage: "Git status failed.",
+    }, {
+      terminateProcessTree,
+    })).rejects.toMatchObject({
+      code: "timeout",
+    } satisfies Partial<GitError>);
+
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+  });
+
   it("overrides inherited locales for every Git child process", () => {
     expect(gitProcessEnvironment({
       LANG: "es_ES.UTF-8",

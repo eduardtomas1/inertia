@@ -109,6 +109,59 @@ describe("visual contrast system", () => {
     },
   );
 
+  it.each(["light", "dark"] as const)(
+    "keeps the %s syntax palette readable on its dedicated code surface",
+    (theme) => {
+      const tokens = themeTokens(theme);
+      const codeSurface = tokens.get("code-surface");
+      expect(codeSurface, "missing --code-surface").toBeDefined();
+
+      for (const foregroundName of [
+        "syntax-keyword",
+        "syntax-string",
+        "syntax-number",
+        "syntax-function",
+        "syntax-variable",
+        "syntax-comment",
+        "syntax-meta",
+        "syntax-deletion",
+      ]) {
+        const foreground = tokens.get(foregroundName);
+        expect(foreground, `missing --${foregroundName}`).toBeDefined();
+        expect(
+          contrast(foreground!, codeSurface!),
+          `${theme} --${foregroundName} on --code-surface`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    },
+  );
+
+  it("keeps the dark canvas and everyday surfaces neutral graphite", () => {
+    const tokens = themeTokens("dark");
+    for (const tokenName of [
+      "app-bg",
+      "sidebar-bg",
+      "surface",
+      "surface-strong",
+      "surface-muted",
+      "surface-hover",
+    ]) {
+      const value = tokens.get(tokenName);
+      expect(value, `missing --${tokenName}`).toBeDefined();
+      const channels = rgb(value!);
+      expect(
+        Math.max(...channels) - Math.min(...channels),
+        `dark --${tokenName} should not carry a blue cast`,
+      ).toBeLessThanOrEqual(4);
+    }
+    expect(luminance(tokens.get("app-bg")!)).toBeLessThan(
+      luminance(tokens.get("surface")!),
+    );
+    expect(luminance(tokens.get("surface")!)).toBeLessThan(
+      luminance(tokens.get("surface-hover")!),
+    );
+  });
+
   it("defines the shared interaction, selection, state-surface, and compatibility aliases", () => {
     const root = cssBlock(":root");
     for (const token of [

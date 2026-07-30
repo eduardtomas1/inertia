@@ -63,7 +63,7 @@ export function buildComposerTurnRequest(
 ): { visibleContent: string; context?: TurnRequestContext } {
   const visibleContent = message.trim()
     || (attachments.length > 0
-      ? "Please inspect the attached image."
+      ? "Please inspect the attached file."
       : "Please review the selected diff context.");
   const promptRequestContext = turnRequestContextFromPromptContext(promptContext);
   const selectedFileReferences = fileReferences.filter((path) =>

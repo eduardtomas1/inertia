@@ -23,6 +23,7 @@ export interface GitProcessResult {
 
 export interface RunGitOptions {
   timeoutMs?: number;
+  deadlineAt?: number;
   maxOutputBytes?: number;
   truncateOutput?: boolean;
   input?: Buffer;
@@ -129,7 +130,17 @@ export function runGit(
   dependencies: GitRunnerDependencies = {},
 ): Promise<GitProcessResult> {
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES;
-  const timeoutMs = options.timeoutMs ?? LOCAL_TIMEOUT_MS;
+  const configuredTimeoutMs = options.timeoutMs ?? LOCAL_TIMEOUT_MS;
+  const deadlineTimeoutMs = options.deadlineAt === undefined
+    ? configuredTimeoutMs
+    : Math.floor(options.deadlineAt - Date.now());
+  if (deadlineTimeoutMs <= 0) {
+    return Promise.reject(new GitError(
+      "timeout",
+      "Git took too long to complete the operation.",
+    ));
+  }
+  const timeoutMs = Math.min(configuredTimeoutMs, deadlineTimeoutMs);
   const terminateProcessTree = dependencies.terminateProcessTree
     ?? terminateProcessTreeAndWait;
 

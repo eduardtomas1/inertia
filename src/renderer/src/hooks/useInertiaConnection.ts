@@ -10,6 +10,7 @@ import {
   runtimeResumeUrl,
   RuntimeProjectionSequence,
 } from "../utils/runtimeSequencing";
+import { MESSAGE_SEND_REQUEST_TIMEOUT_MS } from "@shared/runtime-command-timeouts";
 import { serializeRuntimeClientCommand } from "@shared/runtime-websocket";
 import {
   deliverDecodedServerEvent,
@@ -37,6 +38,11 @@ export interface InertiaConnection {
 
 function requestTimeoutMs(command: ClientCommand): number {
   switch (command.type) {
+    case "message.send":
+      // The server enforces one aggregate preparation deadline before it can
+      // queue a turn. Keep the socket pending through that boundary and its
+      // bounded rollback/attachment cleanup so a retry cannot duplicate work.
+      return MESSAGE_SEND_REQUEST_TIMEOUT_MS;
     case "git.pull":
     case "git.push":
     case "git.commit":

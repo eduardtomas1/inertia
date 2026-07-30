@@ -444,7 +444,11 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await expect(dock.getByText(
       "Document preview is available, but this route cannot read documents. Remove it before sending.",
       { exact: true },
-    )).toBeVisible();
+    )).toHaveCount(0);
+    await textbox.fill("Summarize the attached document.");
+    await expect(dock.getByRole("button", { name: "Send message" }))
+      .toBeEnabled();
+    await textbox.fill("");
     await expectComposerEndsAtDock(dock);
     const attachmentGeometry = await attachmentList.evaluate((list) => {
       const items = [...list.querySelectorAll<HTMLElement>(

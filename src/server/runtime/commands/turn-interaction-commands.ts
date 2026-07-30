@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type WebSocket from "ws";
 
 import {
-  chatAttachmentKind,
   type AgentApprovalRequest,
   type AgentInputRequest,
   type ProviderInfo,
@@ -18,16 +17,23 @@ import {
 import type { RuntimeStore } from "../../database";
 import { getRepositoryStatus, GitError } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
+import { documentAttachmentContexts } from "../attachments/document-attachment-context";
+import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
-import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
 } from "./command-router";
+import {
+  assertMessageSendPreparationPending,
+  awaitMessageSendPreparation,
+  messageSendPreparationDeadline,
+  messageSendPreparationExpired,
+} from "./message-send-preparation";
 
 export interface TurnInteractionCommandDependencies {
   store: RuntimeStore;
@@ -101,27 +107,46 @@ export function createTurnInteractionCommandHandler(
             "Wait for the current run or read-only review to finish first.",
           );
         }
-        const attachments = command.payload.attachments.length === 0
-          ? []
-          : await dependencies.attachmentResolver?.resolveAll(
+        const preparationDeadlineAt = messageSendPreparationDeadline();
+        let resolvedAttachments: Awaited<
+          ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
+        > = [];
+        if (command.payload.attachments.length > 0) {
+          const resolver = dependencies.attachmentResolver;
+          if (!resolver) {
+            throw new RuntimeRequestError(
+              "The selected attachment is no longer available or could not be verified.",
+            );
+          }
+          const resolutionAbort = new AbortController();
+          resolvedAttachments = await awaitMessageSendPreparation(
+            resolver.resolvePayloads(
               command.payload.attachments,
-            ) ?? (() => {
-              throw new RuntimeRequestError(
-                "The selected attachment is no longer available or could not be verified.",
-              );
-            })();
+              resolutionAbort.signal,
+            ),
+            preparationDeadlineAt,
+            () => resolutionAbort.abort(),
+          );
+        }
+        const attachments = resolvedAttachments.map(
+          ({ attachment }) => attachment,
+        );
         const relinquishAttachments = () =>
           dependencies.attachmentResolver?.relinquishAll(
             attachments.map(({ id }) => id),
           );
-        if (
-          attachments.some(
-            ({ mimeType }) => chatAttachmentKind(mimeType) === "document",
-          )
-        ) {
+        let documentContexts;
+        try {
+          documentContexts = await awaitMessageSendPreparation(
+            documentAttachmentContexts(resolvedAttachments),
+            preparationDeadlineAt,
+          );
+        } catch (error) {
           await relinquishAttachments();
           throw new RuntimeRequestError(
-            "Document attachments are preview-only and cannot be sent to the selected provider.",
+            error instanceof Error
+              ? error.message
+              : "The selected document could not be read.",
           );
         }
         if (dependencies.enableProviders) {
@@ -132,11 +157,13 @@ export function createTurnInteractionCommandHandler(
             dependencies.backendProfileController.validateSelection(
               conversation.modelSelection,
             );
-            const backendReadiness = await dependencies
-              .backendProfileController.readiness(
+            const backendReadiness = await awaitMessageSendPreparation(
+              dependencies.backendProfileController.readiness(
                 conversation.modelSelection,
                 selectedProvider,
-              );
+              ),
+              preparationDeadlineAt,
+            );
             if (backendReadiness && !backendReadiness.ready) {
               throw new RuntimeRequestError(
                 backendReadiness.message
@@ -188,9 +215,12 @@ export function createTurnInteractionCommandHandler(
           ReturnType<AgentWorkflowController["resolveTurnSkills"]>
         >;
         try {
-          resolvedSkills = await dependencies.workflows.resolveTurnSkills(
-            conversation.id,
-            command.payload.skillIds ?? [],
+          resolvedSkills = await awaitMessageSendPreparation(
+            dependencies.workflows.resolveTurnSkills(
+              conversation.id,
+              command.payload.skillIds ?? [],
+            ),
+            preparationDeadlineAt,
           );
         } catch (error) {
           await relinquishAttachments();
@@ -213,16 +243,20 @@ export function createTurnInteractionCommandHandler(
         if (dependencies.enableProviders) {
           try {
             const path = dependencies.store.conversationPath(conversation.id);
-            const status = await getRepositoryStatus(path);
+            const status = await getRepositoryStatus(path, {
+              deadlineAt: preparationDeadlineAt,
+            });
             const captured = await createCheckpoint(
               path,
               join(dependencies.dataDirectory, "checkpoint-indexes"),
               conversation.id,
+              { deadlineAt: preparationDeadlineAt },
             );
             capturedCheckpoint = {
               repositoryPath: path,
               ref: captured.ref,
             };
+            assertMessageSendPreparationPending(preparationDeadlineAt);
             const turnIndex = dependencies.store.checkpointCount(
               conversation.id,
             ) + 1;
@@ -255,10 +289,15 @@ export function createTurnInteractionCommandHandler(
             ) {
               // A checkpoint is protective but not a reason to block a run.
             }
+            if (messageSendPreparationExpired(preparationDeadlineAt)) {
+              await relinquishAttachments();
+              assertMessageSendPreparationPending(preparationDeadlineAt);
+            }
           }
         }
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
         try {
+          assertMessageSendPreparationPending(preparationDeadlineAt);
           dependencies.workflows.assertTurnSkillsCurrent(
             conversation.id,
             resolvedSkills.routeKey,
@@ -279,6 +318,7 @@ export function createTurnInteractionCommandHandler(
                 conversationId: conversation.id,
                 content: command.payload.content,
                 attachments,
+                documentContexts,
                 activateConversation: command.payload.activate,
                 context: command.payload.context,
                 checkpointId,

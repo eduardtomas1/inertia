@@ -17,6 +17,8 @@ const capabilityUrl = `ws://127.0.0.1:43210/runtime/${"a".repeat(43)}`;
 const dataDirectory = resolve(tmpdir(), "inertia data");
 const workspaceDirectory = resolve(tmpdir(), "inertia workspace");
 const attachmentRoot = resolve(tmpdir(), "inertia attachments");
+const packageSmokePdfInput = resolve(tmpdir(), "inertia package smoke.pdf");
+const packageSmokePdfResult = resolve(tmpdir(), "inertia package smoke result.json");
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
 
@@ -107,6 +109,44 @@ describe("runtime process protocol", () => {
       options: {
         ...command.options,
         kimiClaudeProfiles: [{ ...profile, baseUrl: "https://example.invalid/" }],
+      },
+    })).toBeNull();
+  });
+
+  it("accepts only absolute packaged PDF smoke paths in the private startup envelope", () => {
+    const command = {
+      type: "runtime.start",
+      options: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+        packageSmokePdf: {
+          inputPath: packageSmokePdfInput,
+          resultPath: packageSmokePdfResult,
+        },
+      },
+    };
+
+    expect(parseRuntimeWorkerCommand(command)).toEqual(command);
+    expect(parseRuntimeWorkerCommand({
+      ...command,
+      options: {
+        ...command.options,
+        packageSmokePdf: {
+          inputPath: "relative.pdf",
+          resultPath: packageSmokePdfResult,
+        },
+      },
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      ...command,
+      options: {
+        ...command.options,
+        packageSmokePdf: {
+          inputPath: packageSmokePdfInput,
+          resultPath: packageSmokePdfResult,
+          unexpected: true,
+        },
       },
     })).toBeNull();
   });

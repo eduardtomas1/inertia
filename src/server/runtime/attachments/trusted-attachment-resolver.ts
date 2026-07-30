@@ -40,6 +40,11 @@ export interface RuntimeAttachmentBroker {
   ): Promise<boolean>;
 }
 
+export interface ResolvedAttachmentPayload {
+  attachment: ChatAttachment;
+  bytes: Uint8Array;
+}
+
 function isContained(root: string, target: string): boolean {
   const child = relative(root, target);
   return child === ""
@@ -83,6 +88,14 @@ export class TrustedAttachmentResolver {
     requested: readonly ChatAttachment[],
     signal?: AbortSignal,
   ): Promise<ChatAttachment[]> {
+    return (await this.resolvePayloads(requested, signal))
+      .map(({ attachment }) => attachment);
+  }
+
+  async resolvePayloads(
+    requested: readonly ChatAttachment[],
+    signal?: AbortSignal,
+  ): Promise<ResolvedAttachmentPayload[]> {
     if (requested.length > MAX_CHAT_ATTACHMENTS) throw publicAttachmentError();
     if (requested.length === 0) return [];
     let canonicalRoot: string;
@@ -95,7 +108,7 @@ export class TrustedAttachmentResolver {
     try {
       const seenIds = new Set<string>();
       const seenPaths = new Set<string>();
-      const resolved: ChatAttachment[] = [];
+      const resolved: ResolvedAttachmentPayload[] = [];
       let totalBytes = 0;
       for (const untrusted of requested) {
         if (signal?.aborted) throw publicAttachmentError();
@@ -104,12 +117,13 @@ export class TrustedAttachmentResolver {
         const trusted = await this.broker.resolve(untrusted.id, signal);
         if (!trusted || trusted.id !== untrusted.id) throw publicAttachmentError();
         claimedIds.push(untrusted.id);
-        const attachment = await this.revalidate(canonicalRoot, trusted, signal);
+        const payload = await this.revalidate(canonicalRoot, trusted, signal);
+        const { attachment } = payload;
         if (seenPaths.has(attachment.path)) throw publicAttachmentError();
         seenPaths.add(attachment.path);
         totalBytes += attachment.size;
         if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) throw publicAttachmentError();
-        resolved.push(attachment);
+        resolved.push(payload);
       }
       return resolved;
     } catch (error) {
@@ -127,7 +141,7 @@ export class TrustedAttachmentResolver {
     canonicalRoot: string,
     trusted: TrustedRuntimeAttachment,
     signal?: AbortSignal,
-  ): Promise<ChatAttachment> {
+  ): Promise<ResolvedAttachmentPayload> {
     try {
       if (
         trusted.size < 1
@@ -151,6 +165,7 @@ export class TrustedAttachmentResolver {
         canonicalPath,
         constants.O_RDONLY | noFollow | nonBlocking,
       );
+      let bytes: Buffer;
       try {
         const before = await file.stat();
         if (
@@ -159,7 +174,7 @@ export class TrustedAttachmentResolver {
           || before.size !== trusted.size
         ) throw publicAttachmentError();
         if (signal?.aborted) throw publicAttachmentError();
-        const bytes = await file.readFile();
+        bytes = await file.readFile();
         const after = await file.stat();
         if (
           signal?.aborted
@@ -172,11 +187,14 @@ export class TrustedAttachmentResolver {
         await file.close();
       }
       return {
-        id: trusted.id,
-        name: trusted.name,
-        path: canonicalPath,
-        mimeType: trusted.mimeType,
-        size: trusted.size,
+        attachment: {
+          id: trusted.id,
+          name: trusted.name,
+          path: canonicalPath,
+          mimeType: trusted.mimeType,
+          size: trusted.size,
+        },
+        bytes,
       };
     } catch {
       throw publicAttachmentError();

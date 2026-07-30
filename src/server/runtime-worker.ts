@@ -5,6 +5,7 @@ import {
 import { startRuntime, type RunningRuntime } from "./index.js";
 import { RuntimeCredentialBrokerClient } from "./runtime/backends/credential-broker-client.js";
 import { RuntimeAttachmentBrokerClient } from "./runtime/attachments/attachment-broker-client.js";
+import { runPackagedPdfSmoke } from "./runtime/attachments/package-smoke-pdf.js";
 import { RuntimeSecureFileBrokerClient } from "./runtime/secure-file-broker-client.js";
 
 let runtime: RunningRuntime | null = null;
@@ -105,7 +106,18 @@ parentPort.on("message", (messageEvent) => {
     backendCredentials: credentials,
     attachments,
     secureFiles,
-  }).then((startedRuntime) => {
+  }).then(async (startedRuntime) => {
+    try {
+      if (command.options.packageSmokePdf) {
+        await runPackagedPdfSmoke(
+          command.options.packageSmokePdf.inputPath,
+          command.options.packageSmokePdf.resultPath,
+        );
+      }
+    } catch (error) {
+      await startedRuntime.close("runtime-crash").catch(() => undefined);
+      throw error;
+    }
     if (stopping) {
       void startedRuntime.close().finally(() => process.exit(0));
       return;

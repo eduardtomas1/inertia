@@ -17,6 +17,7 @@ import {
   createTurnInteractionCommandHandler,
   type TurnInteractionCommandDependencies,
 } from "../../src/server/runtime/commands/turn-interaction-commands";
+import { MESSAGE_SEND_PREPARATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const execFileAsync = promisify(execFile);
@@ -112,7 +113,12 @@ function dependencies(options: {
     dataDirectory: tmpdir(),
     enableProviders: true,
     attachmentResolver: {
-      resolveAll: vi.fn(async () => [trustedAttachment]),
+      resolvePayloads: vi.fn(async () => [{
+        attachment: trustedAttachment,
+        bytes: new Uint8Array([
+          0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        ]),
+      }]),
       relinquishAll: options.relinquishAll,
     } as unknown as TurnInteractionCommandDependencies["attachmentResolver"],
     workflows: {
@@ -136,6 +142,71 @@ function dependencies(options: {
 }
 
 describe("message attachment ownership transfer", () => {
+  it("aborts attachment resolution at the aggregate deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const handlerDependencies = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+      });
+      const abortObserved = vi.fn();
+      vi.mocked(
+        handlerDependencies.attachmentResolver!.resolvePayloads,
+      ).mockImplementation((_requested, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            abortObserved();
+            reject(new Error("Attachment resolution was aborted."));
+          }, { once: true });
+        }));
+      const handling = createTurnInteractionCommandHandler(
+        handlerDependencies,
+      )({} as never, messageCommand());
+      const rejection = expect(handling).rejects.toThrow(
+        "Preparing this message took too long. No turn was started.",
+      );
+
+      await vi.advanceTimersByTimeAsync(
+        MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
+      );
+      await rejection;
+
+      expect(abortObserved).toHaveBeenCalledOnce();
+      expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects safely when aggregate preparation reaches its deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const relinquishAll = vi.fn(async () => undefined);
+      const queue = vi.fn();
+      const handlerDependencies = dependencies({
+        queue,
+        relinquishAll,
+        readiness: vi.fn(() => new Promise(() => undefined)),
+      });
+      const handling = createTurnInteractionCommandHandler(
+        handlerDependencies,
+      )({} as never, messageCommand());
+      const rejection = expect(handling).rejects.toThrow(
+        "Preparing this message took too long. No turn was started.",
+      );
+
+      await vi.advanceTimersByTimeAsync(
+        MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
+      );
+      await rejection;
+
+      expect(queue).not.toHaveBeenCalled();
+      expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("projects an active follow-up without hydrating the live stream", async () => {
     const followUp: ChatMessage = {
       id: "77777777-7777-4777-8777-777777777777",

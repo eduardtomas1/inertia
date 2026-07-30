@@ -32,16 +32,23 @@ export function assertMessageSendPreparationPending(
 export function awaitMessageSendPreparation<T>(
   operation: Promise<T>,
   deadlineAt: number,
+  onTimeout?: () => void,
 ): Promise<T> {
+  const timeoutError = (): MessageSendPreparationTimeoutError => {
+    try {
+      onTimeout?.();
+    } catch {
+      // The authoritative timeout must still settle even if cancellation fails.
+    }
+    return new MessageSendPreparationTimeoutError(TIMEOUT_MESSAGE);
+  };
   const remainingMs = deadlineAt - Date.now();
   if (remainingMs <= 0) {
-    return Promise.reject(
-      new MessageSendPreparationTimeoutError(TIMEOUT_MESSAGE),
-    );
+    return Promise.reject(timeoutError());
   }
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new MessageSendPreparationTimeoutError(TIMEOUT_MESSAGE));
+      reject(timeoutError());
     }, remainingMs);
     timer.unref();
     void operation.then(

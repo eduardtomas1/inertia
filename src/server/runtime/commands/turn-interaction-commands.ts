@@ -108,16 +108,26 @@ export function createTurnInteractionCommandHandler(
           );
         }
         const preparationDeadlineAt = messageSendPreparationDeadline();
-        const resolvedAttachments = command.payload.attachments.length === 0
-          ? []
-          : await awaitMessageSendPreparation(
-              dependencies.attachmentResolver?.resolvePayloads(
-                command.payload.attachments,
-              ) ?? Promise.reject(new RuntimeRequestError(
-                "The selected attachment is no longer available or could not be verified.",
-              )),
-              preparationDeadlineAt,
+        let resolvedAttachments: Awaited<
+          ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
+        > = [];
+        if (command.payload.attachments.length > 0) {
+          const resolver = dependencies.attachmentResolver;
+          if (!resolver) {
+            throw new RuntimeRequestError(
+              "The selected attachment is no longer available or could not be verified.",
             );
+          }
+          const resolutionAbort = new AbortController();
+          resolvedAttachments = await awaitMessageSendPreparation(
+            resolver.resolvePayloads(
+              command.payload.attachments,
+              resolutionAbort.signal,
+            ),
+            preparationDeadlineAt,
+            () => resolutionAbort.abort(),
+          );
+        }
         const attachments = resolvedAttachments.map(
           ({ attachment }) => attachment,
         );

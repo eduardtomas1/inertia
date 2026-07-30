@@ -155,4 +155,51 @@ describe("trusted runtime attachment resolution", () => {
       /no longer available|verified/u,
     );
   });
+
+  it("relinquishes earlier claims when aggregate resolution is aborted", async () => {
+    const { root, trusted } = await fixture();
+    const secondId = "22222222-2222-4222-8222-222222222222";
+    const relinquish = vi.fn(async () => true);
+    const attachmentBroker: RuntimeAttachmentBroker = {
+      resolve: vi.fn((
+        requestedId: string,
+        signal?: AbortSignal,
+      ): Promise<TrustedRuntimeAttachment | null> => {
+        if (requestedId === id) return Promise.resolve(trusted);
+        return new Promise<TrustedRuntimeAttachment | null>(
+          (_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              reject(new Error("aborted"));
+            }, { once: true });
+          },
+        );
+      }),
+      release: vi.fn(async () => true),
+      cleanup: vi.fn(async () => true),
+      relinquish,
+    };
+    const resolver = new TrustedAttachmentResolver(root, attachmentBroker);
+    const controller = new AbortController();
+    const resolving = resolver.resolvePayloads([
+      trusted,
+      {
+        id: secondId,
+        name: "second.png",
+        path: "opaque-renderer-path",
+        mimeType: "image/png",
+        size: png.length,
+      },
+    ], controller.signal);
+    await vi.waitFor(() => {
+      expect(attachmentBroker.resolve).toHaveBeenCalledWith(
+        secondId,
+        controller.signal,
+      );
+    });
+
+    controller.abort();
+
+    await expect(resolving).rejects.toThrow("aborted");
+    expect(relinquish).toHaveBeenCalledWith(id);
+  });
 });

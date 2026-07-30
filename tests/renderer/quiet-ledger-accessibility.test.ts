@@ -307,7 +307,7 @@ describe("Quiet Ledger transcript accessibility", () => {
     expect(turnCompletionAnnouncement(false, completed, "Codex")).toBe("");
   });
 
-  it("exposes each minimap request preview to hover and keyboard focus", () => {
+  it("exposes one custom minimap preview to hover and keyboard focus", () => {
     const viewportSource = readFileSync(
       new URL(
         "../../src/renderer/src/components/response-timeline/viewport.tsx",
@@ -320,15 +320,16 @@ describe("Quiet Ledger transcript accessibility", () => {
       "utf8",
     );
 
-    expect(viewportSource).toContain(
-      "data-request-preview={`Turn ${marker.number} · ${marker.label}`}",
-    );
+    expect(viewportSource).toContain('className="timeline-minimap-preview"');
+    expect(viewportSource).toContain('role="tooltip"');
     expect(viewportSource).toContain(
       "aria-label={`Go to turn ${marker.number}: ${marker.label}`}",
     );
-    expect(styles).toContain("content: attr(data-request-preview)");
+    expect(viewportSource).not.toContain(
+      "title={`Turn ${marker.number}: ${marker.label}`}",
+    );
     expect(styles).toContain(
-      ".timeline-minimap button:focus-visible::after",
+      '.timeline-minimap button[data-emphasized="true"]::before',
     );
   });
 });

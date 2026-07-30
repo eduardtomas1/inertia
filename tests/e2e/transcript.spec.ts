@@ -237,15 +237,33 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await expect(minimap.getByRole("button")).toHaveCount(48);
     const firstMinimapMarker = minimap.getByRole("button").first();
     await expect(firstMinimapMarker).toHaveAttribute(
-      "data-request-preview",
+      "aria-label",
+      "Go to turn 1: Virtualized request 0",
+    );
+    await expect(firstMinimapMarker).not.toHaveAttribute("title");
+    const markerBoundsBeforeHover = await firstMinimapMarker.boundingBox();
+    await firstMinimapMarker.hover();
+    await expect(firstMinimapMarker).toHaveAttribute(
+      "data-emphasized",
+      "true",
+    );
+    await expect(minimap.getByRole("tooltip")).toHaveCount(1);
+    await expect(minimap.getByRole("tooltip")).toHaveText(
       "Turn 1 · Virtualized request 0",
     );
-    await firstMinimapMarker.hover();
     await expect.poll(() => firstMinimapMarker.evaluate((element) =>
-      getComputedStyle(element, "::after").opacity)).toBe("1");
-    await expect.poll(() => firstMinimapMarker.evaluate((element) =>
-      getComputedStyle(element, "::after").content))
-      .toContain("Virtualized request 0");
+      getComputedStyle(element, "::before").transform)).not.toBe("none");
+    expect(await firstMinimapMarker.boundingBox()).toEqual(
+      markerBoundsBeforeHover,
+    );
+    await transcript.hover({ position: { x: 160, y: 160 } });
+    await expect(minimap.getByRole("tooltip")).toHaveCount(0);
+    await firstMinimapMarker.focus();
+    await expect(minimap.getByRole("tooltip")).toHaveCount(1);
+    await expect(firstMinimapMarker).toHaveAttribute(
+      "data-emphasized",
+      "true",
+    );
     const separation = await page.evaluate(() => {
       const minimapBounds = document.querySelector(".timeline-minimap")?.getBoundingClientRect();
       const visibleTurn = [...document.querySelectorAll<HTMLElement>(".response-turn")]

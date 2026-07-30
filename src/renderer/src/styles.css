@@ -8679,10 +8679,23 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: var(--border-strong);
+  background: transparent;
 }
 
-.timeline-minimap button::after {
+.timeline-minimap button::before {
+  position: absolute;
+  z-index: 0;
+  border-radius: inherit;
+  background: var(--border-strong);
+  content: "";
+  inset: 0;
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+
+.timeline-minimap-preview {
   position: absolute;
   top: 50%;
   left: 16px;
@@ -8696,37 +8709,30 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   background: var(--surface-strong);
   box-shadow: var(--shadow-soft);
   color: var(--text);
-  content: attr(data-request-preview);
   font-size: 11px;
   font-weight: 500;
   line-height: 1.4;
-  opacity: 0;
   overflow-wrap: anywhere;
   pointer-events: none;
   text-align: left;
-  transform: translate(4px, -50%);
-  transition:
-    opacity var(--motion-fast) var(--motion-ease),
-    transform var(--motion-fast) var(--motion-ease);
+  transform: translateY(-50%);
   white-space: normal;
 }
 
-.timeline-minimap button:hover::after,
-.timeline-minimap button:focus-visible::after {
-  opacity: 1;
-  transform: translate(0, -50%);
-}
-
-.timeline-minimap button:hover,
-.timeline-minimap button:focus-visible {
-  width: 8px;
+.timeline-minimap button[data-emphasized="true"]::before {
   background: var(--text-soft);
-  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring-soft);
+  transform: scale(1.75, 1.6);
 }
 
-.timeline-minimap button[aria-current="true"] {
-  width: 8px;
+.timeline-minimap button[aria-current="true"]::before {
   background: var(--accent);
+  transform: scaleX(1.34);
+}
+
+.timeline-minimap button[aria-current="true"][data-emphasized="true"]::before {
+  box-shadow: 0 0 0 2px var(--focus-ring-soft);
+  transform: scale(1.75, 1.6);
 }
 
 .response-turn > .message,

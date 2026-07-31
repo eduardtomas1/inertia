@@ -91,16 +91,20 @@ export class RemoteCompanionClient {
     if (this.profile && Date.parse(this.profile.expiresAt) > Date.now()) {
       void this.connect();
     } else if (this.profile) {
-      this.profile = null;
-      await this.profileWriteTail.catch(() => undefined);
-      if (!this.ownsAttempt(epoch)) return this.profile;
-      await clearDeviceProfile();
-      if (!this.ownsAttempt(epoch)) return this.profile;
-      this.callbacks.status("This device grant expired. Pair it again.", false);
+      await this.forgetExpiredProfile(epoch);
     } else {
       this.callbacks.status("Paste a short-lived invitation from the desktop.", false);
     }
     return this.profile;
+  }
+
+  private async forgetExpiredProfile(epoch: number): Promise<void> {
+    this.profile = null;
+    await this.profileWriteTail.catch(() => undefined);
+    if (!this.ownsAttempt(epoch)) return;
+    await clearDeviceProfile().catch(() => undefined);
+    if (!this.ownsAttempt(epoch)) return;
+    this.callbacks.status("This device grant expired. Pair it again.", false);
   }
 
   currentProfile(): BrowserDeviceProfile | null {
@@ -219,6 +223,10 @@ export class RemoteCompanionClient {
     const profile = this.profile;
     if (!profile) return;
     const epoch = this.beginAttempt("Connecting.");
+    if (Date.parse(profile.expiresAt) <= Date.now()) {
+      await this.forgetExpiredProfile(epoch);
+      return;
+    }
     this.callbacks.status("Connecting to the desktop…", false);
     try {
       const tunnel = await this.openOwnedTunnel(

@@ -48,6 +48,19 @@ describe("Remote Companion safe text projection", () => {
     expect(projected).toContain("[Code omitted on Remote Companion]");
   });
 
+  it("redacts url user-info through the authority's final at-sign", () => {
+    expect(sanitizeRemoteContent("https://alice:pa@ss@example.com/private"))
+      .toBe("https://<redacted>@example.com/private");
+    expect(sanitizeRemoteContent("https://a:b@c@d@example.com/x"))
+      .toBe("https://<redacted>@example.com/x");
+    expect(sanitizeRemoteContent("see https://example.com/a@b for details"))
+      .toBe("see https://example.com/a@b for details");
+    expect(sanitizeRemoteContent("https://example.com/?q=a@b"))
+      .toBe("https://example.com/?q=a@b");
+    expect(sanitizeRemoteContent("mail bob@example.com now"))
+      .toBe("mail bob@example.com now");
+  });
+
   it("redacts alternate, interrupted, and indented code blocks", () => {
     const cases = [
       [

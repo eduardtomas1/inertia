@@ -6,7 +6,7 @@ const SECRET_PATTERNS = [
 ] as const;
 
 const CREDENTIAL_URL =
-  /\b([a-z][a-z0-9+.-]*:\/\/)(?:[^/\s@]+)@/giu;
+  /\b([a-z][a-z0-9+.-]*:\/\/)[^/\s?#]*@/giu;
 const DIRECTIONAL_FORMATTING =
   /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u206f]+/gu;
 const CONTENT_CONTROL_CHARACTERS =

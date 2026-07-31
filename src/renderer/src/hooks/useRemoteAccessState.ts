@@ -12,12 +12,15 @@ export function useRemoteAccessState(): RemoteAccessState | null {
       || typeof bridge.onRemoteAccessState !== "function"
     ) return;
     let active = true;
-    void bridge.getRemoteAccessState().then((value) => {
-      if (active) setState(value);
-    }).catch(() => undefined);
+    let live = false;
     const unsubscribe = bridge.onRemoteAccessState((value) => {
-      if (active) setState(value);
+      if (!active) return;
+      live = true;
+      setState(value);
     });
+    void bridge.getRemoteAccessState().then((value) => {
+      if (active && !live) setState(value);
+    }).catch(() => undefined);
     return () => {
       active = false;
       unsubscribe();

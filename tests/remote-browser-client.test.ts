@@ -144,6 +144,42 @@ describe("Remote Companion browser connection ownership", () => {
     expect(statuses.at(-1)).toBe("cleanup");
   });
 
+  it("clears a grant that expired after initialization instead of reconnecting", async () => {
+    vi.stubGlobal("WebSocket", FakeBrowserSocket);
+    const deviceKeys = await generateRemoteKeyPair();
+    const hostKeys = await generateRemoteKeyPair();
+    const profile: BrowserDeviceProfile = {
+      version: 1,
+      deviceId: crypto.randomUUID(),
+      deviceLabel: "Test browser",
+      keyPair: deviceKeys,
+      hostId: crypto.randomUUID(),
+      hostPublicKey: hostKeys.publicKey,
+      relayUrl: "wss://relay.example/remote",
+      endpointId: "opaque_endpoint",
+      scopes: ["view"],
+      projectIds: ["project"],
+      grantVersion: 1,
+      expiresAt: new Date(Date.now() - 1_000).toISOString(),
+    };
+    const statuses: string[] = [];
+    const client = new RemoteCompanionClient({
+      status: (message) => statuses.push(message),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    (client as unknown as { profile: BrowserDeviceProfile | null }).profile =
+      profile;
+
+    await client.connect();
+
+    expect(FakeBrowserSocket.instances).toHaveLength(0);
+    expect(client.currentProfile()).toBeNull();
+    expect(statuses.at(-1)).toBe("This device grant expired. Pair it again.");
+  });
+
   it("cleans open/relay listeners, timers, and sockets on timeout or close", async () => {
     vi.useFakeTimers();
     const opening = new FakeBrowserSocket("wss://relay.example/remote");

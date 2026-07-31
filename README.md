@@ -101,6 +101,16 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - Existing conversations keep their original execution route. Supported same-backend model changes can continue in place; changing the harness or backend opens a clearly separated new chat.
 - Choose whether Inertia opens on the compact Environment summary or the full workspace tools; fresh installs use the calmer summary.
 
+### Remote Companion, without surrendering the desktop
+
+Remote Companion is an experimental, self-hosted, opt-in way to follow safe conversation projections and send text prompts to an existing supervised chat while the Inertia desktop remains online. The desktop stays authoritative and opens only an outbound WebSocket; Inertia does not ship a hosted relay or open an inbound listener on your machine.
+
+Pairing requires an explicit comparison and a device-specific project grant. Grants are scoped, expiring, revocable, paused on screen lock or suspend, and recorded in a local audit history. Application payloads are end-to-end encrypted, while the reference relay sees only unavoidable routing, timing, and size metadata.
+
+The remote boundary is deliberately small. It can show sanitized user and assistant text and can submit text to an existing supervised conversation. It cannot approve commands, answer secret questions, browse or transfer files, use attachments or terminals, change provider settings, mutate Git, create projects or chats, stop runs, expose diagnostics, or enable Full Access.
+
+See the [Remote Companion protocol](docs/REMOTE_COMPANION_PROTOCOL.md), [threat model](docs/REMOTE_COMPANION_THREAT_MODEL.md), and [self-hosting guide](remote/README.md) before enabling it.
+
 ### Provider-native, local by default
 
 Inertia uses the coding tools and accounts already installed on your computer. Codex, Claude, Cursor, and OpenCode keep their own sessions, authentication, models, approvals, plans, reasoning, usage, and cancellation behavior; when a provider does not expose something, Inertia says so instead of imitating it.
@@ -130,13 +140,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.17
+### Version 0.0.18
 
-This release introduces **Graphite Ink**: a near-black dark canvas, clearer elevation and focus, calmer code and diff highlighting, and a restrained animated identity wave while an agent is working. Light mode, forced colours, reduced motion, interface scaling, and response density retain deliberate readable variants.
+This release introduces the experimental **Remote Companion**: a narrowly scoped, end-to-end encrypted browser companion for safe live conversation viewing and separately authorized text prompts to existing supervised chats. It is self-hosted, off by default, outbound-only from the desktop, project-scoped, expiring, revocable, and intentionally excludes approvals, secrets, files, terminals, Git mutation, settings, diagnostics, new chats, and Full Access.
 
-PDFs and supported documents are now first-class prompt context. They can be pasted or attached, previewed, removed, and sent on Linux, macOS, and Windows; privileged extraction verifies the exact file and applies strict page, time, dimension, pixel, and text bounds before provider delivery.
+Codex and Claude delegated-agent state is now persisted and presented with truthful hierarchy and terminal outcomes. Long-conversation minimap previews, attachment import containment, process-tree shutdown, terminal cleanup, prompt drafts, reasoning summaries, and Windows encrypted-vault validation are also more reliable across platforms.
 
-Download [Inertia v0.0.17](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.17):
+Download [Inertia v0.0.18](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.18):
 
 | Platform | Download |
 | --- | --- |

@@ -4,6 +4,33 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.18 — 2026-07-31
+
+### Remote Companion, intentionally narrow
+
+- Remote Companion adds an experimental, opt-in browser view for safe live conversation projections and separately authorized text prompts to existing supervised conversations while the desktop remains online and authoritative.
+- The desktop opens only an outbound WebSocket. A dependency-minimal browser and self-hostable in-memory reference relay are included, but Inertia does not operate a hosted relay or expose an inbound desktop listener.
+- Pairing uses an explicit comparison, device-specific project and scope grants, expiry, revocation, screen-lock suspension, and local audit history. Application payloads are end-to-end encrypted, replay-protected, byte-bounded, rate-limited, and stored with a separate encrypted platform-vault identity.
+- Remote projections are restricted to sanitized user and assistant text. Approvals, secrets, files, attachments, terminals, Git mutation, provider settings, diagnostics, new chats, Full Access, and generic commands remain unavailable remotely.
+- Prompt delivery revalidates the exact live session, route, grant, project, conversation, supervised access mode, and runtime preparation immediately before its one-time commit, preserving known non-delivery versus posted-but-unconfirmed outcomes.
+
+### Delegated work stays truthful
+
+- Codex and Claude subagents retain provider-reported hierarchy, status, continuation, and terminal outcomes across reconnects and persistence instead of collapsing every completed child into a generic failure.
+- Live and completed delegated work exposes only actions supported by the selected harness. Guidance remains an ordinary parent follow-up, while direct child cancellation appears only when the provider can own and acknowledge it.
+- Goal and activity views keep child state compact but informative, including waiting, blocked, completed, failed, cancelled, and lost outcomes without inventing lifecycle certainty.
+
+### Stronger feedback and shutdown edges
+
+- Long-conversation minimap markers preview the corresponding user request on hover and keyboard focus, grow predictably, and avoid duplicate browser and custom tooltip labels.
+- Attachment imports, terminal process trees, provider children, and the supervised utility runtime now use bounded shutdown and explicit process-tree confirmation across Windows, macOS, and Linux.
+- Clipboard copy, reasoning summaries, prompt drafts, long-thread refresh behavior, remote grant expiry, archived-conversation authority, and relay send boundaries remain owned by their exact current session.
+- The Windows remote-vault regression test now drains its asynchronous pairing audit before checking durable state, matching the real service lifecycle and removing a platform-specific file-replacement race without changing runtime behavior.
+
+### Release confidence
+
+- Architecture and lint checks, four TypeScript projects, unit and integration coverage, portable provider contracts, remote-browser Electron E2E, production audit, encrypted-vault and protocol adversarial fixtures, three-OS packaging, package smoke, Electron fuse verification, checksums, and provenance protect the release.
+
 ## 0.0.17 — 2026-07-30
 
 ### Graphite Ink gives the workspace a calmer edge

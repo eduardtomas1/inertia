@@ -367,3 +367,36 @@ production dependency audit, the relevant Electron/browser E2E, platform CI,
 and an independent diff/security review. Hosted infrastructure needs separate
 penetration, load, disaster-recovery, key-management, browser-supply-chain,
 privacy, and operational readiness reviews.
+
+## Runtime startup and project identity
+
+Runtime readiness no longer depends on inspecting every stored project. Startup
+previously awaited `Promise.all(storedProjects.map(inspectProjectIdentity))`,
+which put unbounded parallel `realpath` and Git work on the readiness path. A
+disconnected network mount, an unavailable external disk, or a problematic
+filesystem could therefore block startup until the supervisor killed and
+restarted the runtime — and the restart hit the same project again.
+
+The runtime now serves persisted state immediately and refreshes identity in the
+background through `ProjectIdentityRefresher`:
+
+- concurrency is clamped to the reviewed 4–8 range (default 6), so hundreds of
+  saved projects cannot create a filesystem or Git-process burst;
+- each project gets one overall deadline that covers `realpath` and every other
+  pre-Git step, enforced by the refresher rather than trusted to the inspector;
+- a project that times out or errors is recorded as `unavailable` with a reason,
+  and a project that has never been checked reads as `stale`; the last known
+  identity metadata stays in the database until a refresh succeeds;
+- one unavailable project cannot fail startup, so it cannot drive a restart loop;
+- `dispose()` stops the workers and prevents a late-resolving inspection from
+  applying its identity during shutdown or runtime restart.
+
+`realpath` cannot be aborted, so the deadline abandons the pending operation
+rather than cancelling it; the handle is released when the operating system
+eventually settles it. This is a bounded leak of one pending filesystem call per
+unavailable project, not an unbounded one.
+
+Sensitive operations revalidate before acting. `resolveAuthoritativeProjectPath`
+takes a `ProjectIdentityAuthority` and refuses when identity is stale or
+unavailable, retrying the refresh once so a project that came back online is
+accepted without a restart.

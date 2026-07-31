@@ -42,6 +42,37 @@ async function gitValue(cwd: string, args: readonly string[]): Promise<string> {
   return result.stdout.trim();
 }
 
+export const PROJECT_IDENTITY_DEADLINE_MS = 8_000;
+
+export class ProjectIdentityTimeout extends Error {
+  constructor(deadlineMs: number) {
+    super(`Project identity inspection exceeded ${deadlineMs}ms.`);
+    this.name = "ProjectIdentityTimeout";
+  }
+}
+
+export async function inspectProjectIdentityWithDeadline(
+  projectPath: string,
+  deadlineMs = PROJECT_IDENTITY_DEADLINE_MS,
+  setTimer: typeof setTimeout = setTimeout,
+  clearTimer: typeof clearTimeout = clearTimeout,
+): Promise<ProjectIdentity> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      inspectProjectIdentity(projectPath),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimer(
+          () => reject(new ProjectIdentityTimeout(deadlineMs)),
+          deadlineMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimer(timer);
+  }
+}
+
 export async function inspectProjectIdentity(projectPath: string): Promise<ProjectIdentity> {
   const canonicalPath = await canonicalDirectory(projectPath);
   const normalizedPath = normalizeIdentityPath(canonicalPath);

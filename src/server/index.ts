@@ -38,7 +38,10 @@ import { TerminalManager } from "./terminal";
 import { runRuntimeShutdownPhases } from "./runtime-shutdown";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
-import { inspectProjectIdentity } from "./project-identity";
+import {
+  ProjectIdentityRefresher,
+  projectIdentityIsUsable,
+} from "./project-identity-refresh";
 import { TurnGitArtifactManager } from "./turn-git-artifacts";
 import {
   sendRuntimeEvent as send,
@@ -202,14 +205,31 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       (attachmentId) => options.attachments!.cleanup(attachmentId),
     ));
   }
-  await Promise.all(store.shellSnapshot().projects.map(async (project) => {
-    try {
-      const identity = await inspectProjectIdentity(project.path);
-      store.updateProject(project.id, identity);
-    } catch {
-      // Missing or temporarily unavailable folders remain visible and isolated by their stored path.
-    }
-  }));
+  const projectIdentities = new ProjectIdentityRefresher({
+    apply: (projectId, identity) => {
+      try {
+        store.updateProject(projectId, identity);
+      } catch {
+        return;
+      }
+    },
+  });
+  const projectIdentityRefresh: Promise<void> = projectIdentities
+    .refreshAll(store.shellSnapshot().projects.map(({ id, path }) => ({
+      id,
+      path,
+    })))
+    .catch(() => undefined);
+  const projectIdentityAuthority = {
+    revalidate: async (projectId: string, projectPath: string) => {
+      if (projectIdentityIsUsable(projectIdentities.state(projectId))) {
+        return true;
+      }
+      return projectIdentityIsUsable(
+        await projectIdentities.refresh({ id: projectId, path: projectPath }),
+      );
+    },
+  };
   const remoteTranscriptCache = new RemoteTranscriptCache();
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
   const enableProviders = options.enableProviders ?? true;
@@ -745,7 +765,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
 
   return {
     websocketUrl: `ws://127.0.0.1:${address.port}${websocketPath}`,
-    resolveProjectPath: async (request) => (await resolveAuthoritativeProjectPath(store, request)).absolute,
+    resolveProjectPath: async (request) => (await resolveAuthoritativeProjectPath(
+      store,
+      request,
+      projectIdentityAuthority,
+    )).absolute,
     remoteRequest: (subject, request) => remoteGateway.request(subject, request),
     prepareRemotePrompt: (subject, request) =>
       remoteGateway.preparePrompt(subject, request),
@@ -758,6 +782,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
       closed = true;
+      projectIdentities.dispose();
+      await projectIdentityRefresh;
       snapshotBroadcasts.close();
       secureFileAuthorities.clear();
       await runRuntimeShutdownPhases({

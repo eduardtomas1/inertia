@@ -1,4 +1,5 @@
 import { posix, win32 } from "node:path";
+import { performance } from "node:perf_hooks";
 
 import { describe, expect, it } from "vitest";
 
@@ -193,6 +194,26 @@ describe("Remote Companion safe text projection", () => {
     expect(sanitizeRemoteContent(ordinaryText)).toBe(ordinaryText);
   });
 
+  it("handles surrounding delimiters without treating web URLs as paths", () => {
+    const delimitedPaths = [
+      ["(/home/alice/.env)", "(<local-path>)"],
+      ["[/home/alice/.env]", "[<local-path>]"],
+      ["{/home/alice/.env}", "{<local-path>}"],
+      ["</home/alice/.env>", "<<local-path>>"],
+      ["<C:/Users/alice/secret>", "<<local-path>>"],
+      [String.raw`<\\server\share\secret>`, "<<local-path>>"],
+    ] as const;
+    for (const [input, expected] of delimitedPaths) {
+      expect(sanitizeRemoteContent(input)).toBe(expected);
+    }
+    for (const url of [
+      "<https://example.invalid/home/alice/.env>",
+      "<wss://[::1]/remote>",
+    ]) {
+      expect(sanitizeRemoteContent(url)).toBe(url);
+    }
+  });
+
   it("bounds and normalizes labels", () => {
     expect(sanitizeRemoteContent(
       "x".repeat(70 * 1024),
@@ -202,6 +223,11 @@ describe("Remote Companion safe text projection", () => {
       "/ ".repeat(40 * 1024),
       100 * 1024,
     )).toHaveLength(64 * 1024);
+    const adversarialBoundaries = ":".repeat(64 * 1024);
+    const startedAt = performance.now();
+    expect(sanitizeRemoteContent(adversarialBoundaries))
+      .toBe(adversarialBoundaries);
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
     expect(sanitizeRemoteLabel("  hello\u0000\n world ", 20)).toBe(
       "hello world",
     );

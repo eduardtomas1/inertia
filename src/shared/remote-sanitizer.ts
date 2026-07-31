@@ -100,7 +100,10 @@ function absolutePathTokenAt(
   value: string,
   index: number,
 ): { pathEnd: number; tokenEnd: number } | null {
-  if (!isPathBoundary(value, index)) return null;
+  if (
+    !isPathBoundary(value, index)
+    || !isPlausibleAbsolutePathPrefix(value, index)
+  ) return null;
   const tokenEnd = scanPathTokenEnd(value, index);
   if (!isAbsolutePathToken(value, index, tokenEnd)) return null;
   const suffix = trailingPathSuffix(value, index, tokenEnd);
@@ -121,6 +124,19 @@ function absolutePathTokenAt(
     pathEnd = tokenEnd - 1;
   }
   return { pathEnd, tokenEnd };
+}
+
+function isPlausibleAbsolutePathPrefix(
+  value: string,
+  start: number,
+): boolean {
+  return value[start] === "/"
+    || value[start] === "\\"
+    || (
+      isAsciiLetter(value[start])
+      && value[start + 1] === ":"
+      && isWindowsSeparator(value[start + 2])
+    );
 }
 
 function isAbsolutePathToken(
@@ -340,7 +356,7 @@ function isUnmatchedClosingDelimiter(
 }
 
 function isPathBoundary(value: string, index: number): boolean {
-  return index === 0 || /[\s("'`=[{>,;!?:-]/u.test(value[index - 1]);
+  return index === 0 || /[\s<("'`=[{>,;!?:-]/u.test(value[index - 1]);
 }
 
 function isSchemeBoundary(value: string, index: number): boolean {

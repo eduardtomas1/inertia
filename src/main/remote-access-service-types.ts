@@ -13,6 +13,8 @@ import type {
 import type { PersistedRemoteDevice, RemoteAccessStore } from "./remote-access-store";
 import type { RuntimeSupervisor } from "./runtime-supervisor";
 
+export type RemotePrivacySuspension = "locked" | "unverified";
+
 export interface PendingRemotePairing {
   connectionId: string;
   connectionEpoch: number;
@@ -49,6 +51,7 @@ export interface RemoteAccessServiceOptions {
     >>;
   onStateChange?: (state: RemoteAccessState) => void;
   autoConnect?: boolean;
+  initialPrivacy?: RemotePrivacySuspension | null;
   now?: () => Date;
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;

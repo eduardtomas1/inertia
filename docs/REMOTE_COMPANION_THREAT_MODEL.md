@@ -88,6 +88,36 @@ retention, abuse-reporting, lawful-request, residency, deletion, monitoring,
 on-call, incident notification, and availability obligations. None are
 accepted or implemented by this reference task.
 
+## Desktop presence and lock state
+
+Remote Companion is only defensible while a person is present at an unlocked
+desktop, so an unknown lock state is treated as absence rather than presence.
+
+`RemotePrivacyMonitor` probes `powerMonitor.getSystemIdleState` once at startup
+and then relies on `lock-screen`, `suspend`, and `unlock-screen` events. The
+probe resolves to one of three outcomes. `locked` and a missing, throwing, or
+otherwise indeterminate probe all pause the feature; only `active` or `idle`
+count as a verified unlocked desktop. A platform that exposes no probe at all is
+therefore paused, where it previously reported unlocked.
+
+A paused monitor distinguishes two reasons. `locked` means Inertia observed a
+lock. `unverified` means Inertia never obtained a trustworthy signal, and the
+desktop reports
+"Remote Companion is paused because Inertia could not verify that this desktop
+is unlocked." Only a real `unlock-screen` event clears the unverified state, so
+the user cannot resume on an unverified guess.
+
+The probe runs exactly once and its detail is reported through a single
+diagnostic callback, so a permanently unsupported platform neither spams logs
+nor oscillates between states. `RemoteAccessService` also defaults to paused
+with reason `unverified`; a caller must pass `initialPrivacy: null` to assert
+desktop presence, which keeps a host that forgets to wire a monitor fail-closed.
+
+Locking suspends outbound authority immediately: `setPrivacyLocked(true)`
+disconnects live sessions, and `privacyLocked` is part of
+`remoteSessionRetainsAuthority`, so both view and prompt work stop even for a
+response already mid-encryption.
+
 ## Outbound frame authority
 
 Sealing a response is asynchronous, so authority checked before encryption is

@@ -30,6 +30,8 @@ import {
 import {
   closeRemoteSocket,
   REMOTE_MAX_BUFFERED_BYTES,
+  REMOTE_PRIVACY_LOCKED_MESSAGE,
+  REMOTE_PRIVACY_UNVERIFIED_MESSAGE,
   REMOTE_SHUTDOWN_TIMEOUT_MS,
   RemoteSessionAuthenticationBudget,
   sendSequencedRemoteResponse,
@@ -61,6 +63,7 @@ import {
 import { authenticateRemoteSession } from "./remote-access-session-handshake";
 import type {
   ActiveRemoteSession, PendingRemotePairing, RemoteAccessServiceOptions,
+  RemotePrivacySuspension,
 } from "./remote-access-service-types";
 const RELAY_HANDSHAKE_TIMEOUT_MS = 10_000;
 const SESSION_SWEEP_MS = 30_000;
@@ -91,7 +94,8 @@ export class RemoteAccessService {
   private reconnectTimer: Timer | null = null;
   private registrationTimer: Timer | null = null;
   private sweepTimer: Timer | null = null;
-  private privacyLocked = false;
+  private privacyLocked: boolean;
+  private privacySuspension: RemotePrivacySuspension | null;
   private stopped = false;
   private storeError: string | null = null;
   private identityInitialization: Promise<void> | null = null;
@@ -105,6 +109,10 @@ export class RemoteAccessService {
   ) {
     this.data = data;
     this.hostKeyPair = hostKeyPair;
+    this.privacySuspension = options.initialPrivacy === undefined
+      ? "unverified"
+      : options.initialPrivacy;
+    this.privacyLocked = this.privacySuspension !== null;
     this.now = options.now ?? (() => new Date());
     this.setTimer = options.setTimer ?? setTimeout;
     this.clearTimer = options.clearTimer ?? clearTimeout;
@@ -373,12 +381,25 @@ export class RemoteAccessService {
     this.emitState();
   }
 
-  setPrivacyLocked(locked: boolean): void {
-    if (this.privacyLocked === locked) return;
+  setPrivacyLocked(
+    locked: boolean,
+    suspension: RemotePrivacySuspension | null = locked ? "locked" : null,
+  ): void {
+    const changed = this.privacyLocked !== locked
+      || this.privacySuspension !== suspension;
+    if (!changed) return;
     this.privacyLocked = locked;
+    this.privacySuspension = locked ? suspension ?? "locked" : null;
     if (locked) this.disconnect("shutdown", true);
     else if (this.data?.enabled) this.connect();
     this.emitState();
+  }
+
+  private privacySuspensionMessage(): string | null {
+    if (!this.privacyLocked) return null;
+    return this.privacySuspension === "unverified"
+      ? REMOTE_PRIVACY_UNVERIFIED_MESSAGE
+      : REMOTE_PRIVACY_LOCKED_MESSAGE;
   }
 
   async shutdown(): Promise<void> {
@@ -399,12 +420,12 @@ export class RemoteAccessService {
 
   private connect(): void {
     const data = this.data;
-    if (
-      !data?.enabled
-      || this.stopped
-      || this.privacyLocked
-      || this.socket
-    ) return;
+    if (!data?.enabled || this.stopped || this.socket) return;
+    if (this.privacyLocked) {
+      this.connection = "offline";
+      this.connectionMessage = this.privacySuspensionMessage();
+      return;
+    }
     this.connection = "connecting";
     this.connectionMessage = null;
     this.emitState();
@@ -451,9 +472,8 @@ export class RemoteAccessService {
       this.connection = "offline";
       const closedMessage = this.pendingConnectionMessage;
       this.pendingConnectionMessage = null;
-      this.connectionMessage = this.privacyLocked
-        ? "Remote Companion is paused while the desktop is locked."
-        : closedMessage ?? "The relay is offline.";
+      this.connectionMessage = this.privacySuspensionMessage()
+        ?? closedMessage ?? "The relay is offline.";
       this.relayMessages.reset();
       this.dropAllSessions();
       this.scheduleReconnect();
@@ -886,9 +906,7 @@ export class RemoteAccessService {
     }
     this.clearReconnect();
     this.connection = this.data?.enabled ? "offline" : "disabled";
-    this.connectionMessage = this.privacyLocked
-      ? "Remote Companion is paused while the desktop is locked."
-      : null;
+    this.connectionMessage = this.privacySuspensionMessage();
     if (reconnect) this.scheduleReconnect();
     return socket;
   }

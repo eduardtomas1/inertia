@@ -112,6 +112,7 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
     });
     const socket = new FakeSocket();
     const service = await RemoteAccessService.create({
+      initialPrivacy: null,
       store,
       runtime: {
         remoteRequest: async () => {
@@ -164,6 +165,7 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
     );
     const createSocket = vi.fn(() => new FakeSocket() as unknown as WebSocket);
     service = await RemoteAccessService.create({
+      initialPrivacy: null,
       store,
       runtime: {
         remoteRequest: async () => {
@@ -191,7 +193,7 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("fails closed for an unknown initial state but tolerates unsupported probes", () => {
+  it("fails closed for an unknown initial state and for unsupported probes", () => {
     const unknownPower = Object.assign(new EventEmitter(), {
       getSystemIdleState: () => "unknown" as const,
     });
@@ -200,6 +202,8 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
       () => undefined,
     );
     expect(unknown.locked).toBe(true);
+    expect(unknown.lockStateVerified).toBe(false);
+    expect(unknown.suspension).toBe("unverified");
     unknown.shutdown();
 
     const unsupportedPower = Object.assign(new EventEmitter(), {
@@ -211,8 +215,15 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
       unsupportedPower,
       () => undefined,
     );
-    expect(unsupported.locked).toBe(false);
+    expect(unsupported.locked).toBe(true);
+    expect(unsupported.lockStateVerified).toBe(false);
+    expect(unsupported.suspension).toBe("unverified");
     unsupported.shutdown();
+
+    const missing = new RemotePrivacyMonitor(new EventEmitter(), () => undefined);
+    expect(missing.locked).toBe(true);
+    expect(missing.suspension).toBe("unverified");
+    missing.shutdown();
   });
 
   it("cannot miss a lock emitted during the initial state sample", () => {
@@ -257,6 +268,7 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
     );
     const createSocket = vi.fn(() => new FakeSocket() as unknown as WebSocket);
     const creating = RemoteAccessService.create({
+      initialPrivacy: null,
       store,
       runtime: {
         remoteRequest: async () => {

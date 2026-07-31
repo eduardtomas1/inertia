@@ -44,12 +44,17 @@ export class RemoteAccessHost {
   private initializationError: string | null =
     "Remote Companion secure storage is initializing.";
   private readonly privacyMonitor: RemotePrivacyMonitor;
+  private privacyDiagnostic: string | null = null;
   private stopped = false;
 
   private constructor(private readonly options: RemoteAccessHostOptions) {
     this.privacyMonitor = new RemotePrivacyMonitor(
       powerMonitor,
-      (locked) => this.service?.setPrivacyLocked(locked),
+      (locked, suspension) =>
+        this.service?.setPrivacyLocked(locked, suspension),
+      (detail) => {
+        this.privacyDiagnostic = detail;
+      },
     );
     this.registerIpc(options.assertTrusted);
   }
@@ -121,18 +126,26 @@ export class RemoteAccessHost {
         this.emitState(state);
       },
       autoConnect: false,
+      initialPrivacy: this.privacyMonitor.suspension,
     });
     if (this.stopped) {
       await service.shutdown();
       return;
     }
-    service.setPrivacyLocked(this.privacyMonitor.locked);
+    service.setPrivacyLocked(
+      this.privacyMonitor.locked,
+      this.privacyMonitor.suspension,
+    );
     this.service = service;
     const state = service.state();
     service.startConnections();
     this.initializationError = state.connectionMessage
       ?? "Remote Companion is unavailable.";
     this.emitState(service.state());
+  }
+
+  lockStateDiagnostic(): string | null {
+    return this.privacyMonitor.probeDiagnostic ?? this.privacyDiagnostic;
   }
 
   state(): RemoteAccessState {

@@ -5,6 +5,7 @@ export const REMOTE_BROWSER_VERSION = "0.1.0";
 export const REMOTE_RELAY_VERSION = "0.1.0";
 
 export const REMOTE_LIMITS = Object.freeze({
+  relayEnvelopeBytes: 132 * 1024,
   encryptedFrameBytes: 128 * 1024,
   plaintextBytes: 96 * 1024,
   promptCharacters: 8_000,

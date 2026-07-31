@@ -41,7 +41,7 @@ export class RemoteRelayDispatcher {
   constructor(private readonly handlers: RemoteRelayDispatcherHandlers) {}
 
   receive(raw: RawData): void {
-    if (remoteRawDataByteLength(raw) > REMOTE_LIMITS.encryptedFrameBytes + 4_096) {
+    if (remoteRawDataByteLength(raw) > REMOTE_LIMITS.relayEnvelopeBytes) {
       this.handlers.oversized();
       return;
     }

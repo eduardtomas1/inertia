@@ -84,9 +84,11 @@ or reuses the local runtime capability.
 All JSON objects are strict-schema parsed; unknown fields fail. Relay envelopes
 carry protocol version, routing endpoint/connection identifiers, frame kind,
 session/invitation identifiers, sequence where applicable, and ciphertext.
-Application plaintext is capped at 96 KiB and encrypted frames at 128 KiB.
-Projection builders truncate by UTF-8 byte size, keeping the newest useful
-conversations and transcript content.
+Before any relay JSON parse, desktop and browser enforce the 132 KiB envelope
+limit; browser tunnel setup, pairing/session handshakes, and active sessions
+close on oversized or non-text messages. Application plaintext is capped at
+96 KiB and encrypted frames at 128 KiB. Projection builders truncate by UTF-8
+byte size, keeping the newest useful conversations and transcript content.
 
 Pairing:
 
@@ -158,7 +160,9 @@ The only version 1 application requests are:
 - `state.get`: safe projects, conversations, and agent-run summaries.
 - `conversation.get`: persisted user/assistant transcript, generic redacted
   workstream activity, bounded subagent status, and whether a local action is
-  required.
+  required. A bounded monotonic scanner removes backtick/tilde fenced code,
+  interrupted fences, top-level indented code, and paired, nested,
+  self-closing, or interrupted HTML before path/credential redaction.
 - `prompt.send`: bounded text to one existing authorized conversation.
 
 For prompts, Electron main persists a bounded delivery receipt as `dispatched`
@@ -268,7 +272,8 @@ bounded backoff rather than remaining indefinitely connected but offline.
   retry invalidates an older ID. An unresolved check retains its bounded slot.
 - Session idle expiry: 15 minutes; handshake freshness: 60 seconds.
 - Reconnect backoff: capped at 30 seconds; no prompt replay.
-- Relay envelope: 132 KiB; application ciphertext: 128 KiB; plaintext: 96 KiB.
+- Relay envelope: 132 KiB before JSON parsing; application ciphertext:
+  128 KiB; plaintext: 96 KiB.
 - Relay destination send buffer: 264 KiB by default; exceeding the configured
   bound terminates that destination and cleans up its routes.
 - Audit events: newest 1,000 persisted; delivery receipts/session IDs: newest

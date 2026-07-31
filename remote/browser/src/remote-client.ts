@@ -38,6 +38,16 @@ import {
 } from "./device-store";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+const REMOTE_TEXT_ENCODER = new TextEncoder();
+
+type BoundedRemoteRelayText =
+  | { ok: true; value: string }
+  | {
+    ok: false;
+    closeCode: 1003 | 1009;
+    closeReason: string;
+    message: string;
+  };
 
 export interface RemoteClientCallbacks {
   status(message: string, online: boolean): void;
@@ -290,7 +300,7 @@ export class RemoteCompanionClient {
         this.inboundTail = this.inboundTail
           .then(async () => {
             if (this.ownsAttempt(epoch)) {
-              await this.handleMessage(event.data);
+              await this.handleMessage(tunnel.socket, event.data);
             }
           })
           .catch(() => {
@@ -448,11 +458,18 @@ export class RemoteCompanionClient {
     return promise;
   }
 
-  private async handleMessage(raw: unknown): Promise<void> {
-    if (typeof raw !== "string" || raw.length > 180_000) return;
+  private async handleMessage(
+    socket: WebSocket,
+    raw: unknown,
+  ): Promise<void> {
+    const bounded = boundedRemoteRelayText(raw);
+    if (!bounded.ok) {
+      socket.close(bounded.closeCode, bounded.closeReason);
+      return;
+    }
     let value: unknown;
     try {
-      value = JSON.parse(raw) as unknown;
+      value = JSON.parse(bounded.value) as unknown;
     } catch {
       return;
     }
@@ -666,10 +683,16 @@ export function waitForRemoteRelayMessage(
       reject(new Error("The relay response timed out."));
     }, Math.max(1, Math.min(timeoutMs, REMOTE_LIMITS.pairingTtlMs)));
     const onMessage = (event: MessageEvent) => {
-      if (typeof event.data !== "string") return;
+      const bounded = boundedRemoteRelayText(event.data);
+      if (!bounded.ok) {
+        cleanup();
+        socket.close(bounded.closeCode, bounded.closeReason);
+        reject(new Error(bounded.message));
+        return;
+      }
       let value: unknown;
       try {
-        value = JSON.parse(event.data) as unknown;
+        value = JSON.parse(bounded.value) as unknown;
       } catch {
         return;
       }
@@ -690,6 +713,30 @@ export function waitForRemoteRelayMessage(
     socket.addEventListener("error", onError);
     socket.addEventListener("close", onClose);
   });
+}
+
+function boundedRemoteRelayText(value: unknown): BoundedRemoteRelayText {
+  if (typeof value !== "string") {
+    return {
+      ok: false,
+      closeCode: 1003,
+      closeReason: "relay messages must be text",
+      message: "The relay sent an unsupported message.",
+    };
+  }
+  if (
+    value.length > REMOTE_LIMITS.relayEnvelopeBytes
+    || REMOTE_TEXT_ENCODER.encode(value).byteLength
+      > REMOTE_LIMITS.relayEnvelopeBytes
+  ) {
+    return {
+      ok: false,
+      closeCode: 1009,
+      closeReason: "relay message too large",
+      message: "The relay response exceeded the protocol limit.",
+    };
+  }
+  return { ok: true, value };
 }
 
 async function waitForRelayFrame(

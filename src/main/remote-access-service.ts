@@ -105,7 +105,7 @@ export class RemoteAccessService {
     this.clearTimer = options.clearTimer ?? clearTimeout;
     this.createSocket = options.createSocket ?? ((url) => new WebSocket(url, {
       perMessageDeflate: false,
-      maxPayload: REMOTE_LIMITS.encryptedFrameBytes + 4_096,
+      maxPayload: REMOTE_LIMITS.relayEnvelopeBytes,
       handshakeTimeout: RELAY_HANDSHAKE_TIMEOUT_MS,
     }));
     this.persistence = new RemoteAccessPersistenceQueue(
@@ -717,7 +717,7 @@ export class RemoteAccessService {
     const serialized = JSON.stringify(message);
     if (
       new TextEncoder().encode(serialized).byteLength
-      > REMOTE_LIMITS.encryptedFrameBytes + 4_096
+      > REMOTE_LIMITS.relayEnvelopeBytes
     ) return;
     socket.send(serialized);
   }

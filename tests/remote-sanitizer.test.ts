@@ -48,6 +48,102 @@ describe("Remote Companion safe text projection", () => {
     expect(projected).toContain("[Code omitted on Remote Companion]");
   });
 
+  it("redacts alternate, interrupted, and indented code blocks", () => {
+    const cases = [
+      [
+        "Before\n~~~ts\nconst tildeSecret = true;\n~~~\nAfter",
+        "Before\n[Code omitted on Remote Companion]\nAfter",
+      ],
+      [
+        "Before\n~~~ts ~~~\nconst tildeInfoSecret = true;\n~~~\nAfter",
+        "Before\n[Code omitted on Remote Companion]\nAfter",
+      ],
+      [
+        "Before\n```ts\nconst interruptedSecret = true;",
+        "Before\n[Code omitted on Remote Companion]",
+      ],
+      [
+        "Before\n   ````ts\nconst longFenceSecret = true;\n   ````\nAfter",
+        "Before\n[Code omitted on Remote Companion]\nAfter",
+      ],
+      [
+        "Before\n    const indentedSecret = true;\n    return indentedSecret;\nAfter",
+        "Before\n[Code omitted on Remote Companion]\nAfter",
+      ],
+      [
+        "Before\n\tconst tabSecret = true;\n\n\treturn tabSecret;\nAfter",
+        "Before\n[Code omitted on Remote Companion]\nAfter",
+      ],
+      [
+        "```ts const oneLineSecret = true; ```\nAfter",
+        "[Code omitted on Remote Companion]",
+      ],
+    ] as const;
+    for (const [input, expected] of cases) {
+      expect(sanitizeRemoteContent(input)).toBe(expected);
+      expect(sanitizeRemoteContent(input)).not.toContain("Secret");
+    }
+    expect(sanitizeRemoteContent(
+      "Use `inline code` and ~~ordinary emphasis~~ in prose.",
+    )).toBe("Use `inline code` and ~~ordinary emphasis~~ in prose.");
+  });
+
+  it("redacts interrupted, self-closing, and nested HTML linearly", () => {
+    const cases = [
+      [
+        "Before <img src=\"private.png\" /> after",
+        "Before [HTML omitted on Remote Companion] after",
+      ],
+      [
+        "Before <div><span>nested secret</span><div>inner</div></div> after",
+        "Before [HTML omitted on Remote Companion] after",
+      ],
+      [
+        "Before <x-private>custom secret</x-private> after",
+        "Before [HTML omitted on Remote Companion] after",
+      ],
+      [
+        "Before <x-private data-kind=\"secret\" /> after",
+        "Before [HTML omitted on Remote Companion] after",
+      ],
+      [
+        "Before </script> unmatched prose after",
+        "Before [HTML omitted on Remote Companion] unmatched prose after",
+      ],
+      [
+        "Before <div><span>mismatched secret</div> after",
+        "Before [HTML omitted on Remote Companion]",
+      ],
+      [
+        "Before <script>interrupted secret",
+        "Before [HTML omitted on Remote Companion]",
+      ],
+      [
+        "Before <script src=\"interrupted.js\"",
+        "Before [HTML omitted on Remote Companion]",
+      ],
+      [
+        "Before <!-- interrupted secret",
+        "Before [HTML omitted on Remote Companion]",
+      ],
+      [
+        "Before <br> after",
+        "Before [HTML omitted on Remote Companion] after",
+      ],
+    ] as const;
+    for (const [input, expected] of cases) {
+      expect(sanitizeRemoteContent(input)).toBe(expected);
+      expect(sanitizeRemoteContent(input)).not.toContain("secret");
+    }
+    expect(sanitizeRemoteContent(
+      "Compare <value> and 2 < 3; keep <https://example.invalid/a>, "
+        + "but redact </home/alice/.env>.",
+    )).toBe(
+      "Compare <value> and 2 < 3; keep <https://example.invalid/a>, "
+        + "but redact <<local-path>>.",
+    );
+  });
+
   it("preserves web URLs and punctuation around redacted local paths", () => {
     const projected = sanitizeRemoteContent(
       [
@@ -244,6 +340,18 @@ describe("Remote Companion safe text projection", () => {
       `${mixedToken} <<local-path>>`,
     );
     expect(performance.now() - mixedStartedAt).toBeLessThan(2_000);
+    const interruptedFence = `\`\`\`ts\n${"const bounded = true;\n".repeat(
+      4_096,
+    )}`;
+    const fenceStartedAt = performance.now();
+    expect(sanitizeRemoteContent(interruptedFence)).toBe(
+      "[Code omitted on Remote Companion]",
+    );
+    expect(performance.now() - fenceStartedAt).toBeLessThan(2_000);
+    const angleProse = "<value> ".repeat(8_192);
+    const htmlStartedAt = performance.now();
+    expect(sanitizeRemoteContent(angleProse)).toBe(angleProse);
+    expect(performance.now() - htmlStartedAt).toBeLessThan(2_000);
     expect(sanitizeRemoteLabel("  hello\u0000\n world ", 20)).toBe(
       "hello world",
     );

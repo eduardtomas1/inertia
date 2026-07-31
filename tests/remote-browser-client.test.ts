@@ -7,9 +7,10 @@ import {
 } from "../remote/browser/src/remote-client";
 import type { BrowserDeviceProfile } from "../remote/browser/src/device-store";
 import { generateRemoteKeyPair } from "../src/shared/remote-crypto";
-import type {
-  RemoteRequest,
-  RemoteResponse,
+import {
+  REMOTE_LIMITS,
+  type RemoteRequest,
+  type RemoteResponse,
 } from "../src/shared/remote-protocol";
 
 class FakeBrowserSocket extends EventTarget {
@@ -55,8 +56,12 @@ class FakeBrowserSocket extends EventTarget {
   }
 
   message(value: unknown): void {
+    this.rawMessage(JSON.stringify(value));
+  }
+
+  rawMessage(value: unknown): void {
     this.dispatchEvent(new MessageEvent("message", {
-      data: JSON.stringify(value),
+      data: value,
     }));
   }
 
@@ -74,6 +79,7 @@ class FakeBrowserSocket extends EventTarget {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   FakeBrowserSocket.instances = [];
 });
@@ -166,6 +172,100 @@ describe("Remote Companion browser connection ownership", () => {
     expect(relaying.listenerCount("error")).toBe(0);
     expect(relaying.listenerCount("close")).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("closes oversized relay envelopes before parsing handshake JSON", async () => {
+    const parse = vi.spyOn(JSON, "parse");
+    const oversized = new FakeBrowserSocket("wss://relay.example/remote");
+    const oversizedResult = waitForRemoteRelayMessage(
+      oversized as unknown as WebSocket,
+      () => true,
+      1_000,
+    );
+    const startedAt = performance.now();
+    oversized.rawMessage("x".repeat(
+      REMOTE_LIMITS.relayEnvelopeBytes + 1,
+    ));
+    await expect(oversizedResult).rejects.toThrow("protocol limit");
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+    expect(parse).not.toHaveBeenCalled();
+    expect(oversized.closeCalls).toEqual([
+      [1009, "relay message too large"],
+    ]);
+    expect(oversized.listenerCount("message")).toBe(0);
+
+    const multibyte = new FakeBrowserSocket("wss://relay.example/remote");
+    const multibyteResult = waitForRemoteRelayMessage(
+      multibyte as unknown as WebSocket,
+      () => true,
+      1_000,
+    );
+    multibyte.rawMessage("\u0800".repeat(
+      Math.floor(REMOTE_LIMITS.relayEnvelopeBytes / 3) + 1,
+    ));
+    await expect(multibyteResult).rejects.toThrow("protocol limit");
+    expect(parse).not.toHaveBeenCalled();
+    expect(multibyte.closeCalls).toEqual([
+      [1009, "relay message too large"],
+    ]);
+  });
+
+  it("rejects unsupported relay data and ignores bounded malformed JSON", async () => {
+    const unsupported = new FakeBrowserSocket("wss://relay.example/remote");
+    const unsupportedResult = waitForRemoteRelayMessage(
+      unsupported as unknown as WebSocket,
+      () => true,
+      1_000,
+    );
+    unsupported.rawMessage(new Uint8Array([1, 2, 3]));
+    await expect(unsupportedResult).rejects.toThrow("unsupported");
+    expect(unsupported.closeCalls).toEqual([
+      [1003, "relay messages must be text"],
+    ]);
+
+    const malformed = new FakeBrowserSocket("wss://relay.example/remote");
+    const malformedResult = waitForRemoteRelayMessage(
+      malformed as unknown as WebSocket,
+      (message) => message.type === "relay.error",
+      1_000,
+    );
+    malformed.rawMessage("{");
+    malformed.message({
+      protocolVersion: 1,
+      type: "relay.error",
+      code: "desktop-offline",
+    });
+    await expect(malformedResult).resolves.toMatchObject({
+      type: "relay.error",
+      code: "desktop-offline",
+    });
+    expect(malformed.closeCalls).toEqual([]);
+  });
+
+  it("applies the pre-parse envelope bound to active session messages", async () => {
+    const parse = vi.spyOn(JSON, "parse");
+    const socket = new FakeBrowserSocket("wss://relay.example/remote");
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+
+    await (
+      client as unknown as {
+        handleMessage(socket: WebSocket, raw: unknown): Promise<void>;
+      }
+    ).handleMessage(
+      socket as unknown as WebSocket,
+      "x".repeat(REMOTE_LIMITS.relayEnvelopeBytes + 1),
+    );
+
+    expect(parse).not.toHaveBeenCalled();
+    expect(socket.closeCalls).toEqual([
+      [1009, "relay message too large"],
+    ]);
   });
 
   it("reports offline and stops polling when a live refresh is not acknowledged", async () => {

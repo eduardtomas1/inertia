@@ -7,11 +7,58 @@ const SECRET_PATTERNS = [
 
 const CREDENTIAL_URL =
   /\b([a-z][a-z0-9+.-]*:\/\/)(?:[^/\s@]+)@/giu;
-const CODE_FENCE = /```[\s\S]*?```/gu;
-const HTML_BLOCK = /<([A-Za-z][A-Za-z0-9-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/gu;
 const DIRECTIONAL_FORMATTING =
   /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u206f]+/gu;
 const MAX_REMOTE_CONTENT_CHARACTERS = 64 * 1024;
+const CODE_OMISSION = "[Code omitted on Remote Companion]";
+const HTML_OMISSION = "[HTML omitted on Remote Companion]";
+const REMOTE_HTML_TAGS = new Set([
+  "a", "abbr", "acronym", "address", "applet", "area", "article", "aside",
+  "audio", "b", "base", "basefont", "bdi", "bdo", "bgsound", "big", "blink",
+  "blockquote", "body", "br", "button", "canvas", "caption", "center", "cite",
+  "code", "col", "colgroup", "data", "datalist", "dd", "del", "details",
+  "dfn", "dialog", "dir", "div", "dl", "dt", "em", "embed", "fieldset",
+  "figcaption", "figure", "font", "footer", "form", "frame", "frameset", "h1",
+  "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr", "html",
+  "i", "iframe", "img", "input", "ins", "kbd", "keygen", "label", "legend",
+  "li", "link", "main", "map", "mark", "marquee", "math", "menu", "meta",
+  "meter", "nav", "nobr", "noembed", "noframes", "noscript", "object", "ol",
+  "optgroup", "option", "output", "p", "param", "picture", "plaintext", "pre",
+  "progress", "q", "rb", "rp", "rt", "rtc", "ruby", "s", "samp", "script",
+  "search", "section", "select", "slot", "small", "source", "spacer", "span",
+  "strike", "strong", "style", "sub", "summary", "sup", "svg", "table",
+  "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time",
+  "title", "tr", "track", "tt", "u", "ul", "var", "video", "wbr", "xmp",
+]);
+const REMOTE_VOID_HTML_TAGS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+  "param", "source", "track", "wbr",
+]);
+
+interface RemoteLine {
+  contentEnd: number;
+  nextStart: number;
+}
+
+interface RemoteCodeFence {
+  character: "`" | "~";
+  length: number;
+}
+
+interface RemoteHtmlTag {
+  name: string;
+  closing: boolean;
+  complete: boolean;
+  selfClosing: boolean;
+  hasAttributes: boolean;
+  end: number;
+}
+
+interface RemoteHtmlOpening {
+  name: string;
+  start: number;
+  likelyHtml: boolean;
+}
 
 /**
  * Remote Companion deliberately omits code/source blocks, absolute paths,
@@ -22,9 +69,13 @@ export function sanitizeRemoteContent(
   value: string,
   maximumCharacters = 64 * 1024,
 ): string {
-  let text = value
-    .replace(CODE_FENCE, "[Code omitted on Remote Companion]")
-    .replace(HTML_BLOCK, "[HTML omitted on Remote Companion]")
+  const outputLimit = Math.min(
+    Math.max(0, maximumCharacters),
+    MAX_REMOTE_CONTENT_CHARACTERS,
+  );
+  let text = redactRemoteHtmlBlocks(
+    redactRemoteCodeBlocks(value.slice(0, outputLimit)),
+  )
     .replace(CREDENTIAL_URL, "$1<redacted>@");
   for (const pattern of SECRET_PATTERNS) {
     text = text.replace(pattern, (match) =>
@@ -32,12 +83,390 @@ export function sanitizeRemoteContent(
         ? `${match.split(/\s/u)[0]} <redacted>`
         : "<redacted-secret>");
   }
-  const outputLimit = Math.min(
-    Math.max(0, maximumCharacters),
-    MAX_REMOTE_CONTENT_CHARACTERS,
-  );
-  return redactAbsolutePathTokens(text.slice(0, outputLimit))
+  return redactAbsolutePathTokens(text)
     .slice(0, outputLimit);
+}
+
+// The input is capped before this scanner runs. It visits each line and fence
+// character monotonically, including when a provider is interrupted before a
+// closing fence arrives.
+function redactRemoteCodeBlocks(value: string): string {
+  let result = "";
+  let copiedUntil = 0;
+  let lineStart = 0;
+  while (lineStart < value.length) {
+    const line = remoteLineAt(value, lineStart);
+    const fence = remoteCodeFenceAt(value, lineStart, line.contentEnd);
+    if (fence) {
+      const redactedEnd = remoteFenceBlockEnd(
+        value,
+        line.nextStart,
+        fence,
+      );
+      result += value.slice(copiedUntil, lineStart);
+      result += CODE_OMISSION;
+      copiedUntil = redactedEnd;
+      lineStart = redactedEnd;
+      continue;
+    }
+    if (isIndentedRemoteCodeLine(value, lineStart, line.contentEnd)) {
+      const redactedEnd = remoteIndentedBlockEnd(value, line);
+      result += value.slice(copiedUntil, lineStart);
+      result += CODE_OMISSION;
+      copiedUntil = redactedEnd;
+      lineStart = redactedEnd;
+      continue;
+    }
+    lineStart = line.nextStart;
+  }
+  return `${result}${value.slice(copiedUntil)}`;
+}
+
+function remoteFenceBlockEnd(
+  value: string,
+  start: number,
+  fence: RemoteCodeFence,
+): number {
+  let lineStart = start;
+  while (lineStart < value.length) {
+    const line = remoteLineAt(value, lineStart);
+    if (isRemoteFenceClose(
+      value,
+      lineStart,
+      line.contentEnd,
+      fence,
+    )) return line.contentEnd;
+    lineStart = line.nextStart;
+  }
+  return value.length;
+}
+
+function remoteIndentedBlockEnd(
+  value: string,
+  firstLine: RemoteLine,
+): number {
+  let redactedEnd = firstLine.contentEnd;
+  let lineStart = firstLine.nextStart;
+  while (lineStart < value.length) {
+    const line = remoteLineAt(value, lineStart);
+    if (isIndentedRemoteCodeLine(value, lineStart, line.contentEnd)) {
+      redactedEnd = line.contentEnd;
+      lineStart = line.nextStart;
+      continue;
+    }
+    if (isBlankRemoteLine(value, lineStart, line.contentEnd)) {
+      let nextContentStart = line.nextStart;
+      while (nextContentStart < value.length) {
+        const next = remoteLineAt(value, nextContentStart);
+        if (!isBlankRemoteLine(
+          value,
+          nextContentStart,
+          next.contentEnd,
+        )) break;
+        nextContentStart = next.nextStart;
+      }
+      if (nextContentStart < value.length) {
+        const next = remoteLineAt(value, nextContentStart);
+        if (isIndentedRemoteCodeLine(
+          value,
+          nextContentStart,
+          next.contentEnd,
+        )) {
+          lineStart = nextContentStart;
+          continue;
+        }
+      }
+    }
+    break;
+  }
+  return redactedEnd;
+}
+
+function remoteCodeFenceAt(
+  value: string,
+  start: number,
+  end: number,
+): RemoteCodeFence | null {
+  const markerStart = remoteFenceMarkerStart(value, start, end);
+  if (markerStart === null) return null;
+  const character = value[markerStart];
+  if (character !== "`" && character !== "~") return null;
+  const markerEnd = scanRemoteFenceRun(value, markerStart, end, character);
+  const length = markerEnd - markerStart;
+  if (length < 3) return null;
+  return { character, length };
+}
+
+function isRemoteFenceClose(
+  value: string,
+  start: number,
+  end: number,
+  fence: RemoteCodeFence,
+): boolean {
+  const markerStart = remoteFenceMarkerStart(value, start, end);
+  if (markerStart === null || value[markerStart] !== fence.character) {
+    return false;
+  }
+  const markerEnd = scanRemoteFenceRun(
+    value,
+    markerStart,
+    end,
+    fence.character,
+  );
+  if (markerEnd - markerStart < fence.length) return false;
+  for (let cursor = markerEnd; cursor < end; cursor += 1) {
+    if (value[cursor] !== " " && value[cursor] !== "\t") return false;
+  }
+  return true;
+}
+
+function remoteFenceMarkerStart(
+  value: string,
+  start: number,
+  end: number,
+): number | null {
+  let cursor = start;
+  while (cursor < end && cursor - start < 4 && value[cursor] === " ") {
+    cursor += 1;
+  }
+  return cursor - start <= 3 ? cursor : null;
+}
+
+function scanRemoteFenceRun(
+  value: string,
+  start: number,
+  end: number,
+  character: "`" | "~",
+): number {
+  let cursor = start;
+  while (cursor < end && value[cursor] === character) cursor += 1;
+  return cursor;
+}
+
+function isIndentedRemoteCodeLine(
+  value: string,
+  start: number,
+  end: number,
+): boolean {
+  if (isBlankRemoteLine(value, start, end)) return false;
+  if (value[start] === "\t") return true;
+  return end - start >= 4
+    && value[start] === " "
+    && value[start + 1] === " "
+    && value[start + 2] === " "
+    && value[start + 3] === " ";
+}
+
+function isBlankRemoteLine(
+  value: string,
+  start: number,
+  end: number,
+): boolean {
+  for (let cursor = start; cursor < end; cursor += 1) {
+    if (value[cursor] !== " " && value[cursor] !== "\t") return false;
+  }
+  return true;
+}
+
+function remoteLineAt(value: string, start: number): RemoteLine {
+  let contentEnd = start;
+  while (
+    contentEnd < value.length
+    && value[contentEnd] !== "\n"
+    && value[contentEnd] !== "\r"
+  ) contentEnd += 1;
+  let nextStart = contentEnd;
+  if (value[nextStart] === "\r") nextStart += 1;
+  if (value[nextStart] === "\n") nextStart += 1;
+  return { contentEnd, nextStart };
+}
+
+// HTML ranges are discovered in one bounded token pass. A fixed-size start
+// table avoids nested-regex behavior and lets the second pass replace
+// disjoint/nested ranges monotonically.
+function redactRemoteHtmlBlocks(value: string): string {
+  const redactionEnds = new Uint32Array(value.length + 1);
+  const openings: RemoteHtmlOpening[] = [];
+  let index = 0;
+  while (index < value.length) {
+    if (value[index] !== "<") {
+      index += 1;
+      continue;
+    }
+    const specialEnd = remoteSpecialHtmlEndAt(value, index);
+    if (specialEnd !== null) {
+      redactionEnds[index] = specialEnd;
+      index = specialEnd;
+      continue;
+    }
+    const tag = remoteHtmlTagAt(value, index);
+    if (!tag) {
+      index += 1;
+      continue;
+    }
+    const known = REMOTE_HTML_TAGS.has(tag.name);
+    const likelyHtml = known || tag.hasAttributes;
+    if (!tag.complete) {
+      if (likelyHtml) redactionEnds[index] = value.length;
+      break;
+    }
+    if (tag.closing) {
+      const opening = openings.at(-1);
+      if (opening?.name === tag.name) {
+        openings.pop();
+        redactionEnds[opening.start] = tag.end;
+      } else if (known) {
+        redactionEnds[index] = tag.end;
+      }
+      index = tag.end;
+      continue;
+    }
+    if (tag.selfClosing || REMOTE_VOID_HTML_TAGS.has(tag.name)) {
+      if (likelyHtml || tag.selfClosing) redactionEnds[index] = tag.end;
+      index = tag.end;
+      continue;
+    }
+    openings.push({ name: tag.name, start: index, likelyHtml });
+    index = tag.end;
+  }
+  for (const opening of openings) {
+    if (opening.likelyHtml) redactionEnds[opening.start] = value.length;
+  }
+
+  let result = "";
+  let copiedUntil = 0;
+  index = 0;
+  while (index < value.length) {
+    const redactionEnd = redactionEnds[index] ?? 0;
+    if (redactionEnd <= index) {
+      index += 1;
+      continue;
+    }
+    result += value.slice(copiedUntil, index);
+    result += HTML_OMISSION;
+    copiedUntil = redactionEnd;
+    index = redactionEnd;
+  }
+  return `${result}${value.slice(copiedUntil)}`;
+}
+
+function remoteSpecialHtmlEndAt(
+  value: string,
+  start: number,
+): number | null {
+  if (value.startsWith("<!--", start)) {
+    const close = value.indexOf("-->", start + 4);
+    return close < 0 ? value.length : close + 3;
+  }
+  const declaration = value.slice(start, start + 10).toLowerCase();
+  if (
+    !declaration.startsWith("<!doctype")
+    && !value.startsWith("<![CDATA[", start)
+  ) return null;
+  const terminator = value.startsWith("<![CDATA[", start) ? "]]>" : ">";
+  const close = value.indexOf(terminator, start + 2);
+  return close < 0 ? value.length : close + terminator.length;
+}
+
+function remoteHtmlTagAt(
+  value: string,
+  start: number,
+): RemoteHtmlTag | null {
+  let cursor = start + 1;
+  const closing = value[cursor] === "/";
+  if (closing) cursor += 1;
+  if (!isAsciiLetter(value[cursor])) return null;
+  const nameStart = cursor;
+  cursor += 1;
+  while (
+    cursor < value.length
+    && (
+      isAsciiLetter(value[cursor])
+      || isAsciiDigit(value[cursor])
+      || value[cursor] === "-"
+    )
+  ) cursor += 1;
+  const name = value.slice(nameStart, cursor).toLowerCase();
+  if (
+    cursor < value.length
+    && value[cursor] !== ">"
+    && value[cursor] !== "/"
+    && !isHtmlWhitespace(value[cursor])
+  ) return null;
+  const attributeStart = cursor;
+  let quote: "'" | "\"" | null = null;
+  while (cursor < value.length) {
+    const character = value[cursor];
+    if (quote) {
+      if (character === quote) quote = null;
+      cursor += 1;
+      continue;
+    }
+    if (character === "'" || character === "\"") {
+      quote = character;
+      cursor += 1;
+      continue;
+    }
+    if (character === "<") return null;
+    if (character === ">") {
+      let suffix = cursor - 1;
+      while (suffix >= attributeStart && isHtmlWhitespace(value[suffix])) {
+        suffix -= 1;
+      }
+      if (closing) {
+        for (let check = attributeStart; check < cursor; check += 1) {
+          if (!isHtmlWhitespace(value[check])) return null;
+        }
+      }
+      return {
+        name,
+        closing,
+        complete: true,
+        selfClosing: !closing && value[suffix] === "/",
+        hasAttributes: hasRemoteHtmlAttributes(
+          value,
+          attributeStart,
+          cursor,
+        ),
+        end: cursor + 1,
+      };
+    }
+    cursor += 1;
+  }
+  return {
+    name,
+    closing,
+    complete: false,
+    selfClosing: false,
+    hasAttributes: hasRemoteHtmlAttributes(
+      value,
+      attributeStart,
+      value.length,
+    ),
+    end: value.length,
+  };
+}
+
+function hasRemoteHtmlAttributes(
+  value: string,
+  start: number,
+  end: number,
+): boolean {
+  for (let cursor = start; cursor < end; cursor += 1) {
+    if (
+      !isHtmlWhitespace(value[cursor])
+      && value[cursor] !== "/"
+    ) return true;
+  }
+  return false;
+}
+
+function isHtmlWhitespace(value: string | undefined): boolean {
+  return value === " "
+    || value === "\t"
+    || value === "\n"
+    || value === "\r"
+    || value === "\f";
 }
 
 // Projection schemas cap this input at 64 KiB. The scanner advances
@@ -387,6 +816,10 @@ function isWindowsSeparator(value: string | undefined): boolean {
 
 function isAsciiLetter(value: string | undefined): boolean {
   return value !== undefined && /[A-Za-z]/u.test(value);
+}
+
+function isAsciiDigit(value: string | undefined): boolean {
+  return value !== undefined && value >= "0" && value <= "9";
 }
 
 export function sanitizeRemoteLabel(

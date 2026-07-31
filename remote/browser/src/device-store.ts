@@ -4,6 +4,7 @@ import type { RemoteSerializedKeyPair } from "../../../src/shared/remote-crypto"
 import {
   adoptNonExtractableDeviceKeys,
   assertDeviceKeyIsUnexportable,
+  assertDeviceKeyPairMatches,
   isNonExtractableDevicePrivateKey,
   UnsupportedDeviceKeyStorage,
 } from "./device-keys";
@@ -161,7 +162,15 @@ export async function loadSealedDeviceProfile(): Promise<
     const sealed = validateSealedProfile(sealedRecord);
     if (sealed) {
       if (!sealedProfileHasExpired(sealed)) {
-        await assertDeviceKeyIsUnexportable(sealed.privateKey);
+        try {
+          await assertDeviceKeyIsUnexportable(sealed.privateKey);
+          await assertDeviceKeyPairMatches(sealed.publicKey, sealed.privateKey);
+        } catch {
+          await deleteRecords(db, [SEALED_PROFILE_KEY, PROFILE_KEY]);
+          throw new Error(
+            "The stored Remote Companion profile was invalid and has been cleared.",
+          );
+        }
         await deleteRecords(db, [PROFILE_KEY]);
         return sealed;
       }

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   adoptNonExtractableDeviceKeys,
   assertDeviceKeyIsUnexportable,
+  assertDeviceKeyPairMatches,
   generateNonExtractableDeviceKeys,
   importDevicePublicKey,
   isNonExtractableDevicePrivateKey,
@@ -92,6 +93,24 @@ describe("non-extractable browser device keys", () => {
     );
     const frame = await sealSessionData(sender, SESSION_ID, { ok: true });
     expect(await openSessionData(recipient, frame)).toEqual({ ok: true });
+  });
+
+  it("verifies that the stored public and private keys belong together", async () => {
+    const stored = await generateNonExtractableDeviceKeys();
+    await expect(assertDeviceKeyPairMatches(
+      stored.publicKey,
+      stored.keyPair.privateKey,
+    )).resolves.toBeUndefined();
+
+    const other = await generateNonExtractableDeviceKeys();
+    await expect(assertDeviceKeyPairMatches(
+      other.publicKey,
+      stored.keyPair.privateKey,
+    )).rejects.toThrow("public and private keys do not match");
+    await expect(assertDeviceKeyPairMatches(
+      "not-a-p256-point",
+      stored.keyPair.privateKey,
+    )).rejects.toThrow("public and private keys do not match");
   });
 
   it("rejects an extractable private key as a stored identity", async () => {

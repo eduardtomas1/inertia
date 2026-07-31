@@ -143,3 +143,46 @@ export async function assertDeviceKeyIsUnexportable(
     "The stored device key can still be exported, so Inertia refuses to use it.",
   );
 }
+
+export async function assertDeviceKeyPairMatches(
+  serializedPublicKey: string,
+  privateKey: CryptoKey,
+): Promise<void> {
+  if (!isNonExtractableDevicePrivateKey(privateKey)) {
+    throw new UnsupportedDeviceKeyStorage(
+      "The stored Remote Companion private key is invalid.",
+    );
+  }
+  try {
+    const publicKey = await importDevicePublicKey(serializedPublicKey);
+    const challenge = await crypto.subtle.generateKey(
+      CURVE,
+      false,
+      [...PRIVATE_USAGES],
+    ) as CryptoKeyPair;
+    const [storedSecret, challengeSecret] = await Promise.all([
+      crypto.subtle.deriveBits(
+        { name: CURVE.name, public: challenge.publicKey },
+        privateKey,
+        256,
+      ),
+      crypto.subtle.deriveBits(
+        { name: CURVE.name, public: publicKey },
+        challenge.privateKey,
+        256,
+      ),
+    ]);
+    const storedBytes = new Uint8Array(storedSecret);
+    const challengeBytes = new Uint8Array(challengeSecret);
+    let difference = storedBytes.length ^ challengeBytes.length;
+    for (let index = 0; index < storedBytes.length; index += 1) {
+      difference |= storedBytes[index] ^ (challengeBytes[index] ?? 0);
+    }
+    if (difference === 0) return;
+  } catch {
+    // Normalize malformed public keys and unsupported browser crypto behavior.
+  }
+  throw new UnsupportedDeviceKeyStorage(
+    "The stored Remote Companion public and private keys do not match.",
+  );
+}

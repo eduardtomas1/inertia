@@ -378,6 +378,20 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
     })).toMatchObject({ grantVersion: 2, scopes: ["view"] });
 
     await page.evaluate(async () => {
+      const otherKeys = await crypto.subtle.generateKey(
+        { name: "ECDH", namedCurve: "P-256" },
+        false,
+        ["deriveBits"],
+      ) as CryptoKeyPair;
+      const raw = new Uint8Array(
+        await crypto.subtle.exportKey("raw", otherKeys.publicKey),
+      );
+      let binary = "";
+      for (const byte of raw) binary += String.fromCharCode(byte);
+      const mismatchedPublicKey = btoa(binary)
+        .replaceAll("+", "-")
+        .replaceAll("/", "_")
+        .replace(/=+$/u, "");
       const db = await new Promise<IDBDatabase>((resolveDatabase, reject) => {
         const opening = indexedDB.open("inertia-remote-companion", 1);
         opening.onsuccess = () => resolveDatabase(opening.result);
@@ -385,11 +399,15 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
       });
       await new Promise<void>((resolveWrite, reject) => {
         const transaction = db.transaction("device", "readwrite");
-        transaction.objectStore("device").put({
-          version: 1,
-          relayUrl: "javascript:alert(1)",
-          capabilities: ["full-access"],
-        }, "active-sealed");
+        const store = transaction.objectStore("device");
+        const request = store.get("active-sealed");
+        request.onsuccess = () => {
+          store.put({
+            ...(request.result as Record<string, unknown>),
+            publicKey: mismatchedPublicKey,
+          }, "active-sealed");
+        };
+        request.onerror = () => reject(request.error);
         transaction.oncomplete = () => resolveWrite();
         transaction.onerror = () => reject(transaction.error);
       });

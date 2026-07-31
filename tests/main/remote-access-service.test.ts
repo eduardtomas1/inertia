@@ -595,11 +595,15 @@ describe("Remote Companion outbound encrypted service", () => {
       invitation: null,
       pendingPairings: [],
     });
+    const replacementInvitation = await service.createInvitation();
 
     remoteCryptoGate.afterPairingOpen = null;
     releasePairing();
     await waitFor(() => service.state().pendingPairings.length === 1);
     expect(service.state().pendingPairings[0]?.requestId).toBe(firstRequestId);
+    expect(service.state().invitation?.invitationId).toBe(
+      replacementInvitation.invitationId,
+    );
     await service.shutdown();
   });
 

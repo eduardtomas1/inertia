@@ -524,7 +524,6 @@ export class RemoteAccessService {
         invitation.invitationId,
       ),
     };
-    this.invitation = null;
     this.pendingPairings.set(payload.requestId, pending);
     this.audit("pairing.requested", payload.deviceId, "A device requested pairing.");
     await this.persist();

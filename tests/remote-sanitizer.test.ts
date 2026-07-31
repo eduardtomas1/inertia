@@ -48,6 +48,35 @@ describe("Remote Companion safe text projection", () => {
     expect(projected).toContain("[Code omitted on Remote Companion]");
   });
 
+  it("redacts code inside blockquote and list containers", () => {
+    const omitted = "[Code omitted on Remote Companion]";
+    const cases: Array<[string, string]> = [
+      ["> ```js\n> const TOKEN = process.env.SECRET;\n> ```", omitted],
+      [">```js\n>const TOKEN = 1;\n>```", omitted],
+      [">     const x = 1;\n>     const y = 2;", omitted],
+      [">> ```\n>> secret()\n>> ```", omitted],
+      ["- ```js\n  const TOKEN = 1;\n  ```", omitted],
+      ["1. ```js\n   const TOKEN = 1;\n   ```", omitted],
+    ];
+    for (const [input, expected] of cases) {
+      expect(sanitizeRemoteContent(input)).toBe(expected);
+    }
+    expect(sanitizeRemoteContent("<?php echo $secret; ?>"))
+      .toBe("[HTML omitted on Remote Companion]");
+  });
+
+  it("keeps ordinary quoted prose and list items readable", () => {
+    const cases = [
+      "> Just some quoted prose here.",
+      "- item one\n- item two",
+      "1. first\n2. second",
+      "- see https://example.com/a for details",
+    ];
+    for (const input of cases) {
+      expect(sanitizeRemoteContent(input)).toBe(input);
+    }
+  });
+
   it("redacts url user-info through the authority's final at-sign", () => {
     expect(sanitizeRemoteContent("https://alice:pa@ss@example.com/private"))
       .toBe("https://<redacted>@example.com/private");

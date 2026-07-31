@@ -351,15 +351,21 @@ export class RemoteCompanionClient {
     );
   }
 
-  async sendPrompt(conversationId: string, content: string): Promise<void> {
+  async sendPrompt(
+    conversationId: string,
+    content: string,
+  ): Promise<boolean> {
     const text = content.trim();
-    if (!text) return;
+    if (!text) {
+      this.callbacks.promptResult("Enter a prompt before sending.", false);
+      return false;
+    }
     if (conversationId !== this.selectedConversationId) {
       this.callbacks.promptResult(
         "The selected conversation changed. The prompt was not sent.",
         false,
       );
-      return;
+      return false;
     }
     const request: Extract<RemoteRequest, { type: "prompt.send" }> = {
       type: "prompt.send",
@@ -372,17 +378,21 @@ export class RemoteCompanionClient {
       const response = await this.request(request);
       if (response.ok && response.result.kind === "prompt.accepted") {
         this.callbacks.promptResult("Prompt accepted by the desktop.", false);
-      } else if (!response.ok) {
+        return true;
+      }
+      if (!response.ok) {
         this.callbacks.promptResult(
           response.message,
           response.code === "uncertain",
         );
       }
+      return false;
     } catch {
       this.callbacks.promptResult(
         "Delivery is uncertain. The prompt was not retried.",
         true,
       );
+      return false;
     }
   }
 

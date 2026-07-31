@@ -15,7 +15,7 @@ interface RemoteBrowserAppHarness {
   profile: BrowserDeviceProfile | null;
   selectConversation: Mock<(id: string) => void>;
   sendPrompt: Mock<
-    (conversationId: string, content: string) => Promise<void>
+    (conversationId: string, content: string) => Promise<boolean>
   >;
 }
 
@@ -23,7 +23,7 @@ const appHarness = vi.hoisted((): RemoteBrowserAppHarness => ({
   callbacks: null,
   profile: null,
   selectConversation: vi.fn(),
-  sendPrompt: vi.fn(async () => undefined),
+  sendPrompt: vi.fn(async () => true),
 }));
 
 vi.mock("../../remote/browser/src/remote-client", () => ({
@@ -57,7 +57,7 @@ vi.mock("../../remote/browser/src/remote-client", () => ({
       appHarness.callbacks?.detail(null);
     }
 
-    sendPrompt(conversationId: string, content: string): Promise<void> {
+    sendPrompt(conversationId: string, content: string): Promise<boolean> {
       return appHarness.sendPrompt(conversationId, content);
     }
   },
@@ -68,7 +68,7 @@ afterEach(() => {
   appHarness.profile = null;
   appHarness.selectConversation.mockReset();
   appHarness.sendPrompt.mockReset();
-  appHarness.sendPrompt.mockResolvedValue(undefined);
+  appHarness.sendPrompt.mockResolvedValue(true);
   document.body.replaceChildren();
   vi.resetModules();
 });
@@ -247,9 +247,75 @@ describe("Remote Companion browser selection boundary", () => {
       "Half typed prompt",
     );
 
+    await waitFor(() => expect(
+      (screen.getByLabelText("Text prompt") as HTMLTextAreaElement).value,
+    ).toBe(""));
     appHarness.callbacks!.detail(detail(3));
     expect(
       (screen.getByLabelText("Text prompt") as HTMLTextAreaElement).value,
     ).toBe("");
+  });
+
+  it("keeps the prompt when the desktop does not accept it", async () => {
+    const now = new Date().toISOString();
+    const projectId = crypto.randomUUID();
+    const conversationId = crypto.randomUUID();
+    appHarness.profile = {
+      version: 1,
+      deviceId: crypto.randomUUID(),
+      deviceLabel: "Test browser",
+      keyPair: { publicKey: "device_public", privateKey: "device_private" },
+      hostId: crypto.randomUUID(),
+      hostPublicKey: "host_public",
+      relayUrl: "wss://relay.example/custom/path",
+      endpointId: "opaque_endpoint",
+      scopes: ["view", "prompt"],
+      projectIds: [projectId],
+      grantVersion: 1,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    appHarness.sendPrompt.mockResolvedValue(false);
+    const conversation: RemoteSafeConversation = {
+      id: conversationId,
+      projectId,
+      title: "Conversation A",
+      providerLabel: "Provider",
+      status: "idle",
+      pendingLocalApproval: false,
+      updatedAt: now,
+    };
+    const root = document.createElement("div");
+    root.id = "app";
+    document.body.append(root);
+
+    await import("../../remote/browser/src/main");
+    await waitFor(() => expect(appHarness.callbacks).not.toBeNull());
+    appHarness.callbacks!.shell({
+      generatedAt: now,
+      projects: [{ id: projectId, name: "Project" }],
+      conversations: [conversation],
+      runs: [],
+    });
+    appHarness.callbacks!.detail({
+      generatedAt: now,
+      conversation,
+      messages: [],
+      activities: [],
+      subagents: [],
+      waitingForLocalAction: false,
+    });
+
+    fireEvent.change(screen.getByLabelText("Text prompt"), {
+      target: { value: "Unsent work" },
+    });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Send to desktop",
+    }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Send to desktop",
+    })).toBeEnabled());
+    expect(
+      (screen.getByLabelText("Text prompt") as HTMLTextAreaElement).value,
+    ).toBe("Unsent work");
   });
 });

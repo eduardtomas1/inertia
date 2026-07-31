@@ -17,6 +17,8 @@ let online = false;
 let pairingCode: string | null = null;
 let promptStatus: { message: string; uncertain: boolean } | null = null;
 let pairing = false;
+let hadProfile = false;
+let sending = false;
 let promptDraft: { conversationId: string; value: string } | null = null;
 let invitationDraft = "";
 let deviceNameDraft = "";
@@ -87,7 +89,7 @@ const client = new RemoteCompanionClient({
   },
   detail: (value) => {
     detail = value;
-    if (value === null) promptStatus = null;
+    if (value === null && !promptStatus?.uncertain) promptStatus = null;
     render();
   },
   promptResult: (message, uncertain) => {
@@ -107,6 +109,12 @@ void client.initialize().then(
 );
 
 function render(): void {
+  const hasProfile = client.currentProfile() !== null;
+  if (hadProfile && !hasProfile) {
+    pairing = false;
+    pairingCode = null;
+  }
+  hadProfile = hasProfile;
   const focus = activeFieldFocus();
   captureDrafts();
   root.replaceChildren();
@@ -120,11 +128,13 @@ function renderInto(): void {
   const title = document.createElement("h1");
   title.textContent = "Inertia Remote Companion";
   header.append(title);
-  appendRemoteText(
+  const statusLine = appendRemoteText(
     header,
     status,
     `status ${online ? "online" : "offline"}`,
   );
+  statusLine.setAttribute("role", "status");
+  statusLine.setAttribute("aria-live", "polite");
   root.append(header);
 
   const profile = client.currentProfile();
@@ -217,6 +227,8 @@ function renderPairing(): void {
     pairing = true;
     void client.pair(invitation.value, name.value).then(() => {
       invitationDraft = "";
+      pairing = false;
+      pairingCode = null;
     }, (error: unknown) => {
       status = error instanceof Error ? error.message : "Pairing failed.";
       pairing = false;
@@ -309,22 +321,40 @@ function renderDetail(
   label.append(prompt);
   const submit = document.createElement("button");
   submit.type = "submit";
-  submit.textContent = "Send to desktop";
+  submit.disabled = sending;
+  submit.textContent = sending ? "Sending…" : "Send to desktop";
   form.append(label, submit);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const content = prompt.value;
-    prompt.value = "";
-    promptDraft = null;
+    if (!content.trim() || sending) return;
+    sending = true;
+    submit.disabled = true;
     promptStatus = null;
-    void client.sendPrompt(value.conversation.id, content);
+    void client.sendPrompt(value.conversation.id, content).then((accepted) => {
+      if (accepted) {
+        promptDraft = null;
+        const field = document.getElementById("remote-prompt-input");
+        if (field instanceof HTMLTextAreaElement) field.value = "";
+      }
+    }, () => {
+      promptStatus = {
+        message: "Delivery is uncertain. The prompt was not retried.",
+        uncertain: true,
+      };
+    }).finally(() => {
+      sending = false;
+      render();
+    });
   });
   parent.append(form);
   if (promptStatus) {
-    appendRemoteText(
+    const result = appendRemoteText(
       parent,
       promptStatus.message,
       promptStatus.uncertain ? "warning" : "status",
     );
+    result.setAttribute("role", "status");
+    result.setAttribute("aria-live", "polite");
   }
 }

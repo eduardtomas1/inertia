@@ -230,16 +230,60 @@ function isRemoteFenceClose(
   return true;
 }
 
-function remoteFenceMarkerStart(
+function remoteContainerContentStart(
+  value: string,
+  start: number,
+  end: number,
+): number {
+  let cursor = start;
+  for (let depth = 0; depth < 8; depth += 1) {
+    let probe = cursor;
+    while (probe < end && probe - cursor < 3 && value[probe] === " ") {
+      probe += 1;
+    }
+    if (probe >= end || value[probe] !== ">") break;
+    cursor = probe + 1;
+    if (cursor < end && value[cursor] === " ") cursor += 1;
+  }
+  return remoteListMarkerEnd(value, cursor, end) ?? cursor;
+}
+
+function remoteListMarkerEnd(
   value: string,
   start: number,
   end: number,
 ): number | null {
   let cursor = start;
-  while (cursor < end && cursor - start < 4 && value[cursor] === " ") {
+  while (cursor < end && cursor - start < 3 && value[cursor] === " ") {
     cursor += 1;
   }
-  return cursor - start <= 3 ? cursor : null;
+  const character = value[cursor];
+  if (character === "-" || character === "*" || character === "+") {
+    cursor += 1;
+  } else {
+    const digits = scanAsciiDigits(value, cursor, end);
+    if (
+      digits === cursor
+      || digits - cursor > 9
+      || (value[digits] !== "." && value[digits] !== ")")
+    ) return null;
+    cursor = digits + 1;
+  }
+  if (cursor >= end || value[cursor] !== " ") return null;
+  return cursor + 1;
+}
+
+function remoteFenceMarkerStart(
+  value: string,
+  start: number,
+  end: number,
+): number | null {
+  const contentStart = remoteContainerContentStart(value, start, end);
+  let cursor = contentStart;
+  while (cursor < end && cursor - contentStart < 4 && value[cursor] === " ") {
+    cursor += 1;
+  }
+  return cursor - contentStart <= 3 ? cursor : null;
 }
 
 function scanRemoteFenceRun(
@@ -259,12 +303,14 @@ function isIndentedRemoteCodeLine(
   end: number,
 ): boolean {
   if (isBlankRemoteLine(value, start, end)) return false;
-  if (value[start] === "\t") return true;
-  return end - start >= 4
-    && value[start] === " "
-    && value[start + 1] === " "
-    && value[start + 2] === " "
-    && value[start + 3] === " ";
+  const contentStart = remoteContainerContentStart(value, start, end);
+  if (isBlankRemoteLine(value, contentStart, end)) return false;
+  if (value[contentStart] === "\t") return true;
+  return end - contentStart >= 4
+    && value[contentStart] === " "
+    && value[contentStart + 1] === " "
+    && value[contentStart + 2] === " "
+    && value[contentStart + 3] === " ";
 }
 
 function isBlankRemoteLine(
@@ -368,6 +414,10 @@ function remoteSpecialHtmlEndAt(
   if (value.startsWith("<!--", start)) {
     const close = value.indexOf("-->", start + 4);
     return close < 0 ? value.length : close + 3;
+  }
+  if (value.startsWith("<?", start)) {
+    const close = value.indexOf("?>", start + 2);
+    return close < 0 ? value.length : close + 2;
   }
   const declaration = value.slice(start, start + 10).toLowerCase();
   if (

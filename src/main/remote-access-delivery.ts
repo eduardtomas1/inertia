@@ -99,7 +99,7 @@ export function cancelRemoteDelivery(
       && receipt.deviceId === deviceId
       && receipt.conversationId === request.conversationId
       && receipt.contentDigest === remoteDeliveryDigest(deviceId, request)
-      && receipt.state === "dispatched",
+      && receipt.state !== "accepted",
   );
   if (index < 0) return false;
   data.receipts.splice(index, 1);

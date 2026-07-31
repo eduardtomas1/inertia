@@ -466,6 +466,15 @@ export class RemoteRuntimeGateway {
 
   private prunePreparedPrompts(): void {
     const cutoff = this.now().getTime() - PREPARED_PROMPT_TTL_MS;
+    for (const [preparationId, pending] of this.pendingPreparations) {
+      if (pending.createdAt >= cutoff) continue;
+      this.pendingPreparations.delete(preparationId);
+      if (
+        this.latestPreparationIdByRequest.get(pending.key) === preparationId
+      ) {
+        this.latestPreparationIdByRequest.delete(pending.key);
+      }
+    }
     for (const [preparationId, prepared] of this.preparedPrompts) {
       if (prepared.createdAt >= cutoff) continue;
       this.preparedPrompts.delete(preparationId);

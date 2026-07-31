@@ -87,6 +87,7 @@ export class RemoteAccessService {
     new RemoteSessionAuthenticationBudget();
   private reconnectAttempt = 0;
   private reconnectTimer: Timer | null = null;
+  private registrationTimer: Timer | null = null;
   private sweepTimer: Timer | null = null;
   private privacyLocked = false;
   private stopped = false;
@@ -316,7 +317,9 @@ export class RemoteAccessService {
         grantVersion: device.grantVersion,
       },
     );
-    this.sendFrame(pending.connectionId, frame);
+    if (this.relayMessages.owns(pending.connectionId, pending.connectionEpoch)) {
+      this.sendFrame(pending.connectionId, frame);
+    }
     this.emitState();
   }
 
@@ -421,6 +424,13 @@ export class RemoteAccessService {
     this.socket = socket;
     socket.once("open", () => {
       if (this.socket !== socket) return;
+      this.clearRegistrationDeadline();
+      this.registrationTimer = this.setTimer(() => {
+        this.registrationTimer = null;
+        if (this.socket !== socket || this.connection === "online") return;
+        this.pendingConnectionMessage = "The relay did not accept the desktop.";
+        terminateRemoteSocket(socket);
+      }, RELAY_HANDSHAKE_TIMEOUT_MS);
       this.sendRelay({
         protocolVersion: REMOTE_PROTOCOL_VERSION,
         type: "relay.register",
@@ -439,6 +449,7 @@ export class RemoteAccessService {
     });
     socket.once("close", () => {
       if (this.socket !== socket) return;
+      this.clearRegistrationDeadline();
       this.socket = null;
       this.connection = "offline";
       const closedMessage = this.pendingConnectionMessage;
@@ -460,6 +471,7 @@ export class RemoteAccessService {
   }
 
   private relayRegistered(): void {
+    this.clearRegistrationDeadline();
     this.connection = "online";
     this.connectionMessage = null;
     this.reconnectAttempt = 0;
@@ -848,6 +860,7 @@ export class RemoteAccessService {
     }
     this.dropAllSessions(persistChanges);
     this.sessionAuthenticationBudget.clear();
+    this.clearRegistrationDeadline();
     const socket = this.socket;
     this.socket = null;
     try {
@@ -879,6 +892,12 @@ export class RemoteAccessService {
       this.reconnectTimer = null;
       this.connect();
     }, delay);
+  }
+
+  private clearRegistrationDeadline(): void {
+    if (!this.registrationTimer) return;
+    this.clearTimer(this.registrationTimer);
+    this.registrationTimer = null;
   }
 
   private clearReconnect(): void {
@@ -985,6 +1004,7 @@ export class RemoteAccessService {
     this.sessions.clear();
     this.sessionByConnection.clear();
     this.clearReconnect();
+    this.clearRegistrationDeadline();
     if (this.sweepTimer) this.clearTimer(this.sweepTimer);
     this.sweepTimer = null;
     const socket = this.socket;

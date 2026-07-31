@@ -1,4 +1,4 @@
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,6 +36,7 @@ import {
   type RemoteResponse,
   type RemoteSessionAcceptPayload,
 } from "../../src/shared/remote-protocol";
+import { REMOTE_MAX_BUFFERED_BYTES } from "../../src/main/remote-access-lifecycle";
 import { RemoteAccessService } from "../../src/main/remote-access-service";
 import type { RemoteAccessServiceOptions } from "../../src/main/remote-access-service-types";
 import {
@@ -86,6 +87,28 @@ afterEach(async () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+class StalledRelaySocket extends EventEmitter {
+  readyState: number = WebSocket.OPEN;
+  bufferedAmount = 0;
+  terminated = false;
+  readonly sent: string[] = [];
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  terminate(): void {
+    this.terminated = true;
+    this.readyState = WebSocket.CLOSED;
+    this.emit("close");
+  }
+
+  close(): void {
+    this.readyState = WebSocket.CLOSED;
+    this.emit("close");
+  }
+}
 
 function encryptedStore() {
   const directory = mkdtempSync(join(tmpdir(), "inertia-remote-service-"));
@@ -555,6 +578,28 @@ describe("Remote Companion outbound encrypted service", () => {
       result: { kind: "conversation" },
     });
     await paired.service.shutdown();
+  });
+
+  it("terminates the relay socket when its send buffer exceeds the bound", async () => {
+    const store = encryptedStore();
+    const socket = new StalledRelaySocket();
+    const service = await RemoteAccessService.create({
+      store,
+      createSocket: () => socket as unknown as WebSocket,
+      runtime: { remoteRequest: async () => {
+        throw new Error("unused");
+      } },
+    });
+    socket.bufferedAmount = REMOTE_MAX_BUFFERED_BYTES;
+    await service.setEnabled(true, "ws://127.0.0.1:8787/remote");
+    socket.emit("open");
+
+    expect(socket.sent).toHaveLength(0);
+    expect(socket.terminated).toBe(true);
+    expect(service.state().connectionMessage).toBe(
+      "The relay stopped reading desktop traffic.",
+    );
+    await service.shutdown();
   });
 
   it("retries registration after a stale endpoint owner disconnects", async () => {

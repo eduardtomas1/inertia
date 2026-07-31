@@ -12,6 +12,7 @@ import {
 import { takeRemoteRate } from "./remote-access-policy";
 
 export const REMOTE_SHUTDOWN_TIMEOUT_MS = 1_500;
+export const REMOTE_MAX_BUFFERED_BYTES = 2 * REMOTE_LIMITS.relayEnvelopeBytes;
 
 type RemotePowerEvent = "lock-screen" | "suspend" | "unlock-screen";
 

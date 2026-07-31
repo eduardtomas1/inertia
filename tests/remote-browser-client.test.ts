@@ -6,7 +6,12 @@ import {
   waitForRemoteWebSocketOpen,
 } from "../remote/browser/src/remote-client";
 import type { BrowserDeviceProfile } from "../remote/browser/src/device-store";
-import { generateRemoteKeyPair } from "../src/shared/remote-crypto";
+import {
+  createAuthenticatedSessionSender,
+  generateRemoteKeyPair,
+  importRemoteKeyPair,
+  importRemotePublicKey,
+} from "../src/shared/remote-crypto";
 import {
   REMOTE_LIMITS,
   type RemoteRequest,
@@ -142,6 +147,62 @@ describe("Remote Companion browser connection ownership", () => {
     expect(third.closeCalls).toHaveLength(1);
     await Promise.all([firstAttempt, secondAttempt, thirdAttempt]);
     expect(statuses.at(-1)).toBe("cleanup");
+  });
+
+  it("drops queued sends instead of sealing them onto a newer session", async () => {
+    const deviceKeys = await generateRemoteKeyPair();
+    const hostKeys = await generateRemoteKeyPair();
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const staleSender = await createAuthenticatedSessionSender(
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      await importRemoteKeyPair(deviceKeys),
+      await importRemotePublicKey(hostKeys.publicKey),
+    );
+    const socket = { send: vi.fn() };
+    const internals = client as unknown as {
+      sender: unknown;
+      sessionId: string | null;
+      connectionId: string | null;
+      socket: unknown;
+      outboundTail: Promise<void>;
+      attemptEpoch: number;
+      request(value: RemoteRequest): Promise<RemoteResponse>;
+    };
+    let releaseQueue = (): void => undefined;
+    internals.outboundTail = new Promise<void>((resolve) => {
+      releaseQueue = resolve;
+    });
+    internals.sender = staleSender;
+    internals.sessionId = crypto.randomUUID();
+    internals.connectionId = crypto.randomUUID();
+    internals.socket = socket;
+
+    const pending = internals.request({
+      type: "state.get",
+      requestId: crypto.randomUUID(),
+    });
+
+    internals.attemptEpoch += 1;
+    internals.sender = await createAuthenticatedSessionSender(
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      await importRemoteKeyPair(deviceKeys),
+      await importRemotePublicKey(hostKeys.publicKey),
+    );
+    internals.sessionId = crypto.randomUUID();
+    releaseQueue();
+
+    await expect(pending).rejects.toThrow("The desktop is offline.");
+    expect(socket.send).not.toHaveBeenCalled();
   });
 
   it("clears a grant that expired after initialization instead of reconnecting", async () => {

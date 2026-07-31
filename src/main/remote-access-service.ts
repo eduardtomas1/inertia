@@ -29,6 +29,7 @@ import {
 } from "./remote-access-identity";
 import {
   closeRemoteSocket,
+  REMOTE_MAX_BUFFERED_BYTES,
   REMOTE_SHUTDOWN_TIMEOUT_MS,
   RemoteSessionAuthenticationBudget,
   sendSequencedRemoteResponse,
@@ -72,6 +73,7 @@ export class RemoteAccessService {
   private socket: WebSocket | null = null;
   private connection: RemoteAccessState["connection"] = "disabled";
   private connectionMessage: string | null = null;
+  private pendingConnectionMessage: string | null = null;
   private invitation: RemotePairingInvitation | null = null;
   private readonly pendingPairings = new Map<string, PendingRemotePairing>();
   private readonly sessions = new Map<string, ActiveRemoteSession>();
@@ -142,7 +144,8 @@ export class RemoteAccessService {
       disconnected: (id, epoch) => this.dropConnection(id, epoch),
       rejected: (id) => this.sendRelay({
         protocolVersion: REMOTE_PROTOCOL_VERSION,
-        type: "relay.disconnect", connectionId: id,
+        type: "relay.disconnect",
+        connectionId: id,
       }),
       oversized: () => this.socket?.close(1009, "message too large"),
     });
@@ -428,16 +431,21 @@ export class RemoteAccessService {
     });
     socket.on("message", (raw, isBinary) => {
       if (this.socket !== socket) return;
-      if (isBinary) socket.close(1003, "relay messages must be text");
-      else this.relayMessages.receive(raw);
+      if (isBinary) {
+        socket.close(1003, "relay messages must be text");
+        return;
+      }
+      this.relayMessages.receive(raw);
     });
     socket.once("close", () => {
       if (this.socket !== socket) return;
       this.socket = null;
       this.connection = "offline";
+      const closedMessage = this.pendingConnectionMessage;
+      this.pendingConnectionMessage = null;
       this.connectionMessage = this.privacyLocked
         ? "Remote Companion is paused while the desktop is locked."
-        : "The relay is offline.";
+        : closedMessage ?? "The relay is offline.";
       this.relayMessages.reset();
       this.dropAllSessions();
       this.scheduleReconnect();
@@ -708,8 +716,10 @@ export class RemoteAccessService {
       || encodedRemoteFrameBytes(frame) > REMOTE_LIMITS.encryptedFrameBytes
     ) return;
     this.sendRelay({
-      protocolVersion: REMOTE_PROTOCOL_VERSION, type: "relay.frame",
-      connectionId, frame,
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      type: "relay.frame",
+      connectionId,
+      frame,
     });
   }
 
@@ -719,6 +729,12 @@ export class RemoteAccessService {
     const serialized = JSON.stringify(message);
     const bytes = new TextEncoder().encode(serialized).byteLength;
     if (bytes > REMOTE_LIMITS.relayEnvelopeBytes) return;
+    if (socket.bufferedAmount + bytes > REMOTE_MAX_BUFFERED_BYTES) {
+      this.pendingConnectionMessage =
+        "The relay stopped reading desktop traffic.";
+      terminateRemoteSocket(socket);
+      return;
+    }
     socket.send(serialized);
   }
 

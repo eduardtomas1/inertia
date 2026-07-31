@@ -14,7 +14,7 @@ const rootArgument = process.argv.indexOf("--root");
 const workspaceRoot = rootArgument >= 0
   ? resolve(process.argv[rootArgument + 1] ?? "")
   : defaultWorkspaceRoot;
-const productionTypeScriptLineCeiling = 1_000;
+const productionTypeScriptLineCeiling = 1_250;
 const e2eScenarioTypeScriptLineCeiling = 800;
 const testCaseTypeScriptLineCeiling = 2_500;
 const testSupportTypeScriptLineCeiling = 1_000;

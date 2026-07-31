@@ -449,8 +449,23 @@ export class RemoteCompanionClient {
     return this.ownsAttempt(epoch) && generation === this.pollGeneration;
   }
 
+  private ownsQueuedSend(
+    epoch: number,
+    sender: RemoteSenderState,
+    sessionId: string,
+  ): boolean {
+    return this.ownsAttempt(epoch)
+      && this.sender === sender
+      && this.sessionId === sessionId
+      && this.connectionId !== null
+      && this.socket !== null;
+  }
+
   private request(request: RemoteRequest): Promise<RemoteResponse> {
-    if (!this.sender || !this.sessionId) {
+    const epoch = this.attemptEpoch;
+    const sender = this.sender;
+    const sessionId = this.sessionId;
+    if (!sender || !sessionId) {
       return Promise.reject(new Error("The desktop is offline."));
     }
     const promise = new Promise<RemoteResponse>((resolve, reject) => {
@@ -461,14 +476,14 @@ export class RemoteCompanionClient {
       this.pending.set(request.requestId, { request, timer, resolve, reject });
     });
     this.outboundTail = this.outboundTail.then(async () => {
-      if (!this.sender || !this.sessionId || !this.connectionId || !this.socket) {
+      if (!this.ownsQueuedSend(epoch, sender, sessionId)) {
         throw new Error("The desktop is offline.");
       }
-      sendFrame(
-        this.socket,
-        this.connectionId,
-        await sealSessionData(this.sender, this.sessionId, request),
-      );
+      const frame = await sealSessionData(sender, sessionId, request);
+      if (!this.ownsQueuedSend(epoch, sender, sessionId)) {
+        throw new Error("The desktop is offline.");
+      }
+      sendFrame(this.socket!, this.connectionId!, frame);
     }).catch(() => {
       const pending = this.pending.get(request.requestId);
       if (pending) {

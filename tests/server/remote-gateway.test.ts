@@ -697,6 +697,38 @@ describe("Remote Companion runtime authority", () => {
     store.close();
   });
 
+  it("rejects a replayed receipt once the grant drops the project", async () => {
+    const { store, gateway, subject, firstProject, firstConversation, secondProject } =
+      fixture();
+    const promptingSubject: RemoteAuthorizationSubject = {
+      ...subject,
+      scopes: ["view", "prompt"],
+    };
+    const deliveryId = crypto.randomUUID();
+    const request = {
+      type: "prompt.send" as const,
+      requestId: crypto.randomUUID(),
+      deliveryId,
+      conversationId: firstConversation.id,
+      content: "Keep going",
+    };
+    expect(await sendPrompt(gateway, promptingSubject, request))
+      .toMatchObject({ ok: true });
+
+    const reducedSubject: RemoteAuthorizationSubject = {
+      ...promptingSubject,
+      projectIds: [secondProject.id],
+      grantVersion: 2,
+    };
+    expect(await gateway.preparePrompt(reducedSubject, {
+      ...request,
+      requestId: crypto.randomUUID(),
+    })).toMatchObject({ ok: false, code: "not-found" });
+
+    expect(firstProject.id).not.toBe(secondProject.id);
+    store.close();
+  });
+
   it("keeps the newest useful conversations within the encrypted byte budget", async () => {
     const {
       store,

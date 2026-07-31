@@ -206,7 +206,11 @@ export class RemoteRuntimeGateway {
       );
     }
     const detail = this.dependencies.detail(request.conversationId);
-    if (!detail || detail.conversation.archivedAt !== null) {
+    if (
+      !detail
+      || detail.conversation.archivedAt !== null
+      || !subject.projectIds.includes(detail.conversation.projectId)
+    ) {
       return unavailableConversationResponse(request.requestId);
     }
     const receipt = this.receipts.get(request.deliveryId);

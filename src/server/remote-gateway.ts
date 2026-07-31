@@ -112,7 +112,11 @@ export class RemoteRuntimeGateway {
     request: Extract<RemoteRequest, { type: "conversation.get" }>,
   ): RemoteResponse {
     const detail = this.dependencies.detail(request.conversationId);
-    if (!detail || !subject.projectIds.includes(detail.conversation.projectId)) {
+    if (
+      !detail
+      || detail.conversation.archivedAt !== null
+      || !subject.projectIds.includes(detail.conversation.projectId)
+    ) {
       return failedResponse(
         request.requestId,
         "not-found",
@@ -197,6 +201,10 @@ export class RemoteRuntimeGateway {
         "Prompting is not enabled for this device.",
       );
     }
+    const detail = this.dependencies.detail(request.conversationId);
+    if (!detail || detail.conversation.archivedAt !== null) {
+      return unavailableConversationResponse(request.requestId);
+    }
     const receipt = this.receipts.get(request.deliveryId);
     if (receipt) {
       return receipt.conversationId === request.conversationId
@@ -208,8 +216,6 @@ export class RemoteRuntimeGateway {
             "That delivery identifier was already used.",
           );
     }
-    const detail = this.dependencies.detail(request.conversationId);
-    if (!detail) return unavailableConversationResponse(request.requestId);
     const initialRejection = this.promptBoundaryRejection(
       subject,
       request,
@@ -394,7 +400,10 @@ export class RemoteRuntimeGateway {
     request: Extract<RemoteRequest, { type: "prompt.send" }>,
     detail: ConversationDetail,
   ): RemoteResponse | null {
-    if (!subject.projectIds.includes(detail.conversation.projectId)) {
+    if (
+      detail.conversation.archivedAt !== null
+      || !subject.projectIds.includes(detail.conversation.projectId)
+    ) {
       return unavailableConversationResponse(request.requestId);
     }
     if (detail.conversation.accessMode !== "supervised") {

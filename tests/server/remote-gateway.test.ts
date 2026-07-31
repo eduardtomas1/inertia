@@ -250,6 +250,93 @@ describe("Remote Companion runtime authority", () => {
     store.close();
   });
 
+  it("rejects archived reads and prompts until the conversation is restored", async () => {
+    const { store, gateway, subject, firstConversation, queued } = fixture();
+    const promptingSubject: RemoteAuthorizationSubject = {
+      ...subject,
+      scopes: ["view", "prompt"],
+    };
+    const detailRequest = {
+      type: "conversation.get" as const,
+      requestId: crypto.randomUUID(),
+      conversationId: firstConversation.id,
+    };
+    const promptRequest = {
+      type: "prompt.send" as const,
+      requestId: crypto.randomUUID(),
+      deliveryId: crypto.randomUUID(),
+      conversationId: firstConversation.id,
+      content: "Do not revive an archived conversation",
+    };
+
+    store.archiveConversation(firstConversation.id, true);
+    const archivedShell = await gateway.request(subject, {
+      type: "state.get",
+      requestId: crypto.randomUUID(),
+    });
+    expect(archivedShell).toMatchObject({ ok: true });
+    if (archivedShell.ok && archivedShell.result.kind === "state") {
+      expect(archivedShell.result.state.conversations).toEqual([]);
+    }
+    expect(await gateway.request(subject, detailRequest)).toMatchObject({
+      ok: false,
+      code: "not-found",
+    });
+    expect(await gateway.preparePrompt(
+      promptingSubject,
+      promptRequest,
+    )).toMatchObject({ ok: false, code: "not-found" });
+
+    store.archiveConversation(firstConversation.id, false);
+    expect(await gateway.request(subject, {
+      ...detailRequest,
+      requestId: crypto.randomUUID(),
+    })).toMatchObject({ ok: true });
+    const prepared = await gateway.preparePrompt(
+      promptingSubject,
+      promptRequest,
+    );
+    if (!("preparationId" in prepared)) {
+      throw new Error("Restored conversation was not prepared.");
+    }
+
+    store.archiveConversation(firstConversation.id, true);
+    expect(gateway.commitPrompt(
+      promptingSubject,
+      promptRequest,
+      prepared.preparationId,
+    )).toMatchObject({ ok: false, code: "not-found" });
+    expect(queued()).toBe(0);
+
+    store.archiveConversation(firstConversation.id, false);
+    const acceptedRequest = {
+      ...promptRequest,
+      requestId: crypto.randomUUID(),
+      deliveryId: crypto.randomUUID(),
+    };
+    expect(await sendPrompt(
+      gateway,
+      promptingSubject,
+      acceptedRequest,
+    )).toMatchObject({ ok: true });
+    expect(queued()).toBe(1);
+
+    store.archiveConversation(firstConversation.id, true);
+    expect(await sendPrompt(gateway, promptingSubject, {
+      ...acceptedRequest,
+      requestId: crypto.randomUUID(),
+    })).toMatchObject({ ok: false, code: "not-found" });
+    expect(queued()).toBe(1);
+
+    store.archiveConversation(firstConversation.id, false);
+    expect(await sendPrompt(gateway, promptingSubject, {
+      ...acceptedRequest,
+      requestId: crypto.randomUUID(),
+    })).toMatchObject({ ok: true });
+    expect(queued()).toBe(1);
+    store.close();
+  });
+
   it("accepts each delivery exactly once and rejects identifier fixation", async () => {
     const { store, gateway, subject, firstConversation, queued } = fixture();
     const request = {
@@ -524,6 +611,30 @@ describe("Remote Companion runtime authority", () => {
     );
     await race.entered;
     race.setDetail(null);
+    race.release();
+
+    expect(await response).toMatchObject({
+      ok: false,
+      code: "not-found",
+    });
+    expect(race.queueCalls()).toBe(0);
+    race.store.close();
+  });
+
+  it("does not prepare when a conversation is archived during readiness", async () => {
+    const race = promptRaceFixture();
+    const response = race.gateway.preparePrompt(
+      race.promptingSubject,
+      race.request,
+    );
+    await race.entered;
+    race.setDetail({
+      ...race.detail()!,
+      conversation: {
+        ...race.detail()!.conversation,
+        archivedAt: new Date().toISOString(),
+      },
+    });
     race.release();
 
     expect(await response).toMatchObject({

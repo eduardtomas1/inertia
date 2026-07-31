@@ -356,7 +356,7 @@ describe("Remote Companion browser connection ownership", () => {
     });
   });
 
-  it("clears current detail when the conversation becomes unavailable", async () => {
+  it("clears current detail when the conversation is archived", async () => {
     vi.useFakeTimers();
     const now = new Date().toISOString();
     const conversationId = crypto.randomUUID();
@@ -413,7 +413,7 @@ describe("Remote Companion browser connection ownership", () => {
         requestId: value.requestId,
         ok: false,
         code: "not-found",
-        message: "The conversation is no longer available.",
+        message: "The archived conversation is no longer available.",
       };
     });
     const client = new RemoteCompanionClient({

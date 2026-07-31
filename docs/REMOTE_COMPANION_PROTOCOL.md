@@ -161,12 +161,14 @@ use of a reviewed standard primitive, not a new cipher construction.
 The only version 1 application requests are:
 
 - `state.get`: safe projects, conversations, and agent-run summaries.
-- `conversation.get`: persisted user/assistant transcript, generic redacted
-  workstream activity, bounded subagent status, and whether a local action is
-  required. A bounded monotonic scanner removes backtick/tilde fenced code,
-  interrupted fences, top-level indented code, and paired, nested,
-  self-closing, or interrupted HTML before path/credential redaction.
-- `prompt.send`: bounded text to one existing authorized conversation.
+- `conversation.get`: persisted user/assistant transcript for one authorized,
+  unarchived conversation, generic redacted workstream activity, bounded
+  subagent status, and whether a local action is required. A bounded monotonic
+  scanner removes backtick/tilde fenced code, interrupted fences, top-level
+  indented code, and paired, nested, self-closing, or interrupted HTML before
+  path/credential redaction.
+- `prompt.send`: bounded text to one existing authorized, unarchived
+  conversation.
 
 For prompts, Electron main persists a bounded delivery receipt as `dispatched`
 before runtime preparation. Preparation cannot queue a turn. Immediately
@@ -200,7 +202,9 @@ generation-tagged polling loop. Conversation selection and manual refresh
 replace its timer; completion of an older in-flight poll cannot publish state
 or schedule another loop. Selection also clears the prior detail/prompt form
 synchronously, and the client rejects any prompt whose target is no longer the
-selected conversation.
+selected conversation. If the local user archives that conversation, detail
+and prompt preparation/commit return `not-found`; the still-current browser
+selection clears its transcript and prompt form on the next response.
 
 ## Authorization matrix
 

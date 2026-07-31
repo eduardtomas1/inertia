@@ -60,6 +60,7 @@ trusted only within their existing responsibilities.
 | Browser profile corruption | Malformed IndexedDB changes relay URL, key, or grant. | Strict schema before use, WSS/loopback-WS transport policy, invalid profile deletion and explicit error. |
 | Browser clickjacking/typejacking | An attacker frames an already paired browser and induces a prompt or navigation. | The reference Vite development/preview server sends `frame-ancestors 'none'` in the HTTP CSP response header. The meta policy does not claim unsupported frame protection. Self-hosting instructions require verifying an equivalent production response header; a misconfigured or compromised browser origin remains a trusted-delivery failure. |
 | Browser attempt/poll race | Stale pair/reconnect overwrites a newer socket/session, leaves listeners alive, selection creates duplicate polling loops, or a stale prompt form targets the prior conversation. | Monotonic attempt and poll-generation ownership, one replaceable poll timer, synchronous detail/form clearing on selection/offline, prompt target equality with the current selection, tracked opening sockets, stale tunnel close, ownership checks after awaits, complete timer/listener cleanup on close/error/timeout. |
+| Archived conversation authority | A conversation hidden from the safe shell remains selected, readable, or promptable after the local user archives it. | Runtime detail returns `not-found` for archived conversations. Prompt preparation checks before and after readiness, and commit checks again synchronously; all reject archived state until a fresh flow after unarchive. A current browser `not-found` clears transcript and prompt controls, while stale responses cannot clear a newer selection. |
 | Relay peer-disconnect spoofing | Third connection closes another browser/desktop pair. | Relay verifies the caller owns the connection before disconnecting it. |
 | Relay route lifecycle race | Disconnect or connection-ID reuse lands during asynchronous pairing/session crypto and later commits approval/session state for a dead route. | `peer-connected` creates a desktop-local epoch; disconnect invalidates it synchronously and cleanup is ordered with the per-route frame queue. Post-crypto/persistence commits recheck epoch ownership. Active routes and queued frames are bounded. |
 | Concurrent encrypted frames | Parallel `session.data` opens race HPKE recipient sequence and falsely close a valid session as replay; parallel responses race sender sequence. | One bounded inbound queue per route serializes frame opening only; validated runtime requests remain concurrent. A separate per-session outbound queue seals responses in completion order. |
@@ -155,7 +156,8 @@ Release-blocking deterministic coverage includes:
 - delivery dedupe, fixation, bounded receipt retention, and exact distinction
   between known pre-post failure and posted/no-ack uncertainty;
 - prompt-readiness races for access-mode, project/availability, active-run,
-  disable, lock, revoke, and grant-reduction changes, proving no queue call;
+  archive, disable, lock, revoke, and grant-reduction changes, proving no queue
+  call; archived detail/preparation/commit rejection until unarchive;
   synchronous accepted-post ordering; one-time preparation mismatch/retry,
   expiry, and capacity;
 - total device-record cap across restart, deterministic retired-record
@@ -170,7 +172,7 @@ Release-blocking deterministic coverage includes:
   capacity/rate/size behavior;
 - browser profile schema/clearing, stale-attempt ownership, single poll-loop
   replacement, synchronous stale-detail clearing/current prompt targeting,
-  current-selection not-found clearing and stale-response ownership,
+  current-selection archived/not-found clearing and stale-response ownership,
   listener cleanup, pre-parse ASCII/multibyte relay-envelope bounds,
   unsupported/malformed relay data, IPv4/IPv6 loopback policy,
   XSS/provider-output inert rendering, meta-versus-response CSP frame

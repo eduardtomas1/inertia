@@ -55,6 +55,8 @@ import {
 import { RemoteRequestDispatcher } from "./remote-access-request-dispatcher";
 import {
   RemoteSessionAdmissions, remoteSessionCanCommitPrompt,
+  remoteSessionRetainsAuthority,
+  type RemoteSessionAuthorityInput,
 } from "./remote-access-session-admission";
 import { authenticateRemoteSession } from "./remote-access-session-handshake";
 import type {
@@ -156,15 +158,9 @@ export class RemoteAccessService {
       now: () => this.now(),
       persist: async () => await this.persist(),
       audit: (type, deviceId, detail) => this.audit(type, deviceId, detail),
-      isCurrent: (session) => this.sessions.get(session.sessionId) === session,
-      authorizePromptCommit: (session) => remoteSessionCanCommitPrompt({
-        data: this.data, session,
-        live: this.sessions.get(session.sessionId) === session,
-        ownsRoute: this.relayMessages.owns(
-          session.connectionId, session.connectionEpoch),
-        privacyLocked: this.privacyLocked, stopped: this.stopped,
-        storeFailed: this.storeError !== null, now: this.now().getTime(),
-      }),
+      isCurrent: (session) => this.sessionRetainsAuthority(session),
+      authorizePromptCommit: (session) =>
+        remoteSessionCanCommitPrompt(this.sessionAuthority(session)),
       respond: async (session, response) => await this.respond(session, response),
     });
   }
@@ -611,6 +607,7 @@ export class RemoteAccessService {
           inFlight: new Map(),
           postedPromptDeliveries: new Set(),
           outboundTail: Promise.resolve(),
+          outboundAbandoned: false,
         };
         device.lastSeenAt = this.now().toISOString();
         this.audit("session.connected", device.id, "A remote session connected.");
@@ -714,13 +711,31 @@ export class RemoteAccessService {
     await sendSequencedRemoteResponse(
       session,
       response,
-      () => this.sessions.get(session.sessionId) === session
-        && this.relayMessages.owns(
-          session.connectionId,
-          session.connectionEpoch,
-        ),
+      () => this.sessionRetainsAuthority(session),
       (connectionId, frame) => this.sendFrame(connectionId, frame),
     );
+  }
+
+  private sessionAuthority(
+    session: ActiveRemoteSession,
+  ): RemoteSessionAuthorityInput {
+    return {
+      data: this.data,
+      session,
+      live: this.sessions.get(session.sessionId) === session,
+      ownsRoute: this.relayMessages.owns(
+        session.connectionId,
+        session.connectionEpoch,
+      ),
+      privacyLocked: this.privacyLocked,
+      stopped: this.stopped,
+      storeFailed: this.storeError !== null,
+      now: this.now().getTime(),
+    };
+  }
+
+  private sessionRetainsAuthority(session: ActiveRemoteSession): boolean {
+    return remoteSessionRetainsAuthority(this.sessionAuthority(session));
   }
 
   private sendFrame(connectionId: string, frame: RemoteCipherFrame): void {

@@ -88,6 +88,35 @@ retention, abuse-reporting, lawful-request, residency, deletion, monitoring,
 on-call, incident notification, and availability obligations. None are
 accepted or implemented by this reference task.
 
+## Outbound frame authority
+
+Sealing a response is asynchronous, so authority checked before encryption is
+not authority at the moment of transport. A device can be revoked, its grant
+replaced or expired, the desktop locked, Remote Companion disabled, or the relay
+connection replaced while `sealSessionData` is awaited.
+
+`sendSequencedRemoteResponse` is therefore the single outbound primitive and it
+revalidates authority twice: once before encryption, and once immediately before
+handing the frame to transport. Callers cannot opt out, which is why the check
+lives in the primitive rather than at each call site.
+
+Authority is one predicate, `remoteSessionRetainsAuthority`, covering the
+expected session id, the device and grant identity held by the session, the
+connection id and epoch, the live-session binding, the persisted grant object
+identity, grant version, grant expiry, granted scopes and projects, the desktop
+privacy/lock state, the Remote Companion enabled state, shutdown, and
+store-fail-closed state. `remoteSessionCanCommitPrompt` adds only the prompt
+scope, so view and prompt authority stay separable.
+
+Encryption mutates sequence state: `sealSessionData` consumes a sequence number
+and advances the HPKE sender nonce before the second check can run. A discarded
+frame therefore leaves the sender permanently desynchronized from the browser
+recipient, which requires `frame.sequence === recipient.sequence`. Rather than
+attempt to rewind, the session sets `outboundAbandoned`, which is part of the
+authority predicate, so no further frame is ever sealed or sent on that channel.
+A replacement session negotiates a fresh sender starting at sequence 0 and is
+unaffected.
+
 ## Resource exhaustion in the utility runtime
 
 The gateway caches sanitized transcript projections so repeated remote polls do

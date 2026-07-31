@@ -88,6 +88,7 @@ interface RemoteOutboundSession {
   sessionId: string;
   sender: RemoteSenderState;
   outboundTail: Promise<void>;
+  outboundAbandoned: boolean;
 }
 
 export async function sendSequencedRemoteResponse(
@@ -100,12 +101,17 @@ export async function sendSequencedRemoteResponse(
   ) => void,
 ): Promise<void> {
   const sending = session.outboundTail.catch(() => undefined).then(async () => {
-    if (!isCurrent()) return;
-    send(session.connectionId, await sealSessionData(
+    if (session.outboundAbandoned || !isCurrent()) return;
+    const frame = await sealSessionData(
       session.sender,
       session.sessionId,
       response,
-    ));
+    );
+    if (session.outboundAbandoned || !isCurrent()) {
+      session.outboundAbandoned = true;
+      return;
+    }
+    send(session.connectionId, frame);
   });
   session.outboundTail = sending;
   await sending;

@@ -37,6 +37,7 @@ export interface ActiveRemoteSession {
   inFlight: Map<string, RemoteRequest>;
   postedPromptDeliveries: Set<string>;
   outboundTail: Promise<void>;
+  outboundAbandoned: boolean;
 }
 
 export interface RemoteAccessServiceOptions {

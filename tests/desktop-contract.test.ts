@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { parseOpenProjectPathRequest } from "../src/shared/desktop";
+import {
+  parseOpenProjectPathRequest,
+  parseRemoteDeviceUpdateRequest,
+} from "../src/shared/desktop";
 import {
   BACKEND_CREDENTIAL_MASK,
   parseBackendCredentialProfileRequest,
@@ -58,6 +61,24 @@ describe("desktop credential contract", () => {
     expect(parseBackendCredentialProfileRequest({
       profileId: "kimi",
       secret: "must-not-be-accepted",
+    })).toBeNull();
+  });
+});
+
+describe("desktop remote-access contract", () => {
+  it("rejects sparse conversation grants at the preload boundary", () => {
+    const sparseConversationIds = new Array<string>(1);
+    expect(parseRemoteDeviceUpdateRequest({
+      deviceId: projectId,
+      scopes: ["view"],
+      projectIds: [projectId],
+      grants: [{
+        projectId,
+        conversationIds: sparseConversationIds,
+        includeFutureConversations: false,
+        legacyProjectWide: false,
+      }],
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
     })).toBeNull();
   });
 });

@@ -140,7 +140,7 @@ async function browserTunnel(
   await once(socket, "open");
   const response = nextMessage(socket);
   socket.send(JSON.stringify({
-    protocolVersion: 1,
+    protocolVersion: 2,
     type: "relay.connect",
     endpointId,
     browserVersion: "0.1.0",
@@ -250,7 +250,7 @@ async function openAuthenticatedSession(input: {
   );
   const acceptPromise = nextFrame(tunnel.socket, "session.accept");
   sendFrame(tunnel.socket, tunnel.connectionId, {
-    protocolVersion: 1,
+    protocolVersion: 2,
     kind: "session.open",
     sessionId,
     enc: sender.enc,

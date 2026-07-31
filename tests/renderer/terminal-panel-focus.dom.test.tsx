@@ -75,6 +75,36 @@ describe("TerminalPanel focus lifecycle", () => {
     }));
   });
 
+  it("does not steal focus when the lazy terminal mounts after another control is active", async () => {
+    const sendCommand = vi.fn(() => new Promise<ServerEvent>(() => undefined));
+    const view = render(<button type="button">Composer menu item</button>);
+    const composerMenuItem = screen.getByRole("button", {
+      name: "Composer menu item",
+    });
+    composerMenuItem.focus();
+
+    view.rerender(
+      <>
+        <button type="button">Composer menu item</button>
+        <TerminalPanel
+          projectId="project-1"
+          projectName="Inertia"
+          status="online"
+          fontSize={13}
+          theme="dark"
+          sendCommand={sendCommand}
+          subscribe={() => () => undefined}
+          onClose={() => undefined}
+        />
+      </>,
+    );
+
+    await waitFor(() => expect(sendCommand).toHaveBeenCalled());
+    expect(screen.getByRole("button", {
+      name: "Composer menu item",
+    })).toHaveFocus();
+  });
+
   it("does not reclaim focus when delayed terminal creation completes", async () => {
     let completeCreation: ((event: ServerEvent) => void) | undefined;
     const sendCommand = vi.fn(() => new Promise<ServerEvent>((resolve) => {

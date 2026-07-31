@@ -12,6 +12,7 @@ import {
 import { appendRemoteText } from "../../remote/browser/src/safe-dom";
 import { RemoteAccessSettings } from "../../src/renderer/src/components/RemoteAccessSettings";
 import type { Conversation, Project } from "../../src/shared/contracts";
+import type { RemoteDeviceUpdateRequest } from "../../src/shared/desktop";
 import {
   remoteSafeMessageSchema,
   type RemoteAccessState,
@@ -40,6 +41,30 @@ function pendingState(now: string): RemoteAccessState {
     }],
     invitation: null,
     audit: [],
+  };
+}
+
+function pairedState(now: string, projectId: string): RemoteAccessState {
+  return {
+    ...pendingState(now),
+    pendingPairings: [],
+    devices: [{
+      id: crypto.randomUUID(),
+      label: "Paired browser",
+      scopes: ["view", "prompt"],
+      projectIds: [projectId],
+      grants: [{
+        projectId,
+        conversationIds: [],
+        includeFutureConversations: true,
+        legacyProjectWide: false,
+      }],
+      needsGrantReview: false,
+      createdAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      lastSeenAt: null,
+      revokedAt: null,
+    }],
   };
 }
 
@@ -208,5 +233,61 @@ describe("Remote Companion browser output boundary", () => {
     screen.getByRole("checkbox", { name: "Only conversation" }).click();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Approve/u })).toBeEnabled());
+  });
+
+  it("limits prompt-capable pairing expiry to seven days", async () => {
+    const now = new Date().toISOString();
+    const state = pendingState(now);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => state),
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+      },
+    });
+    render(<RemoteAccessSettings projects={[]} conversations={[]} />);
+
+    await screen.findByText("Approve New browser?");
+    screen.getByRole("switch", { name: "Allow text prompts" }).click();
+    const expiry = screen.getByLabelText(
+      "Permission expiry",
+    ) as HTMLSelectElement;
+    await waitFor(() => expect(expiry.value).toBe("7"));
+    expect(expiry.querySelector('option[value="30"]')).toBeNull();
+    expect(expiry.querySelector('option[value="90"]')).toBeNull();
+  });
+
+  it("saves an existing prompt device with a valid default expiry", async () => {
+    const now = new Date().toISOString();
+    const projectId = crypto.randomUUID();
+    const state = pairedState(now, projectId);
+    const updateRemoteDevice = vi.fn(
+      async (_request: RemoteDeviceUpdateRequest) => state,
+    );
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => state),
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+        updateRemoteDevice,
+      },
+    });
+    render(<RemoteAccessSettings
+      projects={[projectFixture(projectId, now)]}
+      conversations={[]}
+    />);
+
+    await screen.findByText("Paired browser");
+    screen.getByText("Edit permissions").click();
+    const expiry = screen.getByLabelText("Reset expiry") as HTMLSelectElement;
+    expect(expiry.value).toBe("7");
+    expect(expiry.querySelector('option[value="30"]')).toBeNull();
+    screen.getByRole("button", { name: "Save permissions" }).click();
+    await waitFor(() => expect(updateRemoteDevice).toHaveBeenCalledOnce());
+    const request = updateRemoteDevice.mock.calls[0]![0];
+    const expiryMs = Date.parse(request.expiresAt) - Date.now();
+    expect(request.scopes).toEqual(["view", "prompt"]);
+    expect(expiryMs).toBeGreaterThan(6 * 24 * 60 * 60 * 1_000);
+    expect(expiryMs).toBeLessThanOrEqual(7 * 24 * 60 * 60 * 1_000);
   });
 });

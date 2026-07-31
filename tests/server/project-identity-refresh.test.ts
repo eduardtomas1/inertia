@@ -177,6 +177,33 @@ describe("project identity refresher", () => {
     expect(refresher.peakConcurrency()).toBeLessThanOrEqual(4);
   });
 
+  it("shares the concurrency limit with on-demand refreshes", async () => {
+    let active = 0;
+    let peak = 0;
+    const inspected: string[] = [];
+    const refresher = new ProjectIdentityRefresher({
+      concurrency: 2,
+      inspect: async (path) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        inspected.push(path);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        active -= 1;
+        return identity(path);
+      },
+      apply: () => undefined,
+    });
+    const startup = refresher.refreshAll(targets(20));
+    const onDemand = refresher.refresh({
+      id: "on-demand",
+      path: "/projects/on-demand",
+    });
+    await Promise.all([startup, onDemand]);
+    expect(inspected).toContain("/projects/on-demand");
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(refresher.peakConcurrency()).toBeLessThanOrEqual(2);
+  });
+
   it("clamps its concurrency into the reviewed range", async () => {
     let peak = 0;
     let active = 0;

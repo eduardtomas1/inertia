@@ -95,7 +95,6 @@ function TerminalSession({
     terminalRef.current = terminal;
     fitRef.current = fitAddon;
     fitAddon.fit();
-    terminal.focus();
     setInstanceReady(true);
 
     const inputDisposable = terminal.onData((data) => {

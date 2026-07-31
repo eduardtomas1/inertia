@@ -3,6 +3,7 @@ import type { SafeStorage } from "electron";
 
 import {
   REMOTE_LIMITS,
+  remoteConversationGrantsSchema,
   remoteScopeSchema,
   type RemoteAuditEvent,
   type RemoteScope,
@@ -11,7 +12,6 @@ import type { RemoteSerializedKeyPair } from "../shared/remote-crypto";
 import {
   normalizeRemoteConversationGrants,
   remoteConversationGrantsFromProjectIds,
-  remoteConversationGrantsSchema,
   type RemoteConversationGrant,
 } from "../shared/remote-grants";
 import {

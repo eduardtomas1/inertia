@@ -157,9 +157,8 @@ export async function loadSealedDeviceProfile(): Promise<
 > {
   const db = await database();
   try {
-    const sealed = validateSealedProfile(
-      await readRecord(db, SEALED_PROFILE_KEY),
-    );
+    const sealedRecord = await readRecord(db, SEALED_PROFILE_KEY);
+    const sealed = validateSealedProfile(sealedRecord);
     if (sealed) {
       if (!sealedProfileHasExpired(sealed)) {
         await assertDeviceKeyIsUnexportable(sealed.privateKey);
@@ -168,6 +167,12 @@ export async function loadSealedDeviceProfile(): Promise<
       }
       await deleteRecords(db, [SEALED_PROFILE_KEY, PROFILE_KEY]);
       return null;
+    }
+    if (sealedRecord !== undefined) {
+      await deleteRecords(db, [SEALED_PROFILE_KEY, PROFILE_KEY]);
+      throw new Error(
+        "The stored Remote Companion profile was invalid and has been cleared.",
+      );
     }
     const legacy = await readRecord(db, PROFILE_KEY);
     if (legacy === undefined) return null;

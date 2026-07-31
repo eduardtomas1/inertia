@@ -1,13 +1,13 @@
 import { z } from "zod";
 
 import {
-  remoteConversationGrantsSchema,
+  REMOTE_GRANT_LIMITS,
   type RemoteConversationGrant,
 } from "./remote-grants";
 
-export const REMOTE_PROTOCOL_VERSION = 1 as const;
-export const REMOTE_BROWSER_VERSION = "0.1.0";
-export const REMOTE_RELAY_VERSION = "0.1.0";
+export const REMOTE_PROTOCOL_VERSION = 2 as const;
+export const REMOTE_BROWSER_VERSION = "0.2.0";
+export const REMOTE_RELAY_VERSION = "0.2.0";
 
 export const REMOTE_LIMITS = Object.freeze({
   relayEnvelopeBytes: 132 * 1024,
@@ -41,6 +41,7 @@ export const REMOTE_LIMITS = Object.freeze({
 
 const uuid = z.string().uuid();
 const timestamp = z.string().datetime({ offset: true });
+const entityId = z.string().min(1).max(200);
 const boundedBase64Url = (maximum: number) =>
   z.string().min(1).max(maximum).regex(/^[A-Za-z0-9_-]+$/u);
 const routingId = boundedBase64Url(64);
@@ -51,6 +52,19 @@ const encapsulatedKey = boundedBase64Url(256);
 
 export const remoteScopeSchema = z.enum(["view", "prompt"]);
 export type RemoteScope = z.infer<typeof remoteScopeSchema>;
+
+export const remoteConversationGrantSchema = z.object({
+  projectId: entityId,
+  conversationIds: z.array(entityId).max(
+    REMOTE_GRANT_LIMITS.conversationsPerProject,
+  ),
+  includeFutureConversations: z.boolean(),
+  legacyProjectWide: z.boolean(),
+}).strict();
+
+export const remoteConversationGrantsSchema = z
+  .array(remoteConversationGrantSchema)
+  .max(REMOTE_GRANT_LIMITS.projects);
 
 export const remotePairingInvitationSchema = z.object({
   protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
@@ -264,7 +278,6 @@ export const relayServerMessageSchema = z.discriminatedUnion("type", [
 ]);
 export type RelayServerMessage = z.infer<typeof relayServerMessageSchema>;
 
-const entityId = z.string().min(1).max(200);
 const safeLabel = z.string().max(240);
 const safeContent = z.string().max(64 * 1024);
 

@@ -1,27 +1,14 @@
-import { z } from "zod";
-
-const entityId = z.string().min(1).max(200);
-
 export const REMOTE_GRANT_LIMITS = Object.freeze({
   projects: 64,
   conversationsPerProject: 200,
 } as const);
 
-export const remoteConversationGrantSchema = z.object({
-  projectId: entityId,
-  conversationIds: z.array(entityId).max(
-    REMOTE_GRANT_LIMITS.conversationsPerProject,
-  ),
-  includeFutureConversations: z.boolean(),
-  legacyProjectWide: z.boolean(),
-}).strict();
-export type RemoteConversationGrant = z.infer<
-  typeof remoteConversationGrantSchema
->;
-
-export const remoteConversationGrantsSchema = z
-  .array(remoteConversationGrantSchema)
-  .max(REMOTE_GRANT_LIMITS.projects);
+export interface RemoteConversationGrant {
+  projectId: string;
+  conversationIds: string[];
+  includeFutureConversations: boolean;
+  legacyProjectWide: boolean;
+}
 
 export function normalizeRemoteConversationGrants(
   grants: readonly RemoteConversationGrant[],

@@ -134,7 +134,7 @@ describe("Remote Companion browser connection ownership", () => {
     second.open();
     await vi.waitFor(() => expect(second.sent).toHaveLength(1));
     second.message({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.connected",
       connectionId: crypto.randomUUID(),
     });
@@ -335,7 +335,7 @@ describe("Remote Companion browser connection ownership", () => {
     );
     malformed.rawMessage("{");
     malformed.message({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.error",
       code: "desktop-offline",
     });

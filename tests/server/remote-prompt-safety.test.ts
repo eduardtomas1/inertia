@@ -40,6 +40,7 @@ const CLI_HARNESSES = [
 ] as const;
 
 const temporaryDirectories: string[] = [];
+const stores: RuntimeStore[] = [];
 const PROMPT_REQUEST_ID = "4d1b6f8c-59a1-4c62-9a17-2f1c8b3d5e01";
 const DELIVERY_ID = "2f7c0a9e-1b3d-4e5f-8a6b-7c8d9e0f1a2b";
 const STATE_REQUEST_ID = "6bbd21ad-3f1a-4e6f-8a86-2e3f0c3f5c11";
@@ -48,6 +49,7 @@ function fixture(safety: () => RemotePromptSafety) {
   const directory = mkdtempSync(join(tmpdir(), "inertia-remote-safety-"));
   temporaryDirectories.push(directory);
   const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+  stores.push(store);
   const project = store.createProject("Project", directory);
   const conversation = store.createConversation(project.id, "Conversation");
   store.updateConversation(conversation.id, { accessMode: "supervised" });
@@ -91,6 +93,7 @@ async function attemptPrompt(
 }
 
 afterEach(() => {
+  for (const store of stores.splice(0)) store.close();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }

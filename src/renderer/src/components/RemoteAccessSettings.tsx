@@ -17,6 +17,8 @@ import {
 } from "./RemoteConversationGrants";
 import { Switch } from "./ui";
 
+const MAX_PROMPT_EXPIRY_DAYS = 7;
+
 export function RemoteAccessSettings({
   projects,
   conversations,
@@ -203,7 +205,13 @@ export function RemoteAccessSettings({
             <Switch
               label="Allow text prompts"
               checked={prompting}
-              onChange={setPrompting}
+              onChange={(allowed) => {
+                setPrompting(allowed);
+                if (allowed) {
+                  setGrantDays((days) =>
+                    Math.min(days, MAX_PROMPT_EXPIRY_DAYS));
+                }
+              }}
             />
           </div>
           <label className="remote-expiry-setting">
@@ -214,8 +222,8 @@ export function RemoteAccessSettings({
             >
               <option value={1}>1 day</option>
               <option value={7}>7 days</option>
-              <option value={30}>30 days</option>
-              <option value={90}>90 days</option>
+              {!prompting && <option value={30}>30 days</option>}
+              {!prompting && <option value={90}>90 days</option>}
             </select>
           </label>
           <ConversationGrantEditor
@@ -342,7 +350,9 @@ function RemoteDevice({
   const [prompting, setPrompting] = useState(device.scopes.includes("prompt"));
   const [projectIds, setProjectIds] = useState(device.projectIds);
   const [grants, setGrants] = useState(device.grants);
-  const [expiryDays, setExpiryDays] = useState(30);
+  const [expiryDays, setExpiryDays] = useState(
+    prompting ? MAX_PROMPT_EXPIRY_DAYS : 30,
+  );
   const projectNames = useMemo(
     () => projects
       .filter(({ id }) => device.projectIds.includes(id))
@@ -398,7 +408,14 @@ function RemoteDevice({
             <input
               type="checkbox"
               checked={prompting}
-              onChange={(event) => setPrompting(event.target.checked)}
+              onChange={(event) => {
+                const allowed = event.target.checked;
+                setPrompting(allowed);
+                if (allowed) {
+                  setExpiryDays((days) =>
+                    Math.min(days, MAX_PROMPT_EXPIRY_DAYS));
+                }
+              }}
             />
             Allow text prompts
           </label>
@@ -407,8 +424,8 @@ function RemoteDevice({
             <select value={expiryDays} onChange={(event) => setExpiryDays(Number(event.target.value))}>
               <option value={1}>1 day from now</option>
               <option value={7}>7 days from now</option>
-              <option value={30}>30 days from now</option>
-              <option value={90}>90 days from now</option>
+              {!prompting && <option value={30}>30 days from now</option>}
+              {!prompting && <option value={90}>90 days from now</option>}
             </select>
           </label>
           <button

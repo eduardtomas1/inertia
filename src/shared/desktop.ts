@@ -1,7 +1,7 @@
 import type { ChatAttachmentMimeType } from "./attachments";
 import {
   normalizeRemoteConversationGrants,
-  remoteConversationGrantsSchema,
+  REMOTE_GRANT_LIMITS,
   type RemoteConversationGrant,
 } from "./remote-grants";
 import type {
@@ -192,10 +192,49 @@ function remoteConversationGrants(
   value: unknown,
 ): RemoteConversationGrant[] | null | false {
   if (value === undefined || value === null) return null;
-  const parsed = remoteConversationGrantsSchema.safeParse(value);
-  return parsed.success
-    ? normalizeRemoteConversationGrants(parsed.data)
-    : false;
+  if (
+    !Array.isArray(value)
+    || value.length > REMOTE_GRANT_LIMITS.projects
+  ) return false;
+  const grants: RemoteConversationGrant[] = [];
+  for (const candidate of value) {
+    if (!plainObject(candidate)) return false;
+    const keys = Object.keys(candidate);
+    if (
+      keys.length !== 4
+      || !keys.every((key) =>
+        key === "projectId"
+        || key === "conversationIds"
+        || key === "includeFutureConversations"
+        || key === "legacyProjectWide")
+      || !boundedEntityId(candidate.projectId)
+      || !boundedEntityIds(
+        candidate.conversationIds,
+        REMOTE_GRANT_LIMITS.conversationsPerProject,
+      )
+      || typeof candidate.includeFutureConversations !== "boolean"
+      || typeof candidate.legacyProjectWide !== "boolean"
+    ) return false;
+    grants.push({
+      projectId: candidate.projectId,
+      conversationIds: candidate.conversationIds,
+      includeFutureConversations: candidate.includeFutureConversations,
+      legacyProjectWide: candidate.legacyProjectWide,
+    });
+  }
+  return normalizeRemoteConversationGrants(grants);
+}
+
+function boundedEntityId(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 200;
+}
+
+function boundedEntityIds(value: unknown, maximum: number): value is string[] {
+  if (!Array.isArray(value) || value.length > maximum) return false;
+  for (const candidate of value) {
+    if (!boundedEntityId(candidate)) return false;
+  }
+  return true;
 }
 
 function plainObject(value: unknown): value is Record<string, unknown> {

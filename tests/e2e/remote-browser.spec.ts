@@ -79,7 +79,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
   const page = await electronApp.firstWindow();
   const hostKeys = await generateRemoteKeyPair();
   const invitation: RemotePairingInvitation = {
-    protocolVersion: 1,
+    protocolVersion: 2,
     relayUrl,
     endpointId: remoteRandomSecret(24),
     hostId: crypto.randomUUID(),
@@ -91,7 +91,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
   desktop = new WebSocket(relayUrl);
   await once(desktop, "open");
   desktop.send(JSON.stringify({
-    protocolVersion: 1,
+    protocolVersion: 2,
     type: "relay.register",
     endpointId: invitation.endpointId,
     role: "desktop",
@@ -143,7 +143,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
       payload.devicePublicKey,
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.frame",
       connectionId: relayed.connectionId,
       frame: await sealPairingResponse(
@@ -209,11 +209,11 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         && message.frame.kind === "session.data",
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.frame",
       connectionId: sessionMessage.connectionId,
       frame: {
-        protocolVersion: 1,
+        protocolVersion: 2,
         kind: "session.accept",
         sessionId,
         enc: sender.enc,
@@ -254,7 +254,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
     );
     expect(request.type).toBe("state.get");
     desktop.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.frame",
       connectionId: sessionMessage.connectionId,
       frame: await sealSessionData(sender, sessionId, {
@@ -283,11 +283,11 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         && message.frame.kind === "session.open",
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.frame",
       connectionId: sessionMessage.connectionId,
       frame: {
-        protocolVersion: 1,
+        protocolVersion: 2,
         kind: "session.close",
         sessionId,
         reason: "revoked",
@@ -328,11 +328,11 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
       devicePublicKey,
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.frame",
       connectionId: reducedMessage.connectionId,
       frame: {
-        protocolVersion: 1,
+        protocolVersion: 2,
         kind: "session.accept",
         sessionId: reducedOpen.sessionId,
         enc: reducedSender.enc,
@@ -366,7 +366,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         scopes: string[];
       }>((resolveProfile, reject) => {
         const request = db.transaction("device").objectStore("device")
-          .get("active");
+          .get("active-sealed");
         request.onsuccess = () => resolveProfile(request.result as {
           grantVersion: number;
           scopes: string[];
@@ -389,7 +389,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
           version: 1,
           relayUrl: "javascript:alert(1)",
           capabilities: ["full-access"],
-        }, "active");
+        }, "active-sealed");
         transaction.oncomplete = () => resolveWrite();
         transaction.onerror = () => reject(transaction.error);
       });

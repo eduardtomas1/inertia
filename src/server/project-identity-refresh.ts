@@ -20,6 +20,13 @@ interface ProjectIdentityTarget {
   path: string;
 }
 
+interface PendingProjectIdentityRefresh {
+  target: ProjectIdentityTarget;
+  promise: Promise<ProjectIdentityState>;
+  resolve(state: ProjectIdentityState): void;
+  reject(reason: unknown): void;
+}
+
 interface ProjectIdentityRefresherOptions {
   concurrency?: number;
   deadlineMs?: number;
@@ -34,6 +41,7 @@ interface ProjectIdentityRefresherOptions {
 export class ProjectIdentityRefresher {
   private readonly states = new Map<string, ProjectIdentityState>();
   private readonly inFlight = new Map<string, Promise<ProjectIdentityState>>();
+  private readonly queue: PendingProjectIdentityRefresh[] = [];
   private readonly concurrency: number;
   private readonly deadlineMs: number;
   private readonly inspect: (path: string) => Promise<ProjectIdentity>;
@@ -73,34 +81,58 @@ export class ProjectIdentityRefresher {
 
   dispose(): void {
     this.disposed = true;
+    for (const pending of this.queue.splice(0)) {
+      if (this.inFlight.get(pending.target.id) === pending.promise) {
+        this.inFlight.delete(pending.target.id);
+      }
+      pending.resolve(this.state(pending.target.id));
+    }
   }
 
   async refreshAll(targets: readonly ProjectIdentityTarget[]): Promise<void> {
-    const queue = [...targets];
-    const workers = Array.from(
-      { length: Math.min(this.concurrency, queue.length) },
-      async () => {
-        while (!this.disposed) {
-          const target = queue.shift();
-          if (!target) return;
-          await this.refresh(target);
-        }
-      },
-    );
-    await Promise.all(workers);
+    await Promise.all(targets.map((target) => this.refresh(target)));
   }
 
   async refresh(target: ProjectIdentityTarget): Promise<ProjectIdentityState> {
+    if (this.disposed) return this.state(target.id);
     const existing = this.inFlight.get(target.id);
     if (existing) return await existing;
-    const attempt = this.run(target);
+    let resolveAttempt = (_state: ProjectIdentityState): void => undefined;
+    let rejectAttempt = (_reason: unknown): void => undefined;
+    const attempt = new Promise<ProjectIdentityState>((resolve, reject) => {
+      resolveAttempt = resolve;
+      rejectAttempt = reject;
+    });
     this.inFlight.set(target.id, attempt);
-    try {
-      return await attempt;
-    } finally {
-      if (this.inFlight.get(target.id) === attempt) {
-        this.inFlight.delete(target.id);
-      }
+    this.queue.push({
+      target,
+      promise: attempt,
+      resolve: resolveAttempt,
+      reject: rejectAttempt,
+    });
+    this.pump();
+    return await attempt;
+  }
+
+  private pump(): void {
+    while (
+      !this.disposed
+      && this.active < this.concurrency
+      && this.queue.length > 0
+    ) {
+      const pending = this.queue.shift()!;
+      this.active += 1;
+      this.peakActive = Math.max(this.peakActive, this.active);
+      void this.run(pending.target).then(
+        pending.resolve,
+        pending.reject,
+      ).finally(() => {
+        this.active -= 1;
+        if (this.inFlight.get(pending.target.id) === pending.promise) {
+          this.inFlight.delete(pending.target.id);
+        }
+        this.pump();
+      });
     }
   }
 
@@ -108,8 +140,6 @@ export class ProjectIdentityRefresher {
     target: ProjectIdentityTarget,
   ): Promise<ProjectIdentityState> {
     if (this.disposed) return this.state(target.id);
-    this.active += 1;
-    this.peakActive = Math.max(this.peakActive, this.active);
     try {
       const identity = await this.withDeadline(target.path);
       if (this.disposed) return this.state(target.id);
@@ -126,8 +156,6 @@ export class ProjectIdentityRefresher {
         checkedAt: this.now(),
         reason: unavailableReason(error),
       });
-    } finally {
-      this.active -= 1;
     }
   }
 

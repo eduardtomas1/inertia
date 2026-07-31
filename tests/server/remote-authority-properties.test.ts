@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeRemoteConversationGrants,
   remoteConversationGrantsFromProjectIds,
-  remoteConversationGrantsSchema,
   REMOTE_GRANT_LIMITS,
   remoteGrantAllowsConversation,
   remoteGrantedProjectIds,
@@ -18,7 +17,11 @@ import {
   remoteCipherFrameSchema,
   remoteRequestSchema,
   remoteAuthorizationSubjectSchema,
+  remoteConversationGrantsSchema,
+  REMOTE_BROWSER_VERSION,
   REMOTE_LIMITS,
+  REMOTE_PROTOCOL_VERSION,
+  REMOTE_RELAY_VERSION,
 } from "../../src/shared/remote-protocol";
 import {
   remoteSanitizerInspectionWindow,
@@ -71,13 +74,19 @@ function fuzzJson(random: () => number, depth = 0): unknown {
 }
 
 describe("remote frame and request parsing never yields authority", () => {
+  it("versions the prompt-safety projection protocol coherently", () => {
+    expect(REMOTE_PROTOCOL_VERSION).toBe(2);
+    expect(REMOTE_BROWSER_VERSION).toBe("0.2.0");
+    expect(REMOTE_RELAY_VERSION).toBe("0.2.0");
+  });
+
   it("rejects malformed frames without throwing", () => {
     const random = seeded(0xc0ffee);
     for (let attempt = 0; attempt < 3_000; attempt += 1) {
       const candidate = fuzzJson(random);
       const frame = remoteCipherFrameSchema.safeParse(candidate);
       if (frame.success) {
-        expect(frame.data.protocolVersion).toBe(1);
+        expect(frame.data.protocolVersion).toBe(2);
         expect(typeof frame.data.kind).toBe("string");
       }
       const request = remoteRequestSchema.safeParse(candidate);
@@ -95,7 +104,7 @@ describe("remote frame and request parsing never yields authority", () => {
 
   it("never accepts a sequence outside the protocol bound", () => {
     const base = {
-      protocolVersion: 1,
+      protocolVersion: 2,
       kind: "session.data",
       sessionId: "7f0c11aa-9ee8-4e3c-8f8f-0907e31b389e",
       ciphertext: "AAAA",
@@ -117,7 +126,7 @@ describe("remote frame and request parsing never yields authority", () => {
 
   it("never accepts an oversized ciphertext or prompt", () => {
     expect(remoteCipherFrameSchema.safeParse({
-      protocolVersion: 1,
+      protocolVersion: 2,
       kind: "session.data",
       sessionId: "7f0c11aa-9ee8-4e3c-8f8f-0907e31b389e",
       sequence: 0,
@@ -134,7 +143,7 @@ describe("remote frame and request parsing never yields authority", () => {
 
   it("rejects extra fields on every frame shape", () => {
     expect(remoteCipherFrameSchema.safeParse({
-      protocolVersion: 1,
+      protocolVersion: 2,
       kind: "session.close",
       sessionId: "7f0c11aa-9ee8-4e3c-8f8f-0907e31b389e",
       reason: "revoked",

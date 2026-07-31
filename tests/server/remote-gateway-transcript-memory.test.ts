@@ -16,12 +16,14 @@ import {
 } from "../../src/shared/remote-prompt-safety";
 
 const temporaryDirectories: string[] = [];
+const stores: RuntimeStore[] = [];
 const BUDGET_BYTES = 512 * 1024;
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "inertia-remote-memory-"));
   temporaryDirectories.push(directory);
   const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+  stores.push(store);
   const project = store.createProject("Project", directory);
   const conversation = store.createConversation(project.id, "Conversation");
   const transcriptCache = new RemoteTranscriptCache({
@@ -69,6 +71,7 @@ async function transcript(
 }
 
 afterEach(() => {
+  for (const store of stores.splice(0)) store.close();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }

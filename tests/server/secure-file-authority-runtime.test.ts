@@ -136,6 +136,35 @@ function send(socket: WebSocket, command: object): void {
   socket.send(JSON.stringify(command));
 }
 
+async function replaceWorkspaceRoot(
+  workspace: string,
+  moved: string,
+  outside: string,
+): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    try {
+      renameSync(workspace, moved);
+      break;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error
+        ? error.code
+        : null;
+      if (
+        process.platform !== "win32"
+        || (code !== "EBUSY" && code !== "EPERM")
+        || Date.now() >= deadline
+      ) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  symlinkSync(
+    outside,
+    workspace,
+    process.platform === "win32" ? "junction" : "dir",
+  );
+}
+
 describe("runtime secure-file authority lifetime", () => {
   it("rejects a workspace save when its preview root is replaced", async () => {
     const { root, data, workspace } = fixture();
@@ -163,12 +192,7 @@ describe("runtime secure-file authority lifetime", () => {
       || !read.result.file.authorityRef
     ) throw new Error("Expected an authorized workspace preview.");
 
-    renameSync(workspace, moved);
-    symlinkSync(
-      outside,
-      workspace,
-      process.platform === "win32" ? "junction" : "dir",
-    );
+    await replaceWorkspaceRoot(workspace, moved, outside);
     const writeId = randomUUID();
     send(socket, {
       type: "workspace.file.write",
@@ -226,12 +250,7 @@ describe("runtime secure-file authority lifetime", () => {
     )?.authorityRef;
     if (!authorityRef) throw new Error("Expected repository authority.");
 
-    renameSync(workspace, moved);
-    symlinkSync(
-      outside,
-      workspace,
-      process.platform === "win32" ? "junction" : "dir",
-    );
+    await replaceWorkspaceRoot(workspace, moved, outside);
     const diffId = randomUUID();
     send(socket, {
       type: "git.workspace.diff",
@@ -298,12 +317,7 @@ describe("runtime secure-file authority lifetime", () => {
       || !inspected.result.plan.authorityRef
     ) throw new Error("Expected an authorized reversal plan.");
 
-    renameSync(workspace, moved);
-    symlinkSync(
-      outside,
-      workspace,
-      process.platform === "win32" ? "junction" : "dir",
-    );
+    await replaceWorkspaceRoot(workspace, moved, outside);
     const revertId = randomUUID();
     send(socket, {
       type: "git.selection.revert",

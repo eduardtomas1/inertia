@@ -29,6 +29,7 @@ export interface ProjectWorkspaceCommandDependencies {
   secureFileAuthorities: SecureFileAuthorityRegistry;
   workspacePath(projectId: string, conversationId?: string): string;
   rememberDeletedConversation(conversationId: string): void;
+  forgetRemoteTranscript(conversationId: string): void;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
 }
@@ -86,6 +87,7 @@ export function createProjectWorkspaceCommandHandler(
           .conversations) {
           if (conversation.projectId === command.payload.projectId) {
             dependencies.rememberDeletedConversation(conversation.id);
+            dependencies.forgetRemoteTranscript(conversation.id);
           }
         }
         dependencies.store.removeProject(command.payload.projectId);

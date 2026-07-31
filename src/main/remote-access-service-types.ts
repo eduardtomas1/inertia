@@ -44,7 +44,7 @@ export interface RemoteAccessServiceOptions {
   runtime: Pick<RuntimeSupervisor, "remoteRequest">
     & Partial<Pick<
       RuntimeSupervisor,
-      "prepareRemotePrompt" | "commitRemotePrompt"
+      "prepareRemotePrompt" | "commitRemotePrompt" | "forgetRemoteTranscripts"
     >>;
   onStateChange?: (state: RemoteAccessState) => void;
   autoConnect?: boolean;

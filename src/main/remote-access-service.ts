@@ -227,6 +227,7 @@ export class RemoteAccessService {
       this.invitation = null;
       const socket = this.disconnect("disabled", false, false);
       terminateRemoteSocket(socket);
+      this.forgetRemoteTranscripts();
       await this.persist();
       this.emitState();
       return;
@@ -969,6 +970,14 @@ export class RemoteAccessService {
     return this.requireData();
   }
 
+  private forgetRemoteTranscripts(): void {
+    try {
+      this.options.runtime.forgetRemoteTranscripts?.({ kind: "all" });
+    } catch {
+      return;
+    }
+  }
+
   private requireData(): PersistedRemoteAccess {
     if (!this.data || this.storeError) {
       throw new Error(
@@ -1003,6 +1012,7 @@ export class RemoteAccessService {
     this.sessionAdmissions.clear();
     this.sessions.clear();
     this.sessionByConnection.clear();
+    this.forgetRemoteTranscripts();
     this.clearReconnect();
     this.clearRegistrationDeadline();
     if (this.sweepTimer) this.clearTimer(this.sweepTimer);

@@ -53,6 +53,10 @@ export interface RuntimeRemotePromptPreparation {
   preparationId: string;
 }
 
+export type RuntimeRemoteForgetScope =
+  | { kind: "all" }
+  | { kind: "conversation"; conversationId: string };
+
 export type RuntimeWorkerCommand =
   | { type: "runtime.start"; options: RuntimeWorkerOptions }
   | { type: "runtime.shutdown" }
@@ -76,6 +80,7 @@ export type RuntimeWorkerCommand =
       subject: RemoteAuthorizationSubject;
       request: Extract<RemoteRequest, { type: "prompt.send" }>;
     }
+  | { type: "runtime.remote-forget"; scope: RuntimeRemoteForgetScope }
   | RuntimeCredentialResult
   | RuntimeAttachmentResult
   | RuntimeAttachmentReleaseResult
@@ -259,6 +264,13 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
           result,
         }
       : null;
+  }
+  if (
+    value.type === "runtime.remote-forget"
+    && Object.keys(value).length === 2
+  ) {
+    const scope = parseRuntimeRemoteForgetScope(value.scope);
+    return scope ? { type: "runtime.remote-forget", scope } : null;
   }
   if (
     value.type === "runtime.remote-request"
@@ -529,6 +541,26 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   }
   if (value.type === "runtime.ready" && Object.keys(value).length === 2 && isRuntimeWebSocketUrl(value.websocketUrl)) {
     return { type: "runtime.ready", websocketUrl: value.websocketUrl };
+  }
+  return null;
+}
+
+function parseRuntimeRemoteForgetScope(
+  value: unknown,
+): RuntimeRemoteForgetScope | null {
+  if (typeof value !== "object" || value === null) return null;
+  const scope = value as Record<string, unknown>;
+  if (scope.kind === "all" && Object.keys(scope).length === 1) {
+    return { kind: "all" };
+  }
+  if (
+    scope.kind === "conversation"
+    && Object.keys(scope).length === 2
+    && typeof scope.conversationId === "string"
+    && scope.conversationId.length > 0
+    && scope.conversationId.length <= 200
+  ) {
+    return { kind: "conversation", conversationId: scope.conversationId };
   }
   return null;
 }

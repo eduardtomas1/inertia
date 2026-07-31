@@ -18,6 +18,7 @@ function runtimeWithClose(
     commitRemotePrompt: vi.fn(() => {
       throw new Error("unused");
     }),
+    forgetRemoteTranscripts: vi.fn(),
     close,
   };
 }

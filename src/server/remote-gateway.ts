@@ -13,11 +13,9 @@ import {
   type RemoteResponse,
   type RemoteSafeConversation,
 } from "../shared/remote-protocol";
-import {
-  sanitizeRemoteContent,
-  sanitizeRemoteLabel,
-} from "../shared/remote-sanitizer";
+import { sanitizeRemoteLabel } from "../shared/remote-sanitizer";
 import { PROVIDER_INFO } from "./provider/catalog";
+import { RemoteTranscriptCache } from "./remote-transcript-cache";
 
 interface RemoteGatewayDependencies {
   shell(): AppSnapshot;
@@ -27,6 +25,7 @@ interface RemoteGatewayDependencies {
   queuePrompt(conversationId: string, content: string): {
     turnId: string;
   };
+  transcriptCache?: RemoteTranscriptCache;
   now?(): Date;
 }
 
@@ -53,8 +52,6 @@ interface PendingRemotePromptPreparation {
 const PREPARED_PROMPT_TTL_MS = 15_000;
 const PREPARED_PROMPT_LIMIT =
   REMOTE_LIMITS.sessions * REMOTE_LIMITS.inFlightRequestsPerSession;
-const SANITIZED_CONTENT_LIMIT =
-  REMOTE_LIMITS.transcriptMessages * REMOTE_LIMITS.sessions;
 
 export class RemoteRuntimeGateway {
   private readonly receipts = new Map<string, DeliveryReceipt>();
@@ -62,12 +59,29 @@ export class RemoteRuntimeGateway {
   private readonly latestPreparationIdByRequest = new Map<string, string>();
   private readonly pendingPreparations =
     new Map<string, PendingRemotePromptPreparation>();
-  private readonly sanitizedContent =
-    new Map<string, { source: string; value: string }>();
+  private readonly transcriptCache: RemoteTranscriptCache;
   private readonly now: () => Date;
 
   constructor(private readonly dependencies: RemoteGatewayDependencies) {
     this.now = dependencies.now ?? (() => new Date());
+    this.transcriptCache = dependencies.transcriptCache
+      ?? new RemoteTranscriptCache();
+  }
+
+  forgetConversation(conversationId: string): void {
+    this.transcriptCache.invalidateConversation(conversationId);
+  }
+
+  forgetMessage(conversationId: string, messageId: string): void {
+    this.transcriptCache.invalidateMessage(conversationId, messageId);
+  }
+
+  reset(): void {
+    this.transcriptCache.clear();
+    this.receipts.clear();
+    this.preparedPrompts.clear();
+    this.latestPreparationIdByRequest.clear();
+    this.pendingPreparations.clear();
   }
 
   async request(
@@ -148,7 +162,11 @@ export class RemoteRuntimeGateway {
               id: message.id,
               turnId: message.turnId,
               role: message.role as "user" | "assistant",
-              content: this.sanitizedMessageContent(message.id, message.content),
+              content: this.transcriptCache.content(
+                request.conversationId,
+                message.id,
+                message.content,
+              ),
               createdAt: message.createdAt,
             })),
           activities: detail.activities
@@ -444,24 +462,6 @@ export class RemoteRuntimeGateway {
       const oldest = this.receipts.keys().next().value;
       if (typeof oldest === "string") this.receipts.delete(oldest);
     }
-  }
-
-  private sanitizedMessageContent(id: string, content: string): string {
-    const cached = this.sanitizedContent.get(id);
-    if (cached && cached.source === content) {
-      this.sanitizedContent.delete(id);
-      this.sanitizedContent.set(id, cached);
-      return cached.value;
-    }
-    const value = sanitizeRemoteContent(content);
-    this.sanitizedContent.delete(id);
-    this.sanitizedContent.set(id, { source: content, value });
-    while (this.sanitizedContent.size > SANITIZED_CONTENT_LIMIT) {
-      const oldest = this.sanitizedContent.keys().next().value;
-      if (typeof oldest !== "string") break;
-      this.sanitizedContent.delete(oldest);
-    }
-    return value;
   }
 
   private prunePreparedPrompts(): void {

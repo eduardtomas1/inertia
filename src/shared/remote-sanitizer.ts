@@ -65,6 +65,23 @@ interface RemoteHtmlOpening {
   likelyHtml: boolean;
 }
 
+function remoteOutputLimit(maximumCharacters: number): number {
+  return Math.min(
+    Math.max(0, maximumCharacters),
+    MAX_REMOTE_CONTENT_CHARACTERS,
+  );
+}
+
+export function remoteSanitizerInspectionWindow(
+  value: string,
+  maximumCharacters = MAX_REMOTE_CONTENT_CHARACTERS,
+): string {
+  return value.slice(
+    0,
+    remoteOutputLimit(maximumCharacters) + SECRET_SCAN_MARGIN_CHARACTERS,
+  );
+}
+
 /**
  * Remote Companion deliberately omits code/source blocks, absolute paths,
  * credentials, and URL user-info. The result is still untrusted text and the
@@ -72,15 +89,12 @@ interface RemoteHtmlOpening {
  */
 export function sanitizeRemoteContent(
   value: string,
-  maximumCharacters = 64 * 1024,
+  maximumCharacters = MAX_REMOTE_CONTENT_CHARACTERS,
 ): string {
-  const outputLimit = Math.min(
-    Math.max(0, maximumCharacters),
-    MAX_REMOTE_CONTENT_CHARACTERS,
-  );
+  const outputLimit = remoteOutputLimit(maximumCharacters);
   let text = redactRemoteHtmlBlocks(
     redactRemoteCodeBlocks(
-      value.slice(0, outputLimit + SECRET_SCAN_MARGIN_CHARACTERS)
+      remoteSanitizerInspectionWindow(value, maximumCharacters)
         .replace(CONTENT_CONTROL_CHARACTERS, " ")
         .replace(DIRECTIONAL_FORMATTING, " "),
     ),

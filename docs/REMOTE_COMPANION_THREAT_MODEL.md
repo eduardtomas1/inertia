@@ -88,6 +88,35 @@ retention, abuse-reporting, lawful-request, residency, deletion, monitoring,
 on-call, incident notification, and availability obligations. None are
 accepted or implemented by this reference task.
 
+## Resource exhaustion in the utility runtime
+
+The gateway caches sanitized transcript projections so repeated remote polls do
+not re-sanitize unchanged provider messages. That cache is a denial-of-service
+surface: a paired device only has to navigate between conversations to make the
+desktop retain transcript state.
+
+The cache therefore never retains the original provider message. Cache
+equality uses a SHA-256 fingerprint of the bounded prefix the sanitizer can
+actually inspect (`remoteSanitizerInspectionWindow`, 64 KiB of output budget
+plus a 4 KiB secret-scan margin). Because the sanitizer never reads past that
+window, the fingerprint is a complete determinant of the projection, and a
+multi-megabyte message costs only its sanitized projection plus a 32-byte
+digest.
+
+Retention is bounded by bytes rather than by entry count.
+`REMOTE_TRANSCRIPT_CACHE_BUDGET_BYTES` is 8 MiB, weighted at two bytes per
+retained UTF-16 code unit plus a fixed per-entry overhead, and evicted
+least-recently-used first. A single conversation projection may carry at most
+`REMOTE_LIMITS.plaintextBytes` (96 KiB) of sanitized text, so the budget holds
+roughly eighty saturated projections. The earlier bound was
+`transcriptMessages * sessions` entries with no byte ceiling, which allowed
+gigabytes of retained provider text.
+
+Cached projections are dropped when a conversation is archived, deleted, or
+removed with its project, when Remote Companion is disabled, and when the
+encrypted store fails closed. Message edits need no explicit signal because a
+changed inspection window changes the fingerprint.
+
 ## Deferred capabilities
 
 The MVP deliberately has no remote:

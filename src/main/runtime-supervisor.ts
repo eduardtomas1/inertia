@@ -11,6 +11,7 @@ import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/deskto
 import {
   parseRuntimeWorkerEvent,
   type RuntimeCredentialOperation,
+  type RuntimeRemoteForgetScope,
   type RuntimeRemotePromptPreparation,
   type RuntimeWorkerCommand,
   type RuntimeWorkerOptions,
@@ -299,6 +300,12 @@ export class RuntimeSupervisor {
     return record instanceof Error
       ? Promise.reject(record)
       : this.remotePrompts.prepare(record, subject, request);
+  }
+
+  forgetRemoteTranscripts(scope: RuntimeRemoteForgetScope): void {
+    const record = this.current;
+    if (this.phase !== "ready" || !record?.ready) return;
+    this.post(record.child, { type: "runtime.remote-forget", scope });
   }
 
   commitRemotePrompt(

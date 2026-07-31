@@ -23,6 +23,7 @@ import type {
   RemoteResponse,
 } from "../shared/remote-protocol";
 import type {
+  RuntimeRemoteForgetScope,
   RuntimeRemotePromptPreparation,
 } from "../node/runtime-process-protocol";
 import { RuntimeStore } from "./database";
@@ -104,6 +105,7 @@ import {
 } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 import { RemoteRuntimeGateway } from "./remote-gateway";
+import { RemoteTranscriptCache } from "./remote-transcript-cache";
 
 export {
   assembleReadOnlyReviewRequest,
@@ -152,6 +154,7 @@ export interface RunningRuntime {
     request: Extract<RemoteRequest, { type: "prompt.send" }>,
     preparationId: string,
   ) => RemoteResponse;
+  forgetRemoteTranscripts: (scope: RuntimeRemoteForgetScope) => void;
   close: (cause?: "runtime-shutdown" | "runtime-crash") => Promise<void>;
 }
 
@@ -204,6 +207,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       // Missing or temporarily unavailable folders remain visible and isolated by their stored path.
     }
   }));
+  const remoteTranscriptCache = new RemoteTranscriptCache();
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
   const enableProviders = options.enableProviders ?? true;
   const terminals = new TerminalManager();
@@ -538,6 +542,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         deletedConversationIds,
         dataDirectory,
         rememberDeletedConversation,
+        forgetRemoteTranscript: (conversationId) =>
+          remoteTranscriptCache.invalidateConversation(conversationId),
         broadcastSnapshot: flushSnapshot,
         publicError,
         send,
@@ -609,6 +615,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         secureFileAuthorities,
         workspacePath,
         rememberDeletedConversation,
+        forgetRemoteTranscript: (conversationId) =>
+          remoteTranscriptCache.invalidateConversation(conversationId),
         broadcastSnapshot,
         send,
       }),
@@ -695,6 +703,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         );
       }
     },
+    transcriptCache: remoteTranscriptCache,
     queuePrompt: (conversationId, content) => {
       let queued: ReturnType<TurnController["queue"]> | null = null;
       try {
@@ -737,6 +746,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       remoteGateway.preparePrompt(subject, request),
     commitRemotePrompt: (subject, request, preparationId) =>
       remoteGateway.commitPrompt(subject, request, preparationId),
+    forgetRemoteTranscripts: (scope) => {
+      if (scope.kind === "all") remoteGateway.reset();
+      else remoteGateway.forgetConversation(scope.conversationId);
+    },
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
       closed = true;

@@ -73,6 +73,7 @@ export interface ConversationCommandDependencies {
   deletedConversationIds: Set<string>;
   dataDirectory: string;
   rememberDeletedConversation(conversationId: string): void;
+  forgetRemoteTranscript(conversationId: string): void;
   broadcastSnapshot(): void;
   publicError(error: unknown): string;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -393,6 +394,7 @@ export function createConversationCommandHandler(
           command.payload.conversationId,
           true,
         );
+        dependencies.forgetRemoteTranscript(command.payload.conversationId);
         return "mutation";
       case "conversation.unarchive":
         dependencies.store.archiveConversation(
@@ -469,6 +471,7 @@ export function createConversationCommandHandler(
         dependencies.rememberDeletedConversation(
           command.payload.conversationId,
         );
+        dependencies.forgetRemoteTranscript(command.payload.conversationId);
         return "mutation";
       }
       default:

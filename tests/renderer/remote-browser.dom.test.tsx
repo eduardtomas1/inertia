@@ -297,6 +297,53 @@ describe("Remote Companion browser output boundary", () => {
       expect(screen.getByRole("button", { name: /Approve/u })).toBeEnabled());
   });
 
+  it("does not let a deselected project's stale grant approve another project", async () => {
+    const now = new Date().toISOString();
+    const first = {
+      ...projectFixture(crypto.randomUUID(), now),
+      name: "First project",
+    };
+    const second = {
+      ...projectFixture(crypto.randomUUID(), now),
+      name: "Second project",
+    };
+    const firstConversation = {
+      ...conversationFixture(first.id, now),
+      title: "First conversation",
+    };
+    const secondConversation = {
+      ...conversationFixture(second.id, now),
+      title: "Second conversation",
+    };
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => pendingState(now)),
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+      },
+    });
+    render(<RemoteAccessSettings
+      projects={[first, second]}
+      conversations={[firstConversation, secondConversation]}
+    />);
+
+    await screen.findByText("Approve New browser?");
+    screen.getByRole("checkbox", { name: "First project" }).click();
+    await waitFor(() => expect(screen.getByRole("checkbox", {
+      name: "First conversation",
+    })).not.toBeChecked());
+    screen.getByRole("checkbox", { name: "First conversation" }).click();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Approve/u })).toBeEnabled());
+
+    screen.getByRole("checkbox", { name: "First project" }).click();
+    screen.getByRole("checkbox", { name: "Second project" }).click();
+    await waitFor(() => expect(screen.getByRole("checkbox", {
+      name: "Second conversation",
+    })).not.toBeChecked());
+    expect(screen.getByRole("button", { name: /Approve/u })).toBeDisabled();
+  });
+
   it("limits prompt-capable pairing expiry to seven days", async () => {
     const now = new Date().toISOString();
     const state = pendingState(now);

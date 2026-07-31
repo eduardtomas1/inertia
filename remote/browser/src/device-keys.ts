@@ -117,10 +117,18 @@ export async function adoptNonExtractableDeviceKeys(
 export function isNonExtractableDevicePrivateKey(
   value: unknown,
 ): value is CryptoKey {
-  return typeof CryptoKey !== "undefined"
-    && value instanceof CryptoKey
-    && value.type === "private"
-    && value.extractable === false;
+  if (
+    typeof CryptoKey === "undefined"
+    || !(value instanceof CryptoKey)
+    || value.type !== "private"
+    || value.extractable
+  ) return false;
+  const algorithm = value.algorithm;
+  return algorithm.name === CURVE.name
+    && "namedCurve" in algorithm
+    && algorithm.namedCurve === CURVE.namedCurve
+    && value.usages.length === PRIVATE_USAGES.length
+    && PRIVATE_USAGES.every((usage) => value.usages.includes(usage));
 }
 
 export async function assertDeviceKeyIsUnexportable(

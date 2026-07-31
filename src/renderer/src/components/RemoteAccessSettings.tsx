@@ -36,6 +36,10 @@ export function RemoteAccessSettings({
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const current = liveState ?? state;
+  const selectedGrants = useMemo(() => {
+    const selectedProjects = new Set(projectIds);
+    return grants.filter(({ projectId }) => selectedProjects.has(projectId));
+  }, [grants, projectIds]);
 
   useEffect(() => {
     if (!liveState) return;
@@ -230,7 +234,7 @@ export function RemoteAccessSettings({
             projects={projects}
             conversations={conversations}
             projectIds={projectIds}
-            grants={grants}
+            grants={selectedGrants}
             onChange={setGrants}
           />
           <div className="remote-pairing-actions">
@@ -239,14 +243,14 @@ export function RemoteAccessSettings({
               disabled={
                 busy
                 || projectIds.length === 0
-                || !remoteGrantsAllowSomething(grants)
+                || !remoteGrantsAllowSomething(selectedGrants)
               }
               onClick={() => void mutate(
                 () => window.inertia.approveRemotePairing({
                   requestId: pending.requestId,
                   scopes: prompting ? ["view", "prompt"] : ["view"],
                   projectIds,
-                  grants,
+                  grants: selectedGrants,
                   grantDays,
                 }),
                 `${pending.deviceLabel} paired.`,

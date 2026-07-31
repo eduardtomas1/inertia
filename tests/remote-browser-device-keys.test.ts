@@ -105,6 +105,27 @@ describe("non-extractable browser device keys", () => {
       .rejects.toBeInstanceOf(UnsupportedDeviceKeyStorage);
   });
 
+  it("rejects a non-extractable private key for another algorithm", async () => {
+    const rsa = await crypto.subtle.generateKey(
+      {
+        name: "RSA-OAEP",
+        modulusLength: 2_048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      false,
+      ["decrypt"],
+    ) as CryptoKeyPair;
+    expect(rsa.privateKey.extractable).toBe(false);
+    expect(isNonExtractableDevicePrivateKey(rsa.privateKey)).toBe(false);
+    const profile = await sealedProfile();
+    const { privateKey: _ignored, ...metadata } = profile;
+    expect(validateSealedProfile({
+      ...metadata,
+      privateKey: rsa.privateKey,
+    })).toBeNull();
+  });
+
   it("rejects non-CryptoKey values as a stored identity", () => {
     for (const value of [null, undefined, "key", 1, {}, []]) {
       expect(isNonExtractableDevicePrivateKey(value)).toBe(false);

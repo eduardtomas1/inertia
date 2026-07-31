@@ -24,7 +24,9 @@ interface PendingProjectIdentityRefresh {
   target: ProjectIdentityTarget;
   promise: Promise<ProjectIdentityState>;
   resolve(state: ProjectIdentityState): void;
-  reject(reason: unknown): void;
+  timer: ReturnType<typeof setTimeout> | null;
+  started: boolean;
+  settled: boolean;
 }
 
 interface ProjectIdentityRefresherOptions {
@@ -84,7 +86,12 @@ export class ProjectIdentityRefresher {
     this.disposed = true;
     this.queue.length = 0;
     for (const pending of this.pendingByProject.values()) {
-      pending.resolve(this.state(pending.target.id));
+      if (pending.timer) this.clearTimer(pending.timer);
+      pending.timer = null;
+      if (!pending.settled) {
+        pending.settled = true;
+        pending.resolve(this.state(pending.target.id));
+      }
     }
     this.pendingByProject.clear();
   }
@@ -98,17 +105,21 @@ export class ProjectIdentityRefresher {
     const existing = this.pendingByProject.get(target.id);
     if (existing) return await existing.promise;
     let resolveAttempt = (_state: ProjectIdentityState): void => undefined;
-    let rejectAttempt = (_reason: unknown): void => undefined;
-    const attempt = new Promise<ProjectIdentityState>((resolve, reject) => {
+    const attempt = new Promise<ProjectIdentityState>((resolve) => {
       resolveAttempt = resolve;
-      rejectAttempt = reject;
     });
-    const pending = {
+    const pending: PendingProjectIdentityRefresh = {
       target,
       promise: attempt,
       resolve: resolveAttempt,
-      reject: rejectAttempt,
+      timer: null,
+      started: false,
+      settled: false,
     };
+    pending.timer = this.setTimer(
+      () => this.timeout(pending),
+      this.deadlineMs,
+    );
     this.pendingByProject.set(target.id, pending);
     this.queue.push(pending);
     this.pump();
@@ -122,12 +133,16 @@ export class ProjectIdentityRefresher {
       && this.queue.length > 0
     ) {
       const pending = this.queue.shift()!;
+      if (pending.settled) {
+        if (this.pendingByProject.get(pending.target.id) === pending) {
+          this.pendingByProject.delete(pending.target.id);
+        }
+        continue;
+      }
+      pending.started = true;
       this.active += 1;
       this.peakActive = Math.max(this.peakActive, this.active);
-      void this.run(pending.target).then(
-        pending.resolve,
-        pending.reject,
-      ).finally(() => {
+      void this.inspectPending(pending).finally(() => {
         this.active -= 1;
         if (this.pendingByProject.get(pending.target.id) === pending) {
           this.pendingByProject.delete(pending.target.id);
@@ -137,22 +152,21 @@ export class ProjectIdentityRefresher {
     }
   }
 
-  private async run(
-    target: ProjectIdentityTarget,
-  ): Promise<ProjectIdentityState> {
-    if (this.disposed) return this.state(target.id);
+  private async inspectPending(
+    pending: PendingProjectIdentityRefresh,
+  ): Promise<void> {
     try {
-      const identity = await this.withDeadline(target.path);
-      if (this.disposed) return this.state(target.id);
-      this.options.apply(target.id, identity);
-      return this.settle(target.id, {
+      const identity = await this.inspect(pending.target.path);
+      if (this.disposed || pending.settled) return;
+      this.options.apply(pending.target.id, identity);
+      this.complete(pending, {
         freshness: "fresh",
         checkedAt: this.now(),
         reason: null,
       });
     } catch (error) {
-      if (this.disposed) return this.state(target.id);
-      return this.settle(target.id, {
+      if (this.disposed || pending.settled) return;
+      this.complete(pending, {
         freshness: "unavailable",
         checkedAt: this.now(),
         reason: unavailableReason(error),
@@ -160,21 +174,34 @@ export class ProjectIdentityRefresher {
     }
   }
 
-  private async withDeadline(path: string): Promise<ProjectIdentity> {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    try {
-      return await Promise.race([
-        this.inspect(path),
-        new Promise<never>((_resolve, reject) => {
-          timer = this.setTimer(
-            () => reject(new ProjectIdentityTimeout(this.deadlineMs)),
-            this.deadlineMs,
-          );
-        }),
-      ]);
-    } finally {
-      if (timer) this.clearTimer(timer);
+  private timeout(pending: PendingProjectIdentityRefresh): void {
+    if (this.disposed || pending.settled) return;
+    this.complete(pending, {
+      freshness: "unavailable",
+      checkedAt: this.now(),
+      reason: unavailableReason(
+        new ProjectIdentityTimeout(this.deadlineMs),
+      ),
+    });
+    if (!pending.started) {
+      const queued = this.queue.indexOf(pending);
+      if (queued >= 0) this.queue.splice(queued, 1);
+      if (this.pendingByProject.get(pending.target.id) === pending) {
+        this.pendingByProject.delete(pending.target.id);
+      }
+      this.pump();
     }
+  }
+
+  private complete(
+    pending: PendingProjectIdentityRefresh,
+    state: ProjectIdentityState,
+  ): void {
+    if (pending.settled) return;
+    pending.settled = true;
+    if (pending.timer) this.clearTimer(pending.timer);
+    pending.timer = null;
+    pending.resolve(this.settle(pending.target.id, state));
   }
 
   private settle(

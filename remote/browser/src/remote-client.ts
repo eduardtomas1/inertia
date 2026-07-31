@@ -41,6 +41,7 @@ import {
 } from "./device-store";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+const PROFILE_ACTIVITY_WRITE_INTERVAL_MS = 60 * 60 * 1_000;
 const REMOTE_TEXT_ENCODER = new TextEncoder();
 
 type BoundedRemoteRelayText =
@@ -83,6 +84,7 @@ export class RemoteCompanionClient {
   private selectedConversationId: string | null = null;
   private attemptEpoch = 0;
   private profileWriteTail: Promise<void> = Promise.resolve();
+  private lastProfileActivityWriteAt = 0;
 
   constructor(private readonly callbacks: RemoteClientCallbacks) {}
 
@@ -215,6 +217,7 @@ export class RemoteCompanionClient {
       };
       if (!await this.saveOwnedProfile(epoch, profile)) return;
       this.profile = profile;
+      this.lastProfileActivityWriteAt = Date.parse(profile.lastUsedAt);
       tunnel.socket.close(1000, "pairing complete");
       this.socket = null;
       this.connectionId = null;
@@ -318,6 +321,9 @@ export class RemoteCompanionClient {
       };
       if (!await this.saveOwnedProfile(epoch, updatedProfile)) return;
       this.profile = updatedProfile;
+      this.lastProfileActivityWriteAt = Date.parse(
+        updatedProfile.lastUsedAt,
+      );
       this.socket = tunnel.socket;
       this.connectionId = tunnel.connectionId;
       this.sessionId = sessionId;
@@ -418,6 +424,7 @@ export class RemoteCompanionClient {
         && state.result.kind === "state"
       ) {
         this.callbacks.shell(state.result.state);
+        void this.persistAuthenticatedActivity(epoch);
       }
       if (
         this.selectedConversationId
@@ -626,6 +633,36 @@ export class RemoteCompanionClient {
     this.profileWriteTail = write;
     await write;
     return saved;
+  }
+
+  private async persistAuthenticatedActivity(epoch: number): Promise<void> {
+    const profile = this.profile;
+    if (!profile || !this.ownsAttempt(epoch)) return;
+    const now = Date.now();
+    const persistedAt = Date.parse(profile.lastUsedAt);
+    const previousActivityAt = Math.max(
+      Number.isFinite(persistedAt) ? persistedAt : 0,
+      this.lastProfileActivityWriteAt,
+    );
+    if (now - previousActivityAt < PROFILE_ACTIVITY_WRITE_INTERVAL_MS) return;
+    this.lastProfileActivityWriteAt = now;
+    const next = {
+      ...profile,
+      lastUsedAt: new Date(now).toISOString(),
+    };
+    try {
+      if (await this.saveOwnedProfile(epoch, next)) {
+        this.profile = next;
+        return;
+      }
+    } catch {
+      // A later authenticated poll can retry without disconnecting the session.
+    }
+    if (this.lastProfileActivityWriteAt === now) {
+      this.lastProfileActivityWriteAt = Number.isFinite(persistedAt)
+        ? persistedAt
+        : 0;
+    }
   }
 
   private disconnectTransport(message: string): void {

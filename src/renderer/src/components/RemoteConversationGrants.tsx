@@ -91,13 +91,12 @@ export function ConversationGrantEditor({
             <label className="remote-checkbox">
               <input
                 type="checkbox"
-                checked={grant.includeFutureConversations}
+                checked={projectWide}
                 onChange={(event) => onChange(withGrant(grants, {
                   ...grant,
+                  conversationIds: visibleConversationIds,
                   includeFutureConversations: event.target.checked,
-                  legacyProjectWide: event.target.checked
-                    ? grant.legacyProjectWide
-                    : false,
+                  legacyProjectWide: false,
                 }))}
               />
               Include every conversation, including ones created later
@@ -106,8 +105,8 @@ export function ConversationGrantEditor({
               <p className="settings-card-note" role="status">
                 <AlertTriangle size={13} aria-hidden="true" />
                 This device was paired before conversation-level access existed,
-                so it can still read every conversation in this project. Pick
-                conversations below to narrow it.
+                so it can still read every conversation in this project. Turn
+                off &ldquo;Include every conversation&rdquo; to narrow it.
               </p>
             )}
             {unavailableGrantCount > 0 && !projectWide && (

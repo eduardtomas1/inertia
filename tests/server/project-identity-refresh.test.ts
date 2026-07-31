@@ -177,6 +177,35 @@ describe("project identity refresher", () => {
     expect(refresher.peakConcurrency()).toBeLessThanOrEqual(4);
   });
 
+  it("keeps timed-out underlying inspections inside the concurrency cap", async () => {
+    vi.useFakeTimers();
+    try {
+      let inspections = 0;
+      const refresher = new ProjectIdentityRefresher({
+        concurrency: 2,
+        deadlineMs: 100,
+        inspect: () => {
+          inspections += 1;
+          return never();
+        },
+        apply: () => undefined,
+      });
+      const refresh = refresher.refreshAll(targets(20));
+
+      await vi.advanceTimersByTimeAsync(101);
+      await refresh;
+
+      expect(inspections).toBe(2);
+      expect(refresher.peakConcurrency()).toBe(2);
+      for (const target of targets(20)) {
+        expect(refresher.state(target.id).freshness).toBe("unavailable");
+      }
+      refresher.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shares the concurrency limit with on-demand refreshes", async () => {
     let active = 0;
     let peak = 0;

@@ -131,6 +131,35 @@ describe("Remote Companion browser output boundary", () => {
     })]);
   });
 
+  it("shows and clears effective legacy project-wide access", () => {
+    const now = new Date().toISOString();
+    const project = projectFixture(crypto.randomUUID(), now);
+    const onChange = vi.fn();
+    render(<ConversationGrantEditor
+      projects={[project]}
+      conversations={[conversationFixture(project.id, now)]}
+      projectIds={[project.id]}
+      grants={[{
+        projectId: project.id,
+        conversationIds: [],
+        includeFutureConversations: false,
+        legacyProjectWide: true,
+      }]}
+      onChange={onChange}
+    />);
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: /Include every conversation/u,
+    });
+    expect(checkbox).toBeChecked();
+    checkbox.click();
+    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({
+      projectId: project.id,
+      includeFutureConversations: false,
+      legacyProjectWide: false,
+    })]);
+  });
+
   it("renders malicious provider output as inert text", () => {
     const parent = document.createElement("div");
     appendRemoteText(

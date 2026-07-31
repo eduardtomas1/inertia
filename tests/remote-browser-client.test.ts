@@ -401,6 +401,64 @@ describe("Remote Companion browser connection ownership", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("periodically persists activity from authenticated polling", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-07-31T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const deviceKeys = await generateNonExtractableDeviceKeys();
+    const hostKeys = await generateRemoteKeyPair();
+    const profile: SealedBrowserDeviceProfile = {
+      version: 2,
+      deviceId: crypto.randomUUID(),
+      deviceLabel: "Active browser",
+      publicKey: deviceKeys.publicKey,
+      privateKey: deviceKeys.keyPair.privateKey,
+      lastUsedAt: new Date(now - 2 * 60 * 60 * 1_000).toISOString(),
+      hostId: crypto.randomUUID(),
+      hostPublicKey: hostKeys.publicKey,
+      relayUrl: "wss://relay.example/remote",
+      endpointId: "opaque_endpoint",
+      scopes: ["view"],
+      projectIds: ["project"],
+      grantVersion: 1,
+      expiresAt: new Date(now + 14 * 24 * 60 * 60 * 1_000).toISOString(),
+    };
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const saveOwnedProfile = vi.fn(async (
+      _epoch: number,
+      _profile: SealedBrowserDeviceProfile,
+    ) => true);
+    const internals = client as unknown as {
+      attemptEpoch: number;
+      profile: SealedBrowserDeviceProfile | null;
+      persistAuthenticatedActivity(epoch: number): Promise<void>;
+      saveOwnedProfile(
+        epoch: number,
+        profile: SealedBrowserDeviceProfile,
+      ): Promise<boolean>;
+    };
+    internals.profile = profile;
+    internals.saveOwnedProfile = saveOwnedProfile;
+
+    await internals.persistAuthenticatedActivity(internals.attemptEpoch);
+    expect(saveOwnedProfile).toHaveBeenCalledTimes(1);
+    expect(saveOwnedProfile.mock.calls[0]?.[1].lastUsedAt).toBe(
+      new Date(now).toISOString(),
+    );
+    await internals.persistAuthenticatedActivity(internals.attemptEpoch);
+    expect(saveOwnedProfile).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(now + 60 * 60 * 1_000 + 1);
+    await internals.persistAuthenticatedActivity(internals.attemptEpoch);
+    expect(saveOwnedProfile).toHaveBeenCalledTimes(2);
+  });
+
   it("clears stale detail and rejects prompts for the previous selection", async () => {
     const detail = vi.fn();
     const promptResult = vi.fn();

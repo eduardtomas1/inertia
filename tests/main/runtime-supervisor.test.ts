@@ -37,6 +37,7 @@ class FakeUtilityProcess extends EventEmitter {
   pid: number | undefined;
   readonly messages: RuntimeWorkerCommand[] = [];
   killCalls = 0;
+  postError: Error | null = null;
 
   constructor(pid: number) {
     super();
@@ -44,6 +45,7 @@ class FakeUtilityProcess extends EventEmitter {
   }
 
   postMessage(message: RuntimeWorkerCommand): void {
+    if (this.postError) throw this.postError;
     this.messages.push(message);
   }
 
@@ -920,6 +922,78 @@ describe("RuntimeSupervisor", () => {
       ok: false,
     });
 
+    const prompt = {
+      type: "prompt.send" as const,
+      requestId: crypto.randomUUID(),
+      deliveryId: crypto.randomUUID(),
+      conversationId: projectPathRequest.projectId,
+      content: "Prepare then commit",
+    };
+    const promptingSubject = {
+      ...subject,
+      scopes: ["view" as const, "prompt" as const],
+    };
+    const prepared = supervisor.prepareRemotePrompt(
+      promptingSubject,
+      prompt,
+    );
+    const prepareCommand = children[0].messages.at(-1);
+    expect(prepareCommand).toMatchObject({
+      type: "runtime.remote-prompt-prepare",
+      subject: promptingSubject,
+      request: prompt,
+    });
+    if (prepareCommand?.type !== "runtime.remote-prompt-prepare") {
+      throw new Error("Missing prompt preparation command");
+    }
+    children[0].message({
+      type: "runtime.remote-prompt-result",
+      operationId: prepareCommand.operationId,
+      requestId: prompt.requestId,
+      phase: "prepare",
+      preparationId: "33333333-3333-4333-8333-333333333333",
+      response: null,
+    });
+    await expect(prepared).resolves.toEqual({
+      preparationId: "33333333-3333-4333-8333-333333333333",
+    });
+
+    const commitPosted = vi.fn();
+    const committed = supervisor.commitRemotePrompt(
+      promptingSubject,
+      prompt,
+      "33333333-3333-4333-8333-333333333333",
+      commitPosted,
+    );
+    expect(commitPosted).toHaveBeenCalledOnce();
+    const commitCommand = children[0].messages.at(-1);
+    expect(commitCommand).toMatchObject({
+      type: "runtime.remote-prompt-commit",
+      subject: promptingSubject,
+      request: prompt,
+    });
+    if (commitCommand?.type !== "runtime.remote-prompt-commit") {
+      throw new Error("Missing prompt commit command");
+    }
+    children[0].message({
+      type: "runtime.remote-prompt-result",
+      operationId: commitCommand.operationId,
+      requestId: prompt.requestId,
+      phase: "commit",
+      preparationId: null,
+      response: {
+        type: "response",
+        requestId: prompt.requestId,
+        ok: true,
+        result: {
+          kind: "prompt.accepted",
+          deliveryId: prompt.deliveryId,
+          turnId: crypto.randomUUID(),
+        },
+      },
+    });
+    await expect(committed).resolves.toMatchObject({ ok: true });
+
     const timedRequest = {
       ...request,
       requestId: crypto.randomUUID(),
@@ -939,6 +1013,75 @@ describe("RuntimeSupervisor", () => {
     await expect(interrupted).rejects.toThrow(
       "stopped before the remote request completed",
     );
+  });
+
+  it("does not report a commit as posted after the runtime becomes unavailable", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const subject = {
+      deviceId: crypto.randomUUID(),
+      sessionId: crypto.randomUUID(),
+      scopes: ["view" as const, "prompt" as const],
+      projectIds: [projectPathRequest.projectId],
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    const request = {
+      type: "prompt.send" as const,
+      requestId: crypto.randomUUID(),
+      deliveryId: crypto.randomUUID(),
+      conversationId: projectPathRequest.projectId,
+      content: "Do not post after runtime shutdown",
+    };
+    const stopped = supervisor.stop();
+    const messagesBeforeCommit = children[0].messages.length;
+    const commitPosted = vi.fn();
+
+    await expect(supervisor.commitRemotePrompt(
+      subject,
+      request,
+      crypto.randomUUID(),
+      commitPosted,
+    )).rejects.toThrow("local service is starting");
+    expect(commitPosted).not.toHaveBeenCalled();
+    expect(children[0].messages).toHaveLength(messagesBeforeCommit);
+
+    children[0].message({ type: "runtime.stopped" });
+    children[0].exit(0);
+    await expect(stopped).resolves.toBe(true);
+  });
+
+  it("does not report a commit as posted when utility delivery throws", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    children[0].postError = new Error("utility port closed");
+    const commitPosted = vi.fn();
+
+    await expect(supervisor.commitRemotePrompt(
+      {
+        deviceId: crypto.randomUUID(),
+        sessionId: crypto.randomUUID(),
+        scopes: ["view", "prompt"],
+        projectIds: [projectPathRequest.projectId],
+        grantVersion: 1,
+        expiresAt: "2030-01-01T00:00:00.000Z",
+      },
+      {
+        type: "prompt.send",
+        requestId: crypto.randomUUID(),
+        deliveryId: crypto.randomUUID(),
+        conversationId: projectPathRequest.projectId,
+        content: "Do not classify a thrown post as delivery",
+      },
+      crypto.randomUUID(),
+      commitPosted,
+    )).rejects.toThrow("could not be posted");
+    expect(commitPosted).not.toHaveBeenCalled();
+    expect(children[0].killCalls).toBe(0);
   });
 
   it("reports startup failure and retries only after the failed child exits", () => {

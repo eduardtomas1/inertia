@@ -12,6 +12,12 @@ function runtimeWithClose(
     remoteRequest: vi.fn(async () => {
       throw new Error("unused");
     }),
+    prepareRemotePrompt: vi.fn(async () => {
+      throw new Error("unused");
+    }),
+    commitRemotePrompt: vi.fn(() => {
+      throw new Error("unused");
+    }),
     close,
   };
 }

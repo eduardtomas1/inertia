@@ -40,16 +40,18 @@ The implementation preserves Inertia's existing privilege boundaries:
   update, revocation, and projected state IPC. It never exposes a host/device
   private key, provider credential, runtime WebSocket capability, filesystem
   primitive, or provider process control.
-- Electron main sends a strict `runtime.remote-request` to the supervised
-  utility process. The runtime revalidates the authorization subject,
-  project/conversation ownership, current conversation mode, and active-run
-  state. It is still the sole authority for persistence, provider routing,
-  sandboxing, and approval policy.
-- Provider readiness may await. Immediately after that await, the runtime
-  reloads authoritative conversation detail and synchronously revalidates
-  project ownership, Supervised mode, and inactive state before the synchronous
-  queue call. A local change returns unavailable, forbidden, or busy without
-  queueing.
+- Electron main sends strict read requests to the supervised utility process.
+  Prompts use separate strict prepare/commit commands. The runtime revalidates
+  the authorization subject, project/conversation ownership, current
+  conversation mode, and active-run state. It is still the sole authority for
+  persistence, provider routing, sandboxing, and approval policy.
+- Provider readiness may await during prompt preparation. Immediately after
+  that await, the runtime reloads authoritative conversation detail and
+  revalidates project ownership, Supervised mode, and inactive state. It then
+  returns a one-time, expiring internal preparation ID without queueing. Main
+  synchronously revalidates the exact live session/device grant and posts the
+  commit with no intervening await. The runtime atomically consumes that ID,
+  revalidates the boundary again, and synchronously queues the exact request.
 - The existing privileged loopback WebSocket remains unchanged and is never
   sent to a remote browser or relay.
 - The reference relay routes bounded opaque frames between an outbound desktop
@@ -153,13 +155,29 @@ The only version 1 application requests are:
 - `prompt.send`: bounded text to one existing authorized conversation.
 
 For prompts, Electron main persists a bounded delivery receipt as `dispatched`
-before invoking the runtime. An accepted turn records its turn ID. A duplicate
-delivery ID with the same device/conversation/content returns the prior result;
-different content is rejected. A crash or disconnect after dispatch becomes
-`uncertain` and is never retried automatically. The receipt ledger retains the
-newest 512 entries, so exactly-once deduplication is intentionally bounded to
-that retained window. The runtime also keeps a bounded 512-entry in-process
-dedupe ledger.
+before runtime preparation. Preparation cannot queue a turn. Immediately
+before commit, main synchronously checks that Remote Companion remains enabled
+and unlocked, the exact session/route remains live, and the same device grant,
+scope, projects, version, and expiry remain authoritative. If that check fails,
+or the runtime becomes unavailable before the commit command is posted, the
+receipt is removed and the known non-delivery returns `forbidden` or
+`unavailable`; it is not marked uncertain. The supervisor reports the delivery
+linearization only immediately after `postMessage` succeeds. A deterministic
+commit response remains a known outcome. Only a posted commit whose
+acknowledgement is lost becomes `uncertain`, and it is never retried
+automatically.
+
+The runtime preparation is identified by an unguessable one-time UUID, expires
+after 15 seconds, and is consumed by the first exact commit attempt. A retry of
+the same session/request invalidates an older preparation, and at most 32
+preparation operations (including readiness checks in progress) exist. A
+readiness check that never settles retains its slot until runtime restart
+rather than allowing unbounded replacement work. An accepted turn records its
+turn ID. A duplicate delivery ID with the same
+device/conversation/content returns the prior result; different content is
+rejected. The receipt ledger retains the newest 512 entries, so exactly-once
+deduplication is intentionally bounded to that retained window. The runtime
+also keeps a bounded 512-entry in-process dedupe ledger.
 
 There is no durable relay queue. If the desktop is absent, the relay reports it
 offline. A request timeout or transport loss reports offline/uncertain; the
@@ -218,7 +236,10 @@ ownership for disconnect, heartbeats clients, and has bounded shutdown.
 
 ## Lifecycle bounds
 
-- Devices: 16; active peer routes: 8; active sessions: 4; pending pairings: 1.
+- Device records: 16 total; active peer routes: 8; active sessions: 4; pending
+  pairings: 1. Pairing a new device deterministically evicts only the oldest
+  revoked/expired record needed to stay within 16; a full set of current
+  devices rejects the pairing without mutation.
   In-progress admissions share the four-session bound and reserve unique IDs
   across routes until success, failure, or disconnect. Each route queues at
   most 16 encrypted frames. A local user must resolve the current
@@ -226,6 +247,9 @@ ownership for disconnect, heartbeats clients, and has bounded shutdown.
 - Pairing: five minutes and ten attempts/minute.
 - Session authentication: four attempts/connection and 24/minute globally.
 - Active requests: eight/session; all requests: 120/minute; prompts: six/minute.
+- Prompt preparation operations: 32 total including unresolved readiness
+  checks. Issued IDs expire after 15 seconds and are one-time; same-request
+  retry invalidates an older ID. An unresolved check retains its bounded slot.
 - Session idle expiry: 15 minutes; handshake freshness: 60 seconds.
 - Reconnect backoff: capped at 30 seconds; no prompt replay.
 - Relay envelope: 132 KiB; application ciphertext: 128 KiB; plaintext: 96 KiB.

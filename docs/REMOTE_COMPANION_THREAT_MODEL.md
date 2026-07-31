@@ -54,7 +54,7 @@ trusted only within their existing responsibilities.
 | Session replay/fixation | Reuse a valid opening, race the same ID across routes, over-admit while crypto/persistence awaits, retain an opening across local revocation, force sequence reuse, or pin an old grant. | Fresh UUID/timestamp, atomic global session-ID/capacity reservation before crypto, release on failure/disconnect/grant change, persisted used-session IDs, HPKE authenticated context bound to host/device/session, exact sequence, desktop current grant returned encrypted. |
 | Authentication CPU exhaustion | Repeated invalid openings trigger P-256 work across device keys. | Four attempts per relay connection, 24/minute global budget before crypto, at most 16 device keys, relay connection/message limits. Distributed relay/network DoS remains possible. |
 | Malicious project/provider output | XSS, deceptive links, secret/path exfiltration, oversized responses. | Safe projection only, arbitrary POSIX, drive-letter, UNC, extended/device-namespace, and file-URL redaction, credential/code/HTML redaction, user/assistant roles only, UTF-8 byte budget, strict schemas/CSP, DOM `textContent`, no Markdown/HTML execution. Ordinary HTTP(S) URLs, escaped prose, and surrounding punctuation remain usable. Heuristic redaction cannot prove arbitrary prose contains no secret. |
-| Remote approval abuse | Prompt induces a Full Access, command, destructive, credential, or secret approval remotely, or local authority widens while provider readiness awaits. | Remote protocol has no approval/answer capability. Runtime checks project ownership, Supervised mode, and inactive state before readiness and reloads/rechecks them synchronously immediately before queueing; browser only reports that local action is needed. |
+| Remote approval abuse | Prompt induces a Full Access, command, destructive, credential, or secret approval remotely, or local authority widens while provider readiness awaits. | Remote protocol has no approval/answer capability. Runtime prepare checks before/after readiness but cannot queue. Main revalidates the exact live session/device grant and synchronously posts a one-time commit; runtime consumes it, rechecks, and synchronously queues. Browser only reports that local action is needed. |
 | Prompt/attachment/source leakage | Relay/browser receives sensitive local input, source, attachments, path, or execution payload. | Only explicit remote prompt text and safe projections cross the boundary. No attachment/path/source/diagnostic fields exist in strict schemas. Provider credentials and local capabilities never enter them. |
 | Metadata leakage | Relay learns endpoint/IP/timing/size and opaque frame identifiers. | Minimal routing fields, no clear device ID on session opening, no payload logs/queue. Padding, anonymity, and traffic-shape hiding are not provided. |
 | Browser profile corruption | Malformed IndexedDB changes relay URL, key, or grant. | Strict schema before use, WSS/loopback-WS transport policy, invalid profile deletion and explicit error. |
@@ -63,8 +63,9 @@ trusted only within their existing responsibilities.
 | Relay route lifecycle race | Disconnect or connection-ID reuse lands during asynchronous pairing/session crypto and later commits approval/session state for a dead route. | `peer-connected` creates a desktop-local epoch; disconnect invalidates it synchronously and cleanup is ordered with the per-route frame queue. Post-crypto/persistence commits recheck epoch ownership. Active routes and queued frames are bounded. |
 | Concurrent encrypted frames | Parallel `session.data` opens race HPKE recipient sequence and falsely close a valid session as replay; parallel responses race sender sequence. | One bounded inbound queue per route serializes frame opening only; validated runtime requests remain concurrent. A separate per-session outbound queue seals responses in completion order. |
 | Denial of service | Oversized/malformed frames, connection churn, queued-frame growth, stalled close, large workspace, reconnect storm. | Layered size/count/rate/time limits, eight active peer-route and 16-frame-per-route caps, byte-bounded projections, no compression, exponential capped reconnect, heartbeat, bounded 1.5-second shutdown then terminate. A relay or network can always make the optional feature unavailable. |
-| Stale/offline state | Browser displays old state or duplicates a prompt after uncertainty. | Generated timestamps, two-second live polling only while authenticated, clear offline status, no relay prompt queue, persisted dispatch receipt, no automatic prompt retry. A displayed projection may be up to one poll old. |
-| Revocation race | Revoked/reduced device continues with an old session/grant. | Grant change/revoke increments desktop version and closes sessions. Each request checks current device expiry/revocation; reconnect gets current encrypted grant. Revoked keys are not tried. |
+| Stale/offline state | Browser displays old state or duplicates a prompt after uncertainty. | Generated timestamps, two-second live polling only while authenticated, clear offline status, no relay prompt queue, persisted dispatch receipt, no automatic prompt retry. Known failure before commit posting removes the receipt; only a posted commit with no acknowledgement is uncertain. A displayed projection may be up to one poll old. |
+| Revocation/authority race | A prompt prepared under an old enabled, unlocked, device/project/scope grant queues after disable, lock, revoke, or reduction; a stale preparation is committed by retry. | Grant change/revoke increments desktop version and closes sessions. Main synchronously revalidates exact live authority immediately before the successful commit post, which is the delivery linearization. Issued runtime preparation IDs are one-time and expire in 15 seconds; issued plus in-progress operations are capped at 32, with an unresolved check retaining its slot. Same-request retry invalidates the old ID. Runtime consumes and rechecks before synchronous queueing. |
+| Device-record exhaustion | Repeated revoked/expired pairings exceed the encrypted store's strict 16-record schema or block legitimate replacement. | The cap is 16 total records. Before appending, only the oldest retired revoked/expired records are deterministically pruned; 16 current devices reject without mutating durable state. |
 | Lock during startup | A persisted enabled profile connects while already locked, while secure-store initialization awaits, or after a lock races the initial state sample. | The monitor starts locked, subscribes before sampling, treats reported `locked`/`unknown` as locked, retains events that race the sample, and applies state before explicit connection startup. Unsupported probes keep event-based enforcement; listeners are removed on shutdown. |
 | Vault downgrade/corruption, availability stall, or save failure | Linux plaintext safeStorage fallback, interrupted/unsafe replacement, a stuck platform-vault probe, or a failed authority write exposes keys, blocks startup, or leaves wider in-memory access than durable state. | Reused safeStorage policy rejects `basic_text`/`unknown`; separate encrypted vault; hardened replacement/recovery; bounded availability probe. Serialized writes are poisoned on first failure: the process becomes unavailable/disabled, pairing/session authority and timers are cleared, and the relay socket is terminated. Disable/revoke tear down access before saving. Corrupt/decryption failures disable the feature. |
 
@@ -148,9 +149,14 @@ Release-blocking deterministic coverage includes:
   reservation release on disconnect/revocation, stale route ownership, and
   queue bounds;
 - exact process-boundary validation, timeout, worker restart, and shutdown;
-- delivery dedupe, fixation, uncertain delivery, bounded receipt retention;
-- prompt-readiness races for access-mode, project/availability, and active-run
-  changes, proving no queue call;
+- delivery dedupe, fixation, bounded receipt retention, and exact distinction
+  between known pre-post failure and posted/no-ack uncertainty;
+- prompt-readiness races for access-mode, project/availability, active-run,
+  disable, lock, revoke, and grant-reduction changes, proving no queue call;
+  synchronous accepted-post ordering; one-time preparation mismatch/retry,
+  expiry, and capacity;
+- total device-record cap across restart, deterministic retired-record
+  eviction, and no-mutation rejection when all records remain current;
 - failed disable, pairing acceptance, and grant-update persistence with
   unavailable/disabled state, no surviving session/reconnect, and unchanged
   durable grants;
@@ -165,7 +171,8 @@ Release-blocking deterministic coverage includes:
   drive-letter, UNC, and Windows namespace path redaction with
   URL/punctuation/escaped-prose preservation;
 - real Electron Chromium pairing, authenticated E2EE state exchange, and
-  corrupt IndexedDB recovery.
+  corrupt IndexedDB recovery, including cross-platform static-asset
+  containment in the browser fixture.
 
 Before release, run Node 22 `npm run check`, `npm run test:portable`,
 production dependency audit, the relevant Electron/browser E2E, platform CI,

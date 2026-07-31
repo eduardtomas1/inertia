@@ -7,6 +7,7 @@ import {
   MINUTE_MS,
   normalizeRemoteProjectIds,
   normalizeRemoteScopes,
+  remoteDeviceIsCurrent,
 } from "./remote-access-policy";
 import type {
   PersistedRemoteAccess,
@@ -22,10 +23,6 @@ export function applyRemotePairingGrant(input: {
   grantMs: number;
   now: Date;
 }): PersistedRemoteDevice {
-  if (
-    input.data.devices.filter(({ revokedAt }) => revokedAt === null).length
-    >= REMOTE_LIMITS.devices
-  ) throw new Error("The paired-device limit has been reached.");
   const expiresAt = new Date(
     input.now.getTime() + Math.max(
       MINUTE_MS,
@@ -51,9 +48,43 @@ export function applyRemotePairingGrant(input: {
     device.grantVersion = previous.grantVersion + 1;
     input.data.devices[existing] = device;
   } else {
+    if (
+      input.data.devices.filter((candidate) =>
+        remoteDeviceIsCurrent(candidate, input.now.getTime())).length
+      >= REMOTE_LIMITS.devices
+    ) throw new Error("The paired-device limit has been reached.");
+    pruneRetiredDevicesForAppend(input.data, input.now);
     input.data.devices.push(device);
   }
   return device;
+}
+
+function pruneRetiredDevicesForAppend(
+  data: PersistedRemoteAccess,
+  now: Date,
+): void {
+  const removalCount = Math.max(
+    0,
+    data.devices.length - REMOTE_LIMITS.devices + 1,
+  );
+  if (removalCount === 0) return;
+  const retired = data.devices
+    .filter((device) => !remoteDeviceIsCurrent(device, now.getTime()))
+    .sort((left, right) =>
+      retiredAt(left) - retiredAt(right)
+      || Date.parse(left.createdAt) - Date.parse(right.createdAt)
+      || left.id.localeCompare(right.id));
+  if (retired.length < removalCount) {
+    throw new Error("The paired-device limit has been reached.");
+  }
+  const removed = new Set(
+    retired.slice(0, removalCount).map(({ id }) => id),
+  );
+  data.devices = data.devices.filter(({ id }) => !removed.has(id));
+}
+
+function retiredAt(device: PersistedRemoteDevice): number {
+  return Date.parse(device.revokedAt ?? device.expiresAt);
 }
 
 export function revokeRemoteDevice(

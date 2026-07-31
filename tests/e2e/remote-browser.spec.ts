@@ -6,7 +6,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, resolve } from "node:path";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { once } from "node:events";
 
 import { WebSocket } from "ws";
@@ -432,10 +432,19 @@ async function serveBrowserAsset(
   response: ServerResponse,
 ): Promise<void> {
   try {
-    const path = request.url === "/"
+    const requestPath = new URL(
+      request.url ?? "/missing",
+      "http://remote-companion.invalid",
+    ).pathname;
+    const path = requestPath === "/"
       ? resolve(root, "index.html")
-      : resolve(root, request.url?.replace(/^\/+/u, "") ?? "missing");
-    if (!path.startsWith(`${root}/`) && path !== resolve(root, "index.html")) {
+      : resolve(root, requestPath.replace(/^\/+/u, ""));
+    const nested = relative(root, path);
+    if (
+      nested === ".."
+      || nested.startsWith(`..${sep}`)
+      || isAbsolute(nested)
+    ) {
       throw new Error("outside root");
     }
     const bytes = await readFile(path);

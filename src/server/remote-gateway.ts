@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import type {
   AppSnapshot,
   Conversation,
   ConversationDetail,
 } from "../shared/contracts";
+import type { RuntimeRemotePromptPreparation } from "../node/runtime-process-protocol";
 import {
   REMOTE_LIMITS,
   remoteRequestSchema,
@@ -34,8 +36,30 @@ interface DeliveryReceipt {
   response: RemoteResponse;
 }
 
+type RemotePromptRequest = Extract<RemoteRequest, { type: "prompt.send" }>;
+
+interface PreparedRemotePrompt {
+  key: string;
+  subject: RemoteAuthorizationSubject;
+  request: RemotePromptRequest;
+  createdAt: number;
+}
+
+interface PendingRemotePromptPreparation {
+  key: string;
+  createdAt: number;
+}
+
+const PREPARED_PROMPT_TTL_MS = 15_000;
+const PREPARED_PROMPT_LIMIT =
+  REMOTE_LIMITS.sessions * REMOTE_LIMITS.inFlightRequestsPerSession;
+
 export class RemoteRuntimeGateway {
   private readonly receipts = new Map<string, DeliveryReceipt>();
+  private readonly preparedPrompts = new Map<string, PreparedRemotePrompt>();
+  private readonly latestPreparationIdByRequest = new Map<string, string>();
+  private readonly pendingPreparations =
+    new Map<string, PendingRemotePromptPreparation>();
   private readonly now: () => Date;
 
   constructor(private readonly dependencies: RemoteGatewayDependencies) {
@@ -55,20 +79,8 @@ export class RemoteRuntimeGateway {
       );
     }
     const request = parsed.data;
-    if (Date.parse(subject.expiresAt) <= this.now().getTime()) {
-      return failedResponse(
-        request.requestId,
-        "forbidden",
-        "This device grant has expired.",
-      );
-    }
-    if (!subject.scopes.includes("view")) {
-      return failedResponse(
-        request.requestId,
-        "forbidden",
-        "This device cannot view Remote Companion.",
-      );
-    }
+    const rejection = this.requestBoundaryRejection(subject, request);
+    if (rejection) return rejection;
 
     if (request.type === "state.get") {
       return boundRemoteProjection({
@@ -88,7 +100,11 @@ export class RemoteRuntimeGateway {
     if (request.type === "conversation.get") {
       return this.conversation(subject, request);
     }
-    return await this.prompt(subject, request);
+    return failedResponse(
+      request.requestId,
+      "invalid",
+      "Remote prompts require an authorized prepare and commit.",
+    );
   }
 
   private conversation(
@@ -159,10 +175,21 @@ export class RemoteRuntimeGateway {
     });
   }
 
-  private async prompt(
+  async preparePrompt(
     subject: RemoteAuthorizationSubject,
-    request: Extract<RemoteRequest, { type: "prompt.send" }>,
-  ): Promise<RemoteResponse> {
+    untrustedRequest: unknown,
+  ): Promise<RuntimeRemotePromptPreparation | RemoteResponse> {
+    const parsed = remoteRequestSchema.safeParse(untrustedRequest);
+    if (!parsed.success || parsed.data.type !== "prompt.send") {
+      return failedResponse(
+        requestIdFrom(untrustedRequest),
+        "invalid",
+        "The remote prompt was invalid.",
+      );
+    }
+    const request = parsed.data;
+    const requestRejection = this.requestBoundaryRejection(subject, request);
+    if (requestRejection) return requestRejection;
     if (!subject.scopes.includes("prompt")) {
       return failedResponse(
         request.requestId,
@@ -189,10 +216,34 @@ export class RemoteRuntimeGateway {
       detail,
     );
     if (initialRejection) return initialRejection;
+    this.prunePreparedPrompts();
+    const key = preparedPromptKey(subject, request);
+    const previousPreparationId =
+      this.latestPreparationIdByRequest.get(key);
+    if (previousPreparationId) {
+      this.preparedPrompts.delete(previousPreparationId);
+      this.latestPreparationIdByRequest.delete(key);
+    }
+    if (
+      this.preparedPrompts.size + this.pendingPreparations.size
+        >= PREPARED_PROMPT_LIMIT
+    ) {
+      return failedResponse(
+        request.requestId,
+        "busy",
+        "Too many remote prompts are awaiting authorization.",
+      );
+    }
+    const preparationId = randomUUID();
+    this.pendingPreparations.set(preparationId, {
+      key,
+      createdAt: this.now().getTime(),
+    });
+    this.latestPreparationIdByRequest.set(key, preparationId);
     try {
       // Desktop readiness checks can await provider state. Re-read and
-      // synchronously revalidate the remote boundary immediately before the
-      // synchronous queue operation so a local change cannot widen authority.
+      // revalidate before issuing a one-time preparation; commit revalidates
+      // once more immediately before its synchronous queue operation.
       await this.dependencies.preparePrompt(detail.conversation);
       const currentDetail = this.dependencies.detail(request.conversationId);
       if (!currentDetail) {
@@ -204,6 +255,94 @@ export class RemoteRuntimeGateway {
         currentDetail,
       );
       if (currentRejection) return currentRejection;
+      this.prunePreparedPrompts();
+      const pending = this.pendingPreparations.get(preparationId);
+      this.pendingPreparations.delete(preparationId);
+      if (
+        !pending
+        || pending.key !== key
+        || pending.createdAt
+          < this.now().getTime() - PREPARED_PROMPT_TTL_MS
+        || this.latestPreparationIdByRequest.get(key) !== preparationId
+      ) {
+        if (
+          this.latestPreparationIdByRequest.get(key) === preparationId
+        ) {
+          this.latestPreparationIdByRequest.delete(key);
+        }
+        return failedResponse(
+          request.requestId,
+          "forbidden",
+          "Remote prompt authorization is no longer current.",
+        );
+      }
+      this.preparedPrompts.set(preparationId, {
+        key,
+        subject: structuredClone(subject),
+        request: structuredClone(request),
+        createdAt: this.now().getTime(),
+      });
+      return { preparationId };
+    } catch (error) {
+      return failedResponse(
+        request.requestId,
+        "unavailable",
+        publicRemoteError(error),
+      );
+    } finally {
+      this.pendingPreparations.delete(preparationId);
+      if (
+        !this.preparedPrompts.has(preparationId)
+        && this.latestPreparationIdByRequest.get(key) === preparationId
+      ) {
+        this.latestPreparationIdByRequest.delete(key);
+      }
+    }
+  }
+
+  commitPrompt(
+    subject: RemoteAuthorizationSubject,
+    untrustedRequest: unknown,
+    preparationId: string,
+  ): RemoteResponse {
+    const parsed = remoteRequestSchema.safeParse(untrustedRequest);
+    if (!parsed.success || parsed.data.type !== "prompt.send") {
+      return failedResponse(
+        requestIdFrom(untrustedRequest),
+        "invalid",
+        "The remote prompt was invalid.",
+      );
+    }
+    const request = parsed.data;
+    const requestRejection = this.requestBoundaryRejection(subject, request);
+    if (requestRejection) return requestRejection;
+    this.prunePreparedPrompts();
+    const key = preparedPromptKey(subject, request);
+    const prepared = this.preparedPrompts.get(preparationId);
+    this.preparedPrompts.delete(preparationId);
+    if (
+      prepared
+      && this.latestPreparationIdByRequest.get(prepared.key)
+        === preparationId
+    ) {
+      this.latestPreparationIdByRequest.delete(prepared.key);
+    }
+    if (
+      !prepared
+      || prepared.key !== key
+      || !samePreparedPrompt(prepared, subject, request)
+    ) {
+      return failedResponse(
+        request.requestId,
+        "forbidden",
+        "Remote prompt authorization is no longer current.",
+      );
+    }
+    const detail = this.dependencies.detail(request.conversationId);
+    if (!detail) return unavailableConversationResponse(request.requestId);
+    const rejection = this.promptBoundaryRejection(subject, request, detail);
+    if (rejection) return rejection;
+    try {
       const queued = this.dependencies.queuePrompt(
         request.conversationId,
         request.content,
@@ -227,6 +366,27 @@ export class RemoteRuntimeGateway {
         publicRemoteError(error),
       );
     }
+  }
+
+  private requestBoundaryRejection(
+    subject: RemoteAuthorizationSubject,
+    request: RemoteRequest,
+  ): RemoteResponse | null {
+    if (Date.parse(subject.expiresAt) <= this.now().getTime()) {
+      return failedResponse(
+        request.requestId,
+        "forbidden",
+        "This device grant has expired.",
+      );
+    }
+    if (!subject.scopes.includes("view")) {
+      return failedResponse(
+        request.requestId,
+        "forbidden",
+        "This device cannot view Remote Companion.",
+      );
+    }
+    return null;
   }
 
   private promptBoundaryRejection(
@@ -268,6 +428,49 @@ export class RemoteRuntimeGateway {
       if (typeof oldest === "string") this.receipts.delete(oldest);
     }
   }
+
+  private prunePreparedPrompts(): void {
+    const cutoff = this.now().getTime() - PREPARED_PROMPT_TTL_MS;
+    for (const [preparationId, prepared] of this.preparedPrompts) {
+      if (prepared.createdAt >= cutoff) continue;
+      this.preparedPrompts.delete(preparationId);
+      if (
+        this.latestPreparationIdByRequest.get(prepared.key)
+          === preparationId
+      ) {
+        this.latestPreparationIdByRequest.delete(prepared.key);
+      }
+    }
+  }
+}
+
+function preparedPromptKey(
+  subject: RemoteAuthorizationSubject,
+  request: RemotePromptRequest,
+): string {
+  return `${subject.sessionId}:${request.requestId}`;
+}
+
+function samePreparedPrompt(
+  prepared: PreparedRemotePrompt,
+  subject: RemoteAuthorizationSubject,
+  request: RemotePromptRequest,
+): boolean {
+  return prepared.subject.deviceId === subject.deviceId
+    && prepared.subject.sessionId === subject.sessionId
+    && prepared.subject.grantVersion === subject.grantVersion
+    && prepared.subject.expiresAt === subject.expiresAt
+    && sameStrings(prepared.subject.scopes, subject.scopes)
+    && sameStrings(prepared.subject.projectIds, subject.projectIds)
+    && prepared.request.requestId === request.requestId
+    && prepared.request.deliveryId === request.deliveryId
+    && prepared.request.conversationId === request.conversationId
+    && prepared.request.content === request.content;
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 function unavailableConversationResponse(requestId: string): RemoteResponse {

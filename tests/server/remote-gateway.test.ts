@@ -17,7 +17,9 @@ import {
 
 const temporaryDirectories: string[] = [];
 
-function fixture() {
+function fixture(
+  now: () => Date = () => new Date("2030-01-01T00:00:00.000Z"),
+) {
   const directory = mkdtempSync(join(tmpdir(), "inertia-remote-gateway-"));
   temporaryDirectories.push(directory);
   const store = new RuntimeStore(
@@ -41,7 +43,7 @@ function fixture() {
     isConversationActive: () => false,
     preparePrompt: async () => undefined,
     queuePrompt: () => ({ turnId: `remote-turn-${++queued}` }),
-    now: () => new Date("2030-01-01T00:00:00.000Z"),
+    now,
   });
   const subject: RemoteAuthorizationSubject = {
     deviceId: "09400fa3-32c0-4d8d-8d17-e8ea0a4f6937",
@@ -69,6 +71,17 @@ function deferred() {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+async function sendPrompt(
+  gateway: RemoteRuntimeGateway,
+  subject: RemoteAuthorizationSubject,
+  request: Extract<RemoteRequest, { type: "prompt.send" }>,
+) {
+  const prepared = await gateway.preparePrompt(subject, request);
+  return "preparationId" in prepared
+    ? gateway.commitPrompt(subject, request, prepared.preparationId)
+    : prepared;
 }
 
 function promptRaceFixture() {
@@ -203,16 +216,19 @@ describe("Remote Companion runtime authority", () => {
       content: "Continue safely",
     });
 
-    expect(await gateway.request(subject, send(firstConversation.id))).toMatchObject({
+    expect(await gateway.preparePrompt(
+      subject,
+      send(firstConversation.id),
+    )).toMatchObject({
       ok: false,
       code: "forbidden",
     });
-    expect(await gateway.request(
+    expect(await gateway.preparePrompt(
       { ...subject, scopes: ["view", "prompt"] },
       send(secondConversation.id),
     )).toMatchObject({ ok: false, code: "not-found" });
     store.updateConversation(firstConversation.id, { accessMode: "full" });
-    expect(await gateway.request(
+    expect(await gateway.preparePrompt(
       { ...subject, scopes: ["view", "prompt"] },
       send(firstConversation.id),
     )).toMatchObject({ ok: false, code: "forbidden" });
@@ -237,12 +253,12 @@ describe("Remote Companion runtime authority", () => {
       scopes: ["view", "prompt"],
     };
 
-    const first = await gateway.request(promptingSubject, request);
-    const duplicate = await gateway.request(promptingSubject, {
+    const first = await sendPrompt(gateway, promptingSubject, request);
+    const duplicate = await sendPrompt(gateway, promptingSubject, {
       ...request,
       requestId: crypto.randomUUID(),
     });
-    const fixed = await gateway.request(promptingSubject, {
+    const fixed = await sendPrompt(gateway, promptingSubject, {
       ...request,
       requestId: crypto.randomUUID(),
       content: "Different prompt",
@@ -255,9 +271,195 @@ describe("Remote Companion runtime authority", () => {
     store.close();
   });
 
+  it("commits only the exact prepared subject and request once", async () => {
+    const { store, gateway, subject, firstConversation, queued } = fixture();
+    const promptingSubject: RemoteAuthorizationSubject = {
+      ...subject,
+      scopes: ["view", "prompt"],
+    };
+    const request = {
+      type: "prompt.send" as const,
+      requestId: crypto.randomUUID(),
+      deliveryId: crypto.randomUUID(),
+      conversationId: firstConversation.id,
+      content: "Commit exactly once",
+    };
+
+    const mismatchedPreparation = await gateway.preparePrompt(
+      promptingSubject,
+      request,
+    );
+    if (!("preparationId" in mismatchedPreparation)) {
+      throw new Error("Prompt was not prepared");
+    }
+    expect(gateway.commitPrompt(
+      { ...promptingSubject, grantVersion: 2 },
+      request,
+      mismatchedPreparation.preparationId,
+    )).toMatchObject({ ok: false, code: "forbidden" });
+    expect(queued()).toBe(0);
+
+    const exactPreparation = await gateway.preparePrompt(
+      promptingSubject,
+      request,
+    );
+    if (!("preparationId" in exactPreparation)) {
+      throw new Error("Prompt was not prepared");
+    }
+    expect(exactPreparation.preparationId).not.toBe(
+      mismatchedPreparation.preparationId,
+    );
+    expect(gateway.commitPrompt(
+      promptingSubject,
+      request,
+      mismatchedPreparation.preparationId,
+    )).toMatchObject({
+      ok: false,
+      code: "forbidden",
+    });
+    expect(gateway.commitPrompt(
+      promptingSubject,
+      request,
+      exactPreparation.preparationId,
+    )).toMatchObject({
+      ok: true,
+    });
+    expect(gateway.commitPrompt(
+      promptingSubject,
+      request,
+      exactPreparation.preparationId,
+    )).toMatchObject({
+      ok: false,
+      code: "forbidden",
+    });
+    expect(queued()).toBe(1);
+    store.close();
+  });
+
+  it("expires and bounds one-time prompt preparations", async () => {
+    let now = Date.parse("2030-01-01T00:00:00.000Z");
+    const {
+      store,
+      gateway,
+      subject,
+      firstConversation,
+      queued,
+    } = fixture(() => new Date(now));
+    const promptingSubject: RemoteAuthorizationSubject = {
+      ...subject,
+      scopes: ["view", "prompt"],
+    };
+    const request = {
+      type: "prompt.send" as const,
+      requestId: crypto.randomUUID(),
+      deliveryId: crypto.randomUUID(),
+      conversationId: firstConversation.id,
+      content: "Expire this preparation",
+    };
+    const expired = await gateway.preparePrompt(promptingSubject, request);
+    if (!("preparationId" in expired)) {
+      throw new Error("Prompt was not prepared");
+    }
+    now += 15_001;
+    expect(gateway.commitPrompt(
+      promptingSubject,
+      request,
+      expired.preparationId,
+    )).toMatchObject({ ok: false, code: "forbidden" });
+
+    for (
+      let index = 0;
+      index < REMOTE_LIMITS.sessions
+        * REMOTE_LIMITS.inFlightRequestsPerSession;
+      index += 1
+    ) {
+      expect(await gateway.preparePrompt(promptingSubject, {
+        ...request,
+        requestId: crypto.randomUUID(),
+        deliveryId: crypto.randomUUID(),
+        content: `Pending prompt ${index}`,
+      })).toHaveProperty("preparationId");
+    }
+    expect(await gateway.preparePrompt(promptingSubject, {
+      ...request,
+      requestId: crypto.randomUUID(),
+      deliveryId: crypto.randomUUID(),
+      content: "One prompt too many",
+    })).toMatchObject({ ok: false, code: "busy" });
+    expect(queued()).toBe(0);
+    store.close();
+  });
+
+  it("bounds readiness work and invalidates an overlapping retry", async () => {
+    const base = fixture();
+    const release = deferred();
+    let readinessCalls = 0;
+    const gateway = new RemoteRuntimeGateway({
+      shell: () => base.store.shellSnapshot(),
+      detail: (conversationId) =>
+        base.store.conversationDetail(conversationId),
+      isConversationActive: () => false,
+      preparePrompt: async () => {
+        readinessCalls += 1;
+        await release.promise;
+      },
+      queuePrompt: () => ({ turnId: "must-not-queue" }),
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+    });
+    const subject: RemoteAuthorizationSubject = {
+      ...base.subject,
+      scopes: ["view", "prompt"],
+    };
+    const request = {
+      type: "prompt.send" as const,
+      requestId: crypto.randomUUID(),
+      deliveryId: crypto.randomUUID(),
+      conversationId: base.firstConversation.id,
+      content: "Latest preparation wins",
+    };
+    const first = gateway.preparePrompt(subject, request);
+    const second = gateway.preparePrompt(subject, request);
+    const remaining = Array.from(
+      {
+        length:
+          REMOTE_LIMITS.sessions
+          * REMOTE_LIMITS.inFlightRequestsPerSession
+          - 2,
+      },
+      (_, index) => gateway.preparePrompt(subject, {
+        ...request,
+        requestId: crypto.randomUUID(),
+        deliveryId: crypto.randomUUID(),
+        content: `Bound readiness ${index}`,
+      }),
+    );
+    expect(readinessCalls).toBe(
+      REMOTE_LIMITS.sessions * REMOTE_LIMITS.inFlightRequestsPerSession,
+    );
+    expect(await gateway.preparePrompt(subject, {
+      ...request,
+      requestId: crypto.randomUUID(),
+      deliveryId: crypto.randomUUID(),
+      content: "Capacity must reject before readiness",
+    })).toMatchObject({ ok: false, code: "busy" });
+    expect(readinessCalls).toBe(
+      REMOTE_LIMITS.sessions * REMOTE_LIMITS.inFlightRequestsPerSession,
+    );
+
+    release.resolve();
+    expect(await first).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await second).toHaveProperty("preparationId");
+    await expect(Promise.all(remaining)).resolves.toHaveLength(
+      REMOTE_LIMITS.sessions
+        * REMOTE_LIMITS.inFlightRequestsPerSession
+        - 2,
+    );
+    base.store.close();
+  });
+
   it("does not queue when Supervised access widens during readiness", async () => {
     const race = promptRaceFixture();
-    const response = race.gateway.request(
+    const response = race.gateway.preparePrompt(
       race.promptingSubject,
       race.request,
     );
@@ -281,7 +483,7 @@ describe("Remote Companion runtime authority", () => {
 
   it("does not queue when project authority changes during readiness", async () => {
     const race = promptRaceFixture();
-    const response = race.gateway.request(
+    const response = race.gateway.preparePrompt(
       race.promptingSubject,
       race.request,
     );
@@ -305,7 +507,7 @@ describe("Remote Companion runtime authority", () => {
 
   it("does not queue when a conversation disappears during readiness", async () => {
     const race = promptRaceFixture();
-    const response = race.gateway.request(
+    const response = race.gateway.preparePrompt(
       race.promptingSubject,
       race.request,
     );
@@ -323,7 +525,7 @@ describe("Remote Companion runtime authority", () => {
 
   it("does not queue when a local run starts during readiness", async () => {
     const race = promptRaceFixture();
-    const response = race.gateway.request(
+    const response = race.gateway.preparePrompt(
       race.promptingSubject,
       race.request,
     );
@@ -351,7 +553,7 @@ describe("Remote Companion runtime authority", () => {
       index <= REMOTE_LIMITS.deliveryReceipts;
       index += 1
     ) {
-      const response = await gateway.request(promptingSubject, {
+      const response = await sendPrompt(gateway, promptingSubject, {
         type: "prompt.send",
         requestId: crypto.randomUUID(),
         deliveryId: index === 0 ? firstDeliveryId : crypto.randomUUID(),
@@ -362,7 +564,7 @@ describe("Remote Companion runtime authority", () => {
     }
     expect(queued()).toBe(REMOTE_LIMITS.deliveryReceipts + 1);
 
-    expect(await gateway.request(promptingSubject, {
+    expect(await sendPrompt(gateway, promptingSubject, {
       type: "prompt.send",
       requestId: crypto.randomUUID(),
       deliveryId: firstDeliveryId,

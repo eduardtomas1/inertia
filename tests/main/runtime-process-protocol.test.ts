@@ -52,6 +52,35 @@ describe("runtime process protocol", () => {
       ...command,
       sourcePath: "/Users/alice/secret",
     })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      ...command,
+      request: {
+        type: "prompt.send",
+        requestId,
+        deliveryId: crypto.randomUUID(),
+        conversationId,
+        content: "bypass prepare",
+      },
+    })).toBeNull();
+
+    const promptRequest = {
+      type: "prompt.send",
+      requestId: crypto.randomUUID(),
+      deliveryId: crypto.randomUUID(),
+      conversationId,
+      content: "prepare exactly",
+    };
+    const prepare = {
+      type: "runtime.remote-prompt-prepare",
+      operationId: crypto.randomUUID(),
+      subject: { ...subject, scopes: ["view", "prompt"] },
+      request: promptRequest,
+    };
+    expect(parseRuntimeWorkerCommand(prepare)).toEqual(prepare);
+    expect(parseRuntimeWorkerCommand({
+      ...prepare,
+      request: { ...promptRequest, type: "state.get" },
+    })).toBeNull();
 
     const event = {
       type: "runtime.remote-response",
@@ -72,6 +101,51 @@ describe("runtime process protocol", () => {
         requestId: crypto.randomUUID(),
       },
     })).toBeNull();
+
+    const prepared = {
+      type: "runtime.remote-prompt-result",
+      operationId: prepare.operationId,
+      requestId: promptRequest.requestId,
+      phase: "prepare",
+      preparationId: crypto.randomUUID(),
+      response: null,
+    };
+    expect(parseRuntimeWorkerEvent(prepared)).toEqual(prepared);
+    expect(parseRuntimeWorkerEvent({
+      ...prepared,
+      phase: "commit",
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...prepared,
+      response: {
+        ...event.response,
+        requestId: crypto.randomUUID(),
+      },
+    })).toBeNull();
+    const commit = {
+      type: "runtime.remote-prompt-commit",
+      operationId: crypto.randomUUID(),
+      preparationId: prepared.preparationId,
+      subject: prepare.subject,
+      request: promptRequest,
+    };
+    expect(parseRuntimeWorkerCommand(commit)).toEqual(commit);
+    expect(parseRuntimeWorkerCommand({
+      ...commit,
+      preparationId: "not-a-preparation",
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...prepared,
+      phase: "commit",
+      preparationId: null,
+      response: {
+        ...event.response,
+        requestId: promptRequest.requestId,
+      },
+    })).toMatchObject({
+      phase: "commit",
+      preparationId: null,
+    });
   });
 
   it("accepts only absolute bounded startup options", () => {

@@ -22,6 +22,9 @@ import type {
   RemoteRequest,
   RemoteResponse,
 } from "../shared/remote-protocol";
+import type {
+  RuntimeRemotePromptPreparation,
+} from "../node/runtime-process-protocol";
 import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { recoverInterruptedTurns } from "./runtime/turns/turn-recovery";
@@ -138,8 +141,17 @@ export interface RunningRuntime {
   resolveProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
   remoteRequest: (
     subject: RemoteAuthorizationSubject,
-    request: RemoteRequest,
+    request: Exclude<RemoteRequest, { type: "prompt.send" }>,
   ) => Promise<RemoteResponse>;
+  prepareRemotePrompt: (
+    subject: RemoteAuthorizationSubject,
+    request: Extract<RemoteRequest, { type: "prompt.send" }>,
+  ) => Promise<RuntimeRemotePromptPreparation | RemoteResponse>;
+  commitRemotePrompt: (
+    subject: RemoteAuthorizationSubject,
+    request: Extract<RemoteRequest, { type: "prompt.send" }>,
+    preparationId: string,
+  ) => RemoteResponse;
   close: (cause?: "runtime-shutdown" | "runtime-crash") => Promise<void>;
 }
 
@@ -721,6 +733,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     websocketUrl: `ws://127.0.0.1:${address.port}${websocketPath}`,
     resolveProjectPath: async (request) => (await resolveAuthoritativeProjectPath(store, request)).absolute,
     remoteRequest: (subject, request) => remoteGateway.request(subject, request),
+    prepareRemotePrompt: (subject, request) =>
+      remoteGateway.preparePrompt(subject, request),
+    commitRemotePrompt: (subject, request, preparationId) =>
+      remoteGateway.commitPrompt(subject, request, preparationId),
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
       closed = true;

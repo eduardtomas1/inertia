@@ -11,6 +11,7 @@ import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/deskto
 import {
   parseRuntimeWorkerEvent,
   type RuntimeCredentialOperation,
+  type RuntimeRemotePromptPreparation,
   type RuntimeWorkerCommand,
   type RuntimeWorkerOptions,
 } from "../node/runtime-process-protocol.js";
@@ -23,6 +24,7 @@ import {
   type RuntimeAttachmentBroker,
 } from "./runtime-attachment-broker.js";
 import { forceKillRuntimeProcessTree } from "./runtime-process-tree.js";
+import { RuntimeRemotePromptCoordinator } from "./runtime-remote-prompt-coordinator.js";
 
 export type { RuntimeAttachmentBroker } from "./runtime-attachment-broker.js";
 
@@ -76,6 +78,8 @@ interface PendingRemoteRequest {
   resolve: (response: RemoteResponse) => void;
   reject: (error: Error) => void;
 }
+
+type RemotePromptRequest = Extract<RemoteRequest, { type: "prompt.send" }>;
 
 interface PendingSecureFileRequest {
   record: RuntimeProcessRecord;
@@ -172,6 +176,8 @@ export class RuntimeSupervisor {
   private shutdownDeadlineTimer: Timer | null = null;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
   private readonly pendingRemoteRequests = new Map<string, PendingRemoteRequest>();
+  private readonly remotePrompts:
+    RuntimeRemotePromptCoordinator<RuntimeProcessRecord>;
   private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
   private readonly secureFileBroker?: RuntimeSecureFileBroker;
   private readonly pendingSecureFileRequests =
@@ -191,6 +197,12 @@ export class RuntimeSupervisor {
     this.forceKill = options.forceKill
       ?? ((pid, deadlineAt) =>
         forceKillRuntimeProcessTree(pid, { deadlineAt }));
+    this.remotePrompts = new RuntimeRemotePromptCoordinator({
+      timeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
+      setTimer: this.setTimer,
+      clearTimer: this.clearTimer,
+      post: (record, command) => this.post(record.child, command),
+    });
     this.credentialBroker = options.credentialBroker;
     this.secureFileBroker = options.secureFileBroker;
     this.credentialRequestTimeoutMs = boundedDuration(
@@ -244,7 +256,7 @@ export class RuntimeSupervisor {
 
   remoteRequest(
     subject: RemoteAuthorizationSubject,
-    request: RemoteRequest,
+    request: Exclude<RemoteRequest, { type: "prompt.send" }>,
   ): Promise<RemoteResponse> {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
@@ -262,11 +274,7 @@ export class RuntimeSupervisor {
     return new Promise<RemoteResponse>((resolve, reject) => {
       const timer = this.setTimer(() => {
         this.pendingRemoteRequests.delete(request.requestId);
-        reject(new Error(
-          request.type === "prompt.send"
-            ? "Remote prompt delivery is uncertain."
-            : "The remote request timed out.",
-        ));
+        reject(new Error("The remote request timed out."));
       }, DEFAULT_REQUEST_TIMEOUT_MS);
       this.pendingRemoteRequests.set(request.requestId, {
         record,
@@ -281,6 +289,46 @@ export class RuntimeSupervisor {
         request,
       });
     });
+  }
+
+  prepareRemotePrompt(
+    subject: RemoteAuthorizationSubject,
+    request: RemotePromptRequest,
+  ): Promise<RuntimeRemotePromptPreparation | RemoteResponse> {
+    const record = this.remotePromptRecord();
+    return record instanceof Error
+      ? Promise.reject(record)
+      : this.remotePrompts.prepare(record, subject, request);
+  }
+
+  commitRemotePrompt(
+    subject: RemoteAuthorizationSubject,
+    request: RemotePromptRequest,
+    preparationId: string,
+    onPosted?: () => void,
+  ): Promise<RemoteResponse> {
+    const record = this.remotePromptRecord();
+    return record instanceof Error
+      ? Promise.reject(record)
+      : this.remotePrompts.commit(
+          record,
+          subject,
+          request,
+          preparationId,
+          onPosted,
+        );
+  }
+
+  private remotePromptRecord(): RuntimeProcessRecord | Error {
+    const record = this.current;
+    if (this.phase !== "ready" || !record?.ready) {
+      return new Error(
+        this.lastError
+          ? `The local service is restarting. ${this.lastError}`
+          : "The local service is starting. Try again in a moment.",
+      );
+    }
+    return record;
   }
 
   snapshot(): RuntimeSupervisorSnapshot {
@@ -469,6 +517,10 @@ export class RuntimeSupervisor {
       pending.resolve(event.response);
       return;
     }
+    if (event.type === "runtime.remote-prompt-result") {
+      this.remotePrompts.handle(record, event);
+      return;
+    }
     if (event.type === "runtime.startup-failed") {
       record.reportedFailure = event.message;
       record.acceptingReady = false;
@@ -553,13 +605,15 @@ export class RuntimeSupervisor {
     this.emitState();
   }
 
-  private post(child: UtilityProcess, message: RuntimeWorkerCommand): void {
+  private post(child: UtilityProcess, message: RuntimeWorkerCommand): boolean {
     try {
       child.postMessage(message);
+      return true;
     } catch (error) {
       this.lastError = publicProcessError(error, "The runtime process could not receive a lifecycle message.");
       this.forceTerminate(child);
       this.emitState();
+      return false;
     }
   }
 
@@ -624,6 +678,7 @@ export class RuntimeSupervisor {
       this.clearTimer(pending.timer);
       pending.reject(new Error(message));
     }
+    this.remotePrompts.reject(record, message);
   }
 
   private handleCredentialRequest(

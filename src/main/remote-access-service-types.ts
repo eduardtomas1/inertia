@@ -35,12 +35,17 @@ export interface ActiveRemoteSession {
   requestTimes: number[];
   promptTimes: number[];
   inFlight: Map<string, RemoteRequest>;
+  postedPromptDeliveries: Set<string>;
   outboundTail: Promise<void>;
 }
 
 export interface RemoteAccessServiceOptions {
   store: RemoteAccessStore;
-  runtime: Pick<RuntimeSupervisor, "remoteRequest">;
+  runtime: Pick<RuntimeSupervisor, "remoteRequest">
+    & Partial<Pick<
+      RuntimeSupervisor,
+      "prepareRemotePrompt" | "commitRemotePrompt"
+    >>;
   onStateChange?: (state: RemoteAccessState) => void;
   autoConnect?: boolean;
   now?: () => Date;

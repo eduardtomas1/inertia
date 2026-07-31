@@ -1,4 +1,7 @@
 import type { RemoteConnectionEpoch } from "./remote-access-relay-dispatcher";
+import { remoteDeviceIsCurrent } from "./remote-access-policy";
+import type { ActiveRemoteSession } from "./remote-access-service-types";
+import type { PersistedRemoteAccess } from "./remote-access-store";
 
 export interface RemoteSessionAdmission {
   connectionId: string;
@@ -108,4 +111,38 @@ export class RemoteSessionAdmissions {
       this.release(admission);
     }
   }
+}
+
+export function remoteSessionCanCommitPrompt(input: {
+  data: PersistedRemoteAccess | null;
+  session: ActiveRemoteSession;
+  live: boolean;
+  ownsRoute: boolean;
+  privacyLocked: boolean;
+  stopped: boolean;
+  storeFailed: boolean;
+  now: number;
+}): boolean {
+  const { data, session } = input;
+  return data !== null
+    && data.enabled
+    && input.live
+    && input.ownsRoute
+    && !input.privacyLocked
+    && !input.stopped
+    && !input.storeFailed
+    && data.devices.find(({ id }) => id === session.device.id)
+      === session.device
+    && remoteDeviceIsCurrent(session.device, input.now)
+    && session.subject.deviceId === session.device.id
+    && session.subject.grantVersion === session.device.grantVersion
+    && session.subject.expiresAt === session.device.expiresAt
+    && sameStrings(session.subject.scopes, session.device.scopes)
+    && sameStrings(session.subject.projectIds, session.device.projectIds)
+    && session.subject.scopes.includes("prompt");
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }

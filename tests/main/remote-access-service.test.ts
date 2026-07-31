@@ -35,6 +35,7 @@ import {
   type RemoteSessionAcceptPayload,
 } from "../../src/shared/remote-protocol";
 import { RemoteAccessService } from "../../src/main/remote-access-service";
+import type { RemoteAccessServiceOptions } from "../../src/main/remote-access-service-types";
 import {
   DEFAULT_REMOTE_RELAY_URL,
   remotePairingComparisonCode as mainComparisonCode,
@@ -279,6 +280,7 @@ async function waitFor(
 async function pendingPairingFixture(options: {
   createSocket?: (url: string) => WebSocket;
   devicePublicKey?: string;
+  runtime?: RemoteAccessServiceOptions["runtime"];
   onStateChange?: (
     state: ReturnType<RemoteAccessService["state"]>,
   ) => void;
@@ -287,7 +289,7 @@ async function pendingPairingFixture(options: {
   const store = encryptedStore();
   const service = await RemoteAccessService.create({
     store,
-    runtime: {
+    runtime: options.runtime ?? {
       remoteRequest: async () => {
         throw new Error("unused");
       },
@@ -331,6 +333,7 @@ async function pendingPairingFixture(options: {
 
 async function pairedDeviceFixture(options: {
   createSocket?: (url: string) => WebSocket;
+  runtime?: RemoteAccessServiceOptions["runtime"];
   onStateChange?: (
     state: ReturnType<RemoteAccessService["state"]>,
   ) => void;
@@ -351,6 +354,7 @@ async function pairedDeviceFixture(options: {
 
 async function pairedServiceFixture(options: {
   createSocket?: (url: string) => WebSocket;
+  runtime?: RemoteAccessServiceOptions["runtime"];
   onStateChange?: (
     state: ReturnType<RemoteAccessService["state"]>,
   ) => void;
@@ -729,6 +733,218 @@ describe("Remote Companion outbound encrypted service", () => {
     await paired.service.shutdown();
   });
 
+  it.each(["disable", "lock", "revoke", "reduce"] as const)(
+    "does not commit a prepared prompt after %s removes authority",
+    async (transition) => {
+      let enterPrepare = (): void => undefined;
+      const prepareEntered = new Promise<void>((resolve) => {
+        enterPrepare = resolve;
+      });
+      let releasePrepare = (): void => undefined;
+      const prepareReleased = new Promise<void>((resolve) => {
+        releasePrepare = resolve;
+      });
+      const commitRemotePrompt = vi.fn(async (
+        _subject: unknown,
+        request: Extract<RemoteRequest, { type: "prompt.send" }>,
+      ): Promise<RemoteResponse> => ({
+        type: "response",
+        requestId: request.requestId,
+        ok: true,
+        result: {
+          kind: "prompt.accepted",
+          deliveryId: request.deliveryId,
+          turnId: crypto.randomUUID(),
+        },
+      }));
+      const paired = await pairedServiceFixture({
+        scopes: ["view", "prompt"],
+        runtime: {
+          remoteRequest: async () => {
+            throw new Error("unused");
+          },
+          prepareRemotePrompt: async () => {
+            enterPrepare();
+            await prepareReleased;
+            return { preparationId: crypto.randomUUID() };
+          },
+          commitRemotePrompt,
+        },
+      });
+      sendFrame(
+        paired.session.tunnel.socket,
+        paired.session.tunnel.connectionId,
+        await sealSessionData(
+          paired.session.sender,
+          paired.session.sessionId,
+          {
+            type: "prompt.send",
+            requestId: crypto.randomUUID(),
+            deliveryId: crypto.randomUUID(),
+            conversationId: crypto.randomUUID(),
+            content: "Do not queue after authority changes",
+          },
+        ),
+      );
+      await prepareEntered;
+
+      if (transition === "disable") {
+        await paired.service.setEnabled(false);
+      } else if (transition === "lock") {
+        paired.service.setPrivacyLocked(true);
+      } else if (transition === "revoke") {
+        await paired.service.revokeDevice(paired.deviceId);
+      } else {
+        await paired.service.updateDevice(
+          paired.deviceId,
+          ["view"],
+          [paired.projectId],
+          new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(),
+        );
+      }
+      expect(paired.service.state().activeSessions).toBe(0);
+      releasePrepare();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(commitRemotePrompt).not.toHaveBeenCalled();
+      await paired.service.shutdown();
+      expect((await paired.store.load())?.receipts).toEqual([]);
+      expect(paired.service.state().audit).not.toContainEqual(
+        expect.objectContaining({ type: "prompt.uncertain" }),
+      );
+    },
+  );
+
+  it("keeps runtime loss before commit posting as known non-delivery", async () => {
+    const commitRemotePrompt = vi.fn(async (): Promise<RemoteResponse> => {
+      throw new Error("The supervised runtime is stopping.");
+    });
+    const paired = await pairedServiceFixture({
+      scopes: ["view", "prompt"],
+      runtime: {
+        remoteRequest: async () => {
+          throw new Error("unused");
+        },
+        prepareRemotePrompt: async () => ({
+          preparationId: crypto.randomUUID(),
+        }),
+        commitRemotePrompt,
+      },
+    });
+    const response = nextFrame(
+      paired.session.tunnel.socket,
+      "session.data",
+    );
+    sendFrame(
+      paired.session.tunnel.socket,
+      paired.session.tunnel.connectionId,
+      await sealSessionData(
+        paired.session.sender,
+        paired.session.sessionId,
+        {
+          type: "prompt.send",
+          requestId: crypto.randomUUID(),
+          deliveryId: crypto.randomUUID(),
+          conversationId: crypto.randomUUID(),
+          content: "Do not queue without a posted commit",
+        },
+      ),
+    );
+    const frame = await response;
+    if (frame.kind !== "session.data") throw new Error("Missing response.");
+
+    expect(remoteResponseSchema.parse(
+      await openSessionData(paired.session.recipient, frame),
+    )).toMatchObject({ ok: false, code: "unavailable" });
+    expect(commitRemotePrompt).toHaveBeenCalledOnce();
+    await paired.service.shutdown();
+    expect((await paired.store.load())?.receipts).toEqual([]);
+    expect(paired.service.state().audit).not.toContainEqual(
+      expect.objectContaining({ type: "prompt.uncertain" }),
+    );
+  });
+
+  it("linearizes an accepted prompt at the synchronous commit send", async () => {
+    const order: string[] = [];
+    let enterPrepare = (): void => undefined;
+    const prepareEntered = new Promise<void>((resolve) => {
+      enterPrepare = resolve;
+    });
+    let releasePrepare = (): void => undefined;
+    const prepareReleased = new Promise<void>((resolve) => {
+      releasePrepare = resolve;
+    });
+    let enterCommit = (): void => undefined;
+    const commitEntered = new Promise<void>((resolve) => {
+      enterCommit = resolve;
+    });
+    let releaseCommit = (): void => undefined;
+    const commitReleased = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    const paired = await pairedServiceFixture({
+      scopes: ["view", "prompt"],
+      runtime: {
+        remoteRequest: async () => {
+          throw new Error("unused");
+        },
+        prepareRemotePrompt: async () => {
+          order.push("prepared");
+          enterPrepare();
+          await prepareReleased;
+          return { preparationId: crypto.randomUUID() };
+        },
+        commitRemotePrompt: (
+          _subject,
+          request,
+          _preparationId,
+          onPosted,
+        ) => {
+          order.push("commit-sent");
+          onPosted?.();
+          enterCommit();
+          return commitReleased.then((): RemoteResponse => ({
+            type: "response",
+            requestId: request.requestId,
+            ok: true,
+            result: {
+              kind: "prompt.accepted",
+              deliveryId: request.deliveryId,
+              turnId: crypto.randomUUID(),
+            },
+          }));
+        },
+      },
+    });
+    sendFrame(
+      paired.session.tunnel.socket,
+      paired.session.tunnel.connectionId,
+      await sealSessionData(
+        paired.session.sender,
+        paired.session.sessionId,
+        {
+          type: "prompt.send",
+          requestId: crypto.randomUUID(),
+          deliveryId: crypto.randomUUID(),
+          conversationId: crypto.randomUUID(),
+          content: "Queue before later revocation",
+        },
+      ),
+    );
+    await prepareEntered;
+    releasePrepare();
+    await commitEntered;
+    order.push("revoke");
+    await paired.service.revokeDevice(paired.deviceId);
+    releaseCommit();
+
+    await waitFor(() => paired.service.state().audit.some(
+      ({ type }) => type === "prompt.accepted",
+    ));
+    expect(order).toEqual(["prepared", "commit-sent", "revoke"]);
+    await paired.service.shutdown();
+  });
+
   it("fails closed when disabling cannot be persisted with a live session", async () => {
     const createSocket = vi.fn((url: string) => new WebSocket(url));
     const states: Array<ReturnType<RemoteAccessService["state"]>> = [];
@@ -880,24 +1096,12 @@ describe("Remote Companion outbound encrypted service", () => {
     const runtime = {
       remoteRequest: async (
         _subject: unknown,
-        request: RemoteRequest,
+        request: Exclude<RemoteRequest, { type: "prompt.send" }>,
       ): Promise<RemoteResponse> => {
         runtimeCalls += 1;
         if (request.type === "state.get" && holdStateRequests) {
           stateRequestsStarted += 1;
           await stateRequestsReleased;
-        }
-        if (request.type === "prompt.send") {
-          return {
-            type: "response",
-            requestId: request.requestId,
-            ok: true,
-            result: {
-              kind: "prompt.accepted",
-              deliveryId: request.deliveryId,
-              turnId: crypto.randomUUID(),
-            },
-          };
         }
         return {
           type: "response",
@@ -911,6 +1115,28 @@ describe("Remote Companion outbound encrypted service", () => {
               conversations: [],
               runs: [],
             },
+          },
+        };
+      },
+      prepareRemotePrompt: async () => ({
+        preparationId: crypto.randomUUID(),
+      }),
+      commitRemotePrompt: async (
+        _subject: unknown,
+        request: Extract<RemoteRequest, { type: "prompt.send" }>,
+        _preparationId: string,
+        onPosted?: () => void,
+      ): Promise<RemoteResponse> => {
+        onPosted?.();
+        runtimeCalls += 1;
+        return {
+          type: "response",
+          requestId: request.requestId,
+          ok: true,
+          result: {
+            kind: "prompt.accepted",
+            deliveryId: request.deliveryId,
+            turnId: crypto.randomUUID(),
           },
         };
       },

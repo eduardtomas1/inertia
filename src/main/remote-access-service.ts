@@ -22,9 +22,7 @@ import {
   type RemoteScope,
 } from "../shared/remote-protocol";
 import type { PersistedRemoteAccess } from "./remote-access-store";
-import {
-  markRemoteDeliveryUncertain,
-} from "./remote-access-delivery";
+import { settleRemoteDeliveryOnDisconnect } from "./remote-access-delivery";
 import {
   createRemoteAccessIdentity,
   loadRemoteAccessIdentity,
@@ -55,7 +53,7 @@ import {
 } from "./remote-access-relay-dispatcher";
 import { RemoteRequestDispatcher } from "./remote-access-request-dispatcher";
 import {
-  RemoteSessionAdmissions,
+  RemoteSessionAdmissions, remoteSessionCanCommitPrompt,
 } from "./remote-access-session-admission";
 import { authenticateRemoteSession } from "./remote-access-session-handshake";
 import type {
@@ -151,6 +149,14 @@ export class RemoteAccessService {
       persist: async () => await this.persist(),
       audit: (type, deviceId, detail) => this.audit(type, deviceId, detail),
       isCurrent: (session) => this.sessions.get(session.sessionId) === session,
+      authorizePromptCommit: (session) => remoteSessionCanCommitPrompt({
+        data: this.data, session,
+        live: this.sessions.get(session.sessionId) === session,
+        ownsRoute: this.relayMessages.owns(
+          session.connectionId, session.connectionEpoch),
+        privacyLocked: this.privacyLocked, stopped: this.stopped,
+        storeFailed: this.storeError !== null, now: this.now().getTime(),
+      }),
       respond: async (session, response) => await this.respond(session, response),
     });
   }
@@ -579,6 +585,7 @@ export class RemoteAccessService {
           requestTimes: [],
           promptTimes: [],
           inFlight: new Map(),
+          postedPromptDeliveries: new Set(),
           outboundTail: Promise.resolve(),
         };
         device.lastSeenAt = this.now().toISOString();
@@ -778,17 +785,20 @@ export class RemoteAccessService {
     this.sessions.delete(sessionId);
     if (session && !this.storeError) {
       for (const request of session.inFlight.values()) {
-        if (request.type === "prompt.send") {
-          if (markRemoteDeliveryUncertain(
+        if (
+          request.type === "prompt.send"
+          && settleRemoteDeliveryOnDisconnect(
             this.requireData(),
-            request.deliveryId,
-          )) {
-            this.audit(
-              "prompt.uncertain",
-              session.device.id,
-              "A remote prompt has uncertain delivery.",
-            );
-          }
+            session.device.id,
+            request,
+            session.postedPromptDeliveries.has(request.deliveryId),
+          ) === "uncertain"
+        ) {
+          this.audit(
+            "prompt.uncertain",
+            session.device.id,
+            "A remote prompt has uncertain delivery.",
+          );
         }
       }
       this.audit("session.disconnected", session.device.id, "A remote session disconnected.");

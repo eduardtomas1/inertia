@@ -88,6 +88,40 @@ export function acceptRemoteDelivery(
   return true;
 }
 
+export function cancelRemoteDelivery(
+  data: PersistedRemoteAccess,
+  deviceId: string,
+  request: PromptRequest,
+): boolean {
+  const index = data.receipts.findIndex(
+    (receipt) =>
+      receipt.deliveryId === request.deliveryId
+      && receipt.deviceId === deviceId
+      && receipt.conversationId === request.conversationId
+      && receipt.contentDigest === remoteDeliveryDigest(deviceId, request)
+      && receipt.state === "dispatched",
+  );
+  if (index < 0) return false;
+  data.receipts.splice(index, 1);
+  return true;
+}
+
+export function settleRemoteDeliveryOnDisconnect(
+  data: PersistedRemoteAccess,
+  deviceId: string,
+  request: PromptRequest,
+  posted: boolean,
+): "cancelled" | "uncertain" | null {
+  if (posted) {
+    return markRemoteDeliveryUncertain(data, request.deliveryId)
+      ? "uncertain"
+      : null;
+  }
+  return cancelRemoteDelivery(data, deviceId, request)
+    ? "cancelled"
+    : null;
+}
+
 export function markRemoteDeliveryUncertain(
   data: PersistedRemoteAccess,
   deliveryId: string,

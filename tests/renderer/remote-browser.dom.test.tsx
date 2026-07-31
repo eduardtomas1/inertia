@@ -11,6 +11,7 @@ import {
 } from "../../remote/browser/src/device-store";
 import { appendRemoteText } from "../../remote/browser/src/safe-dom";
 import { RemoteAccessSettings } from "../../src/renderer/src/components/RemoteAccessSettings";
+import { ConversationGrantEditor } from "../../src/renderer/src/components/RemoteConversationGrants";
 import type { Conversation, Project } from "../../src/shared/contracts";
 import type { RemoteDeviceUpdateRequest } from "../../src/shared/desktop";
 import {
@@ -98,6 +99,38 @@ function conversationFixture(projectId: string, now: string): Conversation {
 }
 
 describe("Remote Companion browser output boundary", () => {
+  it("lets visible conversations replace stale grants at the project limit", () => {
+    const now = new Date().toISOString();
+    const project = projectFixture(crypto.randomUUID(), now);
+    const conversation = conversationFixture(project.id, now);
+    const onChange = vi.fn();
+    render(<ConversationGrantEditor
+      projects={[project]}
+      conversations={[conversation]}
+      projectIds={[project.id]}
+      grants={[{
+        projectId: project.id,
+        conversationIds: Array.from(
+          { length: 200 },
+          (_, index) => `archived-${index}`,
+        ),
+        includeFutureConversations: false,
+        legacyProjectWide: false,
+      }]}
+      onChange={onChange}
+    />);
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Only conversation",
+    });
+    expect(checkbox).not.toBeDisabled();
+    checkbox.click();
+    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({
+      projectId: project.id,
+      conversationIds: [conversation.id],
+    })]);
+  });
+
   it("renders malicious provider output as inert text", () => {
     const parent = document.createElement("div");
     appendRemoteText(

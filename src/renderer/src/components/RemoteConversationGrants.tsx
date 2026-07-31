@@ -75,6 +75,14 @@ export function ConversationGrantEditor({
         const projectConversations = conversations.filter(
           ({ projectId }) => projectId === project.id,
         );
+        const availableConversationIds = new Set(
+          projectConversations.map(({ id }) => id),
+        );
+        const visibleConversationIds = grant.conversationIds.filter(
+          (id) => availableConversationIds.has(id),
+        );
+        const unavailableGrantCount = grant.conversationIds.length
+          - visibleConversationIds.length;
         const projectWide = grant.includeFutureConversations
           || grant.legacyProjectWide;
         return (
@@ -102,6 +110,13 @@ export function ConversationGrantEditor({
                 conversations below to narrow it.
               </p>
             )}
+            {unavailableGrantCount > 0 && !projectWide && (
+              <p className="settings-card-note" role="status">
+                {unavailableGrantCount} conversation grant(s) no longer match
+                an unarchived conversation. They will be removed when you
+                update this project&apos;s selection.
+              </p>
+            )}
             {projectWide
               ? (
                   <p className="settings-card-note">
@@ -122,17 +137,17 @@ export function ConversationGrantEditor({
                         checked={grant.conversationIds.includes(conversation.id)}
                         disabled={
                           !grant.conversationIds.includes(conversation.id)
-                          && grant.conversationIds.length
+                          && visibleConversationIds.length
                             >= REMOTE_GRANT_LIMITS.conversationsPerProject
                         }
                         onChange={(event) => onChange(withGrant(grants, {
                           ...grant,
                           conversationIds: event.target.checked
                             ? [...new Set([
-                                ...grant.conversationIds,
+                                ...visibleConversationIds,
                                 conversation.id,
                               ])]
-                            : grant.conversationIds.filter(
+                            : visibleConversationIds.filter(
                                 (id) => id !== conversation.id,
                               ),
                         }))}

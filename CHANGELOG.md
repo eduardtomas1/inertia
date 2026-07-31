@@ -4,6 +4,33 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.19 — 2026-07-31
+
+### Remote authority is narrower and easier to revoke
+
+- Remote Companion grants can now be limited to explicit conversations as well as projects. Selected projects and conversations are revalidated against the current workspace before access is admitted.
+- Prompt-capable grants expire within seven days, stale and archived scopes are removed, and active grants refresh on a bounded cadence without turning ordinary status reads into durable writes.
+- Legacy project-wide grants remain operable through an explicit migration path and can be narrowed from Settings instead of silently gaining broader authority.
+- Prompt delivery rechecks the exact device, session, route, project, conversation, access mode, and runtime state immediately before posting.
+
+### Browser identity and protocol state fail closed
+
+- The companion browser stores a non-extractable ECDH P-256 private key, validates the corresponding public key, and rejects malformed or mismatched persisted key pairs rather than trusting a broken identity.
+- Protocol version 2 keeps the desktop, browser, and relay on one explicit contract. Incompatible peers fail clearly instead of being interpreted through an older message shape.
+- Corrupt remote state has documented recovery paths, relay endpoint authentication is explicit, and application payloads remain end-to-end encrypted and replay-protected.
+- Remote transcript projections are sanitized, byte-bounded, and cached within a fixed memory budget so a long conversation cannot turn remote viewing into unbounded runtime retention.
+
+### Privileged lifecycle edges stay bounded
+
+- Privileged IPC rejects unknown payload fields, preventing accidental authority expansion through partially understood commands.
+- Project identity refreshes use bounded concurrency and preserve their cap through timeouts and disposal, including large or adversarial workspace sets.
+- Screen lock, suspend, runtime shutdown, relay disconnect, and remote-session teardown now revoke or settle owned work without waiting forever on an unresponsive peer.
+- New threat-model, database-recovery, relay-authentication, renderer-isolation, and security-boundary documents make the implementation guarantees inspectable.
+
+### Release confidence
+
+- Architecture and lint checks, four TypeScript projects, 1,944 unit and integration tests, 198 portable provider contracts, 42 Electron scenarios, production audit, adversarial remote-authority and browser-key fixtures, three-OS packaging, package smoke, Electron fuse verification, checksums, and provenance protect the release.
+
 ## 0.0.18 — 2026-07-31
 
 ### Remote Companion, intentionally narrow

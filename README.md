@@ -105,11 +105,13 @@ Nested module repositories keep their own review marks, notes, questions, and se
 
 Remote Companion is an experimental, self-hosted, opt-in way to follow safe conversation projections and send text prompts to an existing supervised chat while the Inertia desktop remains online. The desktop stays authoritative and opens only an outbound WebSocket; Inertia does not ship a hosted relay or open an inbound listener on your machine.
 
-Pairing requires an explicit comparison and a device-specific project grant. Grants are scoped, expiring, revocable, paused on screen lock or suspend, and recorded in a local audit history. Application payloads are end-to-end encrypted, while the reference relay sees only unavoidable routing, timing, and size metadata.
+Pairing requires an explicit comparison and a device-specific grant for selected projects and, optionally, selected conversations. Prompt-capable grants expire within seven days; every prompt is revalidated immediately before posting, and stale or archived scopes are removed. Grants remain revocable, pause on screen lock or suspend, and are recorded in a local audit history. Application payloads are end-to-end encrypted, while the reference relay sees only unavoidable routing, timing, and size metadata.
+
+The browser keeps its device identity in a non-extractable ECDH P-256 key and rejects malformed or mismatched stored key pairs. Remote transcript projections are sanitized and byte-bounded, and the desktop, browser, and relay must agree on the same explicit protocol version.
 
 The remote boundary is deliberately small. It can show sanitized user and assistant text and can submit text to an existing supervised conversation. It cannot approve commands, answer secret questions, browse or transfer files, use attachments or terminals, change provider settings, mutate Git, create projects or chats, stop runs, expose diagnostics, or enable Full Access.
 
-See the [Remote Companion protocol](docs/REMOTE_COMPANION_PROTOCOL.md), [threat model](docs/REMOTE_COMPANION_THREAT_MODEL.md), and [self-hosting guide](remote/README.md) before enabling it.
+See the [Remote Companion protocol](docs/REMOTE_COMPANION_PROTOCOL.md), [threat model](docs/REMOTE_COMPANION_THREAT_MODEL.md), [relay authentication guide](docs/RELAY_ENDPOINT_AUTHENTICATION.md), and [self-hosting guide](remote/README.md) before enabling it. Recovery and boundary guarantees are documented in [Database recovery](docs/DATABASE_RECOVERY.md), [Renderer isolation](docs/RENDERER_ISOLATION.md), and [Security boundary coverage](docs/SECURITY_BOUNDARY_COVERAGE.md).
 
 ### Provider-native, local by default
 
@@ -140,13 +142,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.18
+### Version 0.0.19
 
-This release introduces the experimental **Remote Companion**: a narrowly scoped, end-to-end encrypted browser companion for safe live conversation viewing and separately authorized text prompts to existing supervised chats. It is self-hosted, off by default, outbound-only from the desktop, project-scoped, expiring, revocable, and intentionally excludes approvals, secrets, files, terminals, Git mutation, settings, diagnostics, new chats, and Full Access.
+This release hardens the experimental **Remote Companion** without widening it. Device grants can be limited to explicit projects and conversations, prompt authority expires within seven days, stale scopes are removed, and every prompt is revalidated against the live supervised route immediately before posting.
 
-Codex and Claude delegated-agent state is now persisted and presented with truthful hierarchy and terminal outcomes. Long-conversation minimap previews, attachment import containment, process-tree shutdown, terminal cleanup, prompt drafts, reasoning summaries, and Windows encrypted-vault validation are also more reliable across platforms.
+Browser identities now use non-extractable ECDH P-256 keys and reject malformed or mismatched stored key pairs. Remote projections remain sanitized and bounded, privileged IPC rejects unknown fields, project identity refresh and shutdown remain bounded, and new threat-model, recovery, relay-authentication, renderer-isolation, and boundary-coverage documents make those guarantees reviewable.
 
-Download [Inertia v0.0.18](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.18):
+Download [Inertia v0.0.19](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.19):
 
 | Platform | Download |
 | --- | --- |

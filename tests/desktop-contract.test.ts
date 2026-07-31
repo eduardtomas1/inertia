@@ -67,7 +67,8 @@ describe("desktop credential contract", () => {
 
 describe("desktop remote-access contract", () => {
   it("rejects sparse conversation grants at the preload boundary", () => {
-    const sparseConversationIds = new Array<string>(1);
+    const sparseConversationIds: string[] = [];
+    sparseConversationIds.length = 1;
     expect(parseRemoteDeviceUpdateRequest({
       deviceId: projectId,
       scopes: ["view"],

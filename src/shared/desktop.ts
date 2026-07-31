@@ -203,6 +203,8 @@ export interface DesktopBridge {
   revealRuntimeLogs: () => Promise<string>;
   /** Copies a fixed, allowlisted lifecycle summary. Prompts, source, paths, and credentials are excluded. */
   copyRuntimeDiagnosticReport: () => Promise<{ copied: boolean; eventCount: number }>;
+  /** Writes renderer-visible text to the system clipboard; the hardened renderer session denies direct clipboard access. */
+  copyText: (text: string) => Promise<boolean>;
   /** Reads only the latest public GitHub release metadata; updates are never downloaded or installed. */
   checkAppUpdate: (force?: boolean) => Promise<AppUpdateStatus>;
   selectAttachments: () => Promise<DesktopAttachment[]>;

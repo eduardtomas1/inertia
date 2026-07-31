@@ -13,6 +13,7 @@ const IPC = {
   selectCodexExecutable: "inertia:select-codex-executable",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
   copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
+  copyText: "inertia:copy-text",
   checkAppUpdate: "inertia:check-app-update",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
@@ -45,6 +46,10 @@ const bridge: DesktopBridge = Object.freeze({
   copyRuntimeDiagnosticReport: () =>
     ipcRenderer.invoke(IPC.copyRuntimeDiagnosticReport) as ReturnType<
       DesktopBridge["copyRuntimeDiagnosticReport"]
+    >,
+  copyText: (text: string) =>
+    ipcRenderer.invoke(IPC.copyText, typeof text === "string" ? text : "") as ReturnType<
+      DesktopBridge["copyText"]
     >,
   checkAppUpdate: (force = false) =>
     ipcRenderer.invoke(IPC.checkAppUpdate, force === true) as ReturnType<

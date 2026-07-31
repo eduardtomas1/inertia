@@ -61,6 +61,7 @@ import {
   hardenDesktopSession,
 } from "./preview-broker.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { RemoteAccessHost } from "./remote-access-host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
 import {
@@ -79,6 +80,7 @@ const IPC = {
   selectCodexExecutable: "inertia:select-codex-executable",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
   copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
+  copyText: "inertia:copy-text",
   checkAppUpdate: "inertia:check-app-update",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
@@ -371,6 +373,8 @@ function registerIpcHandlers(): void {
     diagnostics.record("report.copy");
     return { copied: true, eventCount: report.eventCount };
   });
+
+  registerClipboardIpc(IPC.copyText, assertTrustedIpc);
 
   ipcMain.handle(IPC.checkAppUpdate, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);

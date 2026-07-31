@@ -8,6 +8,7 @@ import type {
   RemoteScope,
 } from "@shared/remote-protocol";
 import { useRemoteAccessState } from "../hooks/useRemoteAccessState";
+import { writeClipboardText } from "../utils/clipboard";
 import { Switch } from "./ui";
 
 export function RemoteAccessSettings({
@@ -151,9 +152,11 @@ export function RemoteAccessSettings({
             type="button"
             className="secondary-button"
             onClick={() => {
-              void navigator.clipboard.writeText(
+              void writeClipboardText(
                 JSON.stringify(current.invitation),
-              ).then(() => setStatus("Invitation copied."));
+              ).then((copied) => setStatus(copied
+                ? "Invitation copied."
+                : "The invitation could not be copied."));
             }}
           >
             <Copy size={14} />Copy invitation

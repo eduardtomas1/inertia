@@ -11,6 +11,9 @@ const DIRECTIONAL_FORMATTING =
   /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u206f]+/gu;
 const CONTENT_CONTROL_CHARACTERS =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/gu;
+const SECRET_SCAN_MARGIN_CHARACTERS = 4 * 1024;
+const TRAILING_SECRET_FRAGMENT =
+  /(?:\b(?:sk|rk|pk|api|key|token)[-_][A-Za-z0-9_-]*|\beyJ[A-Za-z0-9_.-]*|\b(?:Bearer|Basic)\s+\S*)$/iu;
 const MAX_REMOTE_CONTENT_CHARACTERS = 64 * 1024;
 const CODE_OMISSION = "[Code omitted on Remote Companion]";
 const HTML_OMISSION = "[HTML omitted on Remote Companion]";
@@ -77,7 +80,7 @@ export function sanitizeRemoteContent(
   );
   let text = redactRemoteHtmlBlocks(
     redactRemoteCodeBlocks(
-      value.slice(0, outputLimit)
+      value.slice(0, outputLimit + SECRET_SCAN_MARGIN_CHARACTERS)
         .replace(CONTENT_CONTROL_CHARACTERS, " ")
         .replace(DIRECTIONAL_FORMATTING, " "),
     ),
@@ -89,8 +92,9 @@ export function sanitizeRemoteContent(
         ? `${match.split(/\s/u)[0]} <redacted>`
         : "<redacted-secret>");
   }
-  return redactAbsolutePathTokens(text)
-    .slice(0, outputLimit);
+  text = redactAbsolutePathTokens(text);
+  if (text.length <= outputLimit) return text;
+  return text.slice(0, outputLimit).replace(TRAILING_SECRET_FRAGMENT, "");
 }
 
 // The input is capped before this scanner runs. It visits each line and fence

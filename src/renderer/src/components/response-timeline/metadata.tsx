@@ -14,6 +14,7 @@ import type {
   ChatMessage,
 } from "@shared/contracts";
 import { formatClockTime } from "../../lib/format";
+import { writeClipboardText } from "../../utils/clipboard";
 import {
   formatElapsed,
   turnExecutionElapsedMs,
@@ -32,12 +33,7 @@ function useCopyAction(): [boolean, (content: string) => Promise<void>] {
     if (timer.current !== null) window.clearTimeout(timer.current);
   }, []);
   const copy = async (content: string): Promise<void> => {
-    if (!navigator.clipboard || !content) return;
-    try {
-      await navigator.clipboard.writeText(content);
-    } catch {
-      return;
-    }
+    if (!await writeClipboardText(content)) return;
     setCopied(true);
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => setCopied(false), 1_500);

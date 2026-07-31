@@ -48,16 +48,22 @@ export class RemoteRequestDispatcher {
         : null;
       ownsPromptDelivery =
         request.type === "prompt.send" && receiptResponse === null;
-      const response = receiptResponse ?? await this.runtimeResponse(
-        session,
-        request,
-        () => {
-          if (request.type === "prompt.send") {
-            session.postedPromptDeliveries.add(request.deliveryId);
-          }
-          promptCommitPosted = true;
-        },
-      );
+      const response = receiptResponse
+        ? await this.revalidatedReceipt(
+            session,
+            request as Extract<RemoteRequest, { type: "prompt.send" }>,
+            receiptResponse,
+          )
+        : await this.runtimeResponse(
+            session,
+            request,
+            () => {
+              if (request.type === "prompt.send") {
+                session.postedPromptDeliveries.add(request.deliveryId);
+              }
+              promptCommitPosted = true;
+            },
+          );
       if (request.type === "prompt.send" && ownsPromptDelivery) {
         if (response.ok) {
           await this.acceptDelivery(session, request, response);
@@ -138,6 +144,21 @@ export class RemoteRequestDispatcher {
       commitPosted,
     );
     return await response;
+  }
+
+  private async revalidatedReceipt(
+    session: ActiveRemoteSession,
+    request: Extract<RemoteRequest, { type: "prompt.send" }>,
+    receipt: RemoteResponse,
+  ): Promise<RemoteResponse> {
+    const prepare = this.options.runtime.prepareRemotePrompt;
+    if (!prepare) return receipt;
+    const prepared = await prepare.call(
+      this.options.runtime,
+      session.subject,
+      request,
+    );
+    return "preparationId" in prepared ? receipt : prepared;
   }
 
   private async prepareDelivery(

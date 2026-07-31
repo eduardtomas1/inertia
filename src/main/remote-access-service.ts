@@ -427,8 +427,9 @@ export class RemoteAccessService {
       });
     });
     socket.on("message", (raw, isBinary) => {
-      if (this.socket !== socket || isBinary) return;
-      this.relayMessages.receive(raw);
+      if (this.socket !== socket) return;
+      if (isBinary) socket.close(1003, "relay messages must be text");
+      else this.relayMessages.receive(raw);
     });
     socket.once("close", () => {
       if (this.socket !== socket) return;

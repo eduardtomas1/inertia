@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { lstat } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 
 import {
   ipcMain,
@@ -87,6 +87,10 @@ export class RemoteAccessHost {
       throw error;
     });
     if (metadata === null) {
+      if (await this.hasRecoverableVault()) {
+        await this.initialize();
+        return;
+      }
       this.initializationError = null;
       this.emitState(this.state());
       return;
@@ -95,6 +99,14 @@ export class RemoteAccessHost {
       throw new Error("The encrypted Remote Companion store is invalid.");
     }
     await this.initialize();
+  }
+
+  private async hasRecoverableVault(): Promise<boolean> {
+    const names = await readdir(this.options.userDataDirectory)
+      .catch(() => null);
+    if (!names) return false;
+    return names.some((name) =>
+      /^\.remote-access-vault-[0-9a-f-]{36}\.(?:stage|backup)$/u.test(name));
   }
 
   private async initialize(): Promise<void> {

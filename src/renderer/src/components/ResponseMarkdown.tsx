@@ -39,6 +39,7 @@ import yaml from "highlight.js/lib/languages/yaml";
 import {
   workspaceFileReferenceFallback,
 } from "../utils/workspaceFileReference";
+import { writeClipboardText } from "../utils/clipboard";
 
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("shell", bash);
@@ -214,12 +215,7 @@ function useCopiedState(): [boolean, (text: string) => Promise<void>] {
     if (timer.current !== null) window.clearTimeout(timer.current);
   }, []);
   const copy = async (text: string): Promise<void> => {
-    if (!navigator.clipboard) return;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      return;
-    }
+    if (!await writeClipboardText(text)) return;
     setCopied(true);
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => setCopied(false), 1_500);

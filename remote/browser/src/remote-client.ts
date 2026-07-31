@@ -91,6 +91,11 @@ export class RemoteCompanionClient {
     if (this.profile && Date.parse(this.profile.expiresAt) > Date.now()) {
       void this.connect();
     } else if (this.profile) {
+      this.profile = null;
+      await this.profileWriteTail.catch(() => undefined);
+      if (!this.ownsAttempt(epoch)) return this.profile;
+      await clearDeviceProfile();
+      if (!this.ownsAttempt(epoch)) return this.profile;
       this.callbacks.status("This device grant expired. Pair it again.", false);
     } else {
       this.callbacks.status("Paste a short-lived invitation from the desktop.", false);

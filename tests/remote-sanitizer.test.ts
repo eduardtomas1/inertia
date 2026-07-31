@@ -1,4 +1,4 @@
-import { win32 } from "node:path";
+import { posix, win32 } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -85,25 +85,66 @@ describe("Remote Companion safe text projection", () => {
     );
   });
 
-  it("redacts Windows UNC separator variants recognized by path normalization", () => {
-    const normalizedUnc = String.raw`\\server\share\project\.env`;
+  it("redacts POSIX absolute tokens with legal punctuation and separator runs", () => {
+    const paths = [
+      "/",
+      "/.",
+      "/..",
+      "/!",
+      "/!private/.env",
+      "/:secret/file",
+      "/[tenant]/key",
+      "/name[1]/semi;colon/file#1",
+      "/name[1]/file!",
+      "//srv///project//file",
+    ];
+    for (const path of paths) {
+      expect(posix.isAbsolute(path)).toBe(true);
+      expect(sanitizeRemoteContent(`Path (${path}).`)).toBe(
+        "Path (<local-path>).",
+      );
+      expect(sanitizeRemoteContent(`Path label:${path}, then done.`)).toBe(
+        "Path label:<local-path>, then done.",
+      );
+      expect(sanitizeRemoteContent(`Path ${path}`)).not.toContain(path);
+    }
+    for (const path of ["/", "/.", "/..", "/!"]) {
+      expect(sanitizeRemoteContent(`Path ${path}`)).toBe(
+        "Path <local-path>",
+      );
+    }
+    expect(sanitizeRemoteContent(
+      "Inspect /name[1]/file.ts:12, then continue.",
+    )).toBe("Inspect <local-path>:12, then continue.");
+    expect(sanitizeRemoteContent(
+      "Open file:///!private/[tenant]/.env.",
+    )).toBe("Open file://<local-path>.");
+  });
+
+  it("redacts Windows absolute separator variants recognized by normalization", () => {
     const uncPaths = [
-      normalizedUnc,
+      String.raw`\\server\share\project\.env`,
+      "//server/share/project/.env",
       String.raw`\\server/share/project/.env`,
       String.raw`\\server/share\project/.env`,
+      String.raw`\\server\\share\file`,
+      String.raw`\\server//share\\dir/file`,
     ];
     for (const path of uncPaths) {
       expect(win32.isAbsolute(path)).toBe(true);
-      expect(win32.normalize(path)).toBe(normalizedUnc);
       expect(sanitizeRemoteContent(`Path (${path}).`)).toBe(
         "Path (<local-path>).",
       );
     }
+    expect(new Set(uncPaths.slice(0, 4).map((path) =>
+      win32.normalize(path)))).toEqual(new Set([
+      String.raw`\\server\share\project\.env`,
+    ]));
 
     const devicePaths = [
       String.raw`\\?\C:\project/.env`,
-      String.raw`\\?\UNC\server/share\secret.txt`,
-      String.raw`\\.\pipe/inertia-test`,
+      String.raw`\\?\UNC\server\\share/secret.txt`,
+      String.raw`\\.\pipe//inertia-test`,
     ];
     for (const path of devicePaths) {
       expect(win32.isAbsolute(path)).toBe(true);
@@ -112,15 +153,55 @@ describe("Remote Companion safe text projection", () => {
       );
     }
 
+    const drivePaths = [
+      "C:\\",
+      "C:/",
+      String.raw`C:\Users\alice\secret.txt`,
+      "C:/Users/alice/secret.txt",
+      String.raw`C:\dir/file.txt`,
+      String.raw`C:\\dir//file.txt`,
+      String.raw`\Users\alice\secret.txt`,
+      String.raw`\secret`,
+      String.raw`\\secret`,
+    ];
+    for (const path of drivePaths) {
+      expect(win32.isAbsolute(path)).toBe(true);
+      expect(sanitizeRemoteContent(`Path (${path}).`)).toBe(
+        "Path (<local-path>).",
+      );
+    }
+    expect(new Set(drivePaths.slice(2, 4).map((path) =>
+      win32.normalize(path)))).toEqual(new Set([
+      String.raw`C:\Users\alice\secret.txt`,
+    ]));
+  });
+
+  it("preserves URLs, relative paths, and ordinary escaped prose", () => {
     const ordinaryText = [
       "https://example.invalid/server/share/project/.env",
+      "http://example.invalid/[tenant]/key?next=/private",
       "wss://[::1]/remote",
-      String.raw`Keep escaped prose \\ and regex \\d+ intact.`,
+      "ws://127.0.0.1:8787/remote",
+      "workspace/acme/.env",
+      "./relative/[tenant]/key",
+      "../relative/file",
+      String.raw`C:relative\file`,
+      String.raw`Keep escaped prose \ or \\ intact.`,
+      String.raw`Known regex \d+ \w* \s{1,3} or \\d+\\w* stays intact.`,
+      String.raw`Punctuated regex \d+, \w*. and \s{1,3}; stays intact.`,
     ].join(" ");
     expect(sanitizeRemoteContent(ordinaryText)).toBe(ordinaryText);
   });
 
   it("bounds and normalizes labels", () => {
+    expect(sanitizeRemoteContent(
+      "x".repeat(70 * 1024),
+      100 * 1024,
+    )).toHaveLength(64 * 1024);
+    expect(sanitizeRemoteContent(
+      "/ ".repeat(40 * 1024),
+      100 * 1024,
+    )).toHaveLength(64 * 1024);
     expect(sanitizeRemoteLabel("  hello\u0000\n world ", 20)).toBe(
       "hello world",
     );

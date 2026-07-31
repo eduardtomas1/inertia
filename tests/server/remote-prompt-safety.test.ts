@@ -226,6 +226,7 @@ describe("gateway enforcement of provider remote-prompt safety", () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-remote-nosafety-"));
     temporaryDirectories.push(directory);
     const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+    stores.push(store);
     const project = store.createProject("Project", directory);
     const conversation = store.createConversation(project.id, "Conversation");
     store.updateConversation(conversation.id, { accessMode: "supervised" });

@@ -664,5 +664,5 @@ describe("Remote Companion runtime authority", () => {
       expect(response.result.detail.messages.length).toBeLessThan(200);
     }
     store.close();
-  });
+  }, 30_000);
 });

@@ -21,6 +21,7 @@ import {
   type RemoteResponse,
   type RemoteScope,
 } from "../shared/remote-protocol";
+import type { RemoteConversationGrant } from "../shared/remote-grants";
 import type { PersistedRemoteAccess } from "./remote-access-store";
 import { settleRemoteDeliveryOnDisconnect } from "./remote-access-delivery";
 import {
@@ -267,6 +268,7 @@ export class RemoteAccessService {
     scopes: RemoteScope[],
     projectIds: string[],
     grantMs = DEFAULT_REMOTE_GRANT_MS,
+    grants?: RemoteConversationGrant[],
   ): Promise<void> {
     const data = this.requireData();
     const pending = this.pendingPairings.get(requestId);
@@ -300,6 +302,7 @@ export class RemoteAccessService {
       pending,
       scopes,
       projectIds,
+      grants,
       grantMs,
       now: this.now(),
     });
@@ -366,12 +369,14 @@ export class RemoteAccessService {
     scopes: RemoteScope[],
     projectIds: string[],
     expiresAt: string,
+    grants?: RemoteConversationGrant[],
   ): Promise<void> {
     const device = updateRemoteDeviceGrant({
       data: this.requireData(),
       deviceId,
       scopes,
       projectIds,
+      grants,
       expiresAt,
       now: this.now(),
     });

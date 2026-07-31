@@ -1,3 +1,4 @@
+import { sameRemoteConversationGrants } from "../shared/remote-grants";
 import type { RemoteConnectionEpoch } from "./remote-access-relay-dispatcher";
 import { remoteDeviceIsCurrent } from "./remote-access-policy";
 import type { ActiveRemoteSession } from "./remote-access-service-types";
@@ -146,6 +147,10 @@ export function remoteSessionRetainsAuthority(
     && Date.parse(session.subject.expiresAt) > input.now
     && sameStrings(session.subject.scopes, session.device.scopes)
     && sameStrings(session.subject.projectIds, session.device.projectIds)
+    && sameRemoteConversationGrants(
+      session.subject.grants,
+      session.device.grants,
+    )
     && session.subject.scopes.includes("view");
 }
 

@@ -13,6 +13,7 @@ import {
   type RemoteResponse,
   type RemoteSafeConversation,
 } from "../shared/remote-protocol";
+import { remoteGrantAllowsConversation } from "../shared/remote-grants";
 import { sanitizeRemoteLabel } from "../shared/remote-sanitizer";
 import { PROVIDER_INFO } from "./provider/catalog";
 import { RemoteTranscriptCache } from "./remote-transcript-cache";
@@ -109,7 +110,7 @@ export class RemoteRuntimeGateway {
           kind: "state",
           state: projectShell(
             this.dependencies.shell(),
-            new Set(subject.projectIds),
+            subject,
             this.now(),
           ),
         },
@@ -130,11 +131,7 @@ export class RemoteRuntimeGateway {
     request: Extract<RemoteRequest, { type: "conversation.get" }>,
   ): RemoteResponse {
     const detail = this.dependencies.detail(request.conversationId);
-    if (
-      !detail
-      || detail.conversation.archivedAt !== null
-      || !subject.projectIds.includes(detail.conversation.projectId)
-    ) {
+    if (!detail || !authorizedConversation(subject, detail)) {
       return failedResponse(
         request.requestId,
         "not-found",
@@ -224,11 +221,7 @@ export class RemoteRuntimeGateway {
       );
     }
     const detail = this.dependencies.detail(request.conversationId);
-    if (
-      !detail
-      || detail.conversation.archivedAt !== null
-      || !subject.projectIds.includes(detail.conversation.projectId)
-    ) {
+    if (!detail || !authorizedConversation(subject, detail)) {
       return unavailableConversationResponse(request.requestId);
     }
     const receipt = this.receipts.get(request.deliveryId);
@@ -426,10 +419,7 @@ export class RemoteRuntimeGateway {
     request: Extract<RemoteRequest, { type: "prompt.send" }>,
     detail: ConversationDetail,
   ): RemoteResponse | null {
-    if (
-      detail.conversation.archivedAt !== null
-      || !subject.projectIds.includes(detail.conversation.projectId)
-    ) {
+    if (!authorizedConversation(subject, detail)) {
       return unavailableConversationResponse(request.requestId);
     }
     if (detail.conversation.accessMode !== "supervised") {
@@ -519,6 +509,16 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
   return sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 
+function authorizedConversation(
+  subject: RemoteAuthorizationSubject,
+  detail: ConversationDetail,
+): boolean {
+  const { id, projectId, archivedAt } = detail.conversation;
+  return archivedAt === null
+    && subject.projectIds.includes(projectId)
+    && remoteGrantAllowsConversation(subject.grants, projectId, id);
+}
+
 function unavailableConversationResponse(requestId: string): RemoteResponse {
   return failedResponse(
     requestId,
@@ -529,13 +529,16 @@ function unavailableConversationResponse(requestId: string): RemoteResponse {
 
 function projectShell(
   snapshot: AppSnapshot,
-  projectIds: Set<string>,
+  subject: RemoteAuthorizationSubject,
   now: Date,
 ) {
+  const projectIds = new Set(subject.projectIds);
   const conversationIds = new Set(
     snapshot.conversations
-      .filter(({ projectId, archivedAt }) =>
-        projectIds.has(projectId) && archivedAt === null)
+      .filter(({ id, projectId, archivedAt }) =>
+        projectIds.has(projectId)
+        && archivedAt === null
+        && remoteGrantAllowsConversation(subject.grants, projectId, id))
       .map(({ id }) => id),
   );
   return {

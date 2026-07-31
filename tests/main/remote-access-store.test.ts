@@ -22,6 +22,9 @@ import {
 } from "../../src/main/remote-access-store";
 import { FileCredentialVaultPersistence } from "../../src/main/credential-vault";
 import { applyRemotePairingGrant } from "../../src/main/remote-access-devices";
+import {
+  remoteConversationGrantsFromProjectIds,
+} from "../../src/shared/remote-grants";
 
 const temporaryDirectories: string[] = [];
 
@@ -227,6 +230,7 @@ describe("Remote Companion encrypted local store", () => {
         publicKey: `device_key_${index}`,
         scopes: ["view"],
         projectIds: ["project"],
+        grants: remoteConversationGrantsFromProjectIds(["project"]),
         createdAt: new Date(Date.UTC(2028, 0, index + 1)).toISOString(),
         expiresAt: index === 1
           ? "2029-06-01T00:00:00.000Z"
@@ -308,6 +312,7 @@ describe("Remote Companion encrypted local store", () => {
           publicKey: `active_key_${index}`,
           scopes: ["view" as const],
           projectIds: ["project"],
+          grants: remoteConversationGrantsFromProjectIds(["project"]),
           createdAt: "2029-01-01T00:00:00.000Z",
           expiresAt: "2030-06-01T00:00:00.000Z",
           lastSeenAt: null,

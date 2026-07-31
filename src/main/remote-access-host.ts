@@ -223,6 +223,7 @@ export class RemoteAccessHost {
         request.scopes,
         request.projectIds,
         request.grantDays * 24 * 60 * 60 * 1_000,
+        request.grants ?? undefined,
       );
       return service.state();
     });
@@ -256,6 +257,7 @@ export class RemoteAccessHost {
         request.scopes,
         request.projectIds,
         request.expiresAt,
+        request.grants ?? undefined,
       );
       return service.state();
     });

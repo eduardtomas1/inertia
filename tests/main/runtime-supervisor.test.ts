@@ -12,6 +12,9 @@ import {
   type RuntimeSecureFileBroker,
 } from "../../src/main/runtime-supervisor";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
+import {
+  remoteConversationGrantsFromProjectIds,
+} from "../../src/shared/remote-grants";
 
 const firstUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
 const secondUrl = `ws://127.0.0.1:41002/runtime/${"b".repeat(43)}`;
@@ -892,6 +895,7 @@ describe("RuntimeSupervisor", () => {
       sessionId: crypto.randomUUID(),
       scopes: ["view" as const],
       projectIds: [projectPathRequest.projectId],
+      grants: remoteConversationGrantsFromProjectIds([projectPathRequest.projectId]),
       grantVersion: 1,
       expiresAt: "2030-01-01T00:00:00.000Z",
     };
@@ -1025,6 +1029,7 @@ describe("RuntimeSupervisor", () => {
       sessionId: crypto.randomUUID(),
       scopes: ["view" as const, "prompt" as const],
       projectIds: [projectPathRequest.projectId],
+      grants: remoteConversationGrantsFromProjectIds([projectPathRequest.projectId]),
       grantVersion: 1,
       expiresAt: "2030-01-01T00:00:00.000Z",
     };
@@ -1067,6 +1072,7 @@ describe("RuntimeSupervisor", () => {
         sessionId: crypto.randomUUID(),
         scopes: ["view", "prompt"],
         projectIds: [projectPathRequest.projectId],
+        grants: remoteConversationGrantsFromProjectIds([projectPathRequest.projectId]),
         grantVersion: 1,
         expiresAt: "2030-01-01T00:00:00.000Z",
       },

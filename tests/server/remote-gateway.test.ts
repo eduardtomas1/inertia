@@ -25,6 +25,9 @@ import {
   encodedRemoteFrameBytes,
   remoteResponseSchema,
 } from "../../src/shared/remote-protocol";
+import {
+  remoteConversationGrantsFromProjectIds,
+} from "../../src/shared/remote-grants";
 
 const temporaryDirectories: string[] = [];
 
@@ -61,6 +64,7 @@ function fixture(
     sessionId: "7f0c11aa-9ee8-4e3c-8f8f-0907e31b389e",
     scopes: ["view"],
     projectIds: [firstProject.id],
+    grants: remoteConversationGrantsFromProjectIds([firstProject.id]),
     grantVersion: 1,
     expiresAt: "2030-02-01T00:00:00.000Z",
   };
@@ -718,6 +722,7 @@ describe("Remote Companion runtime authority", () => {
     const reducedSubject: RemoteAuthorizationSubject = {
       ...promptingSubject,
       projectIds: [secondProject.id],
+      grants: remoteConversationGrantsFromProjectIds([secondProject.id]),
       grantVersion: 2,
     };
     expect(await gateway.preparePrompt(reducedSubject, {

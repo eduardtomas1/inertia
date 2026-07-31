@@ -12,6 +12,9 @@ import {
   KIMI_CLAUDE_BUILTIN_PROFILE_ID,
 } from "../../src/shared/claude-backend-profiles";
 import { backendSecretReferenceForProfile } from "../../src/main/credential-vault";
+import {
+  remoteConversationGrantsFromProjectIds,
+} from "../../src/shared/remote-grants";
 
 const capabilityUrl = `ws://127.0.0.1:43210/runtime/${"a".repeat(43)}`;
 const dataDirectory = resolve(tmpdir(), "inertia data");
@@ -30,6 +33,7 @@ describe("runtime process protocol", () => {
       sessionId: crypto.randomUUID(),
       scopes: ["view"],
       projectIds: [projectId],
+      grants: remoteConversationGrantsFromProjectIds([projectId]),
       grantVersion: 1,
       expiresAt: "2030-01-01T00:00:00.000Z",
     };

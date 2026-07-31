@@ -1,4 +1,9 @@
 import type { ChatAttachmentMimeType } from "./attachments";
+import {
+  normalizeRemoteConversationGrants,
+  remoteConversationGrantsSchema,
+  type RemoteConversationGrant,
+} from "./remote-grants";
 import type {
   RemoteAccessState,
   RemotePairingInvitation,
@@ -110,6 +115,7 @@ export interface RemotePairingApprovalRequest {
   requestId: string;
   scopes: RemoteScope[];
   projectIds: string[];
+  grants: RemoteConversationGrant[] | null;
   grantDays: number;
 }
 
@@ -117,6 +123,7 @@ export interface RemoteDeviceUpdateRequest {
   deviceId: string;
   scopes: RemoteScope[];
   projectIds: string[];
+  grants: RemoteConversationGrant[] | null;
   expiresAt: string;
 }
 
@@ -134,13 +141,15 @@ export function parseRemoteAccessEnableRequest(
 export function parseRemotePairingApprovalRequest(
   value: unknown,
 ): RemotePairingApprovalRequest | null {
-  if (!plainObject(value) || Object.keys(value).length !== 4) return null;
+  if (!plainObject(value) || Object.keys(value).length > 5) return null;
   const scopes = remoteScopes(value.scopes);
   const projectIds = remoteProjectIds(value.projectIds);
+  const grants = remoteConversationGrants(value.grants);
   return typeof value.requestId === "string"
     && UUID_PATTERN.test(value.requestId)
     && scopes
     && projectIds
+    && grants !== false
     && typeof value.grantDays === "number"
     && Number.isInteger(value.grantDays)
     && value.grantDays >= 1
@@ -149,6 +158,7 @@ export function parseRemotePairingApprovalRequest(
         requestId: value.requestId,
         scopes,
         projectIds,
+        grants,
         grantDays: value.grantDays,
       }
     : null;
@@ -157,22 +167,35 @@ export function parseRemotePairingApprovalRequest(
 export function parseRemoteDeviceUpdateRequest(
   value: unknown,
 ): RemoteDeviceUpdateRequest | null {
-  if (!plainObject(value) || Object.keys(value).length !== 4) return null;
+  if (!plainObject(value) || Object.keys(value).length > 5) return null;
   const scopes = remoteScopes(value.scopes);
   const projectIds = remoteProjectIds(value.projectIds);
+  const grants = remoteConversationGrants(value.grants);
   return typeof value.deviceId === "string"
     && UUID_PATTERN.test(value.deviceId)
     && scopes
     && projectIds
+    && grants !== false
     && typeof value.expiresAt === "string"
     && Number.isFinite(Date.parse(value.expiresAt))
     ? {
         deviceId: value.deviceId,
         scopes,
         projectIds,
+        grants,
         expiresAt: value.expiresAt,
       }
     : null;
+}
+
+function remoteConversationGrants(
+  value: unknown,
+): RemoteConversationGrant[] | null | false {
+  if (value === undefined || value === null) return null;
+  const parsed = remoteConversationGrantsSchema.safeParse(value);
+  return parsed.success
+    ? normalizeRemoteConversationGrants(parsed.data)
+    : false;
 }
 
 function plainObject(value: unknown): value is Record<string, unknown> {

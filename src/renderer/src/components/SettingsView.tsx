@@ -63,6 +63,7 @@ type SettingsViewProps = {
   backendProfiles: ModelBackendProfileView[];
   backendDefaults: ModelBackendDefault[];
   projects: Project[];
+  conversations: Conversation[];
   archived: Conversation[];
   onUpdate: (settings: Partial<AppSettings>) => void;
   onConnectProvider: (providerId: ProviderId) => void;
@@ -135,6 +136,7 @@ export function SettingsView({
   backendProfiles,
   backendDefaults,
   projects,
+  conversations,
   archived,
   onUpdate,
   onConnectProvider,
@@ -442,7 +444,7 @@ export function SettingsView({
         )}
 
         {section === "remote" && (
-          <RemoteAccessSettings projects={projects} />
+          <RemoteAccessSettings projects={projects} conversations={conversations} />
         )}
 
         {section === "source" && (

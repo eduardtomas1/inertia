@@ -13,6 +13,9 @@ import type {
   RemoteRequest,
   RemoteResponse,
 } from "../../src/shared/remote-protocol";
+import {
+  remoteConversationGrantsFromProjectIds,
+} from "../../src/shared/remote-grants";
 
 function dispatcherFixture(options: {
   authorize: boolean;
@@ -26,6 +29,7 @@ function dispatcherFixture(options: {
     publicKey: "public-key",
     scopes: ["view", "prompt"],
     projectIds: ["project-1"],
+    grants: remoteConversationGrantsFromProjectIds(["project-1"]),
     createdAt: "2030-01-01T00:00:00.000Z",
     expiresAt: "2030-02-01T00:00:00.000Z",
     lastSeenAt: null,
@@ -69,6 +73,7 @@ function dispatcherFixture(options: {
       sessionId: "55555555-5555-4555-8555-555555555555",
       scopes: ["view", "prompt"],
       projectIds: ["project-1"],
+      grants: remoteConversationGrantsFromProjectIds(["project-1"]),
       grantVersion: 1,
       expiresAt: device.expiresAt,
     },

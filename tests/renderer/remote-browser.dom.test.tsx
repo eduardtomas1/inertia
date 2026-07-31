@@ -11,6 +11,7 @@ import {
 } from "../../remote/browser/src/device-store";
 import { appendRemoteText } from "../../remote/browser/src/safe-dom";
 import { RemoteAccessSettings } from "../../src/renderer/src/components/RemoteAccessSettings";
+import type { Conversation, Project } from "../../src/shared/contracts";
 import {
   remoteSafeMessageSchema,
   type RemoteAccessState,
@@ -19,6 +20,57 @@ import {
 afterEach(() => {
   Reflect.deleteProperty(window, "inertia");
 });
+
+function pendingState(now: string): RemoteAccessState {
+  return {
+    available: true,
+    enabled: true,
+    relayUrl: "wss://relay.example/remote",
+    connection: "online",
+    connectionMessage: null,
+    activeSessions: 0,
+    devices: [],
+    pendingPairings: [{
+      requestId: crypto.randomUUID(),
+      deviceLabel: "New browser",
+      comparisonCode: "123456",
+      receivedAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      replacesDeviceLabel: null,
+    }],
+    invitation: null,
+    audit: [],
+  };
+}
+
+function projectFixture(id: string, now: string): Project {
+  return {
+    id,
+    name: "Explicit project",
+    path: "/not-rendered",
+    normalizedPath: "/not-rendered",
+    repositoryIdentity: null,
+    repositoryRoot: null,
+    repositoryRelativePath: "",
+    groupingMode: null,
+    gitRepositoryLimit: 4,
+    color: "#000000",
+    status: "ready",
+    createdAt: now,
+    updatedAt: now,
+  } as Project;
+}
+
+function conversationFixture(projectId: string, now: string): Conversation {
+  return {
+    id: crypto.randomUUID(),
+    projectId,
+    title: "Only conversation",
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+  } as Conversation;
+}
 
 describe("Remote Companion browser output boundary", () => {
   it("renders malicious provider output as inert text", () => {
@@ -98,25 +150,7 @@ describe("Remote Companion browser output boundary", () => {
 
   it("requires an explicit project choice before pairing approval", async () => {
     const now = new Date().toISOString();
-    const state: RemoteAccessState = {
-      available: true,
-      enabled: true,
-      relayUrl: "wss://relay.example/remote",
-      connection: "online",
-      connectionMessage: null,
-      activeSessions: 0,
-      devices: [],
-      pendingPairings: [{
-        requestId: crypto.randomUUID(),
-        deviceLabel: "New browser",
-        comparisonCode: "123456",
-        receivedAt: now,
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
-        replacesDeviceLabel: null,
-      }],
-      invitation: null,
-      audit: [],
-    };
+    const state = pendingState(now);
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
@@ -124,21 +158,10 @@ describe("Remote Companion browser output boundary", () => {
         onRemoteAccessState: vi.fn(() => vi.fn()),
       },
     });
-    render(<RemoteAccessSettings projects={[{
-      id: crypto.randomUUID(),
-      name: "Explicit project",
-      path: "/not-rendered",
-      normalizedPath: "/not-rendered",
-      repositoryIdentity: null,
-      repositoryRoot: null,
-      repositoryRelativePath: "",
-      groupingMode: null,
-      gitRepositoryLimit: 4,
-      color: "#000000",
-      status: "ready",
-      createdAt: now,
-      updatedAt: now,
-    }]} />);
+    render(<RemoteAccessSettings
+      projects={[projectFixture(crypto.randomUUID(), now)]}
+      conversations={[]}
+    />);
 
     await screen.findByText("Approve New browser?");
     const project = screen.getByRole("checkbox", {
@@ -147,6 +170,42 @@ describe("Remote Companion browser output boundary", () => {
     expect(project).not.toBeChecked();
     expect(screen.getByRole("button", { name: /Approve/u })).toBeDisabled();
     project.click();
+    await waitFor(() => expect(screen.getByRole("checkbox", {
+      name: /Include every conversation/u,
+    })).not.toBeChecked());
+    expect(screen.getByRole("button", { name: /Approve/u })).toBeDisabled();
+
+    screen.getByRole("checkbox", {
+      name: /Include every conversation/u,
+    }).click();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Approve/u })).toBeEnabled());
+  });
+
+  it("keeps approval blocked until a conversation is explicitly granted", async () => {
+    const now = new Date().toISOString();
+    const projectId = crypto.randomUUID();
+    const state = pendingState(now);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => state),
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+      },
+    });
+    render(<RemoteAccessSettings
+      projects={[projectFixture(projectId, now)]}
+      conversations={[conversationFixture(projectId, now)]}
+    />);
+
+    await screen.findByText("Approve New browser?");
+    screen.getByRole("checkbox", { name: "Explicit project" }).click();
+    await waitFor(() => expect(screen.getByRole("checkbox", {
+      name: "Only conversation",
+    })).not.toBeChecked());
+    expect(screen.getByRole("button", { name: /Approve/u })).toBeDisabled();
+
+    screen.getByRole("checkbox", { name: "Only conversation" }).click();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Approve/u })).toBeEnabled());
   });

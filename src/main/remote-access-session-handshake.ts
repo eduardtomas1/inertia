@@ -80,6 +80,7 @@ export async function authenticateRemoteSession(input: {
     sessionId: input.frame.sessionId,
     scopes: [...input.device.scopes],
     projectIds: [...input.device.projectIds],
+    grants: structuredClone(input.device.grants),
     grantVersion: input.device.grantVersion,
     expiresAt: input.device.expiresAt,
   };

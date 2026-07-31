@@ -9,6 +9,12 @@ import {
 } from "../shared/remote-protocol";
 import type { RemoteSerializedKeyPair } from "../shared/remote-crypto";
 import {
+  normalizeRemoteConversationGrants,
+  remoteConversationGrantsFromProjectIds,
+  remoteConversationGrantsSchema,
+  type RemoteConversationGrant,
+} from "../shared/remote-grants";
+import {
   ElectronSafeStorageBackend,
   FileCredentialVaultPersistence,
   type CredentialVaultPersistence,
@@ -24,12 +30,19 @@ const persistedDeviceSchema = z.object({
   publicKey: keyMaterial,
   scopes: z.array(remoteScopeSchema).min(1).max(2),
   projectIds: z.array(entityId).min(1).max(64),
+  grants: remoteConversationGrantsSchema.optional(),
   createdAt: timestamp,
   expiresAt: timestamp,
   lastSeenAt: timestamp.nullable(),
   revokedAt: timestamp.nullable(),
   grantVersion: z.number().int().positive(),
-}).strict();
+}).strict().transform((device) => ({
+  ...device,
+  grants: normalizeRemoteConversationGrants(
+    device.grants
+      ?? remoteConversationGrantsFromProjectIds(device.projectIds),
+  ),
+}));
 
 const auditEventSchema = z.object({
   id: z.string().uuid(),
@@ -91,6 +104,7 @@ export interface PersistedRemoteDevice {
   publicKey: string;
   scopes: RemoteScope[];
   projectIds: string[];
+  grants: RemoteConversationGrant[];
   createdAt: string;
   expiresAt: string;
   lastSeenAt: string | null;

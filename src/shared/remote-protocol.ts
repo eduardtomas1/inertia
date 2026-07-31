@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  remoteConversationGrantsSchema,
+  type RemoteConversationGrant,
+} from "./remote-grants";
+
 export const REMOTE_PROTOCOL_VERSION = 1 as const;
 export const REMOTE_BROWSER_VERSION = "0.1.0";
 export const REMOTE_RELAY_VERSION = "0.1.0";
@@ -406,6 +411,7 @@ export const remoteAuthorizationSubjectSchema = z.object({
   sessionId: uuid,
   scopes: z.array(remoteScopeSchema).min(1).max(2),
   projectIds: z.array(entityId).min(1).max(64),
+  grants: remoteConversationGrantsSchema,
   grantVersion: z.number().int().positive(),
   expiresAt: timestamp,
 }).strict();
@@ -418,6 +424,8 @@ export interface RemoteDeviceView {
   label: string;
   scopes: RemoteScope[];
   projectIds: string[];
+  grants: RemoteConversationGrant[];
+  needsGrantReview: boolean;
   createdAt: string;
   expiresAt: string;
   lastSeenAt: string | null;

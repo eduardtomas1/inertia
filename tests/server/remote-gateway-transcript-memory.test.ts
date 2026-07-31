@@ -8,6 +8,9 @@ import { RuntimeStore } from "../../src/server/database";
 import { RemoteRuntimeGateway } from "../../src/server/remote-gateway";
 import { RemoteTranscriptCache } from "../../src/server/remote-transcript-cache";
 import type { RemoteAuthorizationSubject } from "../../src/shared/remote-protocol";
+import {
+  remoteConversationGrantsFromProjectIds,
+} from "../../src/shared/remote-grants";
 
 const temporaryDirectories: string[] = [];
 const BUDGET_BYTES = 512 * 1024;
@@ -35,6 +38,7 @@ function fixture() {
     sessionId: "7f0c11aa-9ee8-4e3c-8f8f-0907e31b389e",
     scopes: ["view"],
     projectIds: [project.id],
+    grants: remoteConversationGrantsFromProjectIds([project.id]),
     grantVersion: 1,
     expiresAt: "2030-02-01T00:00:00.000Z",
   };

@@ -88,6 +88,56 @@ retention, abuse-reporting, lawful-request, residency, deletion, monitoring,
 on-call, incident notification, and availability obligations. None are
 accepted or implemented by this reference task.
 
+## Conversation-scoped grant authority
+
+A project grant used to expose every unarchived conversation in that project,
+including conversations created after pairing. Because transcript sanitization
+cannot understand arbitrary prose, that blast radius was too wide.
+
+Authority is now a list of per-project grants:
+
+```ts
+interface RemoteConversationGrant {
+  projectId: string;
+  conversationIds: string[];
+  includeFutureConversations: boolean;
+  legacyProjectWide: boolean;
+}
+```
+
+A conversation is reachable only when its **current** project is granted and
+that project's grant either lists the conversation explicitly or is project-wide.
+`includeFutureConversations` defaults to false, so a newly created conversation
+in an authorized project stays hidden until it is granted. A project grant with
+no listed conversations and no opt-in reaches nothing.
+
+Because the check uses the conversation's current project, authority cannot
+follow a conversation into a project that was never granted. Inertia does not
+currently support moving a conversation between projects, so this is a
+forward-looking invariant rather than a reachable path today.
+
+Grants predating this model migrate to `legacyProjectWide: true`. That preserves
+exactly the access they already had — a project-wide grant already included
+future conversations, so preserving it is not an expansion — while marking the
+device as needing review. `needsGrantReview` surfaces in the desktop device list
+and the access preview so the user can narrow it.
+
+Enforcement lives in the runtime gateway and applies to every operation:
+transcript listing (`state.get`), transcript fetch (`conversation.get`), prompt
+preparation, and prompt commit. Archived and deleted conversations remain
+unreachable as before. Because prepare and commit each revalidate, removing
+conversation authority mid-flight rejects the commit.
+
+The subject carried from the main process to the runtime includes the grants, and
+`remoteSessionRetainsAuthority` compares the session's grants against the
+persisted device grants, so a grant edit invalidates live sessions.
+
+The desktop shows an access preview per device — projects, named conversations or
+"every conversation, including future ones", view/prompt scope, and expiry — and
+labels transcripts honestly: automated redaction reduces accidental exposure but
+cannot guarantee that arbitrary conversation text contains no sensitive
+information.
+
 ## Desktop presence and lock state
 
 Remote Companion is only defensible while a person is present at an unlocked

@@ -14,6 +14,9 @@ import type {
   PersistedRemoteDevice,
 } from "../../src/main/remote-access-store";
 import {
+  remoteConversationGrantsFromProjectIds,
+} from "../../src/shared/remote-grants";
+import {
   createAuthenticatedSessionRecipient,
   createAuthenticatedSessionSender,
   generateRemoteKeyPair,
@@ -97,6 +100,7 @@ function persistedDevice(
     publicKey: "aaaa",
     scopes: ["view", "prompt"],
     projectIds: ["project-one"],
+    grants: remoteConversationGrantsFromProjectIds(["project-one"]),
     createdAt: "2029-12-01T00:00:00.000Z",
     expiresAt: "2030-02-01T00:00:00.000Z",
     lastSeenAt: null,
@@ -134,6 +138,7 @@ function authorityFixture(
       sessionId: SESSION_ID,
       scopes: [...device.scopes],
       projectIds: [...device.projectIds],
+      grants: structuredClone(device.grants),
       grantVersion: device.grantVersion,
       expiresAt: device.expiresAt,
     },

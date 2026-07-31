@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { RawData } from "ws";
 
+import { remoteGrantsNeedReview } from "../shared/remote-grants";
 import type {
   RemoteAccessState,
   RemoteCipherFrame,
@@ -143,6 +144,8 @@ export function projectRemoteAccessState(input: {
       label: device.label,
       scopes: [...device.scopes],
       projectIds: [...device.projectIds],
+      grants: structuredClone(device.grants),
+      needsGrantReview: remoteGrantsNeedReview(device.grants),
       createdAt: device.createdAt,
       expiresAt: device.expiresAt,
       lastSeenAt: device.lastSeenAt,

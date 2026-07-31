@@ -48,17 +48,17 @@ trusted only within their existing responsibilities.
 | Relay compromise | Observe metadata, replay/reorder/drop frames, deny service, impersonate routing endpoints. | HPKE E2EE/authentication, transcript-bound IDs/AAD/sequences, used-session ledger, exact schemas, no relay queue. Traffic analysis and denial remain possible. |
 | Stolen browser/device | Attacker reads its IndexedDB key and can use the device's current projects/scopes until expiry or revocation. | Device-specific short grants, desktop-authoritative grant reduction, immediate local revocation, audit/active indicator, no credentials/files/approvals. Browser storage is not a hardware vault; this residual risk must be disclosed. |
 | Desktop/account takeover | Attacker controlling the unlocked desktop can enable or approve access. A future hosted account could be taken over. | Local comparison and explicit approval; screen-lock pause; no hosted account exists in this MVP. A hosted service would require strong account recovery/MFA/session controls and is a separate decision. |
-| Pairing phishing or invitation theft | Attacker submits a device key using a copied five-minute invitation. | Random PSK, short expiry, attempt limits, authenticated response, six-digit code derived from both keys and invitation, local comparison, sanitized device label, explicit project choice. Six digits require human verification and are not sole authentication. |
+| Pairing phishing or invitation theft | Attacker submits an invalid or attacker device key using a copied five-minute invitation. | Random PSK, short expiry, attempt limits, authenticated response, six-digit code derived from both keys and invitation, local comparison, sanitized device label, explicit project choice, and P-256 key import before any durable grant/audit mutation. Six digits require human verification and are not sole authentication. |
 | Control/bidi device-label spoofing | Approval list could visually impersonate another browser or reorder text. | Main-process NFKC normalization removes controls and bidi override/isolate marks before pending state or persistence. |
 | Pairing replay | Reuse an invitation/request. | One live invitation, five-minute expiry, bounded request-ID replay set, strict request/invitation correlation, local approval. |
-| Session replay/fixation | Reuse a valid opening, force sequence reuse, or pin an old grant. | Fresh UUID/timestamp, persisted used-session IDs, HPKE authenticated context bound to host/device/session, exact sequence, desktop current grant returned encrypted. |
+| Session replay/fixation | Reuse a valid opening, race the same ID across routes, over-admit while crypto/persistence awaits, retain an opening across local revocation, force sequence reuse, or pin an old grant. | Fresh UUID/timestamp, atomic global session-ID/capacity reservation before crypto, release on failure/disconnect/grant change, persisted used-session IDs, HPKE authenticated context bound to host/device/session, exact sequence, desktop current grant returned encrypted. |
 | Authentication CPU exhaustion | Repeated invalid openings trigger P-256 work across device keys. | Four attempts per relay connection, 24/minute global budget before crypto, at most 16 device keys, relay connection/message limits. Distributed relay/network DoS remains possible. |
-| Malicious project/provider output | XSS, deceptive links, secret/path exfiltration, oversized responses. | Safe projection only, arbitrary POSIX/Windows absolute-path and file-URL redaction, credential/code/HTML redaction, user/assistant roles only, UTF-8 byte budget, strict schemas/CSP, DOM `textContent`, no Markdown/HTML execution. Ordinary HTTP(S) URLs and surrounding punctuation remain usable. Heuristic redaction cannot prove arbitrary prose contains no secret. |
+| Malicious project/provider output | XSS, deceptive links, secret/path exfiltration, oversized responses. | Safe projection only, arbitrary POSIX, drive-letter, UNC, extended/device-namespace, and file-URL redaction, credential/code/HTML redaction, user/assistant roles only, UTF-8 byte budget, strict schemas/CSP, DOM `textContent`, no Markdown/HTML execution. Ordinary HTTP(S) URLs, escaped prose, and surrounding punctuation remain usable. Heuristic redaction cannot prove arbitrary prose contains no secret. |
 | Remote approval abuse | Prompt induces a Full Access, command, destructive, credential, or secret approval remotely, or local authority widens while provider readiness awaits. | Remote protocol has no approval/answer capability. Runtime checks project ownership, Supervised mode, and inactive state before readiness and reloads/rechecks them synchronously immediately before queueing; browser only reports that local action is needed. |
 | Prompt/attachment/source leakage | Relay/browser receives sensitive local input, source, attachments, path, or execution payload. | Only explicit remote prompt text and safe projections cross the boundary. No attachment/path/source/diagnostic fields exist in strict schemas. Provider credentials and local capabilities never enter them. |
 | Metadata leakage | Relay learns endpoint/IP/timing/size and opaque frame identifiers. | Minimal routing fields, no clear device ID on session opening, no payload logs/queue. Padding, anonymity, and traffic-shape hiding are not provided. |
 | Browser profile corruption | Malformed IndexedDB changes relay URL, key, or grant. | Strict schema before use, WSS/loopback-WS transport policy, invalid profile deletion and explicit error. |
-| Browser attempt/poll race | Stale pair/reconnect overwrites a newer socket/session, leaves listeners alive, or selection creates duplicate polling loops beyond the request budget. | Monotonic attempt and poll-generation ownership, one replaceable poll timer, tracked opening sockets, stale tunnel close, ownership checks after awaits, complete timer/listener cleanup on close/error/timeout. |
+| Browser attempt/poll race | Stale pair/reconnect overwrites a newer socket/session, leaves listeners alive, selection creates duplicate polling loops, or a stale prompt form targets the prior conversation. | Monotonic attempt and poll-generation ownership, one replaceable poll timer, synchronous detail/form clearing on selection/offline, prompt target equality with the current selection, tracked opening sockets, stale tunnel close, ownership checks after awaits, complete timer/listener cleanup on close/error/timeout. |
 | Relay peer-disconnect spoofing | Third connection closes another browser/desktop pair. | Relay verifies the caller owns the connection before disconnecting it. |
 | Relay route lifecycle race | Disconnect or connection-ID reuse lands during asynchronous pairing/session crypto and later commits approval/session state for a dead route. | `peer-connected` creates a desktop-local epoch; disconnect invalidates it synchronously and cleanup is ordered with the per-route frame queue. Post-crypto/persistence commits recheck epoch ownership. Active routes and queued frames are bounded. |
 | Concurrent encrypted frames | Parallel `session.data` opens race HPKE recipient sequence and falsely close a valid session as replay; parallel responses race sender sequence. | One bounded inbound queue per route serializes frame opening only; validated runtime requests remain concurrent. A separate per-session outbound queue seals responses in completion order. |
@@ -139,12 +139,14 @@ Release-blocking deterministic coverage includes:
   replay;
 - Linux plaintext/unknown storage rejection, corrupt vaults, unique
   replacement recovery, Windows replacement, restrictive modes, restart;
-- pairing label spoofing, explicit project choice, device scope/expiry,
-  reduction/reconnect, revocation, stolen-key rejection;
+- pairing label spoofing, explicit project choice, invalid P-256 rejection
+  before durable mutation, device scope/expiry, reduction/reconnect,
+  revocation, stolen-key rejection;
 - per-connection/global authentication exhaustion and recovery;
 - back-to-back encrypted request/response sequencing with concurrent runtime
-  work, relay disconnect during gated crypto, stale route ownership, and queue
-  bounds;
+  work, atomic duplicate-ID/capacity admission during gated crypto/persistence,
+  reservation release on disconnect/revocation, stale route ownership, and
+  queue bounds;
 - exact process-boundary validation, timeout, worker restart, and shutdown;
 - delivery dedupe, fixation, uncertain delivery, bounded receipt retention;
 - prompt-readiness races for access-mode, project/availability, and active-run
@@ -155,11 +157,13 @@ Release-blocking deterministic coverage includes:
 - large workspace/transcript UTF-8 byte bounding;
 - relay origin, peer ownership, offline/no-queue, capacity/rate/size behavior;
 - browser profile schema/clearing, stale-attempt ownership, single poll-loop
-  replacement, listener cleanup, IPv4/IPv6 loopback policy,
+  replacement, synchronous stale-detail clearing/current prompt targeting,
+  listener cleanup, IPv4/IPv6 loopback policy,
   XSS/provider-output inert rendering, strict CSP;
 - initially locked startup, lock-during-initialization and lock-during-sample
-  retention before connection, power-listener cleanup, arbitrary POSIX path
-  redaction with URL/punctuation preservation;
+  retention before connection, power-listener cleanup, arbitrary POSIX,
+  drive-letter, UNC, and Windows namespace path redaction with
+  URL/punctuation/escaped-prose preservation;
 - real Electron Chromium pairing, authenticated E2EE state exchange, and
   corrupt IndexedDB recovery.
 

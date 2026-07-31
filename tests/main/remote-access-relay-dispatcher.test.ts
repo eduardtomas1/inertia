@@ -42,6 +42,7 @@ describe("Remote Companion relay frame ownership", () => {
       release = resolve;
     });
     const sequences: number[] = [];
+    const invalidated = vi.fn();
     const disconnected = vi.fn();
     const dispatcher = new RemoteRelayDispatcher({
       registered: vi.fn(),
@@ -51,6 +52,7 @@ describe("Remote Companion relay frame ownership", () => {
         sequences.push(frame.sequence);
         if (frame.sequence === 0) await released;
       },
+      invalidated,
       disconnected,
       oversized: vi.fn(),
     });
@@ -72,6 +74,7 @@ describe("Remote Companion relay frame ownership", () => {
       type: "relay.peer-disconnected",
       connectionId,
     }));
+    expect(invalidated).toHaveBeenCalledTimes(1);
     release();
     await waitFor(() => disconnected.mock.calls.length === 1);
     expect(sequences).toEqual([0]);
@@ -90,6 +93,7 @@ describe("Remote Companion relay frame ownership", () => {
       registered: vi.fn(),
       error: vi.fn(),
       frame: () => released,
+      invalidated: vi.fn(),
       disconnected,
       oversized: vi.fn(),
     });

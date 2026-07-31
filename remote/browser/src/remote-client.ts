@@ -43,7 +43,7 @@ export interface RemoteClientCallbacks {
   status(message: string, online: boolean): void;
   pairingCode(code: string): void;
   shell(shell: RemoteSafeShell): void;
-  detail(detail: RemoteSafeConversationDetail): void;
+  detail(detail: RemoteSafeConversationDetail | null): void;
   promptResult(message: string, uncertain: boolean): void;
 }
 
@@ -315,6 +315,7 @@ export class RemoteCompanionClient {
 
   selectConversation(conversationId: string): void {
     this.selectedConversationId = conversationId;
+    this.callbacks.detail(null);
     this.refreshOrDisconnect(
       this.attemptEpoch,
       this.replacePollingLoop(),
@@ -324,6 +325,13 @@ export class RemoteCompanionClient {
   async sendPrompt(conversationId: string, content: string): Promise<void> {
     const text = content.trim();
     if (!text) return;
+    if (conversationId !== this.selectedConversationId) {
+      this.callbacks.promptResult(
+        "The selected conversation changed. The prompt was not sent.",
+        false,
+      );
+      return;
+    }
     const request: Extract<RemoteRequest, { type: "prompt.send" }> = {
       type: "prompt.send",
       requestId: crypto.randomUUID(),
@@ -567,6 +575,7 @@ export class RemoteCompanionClient {
       pending.reject(new Error(message));
     }
     this.pending.clear();
+    this.callbacks.detail(null);
     this.callbacks.status(message, false);
   }
 }

@@ -35,6 +35,7 @@ const client = new RemoteCompanionClient({
   },
   detail: (value) => {
     detail = value;
+    if (value === null) promptStatus = null;
     render();
   },
   promptResult: (message, uncertain) => {

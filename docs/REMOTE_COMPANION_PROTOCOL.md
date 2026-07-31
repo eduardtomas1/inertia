@@ -99,16 +99,22 @@ Pairing:
    compare it and explicitly choose at least one project. Prompt scope is a
    separate opt-in.
 4. The desktop normalizes the untrusted browser label, removing controls and
-   bidi formatting marks. It persists the grant before returning an
-   authenticated encrypted pairing result.
+   bidi formatting marks. It imports and validates the submitted P-256 public
+   key before mutating or persisting the grant, then returns an authenticated
+   encrypted pairing result.
 
 Sessions:
 
 1. The browser creates a fresh UUID session ID and HPKE authenticated session
    opening. Clear `session.open` metadata does not contain a device ID.
 2. Before P-256 work, the desktop applies global and per-connection
-   authentication-attempt budgets. It tries at most the bounded set of current
-   device public keys without revealing which key matched.
+   authentication-attempt budgets and synchronously reserves the session ID,
+   route epoch, and one of four global admission slots. Concurrent routes
+   cannot reuse an opening ID or over-admit while crypto or persistence awaits.
+   Once a device key authenticates, its grant owns the reservation so a local
+   update or revocation invalidates the in-progress opening before acceptance.
+   The desktop tries at most the bounded set of current device public keys
+   without revealing which key matched.
 3. The desktop rejects used session IDs across process restarts and requires a
    fresh timestamp. The device key authenticates identity; the desktop's
    current grant is authoritative. An old browser grant version cannot widen
@@ -160,7 +166,9 @@ offline. A request timeout or transport loss reports offline/uncertain; the
 browser does not silently retry a prompt. The browser owns exactly one
 generation-tagged polling loop. Conversation selection and manual refresh
 replace its timer; completion of an older in-flight poll cannot publish state
-or schedule another loop.
+or schedule another loop. Selection also clears the prior detail/prompt form
+synchronously, and the client rejects any prompt whose target is no longer the
+selected conversation.
 
 ## Authorization matrix
 
@@ -211,8 +219,10 @@ ownership for disconnect, heartbeats clients, and has bounded shutdown.
 ## Lifecycle bounds
 
 - Devices: 16; active peer routes: 8; active sessions: 4; pending pairings: 1.
-  Each route queues at most 16 encrypted frames. A local user must resolve the
-  current security-sensitive approval before creating another.
+  In-progress admissions share the four-session bound and reserve unique IDs
+  across routes until success, failure, or disconnect. Each route queues at
+  most 16 encrypted frames. A local user must resolve the current
+  security-sensitive approval before creating another.
 - Pairing: five minutes and ten attempts/minute.
 - Session authentication: four attempts/connection and 24/minute globally.
 - Active requests: eight/session; all requests: 120/minute; prompts: six/minute.

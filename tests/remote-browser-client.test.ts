@@ -197,6 +197,65 @@ describe("Remote Companion browser connection ownership", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("clears stale detail and rejects prompts for the previous selection", async () => {
+    const detail = vi.fn();
+    const promptResult = vi.fn();
+    const request = vi.fn((
+      value: RemoteRequest,
+    ): Promise<RemoteResponse> => {
+      if (value.type !== "prompt.send") return new Promise(() => undefined);
+      return Promise.resolve({
+        type: "response",
+        requestId: value.requestId,
+        ok: true,
+        result: {
+          kind: "prompt.accepted",
+          deliveryId: value.deliveryId,
+          turnId: "remote-turn",
+        },
+      });
+    });
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail,
+      promptResult,
+    });
+    Object.assign(client as unknown as Record<string, unknown>, {
+      sender: {},
+      request,
+    });
+    const previousId = crypto.randomUUID();
+    const selectedId = crypto.randomUUID();
+
+    client.selectConversation(previousId);
+    expect(detail).toHaveBeenLastCalledWith(null);
+    expect(
+      detail.mock.invocationCallOrder[0],
+    ).toBeLessThan(request.mock.invocationCallOrder[0]!);
+    client.selectConversation(selectedId);
+    expect(detail).toHaveBeenLastCalledWith(null);
+
+    await client.sendPrompt(previousId, "stale target");
+    expect(promptResult).toHaveBeenLastCalledWith(
+      "The selected conversation changed. The prompt was not sent.",
+      false,
+    );
+    expect(request.mock.calls.filter(
+      ([value]) => value.type === "prompt.send",
+    )).toHaveLength(0);
+
+    await client.sendPrompt(selectedId, "current target");
+    expect(request.mock.calls.find(
+      ([value]) => value.type === "prompt.send",
+    )?.[0]).toMatchObject({
+      type: "prompt.send",
+      conversationId: selectedId,
+      content: "current target",
+    });
+  });
+
   it("keeps one polling loop across repeated conversation selection refreshes", async () => {
     vi.useFakeTimers();
     const now = new Date().toISOString();

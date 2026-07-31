@@ -12,6 +12,9 @@ describe("Remote Companion safe text projection", () => {
       "Build /workspace/acme/.env, deploy /srv/project/file.ts;",
       "Inspect /usr/local/config:12 and file:///workspace/private.txt.",
       "Then C:\\Users\\alice\\private\\secret.ts",
+      "Copy \\\\server\\share\\project\\.env, then \\\\host\\private\\file.txt.",
+      "Extended \\\\?\\C:\\project\\.env and \\\\?\\UNC\\server\\share\\secret.txt.",
+      "Device \\\\.\\PhysicalDrive0.",
       "Bearer highly-sensitive-token-value",
       "```ts\nconst token = 'sk-secretvalue123456';\n```",
       "<script>alert('provider output')</script>",
@@ -23,6 +26,10 @@ describe("Remote Companion safe text projection", () => {
     expect(projected).not.toContain("/srv/project");
     expect(projected).not.toContain("/usr/local");
     expect(projected).not.toContain("C:\\Users");
+    expect(projected).not.toContain("\\\\server\\share");
+    expect(projected).not.toContain("\\\\host\\private");
+    expect(projected).not.toContain("\\\\?\\");
+    expect(projected).not.toContain("\\\\.\\");
     expect(projected).not.toContain("highly-sensitive");
     expect(projected).not.toContain("sk-secret");
     expect(projected).not.toContain("<script>");
@@ -34,12 +41,18 @@ describe("Remote Companion safe text projection", () => {
     expect(projected).toContain("[Code omitted on Remote Companion]");
   });
 
-  it("preserves web URLs and punctuation around redacted POSIX paths", () => {
+  it("preserves web URLs and punctuation around redacted local paths", () => {
     const projected = sanitizeRemoteContent(
       [
         "See https://example.invalid/a/b?x=1",
         "and wss://[::1]/remote, then (/workspace/app/file.ts).",
         "Also redact label:/srv/app and comma,/usr/local/bin.",
+        "UNC (\\\\server\\share\\app\\.env).",
+        "UNC label:\\\\host\\private\\file.txt, then done.",
+        "Extended (\\\\?\\C:\\project\\file.txt).",
+        "Extended UNC \\\\?\\UNC\\server\\share\\file.txt, then done.",
+        "Device \\\\.\\pipe\\inertia-test; done.",
+        "Keep escaped prose \\\\ and regex \\\\d+ intact.",
       ].join(" "),
     );
 
@@ -48,6 +61,14 @@ describe("Remote Companion safe text projection", () => {
     expect(projected).toContain("(<local-path>).");
     expect(projected).toContain("label:<local-path>");
     expect(projected).toContain("comma,<local-path>");
+    expect(projected).toContain("UNC (<local-path>).");
+    expect(projected).toContain("UNC label:<local-path>, then done.");
+    expect(projected).toContain("Extended (<local-path>).");
+    expect(projected).toContain("Extended UNC <local-path>, then done.");
+    expect(projected).toContain("Device <local-path>; done.");
+    expect(projected).toContain(
+      "Keep escaped prose \\\\ and regex \\\\d+ intact.",
+    );
   });
 
   it("bounds and normalizes labels", () => {

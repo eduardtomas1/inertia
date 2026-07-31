@@ -9,6 +9,10 @@ const POSIX_ABSOLUTE_PATH =
   /(^|[\s("'`=[{>,;!?:-])(\/+[^\s"'`<>()[\]{},;!?:/][^\s"'`<>()[\]{},;!?:]*)/gmu;
 const WINDOWS_ABSOLUTE_PATH =
   /\b[A-Za-z]:\\(?:[^\\\s"'`]+\\)*[^\\\s"'`),;:]*/gu;
+const WINDOWS_DEVICE_NAMESPACE_PATH =
+  /(^|[\s("'`=[{>,;!?:-])(\\\\[?.]\\[^\s"'`<>()[\]{},;!]+)/gmu;
+const WINDOWS_UNC_PATH =
+  /(^|[\s("'`=[{>,;!?:-])(\\\\[^\\\s"'`<>()[\]{},;!?:]+\\[^\\\s"'`<>()[\]{},;!?:]+(?:\\[^\\\s"'`<>()[\]{},;!?:]+)*)/gmu;
 const CREDENTIAL_URL =
   /\b([a-z][a-z0-9+.-]*:\/\/)(?:[^/\s@]+)@/giu;
 const LOCAL_FILE_URL =
@@ -34,6 +38,8 @@ export function sanitizeRemoteContent(
     .replace(CREDENTIAL_URL, "$1<redacted>@")
     .replace(LOCAL_FILE_URL, redactFileUrl)
     .replace(POSIX_ABSOLUTE_PATH, redactPosixPath)
+    .replace(WINDOWS_DEVICE_NAMESPACE_PATH, redactPrefixedPath)
+    .replace(WINDOWS_UNC_PATH, redactPrefixedPath)
     .replace(WINDOWS_ABSOLUTE_PATH, "<local-path>");
   for (const pattern of SECRET_PATTERNS) {
     text = text.replace(pattern, (match) =>
@@ -58,6 +64,15 @@ function redactPosixPath(
   ) return match;
   const { value, punctuation } = trailingPathPunctuation(path);
   return `${prefix}${value ? "<local-path>" : ""}${punctuation}`;
+}
+
+function redactPrefixedPath(
+  _match: string,
+  prefix: string,
+  path: string,
+): string {
+  const { punctuation } = trailingPathPunctuation(path);
+  return `${prefix}<local-path>${punctuation}`;
 }
 
 function redactFileUrl(match: string): string {

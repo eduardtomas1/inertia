@@ -23,6 +23,7 @@ import {
   type RemoteSerializedKeyPair,
 } from "../../src/shared/remote-crypto";
 import {
+  REMOTE_LIMITS,
   REMOTE_PROTOCOL_VERSION,
   remotePairingResponsePayloadSchema,
   remoteResponseSchema,
@@ -42,6 +43,9 @@ import { RemoteAccessStore } from "../../src/main/remote-access-store";
 
 const remoteCryptoGate = vi.hoisted(() => ({
   afterPairingOpen: null as (() => Promise<void>) | null,
+  beforeSessionRecipient: null as ((
+    sessionId: string,
+  ) => Promise<void>) | null,
 }));
 
 vi.mock("../../src/shared/remote-crypto", async (importOriginal) => {
@@ -57,6 +61,12 @@ vi.mock("../../src/shared/remote-crypto", async (importOriginal) => {
       await remoteCryptoGate.afterPairingOpen?.();
       return result;
     },
+    createAuthenticatedSessionRecipient: async (
+      ...args: Parameters<typeof actual.createAuthenticatedSessionRecipient>
+    ) => {
+      await remoteCryptoGate.beforeSessionRecipient?.(args[2]);
+      return await actual.createAuthenticatedSessionRecipient(...args);
+    },
   };
 });
 
@@ -66,6 +76,7 @@ const directories: string[] = [];
 
 afterEach(async () => {
   remoteCryptoGate.afterPairingOpen = null;
+  remoteCryptoGate.beforeSessionRecipient = null;
   for (const socket of sockets.splice(0)) socket.terminate();
   for (const relay of relays.splice(0)) await relay.close();
   for (const directory of directories.splice(0)) {
@@ -267,6 +278,7 @@ async function waitFor(
 
 async function pendingPairingFixture(options: {
   createSocket?: (url: string) => WebSocket;
+  devicePublicKey?: string;
   onStateChange?: (
     state: ReturnType<RemoteAccessService["state"]>,
   ) => void;
@@ -299,7 +311,7 @@ async function pendingPairingFixture(options: {
       invitationId: invitation.invitationId,
       deviceId,
       deviceLabel: "Persistence test browser",
-      devicePublicKey: deviceKeys.publicKey,
+      devicePublicKey: options.devicePublicKey ?? deviceKeys.publicKey,
       createdAt: new Date().toISOString(),
       browserVersion: "0.1.0",
     }),
@@ -317,7 +329,7 @@ async function pendingPairingFixture(options: {
   };
 }
 
-async function pairedServiceFixture(options: {
+async function pairedDeviceFixture(options: {
   createSocket?: (url: string) => WebSocket;
   onStateChange?: (
     state: ReturnType<RemoteAccessService["state"]>,
@@ -334,6 +346,17 @@ async function pairedServiceFixture(options: {
   );
   expect(await response).toMatchObject({ kind: "pair.response" });
   pairing.tunnel.socket.terminate();
+  return { ...pairing, projectId };
+}
+
+async function pairedServiceFixture(options: {
+  createSocket?: (url: string) => WebSocket;
+  onStateChange?: (
+    state: ReturnType<RemoteAccessService["state"]>,
+  ) => void;
+  scopes?: Array<"view" | "prompt">;
+} = {}) {
+  const pairing = await pairedDeviceFixture(options);
   const session = await openAuthenticatedSession({
     relayUrl: pairing.relayUrl,
     invitation: pairing.invitation,
@@ -341,7 +364,45 @@ async function pairedServiceFixture(options: {
     deviceKeys: pairing.deviceKeys,
     grantVersion: 1,
   });
-  return { ...pairing, projectId, session };
+  return { ...pairing, session };
+}
+
+async function createSessionOpenFrame(input: {
+  invitation: RemotePairingInvitation;
+  deviceId: string;
+  deviceKeys: RemoteSerializedKeyPair;
+  sessionId: string;
+}): Promise<Extract<RemoteCipherFrame, { kind: "session.open" }>> {
+  const deviceKeyPair = await importRemoteKeyPair(input.deviceKeys);
+  const hostPublicKey = await importRemotePublicKey(
+    input.invitation.hostPublicKey,
+  );
+  const sender = await createAuthenticatedSessionSender(
+    input.invitation.hostId,
+    input.deviceId,
+    input.sessionId,
+    deviceKeyPair,
+    hostPublicKey,
+  );
+  return {
+    protocolVersion: REMOTE_PROTOCOL_VERSION,
+    kind: "session.open",
+    sessionId: input.sessionId,
+    enc: sender.enc,
+    ciphertext: await sealSessionHandshake(
+      sender,
+      "session.open",
+      input.sessionId,
+      {
+        type: "session.open",
+        sessionId: input.sessionId,
+        deviceId: input.deviceId,
+        grantVersion: 1,
+        createdAt: new Date().toISOString(),
+        browserVersion: "0.1.0",
+      },
+    ),
+  };
 }
 
 describe("Remote Companion outbound encrypted service", () => {
@@ -464,6 +525,210 @@ describe("Remote Companion outbound encrypted service", () => {
     await service.shutdown();
   });
 
+  it("reserves a session ID before crypto and releases it on disconnect", async () => {
+    const paired = await pairedDeviceFixture();
+    const sessionId = crypto.randomUUID();
+    let releaseCrypto = (): void => undefined;
+    const cryptoReleased = new Promise<void>((resolve) => {
+      releaseCrypto = resolve;
+    });
+    const recipientCalls: string[] = [];
+    remoteCryptoGate.beforeSessionRecipient = async (value) => {
+      recipientCalls.push(value);
+      await cryptoReleased;
+    };
+    const first = await browserTunnel(
+      paired.relayUrl,
+      paired.invitation.endpointId,
+    );
+    const duplicate = await browserTunnel(
+      paired.relayUrl,
+      paired.invitation.endpointId,
+    );
+    const replacement = await browserTunnel(
+      paired.relayUrl,
+      paired.invitation.endpointId,
+    );
+    const openFrame = await createSessionOpenFrame({
+      invitation: paired.invitation,
+      deviceId: paired.deviceId,
+      deviceKeys: paired.deviceKeys,
+      sessionId,
+    });
+
+    sendFrame(first.socket, first.connectionId, openFrame);
+    await waitFor(() => recipientCalls.length === 1);
+    sendFrame(duplicate.socket, duplicate.connectionId, await createSessionOpenFrame({
+      invitation: paired.invitation,
+      deviceId: paired.deviceId,
+      deviceKeys: paired.deviceKeys,
+      sessionId,
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(recipientCalls).toEqual([sessionId]);
+
+    (
+      paired.service as unknown as {
+        relayMessages: { receive(raw: Buffer): void };
+      }
+    ).relayMessages.receive(Buffer.from(JSON.stringify({
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      type: "relay.peer-disconnected",
+      connectionId: first.connectionId,
+    })));
+    first.socket.terminate();
+    sendFrame(
+      replacement.socket,
+      replacement.connectionId,
+      await createSessionOpenFrame({
+        invitation: paired.invitation,
+        deviceId: paired.deviceId,
+        deviceKeys: paired.deviceKeys,
+        sessionId,
+      }),
+    );
+    await waitFor(() => recipientCalls.length === 2);
+    remoteCryptoGate.beforeSessionRecipient = null;
+    releaseCrypto();
+
+    await waitFor(() => paired.service.state().activeSessions === 1);
+    expect(recipientCalls).toEqual([sessionId, sessionId]);
+    expect(paired.service.state().audit.filter(
+      ({ type }) => type === "session.connected",
+    )).toHaveLength(1);
+    await paired.service.shutdown();
+  });
+
+  it("holds four atomic admissions through deferred persistence", async () => {
+    const paired = await pairedDeviceFixture();
+    const originalSave = paired.store.save.bind(paired.store);
+    let releaseSave = (): void => undefined;
+    const saveReleased = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    let enteredSave = (): void => undefined;
+    const saveEntered = new Promise<void>((resolve) => {
+      enteredSave = resolve;
+    });
+    let holdFirstSave = true;
+    const save = vi.spyOn(paired.store, "save").mockImplementation(
+      async (value) => {
+        if (holdFirstSave) {
+          holdFirstSave = false;
+          enteredSave();
+          await saveReleased;
+        }
+        await originalSave(value);
+      },
+    );
+    const recipientCalls: string[] = [];
+    remoteCryptoGate.beforeSessionRecipient = async (sessionId) => {
+      recipientCalls.push(sessionId);
+    };
+    const attempts = await Promise.all(
+      Array.from({ length: REMOTE_LIMITS.sessions + 1 }, async () => {
+        const tunnel = await browserTunnel(
+          paired.relayUrl,
+          paired.invitation.endpointId,
+        );
+        const sessionId = crypto.randomUUID();
+        return {
+          tunnel,
+          frame: await createSessionOpenFrame({
+            invitation: paired.invitation,
+            deviceId: paired.deviceId,
+            deviceKeys: paired.deviceKeys,
+            sessionId,
+          }),
+        };
+      }),
+    );
+    for (const { tunnel, frame } of attempts.slice(0, REMOTE_LIMITS.sessions)) {
+      sendFrame(tunnel.socket, tunnel.connectionId, frame);
+    }
+    await saveEntered;
+    await waitFor(() => recipientCalls.length === REMOTE_LIMITS.sessions);
+
+    const excess = attempts.at(-1)!;
+    sendFrame(excess.tunnel.socket, excess.tunnel.connectionId, excess.frame);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(recipientCalls).toHaveLength(REMOTE_LIMITS.sessions);
+    expect(paired.service.state().activeSessions).toBe(0);
+
+    releaseSave();
+    await waitFor(
+      () => paired.service.state().activeSessions === REMOTE_LIMITS.sessions,
+    );
+    expect(paired.service.state().activeSessions).toBe(REMOTE_LIMITS.sessions);
+    save.mockRestore();
+    await paired.service.shutdown();
+  });
+
+  it("does not activate an admission revoked during persistence", async () => {
+    const paired = await pairedDeviceFixture();
+    const originalSave = paired.store.save.bind(paired.store);
+    let releaseSave = (): void => undefined;
+    const saveReleased = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    let enteredSave = (): void => undefined;
+    const saveEntered = new Promise<void>((resolve) => {
+      enteredSave = resolve;
+    });
+    let holdFirstSave = true;
+    vi.spyOn(paired.store, "save").mockImplementation(async (value) => {
+      if (holdFirstSave) {
+        holdFirstSave = false;
+        enteredSave();
+        await saveReleased;
+      }
+      await originalSave(value);
+    });
+    const tunnel = await browserTunnel(
+      paired.relayUrl,
+      paired.invitation.endpointId,
+    );
+    const accepted: RemoteCipherFrame[] = [];
+    tunnel.socket.on("message", (raw) => {
+      const message = JSON.parse(raw.toString()) as {
+        type?: string;
+        frame?: RemoteCipherFrame;
+      };
+      if (message.type === "relay.frame"
+        && message.frame?.kind === "session.accept") {
+        accepted.push(message.frame);
+      }
+    });
+    sendFrame(tunnel.socket, tunnel.connectionId, await createSessionOpenFrame({
+      invitation: paired.invitation,
+      deviceId: paired.deviceId,
+      deviceKeys: paired.deviceKeys,
+      sessionId: crypto.randomUUID(),
+    }));
+    await saveEntered;
+
+    const revoked = paired.service.revokeDevice(paired.deviceId);
+    expect(paired.service.state().devices).toEqual([
+      expect.objectContaining({
+        id: paired.deviceId,
+        revokedAt: expect.any(String),
+      }),
+    ]);
+    releaseSave();
+    await revoked;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(paired.service.state().activeSessions).toBe(0);
+    expect(accepted).toEqual([]);
+    expect((await paired.store.load())?.devices).toEqual([
+      expect.objectContaining({
+        id: paired.deviceId,
+        revokedAt: expect.any(String),
+      }),
+    ]);
+    await paired.service.shutdown();
+  });
+
   it("fails closed when disabling cannot be persisted with a live session", async () => {
     const createSocket = vi.fn((url: string) => new WebSocket(url));
     const states: Array<ReturnType<RemoteAccessService["state"]>> = [];
@@ -532,6 +797,35 @@ describe("Remote Companion outbound encrypted service", () => {
     })).rejects.toThrow();
     save.mockRestore();
     expect((await pairing.store.load())?.devices).toEqual([]);
+    await pairing.service.shutdown();
+  });
+
+  it("rejects an invalid device public key before mutating durable grants", async () => {
+    const pairing = await pendingPairingFixture({
+      devicePublicKey: "AA",
+    });
+    const projectId = crypto.randomUUID();
+
+    await expect(pairing.service.approvePairing(
+      pairing.requestId,
+      ["view", "prompt"],
+      [projectId],
+    )).rejects.toThrow();
+
+    expect(pairing.service.state()).toMatchObject({
+      available: true,
+      enabled: true,
+      devices: [],
+      pendingPairings: [{ requestId: pairing.requestId }],
+    });
+    expect(pairing.service.state().audit.map(({ type }) => type)).not.toContain(
+      "pairing.accepted",
+    );
+    const durable = await pairing.store.load();
+    expect(durable?.devices).toEqual([]);
+    expect(durable?.audit.map(({ type }) => type)).not.toContain(
+      "pairing.accepted",
+    );
     await pairing.service.shutdown();
   });
 

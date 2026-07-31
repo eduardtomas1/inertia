@@ -22,6 +22,7 @@ interface RemoteRelayDispatcherHandlers {
     epoch: RemoteConnectionEpoch,
     frame: RemoteCipherFrame,
   ): Promise<void>;
+  invalidated(connectionId: string, epoch: RemoteConnectionEpoch): void;
   disconnected(connectionId: string, epoch: RemoteConnectionEpoch): void;
   oversized(): void;
 }
@@ -84,17 +85,21 @@ export class RemoteRelayDispatcher {
   }
 
   invalidate(connectionId: string, epoch: RemoteConnectionEpoch): void {
-    if (this.owns(connectionId, epoch)) this.epochs.delete(connectionId);
+    if (!this.owns(connectionId, epoch)) return;
+    this.epochs.delete(connectionId);
+    this.handlers.invalidated(connectionId, epoch);
   }
 
   reset(): void {
-    this.epochs.clear();
+    for (const [connectionId, epoch] of this.epochs) {
+      this.invalidate(connectionId, epoch);
+    }
   }
 
   private activate(connectionId: string): void {
     const previous = this.epochs.get(connectionId);
     if (previous !== undefined) {
-      this.epochs.delete(connectionId);
+      this.invalidate(connectionId, previous);
       this.enqueueDisconnect(connectionId, previous);
     }
     if (this.epochs.size >= REMOTE_LIMITS.connections) return;
@@ -104,7 +109,7 @@ export class RemoteRelayDispatcher {
   private deactivate(connectionId: string): void {
     const epoch = this.epochs.get(connectionId);
     if (epoch === undefined) return;
-    this.epochs.delete(connectionId);
+    this.invalidate(connectionId, epoch);
     this.enqueueDisconnect(connectionId, epoch);
   }
 

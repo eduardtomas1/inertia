@@ -432,6 +432,93 @@ describe("Remote Companion outbound encrypted service", () => {
     await service.shutdown();
   });
 
+  it("invalidates a live invitation across disable and re-enable", async () => {
+    const relayUrl = await relay();
+    const service = await RemoteAccessService.create({
+      store: encryptedStore(),
+      runtime: { remoteRequest: async () => {
+        throw new Error("unused");
+      } },
+    });
+    await service.setEnabled(true, relayUrl);
+    await waitFor(() => service.state().connection === "online");
+    const invitation = await service.createInvitation();
+    const deviceKeys = await generateRemoteKeyPair();
+
+    await service.setEnabled(false);
+    expect(service.state().invitation).toBeNull();
+    await service.setEnabled(true);
+    await waitFor(() => service.state().connection === "online");
+    const tunnel = await browserTunnel(relayUrl, invitation.endpointId);
+    sendFrame(
+      tunnel.socket,
+      tunnel.connectionId,
+      await sealPairingRequest(invitation, {
+        type: "pair.request",
+        requestId: crypto.randomUUID(),
+        invitationId: invitation.invitationId,
+        deviceId: crypto.randomUUID(),
+        deviceLabel: "Stale invitation browser",
+        devicePublicKey: deviceKeys.publicKey,
+        createdAt: new Date().toISOString(),
+        browserVersion: "0.1.0",
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(service.state().pendingPairings).toEqual([]);
+    await service.shutdown();
+  });
+
+  it("retries registration after a stale endpoint owner disconnects", async () => {
+    const relayUrl = await relay();
+    const store = encryptedStore();
+    const createdSockets: WebSocket[] = [];
+    const rejectedClosures: Array<Promise<unknown>> = [];
+    const createSocket = vi.fn((url: string) => {
+      const value = new WebSocket(url);
+      sockets.push(value);
+      createdSockets.push(value);
+      if (createdSockets.length > 1) {
+        rejectedClosures.push(once(value, "close"));
+      }
+      return value;
+    });
+    const service = await RemoteAccessService.create({
+      store,
+      createSocket,
+      runtime: { remoteRequest: async () => {
+        throw new Error("unused");
+      } },
+    });
+    await service.setEnabled(true, relayUrl);
+    await waitFor(() => service.state().connection === "online");
+    await service.setEnabled(false);
+    const endpointId = (await store.load())!.endpointId;
+    const staleDesktop = new WebSocket(relayUrl);
+    sockets.push(staleDesktop);
+    await once(staleDesktop, "open");
+    staleDesktop.send(JSON.stringify({
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      type: "relay.register",
+      endpointId,
+      role: "desktop",
+      relayVersion: "0.1.0",
+    }));
+    expect(await nextMessage(staleDesktop)).toMatchObject({
+      type: "relay.registered",
+    });
+
+    await service.setEnabled(true);
+    await rejectedClosures[0];
+    staleDesktop.terminate();
+    await waitFor(
+      () => createSocket.mock.calls.length >= 3
+        && service.state().connection === "online",
+      3_000,
+    );
+    await service.shutdown();
+  });
+
   it("defers first-time identity creation until Remote Companion is enabled", async () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-remote-service-"));
     directories.push(directory);

@@ -9,6 +9,7 @@ const MAX_ENVELOPE_BYTES = 132 * 1024;
 const MAX_CONNECTIONS = 1_024;
 const MAX_CONNECTIONS_PER_DESKTOP = 8;
 const MAX_MESSAGES_PER_MINUTE = 240;
+const MAX_BUFFERED_BYTES = 2 * MAX_ENVELOPE_BYTES;
 const MINUTE_MS = 60_000;
 const HEARTBEAT_MS = 30_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -47,6 +48,12 @@ export async function createReferenceRelay(options = {}) {
     1,
     64,
     MAX_CONNECTIONS_PER_DESKTOP,
+  );
+  const maxBufferedBytes = boundedInteger(
+    options.maxBufferedBytes,
+    1_024,
+    16 * MAX_ENVELOPE_BYTES,
+    MAX_BUFFERED_BYTES,
   );
   const now = options.now ?? Date.now;
   const desktops = new Map();
@@ -272,10 +279,18 @@ export async function createReferenceRelay(options = {}) {
 
   function send(socket, message) {
     if (socket.readyState !== WebSocket.OPEN) return;
-    socket.send(JSON.stringify({
+    const serialized = JSON.stringify({
       protocolVersion: PROTOCOL_VERSION,
       ...message,
-    }));
+    });
+    if (
+      socket.bufferedAmount + Buffer.byteLength(serialized)
+      > maxBufferedBytes
+    ) {
+      socket.terminate();
+      return;
+    }
+    socket.send(serialized);
   }
 
   function sendError(socket, code) {

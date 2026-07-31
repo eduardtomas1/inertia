@@ -32,12 +32,18 @@ It listens on `127.0.0.1:8787` by default, with WebSockets at
 `remote/browser/dist` from a local static HTTP server and include that exact
 origin in `INERTIA_REMOTE_ALLOWED_ORIGINS` when starting the relay. Browser
 `dist` is generated and intentionally ignored; do not commit it.
+For the reference server with reviewed security headers, run
+`npm --prefix remote/browser run preview`.
 
 ## Self-hosting boundary
 
 Outside loopback:
 
 - serve the browser over HTTPS;
+- send the browser policy as an HTTP response header, including
+  `Content-Security-Policy: ...; frame-ancestors 'none'`; a CSP `<meta>` tag
+  cannot enforce `frame-ancestors`. Refuse deployment if the production HTML
+  response does not contain that directive;
 - expose the relay only as WSS through a reviewed TLS reverse proxy;
 - set `INERTIA_REMOTE_ALLOWED_ORIGINS` to a comma-separated exact allowlist of
   browser origins;
@@ -48,6 +54,11 @@ Outside loopback:
 - set `INERTIA_REMOTE_RELAY_HOST` and `INERTIA_REMOTE_RELAY_PORT` as needed;
 - pin source/artifacts, publish checksums, restrict origin administrators, and
   monitor capacity without logging frame bodies.
+
+The reference Vite development/preview server emits the required CSP,
+cross-origin resource, referrer, and content-type headers. An arbitrary static
+host does not inherit them from the build artifact; verify the deployed HTTP
+response before pairing.
 
 The relay accepts browser WebSockets only from configured origins. Desktop
 clients send no Origin. It stores no queue or account state and loses all

@@ -99,7 +99,8 @@ Pairing:
    attempt budget, the desktop consumes the one-time invitation synchronously
    before HPKE work. Concurrent copies cannot create multiple approvals; a
    malformed request from an invitation holder consumes it and requires the
-   local user to create a new invitation.
+   local user to create a new invitation. Disabling Remote Companion also
+   invalidates any live invitation before the relay connection closes.
 3. Both devices derive and display the same six-digit comparison code from the
    host public key, device public key, and invitation ID. The local user must
    compare it and explicitly choose at least one project. Prompt scope is a
@@ -220,9 +221,14 @@ makes its key ineligible immediately and closes its sessions.
 ## Browser delivery and relay operations
 
 The browser is an independently versioned static build with no server-side
-session and a strict CSP. The reference relay requires an exact browser Origin
-allowlist; clients without an Origin are reserved for the desktop/reference
-clients. Serve the browser over HTTPS and relay over WSS outside loopback.
+session and a strict CSP. The reference Vite development and preview servers
+send that CSP as an HTTP response header, including `frame-ancestors 'none'`;
+the HTML meta policy deliberately does not claim frame protection because
+browsers ignore that directive in a meta policy. Any other host must provide
+and verify an equivalent response header before pairing. The reference relay
+requires an exact browser Origin allowlist; clients without an Origin are
+reserved for the desktop/reference clients. Serve the browser over HTTPS and
+relay over WSS outside loopback.
 
 CSP cannot protect a user if the browser hosting origin itself serves modified
 first-party JavaScript. A malicious update from that origin could read the
@@ -238,7 +244,11 @@ timing. It cannot decrypt or forge authenticated application payloads, but it
 can correlate, delay, drop, replay, reorder, rate-limit, or deny traffic. It
 must not log frame bodies. The reference implementation keeps routing only in
 memory, caps connections/messages/payloads, disables compression, checks peer
-ownership for disconnect, heartbeats clients, and has bounded shutdown.
+ownership for disconnect, and terminates a destination before its queued
+outbound bytes plus the next message exceed the configured buffer budget. It
+heartbeats clients and has bounded shutdown. If registration finds a duplicate
+desktop endpoint, the rejected desktop closes its socket and retries with
+bounded backoff rather than remaining indefinitely connected but offline.
 
 ## Lifecycle bounds
 
@@ -259,6 +269,8 @@ ownership for disconnect, heartbeats clients, and has bounded shutdown.
 - Session idle expiry: 15 minutes; handshake freshness: 60 seconds.
 - Reconnect backoff: capped at 30 seconds; no prompt replay.
 - Relay envelope: 132 KiB; application ciphertext: 128 KiB; plaintext: 96 KiB.
+- Relay destination send buffer: 264 KiB by default; exceeding the configured
+  bound terminates that destination and cleans up its routes.
 - Audit events: newest 1,000 persisted; delivery receipts/session IDs: newest
   512 persisted.
 - Main-to-runtime request: ten-second timeout.

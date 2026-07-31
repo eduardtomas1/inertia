@@ -12,6 +12,7 @@ export function createReferenceRelay(options?: {
   port?: number;
   maxConnections?: number;
   maxConnectionsPerDesktop?: number;
+  maxBufferedBytes?: number;
   allowedOrigins?: string[];
   now?: () => number;
 }): Promise<ReferenceRelay>;

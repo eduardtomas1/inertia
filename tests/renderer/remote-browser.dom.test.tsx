@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { REMOTE_BROWSER_HEADERS } from "../../remote/browser/vite.config";
 import {
   browserDeviceProfileSchema,
   validateBrowserRelayUrl,
@@ -33,7 +34,7 @@ describe("Remote Companion browser output boundary", () => {
     expect(parent.innerHTML).toContain("&lt;script&gt;");
   });
 
-  it("ships a restrictive self-contained content security policy", () => {
+  it("requires frame protection in the hosting response policy", () => {
     const html = readFileSync(
       resolve("remote/browser/index.html"),
       "utf8",
@@ -42,7 +43,10 @@ describe("Remote Companion browser output boundary", () => {
     expect(html).toContain("script-src 'self'");
     expect(html).toContain("connect-src ws: wss:");
     expect(html).toContain("object-src 'none'");
-    expect(html).toContain("frame-ancestors 'none'");
+    expect(html).not.toContain("frame-ancestors");
+    expect(REMOTE_BROWSER_HEADERS["Content-Security-Policy"]).toContain(
+      "frame-ancestors 'none'",
+    );
     expect(html).not.toMatch(/https?:\/\//u);
   });
 

@@ -216,6 +216,7 @@ export class RemoteAccessService {
           "Remote Companion disabled.",
         );
       }
+      this.invitation = null;
       const socket = this.disconnect("disabled", false, false);
       terminateRemoteSocket(socket);
       await this.persist();
@@ -456,6 +457,9 @@ export class RemoteAccessService {
     code: Parameters<typeof remoteRelayErrorMessage>[0],
   ): void {
     this.connectionMessage = remoteRelayErrorMessage(code);
+    if (code === "capacity" && this.connection === "connecting") {
+      terminateRemoteSocket(this.socket);
+    }
     this.emitState();
   }
 

@@ -159,6 +159,49 @@ describe("Remote Companion reference relay", () => {
     expect(browser.readyState).toBe(WebSocket.OPEN);
   });
 
+  it("terminates a destination whose bounded send buffer is exhausted", async () => {
+    const url = await relayFixture({ maxBufferedBytes: 1_024 });
+    const desktop = await socket(url);
+    desktop.send(JSON.stringify({
+      protocolVersion: 1,
+      type: "relay.register",
+      endpointId: "slow_endpoint",
+      role: "desktop",
+      relayVersion: "0.1.0",
+    }));
+    await nextMessage(desktop);
+    const browser = await socket(url);
+    browser.send(JSON.stringify({
+      protocolVersion: 1,
+      type: "relay.connect",
+      endpointId: "slow_endpoint",
+      browserVersion: "0.1.0",
+    }));
+    const connectionId = (await nextMessage(browser)).connectionId as string;
+    await nextMessage(desktop);
+    const desktopClosed = once(desktop, "close");
+    const peerDisconnected = nextMessage(browser);
+
+    browser.send(JSON.stringify({
+      protocolVersion: 1,
+      type: "relay.frame",
+      connectionId,
+      frame: {
+        protocolVersion: 1,
+        kind: "pair.request",
+        invitationId: crypto.randomUUID(),
+        enc: "valid_encapsulation",
+        ciphertext: "x".repeat(2_048),
+      },
+    }));
+
+    await desktopClosed;
+    expect(await peerDisconnected).toMatchObject({
+      type: "relay.peer-disconnected",
+      connectionId,
+    });
+  });
+
   it("allows only explicitly configured browser origins", async () => {
     const url = await relayFixture({
       allowedOrigins: ["http://127.0.0.1:4173"],

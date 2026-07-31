@@ -141,7 +141,18 @@ export function parseRemoteAccessEnableRequest(
 export function parseRemotePairingApprovalRequest(
   value: unknown,
 ): RemotePairingApprovalRequest | null {
-  if (!plainObject(value) || Object.keys(value).length > 5) return null;
+  if (!plainObject(value)) return null;
+  const keys = Object.keys(value);
+  const hasGrants = Object.prototype.hasOwnProperty.call(value, "grants");
+  if (
+    keys.length !== (hasGrants ? 5 : 4)
+    || !keys.every((key) =>
+      key === "requestId"
+      || key === "scopes"
+      || key === "projectIds"
+      || key === "grants"
+      || key === "grantDays")
+  ) return null;
   const scopes = remoteScopes(value.scopes);
   const projectIds = remoteProjectIds(value.projectIds);
   const grants = remoteConversationGrants(value.grants);
@@ -167,7 +178,18 @@ export function parseRemotePairingApprovalRequest(
 export function parseRemoteDeviceUpdateRequest(
   value: unknown,
 ): RemoteDeviceUpdateRequest | null {
-  if (!plainObject(value) || Object.keys(value).length > 5) return null;
+  if (!plainObject(value)) return null;
+  const keys = Object.keys(value);
+  const hasGrants = Object.prototype.hasOwnProperty.call(value, "grants");
+  if (
+    keys.length !== (hasGrants ? 5 : 4)
+    || !keys.every((key) =>
+      key === "deviceId"
+      || key === "scopes"
+      || key === "projectIds"
+      || key === "grants"
+      || key === "expiresAt")
+  ) return null;
   const scopes = remoteScopes(value.scopes);
   const projectIds = remoteProjectIds(value.projectIds);
   const grants = remoteConversationGrants(value.grants);

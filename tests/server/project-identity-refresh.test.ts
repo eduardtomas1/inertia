@@ -259,6 +259,22 @@ describe("project identity refresher", () => {
     expect(applied.length).toBeLessThan(50);
   });
 
+  it("settles an active inspection immediately after dispose", async () => {
+    const refresher = new ProjectIdentityRefresher({
+      inspect: () => never(),
+      apply: () => undefined,
+    });
+    const running = refresher.refresh({
+      id: "blocked-project",
+      path: "/mnt/disconnected",
+    });
+    refresher.dispose();
+    await expect(running).resolves.toMatchObject({
+      freshness: "stale",
+      checkedAt: null,
+    });
+  });
+
   it("does not apply an identity that resolves after dispose", async () => {
     const applied: string[] = [];
     let release = (): void => undefined;

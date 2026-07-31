@@ -40,7 +40,8 @@ interface ProjectIdentityRefresherOptions {
 
 export class ProjectIdentityRefresher {
   private readonly states = new Map<string, ProjectIdentityState>();
-  private readonly inFlight = new Map<string, Promise<ProjectIdentityState>>();
+  private readonly pendingByProject =
+    new Map<string, PendingProjectIdentityRefresh>();
   private readonly queue: PendingProjectIdentityRefresh[] = [];
   private readonly concurrency: number;
   private readonly deadlineMs: number;
@@ -81,12 +82,11 @@ export class ProjectIdentityRefresher {
 
   dispose(): void {
     this.disposed = true;
-    for (const pending of this.queue.splice(0)) {
-      if (this.inFlight.get(pending.target.id) === pending.promise) {
-        this.inFlight.delete(pending.target.id);
-      }
+    this.queue.length = 0;
+    for (const pending of this.pendingByProject.values()) {
       pending.resolve(this.state(pending.target.id));
     }
+    this.pendingByProject.clear();
   }
 
   async refreshAll(targets: readonly ProjectIdentityTarget[]): Promise<void> {
@@ -95,21 +95,22 @@ export class ProjectIdentityRefresher {
 
   async refresh(target: ProjectIdentityTarget): Promise<ProjectIdentityState> {
     if (this.disposed) return this.state(target.id);
-    const existing = this.inFlight.get(target.id);
-    if (existing) return await existing;
+    const existing = this.pendingByProject.get(target.id);
+    if (existing) return await existing.promise;
     let resolveAttempt = (_state: ProjectIdentityState): void => undefined;
     let rejectAttempt = (_reason: unknown): void => undefined;
     const attempt = new Promise<ProjectIdentityState>((resolve, reject) => {
       resolveAttempt = resolve;
       rejectAttempt = reject;
     });
-    this.inFlight.set(target.id, attempt);
-    this.queue.push({
+    const pending = {
       target,
       promise: attempt,
       resolve: resolveAttempt,
       reject: rejectAttempt,
-    });
+    };
+    this.pendingByProject.set(target.id, pending);
+    this.queue.push(pending);
     this.pump();
     return await attempt;
   }
@@ -128,8 +129,8 @@ export class ProjectIdentityRefresher {
         pending.reject,
       ).finally(() => {
         this.active -= 1;
-        if (this.inFlight.get(pending.target.id) === pending.promise) {
-          this.inFlight.delete(pending.target.id);
+        if (this.pendingByProject.get(pending.target.id) === pending) {
+          this.pendingByProject.delete(pending.target.id);
         }
         this.pump();
       });

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseOpenProjectPathRequest,
   parseRemoteDeviceUpdateRequest,
+  parseRemotePairingApprovalRequest,
 } from "../src/shared/desktop";
 import {
   BACKEND_CREDENTIAL_MASK,
@@ -66,6 +67,38 @@ describe("desktop credential contract", () => {
 });
 
 describe("desktop remote-access contract", () => {
+  it("rejects unknown remote-access request fields", () => {
+    const deviceUpdate = {
+      deviceId: projectId,
+      scopes: ["view"],
+      projectIds: [projectId],
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    expect(parseRemoteDeviceUpdateRequest(deviceUpdate)).toEqual({
+      ...deviceUpdate,
+      grants: null,
+    });
+    expect(parseRemoteDeviceUpdateRequest({
+      ...deviceUpdate,
+      injected: true,
+    })).toBeNull();
+
+    const pairing = {
+      requestId: conversationId,
+      scopes: ["view"],
+      projectIds: [projectId],
+      grantDays: 1,
+    };
+    expect(parseRemotePairingApprovalRequest(pairing)).toEqual({
+      ...pairing,
+      grants: null,
+    });
+    expect(parseRemotePairingApprovalRequest({
+      ...pairing,
+      injected: true,
+    })).toBeNull();
+  });
+
   it("rejects sparse conversation grants at the preload boundary", () => {
     const sparseConversationIds: string[] = [];
     sparseConversationIds.length = 1;

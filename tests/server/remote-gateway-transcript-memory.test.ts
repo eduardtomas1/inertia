@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,6 +14,7 @@ import {
 import {
   remotePromptSafetyForHarness,
 } from "../../src/shared/remote-prompt-safety";
+import { removeTemporaryDirectory } from "../helpers/temporary-directory";
 
 const temporaryDirectories: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -70,10 +71,10 @@ async function transcript(
   }));
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const store of stores.splice(0)) store.close();
   for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
+    await removeTemporaryDirectory(directory);
   }
 });
 

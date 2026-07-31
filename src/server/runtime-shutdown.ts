@@ -13,8 +13,10 @@ export interface RuntimeShutdownPhases {
 }
 
 export class RuntimeShutdownDeadlineError extends Error {
-  constructor() {
-    super("The runtime did not finish cleanup before its shutdown deadline.");
+  constructor(readonly phase: string = "cleanup") {
+    super(
+      `The runtime did not finish ${phase} before its shutdown deadline.`,
+    );
     this.name = "RuntimeShutdownDeadlineError";
   }
 }
@@ -22,12 +24,44 @@ export class RuntimeShutdownDeadlineError extends Error {
 async function beforeDeadline(
   operation: Promise<void>,
   deadlineAt: number,
+  phase: string,
 ): Promise<void> {
+  type Settlement =
+    | { kind: "pending" }
+    | { kind: "resolved" }
+    | { kind: "rejected"; error: unknown };
+  const settlement: { current: Settlement } = {
+    current: { kind: "pending" },
+  };
+  const observedSettlement = (): Settlement => settlement.current;
+  void operation.then(
+    () => { settlement.current = { kind: "resolved" }; },
+    (error: unknown) => {
+      settlement.current = { kind: "rejected", error };
+    },
+  );
+
+  // Observe already-settled work before consulting wall time. Under heavy
+  // host contention, the event loop can resume after the nominal deadline
+  // even though the owned operation completed and no unsafe work remains.
+  await Promise.resolve();
+  const immediate = observedSettlement();
+  if (immediate.kind === "resolved") return;
+  if (immediate.kind === "rejected") throw immediate.error;
+
   const remainingMs = Math.trunc(deadlineAt - Date.now());
-  if (remainingMs <= 0) throw new RuntimeShutdownDeadlineError();
+  if (remainingMs <= 0) {
+    // Give completion callbacks that became runnable in the same delayed loop
+    // one turn to settle. A genuinely active operation still fails closed.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const delayed = observedSettlement();
+    if (delayed.kind === "resolved") return;
+    if (delayed.kind === "rejected") throw delayed.error;
+    throw new RuntimeShutdownDeadlineError(phase);
+  }
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(
-      () => reject(new RuntimeShutdownDeadlineError()),
+      () => reject(new RuntimeShutdownDeadlineError(phase)),
       remainingMs,
     );
     timer.unref();
@@ -65,7 +99,6 @@ export async function runRuntimeShutdownPhases(
   };
   const drainAgents = async (): Promise<void> => {
     await attempt(phases.stopIsolatedRuns);
-    if (Date.now() >= deadlineAt) throw new RuntimeShutdownDeadlineError();
     await attempt(phases.disposeTurnsAndProviders);
   };
 
@@ -76,14 +109,15 @@ export async function runRuntimeShutdownPhases(
         drainAgents(),
       ]).then(() => undefined),
       deadlineAt,
+      "owned-resource cleanup",
     );
-    for (const operation of [
-      phases.settleArtifacts,
-      phases.terminateClients,
-      phases.closeServer,
-      phases.closeStore,
-    ]) {
-      await beforeDeadline(attempt(operation), deadlineAt);
+    for (const [phase, operation] of [
+      ["artifact cleanup", phases.settleArtifacts],
+      ["client cleanup", phases.terminateClients],
+      ["server cleanup", phases.closeServer],
+      ["database cleanup", phases.closeStore],
+    ] as const) {
+      await beforeDeadline(attempt(operation), deadlineAt, phase);
     }
   } catch (error) {
     shutdownError ??= error;

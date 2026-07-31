@@ -7,7 +7,6 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { realpath } from "node:fs/promises";
@@ -33,6 +32,7 @@ import {
 import { RuntimeStore } from "../../src/server/database";
 import { getUnifiedDiff } from "../../src/server/git";
 import { portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
+import { removeTemporaryDirectory } from "../helpers/temporary-directory";
 import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 
 class EventQueue {
@@ -161,25 +161,6 @@ function waitForRejectedUpgrade(url: string, origin: string): Promise<number> {
       // ws may report the rejected handshake after unexpected-response.
     });
   });
-}
-
-async function removeTemporaryDirectory(directory: string): Promise<void> {
-  const retryDelays = process.platform === "win32" ? [0, 250, 750, 1_500, 3_000] : [0];
-  let lastError: unknown;
-
-  for (const retryDelay of retryDelays) {
-    if (retryDelay > 0) await delay(retryDelay);
-    try {
-      rmSync(directory, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-      if (typeof code !== "string" || !["EBUSY", "ENOTEMPTY", "EPERM"].includes(code)) throw error;
-      lastError = error;
-    }
-  }
-
-  throw lastError;
 }
 
 describe("local runtime", () => {

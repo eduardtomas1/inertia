@@ -11,6 +11,9 @@ import type { RemoteAuthorizationSubject } from "../../src/shared/remote-protoco
 import {
   remoteConversationGrantsFromProjectIds,
 } from "../../src/shared/remote-grants";
+import {
+  remotePromptSafetyForHarness,
+} from "../../src/shared/remote-prompt-safety";
 
 const temporaryDirectories: string[] = [];
 const BUDGET_BYTES = 512 * 1024;
@@ -30,6 +33,7 @@ function fixture() {
     isConversationActive: () => false,
     preparePrompt: async () => undefined,
     queuePrompt: () => ({ turnId: "turn" }),
+    remotePromptSafety: () => remotePromptSafetyForHarness("codex-app-server"),
     transcriptCache,
     now: () => new Date("2030-01-01T00:00:00.000Z"),
   });

@@ -88,6 +88,41 @@ retention, abuse-reporting, lawful-request, residency, deletion, monitoring,
 on-call, incident notification, and availability obligations. None are
 accepted or implemented by this reference task.
 
+## Provider remote-prompt safety contract
+
+Remote prompting used to depend only on the shared `supervised` conversation
+access mode. That word does not describe an equivalent boundary across
+providers: filesystem sandboxing, network reach, whether reads, writes, or
+commands need approval, and whether a permission callback is guaranteed all
+differ, and a provider update can change implicit behaviour.
+
+Each harness therefore declares an explicit contract
+(`src/shared/remote-prompt-safety.ts`) covering `supported`,
+`writesRequireLocalApproval`, `commandsRequireLocalApproval`, `networkPolicy`,
+`filesystemPolicy`, `permissionModel`, and human-readable text. The contract is
+per **harness**, not per provider, because the CLI and SDK/app-server harnesses
+for the same provider differ in exactly the way that matters: the CLI harnesses
+report `approvals: "unavailable"` and cannot deliver an approval decision to
+Inertia at all.
+
+Remote prompting is therefore refused for `codex-cli`, `claude-cli`,
+`cursor-cli`, and `opencode-cli`, and allowed for `codex-app-server`,
+`claude-agent-sdk`, `cursor-acp`, and `opencode-sdk`. Only `opencode-sdk` claims
+`inertia-enforced`, because Inertia installs the ask-by-default permission
+ruleset itself; the others are `provider-reported`. No harness claims
+`read-only-sandbox` or a disabled network, because Inertia does not own an
+operating-system sandbox for any of them.
+
+`remotePromptSafetyForHarness` returns the unsupported contract for an unknown
+or missing harness id, and `remotePromptSafetyIsUsable` additionally rejects any
+contract that is internally permissive, so unknown capability values fail closed.
+The gateway resolves the contract from the conversation's **current**
+`modelSelection.harnessId` on every prepare and commit, so switching providers
+recalculates eligibility, and a throwing capability query is treated as
+unsupported. View-only access is unaffected: the projection still renders, and it
+carries the truthful per-provider headline and explanation that the browser
+displays instead of hard-coded text.
+
 ## Conversation-scoped grant authority
 
 A project grant used to expose every unarchived conversation in that project,

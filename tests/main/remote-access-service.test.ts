@@ -518,6 +518,11 @@ describe("Remote Companion outbound encrypted service", () => {
                   providerLabel: "Provider",
                   status: "idle",
                   pendingLocalApproval: false,
+                  promptSafety: {
+                    supported: true,
+                    headline: "Local approval required for reported actions",
+                    explanation: "Desktop approval is required for reported actions.",
+                  },
                   updatedAt: new Date().toISOString(),
                 },
                 messages: [{

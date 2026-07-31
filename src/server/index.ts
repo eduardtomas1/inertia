@@ -106,6 +106,9 @@ import {
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 import { RemoteRuntimeGateway } from "./remote-gateway";
 import { RemoteTranscriptCache } from "./remote-transcript-cache";
+import {
+  remotePromptSafetyForHarness,
+} from "../shared/remote-prompt-safety";
 
 export {
   assembleReadOnlyReviewRequest,
@@ -704,6 +707,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }
     },
     transcriptCache: remoteTranscriptCache,
+    remotePromptSafety: (conversation) =>
+      remotePromptSafetyForHarness(conversation.modelSelection.harnessId),
     queuePrompt: (conversationId, content) => {
       let queued: ReturnType<TurnController["queue"]> | null = null;
       try {

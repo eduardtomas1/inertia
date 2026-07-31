@@ -14,7 +14,15 @@ import {
   type RemoteSafeConversation,
 } from "../shared/remote-protocol";
 import { remoteGrantAllowsConversation } from "../shared/remote-grants";
-import { sanitizeRemoteLabel } from "../shared/remote-sanitizer";
+import {
+  remotePromptSafetyIsUsable,
+  UNSUPPORTED_REMOTE_PROMPT_SAFETY,
+  type RemotePromptSafety,
+} from "../shared/remote-prompt-safety";
+import {
+  sanitizeRemoteContent,
+  sanitizeRemoteLabel,
+} from "../shared/remote-sanitizer";
 import { PROVIDER_INFO } from "./provider/catalog";
 import { RemoteTranscriptCache } from "./remote-transcript-cache";
 
@@ -26,6 +34,7 @@ interface RemoteGatewayDependencies {
   queuePrompt(conversationId: string, content: string): {
     turnId: string;
   };
+  remotePromptSafety?(conversation: Conversation): RemotePromptSafety;
   transcriptCache?: RemoteTranscriptCache;
   now?(): Date;
 }
@@ -112,6 +121,7 @@ export class RemoteRuntimeGateway {
             this.dependencies.shell(),
             subject,
             this.now(),
+            (conversation) => this.promptSafety(conversation),
           ),
         },
       });
@@ -142,6 +152,7 @@ export class RemoteRuntimeGateway {
     const projectedConversation = safeConversation(
       shell.conversations.find(({ id }) => id === request.conversationId)
         ?? { ...detail.conversation, latestTurn: null, pendingApproval: false, pendingInput: false },
+      this.promptSafety(detail.conversation),
     );
     return boundRemoteProjection({
       type: "response",
@@ -429,6 +440,14 @@ export class RemoteRuntimeGateway {
         "Remote prompting requires Supervised access on the desktop.",
       );
     }
+    const safety = this.promptSafety(detail.conversation);
+    if (!remotePromptSafetyIsUsable(safety)) {
+      return failedResponse(
+        request.requestId,
+        "forbidden",
+        safety.explanation,
+      );
+    }
     if (this.dependencies.isConversationActive(request.conversationId)) {
       return failedResponse(
         request.requestId,
@@ -451,6 +470,16 @@ export class RemoteRuntimeGateway {
     while (this.receipts.size > REMOTE_LIMITS.deliveryReceipts) {
       const oldest = this.receipts.keys().next().value;
       if (typeof oldest === "string") this.receipts.delete(oldest);
+    }
+  }
+
+  private promptSafety(conversation: Conversation): RemotePromptSafety {
+    const resolve = this.dependencies.remotePromptSafety;
+    if (!resolve) return UNSUPPORTED_REMOTE_PROMPT_SAFETY;
+    try {
+      return resolve(conversation) ?? UNSUPPORTED_REMOTE_PROMPT_SAFETY;
+    } catch {
+      return UNSUPPORTED_REMOTE_PROMPT_SAFETY;
     }
   }
 
@@ -531,6 +560,7 @@ function projectShell(
   snapshot: AppSnapshot,
   subject: RemoteAuthorizationSubject,
   now: Date,
+  safety: (conversation: AppSnapshot["conversations"][number]) => RemotePromptSafety,
 ) {
   const projectIds = new Set(subject.projectIds);
   const conversationIds = new Set(
@@ -551,7 +581,7 @@ function projectShell(
       })),
     conversations: snapshot.conversations
       .filter(({ id }) => conversationIds.has(id))
-      .map(safeConversation),
+      .map((conversation) => safeConversation(conversation, safety(conversation))),
     runs: snapshot.runs
       .filter((run) =>
         run.kind === "agent"
@@ -569,7 +599,10 @@ function projectShell(
 
 function safeConversation(
   conversation: AppSnapshot["conversations"][number],
+  safety: RemotePromptSafety = UNSUPPORTED_REMOTE_PROMPT_SAFETY,
 ): RemoteSafeConversation {
+  const usable = conversation.accessMode === "supervised"
+    && remotePromptSafetyIsUsable(safety);
   return {
     id: conversation.id,
     projectId: conversation.projectId,
@@ -577,6 +610,25 @@ function safeConversation(
     providerLabel: PROVIDER_INFO[conversation.providerId].name,
     status: conversation.status,
     pendingLocalApproval: conversation.pendingApproval,
+    promptSafety: {
+      supported: usable,
+      headline: sanitizeRemoteLabel(
+        usable
+          ? safety.headline
+          : conversation.accessMode === "supervised"
+            ? safety.headline
+            : "Remote prompts need Supervised access",
+      ) ?? "Remote prompts unavailable",
+      explanation: sanitizeRemoteContent(
+        usable
+          ? safety.explanation
+          : conversation.accessMode === "supervised"
+            ? safety.explanation
+            : "Switch this conversation to Supervised access on the desktop to "
+              + "allow remote prompts.",
+        600,
+      ),
+    },
     updatedAt: conversation.updatedAt,
   };
 }

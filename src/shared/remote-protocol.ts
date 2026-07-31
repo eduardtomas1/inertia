@@ -281,6 +281,11 @@ export const remoteSafeConversationSchema = z.object({
   providerLabel: safeLabel,
   status: z.enum(["idle", "running", "needs-input", "completed", "failed"]),
   pendingLocalApproval: z.boolean(),
+  promptSafety: z.object({
+    supported: z.boolean(),
+    headline: safeLabel,
+    explanation: z.string().max(600),
+  }).strict(),
   updatedAt: timestamp,
 }).strict();
 export type RemoteSafeConversation = z.infer<

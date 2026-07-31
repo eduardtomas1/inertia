@@ -17,6 +17,9 @@ import type {
   RemoteAuthorizationSubject,
   RemoteResponse,
 } from "../../src/shared/remote-protocol";
+import {
+  remotePromptSafetyForHarness,
+} from "../../src/shared/remote-prompt-safety";
 
 const temporaryDirectories: string[] = [];
 const REQUEST_ID = "6bbd21ad-3f1a-4e6f-8a86-2e3f0c3f5c11";
@@ -37,6 +40,7 @@ function fixture() {
     isConversationActive: () => false,
     preparePrompt: async () => undefined,
     queuePrompt: () => ({ turnId: "remote-turn" }),
+    remotePromptSafety: () => remotePromptSafetyForHarness("codex-app-server"),
     now: () => new Date("2030-01-01T00:00:00.000Z"),
   });
   const subject = (

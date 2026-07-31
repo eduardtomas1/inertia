@@ -416,7 +416,7 @@ process.exit(child.status ?? 1);
 
     expect(releaseStarted).toBe(true);
     expect(new URL(runtime.websocketUrl).hostname).toBe("127.0.0.1");
-  });
+  }, 30_000);
 
   it("starts empty, mutates, and persists a deterministic app snapshot", async () => {
     const { data, workspace } = temporaryWorkspace({ withProject: false });

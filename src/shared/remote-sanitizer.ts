@@ -70,6 +70,10 @@ function redactAbsolutePathTokens(value: string): string {
       index += 1;
       continue;
     }
+    if (path.pathEnd === null) {
+      index = path.tokenEnd;
+      continue;
+    }
     result += value.slice(copiedUntil, index);
     result += `<local-path>${value.slice(path.pathEnd, path.tokenEnd)}`;
     copiedUntil = path.tokenEnd;
@@ -99,13 +103,15 @@ function fileUrlEndAt(value: string, index: number): number | null {
 function absolutePathTokenAt(
   value: string,
   index: number,
-): { pathEnd: number; tokenEnd: number } | null {
+): { pathEnd: number | null; tokenEnd: number } | null {
   if (
     !isPathBoundary(value, index)
     || !isPlausibleAbsolutePathPrefix(value, index)
   ) return null;
   const tokenEnd = scanPathTokenEnd(value, index);
-  if (!isAbsolutePathToken(value, index, tokenEnd)) return null;
+  if (!isAbsolutePathToken(value, index, tokenEnd)) {
+    return { pathEnd: null, tokenEnd };
+  }
   const suffix = trailingPathSuffix(value, index, tokenEnd);
   let pathEnd = tokenEnd;
   if (

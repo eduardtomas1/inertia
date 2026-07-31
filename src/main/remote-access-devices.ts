@@ -22,7 +22,7 @@ export function applyRemotePairingGrant(input: {
   projectIds: string[];
   grantMs: number;
   now: Date;
-}): PersistedRemoteDevice {
+}): { device: PersistedRemoteDevice; replaced: boolean } {
   const expiresAt = new Date(
     input.now.getTime() + Math.max(
       MINUTE_MS,
@@ -42,6 +42,7 @@ export function applyRemotePairingGrant(input: {
     grantVersion: 1,
   };
   const existing = input.data.devices.findIndex(({ id }) => id === device.id);
+  const replaced = existing >= 0;
   if (existing >= 0) {
     const previous = input.data.devices[existing]!;
     device.createdAt = previous.createdAt;
@@ -56,7 +57,7 @@ export function applyRemotePairingGrant(input: {
     pruneRetiredDevicesForAppend(input.data, input.now);
     input.data.devices.push(device);
   }
-  return device;
+  return { device, replaced };
 }
 
 function pruneRetiredDevicesForAppend(

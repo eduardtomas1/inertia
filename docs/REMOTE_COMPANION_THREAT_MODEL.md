@@ -48,9 +48,9 @@ trusted only within their existing responsibilities.
 | Relay compromise | Observe metadata, replay/reorder/drop frames, deny service, impersonate routing endpoints. | HPKE E2EE/authentication, transcript-bound IDs/AAD/sequences, used-session ledger, exact schemas, no relay queue. Traffic analysis and denial remain possible. |
 | Stolen browser/device | Attacker reads its IndexedDB key and can use the device's current projects/scopes until expiry or revocation. | Device-specific short grants, desktop-authoritative grant reduction, immediate local revocation, audit/active indicator, no credentials/files/approvals. Browser storage is not a hardware vault; this residual risk must be disclosed. |
 | Desktop/account takeover | Attacker controlling the unlocked desktop can enable or approve access. A future hosted account could be taken over. | Local comparison and explicit approval; screen-lock pause; no hosted account exists in this MVP. A hosted service would require strong account recovery/MFA/session controls and is a separate decision. |
-| Pairing phishing or invitation theft | Attacker submits an invalid or attacker device key using a copied five-minute invitation. | Random PSK, short expiry, attempt limits, authenticated response, six-digit code derived from both keys and invitation, local comparison, sanitized device label, explicit project choice, and P-256 key import before any durable grant/audit mutation. Six digits require human verification and are not sole authentication. |
+| Pairing phishing or invitation theft | Attacker submits an invalid or attacker device key using a copied five-minute invitation, or deliberately consumes it. | Random PSK, short expiry, attempt limits, one-time consumption before crypto, authenticated response, six-digit code derived from both keys and invitation, local comparison, sanitized device label, explicit project choice, and P-256 key import before any durable grant/audit mutation. Six digits require human verification and are not sole authentication. An invitation holder can force the local user to create a new invitation, but cannot create parallel approvals from one invitation. |
 | Control/bidi device-label spoofing | Approval list could visually impersonate another browser or reorder text. | Main-process NFKC normalization removes controls and bidi override/isolate marks before pending state or persistence. |
-| Pairing replay | Reuse an invitation/request. | One live invitation, five-minute expiry, bounded request-ID replay set, strict request/invitation correlation, local approval. |
+| Pairing replay | Reuse an invitation/request or race copies across relay routes. | One live invitation consumed synchronously before decryption, one pending approval, five-minute expiry, bounded request-ID replay set, strict request/invitation correlation, local approval. Re-pairing an existing device closes every old session after the replacement grant is durable. |
 | Session replay/fixation | Reuse a valid opening, race the same ID across routes, over-admit while crypto/persistence awaits, retain an opening across local revocation, force sequence reuse, or pin an old grant. | Fresh UUID/timestamp, atomic global session-ID/capacity reservation before crypto, release on failure/disconnect/grant change, persisted used-session IDs, HPKE authenticated context bound to host/device/session, exact sequence, desktop current grant returned encrypted. |
 | Authentication CPU exhaustion | Repeated invalid openings trigger P-256 work across device keys. | Four attempts per relay connection, 24/minute global budget before crypto, at most 16 device keys, relay connection/message limits. Distributed relay/network DoS remains possible. |
 | Malicious project/provider output | XSS, deceptive links, secret/path exfiltration, oversized responses. | Safe projection only, arbitrary POSIX, drive-letter, UNC, extended/device-namespace, and file-URL redaction, credential/code/HTML redaction, user/assistant roles only, UTF-8 byte budget, strict schemas/CSP, DOM `textContent`, no Markdown/HTML execution. Ordinary HTTP(S) URLs, escaped prose, and surrounding punctuation remain usable. Heuristic redaction cannot prove arbitrary prose contains no secret. |
@@ -140,9 +140,11 @@ Release-blocking deterministic coverage includes:
   replay;
 - Linux plaintext/unknown storage rejection, corrupt vaults, unique
   replacement recovery, Windows replacement, restrictive modes, restart;
-- pairing label spoofing, explicit project choice, invalid P-256 rejection
-  before durable mutation, device scope/expiry, reduction/reconnect,
-  revocation, stolen-key rejection;
+- pairing label spoofing, explicit project choice, atomic one-time invitation
+  consumption across concurrent routes, invalid-request consumption, invalid
+  P-256 rejection before durable mutation, replacement-session teardown after
+  durable acceptance, device scope/expiry, reduction/reconnect, revocation,
+  stolen-key rejection;
 - per-connection/global authentication exhaustion and recovery;
 - back-to-back encrypted request/response sequencing with concurrent runtime
   work, atomic duplicate-ID/capacity admission during gated crypto/persistence,

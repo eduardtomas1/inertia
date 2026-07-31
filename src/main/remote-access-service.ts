@@ -281,7 +281,7 @@ export class RemoteAccessService {
     ) {
       throw new Error("That pairing request is no longer pending.");
     }
-    const device = applyRemotePairingGrant({
+    const { device, replaced } = applyRemotePairingGrant({
       data,
       pending,
       scopes,
@@ -290,9 +290,9 @@ export class RemoteAccessService {
       now: this.now(),
     });
     this.pendingPairings.delete(requestId);
-    this.invitation = null;
     this.audit("pairing.accepted", device.id, "A device was paired.");
     await this.persist();
+    if (replaced) this.closeDeviceSessions(device.id, "revoked", false);
     const frame = await sealPairingResponse(
       this.requireHostKeyPair(),
       devicePublicKey,
@@ -316,7 +316,6 @@ export class RemoteAccessService {
     const pending = this.pendingPairings.get(requestId);
     if (!pending) return;
     this.pendingPairings.delete(requestId);
-    this.invitation = null;
     this.audit("pairing.denied", pending.payload.deviceId, "A pairing request was denied.");
     await this.persist();
     const frame = await sealPairingResponse(
@@ -495,12 +494,10 @@ export class RemoteAccessService {
       || Date.parse(invitation.expiresAt) <= this.now().getTime()
       || !this.takePairingAttempt()
     ) return;
+    this.invitation = null;
+    this.emitState();
     const payload = remotePairingRequestPayloadSchema.parse(
-      await openPairingRequest(
-        invitation,
-        this.requireHostKeyPair(),
-        frame,
-      ),
+      await openPairingRequest(invitation, this.requireHostKeyPair(), frame),
     );
     if (!this.relayMessages.owns(connectionId, epoch)) return;
     if (
@@ -508,6 +505,7 @@ export class RemoteAccessService {
       || Math.abs(Date.parse(payload.createdAt) - this.now().getTime())
         > REMOTE_LIMITS.pairingTtlMs
       || this.pairingRequestIds.has(payload.requestId)
+      || this.pendingPairings.size >= REMOTE_LIMITS.pendingPairings
     ) return;
     const deviceLabel = sanitizeRemoteDeviceLabel(payload.deviceLabel);
     if (!deviceLabel) return;
@@ -527,10 +525,10 @@ export class RemoteAccessService {
       ),
     };
     this.invitation = null;
+    this.pendingPairings.set(payload.requestId, pending);
     this.audit("pairing.requested", payload.deviceId, "A device requested pairing.");
     await this.persist();
     if (!this.relayMessages.owns(connectionId, epoch)) return;
-    this.pendingPairings.set(payload.requestId, pending);
     this.emitState();
   }
 

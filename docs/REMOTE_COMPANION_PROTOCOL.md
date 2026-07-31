@@ -95,7 +95,11 @@ Pairing:
    invitation ID, random pairing secret, and expiry.
 2. The browser independently rejects any relay URL except `wss://` or loopback
    `ws://`, creates a device P-256 key pair, and encrypts a strict pairing
-   request with HPKE PSK mode.
+   request with HPKE PSK mode. After matching the invitation ID, expiry, and
+   attempt budget, the desktop consumes the one-time invitation synchronously
+   before HPKE work. Concurrent copies cannot create multiple approvals; a
+   malformed request from an invitation holder consumes it and requires the
+   local user to create a new invitation.
 3. Both devices derive and display the same six-digit comparison code from the
    host public key, device public key, and invitation ID. The local user must
    compare it and explicitly choose at least one project. Prompt scope is a
@@ -103,7 +107,9 @@ Pairing:
 4. The desktop normalizes the untrusted browser label, removing controls and
    bidi formatting marks. It imports and validates the submitted P-256 public
    key before mutating or persisting the grant, then returns an authenticated
-   encrypted pairing result.
+   encrypted pairing result. If the device ID replaces an existing grant, its
+   old sessions close immediately after the replacement is durably stored and
+   before the pairing response is sealed.
 
 Sessions:
 

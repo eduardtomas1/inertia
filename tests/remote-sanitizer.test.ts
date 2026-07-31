@@ -228,6 +228,22 @@ describe("Remote Companion safe text projection", () => {
     expect(sanitizeRemoteContent(adversarialBoundaries))
       .toBe(adversarialBoundaries);
     expect(performance.now() - startedAt).toBeLessThan(2_000);
+    const regexToken = String.raw`\d?`.repeat(
+      Math.floor((64 * 1024) / String.raw`\d?`.length),
+    );
+    const regexStartedAt = performance.now();
+    expect(sanitizeRemoteContent(regexToken)).toBe(regexToken);
+    expect(performance.now() - regexStartedAt).toBeLessThan(2_000);
+    const mixedFragment = String.raw`\d?\W+\s{1,3}\B*`;
+    const mixedSuffix = " </srv/private/.env>";
+    const mixedToken = mixedFragment.repeat(
+      Math.floor(((64 * 1024) - mixedSuffix.length) / mixedFragment.length),
+    );
+    const mixedStartedAt = performance.now();
+    expect(sanitizeRemoteContent(`${mixedToken}${mixedSuffix}`)).toBe(
+      `${mixedToken} <<local-path>>`,
+    );
+    expect(performance.now() - mixedStartedAt).toBeLessThan(2_000);
     expect(sanitizeRemoteLabel("  hello\u0000\n world ", 20)).toBe(
       "hello world",
     );

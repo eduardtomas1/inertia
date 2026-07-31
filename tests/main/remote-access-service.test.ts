@@ -529,6 +529,119 @@ describe("Remote Companion outbound encrypted service", () => {
     await service.shutdown();
   });
 
+  it("atomically consumes one invitation across concurrent relay routes", async () => {
+    const relayUrl = await relay();
+    const service = await RemoteAccessService.create({
+      store: encryptedStore(),
+      runtime: { remoteRequest: async () => {
+        throw new Error("unused");
+      } },
+    });
+    await service.setEnabled(true, relayUrl);
+    await waitFor(() => service.state().connection === "online");
+    const invitation = await service.createInvitation();
+    const firstKeys = await generateRemoteKeyPair();
+    const secondKeys = await generateRemoteKeyPair();
+    const firstTunnel = await browserTunnel(relayUrl, invitation.endpointId);
+    const secondTunnel = await browserTunnel(relayUrl, invitation.endpointId);
+    const firstRequestId = crypto.randomUUID();
+    let releasePairing = (): void => undefined;
+    const pairingReleased = new Promise<void>((resolve) => {
+      releasePairing = resolve;
+    });
+    let pairingOpenCount = 0;
+    let pairingOpened = (): void => undefined;
+    const firstPairingOpened = new Promise<void>((resolve) => {
+      pairingOpened = resolve;
+    });
+    remoteCryptoGate.afterPairingOpen = async () => {
+      pairingOpenCount += 1;
+      pairingOpened();
+      await pairingReleased;
+    };
+
+    sendFrame(
+      firstTunnel.socket,
+      firstTunnel.connectionId,
+      await sealPairingRequest(invitation, {
+        type: "pair.request",
+        requestId: firstRequestId,
+        invitationId: invitation.invitationId,
+        deviceId: crypto.randomUUID(),
+        deviceLabel: "First browser",
+        devicePublicKey: firstKeys.publicKey,
+        createdAt: new Date().toISOString(),
+        browserVersion: "0.1.0",
+      }),
+    );
+    await firstPairingOpened;
+    sendFrame(
+      secondTunnel.socket,
+      secondTunnel.connectionId,
+      await sealPairingRequest(invitation, {
+        type: "pair.request",
+        requestId: crypto.randomUUID(),
+        invitationId: invitation.invitationId,
+        deviceId: crypto.randomUUID(),
+        deviceLabel: "Copied invitation browser",
+        devicePublicKey: secondKeys.publicKey,
+        createdAt: new Date().toISOString(),
+        browserVersion: "0.1.0",
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(pairingOpenCount).toBe(1);
+    expect(service.state()).toMatchObject({
+      invitation: null,
+      pendingPairings: [],
+    });
+
+    remoteCryptoGate.afterPairingOpen = null;
+    releasePairing();
+    await waitFor(() => service.state().pendingPairings.length === 1);
+    expect(service.state().pendingPairings[0]?.requestId).toBe(firstRequestId);
+    await service.shutdown();
+  });
+
+  it("fails closed when an invitation holder sends invalid pairing crypto", async () => {
+    const relayUrl = await relay();
+    const service = await RemoteAccessService.create({
+      store: encryptedStore(),
+      runtime: { remoteRequest: async () => {
+        throw new Error("unused");
+      } },
+    });
+    await service.setEnabled(true, relayUrl);
+    await waitFor(() => service.state().connection === "online");
+    const invitation = await service.createInvitation();
+    const deviceKeys = await generateRemoteKeyPair();
+    const invalidTunnel = await browserTunnel(
+      relayUrl,
+      invitation.endpointId,
+    );
+    const validTunnel = await browserTunnel(relayUrl, invitation.endpointId);
+    const validFrame = await sealPairingRequest(invitation, {
+      type: "pair.request",
+      requestId: crypto.randomUUID(),
+      invitationId: invitation.invitationId,
+      deviceId: crypto.randomUUID(),
+      deviceLabel: "Browser",
+      devicePublicKey: deviceKeys.publicKey,
+      createdAt: new Date().toISOString(),
+      browserVersion: "0.1.0",
+    });
+
+    sendFrame(invalidTunnel.socket, invalidTunnel.connectionId, {
+      ...validFrame,
+      ciphertext: "AA",
+    });
+    await waitFor(() => service.state().invitation === null);
+    sendFrame(validTunnel.socket, validTunnel.connectionId, validFrame);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(service.state().pendingPairings).toEqual([]);
+    await service.shutdown();
+  });
+
   it("reserves a session ID before crypto and releases it on disconnect", async () => {
     const paired = await pairedDeviceFixture();
     const sessionId = crypto.randomUUID();
@@ -1043,6 +1156,139 @@ describe("Remote Companion outbound encrypted service", () => {
       "pairing.accepted",
     );
     await pairing.service.shutdown();
+  });
+
+  it("closes stale sessions after durably replacing a device grant", async () => {
+    const remoteRequest = vi.fn(async (): Promise<RemoteResponse> => {
+      throw new Error("A replaced session reached the runtime.");
+    });
+    const prepareRemotePrompt = vi.fn(async () => ({
+      preparationId: crypto.randomUUID(),
+    }));
+    const paired = await pairedServiceFixture({
+      runtime: { remoteRequest, prepareRemotePrompt },
+      scopes: ["view", "prompt"],
+    });
+    const replacementProjectId = crypto.randomUUID();
+    const invitation = await paired.service.createInvitation();
+    const replacementKeys = await generateRemoteKeyPair();
+    const requestId = crypto.randomUUID();
+    const pairingTunnel = await browserTunnel(
+      paired.relayUrl,
+      invitation.endpointId,
+    );
+    sendFrame(
+      pairingTunnel.socket,
+      pairingTunnel.connectionId,
+      await sealPairingRequest(invitation, {
+        type: "pair.request",
+        requestId,
+        invitationId: invitation.invitationId,
+        deviceId: paired.deviceId,
+        deviceLabel: "Replacement browser",
+        devicePublicKey: replacementKeys.publicKey,
+        createdAt: new Date().toISOString(),
+        browserVersion: "0.1.0",
+      }),
+    );
+    await waitFor(() => paired.service.state().pendingPairings.length === 1);
+
+    const originalSave = paired.store.save.bind(paired.store);
+    let enterSave = (): void => undefined;
+    const saveEntered = new Promise<void>((resolve) => {
+      enterSave = resolve;
+    });
+    let releaseSave = (): void => undefined;
+    const saveReleased = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const save = vi.spyOn(paired.store, "save").mockImplementationOnce(
+      async (value) => {
+        enterSave();
+        await saveReleased;
+        await originalSave(value);
+      },
+    );
+    const closeFrame = nextFrame(
+      paired.session.tunnel.socket,
+      "session.close",
+    );
+    let sessionClosed = false;
+    void closeFrame.then(() => {
+      sessionClosed = true;
+    });
+    const pairingResponse = nextFrame(pairingTunnel.socket, "pair.response");
+    const approval = paired.service.approvePairing(
+      requestId,
+      ["view"],
+      [replacementProjectId],
+    );
+
+    await saveEntered;
+    expect(sessionClosed).toBe(false);
+    expect(paired.service.state().activeSessions).toBe(1);
+    releaseSave();
+    await approval;
+    save.mockRestore();
+    expect(await closeFrame).toMatchObject({
+      kind: "session.close",
+      reason: "revoked",
+    });
+    expect(await pairingResponse).toMatchObject({ kind: "pair.response" });
+    expect(paired.service.state()).toMatchObject({
+      activeSessions: 0,
+      devices: [{
+        id: paired.deviceId,
+        scopes: ["view"],
+        projectIds: [replacementProjectId],
+      }],
+    });
+
+    sendFrame(
+      paired.session.tunnel.socket,
+      paired.session.tunnel.connectionId,
+      await sealSessionData(
+        paired.session.sender,
+        paired.session.sessionId,
+        {
+          type: "state.get",
+          requestId: crypto.randomUUID(),
+        },
+      ),
+    );
+    sendFrame(
+      paired.session.tunnel.socket,
+      paired.session.tunnel.connectionId,
+      await sealSessionData(
+        paired.session.sender,
+        paired.session.sessionId,
+        {
+          type: "prompt.send",
+          requestId: crypto.randomUUID(),
+          deliveryId: crypto.randomUUID(),
+          conversationId: crypto.randomUUID(),
+          content: "Do not queue from the replaced grant.",
+        },
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(remoteRequest).not.toHaveBeenCalled();
+    expect(prepareRemotePrompt).not.toHaveBeenCalled();
+
+    pairingTunnel.socket.terminate();
+    const replacementSession = await openAuthenticatedSession({
+      relayUrl: paired.relayUrl,
+      invitation,
+      deviceId: paired.deviceId,
+      deviceKeys: replacementKeys,
+      grantVersion: 2,
+    });
+    expect(replacementSession.accepted).toMatchObject({
+      scopes: ["view"],
+      projectIds: [replacementProjectId],
+      grantVersion: 2,
+    });
+    await paired.service.shutdown();
   });
 
   it("fails closed instead of applying an unpersisted grant widening", async () => {

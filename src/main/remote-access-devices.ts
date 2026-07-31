@@ -12,6 +12,7 @@ import {
 } from "./remote-access-policy";
 import {
   normalizeRemoteConversationGrants,
+  remoteConversationGrantsFromProjectIds,
   remoteGrantedProjectIds,
   type RemoteConversationGrant,
 } from "../shared/remote-grants";
@@ -157,9 +158,12 @@ function resolvedGrants(
   projectIds: string[],
   grants: RemoteConversationGrant[] | undefined,
 ): RemoteConversationGrant[] {
+  if (grants === undefined) {
+    return remoteConversationGrantsFromProjectIds(projectIds);
+  }
   const allowed = new Set(normalizeRemoteProjectIds(projectIds));
   const normalized = normalizeRemoteConversationGrants(
-    (grants ?? []).filter(({ projectId }) => allowed.has(projectId)),
+    grants.filter(({ projectId }) => allowed.has(projectId)),
   );
   const covered = new Set(normalized.map(({ projectId }) => projectId));
   const missing = [...allowed].filter((projectId) => !covered.has(projectId));

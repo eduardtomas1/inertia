@@ -10,7 +10,27 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const discoveryHarness = vi.hoisted((): { pathEntries: string[] } => ({
+  pathEntries: [],
+}));
+
+vi.mock("../../src/server/environment", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../src/server/environment")
+  >();
+  return {
+    ...actual,
+    providerEnvironment: async () => ({
+      env: {
+        ...process.env,
+        PATH: discoveryHarness.pathEntries.join(delimiter),
+      },
+      pathEntries: [...discoveryHarness.pathEntries],
+    }),
+  };
+});
 
 import {
   createKimiClaudeBackendProfile,
@@ -148,7 +168,7 @@ function fakeClaudeExecutable(root: string): void {
   const directory = join(root, "provider-bin");
   mkdirSync(directory);
   const executable = join(directory, "claude");
-  writeFileSync(executable, `#!/usr/bin/env node
+  writeFileSync(executable, `#!${process.execPath}
 const args = process.argv.slice(2);
 if (args[0] === "--version") {
   process.stdout.write("2.1.219\\n");
@@ -161,6 +181,7 @@ if (args[0] === "auth" && args[1] === "status") {
 process.exit(2);
 `);
   chmodSync(executable, 0o755);
+  discoveryHarness.pathEntries = [directory];
   process.env.PATH = [directory, process.env.PATH ?? ""].filter(Boolean).join(delimiter);
 }
 
@@ -239,6 +260,7 @@ describe("Kimi through Claude runtime lifecycle", () => {
   afterEach(async () => {
     for (const socket of sockets.splice(0)) socket.close();
     await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
+    discoveryHarness.pathEntries = [];
     if (originalPath === undefined) delete process.env.PATH;
     else process.env.PATH = originalPath;
     for (const directory of directories.splice(0)) {

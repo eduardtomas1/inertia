@@ -100,12 +100,11 @@ export async function sendSequencedRemoteResponse(
 ): Promise<void> {
   const sending = session.outboundTail.catch(() => undefined).then(async () => {
     if (!isCurrent()) return;
-    const frame = await sealSessionData(
+    send(session.connectionId, await sealSessionData(
       session.sender,
       session.sessionId,
       response,
-    );
-    if (isCurrent()) send(session.connectionId, frame);
+    ));
   });
   session.outboundTail = sending;
   await sending;

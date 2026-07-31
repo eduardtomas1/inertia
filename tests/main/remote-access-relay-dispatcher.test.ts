@@ -54,6 +54,7 @@ describe("Remote Companion relay frame ownership", () => {
       },
       invalidated,
       disconnected,
+      rejected: vi.fn(),
       oversized: vi.fn(),
     });
     dispatcher.receive(message({ type: "relay.peer-connected", connectionId }));
@@ -95,6 +96,7 @@ describe("Remote Companion relay frame ownership", () => {
       frame: () => released,
       invalidated: vi.fn(),
       disconnected,
+      rejected: vi.fn(),
       oversized: vi.fn(),
     });
     dispatcher.receive(message({ type: "relay.peer-connected", connectionId }));

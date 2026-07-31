@@ -154,6 +154,9 @@ export function projectRemoteAccessState(input: {
       comparisonCode: pending.comparisonCode,
       receivedAt: pending.receivedAt,
       expiresAt: pending.expiresAt,
+      replacesDeviceLabel: data?.devices.find(
+        ({ id }) => id === pending.payload.deviceId,
+      )?.label ?? null,
     })),
     invitation: input.invitation,
     audit: (data?.audit ?? []).slice(-100).reverse(),

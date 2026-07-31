@@ -53,6 +53,8 @@ interface PendingRemotePromptPreparation {
 const PREPARED_PROMPT_TTL_MS = 15_000;
 const PREPARED_PROMPT_LIMIT =
   REMOTE_LIMITS.sessions * REMOTE_LIMITS.inFlightRequestsPerSession;
+const SANITIZED_CONTENT_LIMIT =
+  REMOTE_LIMITS.transcriptMessages * REMOTE_LIMITS.sessions;
 
 export class RemoteRuntimeGateway {
   private readonly receipts = new Map<string, DeliveryReceipt>();
@@ -60,6 +62,8 @@ export class RemoteRuntimeGateway {
   private readonly latestPreparationIdByRequest = new Map<string, string>();
   private readonly pendingPreparations =
     new Map<string, PendingRemotePromptPreparation>();
+  private readonly sanitizedContent =
+    new Map<string, { source: string; value: string }>();
   private readonly now: () => Date;
 
   constructor(private readonly dependencies: RemoteGatewayDependencies) {
@@ -144,7 +148,7 @@ export class RemoteRuntimeGateway {
               id: message.id,
               turnId: message.turnId,
               role: message.role as "user" | "assistant",
-              content: sanitizeRemoteContent(message.content),
+              content: this.sanitizedMessageContent(message.id, message.content),
               createdAt: message.createdAt,
             })),
           activities: detail.activities
@@ -438,6 +442,24 @@ export class RemoteRuntimeGateway {
     }
   }
 
+  private sanitizedMessageContent(id: string, content: string): string {
+    const cached = this.sanitizedContent.get(id);
+    if (cached && cached.source === content) {
+      this.sanitizedContent.delete(id);
+      this.sanitizedContent.set(id, cached);
+      return cached.value;
+    }
+    const value = sanitizeRemoteContent(content);
+    this.sanitizedContent.delete(id);
+    this.sanitizedContent.set(id, { source: content, value });
+    while (this.sanitizedContent.size > SANITIZED_CONTENT_LIMIT) {
+      const oldest = this.sanitizedContent.keys().next().value;
+      if (typeof oldest !== "string") break;
+      this.sanitizedContent.delete(oldest);
+    }
+    return value;
+  }
+
   private prunePreparedPrompts(): void {
     const cutoff = this.now().getTime() - PREPARED_PROMPT_TTL_MS;
     for (const [preparationId, prepared] of this.preparedPrompts) {
@@ -478,8 +500,10 @@ function samePreparedPrompt(
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length
-    && left.every((value, index) => value === right[index]);
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 
 function unavailableConversationResponse(requestId: string): RemoteResponse {

@@ -430,6 +430,7 @@ export interface RemotePendingPairingView {
   comparisonCode: string;
   receivedAt: string;
   expiresAt: string;
+  replacesDeviceLabel: string | null;
 }
 
 export interface RemoteAuditEvent {

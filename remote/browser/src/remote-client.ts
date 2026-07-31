@@ -176,8 +176,14 @@ export class RemoteCompanionClient {
         ),
       );
       if (!this.ownsAttempt(epoch)) return;
+      if (response.requestId !== requestId) {
+        throw new Error("The pairing response did not match this request.");
+      }
       if (response.type !== "pair.accepted") {
         throw new Error("The desktop did not approve this browser.");
+      }
+      if (response.deviceId !== deviceId) {
+        throw new Error("The pairing response did not match this browser.");
       }
       const profile: BrowserDeviceProfile = {
         version: 1,

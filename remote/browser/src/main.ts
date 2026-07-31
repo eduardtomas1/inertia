@@ -17,6 +17,58 @@ let online = false;
 let pairingCode: string | null = null;
 let promptStatus: { message: string; uncertain: boolean } | null = null;
 let pairing = false;
+let promptDraft: { conversationId: string; value: string } | null = null;
+let invitationDraft = "";
+let deviceNameDraft = "";
+let promptConversationId: string | null = null;
+
+function captureDrafts(): void {
+  const prompt = document.getElementById("remote-prompt-input");
+  if (prompt instanceof HTMLTextAreaElement && promptConversationId) {
+    promptDraft = {
+      conversationId: promptConversationId,
+      value: prompt.value,
+    };
+  }
+  const invitation = document.getElementById("remote-invitation-input");
+  if (invitation instanceof HTMLTextAreaElement) {
+    invitationDraft = invitation.value;
+  }
+  const name = document.getElementById("remote-device-name");
+  if (name instanceof HTMLInputElement) deviceNameDraft = name.value;
+}
+
+interface RemoteFieldFocus {
+  id: string;
+  selectionStart: number | null;
+  selectionEnd: number | null;
+}
+
+function activeFieldFocus(): RemoteFieldFocus | null {
+  const active = document.activeElement;
+  if (
+    !(active instanceof HTMLTextAreaElement
+      || active instanceof HTMLInputElement)
+    || !active.id
+  ) return null;
+  return {
+    id: active.id,
+    selectionStart: active.selectionStart,
+    selectionEnd: active.selectionEnd,
+  };
+}
+
+function restoreFieldFocus(focus: RemoteFieldFocus | null): void {
+  if (!focus) return;
+  const field = document.getElementById(focus.id);
+  if (
+    !(field instanceof HTMLTextAreaElement
+      || field instanceof HTMLInputElement)
+  ) return;
+  field.focus();
+  if (focus.selectionStart === null || focus.selectionEnd === null) return;
+  field.setSelectionRange(focus.selectionStart, focus.selectionEnd);
+}
 
 const client = new RemoteCompanionClient({
   status: (message, isOnline) => {
@@ -55,7 +107,15 @@ void client.initialize().then(
 );
 
 function render(): void {
+  const focus = activeFieldFocus();
+  captureDrafts();
   root.replaceChildren();
+  promptConversationId = null;
+  renderInto();
+  restoreFieldFocus(focus);
+}
+
+function renderInto(): void {
   const header = document.createElement("header");
   const title = document.createElement("h1");
   title.textContent = "Inertia Remote Companion";
@@ -136,22 +196,28 @@ function renderPairing(): void {
   const label = document.createElement("label");
   label.textContent = "Browser name";
   const name = document.createElement("input");
+  name.id = "remote-device-name";
   name.maxLength = 80;
-  name.value = navigator.userAgent.includes("Mobile")
+  deviceNameDraft ||= navigator.userAgent.includes("Mobile")
     ? "Mobile browser"
     : "Web browser";
+  name.value = deviceNameDraft;
   label.append(name);
   const invitationLabel = document.createElement("label");
   invitationLabel.textContent = "Invitation";
   const invitation = document.createElement("textarea");
+  invitation.id = "remote-invitation-input";
   invitation.rows = 8;
   invitation.spellcheck = false;
+  invitation.value = invitationDraft;
   invitationLabel.append(invitation);
   section.append(label, invitationLabel);
   section.append(button(pairing ? "Waiting for desktop…" : "Pair", () => {
     if (pairing) return;
     pairing = true;
-    void client.pair(invitation.value, name.value).catch((error: unknown) => {
+    void client.pair(invitation.value, name.value).then(() => {
+      invitationDraft = "";
+    }, (error: unknown) => {
       status = error instanceof Error ? error.message : "Pairing failed.";
       pairing = false;
       render();
@@ -233,8 +299,13 @@ function renderDetail(
   const label = document.createElement("label");
   label.textContent = "Text prompt";
   const prompt = document.createElement("textarea");
+  prompt.id = "remote-prompt-input";
   prompt.rows = 4;
   prompt.maxLength = 8_000;
+  prompt.value = promptDraft?.conversationId === value.conversation.id
+    ? promptDraft.value
+    : "";
+  promptConversationId = value.conversation.id;
   label.append(prompt);
   const submit = document.createElement("button");
   submit.type = "submit";
@@ -244,6 +315,7 @@ function renderDetail(
     event.preventDefault();
     const content = prompt.value;
     prompt.value = "";
+    promptDraft = null;
     promptStatus = null;
     void client.sendPrompt(value.conversation.id, content);
   });

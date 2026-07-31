@@ -112,6 +112,7 @@ describe("Remote Companion browser output boundary", () => {
         comparisonCode: "123456",
         receivedAt: now,
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        replacesDeviceLabel: null,
       }],
       invitation: null,
       audit: [],

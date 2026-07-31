@@ -9,6 +9,8 @@ const CREDENTIAL_URL =
   /\b([a-z][a-z0-9+.-]*:\/\/)(?:[^/\s@]+)@/giu;
 const DIRECTIONAL_FORMATTING =
   /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u206f]+/gu;
+const CONTENT_CONTROL_CHARACTERS =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/gu;
 const MAX_REMOTE_CONTENT_CHARACTERS = 64 * 1024;
 const CODE_OMISSION = "[Code omitted on Remote Companion]";
 const HTML_OMISSION = "[HTML omitted on Remote Companion]";
@@ -74,7 +76,11 @@ export function sanitizeRemoteContent(
     MAX_REMOTE_CONTENT_CHARACTERS,
   );
   let text = redactRemoteHtmlBlocks(
-    redactRemoteCodeBlocks(value.slice(0, outputLimit)),
+    redactRemoteCodeBlocks(
+      value.slice(0, outputLimit)
+        .replace(CONTENT_CONTROL_CHARACTERS, " ")
+        .replace(DIRECTIONAL_FORMATTING, " "),
+    ),
   )
     .replace(CREDENTIAL_URL, "$1<redacted>@");
   for (const pattern of SECRET_PATTERNS) {
@@ -285,6 +291,7 @@ function remoteLineAt(value: string, start: number): RemoteLine {
 // table avoids nested-regex behavior and lets the second pass replace
 // disjoint/nested ranges monotonically.
 function redactRemoteHtmlBlocks(value: string): string {
+  if (!value.includes("<")) return value;
   const redactionEnds = new Uint32Array(value.length + 1);
   const openings: RemoteHtmlOpening[] = [];
   let index = 0;

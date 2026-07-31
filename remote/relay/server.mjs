@@ -100,16 +100,19 @@ export async function createReferenceRelay(options = {}) {
       return;
     }
     websocketServer.handleUpgrade(request, socket, head, (websocket) => {
-      websocketServer.emit("connection", websocket);
+      websocketServer.emit("connection", websocket, request);
     });
   });
 
-  websocketServer.on("connection", (socket) => {
+  websocketServer.on("connection", (socket, request) => {
     sockets.add(socket);
     stateBySocket.set(socket, {
       role: "unregistered",
       endpointId: null,
       connectionId: null,
+      origin: typeof request?.headers?.origin === "string"
+        ? request.headers.origin
+        : null,
       messageTimes: [],
       alive: true,
     });
@@ -149,6 +152,10 @@ export async function createReferenceRelay(options = {}) {
         return;
       }
       if (message.type === "relay.register") {
+        if (state.origin !== null) {
+          sendError(socket, "invalid-message");
+          return;
+        }
         if (
           state.role !== "unregistered"
           || desktops.has(message.endpointId)
@@ -163,7 +170,13 @@ export async function createReferenceRelay(options = {}) {
         return;
       }
       if (message.type === "relay.connect") {
-        if (state.role !== "unregistered") {
+        if (
+          state.role !== "unregistered"
+          || (
+            allowedOrigins.size > 0
+            && (state.origin === null || !allowedOrigins.has(state.origin))
+          )
+        ) {
           sendError(socket, "invalid-message");
           return;
         }

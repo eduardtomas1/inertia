@@ -168,4 +168,88 @@ describe("Remote Companion browser selection boundary", () => {
     })).toBeNull();
     expect(screen.getByText("Choose a conversation.")).toBeInTheDocument();
   });
+
+  it("keeps an unsent prompt across live polling refreshes", async () => {
+    const now = new Date().toISOString();
+    const projectId = crypto.randomUUID();
+    const conversationId = crypto.randomUUID();
+    appHarness.profile = {
+      version: 1,
+      deviceId: crypto.randomUUID(),
+      deviceLabel: "Test browser",
+      keyPair: {
+        publicKey: "device_public",
+        privateKey: "device_private",
+      },
+      hostId: crypto.randomUUID(),
+      hostPublicKey: "host_public",
+      relayUrl: "wss://relay.example/custom/path",
+      endpointId: "opaque_endpoint",
+      scopes: ["view", "prompt"],
+      projectIds: [projectId],
+      grantVersion: 1,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const conversation: RemoteSafeConversation = {
+      id: conversationId,
+      projectId,
+      title: "Conversation A",
+      providerLabel: "Provider",
+      status: "idle",
+      pendingLocalApproval: false,
+      updatedAt: now,
+    };
+    const shell: RemoteSafeShell = {
+      generatedAt: now,
+      projects: [{ id: projectId, name: "Project" }],
+      conversations: [conversation],
+      runs: [],
+    };
+    const detail = (messageCount: number): RemoteSafeConversationDetail => ({
+      generatedAt: new Date().toISOString(),
+      conversation,
+      messages: Array.from({ length: messageCount }, (_value, index) => ({
+        id: `message-${index}`,
+        turnId: null,
+        role: "assistant" as const,
+        content: `Agent line ${index}`,
+        createdAt: now,
+      })),
+      activities: [],
+      subagents: [],
+      waitingForLocalAction: false,
+    });
+    const root = document.createElement("div");
+    root.id = "app";
+    document.body.append(root);
+
+    await import("../../remote/browser/src/main");
+    await waitFor(() => expect(appHarness.callbacks).not.toBeNull());
+    appHarness.callbacks!.shell(shell);
+    appHarness.callbacks!.detail(detail(1));
+
+    const field = screen.getByLabelText("Text prompt") as HTMLTextAreaElement;
+    field.focus();
+    fireEvent.change(field, { target: { value: "Half typed prompt" } });
+
+    appHarness.callbacks!.shell(shell);
+    appHarness.callbacks!.detail(detail(2));
+
+    const refreshed = screen.getByLabelText("Text prompt") as HTMLTextAreaElement;
+    expect(refreshed.value).toBe("Half typed prompt");
+    expect(document.activeElement).toBe(refreshed);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Send to desktop",
+    }));
+    expect(appHarness.sendPrompt).toHaveBeenCalledWith(
+      conversationId,
+      "Half typed prompt",
+    );
+
+    appHarness.callbacks!.detail(detail(3));
+    expect(
+      (screen.getByLabelText("Text prompt") as HTMLTextAreaElement).value,
+    ).toBe("");
+  });
 });

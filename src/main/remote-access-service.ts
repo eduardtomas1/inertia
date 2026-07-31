@@ -140,6 +140,10 @@ export class RemoteAccessService {
         this.sessionAdmissions.drop(id, epoch);
       },
       disconnected: (id, epoch) => this.dropConnection(id, epoch),
+      rejected: (id) => this.sendRelay({
+        protocolVersion: REMOTE_PROTOCOL_VERSION,
+        type: "relay.disconnect", connectionId: id,
+      }),
       oversized: () => this.socket?.close(1009, "message too large"),
     });
     this.requests = new RemoteRequestDispatcher({
@@ -429,7 +433,7 @@ export class RemoteAccessService {
     socket.once("close", () => {
       if (this.socket !== socket) return;
       this.socket = null;
-      this.connection = this.privacyLocked ? "offline" : "offline";
+      this.connection = "offline";
       this.connectionMessage = this.privacyLocked
         ? "Remote Companion is paused while the desktop is locked."
         : "The relay is offline.";
@@ -469,16 +473,13 @@ export class RemoteAccessService {
     frame: RemoteCipherFrame,
   ): Promise<void> {
     if (frame.kind === "pair.request") {
-      await this.handlePairingRequest(connectionId, epoch, frame);
-      return;
+      return await this.handlePairingRequest(connectionId, epoch, frame);
     }
     if (frame.kind === "session.open") {
-      await this.handleSessionOpen(connectionId, epoch, frame);
-      return;
+      return await this.handleSessionOpen(connectionId, epoch, frame);
     }
     if (frame.kind === "session.data") {
-      await this.handleSessionData(connectionId, epoch, frame);
-      return;
+      return await this.handleSessionData(connectionId, epoch, frame);
     }
     if (frame.kind === "session.close") {
       this.relayMessages.invalidate(connectionId, epoch);
@@ -701,13 +702,13 @@ export class RemoteAccessService {
   }
 
   private sendFrame(connectionId: string, frame: RemoteCipherFrame): void {
-    if (!remoteCipherFrameSchema.safeParse(frame).success) return;
-    if (encodedRemoteFrameBytes(frame) > REMOTE_LIMITS.encryptedFrameBytes) return;
+    if (
+      !remoteCipherFrameSchema.safeParse(frame).success
+      || encodedRemoteFrameBytes(frame) > REMOTE_LIMITS.encryptedFrameBytes
+    ) return;
     this.sendRelay({
-      protocolVersion: REMOTE_PROTOCOL_VERSION,
-      type: "relay.frame",
-      connectionId,
-      frame,
+      protocolVersion: REMOTE_PROTOCOL_VERSION, type: "relay.frame",
+      connectionId, frame,
     });
   }
 
@@ -715,10 +716,8 @@ export class RemoteAccessService {
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     const serialized = JSON.stringify(message);
-    if (
-      new TextEncoder().encode(serialized).byteLength
-      > REMOTE_LIMITS.relayEnvelopeBytes
-    ) return;
+    const bytes = new TextEncoder().encode(serialized).byteLength;
+    if (bytes > REMOTE_LIMITS.relayEnvelopeBytes) return;
     socket.send(serialized);
   }
 

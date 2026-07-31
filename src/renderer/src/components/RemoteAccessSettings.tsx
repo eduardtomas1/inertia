@@ -172,6 +172,11 @@ export function RemoteAccessSettings({
             </span>
           </div>
           <div className="remote-comparison-code">{pending.comparisonCode}</div>
+          {pending.replacesDeviceLabel && (
+            <p className="settings-card-note" role="status">
+              Approving replaces the existing paired device “{pending.replacesDeviceLabel}” and ends its sessions.
+            </p>
+          )}
           <ProjectScope
             projects={projects}
             selected={projectIds}

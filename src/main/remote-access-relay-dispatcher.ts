@@ -24,6 +24,7 @@ interface RemoteRelayDispatcherHandlers {
   ): Promise<void>;
   invalidated(connectionId: string, epoch: RemoteConnectionEpoch): void;
   disconnected(connectionId: string, epoch: RemoteConnectionEpoch): void;
+  rejected(connectionId: string): void;
   oversized(): void;
 }
 
@@ -102,7 +103,10 @@ export class RemoteRelayDispatcher {
       this.invalidate(connectionId, previous);
       this.enqueueDisconnect(connectionId, previous);
     }
-    if (this.epochs.size >= REMOTE_LIMITS.connections) return;
+    if (this.epochs.size >= REMOTE_LIMITS.connections) {
+      this.handlers.rejected(connectionId);
+      return;
+    }
     this.epochs.set(connectionId, ++this.nextEpoch);
   }
 

@@ -154,9 +154,12 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
   ) {
     this.platform = options.platform ?? process.platform;
     this.temporaryPrefix = options.temporaryPrefix ?? ".credential-vault-";
+    const name = basename(this.path);
     if (
       !/^\.[a-z0-9-]{1,48}-$/u.test(this.temporaryPrefix)
-      || basename(this.path) !== this.path.split(/[\\/]/u).at(-1)
+      || !name
+      || name === "."
+      || name === ".."
     ) {
       throw new CredentialVaultError(
         "persistence-failed",

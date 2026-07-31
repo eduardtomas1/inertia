@@ -60,10 +60,22 @@ cross-origin resource, referrer, and content-type headers. An arbitrary static
 host does not inherit them from the build artifact; verify the deployed HTTP
 response before pairing.
 
-The relay accepts browser WebSockets only from configured origins. Desktop
-clients send no Origin. It stores no queue or account state and loses all
-routing state on restart. Health is available at `/health`; WebSockets use
-`/remote`.
+Desktop clients send no Origin and may only register; sockets that present an
+Origin may only connect as browsers, and when `INERTIA_REMOTE_ALLOWED_ORIGINS`
+is set that Origin must be on the allowlist. A non-browser client can still
+omit the header, so the allowlist constrains browser delivery origins and is
+not an authentication boundary; frame confidentiality rests on HPKE alone.
+
+Endpoint registration is unauthenticated and first-come-first-served. Anyone
+who learns an `endpointId` — including any browser that previously paired, or
+anyone who obtained an invitation — can register it first and keep the real
+desktop offline for as long as they hold the socket. Treat `endpointId` values
+as secrets, and prefer a relay deployment that is not reachable by untrusted
+clients. Removing this limitation requires a registration challenge bound to
+the host key and a protocol version change.
+
+The relay stores no queue or account state and loses all routing state on
+restart. Health is available at `/health`; WebSockets use `/remote`.
 
 See `docs/REMOTE_COMPANION_PROTOCOL.md` and
 `docs/REMOTE_COMPANION_THREAT_MODEL.md` before exposing either component to a

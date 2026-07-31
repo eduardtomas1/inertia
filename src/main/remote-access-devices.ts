@@ -3,6 +3,7 @@ import {
   type RemoteScope,
 } from "../shared/remote-protocol";
 import {
+  boundedRemoteGrantMs,
   MAX_REMOTE_GRANT_MS,
   MINUTE_MS,
   normalizeRemoteProjectIds,
@@ -29,10 +30,11 @@ export function applyRemotePairingGrant(input: {
   grantMs: number;
   now: Date;
 }): { device: PersistedRemoteDevice; replaced: boolean } {
+  const scopes = normalizeRemoteScopes(input.scopes);
   const expiresAt = new Date(
     input.now.getTime() + Math.max(
       MINUTE_MS,
-      Math.min(Math.trunc(input.grantMs), MAX_REMOTE_GRANT_MS),
+      boundedRemoteGrantMs(input.grantMs, scopes),
     ),
   ).toISOString();
   const grants = resolvedGrants(input.projectIds, input.grants);
@@ -40,7 +42,7 @@ export function applyRemotePairingGrant(input: {
     id: input.pending.payload.deviceId,
     label: input.pending.payload.deviceLabel,
     publicKey: input.pending.payload.devicePublicKey,
-    scopes: normalizeRemoteScopes(input.scopes),
+    scopes,
     projectIds: remoteGrantedProjectIds(grants),
     grants,
     createdAt: input.now.toISOString(),
@@ -118,17 +120,24 @@ export function updateRemoteDeviceGrant(input: {
   now: Date;
 }): PersistedRemoteDevice {
   const device = requireRemoteDevice(input.data, input.deviceId);
+  const scopes = normalizeRemoteScopes(input.scopes);
   const expiry = Date.parse(input.expiresAt);
+  const ceiling = input.now.getTime()
+    + boundedRemoteGrantMs(MAX_REMOTE_GRANT_MS, scopes);
   if (
     !Number.isFinite(expiry)
     || expiry <= input.now.getTime()
-    || expiry > input.now.getTime() + MAX_REMOTE_GRANT_MS
-  ) throw new Error("Choose an expiry within 90 days.");
+    || expiry > ceiling
+  ) {
+    throw new Error(scopes.includes("prompt")
+      ? "Choose an expiry within 7 days for a prompt-capable device."
+      : "Choose an expiry within 90 days.");
+  }
   const grants = resolvedGrants(
     input.projectIds,
     input.grants ?? retainedGrants(device, input.projectIds),
   );
-  device.scopes = normalizeRemoteScopes(input.scopes);
+  device.scopes = scopes;
   device.grants = grants;
   device.projectIds = remoteGrantedProjectIds(grants);
   device.expiresAt = new Date(expiry).toISOString();

@@ -5,7 +5,10 @@ import {
   waitForRemoteRelayMessage,
   waitForRemoteWebSocketOpen,
 } from "../remote/browser/src/remote-client";
-import type { BrowserDeviceProfile } from "../remote/browser/src/device-store";
+import type { SealedBrowserDeviceProfile } from "../remote/browser/src/device-store";
+import {
+  generateNonExtractableDeviceKeys,
+} from "../remote/browser/src/device-keys";
 import {
   createAuthenticatedSessionSender,
   generateRemoteKeyPair,
@@ -92,13 +95,15 @@ afterEach(() => {
 describe("Remote Companion browser connection ownership", () => {
   it("lets only the newest overlapping connect attempt own the session", async () => {
     vi.stubGlobal("WebSocket", FakeBrowserSocket);
-    const deviceKeys = await generateRemoteKeyPair();
+    const deviceKeys = await generateNonExtractableDeviceKeys();
     const hostKeys = await generateRemoteKeyPair();
-    const profile: BrowserDeviceProfile = {
-      version: 1,
+    const profile: SealedBrowserDeviceProfile = {
+      version: 2,
       deviceId: crypto.randomUUID(),
       deviceLabel: "Test browser",
-      keyPair: deviceKeys,
+      publicKey: deviceKeys.publicKey,
+      privateKey: deviceKeys.keyPair.privateKey,
+      lastUsedAt: new Date().toISOString(),
       hostId: crypto.randomUUID(),
       hostPublicKey: hostKeys.publicKey,
       relayUrl: "wss://relay.example/remote",
@@ -116,7 +121,7 @@ describe("Remote Companion browser connection ownership", () => {
       detail: vi.fn(),
       promptResult: vi.fn(),
     });
-    (client as unknown as { profile: BrowserDeviceProfile | null }).profile =
+    (client as unknown as { profile: SealedBrowserDeviceProfile | null }).profile =
       profile;
 
     const firstAttempt = client.connect();
@@ -207,13 +212,15 @@ describe("Remote Companion browser connection ownership", () => {
 
   it("clears a grant that expired after initialization instead of reconnecting", async () => {
     vi.stubGlobal("WebSocket", FakeBrowserSocket);
-    const deviceKeys = await generateRemoteKeyPair();
+    const deviceKeys = await generateNonExtractableDeviceKeys();
     const hostKeys = await generateRemoteKeyPair();
-    const profile: BrowserDeviceProfile = {
-      version: 1,
+    const profile: SealedBrowserDeviceProfile = {
+      version: 2,
       deviceId: crypto.randomUUID(),
       deviceLabel: "Test browser",
-      keyPair: deviceKeys,
+      publicKey: deviceKeys.publicKey,
+      privateKey: deviceKeys.keyPair.privateKey,
+      lastUsedAt: new Date().toISOString(),
       hostId: crypto.randomUUID(),
       hostPublicKey: hostKeys.publicKey,
       relayUrl: "wss://relay.example/remote",
@@ -231,7 +238,7 @@ describe("Remote Companion browser connection ownership", () => {
       detail: vi.fn(),
       promptResult: vi.fn(),
     });
-    (client as unknown as { profile: BrowserDeviceProfile | null }).profile =
+    (client as unknown as { profile: SealedBrowserDeviceProfile | null }).profile =
       profile;
 
     await client.connect();

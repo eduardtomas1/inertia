@@ -19,6 +19,17 @@ import type { PendingRemotePairing } from "./remote-access-service-types";
 export const MINUTE_MS = 60_000;
 export const MAX_REMOTE_GRANT_MS = 90 * 24 * 60 * 60 * 1_000;
 export const DEFAULT_REMOTE_GRANT_MS = 30 * 24 * 60 * 60 * 1_000;
+export const MAX_REMOTE_PROMPT_GRANT_MS = 7 * 24 * 60 * 60 * 1_000;
+
+export function boundedRemoteGrantMs(
+  requestedMs: number,
+  scopes: readonly RemoteScope[],
+): number {
+  const ceiling = scopes.includes("prompt")
+    ? MAX_REMOTE_PROMPT_GRANT_MS
+    : MAX_REMOTE_GRANT_MS;
+  return Math.min(Math.trunc(requestedMs), ceiling);
+}
 export const DEFAULT_REMOTE_RELAY_URL = "ws://127.0.0.1:8787/remote";
 
 export function validateRemoteRelayUrl(value: string): string {

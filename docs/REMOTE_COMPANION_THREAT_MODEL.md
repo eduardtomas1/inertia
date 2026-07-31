@@ -400,3 +400,50 @@ Sensitive operations revalidate before acting. `resolveAuthoritativeProjectPath`
 takes a `ProjectIdentityAuthority` and refuses when identity is stale or
 unavailable, retrying the refresh once so a project that came back online is
 accepted without a restart.
+
+## Browser device key storage
+
+The browser companion previously serialized its long-lived device private key to
+a base64url string inside IndexedDB. Copying the browser profile therefore copied
+the device identity, and it stayed usable until the grant expired.
+
+The device key is now a non-extractable Web Crypto `CryptoKey`. It is generated
+with `crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false,
+["deriveBits"])`, stored as a `CryptoKey` object in IndexedDB via structured
+clone, and never exported. Only the public key is kept in serializable form.
+HPKE keeps working because `DhkemP256HkdfSha256` needs `deriveBits`, not export,
+for both the recipient and the authenticated-sender role.
+
+Storage refuses to downgrade. `isNonExtractableDevicePrivateKey` rejects anything
+that is not a private, non-extractable `CryptoKey`;
+`assertDeviceKeyIsUnexportable` additionally attempts an export and refuses the
+identity if it succeeds; and a browser that cannot structured-clone a `CryptoKey`
+gets an `UnsupportedDeviceKeyStorage` error rather than a silent fallback to
+extractable material.
+
+**Migration.** A v1 profile is upgraded in place without re-pairing: the stored
+scalar and public point are re-imported as a non-extractable JWK, which preserves
+the same key pair, so the existing grant survives. The v2 record is written and
+the v1 record deleted in one IndexedDB transaction, so an interrupted migration
+either leaves the old record intact for a retry or completes fully. The old
+serialized private key is never uploaded or logged, and it is removed only once
+the replacement is durable. If re-import cannot produce a non-extractable key,
+both records are cleared and the user re-pairs.
+
+**Lifetime.** Prompt-capable grants are now capped at 7 days
+(`MAX_REMOTE_PROMPT_GRANT_MS`) instead of 90; view-only grants keep the 90-day
+ceiling. The browser profile also carries `lastUsedAt` and expires after 7 days
+of inactivity (`REMOTE_INACTIVITY_EXPIRY_MS`) even inside a longer grant. View
+and prompt scopes remain independently grantable.
+
+WebAuthn-backed key storage is **not** implemented. It would be the strongest
+option, but a half-integrated version would add a second identity path without a
+coherent pairing, recovery, or revocation story, so it is recorded here as future
+work rather than attempted. Device-identity rotation on permission change is also
+deferred: the desktop already bumps `grantVersion` and closes live sessions on
+every grant change, which invalidates the session but not the device key.
+
+**Residual risk.** A non-extractable key stops profile *copying*, not profile
+*use*. An attacker with live code execution in the browser origin can still ask
+the key to perform operations while they have that access. This is a real
+reduction in blast radius, not a hardware vault.

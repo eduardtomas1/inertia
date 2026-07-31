@@ -78,7 +78,7 @@ describe("Minimal Workstream active text signal", () => {
     expect(activeTextRule).toContain("var(--active-work-text-highlight)");
     expect(activeTextRule).toContain("background-clip: text");
     expect(activeTextRule).toContain("-webkit-text-fill-color: transparent");
-    expect(activeTextRule).toContain("background-size: 240% 100%");
+    expect(activeTextRule).toContain("background-size: 300% 100%");
 
     const duration =
       Number(
@@ -91,7 +91,8 @@ describe("Minimal Workstream active text signal", () => {
     expect(duration).toBeGreaterThanOrEqual(2.4);
     expect(duration).toBeLessThanOrEqual(3.6);
     expect(activeTextRule).toContain("linear infinite");
-    expect(keyframes).toContain("background-position: -140% 50%");
+    expect(keyframes).toContain("background-position: 90% 50%");
+    expect(keyframes).toContain("background-position: 8% 50%");
     expect(`${activeTextRule}\n${keyframes}`).not.toMatch(
       /transform:|scale|width:|opacity:/iu,
     );

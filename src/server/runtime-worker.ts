@@ -107,6 +107,120 @@ parentPort.on("message", (messageEvent) => {
     );
     return;
   }
+  if (command.type === "runtime.remote-request") {
+    if (!runtime || stopping) {
+      post({
+        type: "runtime.remote-response",
+        requestId: command.requestId,
+        response: {
+          type: "response",
+          requestId: command.requestId,
+          ok: false,
+          code: "unavailable",
+          message: "The local runtime is not ready.",
+        },
+      });
+      return;
+    }
+    void runtime.remoteRequest(command.subject, command.request).then(
+      (response) => post({
+        type: "runtime.remote-response",
+        requestId: command.requestId,
+        response,
+      }),
+      () => post({
+        type: "runtime.remote-response",
+        requestId: command.requestId,
+        response: {
+          type: "response",
+          requestId: command.requestId,
+          ok: false,
+          code: "unavailable",
+          message: "The local runtime could not complete the remote request.",
+        },
+      }),
+    );
+    return;
+  }
+  if (command.type === "runtime.remote-prompt-prepare") {
+    if (!runtime || stopping) {
+      post({
+        type: "runtime.remote-prompt-result",
+        operationId: command.operationId,
+        requestId: command.request.requestId,
+        phase: "prepare",
+        preparationId: null,
+        response: {
+          type: "response",
+          requestId: command.request.requestId,
+          ok: false,
+          code: "unavailable",
+          message: "The local runtime is not ready.",
+        },
+      });
+      return;
+    }
+    void runtime.prepareRemotePrompt(command.subject, command.request).then(
+      (result) => post(
+        "preparationId" in result
+          ? {
+              type: "runtime.remote-prompt-result",
+              operationId: command.operationId,
+              requestId: command.request.requestId,
+              phase: "prepare",
+              preparationId: result.preparationId,
+              response: null,
+            }
+          : {
+              type: "runtime.remote-prompt-result",
+              operationId: command.operationId,
+              requestId: command.request.requestId,
+              phase: "prepare",
+              preparationId: null,
+              response: result,
+            },
+      ),
+      () => post({
+        type: "runtime.remote-prompt-result",
+        operationId: command.operationId,
+        requestId: command.request.requestId,
+        phase: "prepare",
+        preparationId: null,
+        response: {
+          type: "response",
+          requestId: command.request.requestId,
+          ok: false,
+          code: "unavailable",
+          message: "The local runtime could not prepare the remote prompt.",
+        },
+      }),
+    );
+    return;
+  }
+  if (command.type === "runtime.remote-prompt-commit") {
+    const response = runtime && !stopping
+      ? runtime.commitRemotePrompt(
+          command.subject,
+          command.request,
+          command.preparationId,
+        )
+      : {
+          type: "response" as const,
+          requestId: command.request.requestId,
+          ok: false as const,
+          code: "unavailable" as const,
+          message: "The local runtime is not ready.",
+        };
+    post({
+      type: "runtime.remote-prompt-result",
+      operationId: command.operationId,
+      requestId: command.request.requestId,
+      phase: "commit",
+      preparationId: null,
+      response,
+    });
+    return;
+  }
   if (starting || runtime || stopping) {
     post({ type: "runtime.startup-failed", message: "The runtime was asked to start more than once." });
     void shutdown(1);

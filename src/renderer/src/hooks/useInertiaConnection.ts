@@ -10,7 +10,10 @@ import {
   runtimeResumeUrl,
   RuntimeProjectionSequence,
 } from "../utils/runtimeSequencing";
-import { MESSAGE_SEND_REQUEST_TIMEOUT_MS } from "@shared/runtime-command-timeouts";
+import {
+  CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
+  MESSAGE_SEND_REQUEST_TIMEOUT_MS,
+} from "@shared/runtime-command-timeouts";
 import { serializeRuntimeClientCommand } from "@shared/runtime-websocket";
 import {
   deliverDecodedServerEvent,
@@ -36,8 +39,25 @@ export interface InertiaConnection {
   subscribe: (listener: EventListener) => () => void;
 }
 
+const QUERY_COMMAND_TYPES = new Set<ClientCommand["type"]>([
+  "agent.skills.list",
+  "agent.workflow.load",
+  "backend.profile.get",
+  "conversation.detail.load",
+  "git.branches",
+  "git.diff",
+  "git.turn.compare",
+  "git.turn.diff",
+  "git.workspace.diff",
+  "project.actions",
+  "workspace.entries",
+  "workspace.file.read",
+]);
+
 function requestTimeoutMs(command: ClientCommand): number {
   switch (command.type) {
+    case "conversation.detail.load":
+      return CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS;
     case "message.send":
       // The server enforces one aggregate preparation deadline before it can
       // queue a turn. Keep the socket pending through that boundary and its
@@ -288,7 +308,8 @@ export function useInertiaConnection(): InertiaConnection {
     return new Promise((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         pendingRef.current.delete(command.requestId);
-        if (socketRef.current === socket) {
+        const query = QUERY_COMMAND_TYPES.has(command.type);
+        if (!query && socketRef.current === socket) {
           // Delivery is now ambiguous. Drop the resumable cursor and reconnect
           // so the next authoritative snapshot can prove whether the command
           // changed state instead of leaving callers waiting indefinitely.
@@ -297,7 +318,7 @@ export function useInertiaConnection(): InertiaConnection {
         }
         reject(new RuntimeCommandError(
           "The request took too long to complete.",
-          "ambiguous",
+          query ? "rejected" : "ambiguous",
         ));
       }, requestTimeoutMs(command));
 

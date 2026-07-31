@@ -1,6 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, mkdir, open, readdir, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { constants as fsConstants } from "node:fs";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  rename,
+  unlink,
+} from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { SafeStorage } from "electron";
 import { backendSecretReferenceForProfile } from "../node/backend-secret-reference.js";
 
@@ -51,6 +61,11 @@ export interface CredentialEncryptionBackend {
 export interface CredentialVaultPersistence {
   read(): Promise<string | null>;
   write(value: string): Promise<void>;
+}
+
+export interface FileCredentialVaultPersistenceOptions {
+  platform?: NodeJS.Platform;
+  temporaryPrefix?: `.${string}-`;
 }
 
 interface PersistedCredentialEntry {
@@ -130,14 +145,53 @@ export class ElectronSafeStorageBackend implements CredentialEncryptionBackend {
 }
 
 export class FileCredentialVaultPersistence implements CredentialVaultPersistence {
-  constructor(private readonly path: string) {}
+  private readonly platform: NodeJS.Platform;
+  private readonly temporaryPrefix: string;
+
+  constructor(
+    private readonly path: string,
+    options: FileCredentialVaultPersistenceOptions = {},
+  ) {
+    this.platform = options.platform ?? process.platform;
+    this.temporaryPrefix = options.temporaryPrefix ?? ".credential-vault-";
+    const name = basename(this.path);
+    if (
+      !/^\.[a-z0-9-]{1,48}-$/u.test(this.temporaryPrefix)
+      || !name
+      || name === "."
+      || name === ".."
+    ) {
+      throw new CredentialVaultError(
+        "persistence-failed",
+        "The secure credential vault path is invalid.",
+      );
+    }
+  }
 
   async read(): Promise<string | null> {
+    const paths = await this.paths(false);
+    if (!paths) return null;
+    await this.recover(paths.directory, paths.target);
     let file: Awaited<ReturnType<typeof open>> | null = null;
     try {
-      file = await open(this.path, "r");
+      const before = await lstat(paths.target);
+      if (!before.isFile() || before.isSymbolicLink()) {
+        throw new CredentialVaultError(
+          "storage-corrupt",
+          "The secure credential vault is invalid.",
+        );
+      }
+      file = await open(
+        paths.target,
+        fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      );
       const metadata = await file.stat();
-      if (!metadata.isFile() || metadata.size > MAX_VAULT_BYTES) {
+      if (
+        !metadata.isFile()
+        || metadata.dev !== before.dev
+        || metadata.ino !== before.ino
+        || metadata.size > MAX_VAULT_BYTES
+      ) {
         throw new CredentialVaultError(
           "storage-corrupt",
           "The secure credential vault is invalid.",
@@ -171,23 +225,49 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
         "The secure credential vault is too large.",
       );
     }
-    const directory = dirname(this.path);
+    const paths = await this.paths(true);
+    if (!paths) throw new Error("unreachable");
+    await this.recover(paths.directory, paths.target);
+    await this.assertSafeTarget(paths.target);
+    const token = randomUUID();
     const temporaryPath = join(
-      directory,
-      `.credential-vault-${process.pid}-${randomUUID()}.tmp`,
+      paths.directory,
+      `${this.temporaryPrefix}${token}.stage`,
     );
+    const backupPath = join(
+      paths.directory,
+      `${this.temporaryPrefix}${token}.backup`,
+    );
+    let temporary: Awaited<ReturnType<typeof open>> | null = null;
     try {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await this.cleanupTemporaryFiles(directory);
-      await writeFile(temporaryPath, value, {
+      temporary = await open(temporaryPath, "wx", 0o600);
+      await temporary.writeFile(value, {
         encoding: "utf8",
-        mode: 0o600,
-        flag: "wx",
       });
-      await rename(temporaryPath, this.path);
-      await chmod(this.path, 0o600).catch(() => undefined);
+      await temporary.sync();
+      await temporary.close();
+      temporary = null;
+      if (this.platform === "win32" && await exists(paths.target)) {
+        await rename(paths.target, backupPath);
+        try {
+          await rename(temporaryPath, paths.target);
+        } catch (error) {
+          await rename(backupPath, paths.target).catch(() => undefined);
+          throw error;
+        }
+        await unlink(backupPath).catch(() => undefined);
+      } else {
+        await rename(temporaryPath, paths.target);
+      }
+      await chmod(paths.target, 0o600).catch(() => undefined);
+      await syncDirectory(paths.directory);
     } catch (error) {
+      await temporary?.close().catch(() => undefined);
       await unlink(temporaryPath).catch(() => undefined);
+      if (!await exists(paths.target)) {
+        await rename(backupPath, paths.target).catch(() => undefined);
+      }
+      await unlink(backupPath).catch(() => undefined);
       if (error instanceof CredentialVaultError) throw error;
       throw new CredentialVaultError(
         "persistence-failed",
@@ -196,18 +276,135 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
     }
   }
 
-  private async cleanupTemporaryFiles(directory: string): Promise<void> {
+  private async paths(
+    create: boolean,
+  ): Promise<{ directory: string; target: string } | null> {
+    const requestedDirectory = dirname(this.path);
+    if (create) {
+      await mkdir(requestedDirectory, {
+        recursive: true,
+        mode: 0o700,
+      });
+    }
+    let directory: string;
+    try {
+      directory = await realpath(requestedDirectory);
+    } catch (error) {
+      if (!create && (error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+    return {
+      directory,
+      target: join(directory, basename(this.path)),
+    };
+  }
+
+  private async assertSafeTarget(target: string): Promise<void> {
+    const metadata = await lstat(target).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    if (metadata && (!metadata.isFile() || metadata.isSymbolicLink())) {
+      throw new CredentialVaultError(
+        "persistence-failed",
+        "The secure credential vault could not be saved.",
+      );
+    }
+  }
+
+  private async recover(directory: string, target: string): Promise<void> {
     let names: string[];
     try {
       names = await readdir(directory);
     } catch {
       return;
     }
-    await Promise.all(names
-      .filter((name) =>
-        name.startsWith(".credential-vault-") && name.endsWith(".tmp"))
-      .slice(0, 256)
-      .map((name) => unlink(join(directory, name)).catch(() => undefined)));
+    const escapedPrefix = this.temporaryPrefix.replace(
+      /[.*+?^${}()|[\]\\]/gu,
+      "\\$&",
+    );
+    const pattern = new RegExp(
+      `^${escapedPrefix}([0-9a-f-]{36})\\.(stage|backup)$`,
+      "u",
+    );
+    const transactions = new Map<string, {
+      stage?: string;
+      backup?: string;
+    }>();
+    for (const name of names.slice(0, 1_024)) {
+      if (
+        name.startsWith(this.temporaryPrefix)
+        && name.endsWith(".tmp")
+      ) {
+        await unlink(join(directory, name)).catch(() => undefined);
+        continue;
+      }
+      const match = pattern.exec(name);
+      if (!match) continue;
+      const token = match[1]!;
+      const transaction = transactions.get(token) ?? {};
+      transaction[match[2] as "stage" | "backup"] = join(directory, name);
+      transactions.set(token, transaction);
+      if (transactions.size >= 256) break;
+    }
+    for (const transaction of transactions.values()) {
+      await this.recoverTransaction(target, transaction);
+    }
+  }
+
+  private async recoverTransaction(
+    target: string,
+    transaction: { stage?: string; backup?: string },
+  ): Promise<void> {
+    const targetExists = await exists(target);
+    if (targetExists) {
+      await unlinkSafeTemporary(transaction.stage);
+      await unlinkSafeTemporary(transaction.backup);
+      return;
+    }
+    if (transaction.stage && await regularFile(transaction.stage)) {
+      await rename(transaction.stage, target);
+      await unlinkSafeTemporary(transaction.backup);
+      return;
+    }
+    if (transaction.backup && await regularFile(transaction.backup)) {
+      await rename(transaction.backup, target);
+      await unlinkSafeTemporary(transaction.stage);
+      return;
+    }
+    await unlinkSafeTemporary(transaction.stage);
+    await unlinkSafeTemporary(transaction.backup);
+  }
+}
+
+async function exists(path: string): Promise<boolean> {
+  return await lstat(path).then(() => true).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  });
+}
+
+async function regularFile(path: string): Promise<boolean> {
+  return await lstat(path).then(
+    (metadata) => metadata.isFile() && !metadata.isSymbolicLink(),
+    () => false,
+  );
+}
+
+async function unlinkSafeTemporary(path: string | undefined): Promise<void> {
+  if (!path) return;
+  await unlink(path).catch(() => undefined);
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+  if (process.platform === "win32") return;
+  const handle = await open(directory, "r").catch(() => null);
+  try {
+    await handle?.sync().catch(() => undefined);
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
 }
 

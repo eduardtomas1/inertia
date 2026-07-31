@@ -4,6 +4,7 @@ import type {
   PreviewStateUpdate,
   RuntimeConnection,
 } from "../shared/desktop.js";
+import { REMOTE_ACCESS_IPC } from "../shared/desktop.js";
 
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -12,6 +13,7 @@ const IPC = {
   selectCodexExecutable: "inertia:select-codex-executable",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
   copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
+  copyText: "inertia:copy-text",
   checkAppUpdate: "inertia:check-app-update",
   selectAttachments: "inertia:select-attachments",
   importAttachments: "inertia:import-attachments",
@@ -44,6 +46,10 @@ const bridge: DesktopBridge = Object.freeze({
   copyRuntimeDiagnosticReport: () =>
     ipcRenderer.invoke(IPC.copyRuntimeDiagnosticReport) as ReturnType<
       DesktopBridge["copyRuntimeDiagnosticReport"]
+    >,
+  copyText: (text: string) =>
+    ipcRenderer.invoke(IPC.copyText, typeof text === "string" ? text : "") as ReturnType<
+      DesktopBridge["copyText"]
     >,
   checkAppUpdate: (force = false) =>
     ipcRenderer.invoke(IPC.checkAppUpdate, force === true) as ReturnType<
@@ -83,6 +89,58 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.clearBackendCredential, request) as ReturnType<DesktopBridge["clearBackendCredential"]>,
   getBackendCredentialState: (request: Parameters<DesktopBridge["getBackendCredentialState"]>[0]) =>
     ipcRenderer.invoke(IPC.getBackendCredentialState, request) as ReturnType<DesktopBridge["getBackendCredentialState"]>,
+  getRemoteAccessState: () =>
+    ipcRenderer.invoke(REMOTE_ACCESS_IPC.getState) as ReturnType<
+      DesktopBridge["getRemoteAccessState"]
+    >,
+  onRemoteAccessState: (
+    listener: Parameters<DesktopBridge["onRemoteAccessState"]>[0],
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: Parameters<typeof listener>[0],
+    ) => listener(state);
+    ipcRenderer.on(REMOTE_ACCESS_IPC.stateChanged, handler);
+    return () => ipcRenderer.removeListener(
+      REMOTE_ACCESS_IPC.stateChanged,
+      handler,
+    );
+  },
+  setRemoteAccessEnabled: (
+    request: Parameters<DesktopBridge["setRemoteAccessEnabled"]>[0],
+  ) =>
+    ipcRenderer.invoke(
+      REMOTE_ACCESS_IPC.setEnabled,
+      request,
+    ) as ReturnType<DesktopBridge["setRemoteAccessEnabled"]>,
+  createRemotePairingInvitation: () =>
+    ipcRenderer.invoke(
+      REMOTE_ACCESS_IPC.createInvitation,
+    ) as ReturnType<DesktopBridge["createRemotePairingInvitation"]>,
+  approveRemotePairing: (
+    request: Parameters<DesktopBridge["approveRemotePairing"]>[0],
+  ) =>
+    ipcRenderer.invoke(
+      REMOTE_ACCESS_IPC.approvePairing,
+      request,
+    ) as ReturnType<DesktopBridge["approveRemotePairing"]>,
+  denyRemotePairing: (requestId: string) =>
+    ipcRenderer.invoke(
+      REMOTE_ACCESS_IPC.denyPairing,
+      requestId,
+    ) as ReturnType<DesktopBridge["denyRemotePairing"]>,
+  revokeRemoteDevice: (deviceId: string) =>
+    ipcRenderer.invoke(
+      REMOTE_ACCESS_IPC.revokeDevice,
+      deviceId,
+    ) as ReturnType<DesktopBridge["revokeRemoteDevice"]>,
+  updateRemoteDevice: (
+    request: Parameters<DesktopBridge["updateRemoteDevice"]>[0],
+  ) =>
+    ipcRenderer.invoke(
+      REMOTE_ACCESS_IPC.updateDevice,
+      request,
+    ) as ReturnType<DesktopBridge["updateRemoteDevice"]>,
   getPlatform: () => process.platform,
 });
 

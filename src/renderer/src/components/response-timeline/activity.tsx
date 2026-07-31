@@ -38,6 +38,49 @@ import {
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
 import { ResponseMarkdown } from "../ResponseMarkdown";
+import { parseReasoningSummary } from "../../utils/reasoningSummary";
+
+export function ReasoningSummary({
+  content,
+  streaming = false,
+}: {
+  content: string;
+  streaming?: boolean;
+}): React.JSX.Element {
+  const segments = useMemo(() => parseReasoningSummary(content), [content]);
+  if (segments.length === 0) {
+    return (
+      <p className="turn-reasoning-body">
+        {content}
+        {streaming && <span className="streaming-caret" aria-hidden="true" />}
+      </p>
+    );
+  }
+  return (
+    <ol className="turn-reasoning-steps">
+      {segments.map((segment, index) => (
+        <li
+          key={segment.id}
+          className={clsx(
+            "turn-reasoning-step",
+            streaming && index === segments.length - 1 && "is-active",
+          )}
+          style={{ "--reasoning-step-index": index } as React.CSSProperties}
+        >
+          {segment.title && (
+            <span className="turn-reasoning-step-title">{segment.title}</span>
+          )}
+          {segment.body && (
+            <span className="turn-reasoning-step-body">{segment.body}</span>
+          )}
+          {streaming && index === segments.length - 1 && (
+            <span className="streaming-caret" aria-hidden="true" />
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Element {
   const [now, setNow] = useState(Date.now());
@@ -506,7 +549,7 @@ export function SettledWorkDetails({
       {includesReasoning && (
         <div className="turn-reasoning-detail">
           <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
-          <p>{reasoningContent}</p>
+          <ReasoningSummary content={reasoningContent} />
         </div>
       )}
       {turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
@@ -627,7 +670,7 @@ export function WorkLog({
               {expanded && includesReasoning && (
                 <div className="turn-reasoning-detail">
                   <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
-                  <p>{reasoningContent}<span className="streaming-caret" aria-hidden="true" /></p>
+                  <ReasoningSummary content={reasoningContent} streaming />
                 </div>
               )}
               {expanded && turn.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}

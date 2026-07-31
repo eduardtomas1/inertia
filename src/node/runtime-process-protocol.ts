@@ -18,6 +18,14 @@ import {
 } from "../shared/attachments";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments";
 import {
+  remoteAuthorizationSubjectSchema,
+  remoteRequestSchema,
+  remoteResponseSchema,
+  type RemoteAuthorizationSubject,
+  type RemoteRequest,
+  type RemoteResponse,
+} from "../shared/remote-protocol";
+import {
   parseSecureFileRequest,
   parseSecureFileResult,
   type SecureFileRequest,
@@ -41,10 +49,33 @@ export interface RuntimeWorkerOptions {
   };
 }
 
+export interface RuntimeRemotePromptPreparation {
+  preparationId: string;
+}
+
 export type RuntimeWorkerCommand =
   | { type: "runtime.start"; options: RuntimeWorkerOptions }
   | { type: "runtime.shutdown" }
   | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
+  | {
+      type: "runtime.remote-request";
+      requestId: string;
+      subject: RemoteAuthorizationSubject;
+      request: Exclude<RemoteRequest, { type: "prompt.send" }>;
+    }
+  | {
+      type: "runtime.remote-prompt-prepare";
+      operationId: string;
+      subject: RemoteAuthorizationSubject;
+      request: Extract<RemoteRequest, { type: "prompt.send" }>;
+    }
+  | {
+      type: "runtime.remote-prompt-commit";
+      operationId: string;
+      preparationId: string;
+      subject: RemoteAuthorizationSubject;
+      request: Extract<RemoteRequest, { type: "prompt.send" }>;
+    }
   | RuntimeCredentialResult
   | RuntimeAttachmentResult
   | RuntimeAttachmentReleaseResult
@@ -146,6 +177,19 @@ export type RuntimeWorkerEvent =
   | { type: "runtime.project-path-resolved"; requestId: string; path: string }
   | { type: "runtime.project-path-rejected"; requestId: string; message: string }
   | {
+      type: "runtime.remote-response";
+      requestId: string;
+      response: RemoteResponse;
+    }
+  | {
+      type: "runtime.remote-prompt-result";
+      operationId: string;
+      requestId: string;
+      phase: "prepare" | "commit";
+      preparationId: string | null;
+      response: RemoteResponse | null;
+    }
+  | {
       type: "runtime.attachment-request";
       requestId: string;
       attachmentId: string;
@@ -215,6 +259,66 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
           result,
         }
       : null;
+  }
+  if (
+    value.type === "runtime.remote-request"
+    && Object.keys(value).length === 4
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+  ) {
+    const subject = remoteAuthorizationSubjectSchema.safeParse(value.subject);
+    const request = remoteRequestSchema.safeParse(value.request);
+    return subject.success
+      && request.success
+      && request.data.type !== "prompt.send"
+      && request.data.requestId === value.requestId
+      ? {
+          type: "runtime.remote-request",
+          requestId: value.requestId,
+          subject: subject.data,
+          request: request.data,
+        }
+      : null;
+  }
+  if (
+    (
+      value.type === "runtime.remote-prompt-prepare"
+      || value.type === "runtime.remote-prompt-commit"
+    )
+    && Object.keys(value).length === (
+      value.type === "runtime.remote-prompt-commit" ? 5 : 4
+    )
+    && typeof value.operationId === "string"
+    && UUID_PATTERN.test(value.operationId)
+  ) {
+    if (
+      value.type === "runtime.remote-prompt-commit"
+      && (
+        typeof value.preparationId !== "string"
+        || !UUID_PATTERN.test(value.preparationId)
+      )
+    ) return null;
+    const subject = remoteAuthorizationSubjectSchema.safeParse(value.subject);
+    const request = remoteRequestSchema.safeParse(value.request);
+    if (
+      !subject.success
+      || !request.success
+      || request.data.type !== "prompt.send"
+    ) return null;
+    return value.type === "runtime.remote-prompt-commit"
+      ? {
+          type: "runtime.remote-prompt-commit",
+          operationId: value.operationId,
+          preparationId: value.preparationId as string,
+          subject: subject.data,
+          request: request.data,
+        }
+      : {
+          type: "runtime.remote-prompt-prepare",
+          operationId: value.operationId,
+          subject: subject.data,
+          request: request.data,
+        };
   }
   if (
     value.type === "runtime.resolve-project-path"
@@ -291,6 +395,58 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   if (value.type === "runtime.stopped" && Object.keys(value).length === 1) return { type: "runtime.stopped" };
   if (value.type === "runtime.shutdown-unconfirmed" && Object.keys(value).length === 1) {
     return { type: "runtime.shutdown-unconfirmed" };
+  }
+  if (
+    value.type === "runtime.remote-response"
+    && Object.keys(value).length === 3
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+  ) {
+    const response = remoteResponseSchema.safeParse(value.response);
+    return response.success && response.data.requestId === value.requestId
+      ? {
+          type: "runtime.remote-response",
+          requestId: value.requestId,
+          response: response.data,
+        }
+      : null;
+  }
+  if (
+    value.type === "runtime.remote-prompt-result"
+    && Object.keys(value).length === 6
+    && typeof value.operationId === "string"
+    && UUID_PATTERN.test(value.operationId)
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+    && (value.phase === "prepare" || value.phase === "commit")
+  ) {
+    const response = value.response === null
+      ? null
+      : remoteResponseSchema.safeParse(value.response);
+    const preparationId = typeof value.preparationId === "string"
+      && UUID_PATTERN.test(value.preparationId)
+      ? value.preparationId
+      : null;
+    const validResponse = response !== null
+      && response.success
+      && response.data.requestId === value.requestId;
+    const validPrepare = value.phase === "prepare"
+      && (
+        (preparationId !== null && response === null)
+        || (preparationId === null && validResponse)
+      );
+    const validCommit = value.phase === "commit"
+      && preparationId === null
+      && validResponse;
+    if (!validPrepare && !validCommit) return null;
+    return {
+      type: "runtime.remote-prompt-result",
+      operationId: value.operationId,
+      requestId: value.requestId,
+      phase: value.phase,
+      preparationId,
+      response: response === null ? null : response.data,
+    };
   }
   if (
     (

@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -343,4 +351,27 @@ describe("FileCredentialVaultPersistence", () => {
       expect((await stat(path)).mode & 0o777).toBe(0o600);
     }
   });
+
+  it.runIf(process.platform !== "win32")(
+    "refuses to read or replace a symlinked vault target",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "inertia-credential-vault-"));
+      temporaryDirectories.push(directory);
+      const protectedDirectory = join(directory, "protected");
+      const outsidePath = join(directory, "outside.json");
+      const vaultPath = join(protectedDirectory, "credentials.json");
+      await mkdir(protectedDirectory);
+      await writeFile(outsidePath, "outside-value", { encoding: "utf8" });
+      await symlink(outsidePath, vaultPath);
+      const persistence = new FileCredentialVaultPersistence(vaultPath);
+
+      await expect(persistence.read()).rejects.toMatchObject({
+        code: "storage-corrupt",
+      });
+      await expect(persistence.write("replacement")).rejects.toMatchObject({
+        code: "persistence-failed",
+      });
+      expect(await readFile(outsidePath, "utf8")).toBe("outside-value");
+    },
+  );
 });

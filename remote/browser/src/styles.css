@@ -1,0 +1,192 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  background: #101311;
+  color: #eef2ed;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.5rem 1.25rem;
+}
+
+h1,
+h2 {
+  margin: 0 0 0.75rem;
+}
+
+h1 {
+  font-size: 1.35rem;
+}
+
+h2 {
+  font-size: 1rem;
+}
+
+.card,
+nav,
+.conversation {
+  border: 1px solid #384039;
+  border-radius: 0.75rem;
+  background: #171b18;
+  padding: 1rem;
+}
+
+.card {
+  margin-bottom: 1rem;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.32fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+nav button {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 0.4rem;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid #5b7161;
+  border-radius: 0.5rem;
+  background: #2c5038;
+  color: #fff;
+  padding: 0.55rem 0.75rem;
+  cursor: pointer;
+}
+
+button + button {
+  margin-left: 0.5rem;
+}
+
+button.secondary {
+  background: transparent;
+}
+
+button.selected {
+  outline: 2px solid #88c99a;
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.8rem;
+  font-weight: 600;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid #59615b;
+  border-radius: 0.5rem;
+  background: #0f1210;
+  color: inherit;
+  padding: 0.65rem;
+  font-weight: 400;
+}
+
+.status {
+  font-size: 0.85rem;
+}
+
+.online {
+  color: #95d6a7;
+}
+
+.offline,
+.warning {
+  color: #f4c47b;
+}
+
+.muted,
+.empty {
+  color: #aab3ac;
+}
+
+.pair {
+  max-width: 700px;
+  margin-inline: auto;
+}
+
+.pairing-code {
+  margin-top: 1rem;
+  font: 700 2rem ui-monospace, monospace;
+  letter-spacing: 0.15em;
+}
+
+.transcript {
+  display: grid;
+  gap: 0.75rem;
+  margin-block: 1rem;
+}
+
+.message {
+  border-left: 3px solid #526058;
+  padding: 0.7rem 0.85rem;
+  background: #111512;
+}
+
+.message.user {
+  border-color: #7daa89;
+}
+
+.role {
+  color: #9fac9f;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.message-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+details {
+  margin-block: 0.75rem;
+}
+
+.activity {
+  padding: 0.25rem 0;
+  color: #c2cac3;
+}
+
+form {
+  margin-top: 1rem;
+}
+
+@media (max-width: 720px) {
+  header {
+    display: block;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}

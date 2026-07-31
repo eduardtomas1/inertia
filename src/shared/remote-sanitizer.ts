@@ -791,7 +791,48 @@ function isUnmatchedClosingDelimiter(
 }
 
 function isPathBoundary(value: string, index: number): boolean {
-  return index === 0 || /[\s<("'`=[{>,;!?:-]/u.test(value[index - 1]);
+  if (index === 0) return true;
+  const previous = value[index - 1];
+  if (
+    isPathWordLikeAt(value, index - 1)
+    || previous === "/"
+    || previous === "\\"
+    || isMatchedPathSegmentCloser(value, index - 1)
+  ) return false;
+  if (
+    (value[index] === "/" || value[index] === "\\")
+    && previous === "."
+    && isRelativeDotPrefix(value, index)
+  ) return false;
+  return true;
+}
+
+function isMatchedPathSegmentCloser(
+  value: string,
+  closerIndex: number,
+): boolean {
+  const closer = value[closerIndex];
+  if (closer !== ")" && closer !== "]" && closer !== "}") return false;
+  let segmentStart = closerIndex;
+  while (
+    segmentStart > 0
+    && !isPathTokenTerminator(value[segmentStart - 1])
+    && value[segmentStart - 1] !== "/"
+    && value[segmentStart - 1] !== "\\"
+  ) segmentStart -= 1;
+  return !isUnmatchedClosingDelimiter(value, segmentStart, closerIndex);
+}
+
+function isRelativeDotPrefix(value: string, separatorIndex: number): boolean {
+  let cursor = separatorIndex - 1;
+  while (cursor >= 0 && value[cursor] === ".") cursor -= 1;
+  return cursor < 0 || !isPathTokenCharacterAt(value, cursor);
+}
+
+function isPathTokenCharacterAt(value: string, index: number): boolean {
+  return isPathWordLikeAt(value, index)
+    || value[index] === "/"
+    || value[index] === "\\";
 }
 
 function isSchemeBoundary(value: string, index: number): boolean {
@@ -820,6 +861,29 @@ function isAsciiLetter(value: string | undefined): boolean {
 
 function isAsciiDigit(value: string | undefined): boolean {
   return value !== undefined && value >= "0" && value <= "9";
+}
+
+function isPathWordLikeAt(value: string, index: number): boolean {
+  if (index < 0 || index >= value.length) return false;
+  let start = index;
+  let end = index + 1;
+  const codeUnit = value.charCodeAt(index);
+  if (
+    codeUnit >= 0xdc00
+    && codeUnit <= 0xdfff
+    && index > 0
+    && value.charCodeAt(index - 1) >= 0xd800
+    && value.charCodeAt(index - 1) <= 0xdbff
+  ) start -= 1;
+  else if (
+    codeUnit >= 0xd800
+    && codeUnit <= 0xdbff
+    && index + 1 < value.length
+    && value.charCodeAt(index + 1) >= 0xdc00
+    && value.charCodeAt(index + 1) <= 0xdfff
+  ) end += 1;
+  const character = value.slice(start, end);
+  return character === "_" || /[\p{L}\p{N}\p{M}]/u.test(character);
 }
 
 export function sanitizeRemoteLabel(

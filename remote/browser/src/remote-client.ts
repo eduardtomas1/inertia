@@ -385,17 +385,20 @@ export class RemoteCompanionClient {
         this.selectedConversationId
         && this.ownsPollingLoop(epoch, generation)
       ) {
+        const conversationId = this.selectedConversationId;
         const detail = await this.request({
           type: "conversation.get",
           requestId: crypto.randomUUID(),
-          conversationId: this.selectedConversationId,
+          conversationId,
         });
-        if (
+        if (!(
           this.ownsPollingLoop(epoch, generation)
-          && detail.ok
-          && detail.result.kind === "conversation"
-        ) {
+          && this.selectedConversationId === conversationId
+        )) return;
+        if (detail.ok && detail.result.kind === "conversation") {
           this.callbacks.detail(detail.result.detail);
+        } else {
+          this.callbacks.detail(null);
         }
       }
     } finally {

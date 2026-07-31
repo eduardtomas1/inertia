@@ -356,6 +356,193 @@ describe("Remote Companion browser connection ownership", () => {
     });
   });
 
+  it("clears current detail when the conversation becomes unavailable", async () => {
+    vi.useFakeTimers();
+    const now = new Date().toISOString();
+    const conversationId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    let detailRequests = 0;
+    const detail = vi.fn();
+    const request = vi.fn(async (
+      value: RemoteRequest,
+    ): Promise<RemoteResponse> => {
+      if (value.type === "state.get") {
+        return {
+          type: "response",
+          requestId: value.requestId,
+          ok: true,
+          result: {
+            kind: "state",
+            state: {
+              generatedAt: now,
+              projects: [{ id: projectId, name: "Project" }],
+              conversations: [],
+              runs: [],
+            },
+          },
+        };
+      }
+      if (value.type === "conversation.get" && detailRequests++ === 0) {
+        return {
+          type: "response",
+          requestId: value.requestId,
+          ok: true,
+          result: {
+            kind: "conversation",
+            detail: {
+              generatedAt: now,
+              conversation: {
+                id: conversationId,
+                projectId,
+                title: "Conversation",
+                providerLabel: "Provider",
+                status: "idle",
+                pendingLocalApproval: false,
+                updatedAt: now,
+              },
+              messages: [],
+              activities: [],
+              subagents: [],
+              waitingForLocalAction: false,
+            },
+          },
+        };
+      }
+      return {
+        type: "response",
+        requestId: value.requestId,
+        ok: false,
+        code: "not-found",
+        message: "The conversation is no longer available.",
+      };
+    });
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail,
+      promptResult: vi.fn(),
+    });
+    Object.assign(client as unknown as Record<string, unknown>, {
+      sender: {},
+      request,
+    });
+
+    client.selectConversation(conversationId);
+    await vi.waitFor(() => {
+      expect(detail).toHaveBeenLastCalledWith(expect.objectContaining({
+        conversation: expect.objectContaining({ id: conversationId }),
+      }));
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.waitFor(() => expect(detail).toHaveBeenLastCalledWith(null));
+    expect(detail.mock.calls).toHaveLength(3);
+    (
+      client as unknown as { disconnect(message: string): void }
+    ).disconnect("cleanup");
+  });
+
+  it("does not let an old not-found response clear a newer selection", async () => {
+    const now = new Date().toISOString();
+    const projectId = crypto.randomUUID();
+    const oldId = crypto.randomUUID();
+    const currentId = crypto.randomUUID();
+    let oldRequestStarted = (): void => undefined;
+    const oldStarted = new Promise<void>((resolve) => {
+      oldRequestStarted = resolve;
+    });
+    let resolveOld = (_response: RemoteResponse): void => undefined;
+    const oldResponse = new Promise<RemoteResponse>((resolve) => {
+      resolveOld = resolve;
+    });
+    const detail = vi.fn();
+    const request = vi.fn((
+      value: RemoteRequest,
+    ): Promise<RemoteResponse> => {
+      if (value.type === "state.get") {
+        return Promise.resolve({
+          type: "response",
+          requestId: value.requestId,
+          ok: true,
+          result: {
+            kind: "state",
+            state: {
+              generatedAt: now,
+              projects: [],
+              conversations: [],
+              runs: [],
+            },
+          },
+        });
+      }
+      if (
+        value.type === "conversation.get"
+        && value.conversationId === oldId
+      ) {
+        oldRequestStarted();
+        return oldResponse;
+      }
+      return Promise.resolve({
+        type: "response",
+        requestId: value.requestId,
+        ok: true,
+        result: {
+          kind: "conversation",
+          detail: {
+            generatedAt: now,
+            conversation: {
+              id: currentId,
+              projectId,
+              title: "Current conversation",
+              providerLabel: "Provider",
+              status: "idle",
+              pendingLocalApproval: false,
+              updatedAt: now,
+            },
+            messages: [],
+            activities: [],
+            subagents: [],
+            waitingForLocalAction: false,
+          },
+        },
+      });
+    });
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail,
+      promptResult: vi.fn(),
+    });
+    Object.assign(client as unknown as Record<string, unknown>, {
+      sender: {},
+      request,
+    });
+
+    client.selectConversation(oldId);
+    await oldStarted;
+    client.selectConversation(currentId);
+    await vi.waitFor(() => {
+      expect(detail).toHaveBeenLastCalledWith(expect.objectContaining({
+        conversation: expect.objectContaining({ id: currentId }),
+      }));
+    });
+    resolveOld({
+      type: "response",
+      requestId: crypto.randomUUID(),
+      ok: false,
+      code: "not-found",
+      message: "The old conversation disappeared.",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(detail).toHaveBeenLastCalledWith(expect.objectContaining({
+      conversation: expect.objectContaining({ id: currentId }),
+    }));
+    (
+      client as unknown as { disconnect(message: string): void }
+    ).disconnect("cleanup");
+  });
+
   it("keeps one polling loop across repeated conversation selection refreshes", async () => {
     vi.useFakeTimers();
     const now = new Date().toISOString();

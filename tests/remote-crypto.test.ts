@@ -17,7 +17,9 @@ import {
   sealSessionHandshake,
 } from "../src/shared/remote-crypto";
 import {
+  REMOTE_LIMITS,
   REMOTE_PROTOCOL_VERSION,
+  encodedRemoteFrameBytes,
   remoteCipherFrameSchema,
   remotePairingRequestPayloadSchema,
   remoteResponseSchema,
@@ -158,6 +160,44 @@ describe("Remote Companion HPKE channel", () => {
 });
 
 describe("Remote Companion bounded protocol", () => {
+  it("fits the maximum plaintext inside its encrypted relay envelope", async () => {
+    const hostKeys = await generateRemoteKeyPair();
+    const deviceKeys = await generateRemoteKeyPair();
+    const sessionId = crypto.randomUUID();
+    const deviceId = crypto.randomUUID();
+    const sender = await createAuthenticatedSessionSender(
+      invitation.hostId,
+      deviceId,
+      sessionId,
+      await importRemoteKeyPair(hostKeys),
+      await importRemotePublicKey(deviceKeys.publicKey),
+    );
+    const recipient = await createAuthenticatedSessionRecipient(
+      invitation.hostId,
+      deviceId,
+      sessionId,
+      await importRemoteKeyPair(deviceKeys),
+      await importRemotePublicKey(hostKeys.publicKey),
+      sender.enc,
+    );
+    const payload = "x".repeat(REMOTE_LIMITS.plaintextBytes - 2);
+    expect(new TextEncoder().encode(JSON.stringify(payload)).byteLength).toBe(
+      REMOTE_LIMITS.plaintextBytes,
+    );
+
+    const frame = await sealSessionData(sender, sessionId, payload);
+    expect(encodedRemoteFrameBytes(frame)).toBeLessThanOrEqual(
+      REMOTE_LIMITS.encryptedFrameBytes,
+    );
+    expect(new TextEncoder().encode(JSON.stringify({
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      type: "relay.frame",
+      connectionId: crypto.randomUUID(),
+      frame,
+    })).byteLength).toBeLessThanOrEqual(REMOTE_LIMITS.relayEnvelopeBytes);
+    expect(await openSessionData(recipient, frame)).toBe(payload);
+  });
+
   it("rejects malformed and oversized relay frames", () => {
     expect(remoteCipherFrameSchema.safeParse({
       protocolVersion: REMOTE_PROTOCOL_VERSION,
@@ -171,7 +211,14 @@ describe("Remote Companion bounded protocol", () => {
       kind: "session.data",
       sessionId: crypto.randomUUID(),
       sequence: 1,
-      ciphertext: "x".repeat(200_000),
+      ciphertext: "x".repeat(REMOTE_LIMITS.encryptedFrameBytes),
+    }).success).toBe(true);
+    expect(remoteCipherFrameSchema.safeParse({
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      kind: "session.data",
+      sessionId: crypto.randomUUID(),
+      sequence: 1,
+      ciphertext: "x".repeat(REMOTE_LIMITS.encryptedFrameBytes + 1),
     }).success).toBe(false);
   });
 

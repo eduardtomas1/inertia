@@ -87,8 +87,11 @@ session/invitation identifiers, sequence where applicable, and ciphertext.
 Before any relay JSON parse, desktop and browser enforce the 132 KiB envelope
 limit; browser tunnel setup, pairing/session handshakes, and active sessions
 close on oversized or non-text messages. Application plaintext is capped at
-96 KiB and encrypted frames at 128 KiB. Projection builders truncate by UTF-8
-byte size, keeping the newest useful conversations and transcript content.
+96 KiB, serialized encrypted frames at 130 KiB, and wrapped relay envelopes at
+132 KiB. The frame budget includes the AES-GCM tag, base64url expansion, and
+JSON fields rather than treating ciphertext bytes as wire bytes. Projection
+builders truncate by UTF-8 byte size, keeping the newest useful conversations
+and transcript content.
 
 Pairing:
 
@@ -267,13 +270,18 @@ bounded backoff rather than remaining indefinitely connected but offline.
 - Pairing: five minutes and ten attempts/minute.
 - Session authentication: four attempts/connection and 24/minute globally.
 - Active requests: eight/session; all requests: 120/minute; prompts: six/minute.
+  The reference relay permits 240 browser messages/minute per socket and 544
+  aggregate desktop messages/minute, enough for four independently bounded
+  sessions plus pairing/session lifecycle traffic without weakening each
+  browser's cap.
 - Prompt preparation operations: 32 total including unresolved readiness
   checks. Issued IDs expire after 15 seconds and are one-time; same-request
   retry invalidates an older ID. An unresolved check retains its bounded slot.
 - Session idle expiry: 15 minutes; handshake freshness: 60 seconds.
 - Reconnect backoff: capped at 30 seconds; no prompt replay.
-- Relay envelope: 132 KiB before JSON parsing; application ciphertext:
-  128 KiB; plaintext: 96 KiB.
+- Relay envelope: 132 KiB before JSON parsing; serialized encrypted frame:
+  130 KiB; plaintext: 96 KiB. Deterministic maximum-size tests seal, wrap,
+  relay, open, and schema-validate the byte-bounded projection.
 - Relay destination send buffer: 264 KiB by default; exceeding the configured
   bound terminates that destination and cleans up its routes.
 - Audit events: newest 1,000 persisted; delivery receipts/session IDs: newest

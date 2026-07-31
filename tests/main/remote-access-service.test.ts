@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 
 import { createReferenceRelay, type ReferenceRelay } from "../../remote/relay/server.mjs";
+import { boundRemoteProjection } from "../../src/server/remote-gateway";
 import {
   createAuthenticatedSessionRecipient,
   createAuthenticatedSessionSender,
@@ -25,6 +26,7 @@ import {
 import {
   REMOTE_LIMITS,
   REMOTE_PROTOCOL_VERSION,
+  encodedRemoteFrameBytes,
   remotePairingResponsePayloadSchema,
   remoteResponseSchema,
   remoteSessionAcceptPayloadSchema,
@@ -467,6 +469,92 @@ describe("Remote Companion outbound encrypted service", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(service.state().pendingPairings).toEqual([]);
     await service.shutdown();
+  });
+
+  it("delivers a maximum byte-bounded projection through the relay", async () => {
+    const conversationId = crypto.randomUUID();
+    const projectedResponseBytes: number[] = [];
+    const paired = await pairedServiceFixture({
+      runtime: {
+        remoteRequest: async (_subject, request) => {
+          const response = boundRemoteProjection({
+            type: "response",
+            requestId: request.requestId,
+            ok: true,
+            result: {
+              kind: "conversation",
+              detail: {
+                generatedAt: new Date().toISOString(),
+                conversation: {
+                  id: conversationId,
+                  projectId: crypto.randomUUID(),
+                  title: "Maximum projection",
+                  providerLabel: "Provider",
+                  status: "idle",
+                  pendingLocalApproval: false,
+                  updatedAt: new Date().toISOString(),
+                },
+                messages: [{
+                  id: crypto.randomUUID(),
+                  turnId: null,
+                  role: "assistant",
+                  content: "😀".repeat(32 * 1024),
+                  createdAt: new Date().toISOString(),
+                }],
+                activities: [],
+                subagents: [],
+                waitingForLocalAction: false,
+              },
+            },
+          });
+          projectedResponseBytes.push(new TextEncoder().encode(
+            JSON.stringify(response),
+          ).byteLength);
+          return response;
+        },
+      },
+    });
+    const responsePromise = nextFrame(
+      paired.session.tunnel.socket,
+      "session.data",
+    );
+    sendFrame(
+      paired.session.tunnel.socket,
+      paired.session.tunnel.connectionId,
+      await sealSessionData(
+        paired.session.sender,
+        paired.session.sessionId,
+        {
+          type: "conversation.get",
+          requestId: crypto.randomUUID(),
+          conversationId,
+        },
+      ),
+    );
+    const frame = await responsePromise;
+    if (frame.kind !== "session.data") {
+      throw new Error("Missing maximum projection response.");
+    }
+
+    expect(projectedResponseBytes[0]).toBeGreaterThan(
+      REMOTE_LIMITS.plaintextBytes - 1_024,
+    );
+    expect(encodedRemoteFrameBytes(frame)).toBeLessThanOrEqual(
+      REMOTE_LIMITS.encryptedFrameBytes,
+    );
+    expect(new TextEncoder().encode(JSON.stringify({
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      type: "relay.frame",
+      connectionId: paired.session.tunnel.connectionId,
+      frame,
+    })).byteLength).toBeLessThanOrEqual(REMOTE_LIMITS.relayEnvelopeBytes);
+    expect(remoteResponseSchema.parse(
+      await openSessionData(paired.session.recipient, frame),
+    )).toMatchObject({
+      ok: true,
+      result: { kind: "conversation" },
+    });
+    await paired.service.shutdown();
   });
 
   it("retries registration after a stale endpoint owner disconnects", async () => {

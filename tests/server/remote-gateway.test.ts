@@ -6,12 +6,23 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { RemoteRuntimeGateway } from "../../src/server/remote-gateway";
+import {
+  createAuthenticatedSessionRecipient,
+  createAuthenticatedSessionSender,
+  generateRemoteKeyPair,
+  importRemoteKeyPair,
+  importRemotePublicKey,
+  openSessionData,
+  sealSessionData,
+} from "../../src/shared/remote-crypto";
 import type {
   RemoteAuthorizationSubject,
   RemoteRequest,
 } from "../../src/shared/remote-protocol";
 import {
   REMOTE_LIMITS,
+  REMOTE_PROTOCOL_VERSION,
+  encodedRemoteFrameBytes,
   remoteResponseSchema,
 } from "../../src/shared/remote-protocol";
 
@@ -613,8 +624,13 @@ describe("Remote Companion runtime authority", () => {
       type: "state.get",
       requestId: crypto.randomUUID(),
     });
-    expect(new TextEncoder().encode(JSON.stringify(response)).byteLength)
-      .toBeLessThanOrEqual(REMOTE_LIMITS.plaintextBytes);
+    const responseBytes = new TextEncoder().encode(
+      JSON.stringify(response),
+    ).byteLength;
+    expect(responseBytes).toBeGreaterThan(
+      REMOTE_LIMITS.plaintextBytes - 1_024,
+    );
+    expect(responseBytes).toBeLessThanOrEqual(REMOTE_LIMITS.plaintextBytes);
     expect(remoteResponseSchema.parse(response)).toEqual(response);
     if (response.ok && response.result.kind === "state") {
       expect(response.result.state.conversations.at(-1)?.id).toBe(
@@ -663,6 +679,40 @@ describe("Remote Companion runtime authority", () => {
       );
       expect(response.result.detail.messages.length).toBeLessThan(200);
     }
+
+    const hostKeys = await generateRemoteKeyPair();
+    const deviceKeys = await generateRemoteKeyPair();
+    const hostId = crypto.randomUUID();
+    const deviceId = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+    const sender = await createAuthenticatedSessionSender(
+      hostId,
+      deviceId,
+      sessionId,
+      await importRemoteKeyPair(hostKeys),
+      await importRemotePublicKey(deviceKeys.publicKey),
+    );
+    const recipient = await createAuthenticatedSessionRecipient(
+      hostId,
+      deviceId,
+      sessionId,
+      await importRemoteKeyPair(deviceKeys),
+      await importRemotePublicKey(hostKeys.publicKey),
+      sender.enc,
+    );
+    const frame = await sealSessionData(sender, sessionId, response);
+    expect(encodedRemoteFrameBytes(frame)).toBeLessThanOrEqual(
+      REMOTE_LIMITS.encryptedFrameBytes,
+    );
+    expect(new TextEncoder().encode(JSON.stringify({
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      type: "relay.frame",
+      connectionId: crypto.randomUUID(),
+      frame,
+    })).byteLength).toBeLessThanOrEqual(REMOTE_LIMITS.relayEnvelopeBytes);
+    expect(remoteResponseSchema.parse(
+      await openSessionData(recipient, frame),
+    )).toEqual(response);
     store.close();
   }, 30_000);
 });

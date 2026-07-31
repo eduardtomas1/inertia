@@ -6,7 +6,10 @@ export const REMOTE_RELAY_VERSION = "0.1.0";
 
 export const REMOTE_LIMITS = Object.freeze({
   relayEnvelopeBytes: 132 * 1024,
-  encryptedFrameBytes: 128 * 1024,
+  // A 96 KiB plaintext plus the AES-GCM tag, base64url expansion, and maximum
+  // session-data JSON fields fits below this frame bound. The wrapped relay
+  // envelope in turn fits below relayEnvelopeBytes.
+  encryptedFrameBytes: 130 * 1024,
   plaintextBytes: 96 * 1024,
   promptCharacters: 8_000,
   transcriptMessages: 200,
@@ -36,9 +39,9 @@ const timestamp = z.string().datetime({ offset: true });
 const boundedBase64Url = (maximum: number) =>
   z.string().min(1).max(maximum).regex(/^[A-Za-z0-9_-]+$/u);
 const routingId = boundedBase64Url(64);
-const encryptedBody = boundedBase64Url(
-  Math.ceil(REMOTE_LIMITS.encryptedFrameBytes * 4 / 3) + 8,
-);
+// Base64url is ASCII, so this character bound is also an encoded-byte bound.
+// The sender and receiver separately enforce the complete serialized frame.
+const encryptedBody = boundedBase64Url(REMOTE_LIMITS.encryptedFrameBytes);
 const encapsulatedKey = boundedBase64Url(256);
 
 export const remoteScopeSchema = z.enum(["view", "prompt"]);

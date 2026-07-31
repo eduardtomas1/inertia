@@ -280,8 +280,17 @@ describe("Remote Companion safe text projection", () => {
       "wss://[::1]/remote",
       "ws://127.0.0.1:8787/remote",
       "workspace/acme/.env",
+      "folder/home/alice/file",
+      String.raw`folder\home\alice\file`,
       "./relative/[tenant]/key",
+      "./relative/(tenant)/key",
+      "./relative/{tenant}/key",
       "../relative/file",
+      ".hidden/relative/file",
+      "café/home/alice/file",
+      "cafe\u0301/home/alice/file",
+      "𐐀/home/alice/file",
+      "项目/文件/notes",
       String.raw`C:relative\file`,
       String.raw`Keep escaped prose \ or \\ intact.`,
       String.raw`Known regex \d+ \w* \s{1,3} or \\d+\\w* stays intact.`,
@@ -307,6 +316,25 @@ describe("Remote Companion safe text projection", () => {
       "<wss://[::1]/remote>",
     ]) {
       expect(sanitizeRemoteContent(url)).toBe(url);
+    }
+  });
+
+  it("treats non-token punctuation as an absolute-path boundary", () => {
+    const cases = [
+      ["failure)/home/alice/.env", "failure)<local-path>"],
+      ["result]/srv/project/file.ts", "result]<local-path>"],
+      ["value}/usr/local/private", "value}<local-path>"],
+      ["failure./private/secret", "failure.<local-path>"],
+      ["quote\"/home/alice/.env", "quote\"<local-path>"],
+      ["quote'/home/alice/.env", "quote'<local-path>"],
+      ["label:/home/alice/.env", "label:<local-path>"],
+      ["list,/home/alice/.env", "list,<local-path>"],
+      ["item;/home/alice/.env", "item;<local-path>"],
+      [String.raw`failure)\secret`, "failure)<local-path>"],
+      [String.raw`result]C:\private\secret`, "result]<local-path>"],
+    ] as const;
+    for (const [input, expected] of cases) {
+      expect(sanitizeRemoteContent(input)).toBe(expected);
     }
   });
 

@@ -131,6 +131,78 @@ describe("Remote Companion reference relay", () => {
     });
   });
 
+  it("budgets aggregate desktop responses separately from each browser", async () => {
+    const url = await relayFixture({ now: () => 10_000 });
+    const desktop = await socket(url);
+    desktop.send(JSON.stringify({
+      protocolVersion: 1,
+      type: "relay.register",
+      endpointId: "aggregate_endpoint",
+      role: "desktop",
+      relayVersion: "0.1.0",
+    }));
+    await nextMessage(desktop);
+
+    const browsers: WebSocket[] = [];
+    const connectionIds: string[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const browser = await socket(url);
+      browser.send(JSON.stringify({
+        protocolVersion: 1,
+        type: "relay.connect",
+        endpointId: "aggregate_endpoint",
+        browserVersion: "0.1.0",
+      }));
+      browsers.push(browser);
+      connectionIds.push((await nextMessage(browser)).connectionId as string);
+      await nextMessage(desktop);
+    }
+
+    let delivered = 0;
+    let resolveDelivered = (): void => undefined;
+    const deliveredAll = new Promise<void>((resolve) => {
+      resolveDelivered = resolve;
+    });
+    for (const browser of browsers) {
+      browser.on("message", () => {
+        delivered += 1;
+        if (delivered === 244) resolveDelivered();
+      });
+    }
+    const frame = {
+      protocolVersion: 1,
+      kind: "session.close",
+      sessionId: crypto.randomUUID(),
+      reason: "shutdown",
+    };
+    // Four normal sessions each emit 60 state/detail responses per minute.
+    // Include lifecycle margin that exceeded the old shared 240-message cap.
+    for (let index = 0; index < 244; index += 1) {
+      desktop.send(JSON.stringify({
+        protocolVersion: 1,
+        type: "relay.frame",
+        connectionId: connectionIds[index % connectionIds.length],
+        frame,
+      }));
+    }
+    await deliveredAll;
+    expect(delivered).toBe(244);
+    expect(desktop.readyState).toBe(WebSocket.OPEN);
+
+    const browserClosed = once(browsers[0]!, "close");
+    for (let index = 0; index < 240; index += 1) {
+      browsers[0]!.send(JSON.stringify({
+        protocolVersion: 1,
+        type: "relay.frame",
+        connectionId: connectionIds[0],
+        frame,
+      }));
+    }
+    const [closeCode] = await browserClosed;
+    expect(closeCode).toBe(1008);
+    expect(desktop.readyState).toBe(WebSocket.OPEN);
+  });
+
   it("reports an offline desktop and never queues a later connection", async () => {
     const url = await relayFixture();
     const browser = await socket(url);

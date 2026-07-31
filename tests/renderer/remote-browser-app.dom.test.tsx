@@ -160,5 +160,12 @@ describe("Remote Companion browser selection boundary", () => {
       firstId,
       expect.anything(),
     );
+
+    appHarness.callbacks!.detail(null);
+    expect(screen.queryByLabelText("Text prompt")).toBeNull();
+    expect(screen.queryByRole("button", {
+      name: "Send to desktop",
+    })).toBeNull();
+    expect(screen.getByText("Choose a conversation.")).toBeInTheDocument();
   });
 });

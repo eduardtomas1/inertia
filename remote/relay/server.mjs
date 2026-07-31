@@ -8,7 +8,10 @@ const PROTOCOL_VERSION = 1;
 const MAX_ENVELOPE_BYTES = 132 * 1024;
 const MAX_CONNECTIONS = 1_024;
 const MAX_CONNECTIONS_PER_DESKTOP = 8;
-const MAX_MESSAGES_PER_MINUTE = 240;
+const MAX_BROWSER_MESSAGES_PER_MINUTE = 240;
+// Four active sessions may each use the protocol's 120-request/minute
+// allowance. Leave a separate bounded margin for pairing/session lifecycle.
+const MAX_DESKTOP_MESSAGES_PER_MINUTE = (4 * 120) + 64;
 const MAX_BUFFERED_BYTES = 2 * MAX_ENVELOPE_BYTES;
 const MINUTE_MS = 60_000;
 const HEARTBEAT_MS = 30_000;
@@ -122,7 +125,13 @@ export async function createReferenceRelay(options = {}) {
       const state = stateBySocket.get(socket);
       if (
         !state
-        || !takeRate(state.messageTimes, MAX_MESSAGES_PER_MINUTE, now())
+        || !takeRate(
+          state.messageTimes,
+          state.role === "desktop"
+            ? MAX_DESKTOP_MESSAGES_PER_MINUTE
+            : MAX_BROWSER_MESSAGES_PER_MINUTE,
+          now(),
+        )
       ) {
         sendError(socket, "rate-limited");
         socket.close(1008, "rate limited");

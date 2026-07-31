@@ -1374,12 +1374,13 @@ describe("Remote Companion outbound encrypted service", () => {
     expect(pairing.service.state().audit.map(({ type }) => type)).not.toContain(
       "pairing.accepted",
     );
+    // Drain the asynchronous pairing-request audit before reading the vault.
+    await pairing.service.shutdown();
     const durable = await pairing.store.load();
     expect(durable?.devices).toEqual([]);
     expect(durable?.audit.map(({ type }) => type)).not.toContain(
       "pairing.accepted",
     );
-    await pairing.service.shutdown();
   });
 
   it("closes stale sessions after durably replacing a device grant", async () => {

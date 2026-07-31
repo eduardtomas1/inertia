@@ -437,7 +437,9 @@ server.listen(port, "127.0.0.1", () => {
     );
 
     await expect(readOpenCodeSdkModels(command, process.env, root, {
-      healthTimeoutMs: stage === "provider" ? 2_000 : 250,
+      // Leave enough time for the Windows SDK client to dispatch the request;
+      // the fixture itself still proves that the stalled request is bounded.
+      healthTimeoutMs: 2_000,
       providerTimeoutMs: 250,
     })).rejects.toThrow(message);
 

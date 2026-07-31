@@ -5,7 +5,10 @@ import {
   waitForRemoteRelayMessage,
   waitForRemoteWebSocketOpen,
 } from "../remote/browser/src/remote-client";
-import type { BrowserDeviceProfile } from "../remote/browser/src/device-store";
+import type { SealedBrowserDeviceProfile } from "../remote/browser/src/device-store";
+import {
+  generateNonExtractableDeviceKeys,
+} from "../remote/browser/src/device-keys";
 import {
   createAuthenticatedSessionSender,
   generateRemoteKeyPair,
@@ -92,13 +95,15 @@ afterEach(() => {
 describe("Remote Companion browser connection ownership", () => {
   it("lets only the newest overlapping connect attempt own the session", async () => {
     vi.stubGlobal("WebSocket", FakeBrowserSocket);
-    const deviceKeys = await generateRemoteKeyPair();
+    const deviceKeys = await generateNonExtractableDeviceKeys();
     const hostKeys = await generateRemoteKeyPair();
-    const profile: BrowserDeviceProfile = {
-      version: 1,
+    const profile: SealedBrowserDeviceProfile = {
+      version: 2,
       deviceId: crypto.randomUUID(),
       deviceLabel: "Test browser",
-      keyPair: deviceKeys,
+      publicKey: deviceKeys.publicKey,
+      privateKey: deviceKeys.keyPair.privateKey,
+      lastUsedAt: new Date().toISOString(),
       hostId: crypto.randomUUID(),
       hostPublicKey: hostKeys.publicKey,
       relayUrl: "wss://relay.example/remote",
@@ -116,7 +121,7 @@ describe("Remote Companion browser connection ownership", () => {
       detail: vi.fn(),
       promptResult: vi.fn(),
     });
-    (client as unknown as { profile: BrowserDeviceProfile | null }).profile =
+    (client as unknown as { profile: SealedBrowserDeviceProfile | null }).profile =
       profile;
 
     const firstAttempt = client.connect();
@@ -129,7 +134,7 @@ describe("Remote Companion browser connection ownership", () => {
     second.open();
     await vi.waitFor(() => expect(second.sent).toHaveLength(1));
     second.message({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.connected",
       connectionId: crypto.randomUUID(),
     });
@@ -207,13 +212,15 @@ describe("Remote Companion browser connection ownership", () => {
 
   it("clears a grant that expired after initialization instead of reconnecting", async () => {
     vi.stubGlobal("WebSocket", FakeBrowserSocket);
-    const deviceKeys = await generateRemoteKeyPair();
+    const deviceKeys = await generateNonExtractableDeviceKeys();
     const hostKeys = await generateRemoteKeyPair();
-    const profile: BrowserDeviceProfile = {
-      version: 1,
+    const profile: SealedBrowserDeviceProfile = {
+      version: 2,
       deviceId: crypto.randomUUID(),
       deviceLabel: "Test browser",
-      keyPair: deviceKeys,
+      publicKey: deviceKeys.publicKey,
+      privateKey: deviceKeys.keyPair.privateKey,
+      lastUsedAt: new Date().toISOString(),
       hostId: crypto.randomUUID(),
       hostPublicKey: hostKeys.publicKey,
       relayUrl: "wss://relay.example/remote",
@@ -231,7 +238,7 @@ describe("Remote Companion browser connection ownership", () => {
       detail: vi.fn(),
       promptResult: vi.fn(),
     });
-    (client as unknown as { profile: BrowserDeviceProfile | null }).profile =
+    (client as unknown as { profile: SealedBrowserDeviceProfile | null }).profile =
       profile;
 
     await client.connect();
@@ -328,7 +335,7 @@ describe("Remote Companion browser connection ownership", () => {
     );
     malformed.rawMessage("{");
     malformed.message({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.error",
       code: "desktop-offline",
     });
@@ -392,6 +399,64 @@ describe("Remote Companion browser connection ownership", () => {
 
     expect(statuses.at(-1)).toBe("The desktop is offline.");
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("periodically persists activity from authenticated polling", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-07-31T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const deviceKeys = await generateNonExtractableDeviceKeys();
+    const hostKeys = await generateRemoteKeyPair();
+    const profile: SealedBrowserDeviceProfile = {
+      version: 2,
+      deviceId: crypto.randomUUID(),
+      deviceLabel: "Active browser",
+      publicKey: deviceKeys.publicKey,
+      privateKey: deviceKeys.keyPair.privateKey,
+      lastUsedAt: new Date(now - 2 * 60 * 60 * 1_000).toISOString(),
+      hostId: crypto.randomUUID(),
+      hostPublicKey: hostKeys.publicKey,
+      relayUrl: "wss://relay.example/remote",
+      endpointId: "opaque_endpoint",
+      scopes: ["view"],
+      projectIds: ["project"],
+      grantVersion: 1,
+      expiresAt: new Date(now + 14 * 24 * 60 * 60 * 1_000).toISOString(),
+    };
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const saveOwnedProfile = vi.fn(async (
+      _epoch: number,
+      _profile: SealedBrowserDeviceProfile,
+    ) => true);
+    const internals = client as unknown as {
+      attemptEpoch: number;
+      profile: SealedBrowserDeviceProfile | null;
+      persistAuthenticatedActivity(epoch: number): Promise<void>;
+      saveOwnedProfile(
+        epoch: number,
+        profile: SealedBrowserDeviceProfile,
+      ): Promise<boolean>;
+    };
+    internals.profile = profile;
+    internals.saveOwnedProfile = saveOwnedProfile;
+
+    await internals.persistAuthenticatedActivity(internals.attemptEpoch);
+    expect(saveOwnedProfile).toHaveBeenCalledTimes(1);
+    expect(saveOwnedProfile.mock.calls[0]?.[1].lastUsedAt).toBe(
+      new Date(now).toISOString(),
+    );
+    await internals.persistAuthenticatedActivity(internals.attemptEpoch);
+    expect(saveOwnedProfile).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(now + 60 * 60 * 1_000 + 1);
+    await internals.persistAuthenticatedActivity(internals.attemptEpoch);
+    expect(saveOwnedProfile).toHaveBeenCalledTimes(2);
   });
 
   it("clears stale detail and rejects prompts for the previous selection", async () => {
@@ -495,6 +560,11 @@ describe("Remote Companion browser connection ownership", () => {
                 providerLabel: "Provider",
                 status: "idle",
                 pendingLocalApproval: false,
+                promptSafety: {
+                  supported: true,
+                  headline: "Local approval required for reported actions",
+                  explanation: "Desktop approval is required for reported actions.",
+                },
                 updatedAt: now,
               },
               messages: [],
@@ -594,6 +664,11 @@ describe("Remote Companion browser connection ownership", () => {
               providerLabel: "Provider",
               status: "idle",
               pendingLocalApproval: false,
+              promptSafety: {
+                supported: true,
+                headline: "Local approval required for reported actions",
+                explanation: "Desktop approval is required for reported actions.",
+              },
               updatedAt: now,
             },
             messages: [],
@@ -688,6 +763,11 @@ describe("Remote Companion browser connection ownership", () => {
               providerLabel: "Provider",
               status: "idle",
               pendingLocalApproval: false,
+              promptSafety: {
+                supported: true,
+                headline: "Local approval required for reported actions",
+                explanation: "Desktop approval is required for reported actions.",
+              },
               updatedAt: now,
             },
             messages: [],

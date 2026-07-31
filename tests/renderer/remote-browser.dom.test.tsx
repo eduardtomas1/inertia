@@ -11,6 +11,9 @@ import {
 } from "../../remote/browser/src/device-store";
 import { appendRemoteText } from "../../remote/browser/src/safe-dom";
 import { RemoteAccessSettings } from "../../src/renderer/src/components/RemoteAccessSettings";
+import { ConversationGrantEditor } from "../../src/renderer/src/components/RemoteConversationGrants";
+import type { Conversation, Project } from "../../src/shared/contracts";
+import type { RemoteDeviceUpdateRequest } from "../../src/shared/desktop";
 import {
   remoteSafeMessageSchema,
   type RemoteAccessState,
@@ -20,7 +23,143 @@ afterEach(() => {
   Reflect.deleteProperty(window, "inertia");
 });
 
+function pendingState(now: string): RemoteAccessState {
+  return {
+    available: true,
+    enabled: true,
+    relayUrl: "wss://relay.example/remote",
+    connection: "online",
+    connectionMessage: null,
+    activeSessions: 0,
+    devices: [],
+    pendingPairings: [{
+      requestId: crypto.randomUUID(),
+      deviceLabel: "New browser",
+      comparisonCode: "123456",
+      receivedAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      replacesDeviceLabel: null,
+    }],
+    invitation: null,
+    audit: [],
+  };
+}
+
+function pairedState(now: string, projectId: string): RemoteAccessState {
+  return {
+    ...pendingState(now),
+    pendingPairings: [],
+    devices: [{
+      id: crypto.randomUUID(),
+      label: "Paired browser",
+      scopes: ["view", "prompt"],
+      projectIds: [projectId],
+      grants: [{
+        projectId,
+        conversationIds: [],
+        includeFutureConversations: true,
+        legacyProjectWide: false,
+      }],
+      needsGrantReview: false,
+      createdAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      lastSeenAt: null,
+      revokedAt: null,
+    }],
+  };
+}
+
+function projectFixture(id: string, now: string): Project {
+  return {
+    id,
+    name: "Explicit project",
+    path: "/not-rendered",
+    normalizedPath: "/not-rendered",
+    repositoryIdentity: null,
+    repositoryRoot: null,
+    repositoryRelativePath: "",
+    groupingMode: null,
+    gitRepositoryLimit: 4,
+    color: "#000000",
+    status: "ready",
+    createdAt: now,
+    updatedAt: now,
+  } as Project;
+}
+
+function conversationFixture(projectId: string, now: string): Conversation {
+  return {
+    id: crypto.randomUUID(),
+    projectId,
+    title: "Only conversation",
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+  } as Conversation;
+}
+
 describe("Remote Companion browser output boundary", () => {
+  it("lets visible conversations replace stale grants at the project limit", () => {
+    const now = new Date().toISOString();
+    const project = projectFixture(crypto.randomUUID(), now);
+    const conversation = conversationFixture(project.id, now);
+    const onChange = vi.fn();
+    render(<ConversationGrantEditor
+      projects={[project]}
+      conversations={[conversation]}
+      projectIds={[project.id]}
+      grants={[{
+        projectId: project.id,
+        conversationIds: Array.from(
+          { length: 200 },
+          (_, index) => `archived-${index}`,
+        ),
+        includeFutureConversations: false,
+        legacyProjectWide: false,
+      }]}
+      onChange={onChange}
+    />);
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Only conversation",
+    });
+    expect(checkbox).not.toBeDisabled();
+    checkbox.click();
+    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({
+      projectId: project.id,
+      conversationIds: [conversation.id],
+    })]);
+  });
+
+  it("shows and clears effective legacy project-wide access", () => {
+    const now = new Date().toISOString();
+    const project = projectFixture(crypto.randomUUID(), now);
+    const onChange = vi.fn();
+    render(<ConversationGrantEditor
+      projects={[project]}
+      conversations={[conversationFixture(project.id, now)]}
+      projectIds={[project.id]}
+      grants={[{
+        projectId: project.id,
+        conversationIds: [],
+        includeFutureConversations: false,
+        legacyProjectWide: true,
+      }]}
+      onChange={onChange}
+    />);
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: /Include every conversation/u,
+    });
+    expect(checkbox).toBeChecked();
+    checkbox.click();
+    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({
+      projectId: project.id,
+      includeFutureConversations: false,
+      legacyProjectWide: false,
+    })]);
+  });
+
   it("renders malicious provider output as inert text", () => {
     const parent = document.createElement("div");
     appendRemoteText(
@@ -98,25 +237,7 @@ describe("Remote Companion browser output boundary", () => {
 
   it("requires an explicit project choice before pairing approval", async () => {
     const now = new Date().toISOString();
-    const state: RemoteAccessState = {
-      available: true,
-      enabled: true,
-      relayUrl: "wss://relay.example/remote",
-      connection: "online",
-      connectionMessage: null,
-      activeSessions: 0,
-      devices: [],
-      pendingPairings: [{
-        requestId: crypto.randomUUID(),
-        deviceLabel: "New browser",
-        comparisonCode: "123456",
-        receivedAt: now,
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
-        replacesDeviceLabel: null,
-      }],
-      invitation: null,
-      audit: [],
-    };
+    const state = pendingState(now);
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
@@ -124,21 +245,10 @@ describe("Remote Companion browser output boundary", () => {
         onRemoteAccessState: vi.fn(() => vi.fn()),
       },
     });
-    render(<RemoteAccessSettings projects={[{
-      id: crypto.randomUUID(),
-      name: "Explicit project",
-      path: "/not-rendered",
-      normalizedPath: "/not-rendered",
-      repositoryIdentity: null,
-      repositoryRoot: null,
-      repositoryRelativePath: "",
-      groupingMode: null,
-      gitRepositoryLimit: 4,
-      color: "#000000",
-      status: "ready",
-      createdAt: now,
-      updatedAt: now,
-    }]} />);
+    render(<RemoteAccessSettings
+      projects={[projectFixture(crypto.randomUUID(), now)]}
+      conversations={[]}
+    />);
 
     await screen.findByText("Approve New browser?");
     const project = screen.getByRole("checkbox", {
@@ -147,7 +257,146 @@ describe("Remote Companion browser output boundary", () => {
     expect(project).not.toBeChecked();
     expect(screen.getByRole("button", { name: /Approve/u })).toBeDisabled();
     project.click();
+    await waitFor(() => expect(screen.getByRole("checkbox", {
+      name: /Include every conversation/u,
+    })).not.toBeChecked());
+    expect(screen.getByRole("button", { name: /Approve/u })).toBeDisabled();
+
+    screen.getByRole("checkbox", {
+      name: /Include every conversation/u,
+    }).click();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Approve/u })).toBeEnabled());
+  });
+
+  it("keeps approval blocked until a conversation is explicitly granted", async () => {
+    const now = new Date().toISOString();
+    const projectId = crypto.randomUUID();
+    const state = pendingState(now);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => state),
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+      },
+    });
+    render(<RemoteAccessSettings
+      projects={[projectFixture(projectId, now)]}
+      conversations={[conversationFixture(projectId, now)]}
+    />);
+
+    await screen.findByText("Approve New browser?");
+    screen.getByRole("checkbox", { name: "Explicit project" }).click();
+    await waitFor(() => expect(screen.getByRole("checkbox", {
+      name: "Only conversation",
+    })).not.toBeChecked());
+    expect(screen.getByRole("button", { name: /Approve/u })).toBeDisabled();
+
+    screen.getByRole("checkbox", { name: "Only conversation" }).click();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Approve/u })).toBeEnabled());
+  });
+
+  it("does not let a deselected project's stale grant approve another project", async () => {
+    const now = new Date().toISOString();
+    const first = {
+      ...projectFixture(crypto.randomUUID(), now),
+      name: "First project",
+    };
+    const second = {
+      ...projectFixture(crypto.randomUUID(), now),
+      name: "Second project",
+    };
+    const firstConversation = {
+      ...conversationFixture(first.id, now),
+      title: "First conversation",
+    };
+    const secondConversation = {
+      ...conversationFixture(second.id, now),
+      title: "Second conversation",
+    };
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => pendingState(now)),
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+      },
+    });
+    render(<RemoteAccessSettings
+      projects={[first, second]}
+      conversations={[firstConversation, secondConversation]}
+    />);
+
+    await screen.findByText("Approve New browser?");
+    screen.getByRole("checkbox", { name: "First project" }).click();
+    await waitFor(() => expect(screen.getByRole("checkbox", {
+      name: "First conversation",
+    })).not.toBeChecked());
+    screen.getByRole("checkbox", { name: "First conversation" }).click();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Approve/u })).toBeEnabled());
+
+    screen.getByRole("checkbox", { name: "First project" }).click();
+    screen.getByRole("checkbox", { name: "Second project" }).click();
+    await waitFor(() => expect(screen.getByRole("checkbox", {
+      name: "Second conversation",
+    })).not.toBeChecked());
+    expect(screen.getByRole("button", { name: /Approve/u })).toBeDisabled();
+  });
+
+  it("limits prompt-capable pairing expiry to seven days", async () => {
+    const now = new Date().toISOString();
+    const state = pendingState(now);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => state),
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+      },
+    });
+    render(<RemoteAccessSettings projects={[]} conversations={[]} />);
+
+    await screen.findByText("Approve New browser?");
+    screen.getByRole("switch", { name: "Allow text prompts" }).click();
+    const expiry = screen.getByLabelText(
+      "Permission expiry",
+    ) as HTMLSelectElement;
+    await waitFor(() => expect(expiry.value).toBe("7"));
+    expect(expiry.querySelector('option[value="30"]')).toBeNull();
+    expect(expiry.querySelector('option[value="90"]')).toBeNull();
+  });
+
+  it("saves an existing prompt device with a valid default expiry", async () => {
+    const now = new Date().toISOString();
+    const projectId = crypto.randomUUID();
+    const state = pairedState(now, projectId);
+    const updateRemoteDevice = vi.fn(
+      async (_request: RemoteDeviceUpdateRequest) => state,
+    );
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => state),
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+        updateRemoteDevice,
+      },
+    });
+    render(<RemoteAccessSettings
+      projects={[projectFixture(projectId, now)]}
+      conversations={[]}
+    />);
+
+    await screen.findByText("Paired browser");
+    screen.getByText("Edit permissions").click();
+    const expiry = screen.getByLabelText("Reset expiry") as HTMLSelectElement;
+    expect(expiry.value).toBe("7");
+    expect(expiry.querySelector('option[value="30"]')).toBeNull();
+    screen.getByRole("button", { name: "Save permissions" }).click();
+    await waitFor(() => expect(updateRemoteDevice).toHaveBeenCalledOnce());
+    const request = updateRemoteDevice.mock.calls[0]![0];
+    const expiryMs = Date.parse(request.expiresAt) - Date.now();
+    expect(request.scopes).toEqual(["view", "prompt"]);
+    expect(expiryMs).toBeGreaterThan(6 * 24 * 60 * 60 * 1_000);
+    expect(expiryMs).toBeLessThanOrEqual(7 * 24 * 60 * 60 * 1_000);
   });
 });

@@ -140,7 +140,7 @@ async function browserTunnel(
   await once(socket, "open");
   const response = nextMessage(socket);
   socket.send(JSON.stringify({
-    protocolVersion: 1,
+    protocolVersion: 2,
     type: "relay.connect",
     endpointId,
     browserVersion: "0.1.0",
@@ -250,7 +250,7 @@ async function openAuthenticatedSession(input: {
   );
   const acceptPromise = nextFrame(tunnel.socket, "session.accept");
   sendFrame(tunnel.socket, tunnel.connectionId, {
-    protocolVersion: 1,
+    protocolVersion: 2,
     kind: "session.open",
     sessionId,
     enc: sender.enc,
@@ -313,6 +313,7 @@ async function pendingPairingFixture(options: {
   const relayUrl = await relay();
   const store = encryptedStore();
   const service = await RemoteAccessService.create({
+    initialPrivacy: null,
     store,
     runtime: options.runtime ?? {
       remoteRequest: async () => {
@@ -440,6 +441,7 @@ describe("Remote Companion outbound encrypted service", () => {
     relays.push(value);
     expect(value.address()).toMatchObject({ port: 8787 });
     const service = await RemoteAccessService.create({
+      initialPrivacy: null,
       store: encryptedStore(),
       runtime: { remoteRequest: async () => {
         throw new Error("unused");
@@ -460,6 +462,7 @@ describe("Remote Companion outbound encrypted service", () => {
   it("invalidates a live invitation across disable and re-enable", async () => {
     const relayUrl = await relay();
     const service = await RemoteAccessService.create({
+      initialPrivacy: null,
       store: encryptedStore(),
       runtime: { remoteRequest: async () => {
         throw new Error("unused");
@@ -515,6 +518,11 @@ describe("Remote Companion outbound encrypted service", () => {
                   providerLabel: "Provider",
                   status: "idle",
                   pendingLocalApproval: false,
+                  promptSafety: {
+                    supported: true,
+                    headline: "Local approval required for reported actions",
+                    explanation: "Desktop approval is required for reported actions.",
+                  },
                   updatedAt: new Date().toISOString(),
                 },
                 messages: [{
@@ -584,6 +592,7 @@ describe("Remote Companion outbound encrypted service", () => {
     const store = encryptedStore();
     const socket = new StalledRelaySocket();
     const service = await RemoteAccessService.create({
+      initialPrivacy: null,
       store,
       createSocket: () => socket as unknown as WebSocket,
       runtime: { remoteRequest: async () => {
@@ -617,6 +626,7 @@ describe("Remote Companion outbound encrypted service", () => {
       return value;
     });
     const service = await RemoteAccessService.create({
+      initialPrivacy: null,
       store,
       createSocket,
       runtime: { remoteRequest: async () => {
@@ -662,6 +672,7 @@ describe("Remote Companion outbound encrypted service", () => {
       decrypt: (ciphertext) => new TextDecoder().decode(ciphertext),
     });
     const service = await RemoteAccessService.create({
+      initialPrivacy: null,
       store,
       runtime: { remoteRequest: async () => {
         throw new Error("unused");
@@ -706,6 +717,7 @@ describe("Remote Companion outbound encrypted service", () => {
       },
     );
     const service = await RemoteAccessService.create({
+      initialPrivacy: null,
       store: encryptedStore(),
       runtime: { remoteRequest: async () => {
         throw new Error("unused");
@@ -752,6 +764,7 @@ describe("Remote Companion outbound encrypted service", () => {
   it("atomically consumes one invitation across concurrent relay routes", async () => {
     const relayUrl = await relay();
     const service = await RemoteAccessService.create({
+      initialPrivacy: null,
       store: encryptedStore(),
       runtime: { remoteRequest: async () => {
         throw new Error("unused");
@@ -830,6 +843,7 @@ describe("Remote Companion outbound encrypted service", () => {
   it("fails closed when an invitation holder sends invalid pairing crypto", async () => {
     const relayUrl = await relay();
     const service = await RemoteAccessService.create({
+      initialPrivacy: null,
       store: encryptedStore(),
       runtime: { remoteRequest: async () => {
         throw new Error("unused");
@@ -1612,7 +1626,7 @@ describe("Remote Companion outbound encrypted service", () => {
         };
       },
     };
-    const service = await RemoteAccessService.create({ store, runtime });
+    const service = await RemoteAccessService.create({ store, runtime, initialPrivacy: null });
     await service.setEnabled(true, relayUrl);
     await waitFor(() => service.state().connection === "online");
     const invitation = await service.createInvitation();

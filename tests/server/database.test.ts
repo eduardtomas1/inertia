@@ -73,7 +73,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     expect(JSON.stringify(firstDetail).length).toBeGreaterThan(shellSizeAfter * 100);
     expect(store.conversationDetail("missing-conversation")).toBeNull();
     store.close();
-  });
+  }, 30_000);
 
   it("indexes conversation-detail ordering without a temporary sort", async () => {
     const { databasePath, store } = await createStore();

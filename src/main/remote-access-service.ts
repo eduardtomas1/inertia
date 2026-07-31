@@ -21,6 +21,7 @@ import {
   type RemoteResponse,
   type RemoteScope,
 } from "../shared/remote-protocol";
+import type { RemoteConversationGrant } from "../shared/remote-grants";
 import type { PersistedRemoteAccess } from "./remote-access-store";
 import { settleRemoteDeliveryOnDisconnect } from "./remote-access-delivery";
 import {
@@ -30,6 +31,8 @@ import {
 import {
   closeRemoteSocket,
   REMOTE_MAX_BUFFERED_BYTES,
+  REMOTE_PRIVACY_LOCKED_MESSAGE,
+  REMOTE_PRIVACY_UNVERIFIED_MESSAGE,
   REMOTE_SHUTDOWN_TIMEOUT_MS,
   RemoteSessionAuthenticationBudget,
   sendSequencedRemoteResponse,
@@ -55,10 +58,13 @@ import {
 import { RemoteRequestDispatcher } from "./remote-access-request-dispatcher";
 import {
   RemoteSessionAdmissions, remoteSessionCanCommitPrompt,
+  remoteSessionRetainsAuthority,
+  type RemoteSessionAuthorityInput,
 } from "./remote-access-session-admission";
 import { authenticateRemoteSession } from "./remote-access-session-handshake";
 import type {
   ActiveRemoteSession, PendingRemotePairing, RemoteAccessServiceOptions,
+  RemotePrivacySuspension,
 } from "./remote-access-service-types";
 const RELAY_HANDSHAKE_TIMEOUT_MS = 10_000;
 const SESSION_SWEEP_MS = 30_000;
@@ -89,7 +95,8 @@ export class RemoteAccessService {
   private reconnectTimer: Timer | null = null;
   private registrationTimer: Timer | null = null;
   private sweepTimer: Timer | null = null;
-  private privacyLocked = false;
+  private privacyLocked: boolean;
+  private privacySuspension: RemotePrivacySuspension | null;
   private stopped = false;
   private storeError: string | null = null;
   private identityInitialization: Promise<void> | null = null;
@@ -103,6 +110,10 @@ export class RemoteAccessService {
   ) {
     this.data = data;
     this.hostKeyPair = hostKeyPair;
+    this.privacySuspension = options.initialPrivacy === undefined
+      ? "unverified"
+      : options.initialPrivacy;
+    this.privacyLocked = this.privacySuspension !== null;
     this.now = options.now ?? (() => new Date());
     this.setTimer = options.setTimer ?? setTimeout;
     this.clearTimer = options.clearTimer ?? clearTimeout;
@@ -156,15 +167,9 @@ export class RemoteAccessService {
       now: () => this.now(),
       persist: async () => await this.persist(),
       audit: (type, deviceId, detail) => this.audit(type, deviceId, detail),
-      isCurrent: (session) => this.sessions.get(session.sessionId) === session,
-      authorizePromptCommit: (session) => remoteSessionCanCommitPrompt({
-        data: this.data, session,
-        live: this.sessions.get(session.sessionId) === session,
-        ownsRoute: this.relayMessages.owns(
-          session.connectionId, session.connectionEpoch),
-        privacyLocked: this.privacyLocked, stopped: this.stopped,
-        storeFailed: this.storeError !== null, now: this.now().getTime(),
-      }),
+      isCurrent: (session) => this.sessionRetainsAuthority(session),
+      authorizePromptCommit: (session) =>
+        remoteSessionCanCommitPrompt(this.sessionAuthority(session)),
       respond: async (session, response) => await this.respond(session, response),
     });
   }
@@ -227,6 +232,7 @@ export class RemoteAccessService {
       this.invitation = null;
       const socket = this.disconnect("disabled", false, false);
       terminateRemoteSocket(socket);
+      this.forgetRemoteTranscripts();
       await this.persist();
       this.emitState();
       return;
@@ -262,6 +268,7 @@ export class RemoteAccessService {
     scopes: RemoteScope[],
     projectIds: string[],
     grantMs = DEFAULT_REMOTE_GRANT_MS,
+    grants?: RemoteConversationGrant[],
   ): Promise<void> {
     const data = this.requireData();
     const pending = this.pendingPairings.get(requestId);
@@ -295,6 +302,7 @@ export class RemoteAccessService {
       pending,
       scopes,
       projectIds,
+      grants,
       grantMs,
       now: this.now(),
     });
@@ -361,12 +369,14 @@ export class RemoteAccessService {
     scopes: RemoteScope[],
     projectIds: string[],
     expiresAt: string,
+    grants?: RemoteConversationGrant[],
   ): Promise<void> {
     const device = updateRemoteDeviceGrant({
       data: this.requireData(),
       deviceId,
       scopes,
       projectIds,
+      grants,
       expiresAt,
       now: this.now(),
     });
@@ -376,12 +386,25 @@ export class RemoteAccessService {
     this.emitState();
   }
 
-  setPrivacyLocked(locked: boolean): void {
-    if (this.privacyLocked === locked) return;
+  setPrivacyLocked(
+    locked: boolean,
+    suspension: RemotePrivacySuspension | null = locked ? "locked" : null,
+  ): void {
+    const changed = this.privacyLocked !== locked
+      || this.privacySuspension !== suspension;
+    if (!changed) return;
     this.privacyLocked = locked;
+    this.privacySuspension = locked ? suspension ?? "locked" : null;
     if (locked) this.disconnect("shutdown", true);
     else if (this.data?.enabled) this.connect();
     this.emitState();
+  }
+
+  private privacySuspensionMessage(): string | null {
+    if (!this.privacyLocked) return null;
+    return this.privacySuspension === "unverified"
+      ? REMOTE_PRIVACY_UNVERIFIED_MESSAGE
+      : REMOTE_PRIVACY_LOCKED_MESSAGE;
   }
 
   async shutdown(): Promise<void> {
@@ -402,12 +425,12 @@ export class RemoteAccessService {
 
   private connect(): void {
     const data = this.data;
-    if (
-      !data?.enabled
-      || this.stopped
-      || this.privacyLocked
-      || this.socket
-    ) return;
+    if (!data?.enabled || this.stopped || this.socket) return;
+    if (this.privacyLocked) {
+      this.connection = "offline";
+      this.connectionMessage = this.privacySuspensionMessage();
+      return;
+    }
     this.connection = "connecting";
     this.connectionMessage = null;
     this.emitState();
@@ -454,9 +477,8 @@ export class RemoteAccessService {
       this.connection = "offline";
       const closedMessage = this.pendingConnectionMessage;
       this.pendingConnectionMessage = null;
-      this.connectionMessage = this.privacyLocked
-        ? "Remote Companion is paused while the desktop is locked."
-        : closedMessage ?? "The relay is offline.";
+      this.connectionMessage = this.privacySuspensionMessage()
+        ?? closedMessage ?? "The relay is offline.";
       this.relayMessages.reset();
       this.dropAllSessions();
       this.scheduleReconnect();
@@ -610,6 +632,7 @@ export class RemoteAccessService {
           inFlight: new Map(),
           postedPromptDeliveries: new Set(),
           outboundTail: Promise.resolve(),
+          outboundAbandoned: false,
         };
         device.lastSeenAt = this.now().toISOString();
         this.audit("session.connected", device.id, "A remote session connected.");
@@ -713,13 +736,31 @@ export class RemoteAccessService {
     await sendSequencedRemoteResponse(
       session,
       response,
-      () => this.sessions.get(session.sessionId) === session
-        && this.relayMessages.owns(
-          session.connectionId,
-          session.connectionEpoch,
-        ),
+      () => this.sessionRetainsAuthority(session),
       (connectionId, frame) => this.sendFrame(connectionId, frame),
     );
+  }
+
+  private sessionAuthority(
+    session: ActiveRemoteSession,
+  ): RemoteSessionAuthorityInput {
+    return {
+      data: this.data,
+      session,
+      live: this.sessions.get(session.sessionId) === session,
+      ownsRoute: this.relayMessages.owns(
+        session.connectionId,
+        session.connectionEpoch,
+      ),
+      privacyLocked: this.privacyLocked,
+      stopped: this.stopped,
+      storeFailed: this.storeError !== null,
+      now: this.now().getTime(),
+    };
+  }
+
+  private sessionRetainsAuthority(session: ActiveRemoteSession): boolean {
+    return remoteSessionRetainsAuthority(this.sessionAuthority(session));
   }
 
   private sendFrame(connectionId: string, frame: RemoteCipherFrame): void {
@@ -870,9 +911,7 @@ export class RemoteAccessService {
     }
     this.clearReconnect();
     this.connection = this.data?.enabled ? "offline" : "disabled";
-    this.connectionMessage = this.privacyLocked
-      ? "Remote Companion is paused while the desktop is locked."
-      : null;
+    this.connectionMessage = this.privacySuspensionMessage();
     if (reconnect) this.scheduleReconnect();
     return socket;
   }
@@ -969,6 +1008,14 @@ export class RemoteAccessService {
     return this.requireData();
   }
 
+  private forgetRemoteTranscripts(): void {
+    try {
+      this.options.runtime.forgetRemoteTranscripts?.({ kind: "all" });
+    } catch {
+      return;
+    }
+  }
+
   private requireData(): PersistedRemoteAccess {
     if (!this.data || this.storeError) {
       throw new Error(
@@ -1003,6 +1050,7 @@ export class RemoteAccessService {
     this.sessionAdmissions.clear();
     this.sessions.clear();
     this.sessionByConnection.clear();
+    this.forgetRemoteTranscripts();
     this.clearReconnect();
     this.clearRegistrationDeadline();
     if (this.sweepTimer) this.clearTimer(this.sweepTimer);

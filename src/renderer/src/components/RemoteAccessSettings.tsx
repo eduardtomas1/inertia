@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Check, Copy, RadioTower, ShieldCheck, Trash2 } from "lucide-react";
 
-import type { Project } from "@shared/contracts";
+import type { Conversation, Project } from "@shared/contracts";
+import type { RemoteConversationGrant } from "@shared/remote-grants";
 import type {
   RemoteAccessState,
   RemoteDeviceView,
@@ -9,22 +10,36 @@ import type {
 } from "@shared/remote-protocol";
 import { useRemoteAccessState } from "../hooks/useRemoteAccessState";
 import { writeClipboardText } from "../utils/clipboard";
+import {
+  ConversationGrantEditor,
+  DeviceAccessPreview,
+  remoteGrantsAllowSomething,
+} from "./RemoteConversationGrants";
 import { Switch } from "./ui";
+
+const MAX_PROMPT_EXPIRY_DAYS = 7;
 
 export function RemoteAccessSettings({
   projects,
+  conversations,
 }: {
   projects: Project[];
+  conversations: Conversation[];
 }): React.JSX.Element {
   const liveState = useRemoteAccessState();
   const [state, setState] = useState<RemoteAccessState | null>(null);
   const [relayUrl, setRelayUrl] = useState("");
   const [prompting, setPrompting] = useState(false);
   const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [grants, setGrants] = useState<RemoteConversationGrant[]>([]);
   const [grantDays, setGrantDays] = useState(30);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const current = liveState ?? state;
+  const selectedGrants = useMemo(() => {
+    const selectedProjects = new Set(projectIds);
+    return grants.filter(({ projectId }) => selectedProjects.has(projectId));
+  }, [grants, projectIds]);
 
   useEffect(() => {
     if (!liveState) return;
@@ -37,6 +52,7 @@ export function RemoteAccessSettings({
     .join(",") ?? "";
   useLayoutEffect(() => {
     setProjectIds([]);
+    setGrants([]);
     setPrompting(false);
   }, [pendingPairingIds]);
 
@@ -193,7 +209,13 @@ export function RemoteAccessSettings({
             <Switch
               label="Allow text prompts"
               checked={prompting}
-              onChange={setPrompting}
+              onChange={(allowed) => {
+                setPrompting(allowed);
+                if (allowed) {
+                  setGrantDays((days) =>
+                    Math.min(days, MAX_PROMPT_EXPIRY_DAYS));
+                }
+              }}
             />
           </div>
           <label className="remote-expiry-setting">
@@ -204,19 +226,31 @@ export function RemoteAccessSettings({
             >
               <option value={1}>1 day</option>
               <option value={7}>7 days</option>
-              <option value={30}>30 days</option>
-              <option value={90}>90 days</option>
+              {!prompting && <option value={30}>30 days</option>}
+              {!prompting && <option value={90}>90 days</option>}
             </select>
           </label>
+          <ConversationGrantEditor
+            projects={projects}
+            conversations={conversations}
+            projectIds={projectIds}
+            grants={selectedGrants}
+            onChange={setGrants}
+          />
           <div className="remote-pairing-actions">
             <button
               type="button"
-              disabled={busy || projectIds.length === 0}
+              disabled={
+                busy
+                || projectIds.length === 0
+                || !remoteGrantsAllowSomething(selectedGrants)
+              }
               onClick={() => void mutate(
                 () => window.inertia.approveRemotePairing({
                   requestId: pending.requestId,
                   scopes: prompting ? ["view", "prompt"] : ["view"],
                   projectIds,
+                  grants: selectedGrants,
                   grantDays,
                 }),
                 `${pending.deviceLabel} paired.`,
@@ -254,12 +288,14 @@ export function RemoteAccessSettings({
             key={`${device.id}:${device.expiresAt}:${device.scopes.join(",")}`}
             device={device}
             projects={projects}
+            conversations={conversations}
             disabled={busy}
-            update={(scopes, nextProjectIds, expiresAt) => mutate(
+            update={(scopes, nextProjectIds, nextGrants, expiresAt) => mutate(
               () => window.inertia.updateRemoteDevice({
                 deviceId: device.id,
                 scopes,
                 projectIds: nextProjectIds,
+                grants: nextGrants,
                 expiresAt,
               }),
               `${device.label} permissions updated.`,
@@ -298,23 +334,29 @@ export function RemoteAccessSettings({
 function RemoteDevice({
   device,
   projects,
+  conversations,
   disabled,
   update,
   revoke,
 }: {
   device: RemoteDeviceView;
   projects: Project[];
+  conversations: Conversation[];
   disabled: boolean;
   update(
     scopes: RemoteScope[],
     projectIds: string[],
+    grants: RemoteConversationGrant[],
     expiresAt: string,
   ): Promise<void>;
   revoke(): Promise<void>;
 }): React.JSX.Element {
   const [prompting, setPrompting] = useState(device.scopes.includes("prompt"));
   const [projectIds, setProjectIds] = useState(device.projectIds);
-  const [expiryDays, setExpiryDays] = useState(30);
+  const [grants, setGrants] = useState(device.grants);
+  const [expiryDays, setExpiryDays] = useState(
+    prompting ? MAX_PROMPT_EXPIRY_DAYS : 30,
+  );
   const projectNames = useMemo(
     () => projects
       .filter(({ id }) => device.projectIds.includes(id))
@@ -340,6 +382,17 @@ function RemoteDevice({
           </button>
         )}
       </div>
+      <DeviceAccessPreview
+        device={device}
+        projects={projects}
+        conversations={conversations}
+      />
+      {device.needsGrantReview && !device.revokedAt && (
+        <p className="settings-card-note" role="status">
+          Review this device: it still has project-wide access granted before
+          conversation-level permissions existed.
+        </p>
+      )}
       {!device.revokedAt && (
         <details>
           <summary>Edit permissions</summary>
@@ -348,11 +401,25 @@ function RemoteDevice({
             selected={projectIds}
             onChange={setProjectIds}
           />
+          <ConversationGrantEditor
+            projects={projects}
+            conversations={conversations}
+            projectIds={projectIds}
+            grants={grants}
+            onChange={setGrants}
+          />
           <label className="remote-checkbox">
             <input
               type="checkbox"
               checked={prompting}
-              onChange={(event) => setPrompting(event.target.checked)}
+              onChange={(event) => {
+                const allowed = event.target.checked;
+                setPrompting(allowed);
+                if (allowed) {
+                  setExpiryDays((days) =>
+                    Math.min(days, MAX_PROMPT_EXPIRY_DAYS));
+                }
+              }}
             />
             Allow text prompts
           </label>
@@ -361,8 +428,8 @@ function RemoteDevice({
             <select value={expiryDays} onChange={(event) => setExpiryDays(Number(event.target.value))}>
               <option value={1}>1 day from now</option>
               <option value={7}>7 days from now</option>
-              <option value={30}>30 days from now</option>
-              <option value={90}>90 days from now</option>
+              {!prompting && <option value={30}>30 days from now</option>}
+              {!prompting && <option value={90}>90 days from now</option>}
             </select>
           </label>
           <button
@@ -372,6 +439,7 @@ function RemoteDevice({
             onClick={() => void update(
               prompting ? ["view", "prompt"] : ["view"],
               projectIds,
+              grants,
               new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1_000).toISOString(),
             )}
           >

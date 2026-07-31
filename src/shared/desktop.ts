@@ -1,4 +1,9 @@
 import type { ChatAttachmentMimeType } from "./attachments";
+import {
+  normalizeRemoteConversationGrants,
+  REMOTE_GRANT_LIMITS,
+  type RemoteConversationGrant,
+} from "./remote-grants";
 import type {
   RemoteAccessState,
   RemotePairingInvitation,
@@ -110,6 +115,7 @@ export interface RemotePairingApprovalRequest {
   requestId: string;
   scopes: RemoteScope[];
   projectIds: string[];
+  grants: RemoteConversationGrant[] | null;
   grantDays: number;
 }
 
@@ -117,6 +123,7 @@ export interface RemoteDeviceUpdateRequest {
   deviceId: string;
   scopes: RemoteScope[];
   projectIds: string[];
+  grants: RemoteConversationGrant[] | null;
   expiresAt: string;
 }
 
@@ -134,13 +141,26 @@ export function parseRemoteAccessEnableRequest(
 export function parseRemotePairingApprovalRequest(
   value: unknown,
 ): RemotePairingApprovalRequest | null {
-  if (!plainObject(value) || Object.keys(value).length !== 4) return null;
+  if (!plainObject(value)) return null;
+  const keys = Object.keys(value);
+  const hasGrants = Object.prototype.hasOwnProperty.call(value, "grants");
+  if (
+    keys.length !== (hasGrants ? 5 : 4)
+    || !keys.every((key) =>
+      key === "requestId"
+      || key === "scopes"
+      || key === "projectIds"
+      || key === "grants"
+      || key === "grantDays")
+  ) return null;
   const scopes = remoteScopes(value.scopes);
   const projectIds = remoteProjectIds(value.projectIds);
+  const grants = remoteConversationGrants(value.grants);
   return typeof value.requestId === "string"
     && UUID_PATTERN.test(value.requestId)
     && scopes
     && projectIds
+    && grants !== false
     && typeof value.grantDays === "number"
     && Number.isInteger(value.grantDays)
     && value.grantDays >= 1
@@ -149,6 +169,7 @@ export function parseRemotePairingApprovalRequest(
         requestId: value.requestId,
         scopes,
         projectIds,
+        grants,
         grantDays: value.grantDays,
       }
     : null;
@@ -157,22 +178,85 @@ export function parseRemotePairingApprovalRequest(
 export function parseRemoteDeviceUpdateRequest(
   value: unknown,
 ): RemoteDeviceUpdateRequest | null {
-  if (!plainObject(value) || Object.keys(value).length !== 4) return null;
+  if (!plainObject(value)) return null;
+  const keys = Object.keys(value);
+  const hasGrants = Object.prototype.hasOwnProperty.call(value, "grants");
+  if (
+    keys.length !== (hasGrants ? 5 : 4)
+    || !keys.every((key) =>
+      key === "deviceId"
+      || key === "scopes"
+      || key === "projectIds"
+      || key === "grants"
+      || key === "expiresAt")
+  ) return null;
   const scopes = remoteScopes(value.scopes);
   const projectIds = remoteProjectIds(value.projectIds);
+  const grants = remoteConversationGrants(value.grants);
   return typeof value.deviceId === "string"
     && UUID_PATTERN.test(value.deviceId)
     && scopes
     && projectIds
+    && grants !== false
     && typeof value.expiresAt === "string"
     && Number.isFinite(Date.parse(value.expiresAt))
     ? {
         deviceId: value.deviceId,
         scopes,
         projectIds,
+        grants,
         expiresAt: value.expiresAt,
       }
     : null;
+}
+
+function remoteConversationGrants(
+  value: unknown,
+): RemoteConversationGrant[] | null | false {
+  if (value === undefined || value === null) return null;
+  if (
+    !Array.isArray(value)
+    || value.length > REMOTE_GRANT_LIMITS.projects
+  ) return false;
+  const grants: RemoteConversationGrant[] = [];
+  for (const candidate of value) {
+    if (!plainObject(candidate)) return false;
+    const keys = Object.keys(candidate);
+    if (
+      keys.length !== 4
+      || !keys.every((key) =>
+        key === "projectId"
+        || key === "conversationIds"
+        || key === "includeFutureConversations"
+        || key === "legacyProjectWide")
+      || !boundedEntityId(candidate.projectId)
+      || !boundedEntityIds(
+        candidate.conversationIds,
+        REMOTE_GRANT_LIMITS.conversationsPerProject,
+      )
+      || typeof candidate.includeFutureConversations !== "boolean"
+      || typeof candidate.legacyProjectWide !== "boolean"
+    ) return false;
+    grants.push({
+      projectId: candidate.projectId,
+      conversationIds: candidate.conversationIds,
+      includeFutureConversations: candidate.includeFutureConversations,
+      legacyProjectWide: candidate.legacyProjectWide,
+    });
+  }
+  return normalizeRemoteConversationGrants(grants);
+}
+
+function boundedEntityId(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 200;
+}
+
+function boundedEntityIds(value: unknown, maximum: number): value is string[] {
+  if (!Array.isArray(value) || value.length > maximum) return false;
+  for (const candidate of value) {
+    if (!boundedEntityId(candidate)) return false;
+  }
+  return true;
 }
 
 function plainObject(value: unknown): value is Record<string, unknown> {

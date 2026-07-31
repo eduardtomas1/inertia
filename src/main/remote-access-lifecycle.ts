@@ -10,6 +10,7 @@ import {
   type RemoteResponse,
 } from "../shared/remote-protocol";
 import { takeRemoteRate } from "./remote-access-policy";
+import type { RemotePrivacySuspension } from "./remote-access-service-types";
 
 export const REMOTE_SHUTDOWN_TIMEOUT_MS = 1_500;
 export const REMOTE_MAX_BUFFERED_BYTES = 2 * REMOTE_LIMITS.relayEnvelopeBytes;
@@ -24,26 +25,60 @@ export interface RemotePowerEvents {
   off(event: RemotePowerEvent, listener: () => void): unknown;
 }
 
+export const REMOTE_PRIVACY_LOCKED_MESSAGE =
+  "Remote Companion is paused while the desktop is locked.";
+export const REMOTE_PRIVACY_UNVERIFIED_MESSAGE =
+  "Remote Companion is paused because Inertia could not verify that this "
+  + "desktop is unlocked.";
+
+type RemotePrivacyProbe =
+  | { kind: "locked" | "unlocked" }
+  | { kind: "unknown"; detail: string };
+
 export class RemotePrivacyMonitor {
   private value = true;
+  private verified = false;
   private observedPowerEvent = false;
   private stopped = false;
+  private probeDetail: string | null = null;
 
   constructor(
     private readonly events: RemotePowerEvents,
-    private readonly onChange: (locked: boolean) => void,
+    private readonly onChange: (
+      locked: boolean,
+      suspension: RemotePrivacySuspension | null,
+    ) => void,
+    onDiagnostic?: (detail: string) => void,
   ) {
     events.on("lock-screen", this.lock);
     events.on("suspend", this.lock);
     events.on("unlock-screen", this.unlock);
-    const sampledLocked = initialPrivacyLocked(events);
+    const probe = probeRemotePrivacyState(events);
+    const sampledLocked = probe.kind !== "unlocked";
     if (!this.observedPowerEvent || sampledLocked) {
       this.value = sampledLocked;
     }
+    if (probe.kind === "unknown") this.probeDetail = probe.detail;
+    else this.verified = true;
+    if (this.observedPowerEvent) this.verified = true;
+    if (probe.kind === "unknown" && !this.verified) onDiagnostic?.(probe.detail);
   }
 
   get locked(): boolean {
     return this.value;
+  }
+
+  get lockStateVerified(): boolean {
+    return this.verified;
+  }
+
+  get probeDiagnostic(): string | null {
+    return this.verified ? null : this.probeDetail;
+  }
+
+  get suspension(): RemotePrivacySuspension | null {
+    if (!this.value) return null;
+    return this.verified ? "locked" : "unverified";
   }
 
   shutdown(): void {
@@ -56,30 +91,47 @@ export class RemotePrivacyMonitor {
 
   private readonly lock = (): void => {
     this.observedPowerEvent = true;
+    this.verified = true;
     this.update(true);
   };
 
   private readonly unlock = (): void => {
     this.observedPowerEvent = true;
+    const wasUnverified = !this.verified;
+    this.verified = true;
+    if (wasUnverified && !this.stopped && !this.value) {
+      this.onChange(false, null);
+    }
     this.update(false);
   };
 
   private update(locked: boolean): void {
     if (this.stopped || this.value === locked) return;
     this.value = locked;
-    this.onChange(locked);
+    this.onChange(locked, this.suspension);
   }
 }
 
-function initialPrivacyLocked(events: RemotePowerEvents): boolean {
-  if (typeof events.getSystemIdleState !== "function") return false;
+function probeRemotePrivacyState(events: RemotePowerEvents): RemotePrivacyProbe {
+  if (typeof events.getSystemIdleState !== "function") {
+    return {
+      kind: "unknown",
+      detail: "This platform exposes no desktop lock-state probe.",
+    };
+  }
   try {
     const state = events.getSystemIdleState(60);
-    return state === "locked" || state === "unknown";
+    if (state === "locked") return { kind: "locked" };
+    if (state === "active" || state === "idle") return { kind: "unlocked" };
+    return {
+      kind: "unknown",
+      detail: `The desktop lock-state probe reported "${String(state)}".`,
+    };
   } catch {
-    // Older or unsupported Electron platforms may expose no usable probe.
-    // Future lock/suspend events still enforce the privacy boundary.
-    return false;
+    return {
+      kind: "unknown",
+      detail: "The desktop lock-state probe failed.",
+    };
   }
 }
 
@@ -88,6 +140,7 @@ interface RemoteOutboundSession {
   sessionId: string;
   sender: RemoteSenderState;
   outboundTail: Promise<void>;
+  outboundAbandoned: boolean;
 }
 
 export async function sendSequencedRemoteResponse(
@@ -100,12 +153,17 @@ export async function sendSequencedRemoteResponse(
   ) => void,
 ): Promise<void> {
   const sending = session.outboundTail.catch(() => undefined).then(async () => {
-    if (!isCurrent()) return;
-    send(session.connectionId, await sealSessionData(
+    if (session.outboundAbandoned || !isCurrent()) return;
+    const frame = await sealSessionData(
       session.sender,
       session.sessionId,
       response,
-    ));
+    );
+    if (session.outboundAbandoned || !isCurrent()) {
+      session.outboundAbandoned = true;
+      return;
+    }
+    send(session.connectionId, frame);
   });
   session.outboundTail = sending;
   await sending;

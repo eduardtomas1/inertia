@@ -269,6 +269,9 @@ export function createWorkspaceSceneModel({
       backendProfiles: connection.snapshot?.backendProfiles ?? [],
       backendDefaults: connection.snapshot?.backendDefaults ?? [],
       projects: connection.snapshot?.projects ?? [],
+      conversations: connection.snapshot?.conversations.filter(
+        ({ archivedAt }) => archivedAt === null,
+      ) ?? [],
       archived: connection.snapshot?.conversations.filter(
         ({ archivedAt }) => archivedAt !== null,
       ) ?? [],

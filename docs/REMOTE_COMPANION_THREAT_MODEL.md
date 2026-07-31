@@ -88,6 +88,179 @@ retention, abuse-reporting, lawful-request, residency, deletion, monitoring,
 on-call, incident notification, and availability obligations. None are
 accepted or implemented by this reference task.
 
+## Provider remote-prompt safety contract
+
+Remote prompting used to depend only on the shared `supervised` conversation
+access mode. That word does not describe an equivalent boundary across
+providers: filesystem sandboxing, network reach, whether reads, writes, or
+commands need approval, and whether a permission callback is guaranteed all
+differ, and a provider update can change implicit behaviour.
+
+Each harness therefore declares an explicit contract
+(`src/shared/remote-prompt-safety.ts`) covering `supported`,
+`writesRequireLocalApproval`, `commandsRequireLocalApproval`, `networkPolicy`,
+`filesystemPolicy`, `permissionModel`, and human-readable text. The contract is
+per **harness**, not per provider, because the CLI and SDK/app-server harnesses
+for the same provider differ in exactly the way that matters: the CLI harnesses
+report `approvals: "unavailable"` and cannot deliver an approval decision to
+Inertia at all.
+
+Remote prompting is therefore refused for `codex-cli`, `claude-cli`,
+`cursor-cli`, and `opencode-cli`, and allowed for `codex-app-server`,
+`claude-agent-sdk`, `cursor-acp`, and `opencode-sdk`. Only `opencode-sdk` claims
+`inertia-enforced`, because Inertia installs the ask-by-default permission
+ruleset itself; the others are `provider-reported`. No harness claims
+`read-only-sandbox` or a disabled network, because Inertia does not own an
+operating-system sandbox for any of them.
+
+`remotePromptSafetyForHarness` returns the unsupported contract for an unknown
+or missing harness id, and `remotePromptSafetyIsUsable` additionally rejects any
+contract that is internally permissive, so unknown capability values fail closed.
+The gateway resolves the contract from the conversation's **current**
+`modelSelection.harnessId` on every prepare and commit, so switching providers
+recalculates eligibility, and a throwing capability query is treated as
+unsupported. View-only access is unaffected: the projection still renders, and it
+carries the truthful per-provider headline and explanation that the browser
+displays instead of hard-coded text.
+
+## Conversation-scoped grant authority
+
+A project grant used to expose every unarchived conversation in that project,
+including conversations created after pairing. Because transcript sanitization
+cannot understand arbitrary prose, that blast radius was too wide.
+
+Authority is now a list of per-project grants:
+
+```ts
+interface RemoteConversationGrant {
+  projectId: string;
+  conversationIds: string[];
+  includeFutureConversations: boolean;
+  legacyProjectWide: boolean;
+}
+```
+
+A conversation is reachable only when its **current** project is granted and
+that project's grant either lists the conversation explicitly or is project-wide.
+`includeFutureConversations` defaults to false, so a newly created conversation
+in an authorized project stays hidden until it is granted. A project grant with
+no listed conversations and no opt-in reaches nothing.
+
+Because the check uses the conversation's current project, authority cannot
+follow a conversation into a project that was never granted. Inertia does not
+currently support moving a conversation between projects, so this is a
+forward-looking invariant rather than a reachable path today.
+
+Grants predating this model migrate to `legacyProjectWide: true`. That preserves
+exactly the access they already had — a project-wide grant already included
+future conversations, so preserving it is not an expansion — while marking the
+device as needing review. `needsGrantReview` surfaces in the desktop device list
+and the access preview so the user can narrow it.
+
+Enforcement lives in the runtime gateway and applies to every operation:
+transcript listing (`state.get`), transcript fetch (`conversation.get`), prompt
+preparation, and prompt commit. Archived and deleted conversations remain
+unreachable as before. Because prepare and commit each revalidate, removing
+conversation authority mid-flight rejects the commit.
+
+The subject carried from the main process to the runtime includes the grants, and
+`remoteSessionRetainsAuthority` compares the session's grants against the
+persisted device grants, so a grant edit invalidates live sessions.
+
+The desktop shows an access preview per device — projects, named conversations or
+"every conversation, including future ones", view/prompt scope, and expiry — and
+labels transcripts honestly: automated redaction reduces accidental exposure but
+cannot guarantee that arbitrary conversation text contains no sensitive
+information.
+
+## Desktop presence and lock state
+
+Remote Companion is only defensible while a person is present at an unlocked
+desktop, so an unknown lock state is treated as absence rather than presence.
+
+`RemotePrivacyMonitor` probes `powerMonitor.getSystemIdleState` once at startup
+and then relies on `lock-screen`, `suspend`, and `unlock-screen` events. The
+probe resolves to one of three outcomes. `locked` and a missing, throwing, or
+otherwise indeterminate probe all pause the feature; only `active` or `idle`
+count as a verified unlocked desktop. A platform that exposes no probe at all is
+therefore paused, where it previously reported unlocked.
+
+A paused monitor distinguishes two reasons. `locked` means Inertia observed a
+lock. `unverified` means Inertia never obtained a trustworthy signal, and the
+desktop reports
+"Remote Companion is paused because Inertia could not verify that this desktop
+is unlocked." Only a real `unlock-screen` event clears the unverified state, so
+the user cannot resume on an unverified guess.
+
+The probe runs exactly once and its detail is reported through a single
+diagnostic callback, so a permanently unsupported platform neither spams logs
+nor oscillates between states. `RemoteAccessService` also defaults to paused
+with reason `unverified`; a caller must pass `initialPrivacy: null` to assert
+desktop presence, which keeps a host that forgets to wire a monitor fail-closed.
+
+Locking suspends outbound authority immediately: `setPrivacyLocked(true)`
+disconnects live sessions, and `privacyLocked` is part of
+`remoteSessionRetainsAuthority`, so both view and prompt work stop even for a
+response already mid-encryption.
+
+## Outbound frame authority
+
+Sealing a response is asynchronous, so authority checked before encryption is
+not authority at the moment of transport. A device can be revoked, its grant
+replaced or expired, the desktop locked, Remote Companion disabled, or the relay
+connection replaced while `sealSessionData` is awaited.
+
+`sendSequencedRemoteResponse` is therefore the single outbound primitive and it
+revalidates authority twice: once before encryption, and once immediately before
+handing the frame to transport. Callers cannot opt out, which is why the check
+lives in the primitive rather than at each call site.
+
+Authority is one predicate, `remoteSessionRetainsAuthority`, covering the
+expected session id, the device and grant identity held by the session, the
+connection id and epoch, the live-session binding, the persisted grant object
+identity, grant version, grant expiry, granted scopes and projects, the desktop
+privacy/lock state, the Remote Companion enabled state, shutdown, and
+store-fail-closed state. `remoteSessionCanCommitPrompt` adds only the prompt
+scope, so view and prompt authority stay separable.
+
+Encryption mutates sequence state: `sealSessionData` consumes a sequence number
+and advances the HPKE sender nonce before the second check can run. A discarded
+frame therefore leaves the sender permanently desynchronized from the browser
+recipient, which requires `frame.sequence === recipient.sequence`. Rather than
+attempt to rewind, the session sets `outboundAbandoned`, which is part of the
+authority predicate, so no further frame is ever sealed or sent on that channel.
+A replacement session negotiates a fresh sender starting at sequence 0 and is
+unaffected.
+
+## Resource exhaustion in the utility runtime
+
+The gateway caches sanitized transcript projections so repeated remote polls do
+not re-sanitize unchanged provider messages. That cache is a denial-of-service
+surface: a paired device only has to navigate between conversations to make the
+desktop retain transcript state.
+
+The cache therefore never retains the original provider message. Cache
+equality uses a SHA-256 fingerprint of the bounded prefix the sanitizer can
+actually inspect (`remoteSanitizerInspectionWindow`, 64 KiB of output budget
+plus a 4 KiB secret-scan margin). Because the sanitizer never reads past that
+window, the fingerprint is a complete determinant of the projection, and a
+multi-megabyte message costs only its sanitized projection plus a 32-byte
+digest.
+
+Retention is bounded by bytes rather than by entry count.
+`REMOTE_TRANSCRIPT_CACHE_BUDGET_BYTES` is 8 MiB, weighted at two bytes per
+retained UTF-16 code unit plus a fixed per-entry overhead, and evicted
+least-recently-used first. A single conversation projection may carry at most
+`REMOTE_LIMITS.plaintextBytes` (96 KiB) of sanitized text, so the budget holds
+roughly eighty saturated projections. The earlier bound was
+`transcriptMessages * sessions` entries with no byte ceiling, which allowed
+gigabytes of retained provider text.
+
+Cached projections are dropped when a conversation is archived, deleted, or
+removed with its project, when Remote Companion is disabled, and when the
+encrypted store fails closed. Message edits need no explicit signal because a
+changed inspection window changes the fingerprint.
+
 ## Deferred capabilities
 
 The MVP deliberately has no remote:
@@ -194,3 +367,83 @@ production dependency audit, the relevant Electron/browser E2E, platform CI,
 and an independent diff/security review. Hosted infrastructure needs separate
 penetration, load, disaster-recovery, key-management, browser-supply-chain,
 privacy, and operational readiness reviews.
+
+## Runtime startup and project identity
+
+Runtime readiness no longer depends on inspecting every stored project. Startup
+previously awaited `Promise.all(storedProjects.map(inspectProjectIdentity))`,
+which put unbounded parallel `realpath` and Git work on the readiness path. A
+disconnected network mount, an unavailable external disk, or a problematic
+filesystem could therefore block startup until the supervisor killed and
+restarted the runtime — and the restart hit the same project again.
+
+The runtime now serves persisted state immediately and refreshes identity in the
+background through `ProjectIdentityRefresher`:
+
+- concurrency is clamped to the reviewed 4–8 range (default 6), so hundreds of
+  saved projects cannot create a filesystem or Git-process burst;
+- each project gets one overall deadline that covers `realpath` and every other
+  pre-Git step, enforced by the refresher rather than trusted to the inspector;
+- a project that times out or errors is recorded as `unavailable` with a reason,
+  and a project that has never been checked reads as `stale`; the last known
+  identity metadata stays in the database until a refresh succeeds;
+- one unavailable project cannot fail startup, so it cannot drive a restart loop;
+- `dispose()` stops the workers and prevents a late-resolving inspection from
+  applying its identity during shutdown or runtime restart.
+
+`realpath` cannot be aborted, so the deadline abandons the pending operation
+rather than cancelling it; the handle is released when the operating system
+eventually settles it. This is a bounded leak of one pending filesystem call per
+unavailable project, not an unbounded one.
+
+Sensitive operations revalidate before acting. `resolveAuthoritativeProjectPath`
+takes a `ProjectIdentityAuthority` and refuses when identity is stale or
+unavailable, retrying the refresh once so a project that came back online is
+accepted without a restart.
+
+## Browser device key storage
+
+The browser companion previously serialized its long-lived device private key to
+a base64url string inside IndexedDB. Copying the browser profile therefore copied
+the device identity, and it stayed usable until the grant expired.
+
+The device key is now a non-extractable Web Crypto `CryptoKey`. It is generated
+with `crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false,
+["deriveBits"])`, stored as a `CryptoKey` object in IndexedDB via structured
+clone, and never exported. Only the public key is kept in serializable form.
+HPKE keeps working because `DhkemP256HkdfSha256` needs `deriveBits`, not export,
+for both the recipient and the authenticated-sender role.
+
+Storage refuses to downgrade. `isNonExtractableDevicePrivateKey` rejects anything
+that is not a private, non-extractable `CryptoKey`;
+`assertDeviceKeyIsUnexportable` additionally attempts an export and refuses the
+identity if it succeeds; and a browser that cannot structured-clone a `CryptoKey`
+gets an `UnsupportedDeviceKeyStorage` error rather than a silent fallback to
+extractable material.
+
+**Migration.** A v1 profile is upgraded in place without re-pairing: the stored
+scalar and public point are re-imported as a non-extractable JWK, which preserves
+the same key pair, so the existing grant survives. The v2 record is written and
+the v1 record deleted in one IndexedDB transaction, so an interrupted migration
+either leaves the old record intact for a retry or completes fully. The old
+serialized private key is never uploaded or logged, and it is removed only once
+the replacement is durable. If re-import cannot produce a non-extractable key,
+both records are cleared and the user re-pairs.
+
+**Lifetime.** Prompt-capable grants are now capped at 7 days
+(`MAX_REMOTE_PROMPT_GRANT_MS`) instead of 90; view-only grants keep the 90-day
+ceiling. The browser profile also carries `lastUsedAt` and expires after 7 days
+of inactivity (`REMOTE_INACTIVITY_EXPIRY_MS`) even inside a longer grant. View
+and prompt scopes remain independently grantable.
+
+WebAuthn-backed key storage is **not** implemented. It would be the strongest
+option, but a half-integrated version would add a second identity path without a
+coherent pairing, recovery, or revocation story, so it is recorded here as future
+work rather than attempted. Device-identity rotation on permission change is also
+deferred: the desktop already bumps `grantVersion` and closes live sessions on
+every grant change, which invalidates the session but not the device key.
+
+**Residual risk.** A non-extractable key stops profile *copying*, not profile
+*use*. An attacker with live code execution in the browser origin can still ask
+the key to perform operations while they have that access. This is a real
+reduction in blast radius, not a hardware vault.

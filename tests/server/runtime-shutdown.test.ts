@@ -104,6 +104,61 @@ describe("runtime shutdown phases", () => {
     }
   });
 
+  it("observes settled cleanup after a delayed event-loop resume", async () => {
+    const now = vi.spyOn(Date, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValue(10_000);
+    const calls: string[] = [];
+    try {
+      await expect(runRuntimeShutdownPhases({
+        independentDrains: [],
+        stopIsolatedRuns: () => { calls.push("isolated"); },
+        disposeTurnsAndProviders: () => { calls.push("turns"); },
+        settleArtifacts: () => { calls.push("artifacts"); },
+        terminateClients: () => { calls.push("clients"); },
+        closeServer: async () => {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          calls.push("server");
+        },
+        closeStore: () => { calls.push("store"); },
+      }, 100)).resolves.toBeUndefined();
+      expect(calls).toEqual([
+        "isolated",
+        "turns",
+        "artifacts",
+        "clients",
+        "server",
+        "store",
+      ]);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("identifies the active cleanup phase when a deadline expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const shutdown = runRuntimeShutdownPhases({
+        independentDrains: [() => new Promise<void>(() => undefined)],
+        stopIsolatedRuns: () => {},
+        disposeTurnsAndProviders: () => {},
+        settleArtifacts: () => {},
+        terminateClients: () => {},
+        closeServer: () => {},
+        closeStore: () => {},
+      }, 100);
+      const rejected = expect(shutdown).rejects.toMatchObject({
+        name: "RuntimeShutdownDeadlineError",
+        phase: "owned-resource cleanup",
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("preserves the first settled error while attempting every safe later phase", async () => {
     const firstError = new Error("terminal cleanup failed");
     const calls: string[] = [];

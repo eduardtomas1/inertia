@@ -106,6 +106,11 @@ describe("Remote Companion browser selection boundary", () => {
       providerLabel: "Provider",
       status: "idle",
       pendingLocalApproval: false,
+      promptSafety: {
+        supported: true,
+        headline: "Local approval required for reported actions",
+        explanation: "Desktop approval is required for reported actions.",
+      },
       updatedAt: now,
     });
     const first = conversation(firstId, "Conversation A");
@@ -197,6 +202,11 @@ describe("Remote Companion browser selection boundary", () => {
       providerLabel: "Provider",
       status: "idle",
       pendingLocalApproval: false,
+      promptSafety: {
+        supported: true,
+        headline: "Local approval required for reported actions",
+        explanation: "Desktop approval is required for reported actions.",
+      },
       updatedAt: now,
     };
     const shell: RemoteSafeShell = {
@@ -282,6 +292,11 @@ describe("Remote Companion browser selection boundary", () => {
       providerLabel: "Provider",
       status: "idle",
       pendingLocalApproval: false,
+      promptSafety: {
+        supported: true,
+        headline: "Local approval required for reported actions",
+        explanation: "Desktop approval is required for reported actions.",
+      },
       updatedAt: now,
     };
     const root = document.createElement("div");

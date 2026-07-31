@@ -107,6 +107,10 @@ parentPort.on("message", (messageEvent) => {
     );
     return;
   }
+  if (command.type === "runtime.remote-forget") {
+    runtime?.forgetRemoteTranscripts(command.scope);
+    return;
+  }
   if (command.type === "runtime.remote-request") {
     if (!runtime || stopping) {
       post({

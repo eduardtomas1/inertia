@@ -1,3 +1,4 @@
+import { sameRemoteConversationGrants } from "../shared/remote-grants";
 import type { RemoteConnectionEpoch } from "./remote-access-relay-dispatcher";
 import { remoteDeviceIsCurrent } from "./remote-access-policy";
 import type { ActiveRemoteSession } from "./remote-access-service-types";
@@ -113,7 +114,7 @@ export class RemoteSessionAdmissions {
   }
 }
 
-export function remoteSessionCanCommitPrompt(input: {
+export interface RemoteSessionAuthorityInput {
   data: PersistedRemoteAccess | null;
   session: ActiveRemoteSession;
   live: boolean;
@@ -122,7 +123,11 @@ export function remoteSessionCanCommitPrompt(input: {
   stopped: boolean;
   storeFailed: boolean;
   now: number;
-}): boolean {
+}
+
+export function remoteSessionRetainsAuthority(
+  input: RemoteSessionAuthorityInput,
+): boolean {
   const { data, session } = input;
   return data !== null
     && data.enabled
@@ -131,15 +136,29 @@ export function remoteSessionCanCommitPrompt(input: {
     && !input.privacyLocked
     && !input.stopped
     && !input.storeFailed
+    && !session.outboundAbandoned
     && data.devices.find(({ id }) => id === session.device.id)
       === session.device
     && remoteDeviceIsCurrent(session.device, input.now)
     && session.subject.deviceId === session.device.id
+    && session.subject.sessionId === session.sessionId
     && session.subject.grantVersion === session.device.grantVersion
     && session.subject.expiresAt === session.device.expiresAt
+    && Date.parse(session.subject.expiresAt) > input.now
     && sameStrings(session.subject.scopes, session.device.scopes)
     && sameStrings(session.subject.projectIds, session.device.projectIds)
-    && session.subject.scopes.includes("prompt");
+    && sameRemoteConversationGrants(
+      session.subject.grants,
+      session.device.grants,
+    )
+    && session.subject.scopes.includes("view");
+}
+
+export function remoteSessionCanCommitPrompt(
+  input: RemoteSessionAuthorityInput,
+): boolean {
+  return remoteSessionRetainsAuthority(input)
+    && input.session.subject.scopes.includes("prompt");
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {

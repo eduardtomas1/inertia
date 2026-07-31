@@ -1,8 +1,6 @@
 import {
   createAuthenticatedSessionRecipient,
   createAuthenticatedSessionSender,
-  generateRemoteKeyPair,
-  importRemoteKeyPair,
   importRemotePublicKey,
   openPairingResponse,
   openSessionData,
@@ -30,14 +28,20 @@ import {
   type RemoteSafeShell,
 } from "../../../src/shared/remote-protocol";
 import {
+  generateNonExtractableDeviceKeys,
+  importDevicePublicKey,
+} from "./device-keys";
+import {
   clearDeviceProfile,
-  loadDeviceProfile,
-  saveDeviceProfile,
+  loadSealedDeviceProfile,
+  sealedProfileHasExpired,
+  saveSealedDeviceProfile,
   validateBrowserRelayUrl,
-  type BrowserDeviceProfile,
+  type SealedBrowserDeviceProfile,
 } from "./device-store";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+const PROFILE_ACTIVITY_WRITE_INTERVAL_MS = 60 * 60 * 1_000;
 const REMOTE_TEXT_ENCODER = new TextEncoder();
 
 type BoundedRemoteRelayText =
@@ -65,7 +69,7 @@ interface PendingRequest {
 }
 
 export class RemoteCompanionClient {
-  private profile: BrowserDeviceProfile | null = null;
+  private profile: SealedBrowserDeviceProfile | null = null;
   private socket: WebSocket | null = null;
   private connectionId: string | null = null;
   private sessionId: string | null = null;
@@ -80,12 +84,13 @@ export class RemoteCompanionClient {
   private selectedConversationId: string | null = null;
   private attemptEpoch = 0;
   private profileWriteTail: Promise<void> = Promise.resolve();
+  private lastProfileActivityWriteAt = 0;
 
   constructor(private readonly callbacks: RemoteClientCallbacks) {}
 
-  async initialize(): Promise<BrowserDeviceProfile | null> {
+  async initialize(): Promise<SealedBrowserDeviceProfile | null> {
     const epoch = ++this.attemptEpoch;
-    const profile = await loadDeviceProfile();
+    const profile = await loadSealedDeviceProfile();
     if (!this.ownsAttempt(epoch)) return this.profile;
     this.profile = profile;
     if (this.profile && Date.parse(this.profile.expiresAt) > Date.now()) {
@@ -107,7 +112,7 @@ export class RemoteCompanionClient {
     this.callbacks.status("This device grant expired. Pair it again.", false);
   }
 
-  currentProfile(): BrowserDeviceProfile | null {
+  currentProfile(): SealedBrowserDeviceProfile | null {
     return this.profile;
   }
 
@@ -131,7 +136,7 @@ export class RemoteCompanionClient {
       }
       const label = deviceLabel.trim().slice(0, 80);
       if (!label) throw new Error("Enter a name for this browser.");
-      const keyPair = await generateRemoteKeyPair();
+      const deviceKeys = await generateNonExtractableDeviceKeys();
       if (!this.ownsAttempt(epoch)) return;
       const deviceId = crypto.randomUUID();
       const requestId = crypto.randomUUID();
@@ -145,7 +150,7 @@ export class RemoteCompanionClient {
       this.connectionId = tunnel.connectionId;
       const code = await remotePairingComparisonCode(
         invitation.hostPublicKey,
-        keyPair.publicKey,
+        deviceKeys.publicKey,
         invitation.invitationId,
       );
       if (!this.ownsAttempt(epoch)) return;
@@ -156,7 +161,7 @@ export class RemoteCompanionClient {
         invitationId: invitation.invitationId,
         deviceId,
         deviceLabel: label,
-        devicePublicKey: keyPair.publicKey,
+        devicePublicKey: deviceKeys.publicKey,
         createdAt: new Date().toISOString(),
         browserVersion: REMOTE_BROWSER_VERSION,
       });
@@ -179,7 +184,7 @@ export class RemoteCompanionClient {
       }
       const response = remotePairingResponsePayloadSchema.parse(
         await openPairingResponse(
-          await importRemoteKeyPair(keyPair),
+          deviceKeys.keyPair,
           await importRemotePublicKey(invitation.hostPublicKey),
           responseFrame,
         ),
@@ -194,11 +199,13 @@ export class RemoteCompanionClient {
       if (response.deviceId !== deviceId) {
         throw new Error("The pairing response did not match this browser.");
       }
-      const profile: BrowserDeviceProfile = {
-        version: 1,
+      const profile: SealedBrowserDeviceProfile = {
+        version: 2,
         deviceId,
         deviceLabel: label,
-        keyPair,
+        publicKey: deviceKeys.publicKey,
+        privateKey: deviceKeys.keyPair.privateKey,
+        lastUsedAt: new Date().toISOString(),
         hostId: invitation.hostId,
         hostPublicKey: invitation.hostPublicKey,
         relayUrl,
@@ -210,6 +217,7 @@ export class RemoteCompanionClient {
       };
       if (!await this.saveOwnedProfile(epoch, profile)) return;
       this.profile = profile;
+      this.lastProfileActivityWriteAt = Date.parse(profile.lastUsedAt);
       tunnel.socket.close(1000, "pairing complete");
       this.socket = null;
       this.connectionId = null;
@@ -223,7 +231,7 @@ export class RemoteCompanionClient {
     const profile = this.profile;
     if (!profile) return;
     const epoch = this.beginAttempt("Connecting.");
-    if (Date.parse(profile.expiresAt) <= Date.now()) {
+    if (sealedProfileHasExpired(profile)) {
       await this.forgetExpiredProfile(epoch);
       return;
     }
@@ -238,7 +246,10 @@ export class RemoteCompanionClient {
       this.socket = tunnel.socket;
       this.connectionId = tunnel.connectionId;
       const sessionId = crypto.randomUUID();
-      const deviceKeys = await importRemoteKeyPair(profile.keyPair);
+      const deviceKeys = {
+        privateKey: profile.privateKey,
+        publicKey: await importDevicePublicKey(profile.publicKey),
+      };
       const hostPublicKey = await importRemotePublicKey(profile.hostPublicKey);
       const sender = await createAuthenticatedSessionSender(
         profile.hostId,
@@ -300,15 +311,19 @@ export class RemoteCompanionClient {
         accepted.sessionId !== sessionId
         || accepted.hostId !== profile.hostId
       ) throw new Error("The authenticated session did not match this device.");
-      const updatedProfile: BrowserDeviceProfile = {
+      const updatedProfile: SealedBrowserDeviceProfile = {
         ...profile,
         scopes: accepted.scopes,
         projectIds: accepted.projectIds,
         grantVersion: accepted.grantVersion,
         expiresAt: accepted.expiresAt,
+        lastUsedAt: new Date().toISOString(),
       };
       if (!await this.saveOwnedProfile(epoch, updatedProfile)) return;
       this.profile = updatedProfile;
+      this.lastProfileActivityWriteAt = Date.parse(
+        updatedProfile.lastUsedAt,
+      );
       this.socket = tunnel.socket;
       this.connectionId = tunnel.connectionId;
       this.sessionId = sessionId;
@@ -409,6 +424,7 @@ export class RemoteCompanionClient {
         && state.result.kind === "state"
       ) {
         this.callbacks.shell(state.result.state);
+        void this.persistAuthenticatedActivity(epoch);
       }
       if (
         this.selectedConversationId
@@ -598,7 +614,7 @@ export class RemoteCompanionClient {
 
   private async saveOwnedProfile(
     epoch: number,
-    profile: BrowserDeviceProfile,
+    profile: SealedBrowserDeviceProfile,
   ): Promise<boolean> {
     let saved = false;
     const previousProfile = this.profile;
@@ -606,17 +622,47 @@ export class RemoteCompanionClient {
       .catch(() => undefined)
       .then(async () => {
         if (!this.ownsAttempt(epoch)) return;
-        await saveDeviceProfile(profile);
+        await saveSealedDeviceProfile(profile);
         if (this.ownsAttempt(epoch)) {
           saved = true;
           return;
         }
-        if (previousProfile) await saveDeviceProfile(previousProfile);
+        if (previousProfile) await saveSealedDeviceProfile(previousProfile);
         else await clearDeviceProfile();
       });
     this.profileWriteTail = write;
     await write;
     return saved;
+  }
+
+  private async persistAuthenticatedActivity(epoch: number): Promise<void> {
+    const profile = this.profile;
+    if (!profile || !this.ownsAttempt(epoch)) return;
+    const now = Date.now();
+    const persistedAt = Date.parse(profile.lastUsedAt);
+    const previousActivityAt = Math.max(
+      Number.isFinite(persistedAt) ? persistedAt : 0,
+      this.lastProfileActivityWriteAt,
+    );
+    if (now - previousActivityAt < PROFILE_ACTIVITY_WRITE_INTERVAL_MS) return;
+    this.lastProfileActivityWriteAt = now;
+    const next = {
+      ...profile,
+      lastUsedAt: new Date(now).toISOString(),
+    };
+    try {
+      if (await this.saveOwnedProfile(epoch, next)) {
+        this.profile = next;
+        return;
+      }
+    } catch {
+      // A later authenticated poll can retry without disconnecting the session.
+    }
+    if (this.lastProfileActivityWriteAt === now) {
+      this.lastProfileActivityWriteAt = Number.isFinite(persistedAt)
+        ? persistedAt
+        : 0;
+    }
   }
 
   private disconnectTransport(message: string): void {

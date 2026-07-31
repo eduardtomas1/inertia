@@ -66,18 +66,40 @@ hljs.registerLanguage("xml", xml);
 hljs.registerLanguage("yaml", yaml);
 hljs.registerLanguage("yml", yaml);
 
+export const RESPONSE_MARKDOWN_TAG_NAMES = [
+  "a", "blockquote", "br", "code", "dd", "del", "details", "div", "dl", "dt",
+  "em", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "img", "input", "ins", "kbd",
+  "li", "ol", "p", "pre", "q", "s", "samp", "section", "span", "strong", "sub",
+  "summary", "sup", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
+  "var",
+] as const;
+
 const sanitizeSchema = {
   ...defaultSchema,
-  tagNames: [...(defaultSchema.tagNames ?? []), "details", "summary"],
+  tagNames: [...RESPONSE_MARKDOWN_TAG_NAMES],
+  protocols: {
+    href: ["http", "https", "mailto"],
+    src: ["http", "https", "data"],
+    cite: ["http", "https"],
+  },
   attributes: {
-    ...defaultSchema.attributes,
-    details: ["open"],
-    input: [...(defaultSchema.attributes?.input ?? []), "checked", "disabled", ["type", "checkbox"]],
+    a: ["href", "title"],
+    img: ["src", "alt", "title"],
+    div: [["className", "math", "math-display"]],
+    span: [["className", /^hljs(?:-[a-z-]+)?$/u, /^language-[\w+-]+$/u, "math", "math-inline"]],
     code: [
-      ...(defaultSchema.attributes?.code ?? []),
+      ["className", /^(?:hljs|language-[\w+-]+)$/u],
       "data-code-meta",
       "dataCodeMeta",
     ],
+    details: ["open"],
+    input: ["checked", "disabled", ["type", "checkbox"]],
+    li: [["className", "task-list-item"]],
+    ol: ["start", ["className", "contains-task-list"]],
+    ul: [["className", "contains-task-list"]],
+    td: ["colSpan", "rowSpan", ["align", "left", "center", "right"]],
+    th: ["colSpan", "rowSpan", ["align", "left", "center", "right"]],
+    "*": [],
   },
 };
 const REMARK_PLUGINS: NonNullable<

@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import { WebSocket, WebSocketServer } from "ws";
 
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = 2;
 const MAX_ENVELOPE_BYTES = 132 * 1024;
 const MAX_CONNECTIONS = 1_024;
 const MAX_CONNECTIONS_PER_DESKTOP = 8;

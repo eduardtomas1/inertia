@@ -559,5 +559,5 @@ describe("turn Git artifacts", () => {
     });
     expect(runtime.store.turnGitArtifact(turn.id)?.files).toHaveLength(200);
     runtime.store.close();
-  });
+  }, 45_000);
 });

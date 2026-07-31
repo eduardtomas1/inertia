@@ -22,6 +22,10 @@ import {
 } from "../../src/main/remote-access-store";
 import { FileCredentialVaultPersistence } from "../../src/main/credential-vault";
 import { applyRemotePairingGrant } from "../../src/main/remote-access-devices";
+import {
+  remoteConversationGrantsFromProjectIds,
+  remoteGrantAllowsConversation,
+} from "../../src/shared/remote-grants";
 
 const temporaryDirectories: string[] = [];
 
@@ -51,6 +55,60 @@ afterEach(() => {
 });
 
 describe("Remote Companion encrypted local store", () => {
+  it("preserves legacy project-wide access when pairing omits grants", () => {
+    const now = new Date("2030-01-01T00:00:00.000Z");
+    const projectId = crypto.randomUUID();
+    const data: PersistedRemoteAccess = {
+      version: 1,
+      enabled: false,
+      relayUrl: "ws://127.0.0.1:8787/remote",
+      hostId: crypto.randomUUID(),
+      endpointId: "legacy_pairing_endpoint",
+      keyPair: { publicKey: "host_public", privateKey: "host_private" },
+      devices: [],
+      audit: [],
+      receipts: [],
+      usedSessions: [],
+    };
+
+    const { device } = applyRemotePairingGrant({
+      data,
+      pending: {
+        connectionId: "connection",
+        connectionEpoch: 1,
+        payload: {
+          type: "pair.request",
+          requestId: crypto.randomUUID(),
+          invitationId: crypto.randomUUID(),
+          deviceId: crypto.randomUUID(),
+          deviceLabel: "Legacy browser",
+          devicePublicKey: "legacy_public_key",
+          createdAt: now.toISOString(),
+          browserVersion: "0.1.0",
+        },
+        receivedAt: now.toISOString(),
+        expiresAt: "2030-01-01T00:05:00.000Z",
+        comparisonCode: "123456",
+      },
+      scopes: ["view"],
+      projectIds: [projectId],
+      grantMs: 60_000,
+      now,
+    });
+
+    expect(device.grants).toEqual([expect.objectContaining({
+      projectId,
+      conversationIds: [],
+      includeFutureConversations: false,
+      legacyProjectWide: true,
+    })]);
+    expect(remoteGrantAllowsConversation(
+      device.grants,
+      projectId,
+      crypto.randomUUID(),
+    )).toBe(true);
+  });
+
   it("persists private keys and audit metadata only through encryption", async () => {
     const { file, store } = fixture();
     const keyPair = await generateRemoteKeyPair();
@@ -227,6 +285,7 @@ describe("Remote Companion encrypted local store", () => {
         publicKey: `device_key_${index}`,
         scopes: ["view"],
         projectIds: ["project"],
+        grants: remoteConversationGrantsFromProjectIds(["project"]),
         createdAt: new Date(Date.UTC(2028, 0, index + 1)).toISOString(),
         expiresAt: index === 1
           ? "2029-06-01T00:00:00.000Z"
@@ -308,6 +367,7 @@ describe("Remote Companion encrypted local store", () => {
           publicKey: `active_key_${index}`,
           scopes: ["view" as const],
           projectIds: ["project"],
+          grants: remoteConversationGrantsFromProjectIds(["project"]),
           createdAt: "2029-01-01T00:00:00.000Z",
           expiresAt: "2030-06-01T00:00:00.000Z",
           lastSeenAt: null,

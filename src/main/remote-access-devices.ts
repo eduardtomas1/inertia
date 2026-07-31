@@ -3,12 +3,19 @@ import {
   type RemoteScope,
 } from "../shared/remote-protocol";
 import {
+  boundedRemoteGrantMs,
   MAX_REMOTE_GRANT_MS,
   MINUTE_MS,
   normalizeRemoteProjectIds,
   normalizeRemoteScopes,
   remoteDeviceIsCurrent,
 } from "./remote-access-policy";
+import {
+  normalizeRemoteConversationGrants,
+  remoteConversationGrantsFromProjectIds,
+  remoteGrantedProjectIds,
+  type RemoteConversationGrant,
+} from "../shared/remote-grants";
 import type {
   PersistedRemoteAccess,
   PersistedRemoteDevice,
@@ -20,21 +27,25 @@ export function applyRemotePairingGrant(input: {
   pending: PendingRemotePairing;
   scopes: RemoteScope[];
   projectIds: string[];
+  grants?: RemoteConversationGrant[];
   grantMs: number;
   now: Date;
 }): { device: PersistedRemoteDevice; replaced: boolean } {
+  const scopes = normalizeRemoteScopes(input.scopes);
   const expiresAt = new Date(
     input.now.getTime() + Math.max(
       MINUTE_MS,
-      Math.min(Math.trunc(input.grantMs), MAX_REMOTE_GRANT_MS),
+      boundedRemoteGrantMs(input.grantMs, scopes),
     ),
   ).toISOString();
+  const grants = resolvedGrants(input.projectIds, input.grants);
   const device: PersistedRemoteDevice = {
     id: input.pending.payload.deviceId,
     label: input.pending.payload.deviceLabel,
     publicKey: input.pending.payload.devicePublicKey,
-    scopes: normalizeRemoteScopes(input.scopes),
-    projectIds: normalizeRemoteProjectIds(input.projectIds),
+    scopes,
+    projectIds: remoteGrantedProjectIds(grants),
+    grants,
     createdAt: input.now.toISOString(),
     expiresAt,
     lastSeenAt: null,
@@ -105,21 +116,66 @@ export function updateRemoteDeviceGrant(input: {
   deviceId: string;
   scopes: RemoteScope[];
   projectIds: string[];
+  grants?: RemoteConversationGrant[];
   expiresAt: string;
   now: Date;
 }): PersistedRemoteDevice {
   const device = requireRemoteDevice(input.data, input.deviceId);
+  const scopes = normalizeRemoteScopes(input.scopes);
   const expiry = Date.parse(input.expiresAt);
+  const ceiling = input.now.getTime()
+    + boundedRemoteGrantMs(MAX_REMOTE_GRANT_MS, scopes);
   if (
     !Number.isFinite(expiry)
     || expiry <= input.now.getTime()
-    || expiry > input.now.getTime() + MAX_REMOTE_GRANT_MS
-  ) throw new Error("Choose an expiry within 90 days.");
-  device.scopes = normalizeRemoteScopes(input.scopes);
-  device.projectIds = normalizeRemoteProjectIds(input.projectIds);
+    || expiry > ceiling
+  ) {
+    throw new Error(scopes.includes("prompt")
+      ? "Choose an expiry within 7 days for a prompt-capable device."
+      : "Choose an expiry within 90 days.");
+  }
+  const grants = resolvedGrants(
+    input.projectIds,
+    input.grants ?? retainedGrants(device, input.projectIds),
+  );
+  device.scopes = scopes;
+  device.grants = grants;
+  device.projectIds = remoteGrantedProjectIds(grants);
   device.expiresAt = new Date(expiry).toISOString();
   device.grantVersion += 1;
   return device;
+}
+
+function retainedGrants(
+  device: PersistedRemoteDevice,
+  projectIds: string[],
+): RemoteConversationGrant[] {
+  const requested = new Set(normalizeRemoteProjectIds(projectIds));
+  return device.grants.filter(({ projectId }) => requested.has(projectId));
+}
+
+function resolvedGrants(
+  projectIds: string[],
+  grants: RemoteConversationGrant[] | undefined,
+): RemoteConversationGrant[] {
+  if (grants === undefined) {
+    return remoteConversationGrantsFromProjectIds(projectIds);
+  }
+  const allowed = new Set(normalizeRemoteProjectIds(projectIds));
+  const normalized = normalizeRemoteConversationGrants(
+    grants.filter(({ projectId }) => allowed.has(projectId)),
+  );
+  const covered = new Set(normalized.map(({ projectId }) => projectId));
+  const missing = [...allowed].filter((projectId) => !covered.has(projectId));
+  return normalizeRemoteConversationGrants([
+    ...normalized,
+    ...missing.map((projectId) => ({
+      projectId,
+      conversationIds: [],
+      includeFutureConversations: false,
+      legacyProjectWide: false,
+    })),
+  ]);
 }
 
 function requireRemoteDevice(

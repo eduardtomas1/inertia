@@ -13,11 +13,18 @@ import {
   type RemoteResponse,
   type RemoteSafeConversation,
 } from "../shared/remote-protocol";
+import { remoteGrantAllowsConversation } from "../shared/remote-grants";
+import {
+  remotePromptSafetyIsUsable,
+  UNSUPPORTED_REMOTE_PROMPT_SAFETY,
+  type RemotePromptSafety,
+} from "../shared/remote-prompt-safety";
 import {
   sanitizeRemoteContent,
   sanitizeRemoteLabel,
 } from "../shared/remote-sanitizer";
 import { PROVIDER_INFO } from "./provider/catalog";
+import { RemoteTranscriptCache } from "./remote-transcript-cache";
 
 interface RemoteGatewayDependencies {
   shell(): AppSnapshot;
@@ -27,6 +34,8 @@ interface RemoteGatewayDependencies {
   queuePrompt(conversationId: string, content: string): {
     turnId: string;
   };
+  remotePromptSafety?(conversation: Conversation): RemotePromptSafety;
+  transcriptCache?: RemoteTranscriptCache;
   now?(): Date;
 }
 
@@ -53,8 +62,6 @@ interface PendingRemotePromptPreparation {
 const PREPARED_PROMPT_TTL_MS = 15_000;
 const PREPARED_PROMPT_LIMIT =
   REMOTE_LIMITS.sessions * REMOTE_LIMITS.inFlightRequestsPerSession;
-const SANITIZED_CONTENT_LIMIT =
-  REMOTE_LIMITS.transcriptMessages * REMOTE_LIMITS.sessions;
 
 export class RemoteRuntimeGateway {
   private readonly receipts = new Map<string, DeliveryReceipt>();
@@ -62,12 +69,29 @@ export class RemoteRuntimeGateway {
   private readonly latestPreparationIdByRequest = new Map<string, string>();
   private readonly pendingPreparations =
     new Map<string, PendingRemotePromptPreparation>();
-  private readonly sanitizedContent =
-    new Map<string, { source: string; value: string }>();
+  private readonly transcriptCache: RemoteTranscriptCache;
   private readonly now: () => Date;
 
   constructor(private readonly dependencies: RemoteGatewayDependencies) {
     this.now = dependencies.now ?? (() => new Date());
+    this.transcriptCache = dependencies.transcriptCache
+      ?? new RemoteTranscriptCache();
+  }
+
+  forgetConversation(conversationId: string): void {
+    this.transcriptCache.invalidateConversation(conversationId);
+  }
+
+  forgetMessage(conversationId: string, messageId: string): void {
+    this.transcriptCache.invalidateMessage(conversationId, messageId);
+  }
+
+  reset(): void {
+    this.transcriptCache.clear();
+    this.receipts.clear();
+    this.preparedPrompts.clear();
+    this.latestPreparationIdByRequest.clear();
+    this.pendingPreparations.clear();
   }
 
   async request(
@@ -95,8 +119,9 @@ export class RemoteRuntimeGateway {
           kind: "state",
           state: projectShell(
             this.dependencies.shell(),
-            new Set(subject.projectIds),
+            subject,
             this.now(),
+            (conversation) => this.promptSafety(conversation),
           ),
         },
       });
@@ -116,11 +141,7 @@ export class RemoteRuntimeGateway {
     request: Extract<RemoteRequest, { type: "conversation.get" }>,
   ): RemoteResponse {
     const detail = this.dependencies.detail(request.conversationId);
-    if (
-      !detail
-      || detail.conversation.archivedAt !== null
-      || !subject.projectIds.includes(detail.conversation.projectId)
-    ) {
+    if (!detail || !authorizedConversation(subject, detail)) {
       return failedResponse(
         request.requestId,
         "not-found",
@@ -131,6 +152,7 @@ export class RemoteRuntimeGateway {
     const projectedConversation = safeConversation(
       shell.conversations.find(({ id }) => id === request.conversationId)
         ?? { ...detail.conversation, latestTurn: null, pendingApproval: false, pendingInput: false },
+      this.promptSafety(detail.conversation),
     );
     return boundRemoteProjection({
       type: "response",
@@ -148,7 +170,11 @@ export class RemoteRuntimeGateway {
               id: message.id,
               turnId: message.turnId,
               role: message.role as "user" | "assistant",
-              content: this.sanitizedMessageContent(message.id, message.content),
+              content: this.transcriptCache.content(
+                request.conversationId,
+                message.id,
+                message.content,
+              ),
               createdAt: message.createdAt,
             })),
           activities: detail.activities
@@ -206,11 +232,7 @@ export class RemoteRuntimeGateway {
       );
     }
     const detail = this.dependencies.detail(request.conversationId);
-    if (
-      !detail
-      || detail.conversation.archivedAt !== null
-      || !subject.projectIds.includes(detail.conversation.projectId)
-    ) {
+    if (!detail || !authorizedConversation(subject, detail)) {
       return unavailableConversationResponse(request.requestId);
     }
     const receipt = this.receipts.get(request.deliveryId);
@@ -408,10 +430,7 @@ export class RemoteRuntimeGateway {
     request: Extract<RemoteRequest, { type: "prompt.send" }>,
     detail: ConversationDetail,
   ): RemoteResponse | null {
-    if (
-      detail.conversation.archivedAt !== null
-      || !subject.projectIds.includes(detail.conversation.projectId)
-    ) {
+    if (!authorizedConversation(subject, detail)) {
       return unavailableConversationResponse(request.requestId);
     }
     if (detail.conversation.accessMode !== "supervised") {
@@ -419,6 +438,14 @@ export class RemoteRuntimeGateway {
         request.requestId,
         "forbidden",
         "Remote prompting requires Supervised access on the desktop.",
+      );
+    }
+    const safety = this.promptSafety(detail.conversation);
+    if (!remotePromptSafetyIsUsable(safety)) {
+      return failedResponse(
+        request.requestId,
+        "forbidden",
+        safety.explanation,
       );
     }
     if (this.dependencies.isConversationActive(request.conversationId)) {
@@ -446,22 +473,14 @@ export class RemoteRuntimeGateway {
     }
   }
 
-  private sanitizedMessageContent(id: string, content: string): string {
-    const cached = this.sanitizedContent.get(id);
-    if (cached && cached.source === content) {
-      this.sanitizedContent.delete(id);
-      this.sanitizedContent.set(id, cached);
-      return cached.value;
+  private promptSafety(conversation: Conversation): RemotePromptSafety {
+    const resolve = this.dependencies.remotePromptSafety;
+    if (!resolve) return UNSUPPORTED_REMOTE_PROMPT_SAFETY;
+    try {
+      return resolve(conversation) ?? UNSUPPORTED_REMOTE_PROMPT_SAFETY;
+    } catch {
+      return UNSUPPORTED_REMOTE_PROMPT_SAFETY;
     }
-    const value = sanitizeRemoteContent(content);
-    this.sanitizedContent.delete(id);
-    this.sanitizedContent.set(id, { source: content, value });
-    while (this.sanitizedContent.size > SANITIZED_CONTENT_LIMIT) {
-      const oldest = this.sanitizedContent.keys().next().value;
-      if (typeof oldest !== "string") break;
-      this.sanitizedContent.delete(oldest);
-    }
-    return value;
   }
 
   private prunePreparedPrompts(): void {
@@ -519,6 +538,16 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
   return sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 
+function authorizedConversation(
+  subject: RemoteAuthorizationSubject,
+  detail: ConversationDetail,
+): boolean {
+  const { id, projectId, archivedAt } = detail.conversation;
+  return archivedAt === null
+    && subject.projectIds.includes(projectId)
+    && remoteGrantAllowsConversation(subject.grants, projectId, id);
+}
+
 function unavailableConversationResponse(requestId: string): RemoteResponse {
   return failedResponse(
     requestId,
@@ -529,13 +558,17 @@ function unavailableConversationResponse(requestId: string): RemoteResponse {
 
 function projectShell(
   snapshot: AppSnapshot,
-  projectIds: Set<string>,
+  subject: RemoteAuthorizationSubject,
   now: Date,
+  safety: (conversation: AppSnapshot["conversations"][number]) => RemotePromptSafety,
 ) {
+  const projectIds = new Set(subject.projectIds);
   const conversationIds = new Set(
     snapshot.conversations
-      .filter(({ projectId, archivedAt }) =>
-        projectIds.has(projectId) && archivedAt === null)
+      .filter(({ id, projectId, archivedAt }) =>
+        projectIds.has(projectId)
+        && archivedAt === null
+        && remoteGrantAllowsConversation(subject.grants, projectId, id))
       .map(({ id }) => id),
   );
   return {
@@ -548,7 +581,7 @@ function projectShell(
       })),
     conversations: snapshot.conversations
       .filter(({ id }) => conversationIds.has(id))
-      .map(safeConversation),
+      .map((conversation) => safeConversation(conversation, safety(conversation))),
     runs: snapshot.runs
       .filter((run) =>
         run.kind === "agent"
@@ -566,7 +599,10 @@ function projectShell(
 
 function safeConversation(
   conversation: AppSnapshot["conversations"][number],
+  safety: RemotePromptSafety = UNSUPPORTED_REMOTE_PROMPT_SAFETY,
 ): RemoteSafeConversation {
+  const usable = conversation.accessMode === "supervised"
+    && remotePromptSafetyIsUsable(safety);
   return {
     id: conversation.id,
     projectId: conversation.projectId,
@@ -574,6 +610,25 @@ function safeConversation(
     providerLabel: PROVIDER_INFO[conversation.providerId].name,
     status: conversation.status,
     pendingLocalApproval: conversation.pendingApproval,
+    promptSafety: {
+      supported: usable,
+      headline: sanitizeRemoteLabel(
+        usable
+          ? safety.headline
+          : conversation.accessMode === "supervised"
+            ? safety.headline
+            : "Remote prompts need Supervised access",
+      ) ?? "Remote prompts unavailable",
+      explanation: sanitizeRemoteContent(
+        usable
+          ? safety.explanation
+          : conversation.accessMode === "supervised"
+            ? safety.explanation
+            : "Switch this conversation to Supervised access on the desktop to "
+              + "allow remote prompts.",
+        600,
+      ),
+    },
     updatedAt: conversation.updatedAt,
   };
 }

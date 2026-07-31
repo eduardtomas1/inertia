@@ -25,6 +25,12 @@ import {
   encodedRemoteFrameBytes,
   remoteResponseSchema,
 } from "../../src/shared/remote-protocol";
+import {
+  remoteConversationGrantsFromProjectIds,
+} from "../../src/shared/remote-grants";
+import {
+  remotePromptSafetyForHarness,
+} from "../../src/shared/remote-prompt-safety";
 
 const temporaryDirectories: string[] = [];
 
@@ -54,6 +60,7 @@ function fixture(
     isConversationActive: () => false,
     preparePrompt: async () => undefined,
     queuePrompt: () => ({ turnId: `remote-turn-${++queued}` }),
+    remotePromptSafety: () => remotePromptSafetyForHarness("codex-app-server"),
     now,
   });
   const subject: RemoteAuthorizationSubject = {
@@ -61,6 +68,7 @@ function fixture(
     sessionId: "7f0c11aa-9ee8-4e3c-8f8f-0907e31b389e",
     scopes: ["view"],
     projectIds: [firstProject.id],
+    grants: remoteConversationGrantsFromProjectIds([firstProject.id]),
     grantVersion: 1,
     expiresAt: "2030-02-01T00:00:00.000Z",
   };
@@ -115,6 +123,7 @@ function promptRaceFixture() {
     queuePrompt: () => ({
       turnId: `remote-race-${++queueCalls}`,
     }),
+    remotePromptSafety: () => remotePromptSafetyForHarness("codex-app-server"),
     now: () => new Date("2030-01-01T00:00:00.000Z"),
   });
   const request: Extract<RemoteRequest, { type: "prompt.send" }> = {
@@ -502,6 +511,7 @@ describe("Remote Companion runtime authority", () => {
         await release.promise;
       },
       queuePrompt: () => ({ turnId: "must-not-queue" }),
+      remotePromptSafety: () => remotePromptSafetyForHarness("codex-app-server"),
       now: () => new Date("2030-01-01T00:00:00.000Z"),
     });
     const subject: RemoteAuthorizationSubject = {
@@ -718,6 +728,7 @@ describe("Remote Companion runtime authority", () => {
     const reducedSubject: RemoteAuthorizationSubject = {
       ...promptingSubject,
       projectIds: [secondProject.id],
+      grants: remoteConversationGrantsFromProjectIds([secondProject.id]),
       grantVersion: 2,
     };
     expect(await gateway.preparePrompt(reducedSubject, {
@@ -761,6 +772,7 @@ describe("Remote Companion runtime authority", () => {
       isConversationActive: () => false,
       preparePrompt: async () => undefined,
       queuePrompt: () => ({ turnId: "unused" }),
+      remotePromptSafety: () => remotePromptSafetyForHarness("codex-app-server"),
     });
 
     const response = await gateway.request(subject, {
@@ -806,6 +818,7 @@ describe("Remote Companion runtime authority", () => {
       isConversationActive: () => false,
       preparePrompt: async () => undefined,
       queuePrompt: () => ({ turnId: "unused" }),
+      remotePromptSafety: () => remotePromptSafetyForHarness("codex-app-server"),
     });
 
     const response = await gateway.request(subject, {

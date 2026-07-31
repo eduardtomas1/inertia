@@ -12257,6 +12257,36 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   gap: 8px;
 }
 
+.remote-grant-editor {
+  display: grid;
+  gap: 4px;
+}
+
+.remote-grant-editor .settings-card-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.remote-access-preview {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-sunken, transparent);
+}
+
+.remote-access-preview > div {
+  display: grid;
+  gap: 2px;
+}
+
+.remote-access-preview small {
+  color: var(--text-muted);
+}
+
 .remote-pairing-actions,
 .remote-device-heading {
   display: flex;

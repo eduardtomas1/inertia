@@ -307,6 +307,22 @@ function renderDetail(
     );
     return;
   }
+  const safety = value.conversation.promptSafety;
+  if (!safety.supported) {
+    appendRemoteText(
+      parent,
+      `${value.conversation.providerLabel} remote prompt unavailable`,
+      "muted",
+    );
+    appendRemoteText(parent, safety.explanation, "muted");
+    return;
+  }
+  appendRemoteText(
+    parent,
+    `${value.conversation.providerLabel} remote prompt`,
+    "muted",
+  );
+  appendRemoteText(parent, safety.headline, "muted");
   const form = document.createElement("form");
   const label = document.createElement("label");
   label.textContent = "Text prompt";

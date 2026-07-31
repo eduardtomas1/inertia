@@ -68,7 +68,7 @@ describe("Remote Companion reference relay", () => {
     const url = await relayFixture();
     const desktop = await socket(url);
     desktop.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.register",
       endpointId: "opaque_endpoint",
       role: "desktop",
@@ -80,7 +80,7 @@ describe("Remote Companion reference relay", () => {
 
     const browser = await socket(url);
     browser.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.connect",
       endpointId: "opaque_endpoint",
       browserVersion: "0.1.0",
@@ -95,7 +95,7 @@ describe("Remote Companion reference relay", () => {
 
     const stranger = await socket(url);
     stranger.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.disconnect",
       connectionId,
     }));
@@ -105,20 +105,20 @@ describe("Remote Companion reference relay", () => {
     });
 
     const frame = {
-      protocolVersion: 1,
+      protocolVersion: 2,
       kind: "pair.request",
       invitationId: crypto.randomUUID(),
       enc: "opaque_encapsulation",
       ciphertext: "opaque_ciphertext",
     };
     browser.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.frame",
       connectionId,
       frame,
     }));
     expect(await nextMessage(desktop)).toEqual({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.frame",
       connectionId,
       frame,
@@ -135,7 +135,7 @@ describe("Remote Companion reference relay", () => {
     const url = await relayFixture({ now: () => 10_000 });
     const desktop = await socket(url);
     desktop.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.register",
       endpointId: "aggregate_endpoint",
       role: "desktop",
@@ -148,7 +148,7 @@ describe("Remote Companion reference relay", () => {
     for (let index = 0; index < 4; index += 1) {
       const browser = await socket(url);
       browser.send(JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: 2,
         type: "relay.connect",
         endpointId: "aggregate_endpoint",
         browserVersion: "0.1.0",
@@ -170,7 +170,7 @@ describe("Remote Companion reference relay", () => {
       });
     }
     const frame = {
-      protocolVersion: 1,
+      protocolVersion: 2,
       kind: "session.close",
       sessionId: crypto.randomUUID(),
       reason: "shutdown",
@@ -179,7 +179,7 @@ describe("Remote Companion reference relay", () => {
     // Include lifecycle margin that exceeded the old shared 240-message cap.
     for (let index = 0; index < 244; index += 1) {
       desktop.send(JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: 2,
         type: "relay.frame",
         connectionId: connectionIds[index % connectionIds.length],
         frame,
@@ -192,7 +192,7 @@ describe("Remote Companion reference relay", () => {
     const browserClosed = once(browsers[0]!, "close");
     for (let index = 0; index < 240; index += 1) {
       browsers[0]!.send(JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: 2,
         type: "relay.frame",
         connectionId: connectionIds[0],
         frame,
@@ -207,7 +207,7 @@ describe("Remote Companion reference relay", () => {
     const url = await relayFixture();
     const browser = await socket(url);
     browser.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.connect",
       endpointId: "offline_endpoint",
       browserVersion: "0.1.0",
@@ -219,7 +219,7 @@ describe("Remote Companion reference relay", () => {
 
     const desktop = await socket(url);
     desktop.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.register",
       endpointId: "offline_endpoint",
       role: "desktop",
@@ -235,7 +235,7 @@ describe("Remote Companion reference relay", () => {
     const url = await relayFixture({ maxBufferedBytes: 1_024 });
     const desktop = await socket(url);
     desktop.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.register",
       endpointId: "slow_endpoint",
       role: "desktop",
@@ -244,7 +244,7 @@ describe("Remote Companion reference relay", () => {
     await nextMessage(desktop);
     const browser = await socket(url);
     browser.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.connect",
       endpointId: "slow_endpoint",
       browserVersion: "0.1.0",
@@ -255,11 +255,11 @@ describe("Remote Companion reference relay", () => {
     const peerDisconnected = nextMessage(browser);
 
     browser.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.frame",
       connectionId,
       frame: {
-        protocolVersion: 1,
+        protocolVersion: 2,
         kind: "pair.request",
         invitationId: crypto.randomUUID(),
         enc: "valid_encapsulation",
@@ -300,7 +300,7 @@ describe("Remote Companion reference relay", () => {
     const url = await relayFixture();
     const desktop = await socket(url);
     desktop.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.register",
       endpointId: "bounded_endpoint",
       role: "desktop",
@@ -309,7 +309,7 @@ describe("Remote Companion reference relay", () => {
     await nextMessage(desktop);
     const browser = await socket(url);
     browser.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.connect",
       endpointId: "bounded_endpoint",
       browserVersion: "0.1.0",
@@ -318,11 +318,11 @@ describe("Remote Companion reference relay", () => {
     await nextMessage(desktop);
 
     browser.send(JSON.stringify({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.frame",
       connectionId,
       frame: {
-        protocolVersion: 1,
+        protocolVersion: 2,
         kind: "session.data",
         sessionId: crypto.randomUUID(),
         sequence: -1,

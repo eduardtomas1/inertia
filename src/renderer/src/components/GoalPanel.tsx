@@ -2,7 +2,9 @@ import { useId, useMemo, useState } from "react";
 import clsx from "clsx";
 import {
   Check,
+  ChevronDown,
   CirclePause,
+  Eye,
   Flag,
   Network,
   Play,
@@ -26,12 +28,14 @@ import {
   isLiveSubagentTrace,
   subagentElapsedMs,
   subagentDisclosureRows,
-  subagentProviderLabel,
+  subagentRelationshipLabel,
+  subagentRouteLabel,
   subagentStatusLabel,
-  subagentTraceDetail,
   subagentTraceLabel,
+  subagentTraceSummary,
 } from "../utils/subagentDisclosure";
 import { formatElapsed } from "../utils/responseTimeline";
+import { SubagentTraceDetails } from "./SubagentTraceDetails";
 import { MAX_SELECTED_SKILLS } from "./composer/config";
 
 export interface GoalPanelGoalInput {
@@ -57,8 +61,9 @@ export interface GoalPanelProps {
   onRefreshSkills?: () => void;
   canFollowUpSubagent?: (trace: SubagentTrace) => boolean;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
+  onOpenSubagent?: (trace: SubagentTrace) => void;
   canStopSubagent?: (trace: SubagentTrace) => boolean;
-  onStopSubagent?: (trace: SubagentTrace) => void;
+  onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
 }
 
 function goalStatusLabel(status: AgentGoalStatus): string {
@@ -406,6 +411,7 @@ function SubagentsSection({
   now,
   canFollowUpSubagent,
   onFollowUpSubagent,
+  onOpenSubagent,
   canStopSubagent,
   onStopSubagent,
   headingId,
@@ -416,6 +422,7 @@ function SubagentsSection({
   | "turns"
   | "canFollowUpSubagent"
   | "onFollowUpSubagent"
+  | "onOpenSubagent"
   | "canStopSubagent"
   | "onStopSubagent"
 > & {
@@ -425,6 +432,12 @@ function SubagentsSection({
 }): React.JSX.Element {
   const rows = subagentDisclosureRows(subagents, turns);
   const [showAll, setShowAll] = useState(false);
+  const [expandedTraceIds, setExpandedTraceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [stoppingTraceIds, setStoppingTraceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const compactRows = useMemo(() => compactSubagentRows(rows), [rows]);
   const visibleRows = showAll
     ? rows.map((row) => ({ ...row, omittedAncestors: 0 }))
@@ -455,7 +468,7 @@ function SubagentsSection({
             canStop,
             omittedAncestors,
           }) => {
-            const detail = subagentTraceDetail(trace);
+            const detail = subagentTraceSummary(trace);
             const duration = subagentElapsedMs(trace, now);
             const mayFollowUp = Boolean(
               onFollowUpSubagent && canFollowUpSubagent?.(trace),
@@ -465,27 +478,43 @@ function SubagentsSection({
               && canStop
               && (canStopSubagent?.(trace) ?? true),
             );
+            const mayOpen = Boolean(
+              onOpenSubagent
+              && turns.some(({ id }) => id === trace.turnId),
+            );
             const followUp = onFollowUpSubagent;
             const stop = onStopSubagent;
+            const label = subagentTraceLabel(trace);
+            const route = subagentRouteLabel(trace, turns);
+            const status = subagentStatusLabel(trace);
+            const expanded = expandedTraceIds.has(trace.id);
+            const stopping = stoppingTraceIds.has(trace.id);
+            const detailId = `goal-subagent-${trace.id}-details`;
             return (
               <li
                 key={trace.id}
                 data-status={trace.status}
+                aria-label={`${label}, ${route}, ${status}`}
                 style={{ "--goal-subagent-depth": depth } as React.CSSProperties}
               >
                 <span className="goal-panel-subagent-dot" aria-hidden="true" />
                 <span className="goal-panel-subagent-copy">
                   <span>
-                    <strong>{subagentTraceLabel(trace)}</strong>
+                    <strong>{label}</strong>
+                    <span className="goal-panel-subagent-state">
+                      {status}
+                    </span>
                     <small
                       title={trace.providerStatus
                         ? `Exact provider state: ${trace.providerStatus}`
                         : undefined}
                     >
-                      {subagentProviderLabel(trace)} ·{" "}
-                      {subagentStatusLabel(trace)} · {formatElapsed(duration)}
+                      {route} · {formatElapsed(duration)}
                     </small>
                   </span>
+                  {trace.parentTraceId && (
+                    <small>{subagentRelationshipLabel(trace, subagents)}</small>
+                  )}
                   {omittedAncestors > 0 && (
                     <small>
                       {omittedAncestors} earlier{" "}
@@ -495,28 +524,71 @@ function SubagentsSection({
                   )}
                   {detail && <small title={detail}>{detail}</small>}
                 </span>
-                {(mayFollowUp || mayStop) && (
-                  <span className="goal-panel-subagent-actions">
-                    {mayFollowUp && (
-                      <button
-                        type="button"
-                        aria-label={`Guide parent about ${subagentTraceLabel(trace)}`}
-                        onClick={() => followUp?.(trace)}
-                      >
-                        Guide parent
-                      </button>
-                    )}
-                    {mayStop && (
-                      <button
-                        type="button"
-                        aria-label={`Stop ${subagentTraceLabel(trace)}`}
-                        onClick={() => stop?.(trace)}
-                      >
-                        <Square size={9} fill="currentColor" aria-hidden="true" />
-                        Stop
-                      </button>
-                    )}
-                  </span>
+                <span className="goal-panel-subagent-actions">
+                  {mayOpen && (
+                    <button
+                      type="button"
+                      aria-label={`View parent turn for ${label}`}
+                      onClick={() => onOpenSubagent?.(trace)}
+                    >
+                      <Eye size={10} aria-hidden="true" />
+                      View turn
+                    </button>
+                  )}
+                  {mayFollowUp && (
+                    <button
+                      type="button"
+                      aria-label={`Guide parent about ${label}`}
+                      title="Draft guidance to the active parent; nothing is sent yet."
+                      onClick={() => followUp?.(trace)}
+                    >
+                      Guide parent
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-controls={detailId}
+                    aria-expanded={expanded}
+                    onClick={() => setExpandedTraceIds((current) => {
+                      const next = new Set(current);
+                      if (next.has(trace.id)) next.delete(trace.id);
+                      else next.add(trace.id);
+                      return next;
+                    })}
+                  >
+                    Details
+                    <ChevronDown size={10} aria-hidden="true" />
+                  </button>
+                  {mayStop && (
+                    <button
+                      type="button"
+                      aria-label={`${stopping ? "Stopping" : "Stop"} ${label}`}
+                      disabled={stopping}
+                      onClick={() => {
+                        if (!stop || stopping) return;
+                        setStoppingTraceIds((current) =>
+                          new Set(current).add(trace.id));
+                        void stop(trace).catch(() => undefined).finally(() => {
+                          setStoppingTraceIds((current) => {
+                            const next = new Set(current);
+                            next.delete(trace.id);
+                            return next;
+                          });
+                        });
+                      }}
+                    >
+                      <Square size={9} fill="currentColor" aria-hidden="true" />
+                      {stopping ? "Stopping…" : "Stop"}
+                    </button>
+                  )}
+                </span>
+                {expanded && (
+                  <SubagentTraceDetails
+                    id={detailId}
+                    trace={trace}
+                    traces={subagents}
+                    turns={turns}
+                  />
                 )}
               </li>
             );
@@ -675,6 +747,7 @@ export function GoalPanel({
   onRefreshSkills,
   canFollowUpSubagent,
   onFollowUpSubagent,
+  onOpenSubagent,
   canStopSubagent,
   onStopSubagent,
 }: GoalPanelProps): React.JSX.Element {
@@ -837,6 +910,7 @@ export function GoalPanel({
           now={now}
           canFollowUpSubagent={canFollowUpSubagent}
           onFollowUpSubagent={onFollowUpSubagent}
+          onOpenSubagent={onOpenSubagent}
           canStopSubagent={canStopSubagent}
           onStopSubagent={onStopSubagent}
           headingId={subagentsHeadingId}

@@ -320,6 +320,14 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       .toBeVisible();
     await expect(goalPanel.getByText("Build Verifier", { exact: true }))
       .toBeVisible();
+    await expect(goalPanel.getByText(/Claude · Agent SDK ·/u).first())
+      .toBeVisible();
+    await expect(goalPanel.getByText("Running", { exact: true }))
+      .toBeVisible();
+    await expect(goalPanel.getByText("Completed", { exact: true }))
+      .toBeVisible();
+    await expect(goalPanel.getByText("Failed", { exact: true }))
+      .toBeVisible();
     await goalPanel.getByRole("button", { name: "Complete" }).click();
     await expect(goalPanel.getByText("Complete", { exact: true })).toBeVisible();
     const goalWideScreenshot = testInfo.outputPath(
@@ -365,9 +373,19 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       path: goalNarrowScreenshot,
       contentType: "image/png",
     });
-    await page.locator(".workspace-panel").getByRole("button", {
-      name: "Close workspace tools",
+    const goalPolicyRow = goalPanel.getByRole("listitem", {
+      name: /Policy Reader, Claude · Agent SDK, Completed/u,
+    });
+    await goalPolicyRow.getByRole("button", { name: "Details" }).click();
+    await expect(goalPolicyRow.getByText("Outcome", { exact: true }))
+      .toBeVisible();
+    await expect(goalPolicyRow.getByRole("definition").filter({
+      hasText: "Confirmed exact IDs and bounded provider-authored text.",
+    })).toBeVisible();
+    await goalPolicyRow.getByRole("button", {
+      name: "View parent turn for Policy Reader",
     }).click();
+    await expect(page.locator(`[data-turn-id="${turn.id}"]`)).toBeFocused();
     await resizeWindow(1440, 920);
 
     const disclosure = page.locator(".subagent-disclosure");
@@ -384,11 +402,11 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       .toBeVisible();
     await expect(delegatedWork.getByText("Build Verifier", { exact: true }))
       .toBeVisible();
-    await expect(delegatedWork.getByText(/Claude · Running ·/u))
+    await expect(delegatedWork.getByText(/Claude · Agent SDK · Running ·/u))
       .toBeVisible();
-    await expect(delegatedWork.getByText(/Claude · Completed ·/u))
+    await expect(delegatedWork.getByText(/Claude · Agent SDK · Completed/u))
       .toBeVisible();
-    await expect(delegatedWork.getByText(/Claude · Failed ·/u))
+    await expect(delegatedWork.getByText(/Claude · Agent SDK · Failed/u))
       .toBeVisible();
     await expect(delegatedWork.getByRole("button", {
       name: "Stop Evidence Scout",
@@ -413,6 +431,13 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     await expect(textbox).toHaveAttribute(
       "placeholder",
       "Add a follow-up while the agent works…",
+    );
+    const evidenceRow = delegatedWork.getByRole("listitem", {
+      name: /Evidence Scout, Claude · Agent SDK, Running/u,
+    });
+    await evidenceRow.getByRole("button", { name: "Guide parent" }).click();
+    await expect(textbox).toHaveValue(
+      "Please follow up on the delegated task “Checking the provider lifecycle and exact task identity.” and incorporate its latest result.",
     );
     await textbox.fill("Please prioritize the lifecycle evidence.");
     await expect(composer.getByRole("button", { name: "Send follow-up" }))

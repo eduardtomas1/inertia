@@ -15,6 +15,10 @@ import type {
 } from "@shared/contracts";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../utils/interfaceScale";
 import {
+  isTimelineFocusDetail,
+  TIMELINE_FOCUS_EVENT,
+} from "../../utils/timelineFocus";
+import {
   buildResponseTimeline,
   buildTimelineMinimapMarkers,
   estimateTimelineItemRenderWeight,
@@ -799,6 +803,24 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     };
     window.requestAnimationFrame(focus);
   }, [props.timelineElementRef, timeline, virtualized, virtualizer]);
+
+  useEffect(() => {
+    const focusRequestedTurn = (event: Event): void => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (
+        !isTimelineFocusDetail(detail)
+        || detail.conversationId !== props.conversationId
+      ) return;
+      const index = timeline.findIndex((item) =>
+        item.kind === "turn" && item.turn.id === detail.turnId);
+      if (index >= 0) focusTimelineItem(index, "turn");
+    };
+    window.addEventListener(TIMELINE_FOCUS_EVENT, focusRequestedTurn);
+    return () => window.removeEventListener(
+      TIMELINE_FOCUS_EVENT,
+      focusRequestedTurn,
+    );
+  }, [focusTimelineItem, props.conversationId, timeline]);
 
   useEffect(() => {
     const scrollElement = props.scrollElementRef?.current;

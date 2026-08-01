@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -96,7 +96,12 @@ function turn(update: Partial<AgentTurn> = {}): AgentTurn {
 describe("delegated-agent timeline disclosure", () => {
   it("opens live work, exposes hierarchy and exact provider metadata, and scopes Stop", async () => {
     const user = userEvent.setup();
-    const onStop = vi.fn(async () => undefined);
+    let acknowledgeStop!: () => void;
+    const onStop = vi.fn(async () =>
+      await new Promise<void>((resolve) => {
+        acknowledgeStop = resolve;
+      }));
+    const onFollowUp = vi.fn();
     const parent = trace();
     const child = trace({
       id: "trace-child",
@@ -118,6 +123,7 @@ describe("delegated-agent timeline disclosure", () => {
       providerAgentId: "codex-child",
       providerToolUseId: "spawn-codex",
       providerName: "Build verifier",
+      turnId: "turn-codex",
       providerStatus: "pendingInit",
       status: "queued",
       sequence: 3,
@@ -137,7 +143,15 @@ describe("delegated-agent timeline disclosure", () => {
     render(
       <SubagentDisclosure
         subagents={[parent, child, unsupportedCodex, futureClaude]}
-        turns={[turn()]}
+        turns={[
+          turn(),
+          turn({
+            id: "turn-codex",
+            providerId: "codex",
+            harnessId: "codex-app-server",
+          }),
+        ]}
+        onFollowUpSubagent={onFollowUp}
         onStopSubagent={onStop}
         now={NOW}
       />,
@@ -147,21 +161,21 @@ describe("delegated-agent timeline disclosure", () => {
       "4 delegated tasks · 4 active",
     ).closest("details");
     expect(disclosure).toHaveAttribute("open");
-    expect(screen.getByText("Claude · Running · 10s")).toHaveAttribute(
+    expect(screen.getByText("Claude · Agent SDK · Running · 10s")).toHaveAttribute(
       "title",
       "Exact provider state: running",
     );
-    expect(screen.getByText("Claude · Waiting (paused) · 10s")).toHaveAttribute(
+    expect(screen.getByText("Claude · Agent SDK · Waiting (paused) · 10s")).toHaveAttribute(
       "title",
       "Exact provider state: paused",
     );
-    expect(screen.getByText("Codex · Queued (pendingInit) · 10s")).toHaveAttribute(
+    expect(screen.getByText("Codex · App Server · Queued (pendingInit) · 10s")).toHaveAttribute(
       "title",
       "Exact provider state: pendingInit",
     );
-    expect(screen.getByText("Claude · Unknown (futureState) · 10s"))
+    expect(screen.getByText("Claude · Agent SDK · Unknown (futureState) · 10s"))
       .toHaveAttribute("title", "Exact provider state: futureState");
-    expect(screen.getByText("Child of Evidence scout.")).toBeInTheDocument();
+    expect(screen.getByText("Child of Evidence scout")).toBeInTheDocument();
     expect(screen.queryByRole("button", {
       name: "Stop Build verifier",
     })).not.toBeInTheDocument();
@@ -169,10 +183,29 @@ describe("delegated-agent timeline disclosure", () => {
       name: "Stop Future-state worker",
     })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", {
+    const childRow = screen.getByRole("listitem", {
+      name: /Policy reader/u,
+    });
+    await user.click(within(childRow).getByRole("button", {
+      name: "Guide parent",
+    }));
+    expect(onFollowUp).toHaveBeenCalledWith(child);
+    await user.click(within(childRow).getByRole("button", {
+      name: "Details",
+    }));
+    expect(within(childRow).getByText("Relationship")).toBeInTheDocument();
+    expect(within(childRow).getByText("Recent activity")).toBeInTheDocument();
+    expect(within(childRow).queryByText(/agent-child|task-child/u))
+      .not.toBeInTheDocument();
+
+    await user.click(within(childRow).getByRole("button", {
       name: "Stop Policy reader",
     }));
     expect(onStop).toHaveBeenCalledWith(child);
+    expect(within(childRow).getByRole("button", {
+      name: "Stopping Policy reader",
+    })).toBeDisabled();
+    acknowledgeStop();
     expect(screen.queryByRole("button", { name: /retry/iu }))
       .not.toBeInTheDocument();
   });
@@ -210,7 +243,8 @@ describe("delegated-agent timeline disclosure", () => {
     summary?.focus();
     await user.keyboard("{Enter}");
     expect(disclosure).toHaveAttribute("open");
-    expect(screen.getByText("Codex · Completed · 7s")).toBeInTheDocument();
+    expect(screen.getByText("Codex · App Server · Completed · 7s"))
+      .toBeInTheDocument();
     expect(screen.getByText("All checks passed.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Stop /u }))
       .not.toBeInTheDocument();

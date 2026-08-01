@@ -178,6 +178,20 @@ describe("RuntimeStore conversation lifecycle", () => {
       checkpointId: "checkpoint-1",
       usageAtCompletion,
     });
+    const acknowledgedFollowUp = store.createAcknowledgedFollowUpMessage(
+      conversation.id,
+      turn.id,
+      "Accepted immediately before the parent settled.",
+      at(4_000),
+      at(7_000),
+    );
+    expect(acknowledgedFollowUp).toMatchObject({
+      turnId: turn.id,
+      role: "user",
+      createdAt: at(4_000),
+    });
+    expect(store.conversation(conversation.id)).toMatchObject({ updatedAt: at(7_000), lastViewedAt: at(7_000) });
+    expect(store.project(conversation.projectId).updatedAt).toBe(at(7_000));
     expect(store.shellSnapshot().conversations.find(({ id }) => id === conversation.id)?.latestTurn)
       .toEqual(expect.objectContaining({
         id: turn.id,
@@ -233,6 +247,9 @@ describe("RuntimeStore conversation lifecycle", () => {
     expect(reopened.snapshot().agentTurns).toEqual([
       expect.objectContaining({ id: turn.id, status: "completed" }),
     ]);
+    expect(reopened.snapshot().messages).toContainEqual(
+      expect.objectContaining({ id: acknowledgedFollowUp.id }),
+    );
     reopened.close();
   });
 
@@ -1278,6 +1295,35 @@ describe("RuntimeStore conversation lifecycle", () => {
         providerStatus: "interrupted",
         status: "interrupted",
         isLive: false,
+        sequence: 4,
+      },
+    });
+    const contradictoryTerminal = store.upsertSubagentTrace({
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      providerId: "codex",
+      providerTaskId: null,
+      providerAgentId: "child-provider-state",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "spawn-provider-state",
+      providerRole: null,
+      providerName: null,
+      providerStatus: "errored",
+      status: "failed",
+      isLive: false,
+      description: null,
+      progress: null,
+      result: "A contradictory late terminal edge.",
+      sequence: 6,
+    });
+    expect(contradictoryTerminal).toMatchObject({
+      changed: false,
+      trace: {
+        providerStatus: "interrupted",
+        status: "interrupted",
+        result: "The provider interrupted this child.",
         sequence: 4,
       },
     });

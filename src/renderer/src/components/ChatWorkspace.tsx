@@ -127,6 +127,7 @@ type ChatWorkspaceProps = {
   onOpenProviderUpdateInstructions: (url: string) => void;
   onUsageDisplayModeChange: (mode: UsageDisplayMode) => void;
   onStop: () => Promise<void>;
+  onFollowUpSubagent?: (trace: SubagentTrace) => void;
   onStopSubagent: (trace: SubagentTrace) => Promise<void>;
   onRevertCheckpoint: (checkpoint: CheckpointSummary) => void;
   onOpenTurnDiff: (turnId: string, path?: string) => void;
@@ -200,6 +201,7 @@ export function ChatWorkspace({
   onOpenProviderUpdateInstructions,
   onUsageDisplayModeChange,
   onStop,
+  onFollowUpSubagent,
   onStopSubagent,
   onRevertCheckpoint,
   onOpenTurnDiff,
@@ -378,6 +380,7 @@ export function ChatWorkspace({
               onCompareTurnArtifacts={onCompareTurnArtifacts}
               onOpenTurnFile={onOpenTurnFile}
               onStop={stopTimeline}
+              onFollowUpSubagent={onFollowUpSubagent}
               onStopSubagent={onStopSubagent}
             />
           </Suspense>

@@ -98,6 +98,6 @@ export class ProjectRepository {
   }
 
   touch(projectId: string, timestamp: string): void {
-    this.context.database.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(timestamp, projectId);
+    this.context.database.prepare("UPDATE projects SET updated_at = MAX(updated_at, ?) WHERE id = ?").run(timestamp, projectId);
   }
 }

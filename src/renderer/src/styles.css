@@ -3610,7 +3610,15 @@ textarea {
   line-height: 1.35;
 }
 
-.subagent-stop-button {
+.subagent-row-actions {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.subagent-row-actions button {
   display: inline-flex;
   height: 24px;
   align-items: center;
@@ -3623,15 +3631,72 @@ textarea {
   font-size: var(--ui-font-micro);
 }
 
-.subagent-stop-button:hover {
+.subagent-row-actions button:hover:not(:disabled) {
+  color: var(--text-soft);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.subagent-row-actions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.subagent-row-actions button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.subagent-details-button svg,
+.goal-panel-subagent-actions button[aria-expanded] svg {
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.subagent-details-button[aria-expanded="true"] svg,
+.goal-panel-subagent-actions button[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.subagent-stop-button:hover:not(:disabled) {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
   background: color-mix(in srgb, var(--danger-soft) 42%, transparent);
 }
 
-.subagent-stop-button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
+.subagent-trace-details {
+  display: grid;
+  min-width: 0;
+  grid-column: 2 / -1;
+  gap: 5px;
+  margin: 4px 0 1px;
+  padding: 8px 9px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 0 7px 7px 0;
+  background: color-mix(in srgb, var(--surface-muted) 48%, transparent);
+}
+
+.subagent-trace-details > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(86px, auto) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.subagent-trace-details dt,
+.subagent-trace-details dd {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.subagent-trace-details dt {
+  color: var(--text-muted);
+  font-weight: 620;
+}
+
+.subagent-trace-details dd {
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .composer-toolbar .icon-button,
@@ -4930,7 +4995,7 @@ textarea {
   display: grid;
   min-width: 0;
   grid-template-columns: 7px minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   gap: 7px;
   margin-left: calc(var(--goal-subagent-depth, 0) * 12px);
   padding: 6px 7px;
@@ -4967,18 +5032,54 @@ textarea {
 
 .goal-panel-subagent-copy > span {
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .goal-panel-subagent-copy > span > small {
+  width: 100%;
+  flex: 0 0 100%;
+}
+
+.goal-panel-subagent-state {
   flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.35;
+}
+
+.goal-panel-subagents > li[data-status="completed"]
+  .goal-panel-subagent-state {
+  color: var(--success-state);
+  border-color: color-mix(in srgb, var(--success-state) 28%, var(--border));
+}
+
+.goal-panel-subagents > li[data-status="failed"]
+  .goal-panel-subagent-state,
+.goal-panel-subagents > li[data-status="interrupted"]
+  .goal-panel-subagent-state,
+.goal-panel-subagents > li[data-status="lost"]
+  .goal-panel-subagent-state {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--border));
 }
 
 .goal-panel-subagent-actions {
+  max-width: 220px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 2px;
 }
 
 .goal-panel-subagent-actions button {
   padding: 0 6px;
+}
+
+.goal-panel-subagents .subagent-trace-details {
+  grid-column: 2 / -1;
+  margin-top: 2px;
 }
 
 .goal-panel-history-toggle {
@@ -5012,6 +5113,14 @@ textarea {
   .goal-panel-subagent-actions {
     grid-column: 2;
     justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-disclosure-chevron,
+  .subagent-details-button svg,
+  .goal-panel-subagent-actions button[aria-expanded] svg {
+    transition: none;
   }
 }
 

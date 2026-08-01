@@ -26,6 +26,7 @@ interface ClaudeTaskState extends ClaudeAgentTool {
   agentId: string | null;
   live: boolean;
   terminal: boolean;
+  terminalStatus: SubagentUpdate["status"] | null;
 }
 
 const SUBAGENT_TASK_TYPES = new Set([
@@ -154,6 +155,7 @@ export class ClaudeSubagentTraceTracker {
       agentId: null,
       live: true,
       terminal: false,
+      terminalStatus: null,
     };
     this.tasks.set(taskId, state);
     if (state.toolUseId) this.taskByToolUse.set(state.toolUseId, taskId);
@@ -181,6 +183,7 @@ export class ClaudeSubagentTraceTracker {
         agentId: null,
         live: true,
         terminal: false,
+        terminalStatus: null,
       };
       this.tasks.set(taskId, state);
       if (state.toolUseId) this.taskByToolUse.set(state.toolUseId, taskId);
@@ -233,6 +236,7 @@ export class ClaudeSubagentTraceTracker {
       || status === "waiting"
       || status === "unknown";
     state.terminal = !state.live;
+    state.terminalStatus = state.terminal ? status : null;
     this.emitState(
       state,
       status,
@@ -258,8 +262,14 @@ export class ClaudeSubagentTraceTracker {
             ? "unknown"
             : null;
     if (!status) return;
+    if (
+      state.terminal
+      && state.terminalStatus !== "unknown"
+      && state.terminalStatus !== status
+    ) return;
     state.live = false;
     state.terminal = true;
+    state.terminalStatus = status;
     this.emitState(
       state,
       status,
@@ -277,6 +287,9 @@ export class ClaudeSubagentTraceTracker {
       || !agentId
       || (output.status !== "completed" && output.status !== "async_launched")
     ) return;
+    const status: SubagentUpdate["status"] = output.status === "completed"
+      ? "completed"
+      : "running";
     const toolResult = contentBlocks(record.message)
       .map(objectValue)
       .find((block) => block?.type === "tool_result");
@@ -300,12 +313,18 @@ export class ClaudeSubagentTraceTracker {
         agentId,
         live: output.status === "async_launched",
         terminal: output.status === "completed",
+        terminalStatus: output.status === "completed" ? "completed" : null,
       };
     } else {
-      if (state.terminal && output.status === "async_launched") return;
+      if (
+        state.terminal
+        && state.terminalStatus !== "unknown"
+        && state.terminalStatus !== status
+      ) return;
       state.agentId = agentId;
       state.live = output.status === "async_launched";
       state.terminal = output.status === "completed";
+      state.terminalStatus = state.terminal ? status : null;
     }
     const result = Array.isArray(output.content)
       ? output.content.flatMap((value) => {
@@ -317,7 +336,7 @@ export class ClaudeSubagentTraceTracker {
       : null;
     this.emitState(
       state,
-      output.status === "completed" ? "completed" : "running",
+      status,
       null,
       boundedSubagentText(result, MAX_SUBAGENT_RESULT_CHARS),
       output.status,

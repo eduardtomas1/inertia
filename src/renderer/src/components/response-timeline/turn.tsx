@@ -185,6 +185,7 @@ export function sameTurnTimelineProps(
     && left.onCompareTurnArtifacts === right.onCompareTurnArtifacts
     && left.onOpenTurnFile === right.onOpenTurnFile
     && left.onStop === right.onStop
+    && left.onFollowUpSubagent === right.onFollowUpSubagent
     && left.onStopSubagent === right.onStopSubagent
     && (!next.turn.isActive || (
       left.streamingText === right.streamingText

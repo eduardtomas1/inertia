@@ -52,5 +52,6 @@ export interface ResponseTimelineProps {
   onCompareTurnArtifacts: (earlierTurnId: string, laterTurnId: string) => void;
   onOpenTurnFile: (path: string) => void;
   onStop: () => void;
+  onFollowUpSubagent?: (trace: SubagentTrace) => void;
   onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
 }

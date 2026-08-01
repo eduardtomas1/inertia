@@ -406,29 +406,19 @@ export class RuntimeStore {
     );
   }
 
-  createFollowUpMessage(
+  createAcknowledgedFollowUpMessage(
     conversationId: string,
     turnId: string,
     content: string,
     createdAt?: string,
+    acknowledgedAt?: string,
   ): ChatMessage {
-    return this.transcriptRepository.createFollowUpMessage(
+    return this.transcriptRepository.createAcknowledgedFollowUpMessage(
       conversationId,
       turnId,
       content,
       createdAt,
-    );
-  }
-
-  deleteFollowUpMessage(
-    messageId: string,
-    conversationId: string,
-    turnId: string,
-  ): boolean {
-    return this.transcriptRepository.deleteFollowUpMessage(
-      messageId,
-      conversationId,
-      turnId,
+      acknowledgedAt,
     );
   }
 
@@ -511,6 +501,16 @@ export class RuntimeStore {
 
   subagentTrace(traceId: string): SubagentTrace {
     return this.executionLedgerRepository.subagentTrace(traceId);
+  }
+
+  acknowledgeSubagentStop(
+    traceId: string,
+    updatedAt = new Date().toISOString(),
+  ): UpsertSubagentTraceResult | null {
+    return this.executionLedgerRepository.acknowledgeSubagentStop(
+      traceId,
+      updatedAt,
+    );
   }
 
   upsertSubagentTrace(

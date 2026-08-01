@@ -37,14 +37,13 @@ import {
 import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
 import type { NewConversationLocation } from "../../lib/newConversation";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
-import {
-  supportsActiveParentFollowUp,
-} from "../../utils/composerPrimaryAction";
 import { requestComposerPrefill } from "../../utils/composerPrefill";
 import {
+  canFollowUpSubagentTrace,
   canStopSubagentTrace,
   isLiveSubagentTrace,
 } from "../../utils/subagentDisclosure";
+import { requestTimelineFocus } from "../../utils/timelineFocus";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
@@ -243,18 +242,15 @@ export function createWorkspaceSceneModel({
     && visibleDetailState.state !== "ready"
       ? visibleDetailState
       : null;
-  const canGuideParent = (trace: SubagentTrace): boolean => {
-    if (!isLiveSubagentTrace(trace)) return false;
-    const owner = projection.turns.find(({ id }) => id === trace.turnId);
-    return Boolean(
-      owner
-      && (
-        owner.status === "running"
-        || owner.status === "waiting-for-approval"
-        || owner.status === "waiting-for-input"
-      )
-      && supportsActiveParentFollowUp(owner.harnessId),
-    );
+  const canGuideParent = (trace: SubagentTrace): boolean =>
+    canFollowUpSubagentTrace(trace, projection.turns);
+  const guideParent = (trace: SubagentTrace): void => {
+    if (!conversation || !canGuideParent(trace)) return;
+    const task = trace.description ?? trace.providerRole ?? "delegated task";
+    requestComposerPrefill({
+      conversationId: conversation.id,
+      text: `Please follow up on the delegated task “${task}” and incorporate its latest result.`,
+    });
   };
 
   return {
@@ -410,7 +406,17 @@ export function createWorkspaceSceneModel({
       onCompareTurnArtifacts: actions.compareTurnArtifacts,
       onOpenTurnFile: workspaceTools.openTurnFile,
       onRevertCheckpoint: actions.revertCheckpoint,
-      onStopSubagent: actions.stopSubagent,
+      onFollowUpSubagent: guideParent,
+      onStopSubagent: async (trace) => {
+        try {
+          await actions.stopSubagent(trace);
+        } catch (error) {
+          setActionError(error instanceof Error
+            ? error.message
+            : "The delegated task could not be stopped.");
+          throw error;
+        }
+      },
       onStop: actions.stopAgent,
     },
     resizeHandle: project && !workspaceToolsUnavailable && toolsVisible ? {
@@ -578,22 +584,25 @@ export function createWorkspaceSceneModel({
           ));
         },
         canFollowUpSubagent: canGuideParent,
-        onFollowUpSubagent: (trace) => {
-          if (!conversation || !canGuideParent(trace)) return;
-          const task = trace.description ?? trace.providerRole ?? "delegated task";
-          requestComposerPrefill({
-            conversationId: conversation.id,
-            text: `Please follow up on the delegated task “${task}” and incorporate its latest result.`,
+        onFollowUpSubagent: guideParent,
+        onOpenSubagent: (trace) => {
+          setActiveTool(null);
+          requestTimelineFocus({
+            conversationId: trace.conversationId,
+            turnId: trace.turnId,
           });
         },
         canStopSubagent: (trace) =>
           canStopSubagentTrace(trace, projection.turns),
-        onStopSubagent: (trace) => {
-          void actions.stopSubagent(trace).catch((error) => setActionError(
-            error instanceof Error
+        onStopSubagent: async (trace) => {
+          try {
+            await actions.stopSubagent(trace);
+          } catch (error) {
+            setActionError(error instanceof Error
               ? error.message
-              : "The delegated task could not be stopped.",
-          ));
+              : "The delegated task could not be stopped.");
+            throw error;
+          }
         },
       },
       plan: {

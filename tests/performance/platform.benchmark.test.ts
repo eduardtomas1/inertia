@@ -173,11 +173,11 @@ async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
         },
       );
     });
-    const expectedOutput = Array.from(
+    const expectedLines = Array.from(
       { length: 2_000 },
-      (_, index) => `line-${index}\n`,
-    ).join("");
-    expect(output.replaceAll("\r\n", "\n")).toBe(expectedOutput);
+      (_, index) => `line-${index}`,
+    );
+    expect(ptyOutputLines(output)).toEqual(expectedLines);
     samples.push(performance.now() - startedAt);
     frameCounts.push(frames);
     outputFrameCounts.push(outputFrames);
@@ -194,6 +194,12 @@ async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
     outputBytes,
     expectedLinesPerSample: 2_000,
   };
+}
+
+function ptyOutputLines(output: string): string[] {
+  const lines = output.split(/\r\n|\r|\n/u);
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
 }
 
 async function providerHarnessLifecycleMeasurement(root: string): Promise<Measurement> {
@@ -487,6 +493,37 @@ function terminalBurstMeasurement(): Promise<Measurement> {
 }
 
 describe("cross-platform performance benchmark", () => {
+  it("reconstructs ordered PTY records across platform newline conventions", () => {
+    expect(ptyOutputLines("line-0\rline-1\r")).toEqual([
+      "line-0",
+      "line-1",
+    ]);
+    expect(ptyOutputLines("line-0\r\nline-1\r\n")).toEqual([
+      "line-0",
+      "line-1",
+    ]);
+    expect(ptyOutputLines("line-0\nline-1\rline-2\r\nline-3\n")).toEqual([
+      "line-0",
+      "line-1",
+      "line-2",
+      "line-3",
+    ]);
+    expect(ptyOutputLines("line-0\nline-2\n")).not.toEqual([
+      "line-0",
+      "line-1",
+      "line-2",
+    ]);
+    expect(ptyOutputLines("line-0\nline-2\nline-1\n")).not.toEqual([
+      "line-0",
+      "line-1",
+      "line-2",
+    ]);
+    expect(ptyOutputLines("line-0line-1\n")).not.toEqual([
+      "line-0",
+      "line-1",
+    ]);
+  });
+
   it("records bounded product-path measurements and host metadata", async () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "inertia-platform-benchmark-"));
     try {

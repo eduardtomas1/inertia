@@ -937,6 +937,47 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         );
         CREATE INDEX IF NOT EXISTS paired_launches_status_updated_idx
           ON paired_launches(status, updated_at ASC, id ASC);
+        CREATE TRIGGER IF NOT EXISTS paired_launches_conversation_delete
+        BEFORE DELETE ON conversations
+        BEGIN
+          SELECT RAISE(
+            ABORT,
+            'Cancel the active Duo launch before deleting this thread.'
+          )
+          WHERE EXISTS (
+            SELECT 1
+            FROM paired_launches AS launch
+            JOIN paired_launch_sides AS conversation_side
+              ON conversation_side.launch_id = launch.id
+            WHERE conversation_side.conversation_id = OLD.id
+              AND (
+                launch.status IN ('preparing', 'prepared', 'dispatching')
+                OR EXISTS (
+                  SELECT 1
+                  FROM paired_launch_sides AS live_side
+                  JOIN agent_turns AS live_turn ON live_turn.id = live_side.turn_id
+                  WHERE live_side.launch_id = launch.id
+                    AND live_turn.status NOT IN (
+                      'completed', 'failed', 'cancelled', 'interrupted'
+                    )
+                )
+                OR (
+                  launch.status = 'running'
+                  AND EXISTS (
+                    SELECT 1
+                    FROM paired_launch_sides AS missing_turn
+                    WHERE missing_turn.launch_id = launch.id
+                      AND missing_turn.turn_id IS NULL
+                  )
+                )
+              )
+          );
+          DELETE FROM paired_launches
+          WHERE id IN (
+            SELECT launch_id FROM paired_launch_sides
+            WHERE conversation_id = OLD.id
+          );
+        END;
         CREATE TRIGGER IF NOT EXISTS paired_launches_project_delete
         BEFORE DELETE ON projects
         BEGIN

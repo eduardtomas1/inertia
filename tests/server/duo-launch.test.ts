@@ -548,6 +548,54 @@ describe("atomic Duo launch persistence", () => {
     runtime.store.close();
   });
 
+  it("blocks deletion of either prepared chat until the paired launch is cancelled", async () => {
+    const runtime = await createRuntime();
+    const prepared = preparePair(runtime);
+
+    expect(() => runtime.store.deleteConversation(
+      prepared.conversations[0].id,
+    )).toThrow(/Cancel the active Duo launch/u);
+    expect(runtime.store.findPairedLaunch(prepared.launchId)).not.toBeNull();
+    expect(prepared.conversations.every(({ id }) =>
+      runtime.controller.isActive(id))).toBe(true);
+
+    await expect(coordinator(runtime).cancel(prepared.launchId))
+      .resolves.toMatchObject({ state: "cancelled" });
+    runtime.store.deleteConversation(prepared.conversations[0].id);
+    expect(runtime.store.findPairedLaunch(prepared.launchId)).toBeNull();
+    expect(runtime.store.conversation(prepared.conversations[1].id).id)
+      .toBe(prepared.conversations[1].id);
+    runtime.store.close();
+  });
+
+  it.each([0, 1] as const)(
+    "purges completed Duo history when chat %s is deleted",
+    async (deletedOrdinal) => {
+      const runtime = await createRuntime();
+      const prepared = preparePair(runtime);
+      await expect(coordinator(runtime).dispatch(prepared.launchId))
+        .resolves.toMatchObject({ state: "running" });
+      runtime.provider.completeAll();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(prepared.queued.map(({ turn }) =>
+        runtime.store.agentTurn(turn.id).status)).toEqual([
+        "completed",
+        "completed",
+      ]);
+
+      runtime.store.deleteConversation(
+        prepared.conversations[deletedOrdinal].id,
+      );
+
+      expect(runtime.store.findPairedLaunch(prepared.launchId)).toBeNull();
+      const survivor = prepared.conversations[deletedOrdinal === 0 ? 1 : 0];
+      expect(runtime.store.conversation(survivor.id).id).toBe(survivor.id);
+      runtime.store.removeProject(runtime.projectId);
+      expect(runtime.store.snapshot().projects).toEqual([]);
+      runtime.store.close();
+    },
+  );
+
   it.each(["prepared", "running"] as const)(
     "settles a cross-project %s launch on restart before project removal",
     async (state) => {

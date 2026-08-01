@@ -943,6 +943,7 @@ describe("atomic Duo schema migration", () => {
       if (source === "v37-upgrade") {
         const previous = new Database(databasePath);
         previous.exec(`
+          DROP TRIGGER paired_launches_conversation_delete;
           DROP TRIGGER paired_launches_project_delete;
           DROP TABLE paired_launch_sides;
           DROP TABLE paired_launches;
@@ -967,13 +968,23 @@ describe("atomic Duo schema migration", () => {
         SELECT COUNT(*) AS count FROM sqlite_master
         WHERE type = 'table' AND name IN ('paired_launches', 'paired_launch_sides')
       `).get() as { count: number }).count).toBe(2);
-      const trigger = inspection.prepare(`
-        SELECT sql FROM sqlite_master
-        WHERE type = 'trigger' AND name = 'paired_launches_project_delete'
-      `).get() as { sql: string } | undefined;
-      expect(trigger?.sql).toMatch(/Cancel the active Duo launch/u);
-      expect(trigger?.sql).toMatch(/live_turn\.status NOT IN/u);
-      expect(trigger?.sql).toMatch(/DELETE FROM paired_launches/u);
+      const triggers = inspection.prepare(`
+        SELECT name, sql FROM sqlite_master
+        WHERE type = 'trigger' AND name IN (
+          'paired_launches_conversation_delete',
+          'paired_launches_project_delete'
+        )
+        ORDER BY name
+      `).all() as Array<{ name: string; sql: string }>;
+      expect(triggers.map(({ name }) => name)).toEqual([
+        "paired_launches_conversation_delete",
+        "paired_launches_project_delete",
+      ]);
+      for (const trigger of triggers) {
+        expect(trigger.sql).toMatch(/Cancel the active Duo launch/u);
+        expect(trigger.sql).toMatch(/live_turn\.status NOT IN/u);
+        expect(trigger.sql).toMatch(/DELETE FROM paired_launches/u);
+      }
       expect((inspection.prepare(
         "SELECT MAX(version) AS version FROM schema_migrations",
       ).get() as { version: number }).version).toBe(

@@ -197,7 +197,10 @@ async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
 }
 
 function ptyOutputLines(output: string): string[] {
-  const lines = output.split(/\r\n|\r|\n/u);
+  const withoutTerminalControls = output
+    .replace(/\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)/gu, "")
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, "");
+  const lines = withoutTerminalControls.split(/\r\n|\r|\n/u);
   if (lines.at(-1) === "") lines.pop();
   return lines;
 }
@@ -508,6 +511,10 @@ describe("cross-platform performance benchmark", () => {
       "line-2",
       "line-3",
     ]);
+    expect(ptyOutputLines(
+      "\u001B[?9001h\u001B[?1004h\u001B[?25lline-0\r\n"
+      + "\u001B]0;C:\\node\\node.exe\u0007\u001B[?25hline-1\r\n",
+    )).toEqual(["line-0", "line-1"]);
     expect(ptyOutputLines("line-0\nline-2\n")).not.toEqual([
       "line-0",
       "line-1",
@@ -519,6 +526,10 @@ describe("cross-platform performance benchmark", () => {
       "line-2",
     ]);
     expect(ptyOutputLines("line-0line-1\n")).not.toEqual([
+      "line-0",
+      "line-1",
+    ]);
+    expect(ptyOutputLines("printable-prefixline-0\nline-1\n")).not.toEqual([
       "line-0",
       "line-1",
     ]);

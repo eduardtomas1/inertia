@@ -70,8 +70,9 @@ application produced alongside the AppImage, not AppImage mount time.
   before a partial flush.
 - Real PTY lifecycle: three node-pty launches that each emit 2,000 lines and
   exit normally. The fixture reconstructs every output payload, treats CR, LF,
-  and CRLF only as PTY record delimiters, and asserts every line and its order.
-  On Windows this exercises node-pty's ConPTY backend.
+  and CRLF only as PTY record delimiters, removes only recognized zero-width
+  CSI/OSC terminal controls, and asserts every line and its order. On Windows
+  this exercises node-pty's ConPTY backend.
 - Desktop cold start: a fresh Electron profile with a pre-seeded runtime
   database in provider-disabled `NODE_ENV=test`; operating-system cache is
   uncontrolled.

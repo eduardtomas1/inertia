@@ -311,24 +311,27 @@ export class RemoteAccessService {
           );
           if (replacing) {
             this.closeDeviceSessions(pending.payload.deviceId, "revoked", false);
-            return await this.persistAuthorityReduction(() => {
-              const applied = applyRemotePairingGrant({
-                data: currentData,
-                pending,
-                scopes,
-                projectIds,
-                grants,
-                grantMs,
-                now: this.now(),
-              });
-              this.pendingPairings.delete(requestId);
-              this.audit(
-                "pairing.accepted",
-                applied.device.id,
-                "A device was paired.",
-              );
-              return applied;
-            });
+            return await this.persistAuthorityReduction(
+              () => {
+                const applied = applyRemotePairingGrant({
+                  data: currentData,
+                  pending,
+                  scopes,
+                  projectIds,
+                  grants,
+                  grantMs,
+                  now: this.now(),
+                });
+                this.pendingPairings.delete(requestId);
+                this.audit(
+                  "pairing.accepted",
+                  applied.device.id,
+                  "A device was paired.",
+                );
+                return applied;
+              },
+              () => this.pairingIsCurrent(requestId, pending),
+            );
           }
           const applied = applyRemotePairingGrant({
             data: currentData,
@@ -1162,17 +1165,18 @@ export class RemoteAccessService {
     return await pending;
   }
 
-  private async persistAuthorityReduction<T>(
-    mutate: () => T,
-  ): Promise<T> {
+  private async persistAuthorityReduction<T>(mutate: () => T,
+    remainsCurrent?: () => boolean): Promise<T> {
     await this.beginAuthorityReduction();
+    if (remainsCurrent && !remainsCurrent()) {
+      await this.completeAuthorityReduction();
+      throw new Error("That pairing request is no longer pending.");
+    }
     let result: T;
     try {
       result = mutate();
     } catch (error) {
-      this.failClosedStore(
-        "Remote Companion could not safely apply its authority update.",
-      );
+      this.failClosedStore("Remote Companion could not safely apply its authority update.");
       throw error;
     }
     await this.persist();
@@ -1184,9 +1188,7 @@ export class RemoteAccessService {
     try {
       await this.options.store.beginAuthorityReduction();
     } catch (error) {
-      this.failClosedStore(
-        "Remote Companion could not durably reduce its authority.",
-      );
+      this.failClosedStore("Remote Companion could not durably reduce its authority.");
       throw error;
     }
   }
@@ -1195,9 +1197,7 @@ export class RemoteAccessService {
     try {
       await this.options.store.completeAuthorityReduction();
     } catch (error) {
-      this.failClosedStore(
-        "Remote Companion could not complete its authority update.",
-      );
+      this.failClosedStore("Remote Companion could not complete its authority update.");
       throw error;
     }
   }

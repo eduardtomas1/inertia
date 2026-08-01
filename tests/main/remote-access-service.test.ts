@@ -1862,6 +1862,87 @@ describe("Remote Companion outbound encrypted service", () => {
     await paired.service.shutdown();
   });
 
+  it("does not replace a grant after its pairing route disconnects during the marker", async () => {
+    const paired = await pairedServiceFixture({
+      scopes: ["view", "prompt"],
+    });
+    const invitation = await paired.service.createInvitation();
+    const replacementKeys = await generateRemoteKeyPair();
+    const requestId = crypto.randomUUID();
+    const pairingTunnel = await browserTunnel(
+      paired.relayUrl,
+      invitation.endpointId,
+    );
+    sendFrame(
+      pairingTunnel.socket,
+      pairingTunnel.connectionId,
+      await sealPairingRequest(invitation, {
+        type: "pair.request",
+        requestId,
+        invitationId: invitation.invitationId,
+        deviceId: paired.deviceId,
+        deviceLabel: "Disconnected replacement",
+        devicePublicKey: replacementKeys.publicKey,
+        createdAt: new Date().toISOString(),
+        browserVersion: "0.1.0",
+      }),
+    );
+    await waitFor(() => paired.service.state().pendingPairings.length === 1);
+
+    const originalBegin = paired.store.beginAuthorityReduction.bind(
+      paired.store,
+    );
+    let enterMarker = (): void => undefined;
+    const markerEntered = new Promise<void>((resolve) => {
+      enterMarker = resolve;
+    });
+    let releaseMarker = (): void => undefined;
+    const markerReleased = new Promise<void>((resolve) => {
+      releaseMarker = resolve;
+    });
+    vi.spyOn(paired.store, "beginAuthorityReduction")
+      .mockImplementationOnce(async () => {
+        await originalBegin();
+        enterMarker();
+        await markerReleased;
+      });
+
+    const approval = paired.service.approvePairing(
+      requestId,
+      ["view"],
+      [crypto.randomUUID()],
+    );
+    await markerEntered;
+    pairingTunnel.socket.terminate();
+    await waitFor(() => paired.service.state().pendingPairings.length === 0);
+    releaseMarker();
+
+    await expect(approval).rejects.toThrow(
+      "That pairing request is no longer pending.",
+    );
+    expect(paired.service.state().devices).toMatchObject([{
+      id: paired.deviceId,
+      scopes: ["view", "prompt"],
+    }]);
+    expect(await paired.store.load()).toMatchObject({
+      devices: [{
+        id: paired.deviceId,
+        grantVersion: 1,
+        scopes: ["view", "prompt"],
+      }],
+    });
+
+    const oldSession = await openAuthenticatedSession({
+      relayUrl: paired.relayUrl,
+      invitation,
+      deviceId: paired.deviceId,
+      deviceKeys: paired.deviceKeys,
+      grantVersion: 1,
+    });
+    expect(oldSession.accepted.grantVersion).toBe(1);
+    await paired.service.shutdown();
+  });
+
   it("fails closed instead of applying an unpersisted grant widening", async () => {
     const createSocket = vi.fn((url: string) => new WebSocket(url));
     const paired = await pairedServiceFixture({

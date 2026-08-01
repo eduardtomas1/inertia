@@ -35,6 +35,7 @@ export interface WorkspaceGitDiscoveryLimits {
 
 export interface WorkspaceGitDiscoveryOptions
   extends Partial<WorkspaceGitDiscoveryLimits> {
+  deadlineAt?: number;
   secureFiles?: RuntimeSecureFileBroker;
   onRepositoryAuthorized?: (
     repositoryPath: string,
@@ -145,6 +146,15 @@ function positiveLimit(value: number | undefined, fallback: number): number {
   return Number.isSafeInteger(value) && (value ?? 0) > 0 ? value! : fallback;
 }
 
+function requireDiscoveryTime(deadlineAt: number | undefined): void {
+  if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+    throw new GitError(
+      "timeout",
+      "Workspace repository discovery took too long.",
+    );
+  }
+}
+
 function normalizedLimits(input: Partial<WorkspaceGitDiscoveryLimits>): WorkspaceGitDiscoveryLimits {
   return {
     maxDepth: positiveLimit(input.maxDepth, WORKSPACE_GIT_DEFAULT_LIMITS.maxDepth),
@@ -243,6 +253,7 @@ export async function discoverWorkspaceGitRepositories(
   let truncated = false;
 
   while (queue.length > 0) {
+    requireDiscoveryTime(inputLimits.deadlineAt);
     if (scannedDirectories >= limits.maxDirectories) {
       skippedDirectories += queue.length;
       truncated = true;
@@ -254,7 +265,9 @@ export async function discoverWorkspaceGitRepositories(
     let entries;
     try {
       entries = await readdir(current.absolutePath, { withFileTypes: true });
-    } catch {
+      requireDiscoveryTime(inputLimits.deadlineAt);
+    } catch (error) {
+      if (error instanceof GitError && error.code === "timeout") throw error;
       partial = true;
       safeIssue(issues, limits, current.repositoryPath, "This folder could not be inspected.");
       continue;
@@ -336,14 +349,17 @@ export async function discoverWorkspaceGitRepositories(
     }
   }
 
+  requireDiscoveryTime(inputLimits.deadlineAt);
   const inspected = await mapWithConcurrency(candidates, limits.statusConcurrency, async (candidate) => {
     try {
+      requireDiscoveryTime(inputLimits.deadlineAt);
       const candidateInfo = await lstat(candidate.absolutePath, {
         bigint: true,
       });
       const secureRoot = inputLimits.secureFiles
         ? await inputLimits.secureFiles.authorizeRoot(candidate.absolutePath)
         : null;
+      requireDiscoveryTime(inputLimits.deadlineAt);
       if (
         secureRoot
         && (
@@ -358,6 +374,7 @@ export async function discoverWorkspaceGitRepositories(
       }
       const status = await getRepositoryStatus(
         secureRoot?.root ?? candidate.absolutePath,
+        { deadlineAt: inputLimits.deadlineAt },
       );
       if (secureRoot) await inputLimits.secureFiles!.verifyRoot(secureRoot);
       const candidateIdentity = canonicalIdentity(candidate.absolutePath);
@@ -371,6 +388,7 @@ export async function discoverWorkspaceGitRepositories(
         secureRoot,
       };
     } catch (error) {
+      if (error instanceof GitError && error.code === "timeout") throw error;
       partial = true;
       return {
         rootIdentity: null,

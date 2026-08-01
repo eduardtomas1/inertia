@@ -100,4 +100,13 @@ describe("provider maintenance renderer projection", () => {
       /setActionError\([^)]*provider\.maintenance/su,
     );
   });
+
+  it("does not start a duplicate maintenance refresh from provider refresh", () => {
+    expect(sceneModelSource).toContain(
+      "onRefreshProvider: (providerId) => {\n"
+      + "        actions.refreshProvider(providerId);\n"
+      + "      },\n"
+      + "      onRefreshProviderMaintenance:",
+    );
+  });
 });

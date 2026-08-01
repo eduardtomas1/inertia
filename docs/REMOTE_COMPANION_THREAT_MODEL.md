@@ -21,7 +21,9 @@ Protected assets:
 - provider credentials and secret answers;
 - host/device private keys and pairing secrets;
 - raw local runtime capabilities;
-- source, filesystem paths, attachments, diagnostics, terminal and Git state;
+- direct source/file access, filesystem paths, attachments, diagnostics,
+  terminal and Git state; prompt-capable grants deliberately allow the selected
+  provider to read project material and may return project-derived prose;
 - project/conversation/run identity and authorization;
 - prompt text and safe transcript plaintext;
 - local approval policy, sandbox mode, and provider routing;
@@ -55,7 +57,7 @@ trusted only within their existing responsibilities.
 | Authentication CPU exhaustion | Repeated invalid openings trigger P-256 work across device keys. | Four attempts per relay connection, 24/minute global budget before crypto, at most 16 device keys, relay connection/message limits. Distributed relay/network DoS remains possible. |
 | Malicious project/provider output | XSS, deceptive links, control/bidi transcript reordering, secret/path/source exfiltration, interrupted code/HTML blocks, oversized responses. | Projected content replaces C0/DEL controls except tab/newline/carriage return and bidi override/isolate marks before redaction, so omission markers cannot be visually relocated. Safe projection only, bounded monotonic removal of backtick/tilde fenced, unterminated, and top-level indented code plus paired/nested/self-closing/interrupted HTML; arbitrary POSIX, drive-letter, UNC, extended/device-namespace, and file-URL redaction; credential redaction; user/assistant roles only; UTF-8 byte budget; strict schemas/CSP; DOM `textContent`; no Markdown/HTML execution. Ordinary HTTP(S) URLs, angle-bracket prose, escaped prose, and surrounding punctuation remain usable. Heuristic redaction cannot prove arbitrary prose contains no secret. |
 | Remote approval abuse | Prompt induces a Full Access, command, destructive, credential, or secret approval remotely, or local authority widens while provider readiness awaits. | Remote protocol has no approval/answer capability. Runtime prepare checks before/after readiness but cannot queue. Main revalidates the exact live session/device grant and synchronously posts a one-time commit; runtime consumes it, rechecks, and synchronously queues. Browser only reports that local action is needed. |
-| Prompt/attachment/source leakage | Relay/browser receives sensitive local input, source, attachments, path, or execution payload. | Only explicit remote prompt text and safe projections cross the boundary. No attachment/path/source/diagnostic fields exist in strict schemas. Provider credentials and local capabilities never enter them. |
+| Prompt/attachment/source leakage | Relay/browser receives sensitive local input, source, attachments, path, execution payload, or source-derived prose. | No attachment/path/source/diagnostic fields exist in strict schemas, and provider credentials and local capabilities never enter them. A prompt-capable grant does authorize provider-controlled project reads, however, and heuristic sanitization cannot recognize an arbitrary paraphrase as project-derived. Treat prompt permission as authority to receive such prose, not as a source-confidentiality boundary. |
 | Metadata leakage | Relay learns endpoint/IP/timing/size and opaque frame identifiers. | Minimal routing fields, no clear device ID on session opening, no payload logs/queue. Padding, anonymity, and traffic-shape hiding are not provided. |
 | Browser profile corruption | Malformed IndexedDB changes relay URL, key, or grant. | Strict schema before use, WSS/loopback-WS transport policy, invalid profile deletion and explicit error. |
 | Browser clickjacking/typejacking | An attacker frames an already paired browser and induces a prompt or navigation. | The reference Vite development/preview server sends `frame-ancestors 'none'` in the HTTP CSP response header. The meta policy does not claim unsupported frame protection. Self-hosting instructions require verifying an equivalent production response header; a misconfigured or compromised browser origin remains a trusted-delivery failure. |
@@ -71,14 +73,16 @@ trusted only within their existing responsibilities.
 | Revocation/authority race | A prompt prepared under an old enabled, unlocked, device/project/scope grant queues after disable, lock, revoke, or reduction; a stale preparation is committed by retry. | Grant change/revoke increments desktop version and closes sessions. Main synchronously revalidates exact live authority immediately before the successful commit post, which is the delivery linearization. Issued runtime preparation IDs are one-time and expire in 15 seconds; issued plus in-progress operations are capped at 32, with an unresolved check retaining its slot. Same-request retry invalidates the old ID. Runtime consumes and rechecks before synchronous queueing. |
 | Device-record exhaustion | Repeated revoked/expired pairings exceed the encrypted store's strict 16-record schema or block legitimate replacement. | The cap is 16 total records. Before appending, only the oldest retired revoked/expired records are deterministically pruned; 16 current devices reject without mutating durable state. |
 | Lock during startup | A persisted enabled profile connects while already locked, while secure-store initialization awaits, or after a lock races the initial state sample. | The monitor starts locked, subscribes before sampling, treats reported `locked`/`unknown` as locked, retains events that race the sample, and applies state before explicit connection startup. Unsupported probes keep event-based enforcement; listeners are removed on shutdown. |
-| Vault downgrade/corruption, availability stall, or save failure | Linux plaintext safeStorage fallback, interrupted/unsafe replacement, a stuck platform-vault probe, or a failed authority write exposes keys, blocks startup, or leaves wider in-memory access than durable state. | Reused safeStorage policy rejects `basic_text`/`unknown`; separate encrypted vault; hardened replacement/recovery; bounded availability probe. Serialized writes are poisoned on first failure: the process becomes unavailable/disabled, pairing/session authority and timers are cleared, and the relay socket is terminated. Disable/revoke tear down access before saving. Corrupt/decryption failures disable the feature. |
+| Vault downgrade/corruption, availability stall, or save failure | Linux plaintext safeStorage fallback, interrupted/unsafe replacement, a stuck platform-vault probe, or a failed authority write exposes keys, blocks startup, or restores wider authority after restart. | Reused safeStorage policy rejects `basic_text`/`unknown`; separate encrypted vault; hardened replacement/recovery; bounded availability probe. Serialized writes are poisoned on first failure: the process becomes unavailable/disabled, pairing/session authority and timers are cleared, and the relay socket is terminated. Disable, revoke, and grant updates first write a non-secret fail-closed marker. If their vault write or marker cleanup is interrupted, restart disables Remote Companion and removes paired authority instead of reviving the older grant. Corrupt/decryption failures disable the feature. |
 
 ## Privacy consequences
 
 Enabling the feature intentionally makes selected safe conversation text and
-remote prompt text available to each approved browser. Anyone controlling that
-browser profile, its browser origin, or the unlocked browser session can read
-that scope. Device labels, selected projects, grants, audit metadata, delivery
+remote prompt text available to each approved browser. Granting prompt scope
+also lets the selected provider read project material and return project-derived
+prose; the sanitizer cannot prove arbitrary prose is source-free or secret-free.
+Anyone controlling that browser profile, its browser origin, or the unlocked
+browser session can exercise that scope. Device labels, selected projects, grants, audit metadata, delivery
 digests, and host keys are stored locally inside the encrypted remote vault.
 Prompt bodies are not written to the remote audit log.
 
@@ -104,6 +108,11 @@ per **harness**, not per provider, because the CLI and SDK/app-server harnesses
 for the same provider differ in exactly the way that matters: the CLI harnesses
 report `approvals: "unavailable"` and cannot deliver an approval decision to
 Inertia at all.
+
+Every currently supported prompt route classifies project reads as
+`provider-controlled`. Supervised mode continues to gate reported writes and
+commands, but it does not turn an agent's reads or answer into a semantic
+source-confidentiality boundary.
 
 Remote prompting is therefore refused for `codex-cli`, `claude-cli`,
 `cursor-cli`, and `opencode-cli`, and allowed for `codex-app-server`,
@@ -268,7 +277,9 @@ The MVP deliberately has no remote:
 - command, sandbox, Full Access, destructive, or other approval;
 - secret question or credential entry;
 - terminal;
-- file browse/upload/download, attachment, source, path, or diagnostic access;
+- direct file browse/upload/download, attachment, source-field, path, or
+  diagnostic access (a prompt-capable provider can still read project material
+  and return project-derived prose);
 - provider settings, authentication, maintenance, or route selection;
 - Git reversal/mutation;
 - permission enablement;
@@ -277,8 +288,7 @@ The MVP deliberately has no remote:
 
 Remote stop remains deferred because the current narrow boundary does not
 expose an exact remote-run ownership capability. Adding any item above requires
-a new threat model, protocol version, UI decision, and independent review; it
-must not be smuggled through prompt text or a generic command.
+a new threat model, protocol version, UI decision, and independent review.
 
 ## Staged delivery and explicit product decisions
 

@@ -66,6 +66,7 @@ export interface GitRepositoryStatus {
 }
 
 export interface GitDiffOptions {
+  deadlineAt?: number;
   maxFiles?: number;
   maxBytes?: number;
   paths?: string[];

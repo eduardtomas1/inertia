@@ -42,7 +42,7 @@ export interface AppRuntimeActions {
       | "interactionMode"
       | "accessMode"
     >>,
-  ) => void;
+  ) => Promise<void>;
 }
 
 export function useAppRuntimeActions(options: {
@@ -136,12 +136,12 @@ export function useAppRuntimeActions(options: {
       });
     }
   }, [sendCommand, setActionError]);
-  const updateConversationById = useCallback((
+  const updateConversationById = useCallback(async (
     targetConversationId: string,
     update: Parameters<AppRuntimeActions["updateConversationById"]>[1],
-  ): void => {
+  ): Promise<void> => {
     const { modelSelection, ...legacyUpdate } = update;
-    void run(`conversation.update:${targetConversationId}`, {
+    await run(`conversation.update:${targetConversationId}`, {
       type: "conversation.update",
       payload: {
         conversationId: targetConversationId,
@@ -158,7 +158,7 @@ export function useAppRuntimeActions(options: {
             }
           : {}),
       },
-    }).catch(() => undefined);
+    });
   }, [run]);
 
   return {

@@ -107,7 +107,7 @@ describe("renderer error visibility boundary", () => {
       "automaticallyLoadedAuthorityRef.current = null;",
     );
     expect(workspaceGitSource).toMatch(
-      /void loadGit\(\)\.catch\(\(error\) => \{[\s\S]*?if \(!cancelled\) \{[\s\S]*?setActionError\(/,
+      /void loadGit\(\{[\s\S]*?scope: loadWorkspaceOnMount[\s\S]*?\}\)\.catch\(\(error\) => \{[\s\S]*?if \(!cancelled\) \{[\s\S]*?setActionError\(/,
     );
     expect(workspaceGitSource).toContain(
       'error instanceof Error && error.message.trim()',

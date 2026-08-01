@@ -95,6 +95,56 @@ const betaChat = conversation(
   beta,
 );
 
+function deferredWorkspaceGitRequests() {
+  const statusResolvers: Array<(event: ServerEvent) => void> = [];
+  const workspaceResolvers: Array<(event: ServerEvent) => void> = [];
+  const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+    if (command.type === "git.refresh") {
+      return new Promise((resolve) => statusResolvers.push(resolve));
+    }
+    if (command.type === "git.workspace.refresh") {
+      return new Promise((resolve) => workspaceResolvers.push(resolve));
+    }
+    return Promise.reject(new Error("Unexpected command"));
+  });
+  return {
+    request,
+    settle(index: number, root: string) {
+      statusResolvers[index]?.(result({
+        kind: "git.status",
+        status: {
+          isRepository: false,
+          root,
+          branch: null,
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          hasRemote: false,
+          files: [],
+          insertions: 0,
+          deletions: 0,
+        },
+      }));
+      workspaceResolvers[index]?.(result({
+        kind: "git.workspace.status",
+        status: {
+          repositories: [],
+          files: 0,
+          insertions: 0,
+          deletions: 0,
+          scannedDirectories: index + 1,
+          skippedDirectories: 0,
+          discoveredRepositories: 0,
+          repositoryLimit: 64,
+          partial: false,
+          truncated: false,
+          issues: [],
+        },
+      }));
+    },
+  };
+}
+
 describe("workspace pane authority", () => {
   it("routes actual directories to reveal and files to the internal preview", async () => {
     const openDirectory = vi.fn(async () => undefined);
@@ -424,7 +474,8 @@ describe("workspace pane authority", () => {
     }) => useWorkspaceGit({
       ...owner,
       enabled: true,
-      loadOnMount: false,
+      loadStatusOnMount: false,
+      loadWorkspaceOnMount: false,
       online: true,
       ignoreWhitespace: false,
       refreshVersion: 0,
@@ -482,6 +533,265 @@ describe("workspace pane authority", () => {
 
     expect(hook.result.current.gitStatus?.root).toBe("/beta");
     expect(hook.result.current.gitDiff?.patch).toBe("BETA");
+  });
+
+  it("loads root Git status for shell actions without scanning nested repositories", async () => {
+    const setActionError = vi.fn();
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type !== "git.refresh") {
+        return Promise.reject(new Error(`Unexpected ${command.type} command`));
+      }
+      return Promise.resolve(result({
+        kind: "git.status",
+        status: {
+          isRepository: true,
+          authorityRef: "66666666-6666-4666-8666-666666666666",
+          root: "/alpha",
+          branch: "feature/status-ready",
+          upstream: "origin/feature/status-ready",
+          ahead: 0,
+          behind: 0,
+          hasRemote: true,
+          files: [{
+            path: "README.md",
+            status: "modified",
+            insertions: 1,
+            deletions: 0,
+            untracked: false,
+            staged: false,
+            unstaged: true,
+            indexStatus: " ",
+            worktreeStatus: "M",
+          }],
+          insertions: 1,
+          deletions: 0,
+        },
+      }));
+    });
+    const run = async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => await request(command);
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: true,
+      loadStatusOnMount: true,
+      loadWorkspaceOnMount: false,
+      project: alpha,
+      conversation: alphaChat,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request,
+      run,
+      setActionError,
+    }));
+
+    await waitFor(() => {
+      expect(hook.result.current.gitStatus?.branch)
+        .toBe("feature/status-ready");
+      expect(hook.result.current.loading).toBe(false);
+    });
+    expect(hook.result.current.gitStatus?.files).toHaveLength(1);
+    expect(request.mock.calls.filter(
+      ([command]) => command.type === "git.workspace.refresh",
+    )).toHaveLength(0);
+    expect(request.mock.calls.filter(
+      ([command]) => command.type === "git.diff",
+    )).toHaveLength(0);
+  });
+
+  it("coalesces duplicate Git loads for the same pane authority", async () => {
+    let settleWorkspace!: (event: ServerEvent) => void;
+    const workspaceRefresh = new Promise<ServerEvent>((resolve) => {
+      settleWorkspace = resolve;
+    });
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "git.refresh") {
+        return Promise.resolve(result({
+          kind: "git.status",
+          status: {
+            isRepository: false,
+            root: "/alpha",
+            branch: null,
+            upstream: null,
+            ahead: 0,
+            behind: 0,
+            hasRemote: false,
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
+        }));
+      }
+      if (command.type === "git.workspace.refresh") return workspaceRefresh;
+      return Promise.reject(new Error("Unexpected command"));
+    });
+    const run = async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => await request(command);
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: true,
+      loadStatusOnMount: false,
+      loadWorkspaceOnMount: false,
+      project: alpha,
+      conversation: alphaChat,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request,
+      run,
+      setActionError,
+    }));
+
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = hook.result.current.loadGit();
+      second = hook.result.current.loadGit();
+    });
+    expect(first).toBe(second);
+    expect(request.mock.calls.filter(
+      ([command]) => command.type === "git.refresh",
+    )).toHaveLength(1);
+    expect(request.mock.calls.filter(
+      ([command]) => command.type === "git.workspace.refresh",
+    )).toHaveLength(1);
+    await waitFor(() => {
+      expect(hook.result.current.gitStatus?.root).toBe("/alpha");
+    });
+    expect(hook.result.current.workspaceGitStatus).toBeNull();
+
+    await act(async () => {
+      settleWorkspace(result({
+        kind: "git.workspace.status",
+        status: {
+          repositories: [],
+          files: 0,
+          insertions: 0,
+          deletions: 0,
+          scannedDirectories: 1,
+          skippedDirectories: 0,
+          discoveredRepositories: 0,
+          repositoryLimit: 64,
+          partial: false,
+          truncated: false,
+          issues: [],
+        },
+      }));
+      await first;
+    });
+    expect(hook.result.current.workspaceGitStatus?.scannedDirectories).toBe(1);
+  });
+
+  it("queues a fresh Git load when the Changes pane closes and reopens mid-scan", async () => {
+    const deferred = deferredWorkspaceGitRequests();
+    const run = async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => await deferred.request(command);
+    const setActionError = vi.fn();
+    const hook = renderHook(
+      ({ loadOnMount }: { loadOnMount: boolean }) => useWorkspaceGit({
+        enabled: true,
+        loadStatusOnMount: false,
+        loadWorkspaceOnMount: loadOnMount,
+        project: alpha,
+        conversation: alphaChat,
+        online: true,
+        ignoreWhitespace: false,
+        refreshVersion: 0,
+        request: deferred.request,
+        run,
+        setActionError,
+      }),
+      { initialProps: { loadOnMount: true } },
+    );
+
+    await waitFor(() => {
+      expect(deferred.request.mock.calls.filter(
+        ([command]) => command.type === "git.workspace.refresh",
+      )).toHaveLength(1);
+    });
+    hook.rerender({ loadOnMount: false });
+    hook.rerender({ loadOnMount: true });
+    expect(deferred.request.mock.calls.filter(
+      ([command]) => command.type === "git.workspace.refresh",
+    )).toHaveLength(1);
+
+    act(() => deferred.settle(0, "/stale"));
+    await waitFor(() => {
+      expect(deferred.request.mock.calls.filter(
+        ([command]) => command.type === "git.workspace.refresh",
+      )).toHaveLength(2);
+    });
+    expect(hook.result.current.gitStatus).toBeNull();
+
+    act(() => deferred.settle(1, "/fresh"));
+    await waitFor(() => {
+      expect(hook.result.current.gitStatus?.root).toBe("/fresh");
+      expect(hook.result.current.workspaceGitStatus?.scannedDirectories).toBe(2);
+      expect(hook.result.current.loading).toBe(false);
+    });
+  });
+
+  it("queues one authoritative trailing load for explicit refreshes during a scan", async () => {
+    const deferred = deferredWorkspaceGitRequests();
+    const run = async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => await deferred.request(command);
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: true,
+      loadStatusOnMount: true,
+      loadWorkspaceOnMount: true,
+      project: alpha,
+      conversation: alphaChat,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request: deferred.request,
+      run,
+      setActionError,
+    }));
+
+    await waitFor(() => {
+      expect(deferred.request.mock.calls.filter(
+        ([command]) => command.type === "git.workspace.refresh",
+      )).toHaveLength(1);
+    });
+    let firstRefresh!: Promise<void>;
+    let secondRefresh!: Promise<void>;
+    act(() => {
+      firstRefresh = hook.result.current.loadGit({ authoritative: true });
+      secondRefresh = hook.result.current.loadGit({ authoritative: true });
+    });
+    expect(firstRefresh).toBe(secondRefresh);
+    expect(deferred.request.mock.calls.filter(
+      ([command]) => command.type === "git.workspace.refresh",
+    )).toHaveLength(1);
+
+    act(() => deferred.settle(0, "/stale"));
+    await waitFor(() => {
+      expect(deferred.request.mock.calls.filter(
+        ([command]) => command.type === "git.workspace.refresh",
+      )).toHaveLength(2);
+    });
+
+    await act(async () => {
+      deferred.settle(1, "/fresh");
+      await secondRefresh;
+    });
+    await waitFor(() => {
+      expect(hook.result.current.gitStatus?.root).toBe("/fresh");
+      expect(hook.result.current.workspaceGitStatus?.scannedDirectories).toBe(2);
+      expect(hook.result.current.loading).toBe(false);
+    });
+    expect(deferred.request.mock.calls.filter(
+      ([command]) => command.type === "git.workspace.refresh",
+    )).toHaveLength(2);
   });
 
   it("retains a completed reversal under its initiating pane authority", async () => {

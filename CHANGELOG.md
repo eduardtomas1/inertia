@@ -17,7 +17,7 @@ The useful changes in each Inertia release, in plain language.
 
 - The companion browser stores a non-extractable ECDH P-256 private key, validates the corresponding public key, and rejects malformed or mismatched persisted key pairs rather than trusting a broken identity.
 - Protocol version 2 keeps the desktop, browser, and relay on one explicit contract. Incompatible peers fail clearly instead of being interpreted through an older message shape.
-- Corrupt remote state has documented recovery paths, relay endpoint authentication is explicit, and application payloads remain end-to-end encrypted and replay-protected.
+- Corrupt remote-vault state fails closed through documented recovery paths. The reference relay's unauthenticated endpoint-registration limitation and the deferred host-key design are explicit; application payloads remain end-to-end encrypted and replay-protected.
 - Remote transcript projections are sanitized, byte-bounded, and cached within a fixed memory budget so a long conversation cannot turn remote viewing into unbounded runtime retention.
 
 ### Privileged lifecycle edges stay bounded
@@ -25,7 +25,7 @@ The useful changes in each Inertia release, in plain language.
 - Privileged IPC rejects unknown payload fields, preventing accidental authority expansion through partially understood commands.
 - Project identity refreshes use bounded concurrency and preserve their cap through timeouts and disposal, including large or adversarial workspace sets.
 - Screen lock, suspend, runtime shutdown, relay disconnect, and remote-session teardown now revoke or settle owned work without waiting forever on an unresponsive peer.
-- New threat-model, database-recovery, relay-authentication, renderer-isolation, and security-boundary documents make the implementation guarantees inspectable.
+- New threat-model and renderer-isolation documents make implemented guarantees inspectable, while the database-recovery, relay-authentication, and security-boundary coverage documents explicitly record deferred gaps.
 
 ### Release confidence
 

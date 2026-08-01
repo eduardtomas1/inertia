@@ -52,7 +52,7 @@ export interface ComposerProps {
       | "interactionMode"
       | "accessMode"
     >>,
-  ) => void;
+  ) => Promise<void>;
   onCreateConversationForSelection?: (selection: ModelSelection) => Promise<void>;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;

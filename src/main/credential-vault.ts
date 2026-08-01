@@ -276,6 +276,33 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
     }
   }
 
+  async remove(): Promise<void> {
+    const paths = await this.paths(false);
+    if (!paths) return;
+    await this.recover(paths.directory, paths.target);
+    const metadata = await lstat(paths.target).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    if (!metadata) return;
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new CredentialVaultError(
+        "persistence-failed",
+        "The secure credential vault could not be removed.",
+      );
+    }
+    try {
+      await unlink(paths.target);
+      await syncDirectory(paths.directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw new CredentialVaultError(
+        "persistence-failed",
+        "The secure credential vault could not be removed.",
+      );
+    }
+  }
+
   private async paths(
     create: boolean,
   ): Promise<{ directory: string; target: string } | null> {

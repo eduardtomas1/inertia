@@ -17,7 +17,8 @@ import { workspaceGitRefreshIdentity } from "../../utils/workspaceGit";
 
 interface WorkspaceGitOptions {
   enabled: boolean;
-  loadOnMount: boolean;
+  loadStatusOnMount: boolean;
+  loadWorkspaceOnMount: boolean;
   project: Project | null;
   conversation: Conversation | null;
   online: boolean;
@@ -27,6 +28,15 @@ interface WorkspaceGitOptions {
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   setActionError: (message: string | null) => void;
 }
+
+export interface WorkspaceGitLoadOptions {
+  authoritative?: boolean;
+  scope?: "status" | "workspace";
+}
+
+export type LoadWorkspaceGit = (
+  options?: WorkspaceGitLoadOptions,
+) => Promise<void>;
 
 export function useWorkspaceGit({
   project,
@@ -38,7 +48,8 @@ export function useWorkspaceGit({
   run,
   setActionError,
   enabled,
-  loadOnMount,
+  loadStatusOnMount,
+  loadWorkspaceOnMount,
 }: WorkspaceGitOptions) {
   const [gitStatus, setGitStatus] = useState<GitStatusSnapshot | null>(null);
   const [gitDiff, setGitDiff] = useState<GitDiffSnapshot | null>(null);
@@ -50,61 +61,134 @@ export function useWorkspaceGit({
   const authority = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const authorityRef = useRef(authority);
   const requestGenerationRef = useRef(0);
+  const loadGitInFlightRef = useRef<{
+    identity: string;
+    generation: number;
+    scope: "status" | "workspace";
+    promise: Promise<void>;
+  } | null>(null);
+  const trailingGitLoadRef = useRef<{
+    identity: string;
+    generation: number;
+    scope: "status" | "workspace";
+    promise: Promise<void>;
+  } | null>(null);
   authorityRef.current = authority;
 
-  const loadGit = useCallback(async () => {
-    if (!project?.id) return;
+  const loadGit = useCallback((
+    options?: WorkspaceGitLoadOptions,
+  ): Promise<void> => {
+    if (!project?.id) return Promise.resolve();
+    const scope = options?.scope ?? "workspace";
+    if (options?.authoritative) requestGenerationRef.current += 1;
     const owner = `${project.id}:${conversation?.id ?? ""}`;
-    const generation = ++requestGenerationRef.current;
-    const ownsResponse = (): boolean => (
-      authorityRef.current === owner
-      && requestGenerationRef.current === generation
-    );
-    const [event, workspaceEvent] = await Promise.all([
-      request({
+    const identity = `${owner}:${ignoreWhitespace ? "ignore" : "exact"}`;
+    const generation = requestGenerationRef.current;
+    const active = loadGitInFlightRef.current;
+    if (active?.identity === identity) {
+      if (
+        active.generation === generation
+        && (active.scope === "workspace" || scope === "status")
+      ) {
+        return active.promise;
+      }
+
+      const queued = trailingGitLoadRef.current;
+      if (queued?.identity === identity) {
+        queued.generation = generation;
+        if (scope === "workspace") queued.scope = scope;
+        return queued.promise;
+      }
+
+      const trailing = {
+        identity,
+        generation,
+        scope,
+        promise: Promise.resolve(),
+      };
+      trailing.promise = active.promise.catch(() => undefined).then(() => {
+        if (trailingGitLoadRef.current !== trailing) return;
+        trailingGitLoadRef.current = null;
+        if (
+          authorityRef.current !== owner
+          || requestGenerationRef.current !== trailing.generation
+        ) {
+          return;
+        }
+        return loadGit({ scope: trailing.scope });
+      });
+      trailingGitLoadRef.current = trailing;
+      return trailing.promise;
+    }
+
+    let promise: Promise<void>;
+    promise = (async () => {
+      const ownsResponse = (): boolean => (
+        authorityRef.current === owner
+        && requestGenerationRef.current === generation
+      );
+      const statusRequest = request({
         type: "git.refresh",
         payload: {
           projectId: project.id,
           conversationId: conversation?.id,
         },
-      }).then(resultEvent),
-      request({
-        type: "git.workspace.refresh",
+      }).then(resultEvent).then((event) => {
+        if (event.result.kind !== "git.status") {
+          throw new Error("Unexpected Git response.");
+        }
+        const status = event.result.status;
+        if (ownsResponse()) {
+          setGitStatus(status);
+          if (!status.isRepository) {
+            setGitDiff(null);
+            setBranches([]);
+          }
+        }
+        return status;
+      });
+      const workspaceRequest = scope === "workspace"
+        ? request({
+            type: "git.workspace.refresh",
+            payload: {
+              projectId: project.id,
+              conversationId: conversation?.id,
+            },
+          }).then(resultEvent)
+        : null;
+      const [status, workspaceEvent] = workspaceRequest
+        ? await Promise.all([statusRequest, workspaceRequest])
+        : [await statusRequest, null];
+      if (!ownsResponse()) return;
+      if (scope === "status") return;
+      if (workspaceEvent?.result.kind !== "git.workspace.status") {
+        throw new Error("Unexpected workspace Git response.");
+      }
+      if (!ownsResponse()) return;
+      setWorkspaceGitStatus(workspaceEvent.result.status);
+      if (!status.isRepository) return;
+      if (!status.authorityRef) {
+        throw new Error("The Git status authorization is unavailable.");
+      }
+      const diffEvent = resultEvent(await request({
+        type: "git.diff",
         payload: {
           projectId: project.id,
           conversationId: conversation?.id,
+          authorityRef: status.authorityRef,
+          ignoreWhitespace,
         },
-      }).then(resultEvent),
-    ]);
-    if (event.result.kind !== "git.status") {
-      throw new Error("Unexpected Git response.");
-    }
-    if (workspaceEvent.result.kind !== "git.workspace.status") {
-      throw new Error("Unexpected workspace Git response.");
-    }
-    if (!ownsResponse()) return;
-    setGitStatus(event.result.status);
-    setWorkspaceGitStatus(workspaceEvent.result.status);
-    if (!event.result.status.isRepository) {
-      setGitDiff(null);
-      setBranches([]);
-      return;
-    }
-    if (!event.result.status.authorityRef) {
-      throw new Error("The Git status authorization is unavailable.");
-    }
-    const diffEvent = resultEvent(await request({
-      type: "git.diff",
-      payload: {
-        projectId: project.id,
-        conversationId: conversation?.id,
-        authorityRef: event.result.status.authorityRef,
-        ignoreWhitespace,
-      },
-    }));
-    if (ownsResponse() && diffEvent.result.kind === "git.diff") {
-      setGitDiff(diffEvent.result.diff);
-    }
+      }));
+      if (ownsResponse() && diffEvent.result.kind === "git.diff") {
+        setGitDiff(diffEvent.result.diff);
+      }
+    })().finally(() => {
+      if (loadGitInFlightRef.current?.promise === promise) {
+        loadGitInFlightRef.current = null;
+      }
+    });
+    loadGitInFlightRef.current = { identity, generation, scope, promise };
+    return promise;
   }, [
     conversation?.id,
     ignoreWhitespace,
@@ -120,7 +204,7 @@ export function useWorkspaceGit({
     setBranches([]);
     if (
       !enabled
-      || !loadOnMount
+      || (!loadStatusOnMount && !loadWorkspaceOnMount)
       || !projectRefreshIdentity
       || !project?.id
       || !online
@@ -130,7 +214,9 @@ export function useWorkspaceGit({
     }
     let cancelled = false;
     setLoading(true);
-    void loadGit().catch((error) => {
+    void loadGit({
+      scope: loadWorkspaceOnMount ? "workspace" : "status",
+    }).catch((error) => {
       if (!cancelled) {
         setActionError(
           error instanceof Error && error.message.trim()
@@ -149,7 +235,8 @@ export function useWorkspaceGit({
     enabled,
     loadGit,
     online,
-    loadOnMount,
+    loadStatusOnMount,
+    loadWorkspaceOnMount,
     project?.id,
     projectRefreshIdentity,
     refreshVersion,
@@ -229,7 +316,10 @@ export function useWorkspaceGit({
       type,
       payload: { projectId: project.id, name },
     } as CommandWithoutId).then(() =>
-      Promise.all([loadGit(), Promise.resolve(loadBranches())])
+      Promise.all([
+        loadGit({ authoritative: true }),
+        Promise.resolve(loadBranches()),
+      ])
     ).catch(() => undefined);
   }, [loadBranches, loadGit, project, run]);
 
@@ -260,7 +350,7 @@ export function useWorkspaceGit({
         },
       });
     }
-    await loadGit();
+    await loadGit({ authoritative: true });
   }, [conversation?.id, loadGit, project, run]);
 
   return {

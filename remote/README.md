@@ -4,12 +4,14 @@ This directory contains independently versioned, dependency-minimal reference
 components:
 
 - `relay`: an in-memory opaque WebSocket router;
-- `browser`: a static strict-CSP companion built from the shared version 1
+- `browser`: a static strict-CSP companion built from the shared version 2
   protocol and HPKE implementation.
 
 They are intended for local development and reviewed self-hosting. This
 repository does not deploy a public service, create accounts, configure
-domains, or provide a production SLO.
+domains, or provide a production SLO. Neither component is bundled into the
+desktop package: the stock loopback URL is a development default, not a running
+or remotely reachable service.
 
 ## Local development
 

@@ -235,6 +235,96 @@ describe("Remote Companion encrypted local store", () => {
     expect(existsSync(backup)).toBe(false);
   });
 
+  it("fails closed after an interrupted authority reduction", async () => {
+    const { file, store, reopen } = fixture();
+    const projectId = crypto.randomUUID();
+    const value: PersistedRemoteAccess = {
+      version: 1,
+      enabled: true,
+      relayUrl: "ws://127.0.0.1:8787/remote",
+      hostId: crypto.randomUUID(),
+      endpointId: "interrupted_authority_endpoint",
+      keyPair: await generateRemoteKeyPair(),
+      devices: [{
+        id: crypto.randomUUID(),
+        label: "Previously trusted browser",
+        publicKey: "device_public_key",
+        scopes: ["view", "prompt"],
+        projectIds: [projectId],
+        grants: remoteConversationGrantsFromProjectIds([projectId]),
+        createdAt: "2030-01-01T00:00:00.000Z",
+        expiresAt: "2030-01-02T00:00:00.000Z",
+        lastSeenAt: null,
+        revokedAt: null,
+        grantVersion: 1,
+      }],
+      audit: [],
+      receipts: [],
+      usedSessions: [],
+    };
+    await store.save(value);
+    await store.beginAuthorityReduction();
+
+    const recovered = await reopen().load();
+
+    expect(recovered).toMatchObject({
+      enabled: false,
+      devices: [],
+      receipts: [],
+      usedSessions: [],
+    });
+    expect(existsSync(`${file}.fail-closed`)).toBe(false);
+    expect(await reopen().load()).toEqual(recovered);
+  });
+
+  it("retains the marker until concurrent authority reductions finish", async () => {
+    const { file, store } = fixture();
+    await Promise.all([
+      store.beginAuthorityReduction(),
+      store.beginAuthorityReduction(),
+    ]);
+
+    await store.completeAuthorityReduction();
+    expect(existsSync(`${file}.fail-closed`)).toBe(true);
+    await store.completeAuthorityReduction();
+    expect(existsSync(`${file}.fail-closed`)).toBe(false);
+  });
+
+  it("creates a fresh marker when a reduction begins during marker cleanup", async () => {
+    const { file, store } = fixture();
+    const originalRemove = FileCredentialVaultPersistence.prototype.remove;
+    let enterCleanup = (): void => undefined;
+    const cleanupEntered = new Promise<void>((resolve) => {
+      enterCleanup = resolve;
+    });
+    let releaseCleanup = (): void => undefined;
+    const cleanupReleased = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const remove = vi.spyOn(
+      FileCredentialVaultPersistence.prototype,
+      "remove",
+    ).mockImplementationOnce(async function (
+      this: FileCredentialVaultPersistence,
+    ) {
+      enterCleanup();
+      await cleanupReleased;
+      await originalRemove.call(this);
+    });
+    await store.beginAuthorityReduction();
+    const firstCompletion = store.completeAuthorityReduction();
+    await cleanupEntered;
+
+    const secondBeginning = store.beginAuthorityReduction();
+    releaseCleanup();
+    await Promise.all([firstCompletion, secondBeginning]);
+
+    expect(existsSync(`${file}.fail-closed`)).toBe(true);
+    await store.completeAuthorityReduction();
+    expect(existsSync(`${file}.fail-closed`)).toBe(false);
+    remove.mockRestore();
+  });
+
   it("uses the shared Windows replacement path for a separate remote namespace", async () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-remote-store-"));
     temporaryDirectories.push(directory);

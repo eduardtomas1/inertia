@@ -5,9 +5,10 @@ bug usually lives in a branch that no test enters, so these areas carry
 **branch-level** expectations and a named owning test file rather than a
 percentage of lines.
 
-Coverage is not currently enforced in CI for these paths. This document is the
-reviewed expectation; wiring per-path thresholds into `vitest --coverage` is
-follow-up work, and the honest status is recorded per row.
+Linux CI enforces dedicated coverage floors for the remote shared contract,
+main-process remote authority, runtime remote gateway, secure-file boundary,
+and credential vault in addition to the global and renderer baselines. The
+table below records the behavioral expectation behind those numeric floors.
 
 | Boundary | Owning tests | Expectation |
 | --- | --- | --- |

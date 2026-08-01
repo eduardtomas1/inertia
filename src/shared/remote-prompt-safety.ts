@@ -47,13 +47,14 @@ const APPROVAL_ROUTED: RemotePromptSafety = Object.freeze({
   writesRequireLocalApproval: true,
   commandsRequireLocalApproval: true,
   networkPolicy: "provider-controlled",
-  filesystemPolicy: "local-approval",
+  filesystemPolicy: "provider-controlled",
   permissionModel: "provider-reported",
   headline: "Local approval required for reported actions",
   explanation:
     "The agent reports each tool action to Inertia, which requires a desktop "
-    + "approval before it proceeds. Inertia can only gate the actions the "
-    + "agent chooses to report; this is not an operating-system sandbox.",
+    + "approval before it proceeds. Project reads remain provider-controlled, "
+    + "and remote answers can include project-derived text. Inertia can only "
+    + "gate the actions the agent reports; this is not an operating-system sandbox.",
 });
 
 const REMOTE_PROMPT_SAFETY: Readonly<Record<string, RemotePromptSafety>> =
@@ -65,8 +66,9 @@ const REMOTE_PROMPT_SAFETY: Readonly<Record<string, RemotePromptSafety>> =
       explanation:
         "Codex reports command and patch approvals to Inertia over its app "
         + "server protocol, and a supervised conversation requires a desktop "
-        + "decision for each one. Codex owns its own sandbox configuration, so "
-        + "Inertia does not claim a filesystem or network guarantee of its own.",
+        + "decision for each reported write or command. Codex controls project "
+        + "reads, and its remote answer can include project-derived text. Inertia "
+        + "does not claim a filesystem or network guarantee of its own.",
     },
     "claude-agent-sdk": {
       ...APPROVAL_ROUTED,
@@ -74,16 +76,17 @@ const REMOTE_PROMPT_SAFETY: Readonly<Record<string, RemotePromptSafety>> =
       explanation:
         "The Claude Agent SDK routes every tool use through Inertia's "
         + "canUseTool callback, so a supervised conversation requires a desktop "
-        + "decision before a write or command runs. Reads that the SDK does not "
-        + "surface as tool uses are provider-controlled.",
+        + "decision before a write or command runs. Project reads are provider-"
+        + "controlled, and the remote answer can include project-derived text.",
     },
     "cursor-acp": {
       ...APPROVAL_ROUTED,
       headline: "Provider-controlled reads · Local approval required for reported actions",
       explanation:
         "Cursor reports permission requests over the Agent Client Protocol and "
-        + "a supervised conversation requires a desktop decision for each one. "
-        + "Cursor decides what it reports, so this is not a sandbox.",
+        + "a supervised conversation requires a desktop decision for each reported "
+        + "write or command. Cursor controls project reads, and the remote answer "
+        + "can include project-derived text, so this is not a sandbox.",
     },
     "opencode-sdk": {
       ...APPROVAL_ROUTED,
@@ -92,8 +95,8 @@ const REMOTE_PROMPT_SAFETY: Readonly<Record<string, RemotePromptSafety>> =
       explanation:
         "Inertia installs an ask-by-default OpenCode permission ruleset for "
         + "supervised conversations, so edits and commands need a desktop "
-        + "decision. OpenCode still executes the work in its own process "
-        + "without an operating-system sandbox.",
+        + "decision. OpenCode still controls project reads and can return project-"
+        + "derived text remotely; it executes without an operating-system sandbox.",
     },
     "codex-cli": {
       ...UNSUPPORTED_REMOTE_PROMPT_SAFETY,

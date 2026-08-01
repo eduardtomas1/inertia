@@ -164,7 +164,8 @@ describe("ModelChooser", () => {
     expect(source).toContain("filterModelRoutesBySource");
     expect(source).toContain("searchModelRoutes(sourceRoutes, query)");
     expect(source).toContain("resolveModelShortcutBindings");
-    expect(source).toContain("triggerRef.current?.focus()");
+    expect(source).toContain("restoreFocusWhenEnabledRef");
+    expect(source).toContain("trigger.focus()");
     expect(source).toContain('event.key !== "Escape"');
     expect(source).toContain(
       'document.addEventListener("keydown", handleKeyDown, true)',

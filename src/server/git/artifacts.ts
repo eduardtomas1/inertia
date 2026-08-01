@@ -184,9 +184,14 @@ export async function compareGitSnapshots(
   repositoryPath: string,
   beforeReference: string,
   afterReference: string,
-  options: Pick<GitDiffOptions, "maxBytes" | "paths"> = {},
+  options: Pick<
+    GitDiffOptions,
+    "deadlineAt" | "maxBytes" | "paths"
+  > = {},
 ): Promise<GitSnapshotComparison> {
-  const root = await repositoryRoot(repositoryPath);
+  const root = await repositoryRoot(repositoryPath, {
+    deadlineAt: options.deadlineAt,
+  });
   const beforeRef = validateArtifactRef(beforeReference);
   const afterRef = validateArtifactRef(afterReference);
   const paths = options.paths ? await validatedPaths(root, options.paths) : [];
@@ -199,6 +204,7 @@ export async function compareGitSnapshots(
   await Promise.all(
     [beforeRef, afterRef].map((ref) =>
       runGitInspection(root, ["rev-parse", "--verify", `${ref}^{commit}`], {
+        deadlineAt: options.deadlineAt,
         maxOutputBytes: 256,
         failureMessage: "A historical Git snapshot is unavailable.",
       })),
@@ -216,6 +222,7 @@ export async function compareGitSnapshots(
         ...pathArgs,
       ],
       {
+        deadlineAt: options.deadlineAt,
         maxOutputBytes: DEFAULT_OUTPUT_BYTES,
         truncateOutput: true,
         failureMessage: "Unable to inspect historical changed files.",
@@ -233,6 +240,7 @@ export async function compareGitSnapshots(
         ...pathArgs,
       ],
       {
+        deadlineAt: options.deadlineAt,
         maxOutputBytes: DEFAULT_OUTPUT_BYTES,
         truncateOutput: true,
         failureMessage: "Unable to inspect historical change totals.",
@@ -252,6 +260,7 @@ export async function compareGitSnapshots(
         ...pathArgs,
       ],
       {
+        deadlineAt: options.deadlineAt,
         maxOutputBytes: maxBytes,
         truncateOutput: true,
         failureMessage: "Unable to generate the historical Git diff.",

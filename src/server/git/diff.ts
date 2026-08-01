@@ -14,9 +14,10 @@ import {
   getRepositoryStatus,
   hasHead,
 } from "./status";
-import type {
-  GitDiffOptions,
-  GitUnifiedDiff,
+import {
+  GitError,
+  type GitDiffOptions,
+  type GitUnifiedDiff,
 } from "./types";
 import type {
   RuntimeSecureFileBroker,
@@ -75,7 +76,9 @@ export async function getUnifiedDiff(
     throw new Error("Secure repository file access is unavailable.");
   }
   if (secureRoot) await secureFiles!.verifyRoot(secureRoot);
-  const root = secureRoot?.root ?? await repositoryRoot(repositoryPath);
+  const root = secureRoot?.root ?? await repositoryRoot(repositoryPath, {
+    deadlineAt: options.deadlineAt,
+  });
   const maxFiles = boundedInteger(
     options.maxFiles,
     DEFAULT_DIFF_FILES,
@@ -86,7 +89,9 @@ export async function getUnifiedDiff(
     DEFAULT_DIFF_BYTES,
     MAX_DIFF_BYTES,
   );
-  const status = await getRepositoryStatus(root);
+  const status = await getRepositoryStatus(root, {
+    deadlineAt: options.deadlineAt,
+  });
   const requested = options.paths
     ? await validatedPaths(root, options.paths)
     : null;
@@ -114,10 +119,11 @@ export async function getUnifiedDiff(
       "--unified=3",
       ...(options.ignoreWhitespace ? ["--ignore-all-space"] : []),
     ];
-    const args = (await hasHead(root))
+    const args = (await hasHead(root, { deadlineAt: options.deadlineAt }))
       ? [...baseArgs, "HEAD", "--", ...tracked]
       : [...baseArgs, "--cached", "--", ...tracked];
     const result = await runGitInspection(root, args, {
+      deadlineAt: options.deadlineAt,
       maxOutputBytes: maxBytes,
       truncateOutput: true,
       failureMessage: "Unable to generate the repository diff.",
@@ -128,6 +134,15 @@ export async function getUnifiedDiff(
 
   for (const file of selected) {
     if (file.status !== "untracked") continue;
+    if (
+      options.deadlineAt !== undefined
+      && Date.now() >= options.deadlineAt
+    ) {
+      throw new GitError(
+        "timeout",
+        "Git took too long to complete the operation.",
+      );
+    }
     const remaining = maxBytes - Buffer.byteLength(text);
     if (remaining <= 0) {
       truncated = true;

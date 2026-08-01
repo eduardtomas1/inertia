@@ -136,6 +136,23 @@ describe("visual contrast system", () => {
     },
   );
 
+  it.each(["light", "dark"] as const)(
+    "keeps the %s working-text wave readable and visibly distinct",
+    (theme) => {
+      const tokens = themeTokens(theme);
+      const rest = tokens.get("active-work-text-rest");
+      const highlight = tokens.get("active-work-text-highlight");
+      const surface = tokens.get("surface-strong");
+
+      expect(rest, "missing --active-work-text-rest").toBeDefined();
+      expect(highlight, "missing --active-work-text-highlight").toBeDefined();
+      expect(surface, "missing --surface-strong").toBeDefined();
+      expect(contrast(rest!, surface!)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(highlight!, surface!)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(rest!, highlight!)).toBeGreaterThanOrEqual(1.8);
+    },
+  );
+
   it("keeps the dark canvas and everyday surfaces neutral graphite", () => {
     const tokens = themeTokens("dark");
     for (const tokenName of [

@@ -352,6 +352,20 @@ describe("FileCredentialVaultPersistence", () => {
     }
   });
 
+  it("removes only the owned regular vault file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-credential-vault-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "credentials.json");
+    const persistence = new FileCredentialVaultPersistence(path);
+    await persistence.write("owned-value");
+
+    await persistence.remove();
+
+    expect(await persistence.read()).toBeNull();
+    await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(persistence.remove()).resolves.toBeUndefined();
+  });
+
   it.runIf(process.platform !== "win32")(
     "refuses to read or replace a symlinked vault target",
     async () => {
@@ -369,6 +383,9 @@ describe("FileCredentialVaultPersistence", () => {
         code: "storage-corrupt",
       });
       await expect(persistence.write("replacement")).rejects.toMatchObject({
+        code: "persistence-failed",
+      });
+      await expect(persistence.remove()).rejects.toMatchObject({
         code: "persistence-failed",
       });
       expect(await readFile(outsidePath, "utf8")).toBe("outside-value");

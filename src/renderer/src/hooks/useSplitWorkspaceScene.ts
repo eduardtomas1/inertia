@@ -89,7 +89,7 @@ interface SplitWorkspaceActions
   updateConversationById: (
     conversationId: string,
     update: Parameters<WorkspaceSceneActions["updateConversation"]>[0],
-  ) => void;
+  ) => Promise<void>;
 }
 
 interface UseSplitWorkspaceSceneOptions {
@@ -224,6 +224,7 @@ export function useSplitWorkspaceScene({
     run,
     setActionError,
     setActiveTool: layout.setActiveTool,
+    loadGitStatusOnMount: Boolean(splitConversation && splitProject),
     loadGitOnMount: layout.activeTool === "changes",
     loadFilesOnMount: layout.activeTool === "files",
   }));
@@ -325,11 +326,11 @@ export function useSplitWorkspaceScene({
     clearSelectedSkills: workflow.clearSelectedSkills,
     setGoal: workflow.setGoal,
     clearGoal: workflow.clearGoal,
-    updateConversation: (
+    updateConversation: async (
       update: Parameters<WorkspaceSceneActions["updateConversation"]>[0],
-    ) => {
+    ): Promise<void> => {
       if (splitConversation) {
-        actions.updateConversationById(splitConversation.id, update);
+        await actions.updateConversationById(splitConversation.id, update);
       }
     },
     ...turnActions,

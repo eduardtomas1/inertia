@@ -1,7 +1,7 @@
 # Remote Companion protocol and architecture
 
-Status: experimental protocol version 1, browser version 0.1.0, reference
-relay version 0.1.0. Remote Companion is disabled by default. This repository
+Status: experimental protocol version 2, browser version 0.2.0, reference
+relay version 0.2.0. Remote Companion is disabled by default. This repository
 does not deploy or operate a public relay or browser origin.
 
 ## Current architecture seams
@@ -31,11 +31,13 @@ The implementation preserves Inertia's existing privilege boundaries:
   restrictive-file, restart-recovery, and Windows replacement behavior. The
   remote vault has its own filename and `.remote-access-vault-` transaction
   namespace; it is not part of the credential namespace.
-- Vault writes are serialized. The first save failure poisons that queue and
+- Vault writes are serialized. Authority reductions first persist a separate,
+  non-secret fail-closed marker. The first save failure poisons the queue and
   synchronously makes Remote Companion unavailable and disabled for the
   process, clears pairing/session authority and timers, terminates the relay
-  socket, and preserves the write error for the caller. Disable and revocation
-  tear down live access before their durable write.
+  socket, and preserves the write error for the caller. If disable, revocation,
+  or grant reduction is interrupted, restart consumes the marker, disables the
+  feature, and clears paired authority rather than restoring the wider vault.
 - The preload exposes only local settings, pairing approval, scoped grant
   update, revocation, and projected state IPC. It never exposes a host/device
   private key, provider credential, runtime WebSocket capability, filesystem
@@ -158,7 +160,7 @@ use of a reviewed standard primitive, not a new cipher construction.
 
 ## Requests, authority, and exactly-once behavior
 
-The only version 1 application requests are:
+The only version 2 application requests are:
 
 - `state.get`: safe projects, conversations, and agent-run summaries.
 - `conversation.get`: persisted user/assistant transcript for one authorized,
@@ -168,7 +170,9 @@ The only version 1 application requests are:
   indented code, and paired, nested, self-closing, or interrupted HTML before
   path/credential redaction.
 - `prompt.send`: bounded text to one existing authorized, unarchived
-  conversation.
+  conversation. A prompt-capable grant authorizes the selected provider to read
+  project material under its own supervised policy, and sanitized answers may
+  contain project-derived prose. It is not a source-confidentiality boundary.
 
 For prompts, Electron main persists a bounded delivery receipt as `dispatched`
 before runtime preparation. Preparation cannot queue a turn. Immediately

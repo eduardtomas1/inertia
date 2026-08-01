@@ -114,7 +114,7 @@ export interface WorkspaceSceneActions {
       | "interactionMode"
       | "accessMode"
     >>,
-  ) => void;
+  ) => Promise<void>;
   updateSettings: (updates: Partial<AppSettings>) => Promise<void>;
   chooseCodexBinary: () => Promise<void>;
   refreshProvider: (providerId?: ProviderId) => void;
@@ -281,10 +281,6 @@ export function createWorkspaceSceneModel({
       onConnectProvider: actions.connectProvider,
       onRefreshProvider: (providerId) => {
         actions.refreshProvider(providerId);
-        void providerMaintenance.refresh(
-          providerId as ProviderMaintenanceProviderId | undefined,
-          true,
-        ).catch(() => undefined);
       },
       onRefreshProviderMaintenance: (providerId) =>
         providerMaintenance.refresh(providerId, true),
@@ -472,7 +468,7 @@ export function createWorkspaceSceneModel({
         wrapLines: settings.wrapDiffs,
         lastReversal: workspaceTools.lastDiffReversal,
         onRefresh: () => {
-          void workspaceTools.loadGit().catch((error) => setActionError(
+          void workspaceTools.loadGit({ authoritative: true }).catch((error) => setActionError(
             error instanceof Error
               ? error.message
               : "Changes could not be refreshed.",
@@ -605,20 +601,30 @@ export function createWorkspaceSceneModel({
         summary: planSummary,
         ...(canUpdatePlan ? {
           onRefine: () => {
-            actions.updateConversation({ interactionMode: "plan" });
-            void actions.sendMessage(
-              "Refine the implementation plan with clearer steps, risks, and validation.",
-              [],
-            ).catch(() => undefined);
+            void actions.updateConversation({ interactionMode: "plan" })
+              .then(() => actions.sendMessage(
+                "Refine the implementation plan with clearer steps, risks, and validation.",
+                [],
+              ))
+              .catch((error) => setActionError(
+                error instanceof Error
+                  ? error.message
+                  : "Plan mode could not be selected.",
+              ));
           },
         } : {}),
         ...(canUpdatePlan && planSteps.length > 0 ? {
           onImplement: () => {
-            actions.updateConversation({ interactionMode: "build" });
-            void actions.sendMessage(
-              "Implement the plan above and validate the result.",
-              [],
-            ).catch(() => undefined);
+            void actions.updateConversation({ interactionMode: "build" })
+              .then(() => actions.sendMessage(
+                "Implement the plan above and validate the result.",
+                [],
+              ))
+              .catch((error) => setActionError(
+                error instanceof Error
+                  ? error.message
+                  : "Build mode could not be selected.",
+              ));
             setActiveTool("changes");
           },
         } : {}),

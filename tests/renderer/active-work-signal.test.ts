@@ -78,7 +78,7 @@ describe("Minimal Workstream active text signal", () => {
     expect(activeTextRule).toContain("var(--active-work-text-highlight)");
     expect(activeTextRule).toContain("background-clip: text");
     expect(activeTextRule).toContain("-webkit-text-fill-color: transparent");
-    expect(activeTextRule).toContain("background-size: 300% 100%");
+    expect(activeTextRule).toContain("background-size: 240% 100%");
 
     const duration =
       Number(

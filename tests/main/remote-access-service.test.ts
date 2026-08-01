@@ -691,6 +691,54 @@ describe("Remote Companion outbound encrypted service", () => {
     await service.shutdown();
   });
 
+  it("honors a queued disable while first-time identity creation is pending", async () => {
+    const store = encryptedStore();
+    const originalSave = store.save.bind(store);
+    let enterSave = (): void => undefined;
+    const saveEntered = new Promise<void>((resolve) => {
+      enterSave = resolve;
+    });
+    let releaseSave = (): void => undefined;
+    const saveReleased = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    let holdFirstSave = true;
+    vi.spyOn(store, "save").mockImplementation(async (value) => {
+      if (holdFirstSave) {
+        holdFirstSave = false;
+        enterSave();
+        await saveReleased;
+      }
+      await originalSave(value);
+    });
+    const socket = new StalledRelaySocket();
+    const createSocket = vi.fn(() => socket as unknown as WebSocket);
+    const service = await RemoteAccessService.create({
+      initialPrivacy: null,
+      store,
+      createSocket,
+      runtime: { remoteRequest: async () => {
+        throw new Error("unused");
+      } },
+    });
+
+    const enable = service.setEnabled(true, DEFAULT_REMOTE_RELAY_URL);
+    await saveEntered;
+    const disable = service.setEnabled(false);
+    releaseSave();
+    await Promise.all([enable, disable]);
+
+    expect(createSocket).toHaveBeenCalledTimes(1);
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+    expect(service.state()).toMatchObject({
+      enabled: false,
+      connection: "disabled",
+      activeSessions: 0,
+    });
+    expect(await store.load()).toMatchObject({ enabled: false });
+    await service.shutdown();
+  });
+
   it("does not commit a pairing after its relay route disconnects", async () => {
     const relayUrl = await relay();
     let opened = (): void => undefined;
@@ -1063,6 +1111,7 @@ describe("Remote Companion outbound encrypted service", () => {
     await saveEntered;
 
     const revoked = paired.service.revokeDevice(paired.deviceId);
+    await waitFor(() => paired.service.state().devices[0]?.revokedAt !== null);
     expect(paired.service.state().devices).toEqual([
       expect.objectContaining({
         id: paired.deviceId,
@@ -1330,8 +1379,215 @@ describe("Remote Companion outbound encrypted service", () => {
     paired.service.setPrivacyLocked(false);
     expect(createSocket).toHaveBeenCalledTimes(socketCount);
     save.mockRestore();
-    expect((await paired.store.load())?.enabled).toBe(true);
+    expect(await paired.store.load()).toMatchObject({
+      enabled: false,
+      devices: [],
+    });
     await paired.service.shutdown();
+  });
+
+  it.each(["revoke", "update"] as const)(
+    "does not resurrect device authority after a failed %s save and restart",
+    async (operation) => {
+      const pairing = await pairedDeviceFixture({ scopes: ["view", "prompt"] });
+      const save = vi.spyOn(pairing.store, "save").mockRejectedValueOnce(
+        new Error("vault write failed"),
+      );
+
+      const action = operation === "revoke"
+        ? pairing.service.revokeDevice(pairing.deviceId)
+        : pairing.service.updateDevice(
+          pairing.deviceId,
+          ["view"],
+          [pairing.projectId],
+          new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(),
+        );
+      await expect(action).rejects.toThrow("vault write failed");
+      expect(pairing.service.state()).toMatchObject({
+        available: false,
+        enabled: false,
+      });
+
+      save.mockRestore();
+      expect(await pairing.store.load()).toMatchObject({
+        enabled: false,
+        devices: [],
+      });
+      await pairing.service.shutdown();
+    },
+  );
+
+  it("waits for each authority marker before mutating queued generations", async () => {
+    const pairing = await pairedDeviceFixture({ scopes: ["view", "prompt"] });
+    const originalBegin = pairing.store.beginAuthorityReduction.bind(
+      pairing.store,
+    );
+    let beginCalls = 0;
+    let enterFirst = (): void => undefined;
+    const firstEntered = new Promise<void>((resolve) => {
+      enterFirst = resolve;
+    });
+    let releaseFirst = (): void => undefined;
+    const firstReleased = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let enterSecond = (): void => undefined;
+    const secondEntered = new Promise<void>((resolve) => {
+      enterSecond = resolve;
+    });
+    let releaseSecond = (): void => undefined;
+    const secondReleased = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const begin = vi.spyOn(
+      pairing.store,
+      "beginAuthorityReduction",
+    ).mockImplementation(async () => {
+      beginCalls += 1;
+      await originalBegin();
+      if (beginCalls === 1) {
+        enterFirst();
+        await firstReleased;
+      } else {
+        enterSecond();
+        await secondReleased;
+      }
+    });
+    const save = vi.spyOn(pairing.store, "save");
+    const expiry = new Date(
+      Date.now() + 24 * 60 * 60 * 1_000,
+    ).toISOString();
+
+    const first = pairing.service.updateDevice(
+      pairing.deviceId,
+      ["view"],
+      [pairing.projectId],
+      expiry,
+    );
+    await firstEntered;
+    const second = pairing.service.updateDevice(
+      pairing.deviceId,
+      ["view", "prompt"],
+      [pairing.projectId],
+      expiry,
+    );
+    await Promise.resolve();
+    expect(beginCalls).toBe(1);
+    expect(save).not.toHaveBeenCalled();
+    expect(pairing.service.state().devices[0]?.scopes).toEqual([
+      "view",
+      "prompt",
+    ]);
+
+    releaseFirst();
+    await secondEntered;
+    expect(beginCalls).toBe(2);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(pairing.service.state().devices[0]?.scopes).toEqual(["view"]);
+    releaseSecond();
+    await Promise.all([first, second]);
+
+    expect(pairing.service.state().devices[0]?.scopes).toEqual([
+      "view",
+      "prompt",
+    ]);
+    expect(save).toHaveBeenCalledTimes(2);
+    save.mockRestore();
+    begin.mockRestore();
+    await pairing.service.shutdown();
+  });
+
+  it.each(["revoke", "update"] as const)(
+    "removes a session admitted while a serialized %s waits for its marker",
+    async (operation) => {
+      const pairing = await pairedDeviceFixture({ scopes: ["view", "prompt"] });
+      const originalBegin = pairing.store.beginAuthorityReduction.bind(
+        pairing.store,
+      );
+      let enterMarker = (): void => undefined;
+      const markerEntered = new Promise<void>((resolve) => {
+        enterMarker = resolve;
+      });
+      let releaseMarker = (): void => undefined;
+      const markerReleased = new Promise<void>((resolve) => {
+        releaseMarker = resolve;
+      });
+      vi.spyOn(pairing.store, "beginAuthorityReduction")
+        .mockImplementationOnce(async () => {
+          await originalBegin();
+          enterMarker();
+          await markerReleased;
+        });
+      const reduction = operation === "revoke"
+        ? pairing.service.revokeDevice(pairing.deviceId)
+        : pairing.service.updateDevice(
+          pairing.deviceId,
+          ["view"],
+          [pairing.projectId],
+          new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(),
+        );
+      await markerEntered;
+
+      const admitted = await openAuthenticatedSession({
+        relayUrl: pairing.relayUrl,
+        invitation: pairing.invitation,
+        deviceId: pairing.deviceId,
+        deviceKeys: pairing.deviceKeys,
+        grantVersion: 1,
+      });
+      expect(pairing.service.state().activeSessions).toBe(1);
+      releaseMarker();
+      await reduction;
+
+      await waitFor(() => pairing.service.state().activeSessions === 0);
+      admitted.tunnel.socket.terminate();
+      await pairing.service.shutdown();
+    },
+  );
+
+  it("rejects an update queued behind revocation without poisoning the store", async () => {
+    const pairing = await pairedDeviceFixture({ scopes: ["view", "prompt"] });
+    const originalBegin = pairing.store.beginAuthorityReduction.bind(
+      pairing.store,
+    );
+    let enterMarker = (): void => undefined;
+    const markerEntered = new Promise<void>((resolve) => {
+      enterMarker = resolve;
+    });
+    let releaseMarker = (): void => undefined;
+    const markerReleased = new Promise<void>((resolve) => {
+      releaseMarker = resolve;
+    });
+    vi.spyOn(pairing.store, "beginAuthorityReduction")
+      .mockImplementationOnce(async () => {
+        await originalBegin();
+        enterMarker();
+        await markerReleased;
+      });
+
+    const revocation = pairing.service.revokeDevice(pairing.deviceId);
+    await markerEntered;
+    const staleUpdate = pairing.service.updateDevice(
+      pairing.deviceId,
+      ["view"],
+      [pairing.projectId],
+      new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(),
+    );
+    releaseMarker();
+
+    await revocation;
+    await expect(staleUpdate).rejects.toThrow(
+      "That paired device is already revoked.",
+    );
+    expect(pairing.service.state()).toMatchObject({
+      available: true,
+      enabled: true,
+    });
+    expect((await pairing.store.load())?.devices[0]).toMatchObject({
+      id: pairing.deviceId,
+      revokedAt: expect.any(String),
+    });
+    await pairing.service.shutdown();
   });
 
   it("does not admit a device when pairing persistence fails", async () => {
@@ -1397,7 +1653,7 @@ describe("Remote Companion outbound encrypted service", () => {
     );
   });
 
-  it("closes stale sessions after durably replacing a device grant", async () => {
+  it("closes stale sessions before durably replacing a device grant", async () => {
     const remoteRequest = vi.fn(async (): Promise<RemoteResponse> => {
       throw new Error("A replaced session reached the runtime.");
     });
@@ -1464,8 +1720,8 @@ describe("Remote Companion outbound encrypted service", () => {
     );
 
     await saveEntered;
-    expect(sessionClosed).toBe(false);
-    expect(paired.service.state().activeSessions).toBe(1);
+    await waitFor(() => sessionClosed);
+    expect(paired.service.state().activeSessions).toBe(0);
     releaseSave();
     await approval;
     save.mockRestore();
@@ -1562,7 +1818,10 @@ describe("Remote Companion outbound encrypted service", () => {
       grantVersion: 1,
     })).rejects.toThrow();
     save.mockRestore();
-    expect((await paired.store.load())?.devices[0]?.scopes).toEqual(["view"]);
+    expect(await paired.store.load()).toMatchObject({
+      enabled: false,
+      devices: [],
+    });
     await paired.service.shutdown();
   });
 

@@ -1,10 +1,12 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ToolKind } from "@agentclientprotocol/sdk";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {
   createCursorAcpHarness,
+  isCursorFileMutationKind,
   parseCursorQuestionRequest,
 } from "../../src/server/provider/cursor-acp-harness";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
@@ -32,6 +34,61 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     promptId = message.id;
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "cursor-cleanup-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done" } } } });
     return send({ jsonrpc: "2.0", id: promptId, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+  return command;
+}
+
+function permissionSequenceCursorAgent(root: string, name: string): string {
+  const command = portableNodeExecutable(root, name);
+  writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const sessionId = "66666666-6666-4666-8666-666666666666";
+const kinds = ["edit", "delete", "move", "execute"];
+let promptId;
+let permissionIndex = 0;
+const requestNextPermission = () => {
+  if (permissionIndex >= kinds.length) {
+    return send({ jsonrpc: "2.0", id: promptId, result: { stopReason: "end_turn" } });
+  }
+  const index = permissionIndex;
+  const kind = kinds[index];
+  permissionIndex += 1;
+  send({
+    jsonrpc: "2.0",
+    id: 100 + index,
+    method: "session/request_permission",
+    params: {
+      sessionId,
+      toolCall: {
+        toolCallId: "tool-" + kind,
+        title: "Allow " + kind,
+        kind,
+        status: "pending",
+        rawInput: { kind },
+      },
+      options: [
+        { optionId: "allow-" + kind, name: "Allow once", kind: "allow_once" },
+        { optionId: "reject-" + kind, name: "Reject", kind: "reject_once" },
+      ],
+    },
+  });
+};
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    promptId = message.id;
+    return requestNextPermission();
+  }
+  if (typeof message.id === "number" && message.id >= 100 && message.id < 104) {
+    if (message.result?.outcome?.outcome !== "selected") {
+      return send({ jsonrpc: "2.0", id: promptId, result: { stopReason: "refusal" } });
+    }
+    return requestNextPermission();
   }
 });
 `);
@@ -82,6 +139,79 @@ describe.sequential("Cursor ACP harness", () => {
         ],
       }],
     })).toThrow("duplicate option ID");
+  });
+
+  it("uses one complete file-mutation classification for ACP permissions", () => {
+    expect(([
+      "read",
+      "edit",
+      "delete",
+      "move",
+      "search",
+      "execute",
+      "think",
+      "fetch",
+      "switch_mode",
+      "other",
+    ] satisfies ToolKind[]).filter(isCursorFileMutationKind)).toEqual([
+      "edit",
+      "delete",
+      "move",
+    ]);
+  });
+
+  it.each([
+    {
+      access: "supervised" as const,
+      expectedApprovals: [
+        ["Allow edit", "file-change"],
+        ["Allow delete", "file-change"],
+        ["Allow move", "file-change"],
+        ["Allow execute", "command"],
+      ],
+    },
+    {
+      access: "auto-edit" as const,
+      expectedApprovals: [["Allow execute", "command"]],
+    },
+    {
+      access: "full" as const,
+      expectedApprovals: [],
+    },
+  ])("applies $access access to ACP edit, delete, move, and execute requests", async ({
+    access,
+    expectedApprovals,
+  }) => {
+    const root = portableFixtureRoot(`cursor ACP ${access} permissions`);
+    roots.push(root);
+    const command = permissionSequenceCursorAgent(
+      root,
+      `cursor-${access}-permissions`,
+    );
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+    const approvals: string[][] = [];
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: `cursor-${access}-permissions`,
+      cwd: root,
+      prompt: "Apply the requested changes",
+      interactionMode: "build",
+      access,
+    }), {
+      onApproval: (event) => {
+        approvals.push([event.request.title, event.request.kind]);
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+        )).toBe(true);
+      },
+    })).resolves.toMatchObject({ status: "completed" });
+    expect(approvals).toEqual(expectedApprovals);
   });
 
   it("fails and terminates an ACP process that floods bounded events", async () => {

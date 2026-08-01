@@ -165,6 +165,7 @@ export function ModelChooser({
   const anchorRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const restoreFocusWhenEnabledRef = useRef(false);
   const [open, setOpen] = useState(false);
   useNativePreviewSuspension(open);
   const [query, setQuery] = useState("");
@@ -233,14 +234,26 @@ export function ModelChooser({
   );
   const selectedKey = activeKeyForRoute(selectedRoute);
 
+  const restoreTriggerFocus = useCallback((): void => {
+    const trigger = triggerRef.current;
+    if (!trigger || trigger.disabled) return;
+    restoreFocusWhenEnabledRef.current = false;
+    trigger.focus();
+  }, []);
+
   const close = useCallback((restoreFocus = true): void => {
     setOpen(false);
     setQuery("");
     onOpenChange?.(false);
-    if (restoreFocus) {
-      window.requestAnimationFrame(() => triggerRef.current?.focus());
-    }
-  }, [onOpenChange]);
+    restoreFocusWhenEnabledRef.current = restoreFocus;
+    if (restoreFocus) window.requestAnimationFrame(restoreTriggerFocus);
+  }, [onOpenChange, restoreTriggerFocus]);
+
+  useEffect(() => {
+    if (open || disabled || !restoreFocusWhenEnabledRef.current) return;
+    const frame = window.requestAnimationFrame(restoreTriggerFocus);
+    return () => window.cancelAnimationFrame(frame);
+  }, [disabled, open, restoreTriggerFocus]);
 
   useEffect(() => {
     if (!open) return;

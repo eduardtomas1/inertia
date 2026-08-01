@@ -122,8 +122,8 @@
   --execution-separator: color-mix(in srgb, var(--panel-border) 62%, transparent);
   --activity-rail-border: color-mix(in srgb, var(--panel-border) 72%, transparent);
   --execution-rail-background: color-mix(in srgb, var(--surface-muted) 44%, transparent);
-  --active-work-text-rest: color-mix(in srgb, var(--status-working) 76%, var(--text-soft));
-  --active-work-text-highlight: color-mix(in srgb, var(--accent-strong) 84%, var(--text));
+  --active-work-text-rest: #4d687e;
+  --active-work-text-highlight: #2e288f;
   --final-answer-text: var(--text);
   --metadata-text: var(--text-muted);
   --user-request-tint: color-mix(in srgb, var(--surface-muted) 82%, var(--accent-soft));
@@ -262,6 +262,8 @@
   --status-failed: #df8882;
   --status-completed: #82bd98;
   --status-idle: #85868e;
+  --active-work-text-rest: #9289b8;
+  --active-work-text-highlight: #eeeaff;
   --code-surface: #0d0d0f;
   --code-header-surface: #131315;
   --code-border: rgba(242, 242, 243, 0.14);
@@ -4466,6 +4468,13 @@ textarea {
 
 .access-popover p {
   margin: 2px 7px 6px;
+}
+
+.composer-popover .composer-control-error {
+  margin: 5px 7px 3px;
+  color: var(--failure-accent);
+  font-size: var(--ui-font-micro);
+  line-height: 1.4;
 }
 
 .option-check {
@@ -8722,7 +8731,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .timeline-minimap button[data-emphasized="true"]::before {
   background: var(--text-soft);
   box-shadow: 0 0 0 2px var(--focus-ring-soft);
-  transform: scale(1.75, 1.6);
+  transform: scale(2.6, 2);
 }
 
 .timeline-minimap button[aria-current="true"]::before {
@@ -8732,7 +8741,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .timeline-minimap button[aria-current="true"][data-emphasized="true"]::before {
   box-shadow: 0 0 0 2px var(--focus-ring-soft);
-  transform: scale(1.75, 1.6);
+  transform: scale(2.6, 2);
 }
 
 .response-turn > .message,
@@ -9065,7 +9074,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
       var(--active-work-text-rest) 100%
     );
   background-position: 90% 50%;
-  background-size: 300% 100%;
+  background-size: 240% 100%;
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;

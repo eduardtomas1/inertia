@@ -10,6 +10,7 @@ import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
+import type { LoadWorkspaceGit } from "./useWorkspaceGit";
 
 interface TurnArtifactsOptions {
   project: Project | null;
@@ -18,7 +19,7 @@ interface TurnArtifactsOptions {
   setActionError: (message: string | null) => void;
   setActiveTool: (tool: WorkspacePanelTab | null) => void;
   openWorkspaceFile: (path: string) => void;
-  loadGit: () => Promise<void>;
+  loadGit: LoadWorkspaceGit;
 }
 
 export function useTurnArtifacts({
@@ -143,7 +144,7 @@ export function useTurnArtifacts({
   const showCurrentChanges = useCallback(() => {
     setHistoricalDiff(null);
     setHistoricalSelectedPath(null);
-    void loadGit().catch((error) => {
+    void loadGit({ authoritative: true }).catch((error) => {
       setActionError(
         error instanceof Error
           ? error.message

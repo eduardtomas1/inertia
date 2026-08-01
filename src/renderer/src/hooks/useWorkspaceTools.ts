@@ -14,6 +14,7 @@ import { useWorkspaceReview } from "./workspace-tools/useWorkspaceReview";
 
 interface WorkspaceToolsOptions {
   enabled?: boolean;
+  loadGitStatusOnMount?: boolean;
   loadGitOnMount?: boolean;
   loadFilesOnMount?: boolean;
   project: Project | null;
@@ -59,7 +60,8 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     run: options.run,
     setActionError: options.setActionError,
     enabled,
-    loadOnMount: options.loadGitOnMount ?? true,
+    loadStatusOnMount: options.loadGitStatusOnMount ?? true,
+    loadWorkspaceOnMount: options.loadGitOnMount ?? false,
   });
   const files = useWorkspaceFiles({
     project: options.project,
@@ -68,7 +70,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     request: options.request,
     setActionError: options.setActionError,
     enabled,
-    loadOnMount: options.loadFilesOnMount ?? true,
+    loadOnMount: options.loadFilesOnMount ?? false,
   });
   const review = useWorkspaceReview({
     project: options.project,

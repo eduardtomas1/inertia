@@ -6,3 +6,46 @@ export const MESSAGE_SEND_REQUEST_TIMEOUT_MS =
   MESSAGE_SEND_PREPARATION_TIMEOUT_MS + 60_000;
 
 export const CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS = 60_000;
+
+// A single read can invoke several individually bounded Git subprocesses.
+// Give the server one aggregate deadline, then leave transport/cleanup
+// headroom so its authoritative response reaches the renderer first.
+export const GIT_READ_OPERATION_TIMEOUT_MS = 120_000;
+export const GIT_READ_REQUEST_TIMEOUT_MS =
+  GIT_READ_OPERATION_TIMEOUT_MS + 60_000;
+
+// Mutations can legitimately combine a network operation with several local
+// validation and post-operation status subprocesses. Delivery remains
+// ambiguous if this outer client deadline is ever reached.
+export const GIT_MUTATION_REQUEST_TIMEOUT_MS = 10 * 60_000;
+
+// Workspace file reads may cross the privileged secure-file broker, whose
+// operations are bounded at 30 seconds. Leave enough room for the runtime to
+// return its authoritative result without reconnecting the shared socket.
+export const WORKSPACE_ENTRY_REQUEST_TIMEOUT_MS = 45_000;
+export const WORKSPACE_FILE_REQUEST_TIMEOUT_MS = 90_000;
+export const WORKSPACE_FILE_MUTATION_REQUEST_TIMEOUT_MS = 180_000;
+
+// Native goal and skill reads combine bounded provider discovery with a
+// one-shot provider control request.
+export const AGENT_WORKFLOW_REQUEST_TIMEOUT_MS = 45_000;
+
+export const REVIEW_OPERATION_REQUEST_TIMEOUT_MS = 10 * 60_000;
+
+// Backend probes can use their full 30-second safety deadline. A timed-out
+// probe is still delivery-ambiguous because it persists compatibility state.
+export const BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS = 45_000;
+
+// Workspace discovery can inspect thousands of folders and many independent
+// repositories. Keep the renderer pending through that bounded operation
+// instead of turning an expected scan into a transport reconciliation loop.
+export const WORKSPACE_GIT_DISCOVERY_TIMEOUT_MS = 90_000;
+export const WORKSPACE_GIT_REFRESH_REQUEST_TIMEOUT_MS =
+  WORKSPACE_GIT_DISCOVERY_TIMEOUT_MS + 60_000;
+export const GIT_REFRESH_REQUEST_TIMEOUT_MS = GIT_READ_REQUEST_TIMEOUT_MS;
+
+// Provider discovery combines bounded executable, authentication, metadata,
+// and latest-version probes. Its client deadline must exceed those server-side
+// bounds while still settling a genuinely stalled request.
+export const PROVIDER_REFRESH_REQUEST_TIMEOUT_MS = 45_000;
+export const PROVIDER_MAINTENANCE_REFRESH_REQUEST_TIMEOUT_MS = 30_000;

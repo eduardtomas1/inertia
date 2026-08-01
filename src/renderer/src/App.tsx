@@ -355,6 +355,13 @@ export default function App(): React.JSX.Element {
       run,
       setActionError,
       setActiveTool: sceneSetActiveTool,
+      loadGitStatusOnMount: !workspaceToolsUnavailable,
+      loadGitOnMount:
+        !workspaceToolsUnavailable
+        && (
+          sceneActiveTool === "changes"
+          || workspaceLayout.environmentOpen
+        ),
       loadFilesOnMount:
         !workspaceToolsUnavailable && sceneActiveTool === "files",
     }),
@@ -917,7 +924,7 @@ export default function App(): React.JSX.Element {
         cycleTheme,
         loadBranches,
         mutateBranch,
-        loadGit,
+        loadGit: () => loadGit({ authoritative: true }),
         commit,
         runProjectAction,
         activateActivityContext,

@@ -52,7 +52,7 @@ export interface ComposerInputZoneProps {
   slashMatch: RegExpExecArray | null;
   onUpdateConversation: (
     update: Partial<Pick<Conversation, "interactionMode">>,
-  ) => void;
+  ) => Promise<void>;
 }
 
 export function ComposerInputZone({
@@ -252,10 +252,12 @@ export function ComposerInputZone({
               disabled={disabled || running}
               key={item.id}
               onClick={() => {
-                onUpdateConversation({
+                void onUpdateConversation({
                   interactionMode: item.mode as InteractionMode,
-                });
-                onMessageChange("");
+                }).then(
+                  () => onMessageChange(""),
+                  () => undefined,
+                );
               }}
             >
               <span>/{item.id}</span>

@@ -2,6 +2,7 @@ import {
   act,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
 } from "@testing-library/react";
@@ -11,9 +12,11 @@ import type {
   ChatAttachment,
   Conversation,
   ProviderInfo,
+  ServerEvent,
 } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
+import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
 
 const provider: ProviderInfo = {
   id: "codex",
@@ -123,7 +126,7 @@ function composerProps(
     onListSkills: async () => undefined,
     onToggleSkill: () => undefined,
     onClearSelectedSkills: () => undefined,
-    onUpdateConversation: () => undefined,
+    onUpdateConversation: () => Promise.resolve(),
     onCreateConversationForSelection: async () => undefined,
     onChooseAttachments: async () => [],
     onImportAttachments: async () => [],
@@ -146,6 +149,67 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("returns conversation-update failures to the control that initiated them", async () => {
+    const request = deferred<ServerEvent>();
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useAppRuntimeActions({
+      sendCommand: () => request.promise,
+      refreshDetail: vi.fn(),
+      setBusyAction: vi.fn(),
+      setActionError,
+    }));
+
+    const update = hook.result.current.updateConversationById(
+      "19191919-1919-4919-8919-191919191919",
+      { accessMode: "auto-edit" },
+    );
+    const rejection = expect(update).rejects.toThrow(
+      "Runtime rejected access",
+    );
+    await act(async () => request.reject(new Error("Runtime rejected access")));
+
+    await rejection;
+    expect(setActionError).toHaveBeenCalledWith("Runtime rejected access");
+  });
+
+  it("keeps access changes pending until the runtime acknowledges them", async () => {
+    const update = deferred<void>();
+    const onUpdateConversation = vi.fn(() => update.promise);
+    render(<Composer {...composerProps(
+      conversation("20202020-2020-4020-8020-202020202020"),
+      { onUpdateConversation },
+    )} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Choose project access. Current access: Supervised.",
+    }));
+    expect(screen.getByText(
+      "Use this provider's restricted mode and native approvals",
+    )).toBeInTheDocument();
+    expect(screen.getByText(
+      "Allow edits; other actions follow the provider's policy",
+    )).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitemradio", {
+      name: /Auto-accept edits/,
+    }));
+
+    expect(onUpdateConversation).toHaveBeenCalledExactlyOnceWith({
+      accessMode: "auto-edit",
+    });
+    expect(screen.getByRole("menuitemradio", {
+      name: /Auto-accept edits/,
+    })).toBeDisabled();
+
+    await act(async () => update.reject(new Error("Access update rejected")));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Access update rejected",
+    );
+    expect(screen.getByRole("menuitemradio", {
+      name: /Auto-accept edits/,
+    })).not.toBeDisabled();
+  });
+
   it("releases a late attachment picker result instead of moving it to another chat", async () => {
     const first = conversation("22222222-2222-4222-8222-222222222222");
     const second = conversation("33333333-3333-4333-8333-333333333333");

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   discoverWorkspaceGitRepositories,
@@ -20,6 +20,9 @@ import {
   workspaceGitFilePath,
 } from "../../src/server/workspace-git";
 import { getRepositoryStatus, getUnifiedDiff } from "../../src/server/git";
+import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
+import { issueAuthorityForLiveOwner } from "../../src/server/runtime/live-authority";
+import { discoverFreshWorkspaceGitRepositories } from "../../src/server/runtime/commands/source-control-commands";
 
 const roots: string[] = [];
 
@@ -80,6 +83,91 @@ afterEach(() => {
 });
 
 describe("workspace Git repository discovery", () => {
+  it("stops discovery at its aggregate deadline", async () => {
+    const root = temporaryRoot("workspace-deadline");
+
+    await expect(discoverWorkspaceGitRepositories(root, {
+      deadlineAt: Date.now() - 1,
+    })).rejects.toThrow("Workspace repository discovery took too long.");
+  });
+
+  it("propagates an aggregate deadline through Git diff inspection", async () => {
+    const root = temporaryRoot("git-read-deadline");
+    initializeRepository(root, "tracked.txt");
+
+    await expect(getUnifiedDiff(root, {
+      deadlineAt: Date.now() - 1,
+    })).rejects.toThrow("Git took too long to complete the operation.");
+  });
+
+  it("discovers fresh workspace state again across a mutation boundary", async () => {
+    let files = 1;
+    const releases: Array<() => void> = [];
+    const discover = vi.fn(async () => {
+      const observedFiles = files;
+      await new Promise<void>((resolveDiscovery) => {
+        releases.push(resolveDiscovery);
+      });
+      return {
+        repositories: [],
+        files: observedFiles,
+        insertions: observedFiles,
+        deletions: 0,
+        scannedDirectories: 1,
+        skippedDirectories: 0,
+        discoveredRepositories: 0,
+        repositoryLimit: 128,
+        partial: false,
+        truncated: false,
+        issues: [],
+      };
+    });
+    const secureFiles = {
+      authorizeRoot: vi.fn(),
+    } as unknown as RuntimeSecureFileBroker;
+
+    const beforePromise = discoverFreshWorkspaceGitRepositories(
+      "/workspace",
+      { maxRepositories: 128, secureFiles },
+      discover,
+    );
+    files = 2;
+    const afterPromise = discoverFreshWorkspaceGitRepositories(
+      "/workspace",
+      { maxRepositories: 128, secureFiles },
+      discover,
+    );
+
+    expect(discover).toHaveBeenCalledTimes(2);
+    expect(releases).toHaveLength(2);
+    releases[0]!();
+    const before = await beforePromise;
+    releases[1]!();
+    const after = await afterPromise;
+    expect(before.snapshot.files).toBe(1);
+    expect(after.snapshot.files).toBe(2);
+  });
+
+  it("clears an authority issued while its request owner disconnects", async () => {
+    let live = true;
+    let finishIssue!: (reference: string) => void;
+    const issuing = new Promise<string>((resolve) => {
+      finishIssue = resolve;
+    });
+    const clearOwner = vi.fn();
+    const authority = issueAuthorityForLiveOwner(
+      () => live,
+      async () => await issuing,
+      clearOwner,
+    );
+
+    live = false;
+    finishIssue("authority-ref");
+
+    await expect(authority).resolves.toBeNull();
+    expect(clearOwner).toHaveBeenCalledTimes(1);
+  });
+
   it("does not invoke a repository-configured fsmonitor during status refresh", async () => {
     const root = temporaryRoot("hostile-fsmonitor-refresh");
     initializeRepository(root, "README.md");

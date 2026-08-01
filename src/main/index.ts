@@ -718,11 +718,20 @@ function focusMainWindow(): void {
 }
 
 function finishQuitAfterCleanup(): void {
+  const windowToClose = mainWindow;
+  mainWindow = null;
+  if (windowToClose && !windowToClose.isDestroyed()) {
+    // Stop renderer polling and release Chromium's final native window before
+    // forcing the already-clean main process to exit. Leaving the window alive
+    // can keep a packaged process resident after every privileged owner has
+    // settled, especially when the runtime-ready bridge is already offline.
+    windowToClose.destroy();
+  }
   recordPackageSmokeStage("app-exit");
   // The first quit pass already saved window state, closed native previews,
-  // stopped the utility runtime, and disposed owned attachments. Exit directly
-  // because Electron's native app-exit path can still block inside Chromium
-  // teardown after every privileged resource has already been released.
+  // stopped the utility runtime, disposed owned attachments, and destroyed the
+  // renderer window. Exit directly because Electron's native app-exit path can
+  // still block after every privileged resource has already been released.
   process.exit(0);
 }
 

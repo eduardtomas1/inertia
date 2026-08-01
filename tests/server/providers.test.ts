@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { delimiter, join } from "node:path";
@@ -314,11 +315,19 @@ process.exit(2);
   it("removes descendants from a timed-out provider discovery probe", async () => {
     const root = temporaryRoot();
     const childPidPath = join(root, "discovery-child.pid");
+    // Starting a copied Node executable can exceed the synthetic 250 ms
+    // deadline on a loaded Windows runner. Use the real discovery bound there
+    // so the fixture has actually created the descendant being asserted.
+    const probeTimeoutMs = process.platform === "win32" ? 2_500 : 250;
+    const descendantExecutable = portableNodeExecutable(
+      root,
+      "discovery-descendant",
+    );
     const command = nodeCommand(root, "hanging-codex", `
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const descendant = spawn(
-  process.execPath,
+  ${JSON.stringify(descendantExecutable)},
   ["-e", "setInterval(() => {}, 1000)"],
   { stdio: "ignore" },
 );
@@ -330,7 +339,7 @@ setInterval(() => {}, 1000);
       command,
       cwd: root,
       refreshEnvironment: true,
-      timeoutMs: 250,
+      timeoutMs: probeTimeoutMs,
     })).resolves.toMatchObject({
       available: false,
       installState: "error",
@@ -338,12 +347,31 @@ setInterval(() => {}, 1000);
     });
 
     const descendantPid = Number(readFileSync(childPidPath, "utf8"));
-    descendantPids.push(descendantPid);
     expect(Number.isSafeInteger(descendantPid)).toBe(true);
-    await waitFor(
-      "the discovery descendant to stop",
-      () => !processExists(descendantPid),
-    );
+    if (process.platform === "win32") {
+      // A stopped Windows PID can be recycled by another Vitest worker before
+      // this assertion runs. The owned executable remains a stable identity:
+      // Windows cannot delete it until the original descendant releases it.
+      descendantPids.push(descendantPid);
+      await waitFor("the discovery descendant executable to be released", () => {
+        try {
+          rmSync(descendantExecutable);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      // Executable release proves the owned process is gone, so do not retain
+      // its now-recyclable PID for afterEach. If the assertion throws first,
+      // the PID remains registered for best-effort failure-path cleanup.
+      descendantPids.pop();
+    } else {
+      descendantPids.push(descendantPid);
+      await waitFor(
+        "the discovery descendant to stop",
+        () => !processExists(descendantPid),
+      );
+    }
   });
 
   it("reports an unconfirmed timed-out discovery cleanup instead of readiness", async () => {

@@ -4,6 +4,25 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.21 — 2026-08-01
+
+### Delegated work is readable and truthful
+
+- Subagents now show their real harness and backend route, parent relationship, elapsed time, concise activity, provider state, and terminal outcome in both the transcript and Goal panel.
+- Completed, failed, cancelled, and lost delegates retain the provider's authoritative result instead of collapsing into a generic failure or a contradictory local state.
+- **View turn** moves to the owning transcript turn, while **Guide parent** prepares an ordinary composer draft rather than pretending Inertia can message a child agent directly.
+- Direct Stop remains available only for live Claude Agent SDK tasks whose harness can own and acknowledge the operation.
+
+### Follow-ups and cancellation survive races
+
+- Follow-up messages are persisted only after provider acknowledgement, preserve their original submission order, and cannot rewind conversation or project freshness while waiting.
+- A delayed acknowledgement no longer clears an explicit user settlement action made while the provider was responding.
+- Claude cancellation notifications may win a stop-transport race without being overwritten by a local fallback; later authoritative terminal detail can still enrich the same trace without changing its established outcome.
+
+### Release confidence
+
+- Architecture and lint checks, four TypeScript projects, 2,006 unit and integration tests, 202 portable provider contracts, targeted Electron coverage, production audit, five exact-head review rounds, and green Linux, macOS, and Windows CI protect the release.
+
 ## 0.0.20 — 2026-08-01
 
 ### Remote Companion fails closed at every authority edge

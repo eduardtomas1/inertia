@@ -113,7 +113,6 @@ describe("accepted turn viewport anchoring", () => {
             projectRoot="/workspace"
             projectId="project-1"
             conversationId={conversationId}
-            providers={[]}
             streamingText=""
             streamingReasoning=""
             approvals={[]}

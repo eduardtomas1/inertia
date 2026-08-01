@@ -41,6 +41,24 @@ import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
 
 type TimelineJumpTarget = "turn" | "request" | "final" | "artifact";
+const TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS = 96;
+
+export function responseTimelineArticleLabel(
+  item: ResponseTimelineItem,
+): string {
+  if (item.kind === "compatibility") {
+    return "Recovered legacy and orphaned history";
+  }
+  const request = item.turn.userMessage.content.trim().replace(/\s+/gu, " ");
+  const requestLabel = request
+    ? request.length > TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS
+      ? `${request.slice(0, TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS - 1)}…`
+      : request
+    : item.turn.userMessage.attachments.length > 0
+      ? "Request with attachments"
+      : "Request";
+  return `Turn ${item.turn.index}: ${requestLabel}`;
+}
 
 function findTurnElement(
   root: HTMLElement | null | undefined,
@@ -895,6 +913,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
                   data-index={virtualItem.index}
                   aria-posinset={virtualItem.index + 1}
                   aria-setsize={timeline.length}
+                  aria-label={responseTimelineArticleLabel(item)}
                   ref={virtualizer.measureElement}
                   style={{ transform: `translateY(${virtualItem.start}px)` }}
                 >

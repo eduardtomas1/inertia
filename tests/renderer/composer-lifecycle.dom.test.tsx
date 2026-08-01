@@ -16,7 +16,10 @@ import type {
 } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
-import { DRAFT_PERSISTENCE_DELAY_MS } from "../../src/renderer/src/components/composer/Composer";
+import {
+  DRAFT_PERSISTENCE_DELAY_MS,
+  DRAFT_PERSISTENCE_MAX_WAIT_MS,
+} from "../../src/renderer/src/components/composer/Composer";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
 
 const provider: ProviderInfo = {
@@ -151,7 +154,7 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
-  it("debounces rapid draft writes and flushes pending ownership boundaries", async () => {
+  it("makes the leading draft durable, bounds trailing loss, and flushes ownership boundaries", async () => {
     vi.useFakeTimers();
     const first = conversation("10101010-1010-4010-8010-101010101010");
     const second = conversation("20202020-2020-4020-8020-202020202020");
@@ -163,18 +166,38 @@ describe("composer asynchronous ownership", () => {
     const editor = screen.getByRole("textbox", { name: "Message" });
 
     fireEvent.change(editor, { target: { value: "a" } });
+    expect(window.localStorage.getItem(`inertia:draft:${first.id}`)).toBe("a");
     fireEvent.change(editor, { target: { value: "ab" } });
     fireEvent.change(editor, { target: { value: "abc" } });
-    expect(window.localStorage.getItem(`inertia:draft:${first.id}`)).toBeNull();
+    expect(window.localStorage.getItem(`inertia:draft:${first.id}`)).toBe("a");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(DRAFT_PERSISTENCE_DELAY_MS - 1);
     });
-    expect(window.localStorage.getItem(`inertia:draft:${first.id}`)).toBeNull();
+    expect(window.localStorage.getItem(`inertia:draft:${first.id}`)).toBe("a");
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(window.localStorage.getItem(`inertia:draft:${first.id}`)).toBe("abc");
+
+    fireEvent.change(editor, { target: { value: "continuous-0" } });
+    for (let index = 1; index < 5; index += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      fireEvent.change(editor, { target: { value: `continuous-${index}` } });
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(
+        DRAFT_PERSISTENCE_MAX_WAIT_MS - (4 * 200) - 1,
+      );
+    });
+    expect(window.localStorage.getItem(`inertia:draft:${first.id}`)).toBe("abc");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(window.localStorage.getItem(`inertia:draft:${first.id}`))
+      .toBe("continuous-4");
 
     fireEvent.change(editor, { target: { value: "flush on switch" } });
     view.rerender(<Composer {...composerProps(second)} />);
@@ -196,6 +219,7 @@ describe("composer asynchronous ownership", () => {
     view.unmount();
     expect(window.localStorage.getItem(`inertia:draft:${second.id}`))
       .toBe("flush on unmount");
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("returns conversation-update failures to the control that initiated them", async () => {

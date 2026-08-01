@@ -172,7 +172,9 @@ describe("ModelChooser", () => {
     );
     expect(source).toContain("event.stopPropagation()");
     expect(source).toContain('"ArrowDown", "ArrowUp", "Home", "End"');
-    expect(source).toContain('role="listbox"');
+    expect(source).toContain('<ul');
+    expect(source).toContain('className="model-chooser-list"');
+    expect(source).not.toContain('role="listbox"');
     expect(source).toContain("results.emptyState");
     expect(css).toContain(".model-chooser-palette");
     expect(css).toContain(".model-chooser-header:focus-within");

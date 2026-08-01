@@ -23,6 +23,7 @@ export {
 } from "./response-timeline/turn";
 export {
   ResponseTimeline,
+  responseTimelineArticleLabel,
 } from "./response-timeline/viewport";
 export type {
   ResponseTimelineProps,

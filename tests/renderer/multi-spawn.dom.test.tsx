@@ -389,9 +389,10 @@ describe("multi-spawn", () => {
       name: /Choose model\..*GPT-5\.6-Sol/u,
     })[1]!);
     expect(screen.getByRole("dialog", { name: "Choose model" })).toBeVisible();
-    fireEvent.click(
-      screen.getByRole("option", { name: /GPT-5\.5/u }),
-    );
+    const result = screen.getByRole("list", { name: "Model results" })
+      .querySelector<HTMLElement>(".model-chooser-row-option[data-model-route-key*='gpt-5.5']");
+    if (!result) throw new Error("Expected the GPT-5.5 result action.");
+    fireEvent.click(result);
     expect(screen.getAllByText("GPT-5.5")).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Launch duo" }));

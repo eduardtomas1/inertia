@@ -148,8 +148,10 @@ describe("model chooser active route", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
 
-    expect(screen.getByRole("option", { name: /Team Alpha/u }))
-      .toHaveAttribute("aria-selected", "false");
+    const result = screen.getByRole("list", { name: "Model results" })
+      .querySelector(".model-chooser-row-option");
+    expect(result).not.toBeNull();
+    expect(result).not.toHaveAttribute("aria-current");
     expect(screen.queryByText("Active model")).not.toBeInTheDocument();
   });
 
@@ -175,7 +177,10 @@ describe("model chooser active route", () => {
     render(<PendingSelectionChooser />);
     const trigger = screen.getByRole("button", { name: /Choose model/u });
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole("option", { name: /Team Alpha/u }));
+    const result = screen.getByRole("list", { name: "Model results" })
+      .querySelector(".model-chooser-row-option");
+    if (!result) throw new Error("Expected a model result action.");
+    fireEvent.click(result);
 
     expect(screen.queryByRole("dialog", { name: "Choose model" }))
       .not.toBeInTheDocument();
@@ -188,7 +193,7 @@ describe("model chooser active route", () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
-  it("renders a 750-route catalog as one semantic row per result within budget", () => {
+  it("windows a 750-route catalog within render and keyboard latency budgets", async () => {
     const routes = Array.from({ length: 750 }, (_, index) =>
       catalogRoute(index));
     render(
@@ -203,17 +208,54 @@ describe("model chooser active route", () => {
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
     const elapsed = performance.now() - startedAt;
 
-    const results = document.querySelectorAll(".model-chooser-result");
-    expect(results).toHaveLength(750);
-    expect(screen.getAllByRole("option")).toHaveLength(750);
+    const resultList = screen.getByRole("list", { name: "Model results" });
+    await waitFor(() => {
+      expect(resultList.querySelectorAll(":scope > li").length)
+        .toBeGreaterThan(0);
+    });
+    const results = resultList.querySelectorAll(":scope > li");
+    expect(results.length).toBeLessThanOrEqual(24);
+    expect(results.length).toBeLessThan(750);
     expect(document.querySelector(".model-chooser-favorite-actions"))
       .toBeNull();
     const first = results[0]!;
-    expect(first.querySelectorAll('[role="option"]')).toHaveLength(1);
+    expect(first).toHaveAttribute("aria-posinset", "1");
+    expect(first).toHaveAttribute("aria-setsize", "750");
+    expect(first.querySelectorAll(".model-chooser-row-option"))
+      .toHaveLength(1);
+    expect(first.querySelectorAll("button")).toHaveLength(2);
     expect(first.querySelectorAll(".model-chooser-row-favorite"))
       .toHaveLength(1);
-    // This bounded, on-demand catalog render did not justify adding a second
-    // virtualization system with new focus and accessibility failure modes.
-    expect(elapsed).toBeLessThan(2_000);
+    expect(elapsed).toBeLessThan(750);
+
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    const endStartedAt = performance.now();
+    fireEvent.keyDown(search, { key: "End" });
+    await waitFor(() => {
+      const activeId = search.getAttribute("aria-activedescendant");
+      expect(activeId).not.toBeNull();
+      expect(document.getElementById(activeId!)).toHaveTextContent(
+        "Team Model 749",
+      );
+    });
+    expect(performance.now() - endStartedAt).toBeLessThan(500);
+    expect(resultList.querySelectorAll(":scope > li").length)
+      .toBeLessThanOrEqual(24);
+
+    fireEvent.keyDown(search, { key: "Home" });
+    await waitFor(() => {
+      const activeId = search.getAttribute("aria-activedescendant");
+      expect(document.getElementById(activeId!)).toHaveTextContent(
+        "Team Model 0",
+      );
+    });
+
+    const favorite = resultList.querySelector<HTMLButtonElement>(
+      ".model-chooser-row-favorite",
+    )!;
+    favorite.focus();
+    fireEvent.click(favorite);
+    expect(favorite).toHaveFocus();
+    expect(favorite).toHaveAttribute("aria-pressed", "true");
   });
 });

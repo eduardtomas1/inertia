@@ -61,6 +61,10 @@ import {
 } from "../../utils/composerPrefill";
 
 export const DRAFT_PERSISTENCE_DELAY_MS = 275;
+// The first non-empty edit is synchronous. During uninterrupted typing, a
+// force-terminated renderer can lose at most this much newer draft history;
+// ordinary lifecycle boundaries still flush the exact pending owner/value.
+export const DRAFT_PERSISTENCE_MAX_WAIT_MS = 1_000;
 
 export const Composer = memo(function Composer({
   conversation,
@@ -112,6 +116,7 @@ export const Composer = memo(function Composer({
     value: string;
   } | null>(null);
   const draftPersistenceTimerRef = useRef<number | null>(null);
+  const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -160,6 +165,10 @@ export const Composer = memo(function Composer({
       window.clearTimeout(draftPersistenceTimerRef.current);
       draftPersistenceTimerRef.current = null;
     }
+    if (draftPersistenceMaxWaitTimerRef.current !== null) {
+      window.clearTimeout(draftPersistenceMaxWaitTimerRef.current);
+      draftPersistenceMaxWaitTimerRef.current = null;
+    }
     const pending = pendingDraftRef.current;
     pendingDraftRef.current = null;
     if (!pending) return;
@@ -184,7 +193,29 @@ export const Composer = memo(function Composer({
       flushDraftPersistence,
       DRAFT_PERSISTENCE_DELAY_MS,
     );
+    if (draftPersistenceMaxWaitTimerRef.current === null) {
+      draftPersistenceMaxWaitTimerRef.current = window.setTimeout(
+        flushDraftPersistence,
+        DRAFT_PERSISTENCE_MAX_WAIT_MS,
+      );
+    }
   }, [flushDraftPersistence]);
+
+  const persistDraftChange = useCallback((
+    conversationId: string,
+    previous: string,
+    next: string,
+  ): void => {
+    if (!previous && next) {
+      // Make the first recoverable character durable immediately. Later edits
+      // coalesce for 275 ms, with a one-second maximum loss window while the
+      // user types continuously.
+      pendingDraftRef.current = { conversationId, value: next };
+      flushDraftPersistence();
+      return;
+    }
+    scheduleDraftPersistence(conversationId, next);
+  }, [flushDraftPersistence, scheduleDraftPersistence]);
 
   const markEditorChanged = (conversationId = conversation.id): void => {
     editorRevisionSequenceRef.current += 1;
@@ -209,7 +240,7 @@ export const Composer = memo(function Composer({
         if (next !== current) {
           markEditorChanged(conversationIdRef.current);
           draftValueRef.current = next;
-          scheduleDraftPersistence(conversationIdRef.current, next);
+          persistDraftChange(conversationIdRef.current, current, next);
         }
         return next;
       });
@@ -217,7 +248,7 @@ export const Composer = memo(function Composer({
     };
     window.addEventListener(COMPOSER_PREFILL_EVENT, prefill);
     return () => window.removeEventListener(COMPOSER_PREFILL_EVENT, prefill);
-  }, [scheduleDraftPersistence]);
+  }, [persistDraftChange]);
 
   useEffect(() => {
     const refreshPromptStash = (): void => {
@@ -354,10 +385,11 @@ export const Composer = memo(function Composer({
   useTextareaAutosize(textareaRef, message);
 
   const updateMessage = (next: string): void => {
-    if (next === draftValueRef.current) return;
+    const previous = draftValueRef.current;
+    if (next === previous) return;
     markEditorChanged();
     draftValueRef.current = next;
-    scheduleDraftPersistence(conversation.id, next);
+    persistDraftChange(conversation.id, previous, next);
     setMessage(next);
   };
 

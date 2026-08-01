@@ -5,8 +5,11 @@ import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
 import { nativeProviderMetadataScope } from "../../src/server/provider/metadata";
+import { backendCompatibilityProbeResultSchema } from "../../src/shared/backend-probe";
+import { persistedModelBackendProfileSchema } from "../../src/shared/backend-profile-settings";
 import {
   continuationIdentityForSelection,
+  MODEL_CAPABILITY_IDS,
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
@@ -109,14 +112,18 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await expect(modelChooser).toHaveAttribute("id", chooserId!);
   await expect(modelChooser).toBeVisible();
   await expect(modelChooser.getByRole("navigation", { name: "Model sources" })).toBeVisible();
-  const modelResults = modelChooser.getByRole("listbox", {
+  const modelResults = modelChooser.getByRole("list", {
     name: "Model results",
   });
+  const modelOptions = modelResults.locator(".model-chooser-row-option");
   const modelResultsAx = await modelResults.ariaSnapshot();
-  expect(modelResultsAx).toContain('- listbox "Model results"');
-  expect(modelResultsAx).toContain("- option ");
-  expect(modelResultsAx).toContain("[selected]");
+  expect(modelResultsAx).toContain('- list "Model results"');
+  expect(modelResultsAx).toContain("- listitem:");
   expect(modelResultsAx).toContain('- button "Add ');
+  await expect(modelResults.locator(
+    ".model-chooser-row.is-active .model-chooser-row-option",
+  )).toHaveAttribute("aria-current", "true");
+  expect(await modelResults.locator(":scope > :not(li)").count()).toBe(0);
   await expect(modelChooser.getByRole("group", {
     name: "Model favorite actions",
   })).toHaveCount(0);
@@ -189,15 +196,15 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   });
   await expect(favoritesSource).toBeVisible();
   await favoritesSource.click();
-  await expect(modelChooser.getByRole("option")).toHaveCount(1);
+  await expect(modelOptions).toHaveCount(1);
   await captureChooserScenario("model-chooser-favorites-1440x720");
   await claudeSource.click();
   await expect(claudeSource).toHaveAttribute("aria-pressed", "true");
   await captureChooserScenario("model-chooser-claude-1440x720");
   await searchModels.fill("Kimi K3");
-  await expect(modelChooser.getByRole("option").filter({ hasText: /Kimi/u }).first())
+  await expect(modelOptions.filter({ hasText: /Kimi/u }).first())
     .toBeVisible();
-  await expect(modelChooser.getByRole("option").filter({ hasText: /Codex/u }))
+  await expect(modelOptions.filter({ hasText: /Codex/u }))
     .toHaveCount(0);
   await captureChooserScenario("model-chooser-search-kimi-1440x720");
   await searchModels.fill("route-that-does-not-exist");
@@ -404,7 +411,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
   await searchModels.fill("Sol");
-  const solResults = modelChooser.getByRole("option").filter({
+  const solResults = modelOptions.filter({
     hasText: /^Sol/u,
   });
   await expect(solResults).toHaveCount(2);
@@ -436,7 +443,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
   await searchModels.fill("Codex Beta");
-  const codexBeta = modelChooser.getByRole("option").filter({
+  const codexBeta = modelOptions.filter({
     hasText: /^Codex Beta/u,
   });
   await expect(codexBeta).toBeEnabled();
@@ -472,7 +479,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     await modelTrigger.click();
     await modelChooser.getByRole("searchbox", { name: "Search models" })
       .fill("Kimi K3");
-    const kimi = modelChooser.getByRole("option")
+    const kimi = modelOptions
       .filter({ hasText: /K3/u })
       .filter({ hasText: /Kimi/u, hasNotText: /256K/u });
     await expect(kimi).toBeEnabled();
@@ -562,6 +569,127 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     conversationCount: conversationCountBefore + 1,
   });
   await expect(routeConfirmation).toHaveCount(0);
+
+  const catalogStore = new RuntimeStore(databasePath, workspaceDirectory);
+  for (let profileIndex = 0; profileIndex < 5; profileIndex += 1) {
+    const models = Array.from({ length: 120 }, (_, modelIndex) => {
+      const index = (profileIndex * 120) + modelIndex;
+      const suffix = String(index).padStart(4, "0");
+      return {
+        id: `catalog-${suffix}`,
+        displayName: `Catalog Model ${suffix}`,
+        contextWindowTokens: null,
+        reasoningOptions: [],
+        capabilities: [],
+      };
+    });
+    const profile = persistedModelBackendProfileSchema.parse({
+      id: `custom:catalog-${profileIndex}`,
+      displayName: `Catalog gateway ${profileIndex + 1}`,
+      harnessId: "codex-app-server",
+      protocol: "openai-responses",
+      authenticationMode: "none",
+      source: "custom",
+      enabled: true,
+      configurationRevision: 1,
+      endpointIdentity: `endpoint:catalog-${profileIndex}`,
+      preset: "custom",
+      baseUrl: `https://catalog-${profileIndex}.example.test/v1`,
+      allowInsecureLocalhost: false,
+      credentialGeneration: null,
+      models,
+      routing: { mode: "simple", primaryModelId: models[0]!.id },
+      capabilityHints: [],
+      createdAt: cachedAt,
+      updatedAt: cachedAt,
+    });
+    catalogStore.saveModelBackendProfile(profile);
+    catalogStore.recordModelBackendProbe(
+      profile.id,
+      backendCompatibilityProbeResultSchema.parse({
+        profileId: profile.id,
+        backendConfigurationRevision: profile.configurationRevision,
+        endpointIdentity: profile.endpointIdentity,
+        protocol: profile.protocol,
+        modelId: models[0]!.id,
+        compatibility: "protocol-compatible",
+        protocolVerified: true,
+        modelVerified: true,
+        capabilities: MODEL_CAPABILITY_IDS.map((id) => ({
+          id,
+          state: id === "streaming" ? "verified" : "unknown",
+          provenance: id === "streaming" ? "probe" : "unknown",
+          detail: null,
+          checkedAt: cachedAt,
+        })),
+        contextWindow: {
+          tokens: null,
+          state: "unknown",
+          provenance: "unknown",
+          detail: null,
+          checkedAt: cachedAt,
+        },
+        failure: null,
+        checkedAt: cachedAt,
+      }),
+    );
+  }
+  catalogStore.close();
+
+  const beforeCatalogRestart = await runtimeSnapshot();
+  await electronApp.evaluate(() => {
+    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+      crash: () => RuntimeTestSnapshot;
+    } | undefined;
+    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
+    runtime.crash();
+  });
+  await expect.poll(async () => {
+    const current = await runtimeSnapshot();
+    return current.phase === "ready"
+      && current.generation > beforeCatalogRestart.generation;
+  }, { timeout: 10_000 }).toBe(true);
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  await resizeWindow(720, 640);
+  await modelTrigger.click();
+  await expect(modelChooser).toBeVisible();
+  const catalogStartedAt = Date.now();
+  await searchModels.fill("Catalog Model");
+  await expect(modelOptions.first()).toBeVisible();
+  expect(Date.now() - catalogStartedAt).toBeLessThan(1_000);
+  const mountedCatalogRows = await modelResults.locator(":scope > li").count();
+  expect(mountedCatalogRows).toBeGreaterThan(0);
+  expect(mountedCatalogRows).toBeLessThanOrEqual(40);
+  await expect(modelResults.locator(":scope > :not(li)")).toHaveCount(0);
+  const navigatedResult = modelResults.locator(
+    ".model-chooser-result.is-navigated .model-chooser-row-option",
+  );
+  await searchModels.press("End");
+  await expect(navigatedResult).toContainText("Catalog Model 0599");
+  const lastSelectableCatalogItem = navigatedResult.locator(
+    "xpath=ancestor::li",
+  );
+  await expect(lastSelectableCatalogItem).toHaveAttribute(
+    "aria-posinset",
+    "600",
+  );
+  await expect(lastSelectableCatalogItem).toHaveAttribute(
+    "aria-setsize",
+    "600",
+  );
+  await expect(searchModels).toBeFocused();
+  await searchModels.press("Home");
+  await expect(navigatedResult).toContainText("Catalog Model 0000");
+  expect(await modelResults.locator(":scope > li").count())
+    .toBeLessThanOrEqual(40);
+  const catalogAx = await modelResults.ariaSnapshot();
+  expect(catalogAx).toContain('- list "Model results"');
+  expect(catalogAx).toContain("- listitem:");
+  expect(catalogAx).toContain('- button "Add Catalog Model');
+  await searchModels.press("Escape");
+  await expect(modelChooser).toBeHidden();
+  await resizeWindow(1440, 720);
   await workspaceHeader.getByRole("button", { name: "Open workspace tools" }).click();
   expect(rendererErrors).toEqual([]);
 });

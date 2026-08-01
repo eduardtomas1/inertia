@@ -11444,9 +11444,12 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
+  width: 100%;
   padding: 7px 3px 7px 10px;
   cursor: pointer;
   outline: none;
+  text-align: left;
+  background: transparent;
 }
 
 .model-chooser-row-option[aria-disabled="true"] {
@@ -11951,8 +11954,11 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   scrollbar-gutter: stable;
 }
 
-.model-chooser-listbox {
+.model-chooser-list {
   display: block;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .model-chooser-result {
@@ -11961,7 +11967,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   padding: 1px 4px;
 }
 
-.model-chooser-listbox .model-chooser-row {
+.model-chooser-list .model-chooser-row {
   height: 100%;
   border-radius: var(--radius-small);
 }

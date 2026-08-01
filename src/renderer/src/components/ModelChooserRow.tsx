@@ -55,9 +55,9 @@ export interface ModelChooserRowState {
 
 export interface ModelChooserRowProps {
   row: ModelChooserRowData;
-  /** Stable ID for aria-activedescendant integration; generated when omitted. */
+  /** Stable ID for searchbox aria-activedescendant; generated when omitted. */
   optionId?: string;
-  /** Roving option tab index supplied by the future chooser. */
+  /** Result-action tab index; search owns ordinary chooser navigation. */
   tabIndex?: 0 | -1;
   onSelect: (row: ModelChooserRowData) => void;
   onFavoriteToggle?: (row: ModelChooserRowData) => void;
@@ -185,13 +185,12 @@ export const ModelChooserRow = memo(function ModelChooserRow({
   return (
     <div
       className={`model-chooser-row${row.active ? " is-active" : ""}${row.selectable ? "" : " is-disabled"}`}
-      role="presentation"
     >
-      <div
+      <button
+        type="button"
         id={optionId ?? `${reactId}-model-option`}
         className="model-chooser-row-option"
-        role="option"
-        aria-selected={row.active}
+        aria-current={row.active ? "true" : undefined}
         aria-disabled={!row.selectable}
         aria-describedby={describedBy}
         aria-keyshortcuts={row.shortcut?.ariaKeyShortcuts}
@@ -200,11 +199,6 @@ export const ModelChooserRow = memo(function ModelChooserRow({
         tabIndex={tabIndex}
         title={row.disabledReason ?? undefined}
         onClick={select}
-        onKeyDown={(event) => {
-          if (!isModelChooserSelectionKey(event.nativeEvent)) return;
-          event.preventDefault();
-          select();
-        }}
       >
         <span className="model-chooser-row-main">
           <span className="model-chooser-row-primary">
@@ -243,7 +237,7 @@ export const ModelChooserRow = memo(function ModelChooserRow({
             <span className="visually-hidden">Active model</span>
           </span>
         )}
-      </div>
+      </button>
       {onFavoriteToggle && (
         <ModelChooserFavoriteButton
           row={row}

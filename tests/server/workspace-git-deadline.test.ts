@@ -25,6 +25,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 import { discoverWorkspaceGitRepositories } from "../../src/server/workspace-git";
+import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
 
 const roots: string[] = [];
 
@@ -45,5 +46,36 @@ describe("workspace Git traversal deadline", () => {
       deadlineAt: Date.now() + 40,
     })).rejects.toThrow("Workspace repository discovery took too long.");
     expect(fsGate.inspectedPaths).toContain(fsGate.blockedPath);
+  });
+
+  it("aborts a stalled secure-root authorization at the aggregate deadline", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-workspace-auth-deadline-"));
+    roots.push(root);
+    mkdirSync(join(root, ".git"));
+    let observedSignal: AbortSignal | undefined;
+    const secureFiles: RuntimeSecureFileBroker = {
+      authorizeRoot: vi.fn(async (_path: string, signal?: AbortSignal) => {
+        observedSignal = signal;
+        return await new Promise<never>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            reject(new Error("aborted"));
+          }, { once: true });
+        });
+      }),
+      verifyRoot: vi.fn(),
+      read: vi.fn(async () => {
+        throw new Error("unused");
+      }),
+      replace: vi.fn(async () => {
+        throw new Error("unused");
+      }),
+    };
+
+    await expect(discoverWorkspaceGitRepositories(root, {
+      deadlineAt: Date.now() + 40,
+      secureFiles,
+    })).rejects.toThrow("Workspace repository discovery took too long.");
+    expect(observedSignal?.aborted).toBe(true);
+    expect(secureFiles.verifyRoot).not.toHaveBeenCalled();
   });
 });

@@ -1542,7 +1542,7 @@ describe("Remote Companion outbound encrypted service", () => {
   });
 
   it.each(["revoke", "update"] as const)(
-    "removes a session admitted while a serialized %s waits for its marker",
+    "blocks session admission while a serialized %s waits for its marker",
     async (operation) => {
       const pairing = await pairedDeviceFixture({ scopes: ["view", "prompt"] });
       const originalBegin = pairing.store.beginAuthorityReduction.bind(
@@ -1572,19 +1572,19 @@ describe("Remote Companion outbound encrypted service", () => {
         );
       await markerEntered;
 
-      const admitted = await openAuthenticatedSession({
+      const admission = openAuthenticatedSession({
         relayUrl: pairing.relayUrl,
         invitation: pairing.invitation,
         deviceId: pairing.deviceId,
         deviceKeys: pairing.deviceKeys,
         grantVersion: 1,
       });
-      expect(pairing.service.state().activeSessions).toBe(1);
+      await expect(admission).rejects.toThrow("Message timed out.");
+      expect(pairing.service.state().activeSessions).toBe(0);
       releaseMarker();
       await reduction;
 
-      await waitFor(() => pairing.service.state().activeSessions === 0);
-      admitted.tunnel.socket.terminate();
+      expect(pairing.service.state().activeSessions).toBe(0);
       await pairing.service.shutdown();
     },
   );

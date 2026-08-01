@@ -170,7 +170,8 @@ export class RemoteAccessService {
       audit: (type, deviceId, detail) => this.audit(type, deviceId, detail),
       isCurrent: (session) => this.sessionRetainsAuthority(session),
       authorizePromptCommit: (session) =>
-        remoteSessionCanCommitPrompt(this.sessionAuthority(session)),
+        !this.sessionAdmissions.isDeviceBlocked(session.device.id)
+        && remoteSessionCanCommitPrompt(this.sessionAuthority(session)),
       respond: async (session, response) => await this.respond(session, response),
     });
   }
@@ -401,28 +402,32 @@ export class RemoteAccessService {
     const current = data.devices.find(({ id }) => id === deviceId);
     if (!current) throw new Error("That paired device was not found.");
     if (current.revokedAt) return;
-    this.closeDeviceSessions(current.id, "revoked", false);
-    await this.serializeAuthorityMutation(async () => {
-      const durableDevice = this.requireData().devices.find(
-        ({ id }) => id === deviceId,
-      );
-      if (!durableDevice) throw new Error("That paired device was not found.");
-      if (durableDevice.revokedAt) return;
-      this.closeDeviceSessions(durableDevice.id, "revoked", false);
-      await this.persistAuthorityReduction(() => {
-        this.closeDeviceSessions(durableDevice.id, "revoked", false);
-        const revoked = revokeRemoteDevice(
-          this.requireData(),
-          deviceId,
-          this.now(),
+    const releaseAdmissionBlock = this.sessionAdmissions.blockDevice(current.id);
+    try {
+      this.closeDeviceSessions(current.id, "revoked", false);
+      await this.serializeAuthorityMutation(async () => {
+        const durableDevice = this.requireData().devices.find(
+          ({ id }) => id === deviceId,
         );
-        if (!revoked) throw new Error("That paired device is already revoked.");
-        this.audit("device.revoked", revoked.id, "A paired device was revoked.");
+        if (!durableDevice) throw new Error("That paired device was not found.");
+        if (durableDevice.revokedAt) return;
+        this.closeDeviceSessions(durableDevice.id, "revoked", false);
+        await this.persistAuthorityReduction(() => {
+          this.closeDeviceSessions(durableDevice.id, "revoked", false);
+          const revoked = revokeRemoteDevice(
+            this.requireData(),
+            deviceId,
+            this.now(),
+          );
+          if (!revoked) throw new Error("That paired device is already revoked.");
+          this.audit("device.revoked", revoked.id, "A paired device was revoked.");
+        });
+        this.emitState();
       });
-      this.emitState();
-    });
+    } finally {
+      releaseAdmissionBlock();
+    }
   }
-
   async updateDevice(
     deviceId: string,
     scopes: RemoteScope[],
@@ -443,25 +448,12 @@ export class RemoteAccessService {
     if (validated.revokedAt) {
       throw new Error("That paired device is already revoked.");
     }
-    this.closeDeviceSessions(validated.id, "revoked", false);
-    await this.serializeAuthorityMutation(async () => {
-      const current = updateRemoteDeviceGrant({
-        data: structuredClone(this.requireData()),
-        deviceId,
-        scopes,
-        projectIds,
-        grants,
-        expiresAt,
-        now: this.now(),
-      });
-      if (current.revokedAt) {
-        throw new Error("That paired device is already revoked.");
-      }
-      this.closeDeviceSessions(current.id, "revoked", false);
-      await this.persistAuthorityReduction(() => {
-        this.closeDeviceSessions(current.id, "revoked", false);
-        const device = updateRemoteDeviceGrant({
-          data: this.requireData(),
+    const releaseAdmissionBlock = this.sessionAdmissions.blockDevice(validated.id);
+    try {
+      this.closeDeviceSessions(validated.id, "revoked", false);
+      await this.serializeAuthorityMutation(async () => {
+        const current = updateRemoteDeviceGrant({
+          data: structuredClone(this.requireData()),
           deviceId,
           scopes,
           projectIds,
@@ -469,12 +461,29 @@ export class RemoteAccessService {
           expiresAt,
           now: this.now(),
         });
-        this.audit("device.scope-changed", device.id, "Device permissions changed.");
+        if (current.revokedAt) {
+          throw new Error("That paired device is already revoked.");
+        }
+        this.closeDeviceSessions(current.id, "revoked", false);
+        await this.persistAuthorityReduction(() => {
+          this.closeDeviceSessions(current.id, "revoked", false);
+          const device = updateRemoteDeviceGrant({
+            data: this.requireData(),
+            deviceId,
+            scopes,
+            projectIds,
+            grants,
+            expiresAt,
+            now: this.now(),
+          });
+          this.audit("device.scope-changed", device.id, "Device permissions changed.");
+        });
+        this.emitState();
       });
-      this.emitState();
-    });
+    } finally {
+      releaseAdmissionBlock();
+    }
   }
-
   setPrivacyLocked(
     locked: boolean,
     suspension: RemotePrivacySuspension | null = locked ? "locked" : null,
@@ -684,19 +693,24 @@ export class RemoteAccessService {
     try {
       const hostKeys = this.requireHostKeyPair();
       for (const device of data.devices) {
-        if (!remoteDeviceIsCurrent(device, this.now().getTime())) continue;
+        if (
+          this.sessionAdmissions.isDeviceBlocked(device.id)
+          || !remoteDeviceIsCurrent(device, this.now().getTime())
+        ) continue;
         const authenticated = await authenticateRemoteSession({
           data,
           device,
           frame,
           hostKeys,
           now: () => this.now(),
-          current: () => this.sessionAdmissions.owns(admission),
+          current: () => this.sessionAdmissions.owns(admission)
+            && !this.sessionAdmissions.isDeviceBlocked(device.id),
         });
         if (authenticated === "stale") return;
         if (!authenticated) continue;
         if (
           !data.devices.includes(device)
+          || this.sessionAdmissions.isDeviceBlocked(device.id)
           || !remoteDeviceIsCurrent(device, this.now().getTime())
           || authenticated.subject.grantVersion !== device.grantVersion
           || !this.sessionAdmissions.bindDevice(admission, device.id)
@@ -727,7 +741,10 @@ export class RemoteAccessService {
         device.lastSeenAt = this.now().toISOString();
         this.audit("session.connected", device.id, "A remote session connected.");
         await this.persist();
-        if (!this.sessionAdmissions.owns(admission)) return;
+        if (
+          !this.sessionAdmissions.owns(admission)
+          || this.sessionAdmissions.isDeviceBlocked(device.id)
+        ) return;
         this.sessions.set(frame.sessionId, session);
         this.sessionByConnection.set(connectionId, frame.sessionId);
         this.sendFrame(connectionId, {
@@ -850,7 +867,8 @@ export class RemoteAccessService {
   }
 
   private sessionRetainsAuthority(session: ActiveRemoteSession): boolean {
-    return remoteSessionRetainsAuthority(this.sessionAuthority(session));
+    return !this.sessionAdmissions.isDeviceBlocked(session.device.id)
+      && remoteSessionRetainsAuthority(this.sessionAuthority(session));
   }
 
   private sendFrame(connectionId: string, frame: RemoteCipherFrame): void {

@@ -45,6 +45,11 @@ import { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
 import { TurnProviderEventProjector } from "./turn-provider-event-projector";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 
+interface ProviderStartAttempt {
+  accepted: boolean;
+  started: Promise<boolean>;
+}
+
 export type {
   QueuedTurn,
   QueueTurnRequest,
@@ -330,7 +335,7 @@ export class TurnController {
     }
 
     const first = this.startProvider(firstActive);
-    if (!first) {
+    if (!first.accepted) {
       if (!secondActive.settled) {
         this.settle(
           secondActive,
@@ -342,7 +347,7 @@ export class TurnController {
       return [false, false];
     }
     const second = this.startProvider(secondActive);
-    if (!second) {
+    if (!second.accepted) {
       if (!firstActive.settled) {
         this.providers.cancel(firstActive.conversation.id);
         this.settle(
@@ -353,7 +358,20 @@ export class TurnController {
         );
       }
     }
-    return [first, second];
+    const started = await Promise.all([first.started, second.started]);
+    if (!started.every(Boolean)) {
+      [firstActive, secondActive].forEach((sibling, ordinal) => {
+        if (sibling.settled) return;
+        if (started[ordinal]) this.providers.cancel(sibling.conversation.id);
+        this.settle(
+          sibling,
+          "cancelled",
+          "turn-start-failed",
+          "The paired provider start was not acknowledged on both sides.",
+        );
+      });
+    }
+    return started;
   }
 
   start(turnId: string): boolean {
@@ -435,11 +453,27 @@ export class TurnController {
         }));
       return true;
     }
-    return this.startProvider(active);
+    return this.startProvider(active).accepted;
   }
 
-  private startProvider(active: ActiveTurn): boolean {
-    if (active.settled || this.closing) return false;
+  private startProvider(active: ActiveTurn): ProviderStartAttempt {
+    if (active.settled || this.closing) {
+      return { accepted: false, started: Promise.resolve(false) };
+    }
+    let startSettled = false;
+    let resolveStarted!: (started: boolean) => void;
+    const started = new Promise<boolean>((resolve) => {
+      resolveStarted = resolve;
+    });
+    const acknowledge = (value: boolean): void => {
+      if (startSettled) return;
+      startSettled = true;
+      if (active.providerStartAcknowledgement === acknowledge) {
+        active.providerStartAcknowledgement = null;
+      }
+      resolveStarted(value);
+    };
+    active.providerStartAcknowledgement = acknowledge;
     // Provider callbacks may fire synchronously from run()/harness.start().
     // Claim ownership before invoking the provider so any callback-triggered
     // settlement uses bounded exact-run cleanup instead of releasing resources
@@ -447,13 +481,30 @@ export class TurnController {
     active.providerRunStarted = true;
     try {
       const result = this.providers.run(active.providerInput, {
+        onStarted: () => {
+          if (active.settled || this.closing) {
+            this.providers.cancel(active.conversation.id);
+            acknowledge(false);
+            return;
+          }
+          acknowledge(true);
+          if (this.store.agentTurn(active.turn.id).status === "starting") {
+            if (this.transition(active, "running")) {
+              this.broadcastConversationShell(active);
+            }
+          }
+        },
         onEvent: (event) => {
           this.handleProviderEvent(event);
         },
       });
       void result.then(
-        (providerResult) => this.handleProviderResult(active, providerResult),
+        (providerResult) => {
+          acknowledge(false);
+          this.handleProviderResult(active, providerResult);
+        },
         (error: unknown) => {
+          acknowledge(false);
           const failure = providerPromiseFailure(active, error);
           this.settle(
             active,
@@ -467,19 +518,15 @@ export class TurnController {
         this.track(this.releaseTurnAttachments(active));
       })
         .catch(() => undefined);
-      if (this.store.agentTurn(active.turn.id).status === "starting") {
-        if (this.transition(active, "running")) {
-          this.broadcastConversationShell(active);
-        }
-      }
     } catch (error) {
+      acknowledge(false);
       if (active.providerRunStarted) {
         this.providers.cancel(active.conversation.id);
       }
       this.settle(active, "failed", "turn-start-failed", this.publicError(error));
-      return false;
+      return { accepted: false, started };
     }
-    return true;
+    return { accepted: true, started };
   }
 
   cancel(conversationId: string, cause: TurnTerminalCause = "user-cancelled"): boolean {
@@ -759,6 +806,7 @@ export class TurnController {
     message?: string,
     failure?: ProviderRunFailure,
   ): boolean {
+    active.providerStartAcknowledgement?.(false);
     const wasSettled = active.settled;
     const settled = this.settlement.settle(
       active,

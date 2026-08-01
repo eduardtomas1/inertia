@@ -566,7 +566,15 @@ export class ProviderManager {
         throw new ProviderRuntimeError("invalid_input", `Agent harness '${harness.id}' returned a mismatched run.`);
       }
       active.harnessRun = harnessRun;
-      if (active.cancelRequested) this.cancelStartedHarness(active);
+      if (active.cancelRequested) {
+        this.cancelStartedHarness(active);
+      } else {
+        try {
+          callbacks.onStarted?.();
+        } catch {
+          // Start acknowledgement observers cannot invalidate an owned run.
+        }
+      }
       return harnessRun.result;
     };
 

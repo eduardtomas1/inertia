@@ -94,6 +94,7 @@ class FakeProvider implements TurnProviderRuntime {
     this.runCount += 1;
     this.input = input;
     this.callbacks = callbacks;
+    callbacks.onStarted?.();
     return new Promise((resolve, reject) => {
       this.resolveResult = resolve;
       this.rejectResult = reject;

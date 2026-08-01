@@ -105,10 +105,10 @@ export class DuoLaunchCoordinator {
   }
 
   prepare(payload: DuoPreparePayload): Promise<PreparedDuoLaunch> {
-    const durable = this.store.findPairedLaunch(payload.launchId);
-    if (durable) return Promise.resolve(this.preparedResult(durable));
     const current = this.prepareTasks.get(payload.launchId);
     if (current) return current;
+    const durable = this.store.findPairedLaunch(payload.launchId);
+    if (durable) return Promise.resolve(this.preparedResult(durable));
     const task = this.prepareFresh(payload).finally(() => {
       this.prepareTasks.delete(payload.launchId);
       this.cancellationRequests.delete(payload.launchId);

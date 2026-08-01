@@ -929,7 +929,7 @@ describe("published database fixtures", () => {
 
 describe("atomic Duo schema migration", () => {
   it.each(["current", "v37-upgrade"] as const)(
-    "installs project deletion cleanup for a %s database",
+    "installs active-launch deletion protection for a %s database",
     async (source) => {
       const directory = await temporaryDirectory("inertia-duo-migration-");
       const workspacePath = join(directory, "workspace");
@@ -967,10 +967,13 @@ describe("atomic Duo schema migration", () => {
         SELECT COUNT(*) AS count FROM sqlite_master
         WHERE type = 'table' AND name IN ('paired_launches', 'paired_launch_sides')
       `).get() as { count: number }).count).toBe(2);
-      expect((inspection.prepare(`
-        SELECT COUNT(*) AS count FROM sqlite_master
+      const trigger = inspection.prepare(`
+        SELECT sql FROM sqlite_master
         WHERE type = 'trigger' AND name = 'paired_launches_project_delete'
-      `).get() as { count: number }).count).toBe(1);
+      `).get() as { sql: string } | undefined;
+      expect(trigger?.sql).toMatch(/Cancel the active Duo launch/u);
+      expect(trigger?.sql).toMatch(/live_turn\.status NOT IN/u);
+      expect(trigger?.sql).toMatch(/DELETE FROM paired_launches/u);
       expect((inspection.prepare(
         "SELECT MAX(version) AS version FROM schema_migrations",
       ).get() as { version: number }).version).toBe(

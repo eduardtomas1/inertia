@@ -595,6 +595,78 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     await manager.disposeAll();
   });
 
+  it("acknowledges provider start only after async backend resolution reaches the harness", async () => {
+    const root = temporaryRoot();
+    const { command, program } = nodeProgram(root, "acknowledged-codex-cli", `
+console.log(JSON.stringify({ type: "turn.completed" }));
+`);
+    let releaseBackend!: (environment: NodeJS.ProcessEnv) => void;
+    const backend = new Promise<NodeJS.ProcessEnv>((resolve) => {
+      releaseBackend = resolve;
+    });
+    const manager = new ProviderManager(
+      {
+        commands: { codex: command },
+        resolveBackendLaunchOptions: async (_input, environment) => ({
+          environment: await backend.then(() => environment),
+        }),
+      },
+      new AgentHarnessRegistry([
+        createCliAgentHarness("codex", { prefixArgs: [program] }),
+      ]),
+    );
+    let acknowledgeStart!: () => void;
+    const started = new Promise<void>((resolve) => {
+      acknowledgeStart = resolve;
+    });
+    const onStarted = vi.fn(acknowledgeStart);
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      harnessId: "codex-cli",
+      conversationId: "acknowledged-cli",
+      cwd: root,
+      prompt: "Respond",
+      interactionMode: "build",
+      access: "full",
+    }), { onStarted });
+    await Promise.resolve();
+    expect(onStarted).not.toHaveBeenCalled();
+
+    releaseBackend({});
+    await started;
+    expect(onStarted).toHaveBeenCalledTimes(1);
+    await expect(result).resolves.toMatchObject({ status: "completed" });
+    await manager.disposeAll();
+  });
+
+  it("does not acknowledge an async backend rejection before harness start", async () => {
+    const root = temporaryRoot();
+    const onStarted = vi.fn();
+    const manager = new ProviderManager(
+      {
+        commands: { codex: "codex" },
+        resolveBackendLaunchOptions: async () => {
+          await Promise.resolve();
+          throw new Error("credential resolution rejected");
+        },
+      },
+      new AgentHarnessRegistry([createCliAgentHarness("codex")]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      harnessId: "codex-cli",
+      conversationId: "rejected-before-start",
+      cwd: root,
+      prompt: "Respond",
+      interactionMode: "build",
+      access: "full",
+    }), { onStarted })).rejects.toThrow(/credential resolution rejected/u);
+    expect(onStarted).not.toHaveBeenCalled();
+    expect(manager.isRunning("rejected-before-start")).toBe(false);
+    await manager.disposeAll();
+  });
+
   it("maps unconfirmed CLI cancellation cleanup to one failed terminal result", async () => {
     const root = temporaryRoot();
     const { command, program } = nodeProgram(root, "stalled-codex-cli", `

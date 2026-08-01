@@ -16,6 +16,7 @@ import {
 } from "vitest";
 import type {
   AppSnapshot,
+  DuoLaunchSideStatus,
   ModelBackendProfileView,
   ModelSelection,
   Project,
@@ -1033,6 +1034,77 @@ describe("multi-spawn", () => {
     expect(run.mock.calls.some(([, command]) =>
       command.type === "duo.prepare" || command.type === "duo.dispatch"))
       .toBe(false);
+  });
+
+  it("cancels a lost prepared response before clearing its recovery identity", async () => {
+    const launchId = "88888888-8888-4888-8888-888888888888";
+    window.localStorage.setItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+      launchId,
+    );
+    const sides: [DuoLaunchSideStatus, DuoLaunchSideStatus] = [
+      { ordinal: 0 as const, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "pending" as const },
+      { ordinal: 1 as const, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "pending" as const },
+    ];
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.status") {
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId,
+            state: "prepared",
+            error: null,
+            sides,
+          },
+        };
+      }
+      expect(command).toEqual({ type: "duo.cancel", payload: { launchId } });
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId,
+          state: "cancelled",
+          error: null,
+          sides: [
+            { ...sides[0], dispatchState: "cancelled" },
+            { ...sides[1], dispatchState: "cancelled" },
+          ],
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.status",
+      "duo.cancel",
+    ]);
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBeNull();
+    expect(hook.result.current.error).toBe(
+      "The duo launch was cancelled before both providers began.",
+    );
   });
 
   it("closes for authoritative reconciliation after ambiguous preparation", async () => {

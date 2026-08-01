@@ -187,6 +187,7 @@ export interface ActiveTurn {
   runStartedAt: number;
   workspaceRunCreated: boolean;
   providerRunStarted: boolean;
+  providerStartAcknowledgement: ((started: boolean) => void) | null;
   attachmentsReleased: boolean;
   attachmentRelease: Promise<void> | null;
   acceptingProviderEvents: boolean;

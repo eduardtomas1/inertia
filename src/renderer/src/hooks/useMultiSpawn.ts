@@ -158,6 +158,7 @@ export function useMultiSpawn({
   const reconcilePendingLaunch = useCallback(async (
     launchId: string,
   ): Promise<void> => {
+    let durablePrepared = false;
     try {
       const event = resultEvent(await run("multi-spawn:status", {
         type: "duo.status",
@@ -166,13 +167,28 @@ export function useMultiSpawn({
       if (event.result.kind !== "duo.status") {
         throw new Error("The local service returned an unexpected duo status.");
       }
-      const message = launchStatusMessage(event.result);
-      if (!launchNeedsFurtherReconciliation(event.result)) {
+      let status = event.result;
+      if (status.state === "prepared") {
+        durablePrepared = true;
+        const cancellation = resultEvent(await run("multi-spawn:cancel", {
+          type: "duo.cancel",
+          payload: { launchId },
+        }));
+        if (cancellation.result.kind !== "duo.status") {
+          throw new Error(
+            "The local service returned an unexpected Duo recovery response.",
+          );
+        }
+        status = cancellation.result;
+      }
+      const message = launchStatusMessage(status);
+      if (!launchNeedsFurtherReconciliation(status) && status.state !== "prepared") {
         clearPendingMultiSpawnLaunchId(window.localStorage);
+        durablePrepared = false;
       }
       if (message) setError(message);
     } catch (caught) {
-      if (runtimeCommandDelivery(caught) === "rejected") {
+      if (!durablePrepared && runtimeCommandDelivery(caught) === "rejected") {
         clearPendingMultiSpawnLaunchId(window.localStorage);
       }
       setError(

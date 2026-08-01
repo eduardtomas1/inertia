@@ -74,7 +74,13 @@ function providerInfo(): ProviderInfo {
 class PairProvider implements TurnProviderRuntime {
   readonly inputs: ProviderRunInput[] = [];
   readonly cancellations: string[] = [];
+  readonly callbacks: ProviderRunCallbacks[] = [];
+  readonly completions: Array<{
+    input: ProviderRunInput;
+    resolve: (result: ProviderRunResult) => void;
+  }> = [];
   throwOnRun: number | null = null;
+  rejectOnRun: number | null = null;
 
   resolveModelRoute = resolveNativeModelRoute;
 
@@ -84,13 +90,34 @@ class PairProvider implements TurnProviderRuntime {
 
   run(
     input: ProviderRunInput,
-    _callbacks: ProviderRunCallbacks,
+    callbacks: ProviderRunCallbacks,
   ): Promise<ProviderRunResult> {
     this.inputs.push(input);
+    this.callbacks.push(callbacks);
     if (this.inputs.length === this.throwOnRun) {
       throw new Error("provider invocation rejected");
     }
-    return new Promise(() => undefined);
+    if (this.inputs.length === this.rejectOnRun) {
+      return Promise.reject(new Error("backend launch rejected before harness start"));
+    }
+    callbacks.onStarted?.();
+    return new Promise((resolve) => {
+      this.completions.push({ input, resolve });
+    });
+  }
+
+  completeAll(): void {
+    for (const { input, resolve } of this.completions.splice(0)) {
+      resolve({
+        providerId: input.providerId,
+        conversationId: input.conversationId ?? input.threadId,
+        status: "completed",
+        text: "",
+        textTruncated: false,
+        exitCode: 0,
+        signal: null,
+      });
+    }
   }
 
   cancel(conversationId: string): boolean {
@@ -168,7 +195,10 @@ async function createRuntime(
   };
 }
 
-function createIntent(runtime: DuoTestRuntime): {
+function createIntent(
+  runtime: DuoTestRuntime,
+  projectIds: readonly [string, string] = [runtime.projectId, runtime.projectId],
+): {
   conversationIds: [string, string];
   launchId: string;
 } {
@@ -177,7 +207,7 @@ function createIntent(runtime: DuoTestRuntime): {
   runtime.store.createPairedLaunch(launchId, [
     {
       ordinal: 0,
-      projectId: runtime.projectId,
+      projectId: projectIds[0],
       plannedConversationId: conversationIds[0],
       plannedWorktreePath: null,
       plannedBranch: null,
@@ -185,7 +215,7 @@ function createIntent(runtime: DuoTestRuntime): {
     },
     {
       ordinal: 1,
-      projectId: runtime.projectId,
+      projectId: projectIds[1],
       plannedConversationId: conversationIds[1],
       plannedWorktreePath: null,
       plannedBranch: null,
@@ -199,6 +229,7 @@ function adoptConversations(
   runtime: DuoTestRuntime,
   launchId: string,
   conversationIds: [string, string],
+  projectIds: readonly [string, string] = [runtime.projectId, runtime.projectId],
 ) {
   const selection = nativeModelSelection({
     providerId: "codex",
@@ -208,7 +239,7 @@ function adoptConversations(
   });
   return runtime.store.createPairedConversations(launchId, [
     {
-      projectId: runtime.projectId,
+      projectId: projectIds[0],
       title: "Duo left",
       options: {
         id: conversationIds[0],
@@ -220,7 +251,7 @@ function adoptConversations(
       },
     },
     {
-      projectId: runtime.projectId,
+      projectId: projectIds[1],
       title: "Duo right",
       options: {
         id: conversationIds[1],
@@ -234,12 +265,16 @@ function adoptConversations(
   ]);
 }
 
-function preparePair(runtime: DuoTestRuntime) {
-  const intent = createIntent(runtime);
+function preparePair(
+  runtime: DuoTestRuntime,
+  projectIds: readonly [string, string] = [runtime.projectId, runtime.projectId],
+) {
+  const intent = createIntent(runtime, projectIds);
   const conversations = adoptConversations(
     runtime,
     intent.launchId,
     intent.conversationIds,
+    projectIds,
   );
   const queued = runtime.controller.queuePair(intent.launchId, [
     {
@@ -397,36 +432,161 @@ describe("atomic Duo launch persistence", () => {
     runtime.store.close();
   });
 
-  it.each(["prepared", "failed", "successfully-dispatched"] as const)(
-    "does not let %s paired launch history block project removal",
+  it.each(["preparing", "prepared", "running"] as const)(
+    "blocks cross-project removal while a Duo launch is %s",
     async (state) => {
       const runtime = await createRuntime();
-      const prepared = preparePair(runtime);
-      if (state === "failed") {
-        runtime.store.failPairedLaunch(
-          prepared.launchId,
-          "failed",
-          "Expected test failure",
-        );
-      } else if (state === "successfully-dispatched") {
-        expect(runtime.store.claimPairedLaunchDispatch(prepared.launchId))
-          .toBe(true);
-        runtime.store.finishPairedLaunchDispatch(
-          prepared.launchId,
-          [true, true],
-        );
+      const otherProject = runtime.store.createProject(
+        "Other Duo project",
+        join(runtime.workspace, "other"),
+      );
+      const projectIds = [runtime.projectId, otherProject.id] as const;
+      let launchId: string;
+      let conversations: ReturnType<typeof preparePair>["conversations"] | null = null;
+      if (state === "preparing") {
+        launchId = createIntent(runtime, projectIds).launchId;
+      } else {
+        const prepared = preparePair(runtime, projectIds);
+        launchId = prepared.launchId;
+        conversations = prepared.conversations;
+        if (state === "running") {
+          await expect(coordinator(runtime).dispatch(launchId))
+          .resolves.toMatchObject({ state: "running" });
+        }
       }
 
-      runtime.store.removeProject(runtime.projectId);
-
-      expect(runtime.store.findPairedLaunch(prepared.launchId)).toBeNull();
-      expect(runtime.store.snapshot()).toMatchObject({
-        projects: [],
-        conversations: [],
-        agentTurns: [],
-        messages: [],
-      });
+      expect(() => runtime.store.removeProject(runtime.projectId)).toThrow(
+        /Cancel the active Duo launch/u,
+      );
+      expect(runtime.store.findPairedLaunch(launchId)).not.toBeNull();
+      expect(runtime.store.snapshot().projects.map(({ id }) => id))
+        .toEqual(expect.arrayContaining([...projectIds]));
+      if (conversations) {
+        expect(conversations.every(({ id }) =>
+          runtime.controller.isActive(id))).toBe(true);
+      }
       runtime.store.close();
+    },
+  );
+
+  it("purges terminal cross-project history only after both queued turns are settled", async () => {
+    const runtime = await createRuntime();
+    const otherProject = runtime.store.createProject(
+      "Other Duo project",
+      join(runtime.workspace, "other"),
+    );
+    const prepared = preparePair(
+      runtime,
+      [runtime.projectId, otherProject.id],
+    );
+    await expect(coordinator(runtime).cancel(prepared.launchId))
+      .resolves.toMatchObject({ state: "cancelled" });
+
+    runtime.store.removeProject(runtime.projectId);
+
+    expect(runtime.store.findPairedLaunch(prepared.launchId)).toBeNull();
+    expect(runtime.store.snapshot().projects.map(({ id }) => id))
+      .toEqual([otherProject.id]);
+    expect(runtime.store.snapshot().conversations.map(({ id }) => id))
+      .toEqual([prepared.conversations[1].id]);
+    expect(runtime.store.agentTurn(prepared.queued[1].turn.id).status)
+      .toBe("cancelled");
+    runtime.store.close();
+  });
+
+  it("allows failed pre-turn launch history to be purged with its project", async () => {
+    const runtime = await createRuntime();
+    const otherProject = runtime.store.createProject(
+      "Other Duo project",
+      join(runtime.workspace, "other"),
+    );
+    const launch = createIntent(
+      runtime,
+      [runtime.projectId, otherProject.id],
+    );
+    runtime.store.failPairedLaunch(
+      launch.launchId,
+      "failed",
+      "Expected pre-turn failure",
+    );
+
+    runtime.store.removeProject(runtime.projectId);
+
+    expect(runtime.store.findPairedLaunch(launch.launchId)).toBeNull();
+    expect(runtime.store.snapshot().projects.map(({ id }) => id))
+      .toEqual([otherProject.id]);
+    runtime.store.close();
+  });
+
+  it("allows cross-project removal after both running providers complete", async () => {
+    const runtime = await createRuntime();
+    const otherProject = runtime.store.createProject(
+      "Other Duo project",
+      join(runtime.workspace, "other"),
+    );
+    const prepared = preparePair(
+      runtime,
+      [runtime.projectId, otherProject.id],
+    );
+    await expect(coordinator(runtime).dispatch(prepared.launchId))
+      .resolves.toMatchObject({ state: "running" });
+    runtime.provider.completeAll();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(prepared.queued.map(({ turn }) =>
+      runtime.store.agentTurn(turn.id).status)).toEqual([
+      "completed",
+      "completed",
+    ]);
+
+    runtime.store.removeProject(runtime.projectId);
+
+    expect(runtime.store.findPairedLaunch(prepared.launchId)).toBeNull();
+    expect(runtime.store.snapshot().projects.map(({ id }) => id))
+      .toEqual([otherProject.id]);
+    expect(runtime.store.agentTurn(prepared.queued[1].turn.id).status)
+      .toBe("completed");
+    runtime.store.close();
+  });
+
+  it.each(["prepared", "running"] as const)(
+    "settles a cross-project %s launch on restart before project removal",
+    async (state) => {
+      const runtime = await createRuntime();
+      const otherProject = runtime.store.createProject(
+        "Other Duo project",
+        join(runtime.workspace, "other"),
+      );
+      const prepared = preparePair(
+        runtime,
+        [runtime.projectId, otherProject.id],
+      );
+      if (state === "running") {
+        await expect(coordinator(runtime).dispatch(prepared.launchId))
+          .resolves.toMatchObject({ state: "running" });
+      }
+      runtime.store.close();
+
+      const reopened = new RuntimeStore(
+        runtime.databasePath,
+        runtime.workspace,
+        { recoverInterruptedRuns: false },
+      );
+      recoverInterruptedTurns(reopened);
+      await reconcileInterruptedDuoLaunches(reopened);
+      expect(prepared.queued.map(({ turn }) =>
+        reopened.agentTurn(turn.id).status)).toEqual([
+        "interrupted",
+        "interrupted",
+      ]);
+
+      reopened.removeProject(runtime.projectId);
+
+      expect(reopened.findPairedLaunch(prepared.launchId)).toBeNull();
+      expect(reopened.snapshot().projects.map(({ id }) => id))
+        .toEqual([otherProject.id]);
+      expect(reopened.agentTurn(prepared.queued[1].turn.id).status)
+        .toBe("interrupted");
+      reopened.close();
     },
   );
 
@@ -467,6 +627,80 @@ describe("atomic Duo launch persistence", () => {
     await expect(cancellation).resolves.toMatchObject({ state: "cancelled" });
     expect(runtime.store.snapshot().conversations).toEqual([]);
     expect(runtime.provider.inputs).toEqual([]);
+    runtime.store.close();
+  });
+
+  it("joins a concurrent duplicate after durable preparation has begun", async () => {
+    const runtime = await createRuntime();
+    await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
+    let createCount = 0;
+    let announceDurablePreparing!: () => void;
+    let releaseFirstCreate!: () => void;
+    const durablePreparing = new Promise<void>((resolve) => {
+      announceDurablePreparing = resolve;
+    });
+    const firstCreateGate = new Promise<void>((resolve) => {
+      releaseFirstCreate = resolve;
+    });
+    const launches = new DuoLaunchCoordinator(
+      runtime.store,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {
+        validateSelection: (selection: unknown) => selection,
+        readiness: async () => null,
+      } as never,
+      runtime.controller,
+      join(runtime.workspace, ".inertia"),
+      () => [providerInfo()],
+      {
+        worktrees: {
+          create: async (_repositoryPath, worktreePath, options) => {
+            createCount += 1;
+            if (createCount === 1) {
+              announceDurablePreparing();
+              await firstCreateGate;
+            }
+            return {
+              root: worktreePath,
+              branch: options.branch,
+              detached: false,
+              upstream: null,
+              ahead: 0,
+              behind: 0,
+              hasRemote: false,
+              pullRequest: {
+                available: false,
+                remoteName: null,
+                forge: null,
+                unavailableReason: "no-remotes",
+              },
+              files: [],
+              insertions: 0,
+              deletions: 0,
+              clean: true,
+              truncated: false,
+            } satisfies GitRepositoryStatus;
+          },
+          remove: async () => {
+            throw new Error("Duplicate preparation must not compensate.");
+          },
+        },
+      },
+    );
+    const payload = preparePayload(runtime, true);
+    const first = launches.prepare(payload);
+    await durablePreparing;
+
+    const duplicate = launches.prepare(payload);
+    expect(duplicate).toBe(first);
+    releaseFirstCreate();
+
+    await expect(Promise.all([first, duplicate])).resolves.toEqual([
+      expect.objectContaining({ launchId: payload.launchId, state: "prepared" }),
+      expect.objectContaining({ launchId: payload.launchId, state: "prepared" }),
+    ]);
+    expect(createCount).toBe(2);
+    expect(runtime.store.snapshot().conversations).toHaveLength(2);
     runtime.store.close();
   });
 
@@ -584,6 +818,29 @@ describe("Duo dispatch ownership", () => {
       .toBe("failed");
     runtime.store.close();
   });
+
+  it.each([1, 2] as const)(
+    "awaits real provider acknowledgement and compensates async launch rejection on side %s",
+    async (rejectedSide) => {
+      const runtime = await createRuntime();
+      const prepared = preparePair(runtime);
+      runtime.provider.rejectOnRun = rejectedSide;
+
+      const status = await coordinator(runtime).dispatch(prepared.launchId);
+
+      expect(status.state).toBe("failed");
+      expect(runtime.provider.inputs).toHaveLength(2);
+      const sibling = prepared.conversations[rejectedSide === 1 ? 1 : 0];
+      expect(runtime.provider.cancellations).toContain(sibling.id);
+      expect(runtime.store.agentTurn(
+        prepared.queued[rejectedSide === 1 ? 1 : 0].turn.id,
+      ).status).toBe("cancelled");
+      expect(runtime.store.agentTurn(
+        prepared.queued[rejectedSide - 1].turn.id,
+      ).status).toBe("failed");
+      runtime.store.close();
+    },
+  );
 
   it("cancels both idle survivors when cancellation races the dispatch barrier", async () => {
     let releaseCapture!: () => void;

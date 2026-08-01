@@ -187,6 +187,7 @@ export function resolveTurnRequest(
           runStartedAt: dependencies.clock().getTime(),
           workspaceRunCreated: false,
           providerRunStarted: false,
+          providerStartAcknowledgement: null,
           attachmentsReleased: false,
           attachmentRelease: null,
           acceptingProviderEvents: true,

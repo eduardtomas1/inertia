@@ -999,7 +999,11 @@ if (!hasSingleInstanceLock) {
 function recordPackageSmokeStage(stage: string): void {
   if (!packageSmokeFilePath) return;
   try {
-    writeFileSync(`${packageSmokeFilePath}.${stage}.json`, JSON.stringify({ stage, pid: process.pid }), { encoding: "utf8", mode: 0o600, flag: "wx" });
+    writeFileSync(`${packageSmokeFilePath}.${stage}.json`, JSON.stringify({
+      stage,
+      pid: process.pid,
+      timestampMs: Date.now(),
+    }), { encoding: "utf8", mode: 0o600, flag: "wx" });
   } catch {
     // Packaged smoke diagnostics are best effort and test-only.
   }

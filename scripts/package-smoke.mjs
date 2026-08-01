@@ -276,7 +276,13 @@ async function requireLifecycleMarker(
     timeoutMs,
     `${stage} lifecycle marker`,
   );
-  if (value.stage !== stage || value.pid !== mainPid) throw new Error(`Invalid ${stage} lifecycle marker.`);
+  if (
+    value.stage !== stage
+    || value.pid !== mainPid
+    || !Number.isSafeInteger(value.timestampMs)
+    || value.timestampMs <= 0
+  ) throw new Error(`Invalid ${stage} lifecycle marker.`);
+  return value;
 }
 
 function appendOutput(current, chunk) {
@@ -371,13 +377,13 @@ try {
   // Provider discovery deliberately keeps the packaged app alive before
   // shutdown. Start the exit deadline only after Electron begins quitting so
   // that dwell time cannot consume the process-tree cleanup budget.
-  await requireLifecycleMarker(
+  const beforeQuit = await requireLifecycleMarker(
     markerPath,
     "before-quit",
     readiness.mainPid,
     EXIT_TIMEOUT_MS,
   );
-  const shutdownObservedAt = Date.now();
+  const shutdownStartedAt = beforeQuit.timestampMs;
   const exit = await withTimeout(
     exitResult,
     EXIT_TIMEOUT_MS,
@@ -404,7 +410,7 @@ try {
     packageKind: process.platform === "linux" ? "linux-unpacked" : "unpacked",
     signingState: process.platform === "darwin" ? "ci-ad-hoc-or-local" : "not-recorded",
     launchToRuntimeReadyMs: readinessObservedAt - launchedAt,
-    shutdownToProcessExitMs: Date.now() - shutdownObservedAt,
+    shutdownToProcessExitMs: Date.now() - shutdownStartedAt,
     mainPid: readiness.mainPid,
     runtimePid: readiness.runtimePid,
     generation: readiness.generation,

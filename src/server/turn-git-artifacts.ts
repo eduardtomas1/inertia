@@ -389,6 +389,7 @@ export class TurnGitArtifactManager {
     laterTurnId: string,
     path?: string,
     deadlineAt?: number,
+    signal?: AbortSignal,
   ): Promise<TurnGitDiffSnapshot> {
     if (earlierTurnId === laterTurnId) {
       throw new TurnGitArtifactError("Choose two different turns to compare.");
@@ -411,6 +412,7 @@ export class TurnGitArtifactManager {
       later.afterRef,
       {
         deadlineAt,
+        signal,
         maxBytes: MAX_PATCH_BYTES,
         ...(path ? { paths: [path] } : {}),
       },

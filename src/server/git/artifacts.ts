@@ -186,15 +186,21 @@ export async function compareGitSnapshots(
   afterReference: string,
   options: Pick<
     GitDiffOptions,
-    "deadlineAt" | "maxBytes" | "paths"
+    "deadlineAt" | "maxBytes" | "paths" | "signal"
   > = {},
 ): Promise<GitSnapshotComparison> {
   const root = await repositoryRoot(repositoryPath, {
     deadlineAt: options.deadlineAt,
+    signal: options.signal,
   });
   const beforeRef = validateArtifactRef(beforeReference);
   const afterRef = validateArtifactRef(afterReference);
-  const paths = options.paths ? await validatedPaths(root, options.paths) : [];
+  const paths = options.paths
+    ? await validatedPaths(root, options.paths, {
+        deadlineAt: options.deadlineAt,
+        signal: options.signal,
+      })
+    : [];
   const pathArgs = paths.length > 0 ? ["--", ...paths] : ["--"];
   const maxBytes = boundedInteger(
     options.maxBytes,

@@ -1154,9 +1154,8 @@ export class RemoteAccessService {
     return this.persistence.save(this.requireData());
   }
 
-  private async serializeAuthorityMutation<T>(
-    operation: () => Promise<T>,
-  ): Promise<T> {
+  private async serializeAuthorityMutation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.stopped) throw new Error("Remote Companion is shutting down.");
     const pending = this.authorityMutationTail.then(operation);
     this.authorityMutationTail = pending.then(
       () => undefined,

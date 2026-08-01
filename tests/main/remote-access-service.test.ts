@@ -1541,6 +1541,73 @@ describe("Remote Companion outbound encrypted service", () => {
     });
   });
 
+  it.each(["disable", "revoke", "update"] as const)(
+    "closes %s mutation admission before draining shutdown authority",
+    async (lateOperation) => {
+      const pairing = await pairedDeviceFixture({ scopes: ["view", "prompt"] });
+      pairing.service.setPrivacyLocked(true);
+      const originalBegin = pairing.store.beginAuthorityReduction.bind(
+        pairing.store,
+      );
+      let enterMarker = (): void => undefined;
+      const markerEntered = new Promise<void>((resolve) => {
+        enterMarker = resolve;
+      });
+      let releaseMarker = (): void => undefined;
+      const markerReleased = new Promise<void>((resolve) => {
+        releaseMarker = resolve;
+      });
+      const begin = vi.spyOn(pairing.store, "beginAuthorityReduction")
+        .mockImplementationOnce(async () => {
+          await originalBegin();
+          enterMarker();
+          await markerReleased;
+        });
+      const expiry = new Date(
+        Date.now() + 24 * 60 * 60 * 1_000,
+      ).toISOString();
+
+      const admittedReduction = pairing.service.updateDevice(
+        pairing.deviceId,
+        ["view"],
+        [pairing.projectId],
+        expiry,
+      );
+      await markerEntered;
+      const shutdown = pairing.service.shutdown();
+      const lateMutation = lateOperation === "disable"
+        ? pairing.service.setEnabled(false)
+        : lateOperation === "revoke"
+          ? pairing.service.revokeDevice(pairing.deviceId)
+          : pairing.service.updateDevice(
+              pairing.deviceId,
+              ["view"],
+              [pairing.projectId],
+              expiry,
+            );
+
+      await expect(lateMutation).rejects.toThrow(
+        "Remote Companion is shutting down.",
+      );
+      expect(begin).toHaveBeenCalledTimes(1);
+      releaseMarker();
+      await Promise.all([admittedReduction, shutdown]);
+
+      await expect(
+        pairing.service.revokeDevice(pairing.deviceId),
+      ).rejects.toThrow("Remote Companion is shutting down.");
+      expect(begin).toHaveBeenCalledTimes(1);
+      expect(await pairing.store.load()).toMatchObject({
+        enabled: true,
+        devices: [{
+          id: pairing.deviceId,
+          scopes: ["view"],
+          revokedAt: null,
+        }],
+      });
+    },
+  );
+
   it.each(["revoke", "update"] as const)(
     "blocks session admission while a serialized %s waits for its marker",
     async (operation) => {

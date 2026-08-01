@@ -13,7 +13,6 @@ import {
 import {
   runGit,
   runGitInspection,
-  type RunGitInspectionOptions,
 } from "./runner";
 import { GitError } from "./types";
 
@@ -27,7 +26,29 @@ export function isContained(root: string, target: string): boolean {
     );
 }
 
-async function requireDirectory(path: string): Promise<string> {
+export interface GitPathInspectionOptions {
+  deadlineAt?: number;
+  signal?: AbortSignal;
+}
+
+function requirePathInspectionTime(
+  options: GitPathInspectionOptions,
+): void {
+  if (
+    options.signal?.aborted
+    || (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt)
+  ) {
+    throw new GitError(
+      "timeout",
+      "Git took too long to complete the operation.",
+    );
+  }
+}
+
+async function requireDirectory(
+  path: string,
+  options: GitPathInspectionOptions,
+): Promise<string> {
   if (
     typeof path !== "string"
     || path.length === 0
@@ -37,8 +58,12 @@ async function requireDirectory(path: string): Promise<string> {
     throw new GitError("invalid-input", "The repository path is invalid.");
   }
   try {
+    requirePathInspectionTime(options);
     const canonical = await realpath(resolve(path));
-    if (!(await stat(canonical)).isDirectory()) throw new Error();
+    requirePathInspectionTime(options);
+    const info = await stat(canonical);
+    requirePathInspectionTime(options);
+    if (!info.isDirectory()) throw new Error();
     return canonical;
   } catch (error) {
     if (error instanceof GitError) throw error;
@@ -48,9 +73,10 @@ async function requireDirectory(path: string): Promise<string> {
 
 export async function repositoryRoot(
   repositoryPath: string,
-  options: Pick<RunGitInspectionOptions, "deadlineAt"> = {},
+  options: GitPathInspectionOptions = {},
 ): Promise<string> {
-  const directory = await requireDirectory(repositoryPath);
+  const directory = await requireDirectory(repositoryPath, options);
+  requirePathInspectionTime(options);
   const result = await runGitInspection(
     directory,
     ["rev-parse", "--show-toplevel"],
@@ -68,8 +94,12 @@ export async function repositoryRoot(
     );
   }
   try {
-    return await realpath(reported);
-  } catch {
+    requirePathInspectionTime(options);
+    const canonical = await realpath(reported);
+    requirePathInspectionTime(options);
+    return canonical;
+  } catch (error) {
+    if (error instanceof GitError) throw error;
     throw new GitError(
       "not-repository",
       "The selected folder is not a Git repository.",
@@ -109,7 +139,9 @@ export async function validateBranch(
 export async function validatedPaths(
   root: string,
   paths: readonly string[],
+  options: GitPathInspectionOptions = {},
 ): Promise<string[]> {
+  requirePathInspectionTime(options);
   if (paths.length === 0 || paths.length > MAX_DIFF_FILES) {
     throw new GitError(
       "invalid-input",
@@ -118,6 +150,7 @@ export async function validatedPaths(
   }
   const unique = new Set<string>();
   for (const input of paths) {
+    requirePathInspectionTime(options);
     if (
       typeof input !== "string"
       || input.length === 0
@@ -139,6 +172,7 @@ export async function validatedPaths(
     }
     try {
       const canonical = await realpath(absolute);
+      requirePathInspectionTime(options);
       if (!isContained(root, canonical)) {
         throw new GitError(
           "invalid-input",
@@ -149,8 +183,10 @@ export async function validatedPaths(
       if (error instanceof GitError) throw error;
       let ancestor = absolute;
       while (ancestor !== root) {
+        requirePathInspectionTime(options);
         try {
           const info = await lstat(ancestor);
+          requirePathInspectionTime(options);
           if (info.isSymbolicLink()) {
             throw new GitError(
               "invalid-input",
@@ -160,10 +196,12 @@ export async function validatedPaths(
           break;
         } catch (ancestorError) {
           if (ancestorError instanceof GitError) throw ancestorError;
+          requirePathInspectionTime(options);
           ancestor = resolve(ancestor, "..");
         }
       }
     }
+    requirePathInspectionTime(options);
     unique.add(relative(root, absolute).split(sep).join("/"));
   }
   return [...unique];

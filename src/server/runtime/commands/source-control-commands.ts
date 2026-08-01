@@ -424,7 +424,6 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.turn.compare": {
-        const deadlineAt = Date.now() + GIT_READ_OPERATION_TIMEOUT_MS;
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
@@ -447,12 +446,18 @@ export function createSourceControlCommandHandler(
             "Both Git artifacts must belong to this thread.",
           );
         }
+        const deadlineAt = Date.now() + GIT_READ_OPERATION_TIMEOUT_MS;
+        const deadline = new SourceControlDeadline(deadlineAt, "read");
         try {
-          const diff = await dependencies.turnGitArtifacts.compare(
-            earlier.id,
-            later.id,
-            command.payload.path,
-            deadlineAt,
+          const diff = await deadline.run(
+            async (signal) =>
+              await dependencies.turnGitArtifacts.compare(
+                earlier.id,
+                later.id,
+                command.payload.path,
+                deadlineAt,
+                signal,
+              ),
           );
           dependencies.send(socket, {
             type: "request.result",
@@ -464,6 +469,8 @@ export function createSourceControlCommandHandler(
             throw new RuntimeRequestError(error.message);
           }
           throw error;
+        } finally {
+          deadline.dispose();
         }
         return "handled";
       }

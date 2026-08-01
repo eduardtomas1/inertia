@@ -448,7 +448,7 @@ export class RemoteAccessService {
     }
     const releaseAdmissionBlock = this.sessionAdmissions.blockDevice(validated.id);
     try {
-      this.closeDeviceSessions(validated.id, "revoked", false);
+      this.closeDeviceSessions(validated.id, "permissions-changed", false);
       await this.serializeAuthorityMutation(async () => {
         const current = updateRemoteDeviceGrant({
           data: structuredClone(this.requireData()),
@@ -462,9 +462,9 @@ export class RemoteAccessService {
         if (current.revokedAt) {
           throw new Error("That paired device is already revoked.");
         }
-        this.closeDeviceSessions(current.id, "revoked", false);
+        this.closeDeviceSessions(current.id, "permissions-changed", false);
         await this.persistAuthorityReduction(() => {
-          this.closeDeviceSessions(current.id, "revoked", false);
+          this.closeDeviceSessions(current.id, "permissions-changed", false);
           const device = updateRemoteDeviceGrant({
             data: this.requireData(),
             deviceId,

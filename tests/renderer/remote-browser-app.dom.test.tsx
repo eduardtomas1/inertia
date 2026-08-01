@@ -33,6 +33,10 @@ vi.mock("../../remote/browser/src/remote-client", () => ({
     }
 
     initialize(): Promise<BrowserDeviceProfile | null> {
+      appHarness.callbacks?.status(
+        appHarness.profile ? "Connected." : "Paste an invitation.",
+        appHarness.profile !== null,
+      );
       return Promise.resolve(appHarness.profile);
     }
 
@@ -127,7 +131,14 @@ describe("Remote Companion browser selection boundary", () => {
       generatedAt: now,
       conversation: value,
       messages: [],
-      activities: [],
+      activities: [{
+        id: "activity-1",
+        turnId: null,
+        kind: "status",
+        title: "Reading safely",
+        status: "running",
+        createdAt: now,
+      }],
       subagents: [],
       waitingForLocalAction: false,
     });
@@ -145,7 +156,8 @@ describe("Remote Companion browser selection boundary", () => {
       name: "Conversation B · idle",
     }));
     expect(appHarness.selectConversation).toHaveBeenCalledWith(secondId);
-    expect(screen.queryByLabelText("Text prompt")).toBeNull();
+    expect(screen.getByLabelText("Text prompt").closest("form")).not
+      .toBeVisible();
     expect(screen.queryByRole("button", {
       name: "Send to desktop",
     })).toBeNull();
@@ -167,7 +179,8 @@ describe("Remote Companion browser selection boundary", () => {
     );
 
     appHarness.callbacks!.detail(null);
-    expect(screen.queryByLabelText("Text prompt")).toBeNull();
+    expect(screen.getByLabelText("Text prompt").closest("form")).not
+      .toBeVisible();
     expect(screen.queryByRole("button", {
       name: "Send to desktop",
     })).toBeNull();
@@ -225,7 +238,14 @@ describe("Remote Companion browser selection boundary", () => {
         content: `Agent line ${index}`,
         createdAt: now,
       })),
-      activities: [],
+      activities: [{
+        id: "activity-1",
+        turnId: null,
+        kind: "status",
+        title: "Reading safely",
+        status: "running",
+        createdAt: now,
+      }],
       subagents: [],
       waitingForLocalAction: false,
     });
@@ -241,13 +261,53 @@ describe("Remote Companion browser selection boundary", () => {
     const field = screen.getByLabelText("Text prompt") as HTMLTextAreaElement;
     field.focus();
     fireEvent.change(field, { target: { value: "Half typed prompt" } });
+    field.setSelectionRange(5, 10);
+    const navigationNode = screen.getByRole("button", {
+      name: "Conversation A · idle",
+    });
+    const firstMessage = document.querySelector(
+      '[data-remote-key="message:message-0"]',
+    );
+    const transcript = document.querySelector<HTMLElement>(".transcript")!;
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 200 },
+    });
+    transcript.scrollTop = 300;
+    const activityDisclosure = screen.getByText("Safe workstream (1)")
+      .closest("details")!;
+    activityDisclosure.open = true;
 
     appHarness.callbacks!.shell(shell);
     appHarness.callbacks!.detail(detail(2));
 
     const refreshed = screen.getByLabelText("Text prompt") as HTMLTextAreaElement;
+    expect(refreshed).toBe(field);
     expect(refreshed.value).toBe("Half typed prompt");
     expect(document.activeElement).toBe(refreshed);
+    expect(refreshed.selectionStart).toBe(5);
+    expect(refreshed.selectionEnd).toBe(10);
+    expect(screen.getByRole("button", {
+      name: "Conversation A · idle",
+    })).toBe(navigationNode);
+    expect(document.querySelector(
+      '[data-remote-key="message:message-0"]',
+    )).toBe(firstMessage);
+    expect(screen.getByText("Safe workstream (1)").closest("details"))
+      .toBe(activityDisclosure);
+    expect(activityDisclosure.open).toBe(true);
+    expect(transcript.scrollTop).toBe(300);
+
+    appHarness.callbacks!.status("The desktop is offline.", false);
+    expect(screen.getByText(/Showing cached desktop data/u)).toBeVisible();
+    expect(screen.getByText(/Cached · last updated/u)).toBeVisible();
+    expect(screen.getByRole("button", {
+      name: "Conversation A · idle",
+    })).toBe(navigationNode);
+    expect(refreshed).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Offline" })).toBeDisabled();
+    appHarness.callbacks!.status("Connected.", true);
+    expect(refreshed).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", {
       name: "Send to desktop",

@@ -99,6 +99,63 @@ function conversationFixture(projectId: string, now: string): Conversation {
 }
 
 describe("Remote Companion browser output boundary", () => {
+  it("shows an actionable initial-state error and recovers", async () => {
+    const now = new Date().toISOString();
+    const getRemoteAccessState = vi.fn()
+      .mockRejectedValueOnce(new Error("Remote state failed to load."))
+      .mockResolvedValueOnce(pendingState(now));
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState,
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+      },
+    });
+
+    render(<RemoteAccessSettings projects={[]} conversations={[]} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Remote state failed to load.",
+    );
+    screen.getByRole("button", { name: "Retry" }).click();
+    expect(await screen.findByRole("heading", {
+      name: "Remote Companion",
+    })).toBeVisible();
+    expect(getRemoteAccessState).toHaveBeenCalledTimes(2);
+  });
+
+  it("serializes invitation creation through the busy mutation boundary", async () => {
+    const now = new Date().toISOString();
+    const state = pendingState(now);
+    state.pendingPairings = [];
+    let finishCreation = (): void => undefined;
+    const creation = new Promise<unknown>((resolveCreation) => {
+      finishCreation = () => resolveCreation(undefined);
+    });
+    const createRemotePairingInvitation = vi.fn(() => creation);
+    const getRemoteAccessState = vi.fn(async () => state);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState,
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+        createRemotePairingInvitation,
+      },
+    });
+
+    render(<RemoteAccessSettings projects={[]} conversations={[]} />);
+    const create = await screen.findByRole("button", {
+      name: "Create pairing invitation",
+    });
+    create.click();
+    create.click();
+    expect(createRemotePairingInvitation).toHaveBeenCalledOnce();
+    await waitFor(() => expect(create).toBeDisabled());
+
+    finishCreation();
+    await screen.findByText("Invitation created. It expires in five minutes.");
+    expect(getRemoteAccessState).toHaveBeenCalledTimes(2);
+  });
+
   it("lets visible conversations replace stale grants at the project limit", () => {
     const now = new Date().toISOString();
     const project = projectFixture(crypto.randomUUID(), now);

@@ -140,7 +140,7 @@ export interface WorkspaceSceneActions {
 export interface WorkspaceSceneModelInput {
   view: "workspace" | "settings";
   settingsTarget: {
-    section: "providers" | "backends";
+    section: "providers" | "backends" | "remote";
     profileId?: string;
   } | null;
   settings: AppSettings;

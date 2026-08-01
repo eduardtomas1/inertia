@@ -192,6 +192,7 @@ const sessionCloseFrameSchema = z.object({
     "disabled",
     "expired",
     "revoked",
+    "permissions-changed",
     "replay",
     "rate-limited",
     "protocol-error",

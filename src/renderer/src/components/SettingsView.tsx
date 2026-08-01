@@ -54,7 +54,7 @@ import { RemoteAccessSettings } from "./RemoteAccessSettings";
 
 type SettingsViewProps = {
   target?: {
-    section: "providers" | "backends";
+    section: "providers" | "backends" | "remote";
     profileId?: string;
   } | null;
   settings: AppSettings;

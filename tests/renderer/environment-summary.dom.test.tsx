@@ -40,9 +40,13 @@ const project: Project = {
 function HeaderHarness({
   activeProject = null,
   workspaceToolsUnavailableReason = null,
+  onOpenSettings = vi.fn(),
+  onOpenRemoteSettings = vi.fn(),
 }: {
   activeProject?: Project | null;
   workspaceToolsUnavailableReason?: string | null;
+  onOpenSettings?: () => void;
+  onOpenRemoteSettings?: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(true);
   return (
@@ -68,7 +72,8 @@ function HeaderHarness({
         workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
         onSetEnvironmentOpen={setOpen}
         onCycleTheme={vi.fn()}
-        onOpenSettings={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        onOpenRemoteSettings={onOpenRemoteSettings}
         onOpenProject={vi.fn()}
         onRefreshBranches={vi.fn()}
         onSwitchBranch={vi.fn()}
@@ -120,6 +125,44 @@ describe("environment summary header popover", () => {
     expect(screen.getByRole("button", {
       name: "Open environment summary",
     })).toHaveFocus();
+  });
+
+  it("routes the Remote indicator directly to Remote Companion settings", async () => {
+    const onOpenSettings = vi.fn();
+    const onOpenRemoteSettings = vi.fn();
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => ({
+          available: true,
+          enabled: true,
+          relayUrl: "wss://relay.example/remote",
+          connection: "online",
+          connectionMessage: null,
+          activeSessions: 0,
+          devices: [],
+          pendingPairings: [],
+          invitation: null,
+          audit: [],
+        })),
+        onRemoteAccessState: vi.fn(() => vi.fn()),
+      },
+    });
+    try {
+      render(<HeaderHarness
+        activeProject={project}
+        onOpenSettings={onOpenSettings}
+        onOpenRemoteSettings={onOpenRemoteSettings}
+      />);
+      const indicator = await screen.findByRole("button", {
+        name: "Remote Companion online",
+      });
+      indicator.click();
+      expect(onOpenRemoteSettings).toHaveBeenCalledOnce();
+      expect(onOpenSettings).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(window, "inertia");
+    }
   });
 
   it("closes when the user clicks outside", async () => {

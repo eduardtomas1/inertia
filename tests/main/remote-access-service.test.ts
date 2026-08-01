@@ -2285,7 +2285,7 @@ describe("Remote Companion outbound encrypted service", () => {
     );
     expect(await reducedClose).toMatchObject({
       kind: "session.close",
-      reason: "revoked",
+      reason: "permissions-changed",
     });
     const reduced = await openAuthenticatedSession({
       relayUrl,

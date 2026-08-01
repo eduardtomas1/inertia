@@ -1,15 +1,21 @@
-import { _electron as electron, expect, test } from "@playwright/test";
+import {
+  _electron as electron,
+  expect,
+  test,
+  type Page,
+} from "@playwright/test";
 import {
   createServer,
   type IncomingMessage,
   type Server,
   type ServerResponse,
 } from "node:http";
-import { readFile } from "node:fs/promises";
-import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { once } from "node:events";
 
-import { WebSocket } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 
 import {
   createReferenceRelay,
@@ -73,10 +79,8 @@ test.afterAll(async () => {
 });
 
 test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
-  const electronApp = await electron.launch({
-    args: [resolve("tests/fixtures/remote-browser-electron.cjs"), staticUrl],
-  });
-  const page = await electronApp.firstWindow();
+  const browser = await launchRemoteBrowser();
+  const { page } = browser;
   const hostKeys = await generateRemoteKeyPair();
   const invitation: RemotePairingInvitation = {
     protocolVersion: 2,
@@ -290,11 +294,9 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         protocolVersion: 2,
         kind: "session.close",
         sessionId,
-        reason: "revoked",
+        reason: "permissions-changed",
       },
     }));
-    await expect(page.getByText(/closed the session/u)).toBeVisible();
-    await page.getByRole("button", { name: "Reconnect" }).click();
     const reducedMessage = await reducedSessionPromise;
     if (
       reducedMessage.type !== "relay.frame"
@@ -377,70 +379,226 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
       return profile;
     })).toMatchObject({ grantVersion: 2, scopes: ["view"] });
 
-    await page.evaluate(async () => {
-      const otherKeys = await crypto.subtle.generateKey(
-        { name: "ECDH", namedCurve: "P-256" },
-        false,
-        ["deriveBits"],
-      ) as CryptoKeyPair;
-      const raw = new Uint8Array(
-        await crypto.subtle.exportKey("raw", otherKeys.publicKey),
-      );
-      let binary = "";
-      for (const byte of raw) binary += String.fromCharCode(byte);
-      const mismatchedPublicKey = btoa(binary)
-        .replaceAll("+", "-")
-        .replaceAll("/", "_")
-        .replace(/=+$/u, "");
-      const db = await new Promise<IDBDatabase>((resolveDatabase, reject) => {
-        const opening = indexedDB.open("inertia-remote-companion", 1);
-        opening.onsuccess = () => resolveDatabase(opening.result);
-        opening.onerror = () => reject(opening.error);
-      });
-      await new Promise<void>((resolveWrite, reject) => {
-        const transaction = db.transaction("device", "readwrite");
-        const store = transaction.objectStore("device");
-        const request = store.get("active-sealed");
-        request.onsuccess = () => {
-          store.put({
-            ...(request.result as Record<string, unknown>),
-            publicKey: mismatchedPublicKey,
-          }, "active-sealed");
-        };
-        request.onerror = () => reject(request.error);
-        transaction.oncomplete = () => resolveWrite();
-        transaction.onerror = () => reject(transaction.error);
-      });
-      db.close();
-    });
-    await page.reload();
-    await expect(page.getByText(
-      "The stored Remote Companion profile was invalid and has been cleared.",
-    )).toBeVisible();
+    desktop.send(JSON.stringify({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId: reducedMessage.connectionId,
+      frame: {
+        protocolVersion: 2,
+        kind: "session.close",
+        sessionId: reducedOpen.sessionId,
+        reason: "revoked",
+      },
+    }));
+    await expect(page.getByText(/revoked on the desktop/u)).toBeVisible();
     await expect(page.getByRole("heading", {
       name: "Pair this browser",
     })).toBeVisible();
   } finally {
-    await electronApp.close();
+    await browser.close();
   }
 });
+
+test("stops automatic retries on a terminal relay protocol mismatch", async () => {
+  const mismatchRelay = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(mismatchRelay, "listening");
+  const address = mismatchRelay.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Mismatch relay did not bind.");
+  }
+  let connections = 0;
+  mismatchRelay.on("connection", (socket) => {
+    connections += 1;
+    socket.once("message", () => {
+      socket.send(JSON.stringify({
+        protocolVersion: 99,
+        type: "relay.connected",
+        connectionId: crypto.randomUUID(),
+      }));
+    });
+  });
+  const hostKeys = await generateRemoteKeyPair();
+  const browser = await launchRemoteBrowser();
+  const { page } = browser;
+  try {
+    await seedBrowserProfile(page, {
+      hostPublicKey: hostKeys.publicKey,
+      relayUrl: `ws://127.0.0.1:${address.port}/remote`,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    connections = 0;
+    await page.reload();
+    await expect(page.getByText(/incompatible Remote Companion protocol/u))
+      .toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry connection" }))
+      .toBeVisible();
+    const terminalConnectionCount = connections;
+    await page.waitForTimeout(2_000);
+    expect(connections).toBe(terminalConnectionCount);
+  } finally {
+    await browser.close();
+    await new Promise<void>((resolveClose) => mismatchRelay.close(() => resolveClose()));
+  }
+});
+
+test("expires a browser grant while a real socket attempt is in flight", async () => {
+  const silentRelay = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(silentRelay, "listening");
+  const address = silentRelay.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Silent relay did not bind.");
+  }
+  const hostKeys = await generateRemoteKeyPair();
+  const browser = await launchRemoteBrowser();
+  const { page } = browser;
+  try {
+    await seedBrowserProfile(page, {
+      hostPublicKey: hostKeys.publicKey,
+      relayUrl: `ws://127.0.0.1:${address.port}/remote`,
+      expiresAt: new Date(Date.now() + 1_000).toISOString(),
+    });
+    await page.reload();
+    await expect(page.getByText("This device grant expired. Pair it again."))
+      .toBeVisible();
+    await expect(page.getByRole("heading", { name: "Pair this browser" }))
+      .toBeVisible();
+  } finally {
+    await browser.close();
+    await new Promise<void>((resolveClose) => silentRelay.close(() => resolveClose()));
+  }
+});
+
+async function launchRemoteBrowser(): Promise<{
+  electronApp: Awaited<ReturnType<typeof electron.launch>>;
+  page: Page;
+  close(): Promise<void>;
+}> {
+  const userDataDir = await mkdtemp(join(tmpdir(), "inertia-remote-e2e-"));
+  try {
+    const electronApp = await electron.launch({
+      args: [
+        resolve("tests/fixtures/remote-browser-electron.cjs"),
+        staticUrl,
+        userDataDir,
+      ],
+    });
+    const page = await electronApp.firstWindow();
+    return {
+      electronApp,
+      page,
+      close: async () => {
+        await electronApp.close();
+        await rm(userDataDir, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    await rm(userDataDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function seedBrowserProfile(
+  page: Page,
+  input: {
+    hostPublicKey: string;
+    relayUrl: string;
+    expiresAt: string;
+    hostId?: string;
+    deviceId?: string;
+    endpointId?: string;
+    scopes?: Array<"view" | "prompt">;
+  },
+): Promise<{
+  hostId: string;
+  deviceId: string;
+  endpointId: string;
+  publicKey: string;
+  expiresAt: string;
+}> {
+  return await page.evaluate(async ({
+    hostPublicKey,
+    relayUrl: url,
+    expiresAt,
+    hostId: requestedHostId,
+    deviceId: requestedDeviceId,
+    endpointId: requestedEndpointId,
+    scopes,
+  }) => {
+    const keys = await crypto.subtle.generateKey(
+      { name: "ECDH", namedCurve: "P-256" },
+      false,
+      ["deriveBits"],
+    ) as CryptoKeyPair;
+    const raw = new Uint8Array(
+      await crypto.subtle.exportKey("raw", keys.publicKey),
+    );
+    let binary = "";
+    for (const byte of raw) binary += String.fromCharCode(byte);
+    const publicKey = btoa(binary)
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replace(/=+$/u, "");
+    const hostId = requestedHostId ?? crypto.randomUUID();
+    const deviceId = requestedDeviceId ?? crypto.randomUUID();
+    const endpointId = requestedEndpointId ?? "lifecycle_endpoint";
+    const db = await new Promise<IDBDatabase>((resolveDatabase, reject) => {
+      const opening = indexedDB.open("inertia-remote-companion", 1);
+      opening.onupgradeneeded = () => {
+        opening.result.createObjectStore("device");
+      };
+      opening.onsuccess = () => resolveDatabase(opening.result);
+      opening.onerror = () => reject(opening.error);
+    });
+    await new Promise<void>((resolveWrite, reject) => {
+      const transaction = db.transaction("device", "readwrite");
+      transaction.objectStore("device").put({
+        version: 2,
+        deviceId,
+        deviceLabel: "Lifecycle browser",
+        publicKey,
+        privateKey: keys.privateKey,
+        lastUsedAt: new Date().toISOString(),
+        hostId,
+        hostPublicKey,
+        relayUrl: url,
+        endpointId,
+        scopes: scopes ?? ["view"],
+        projectIds: ["safe-project"],
+        grantVersion: 1,
+        expiresAt,
+      }, "active-sealed");
+      transaction.oncomplete = () => resolveWrite();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    db.close();
+    return { hostId, deviceId, endpointId, publicKey, expiresAt };
+  }, input);
+}
 
 async function nextDesktopMessage(
   accept: (message: Record<string, unknown>) => boolean,
 ): Promise<Record<string, unknown>> {
+  return await nextSocketMessage(desktop, accept);
+}
+
+async function nextSocketMessage(
+  socket: WebSocket,
+  accept: (message: Record<string, unknown>) => boolean,
+): Promise<Record<string, unknown>> {
   return await new Promise((resolveMessage, reject) => {
     const timer = setTimeout(() => {
-      desktop.off("message", onMessage);
+      socket.off("message", onMessage);
       reject(new Error("Desktop relay message timed out."));
-    }, 5_000);
+    }, 15_000);
     const onMessage = (raw: WebSocket.RawData): void => {
       const message = JSON.parse(raw.toString()) as Record<string, unknown>;
       if (!accept(message)) return;
       clearTimeout(timer);
-      desktop.off("message", onMessage);
+      socket.off("message", onMessage);
       resolveMessage(message);
     };
-    desktop.on("message", onMessage);
+    socket.on("message", onMessage);
   });
 }
 

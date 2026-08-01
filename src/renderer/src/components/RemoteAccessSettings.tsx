@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, RadioTower, ShieldCheck, Trash2 } from "lucide-react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -26,7 +26,8 @@ export function RemoteAccessSettings({
   projects: Project[];
   conversations: Conversation[];
 }): React.JSX.Element {
-  const liveState = useRemoteAccessState();
+  const remoteLoad = useRemoteAccessState();
+  const liveState = remoteLoad.status === "ready" ? remoteLoad.state : null;
   const [state, setState] = useState<RemoteAccessState | null>(null);
   const [relayUrl, setRelayUrl] = useState("");
   const [prompting, setPrompting] = useState(false);
@@ -35,6 +36,7 @@ export function RemoteAccessSettings({
   const [grantDays, setGrantDays] = useState(30);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const current = liveState ?? state;
   const selectedGrants = useMemo(() => {
     const selectedProjects = new Set(projectIds);
@@ -60,7 +62,8 @@ export function RemoteAccessSettings({
     operation: () => Promise<RemoteAccessState>,
     success: string,
   ): Promise<void> => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setStatus(null);
     try {
@@ -70,11 +73,26 @@ export function RemoteAccessSettings({
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Remote Companion could not be updated.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
   if (!current) {
+    if (remoteLoad.status === "error") {
+      return (
+        <div className="settings-empty-state" role="alert">
+          <p>{remoteLoad.error}</p>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={remoteLoad.retry}
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
     return <div className="settings-empty-state">Loading Remote Companion…</div>;
   }
 
@@ -141,9 +159,12 @@ export function RemoteAccessSettings({
               className="secondary-button"
               disabled={busy || !current.enabled || current.connection !== "online"}
               onClick={() => {
-                void window.inertia.createRemotePairingInvitation().then(
-                  () => setStatus("Invitation created. It expires in five minutes."),
-                  (error: unknown) => setStatus(error instanceof Error ? error.message : "Invitation creation failed."),
+                void mutate(
+                  async () => {
+                    await window.inertia.createRemotePairingInvitation();
+                    return await window.inertia.getRemoteAccessState();
+                  },
+                  "Invitation created. It expires in five minutes.",
                 );
               }}
             >

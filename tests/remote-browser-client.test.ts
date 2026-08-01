@@ -93,7 +93,7 @@ afterEach(() => {
 });
 
 describe("Remote Companion browser connection ownership", () => {
-  it("lets only the newest overlapping connect attempt own the session", async () => {
+  it("coalesces overlapping connect requests into one owned attempt", async () => {
     vi.stubGlobal("WebSocket", FakeBrowserSocket);
     const deviceKeys = await generateNonExtractableDeviceKeys();
     const hostKeys = await generateRemoteKeyPair();
@@ -127,31 +127,25 @@ describe("Remote Companion browser connection ownership", () => {
     const firstAttempt = client.connect();
     const first = FakeBrowserSocket.instances[0]!;
     const secondAttempt = client.connect();
-    const second = FakeBrowserSocket.instances[1]!;
-    expect(first.closeCalls).toHaveLength(1);
+    expect(FakeBrowserSocket.instances).toHaveLength(1);
+    expect(first.closeCalls).toHaveLength(0);
 
     first.open();
-    second.open();
-    await vi.waitFor(() => expect(second.sent).toHaveLength(1));
-    second.message({
+    await vi.waitFor(() => expect(first.sent).toHaveLength(1));
+    first.message({
       protocolVersion: 2,
       type: "relay.connected",
       connectionId: crypto.randomUUID(),
     });
-    await vi.waitFor(() => expect(second.sent).toHaveLength(2));
-    expect(
-      (client as unknown as { socket: WebSocket | null }).socket,
-    ).toBe(second);
-
-    const thirdAttempt = client.connect();
-    const third = FakeBrowserSocket.instances[2]!;
-    expect(second.closeCalls).toHaveLength(1);
+    await vi.waitFor(() => expect(first.sent).toHaveLength(2));
     (
-      client as unknown as { disconnect(message: string): void }
-    ).disconnect("cleanup");
-    expect(third.closeCalls).toHaveLength(1);
-    await Promise.all([firstAttempt, secondAttempt, thirdAttempt]);
-    expect(statuses.at(-1)).toBe("cleanup");
+      client as unknown as {
+        supervisor: { stop(message: string): void };
+      }
+    ).supervisor.stop("cleanup");
+    expect(first.closeCalls).toHaveLength(1);
+    await Promise.all([firstAttempt, secondAttempt]);
+    expect(statuses).toContain("Connecting to the desktop…");
   });
 
   it("drops queued sends instead of sealing them onto a newer session", async () => {
@@ -359,9 +353,14 @@ describe("Remote Companion browser connection ownership", () => {
 
     await (
       client as unknown as {
-        handleMessage(socket: WebSocket, raw: unknown): Promise<void>;
+        handleMessage(
+          generation: number,
+          socket: WebSocket,
+          raw: unknown,
+        ): Promise<void>;
       }
     ).handleMessage(
+      0,
       socket as unknown as WebSocket,
       "x".repeat(REMOTE_LIMITS.relayEnvelopeBytes + 1),
     );
@@ -516,6 +515,39 @@ describe("Remote Companion browser connection ownership", () => {
       conversationId: selectedId,
       content: "current target",
     });
+  });
+
+  it("never replays a prompt after uncertain transport delivery", async () => {
+    const promptResult = vi.fn();
+    const request = vi.fn(async (_value: RemoteRequest) => {
+      throw new Error("socket closed after send");
+    });
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult,
+    });
+    const conversationId = crypto.randomUUID();
+    Object.assign(client as unknown as Record<string, unknown>, {
+      sender: {},
+      request,
+      selectedConversationId: conversationId,
+    });
+
+    await expect(client.sendPrompt(conversationId, "One shot")).resolves
+      .toBe(false);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      type: "prompt.send",
+      conversationId,
+      content: "One shot",
+    });
+    expect(promptResult).toHaveBeenLastCalledWith(
+      "Delivery is uncertain. The prompt was not retried.",
+      true,
+    );
   });
 
   it("clears current detail when the conversation is archived", async () => {

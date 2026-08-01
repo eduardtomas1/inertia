@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type {
   ChatAttachment,
@@ -53,7 +53,7 @@ import {
   type ComposerPrefillDetail,
 } from "../../utils/composerPrefill";
 
-export function Composer({
+export const Composer = memo(function Composer({
   conversation,
   providers,
   actions,
@@ -127,6 +127,9 @@ export function Composer({
   } | null>(null);
   const [creatingRouteConversation, setCreatingRouteConversation] = useState(false);
   const [routeRepairing, setRouteRepairing] = useState(false);
+  const [conversationUpdatePending, setConversationUpdatePending] = useState(false);
+  const [conversationUpdateError, setConversationUpdateError] = useState<string | null>(null);
+  const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null);
@@ -223,6 +226,9 @@ export function Composer({
     setPendingRoute(null);
     setCreatingRouteConversation(false);
     setRouteRepairing(false);
+    conversationUpdateSequenceRef.current += 1;
+    setConversationUpdatePending(false);
+    setConversationUpdateError(null);
     dismissMenu("context-change");
   }, [conversation.id, dismissMenu, onReleaseAttachment]);
 
@@ -635,15 +641,39 @@ export function Composer({
   const submissionPending = primaryAction === "submitting";
   const followUpPending = followUpState === "pending";
   const reasoningLabel = selectedModel?.reasoningOptions.find(({ value }) => value === selectedReasoning)?.label ?? "Provider default";
+  const updateConversation = async (
+    update: Parameters<ComposerProps["onUpdateConversation"]>[0],
+  ): Promise<void> => {
+    const sequence = conversationUpdateSequenceRef.current + 1;
+    conversationUpdateSequenceRef.current = sequence;
+    setConversationUpdatePending(true);
+    setConversationUpdateError(null);
+    try {
+      await onUpdateConversation(update);
+    } catch (error) {
+      if (mountedRef.current && conversationUpdateSequenceRef.current === sequence) {
+        setConversationUpdateError(
+          error instanceof Error
+            ? error.message
+            : "The conversation setting could not be updated.",
+        );
+      }
+      throw error;
+    } finally {
+      if (mountedRef.current && conversationUpdateSequenceRef.current === sequence) {
+        setConversationUpdatePending(false);
+      }
+    }
+  };
   const updateReasoningEffort = (reasoningEffort: string): void => {
-    onUpdateConversation(kimiSelection
+    void updateConversation(kimiSelection
       ? {
           modelSelection: {
             ...conversation.modelSelection,
             reasoningEffort,
           },
         }
-      : { reasoningEffort });
+      : { reasoningEffort }).catch(() => undefined);
   };
   const modelRoutes = useMemo(() => buildComposerModelRoutes(
     providers,
@@ -677,10 +707,10 @@ export function Composer({
     }
     const providerId = route.providerId
       ?? legacyProviderIdForHarness(route.selection.harnessId);
-    onUpdateConversation({
+    void updateConversation({
       ...(providerId ? { providerId } : {}),
       modelSelection: transition.selection,
-    });
+    }).catch(() => undefined);
   };
   const updatePromptStash = (
     update: (current: readonly PromptStashEntry[]) => PromptStashEntry[],
@@ -743,16 +773,22 @@ export function Composer({
         ref={composerRef}
         className={clsx("composer", menu && "has-open-menu")}
         aria-label="Message composer"
-        aria-busy={submissionPending || followUpPending || running || stopping}
+        aria-busy={
+          submissionPending
+          || followUpPending
+          || running
+          || stopping
+          || conversationUpdatePending
+        }
         data-primary-action={primaryAction}
-        data-disabled={disabled}
+        data-disabled={disabled || conversationUpdatePending}
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
         onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}
       >
         <ComposerInputZone
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}
-          disabled={disabled}
+          disabled={disabled || conversationUpdatePending}
           onRunRouteRepair={runRouteRepair}
           promptContext={promptContext}
           onClearPromptContext={clearPromptContext}
@@ -785,11 +821,11 @@ export function Composer({
           mentionResults={mentionResults}
           onAddFileReference={addFileReference}
           slashMatch={slashMatch}
-          onUpdateConversation={onUpdateConversation}
+          onUpdateConversation={updateConversation}
         />
         <ComposerToolbar
           actions={actions}
-          disabled={disabled}
+          disabled={disabled || conversationUpdatePending}
           running={running}
           attachmentCount={attachments.length}
           onChooseAttachments={chooseAttachments}
@@ -837,7 +873,9 @@ export function Composer({
           reasoningLabel={reasoningLabel}
           onUpdateReasoningEffort={updateReasoningEffort}
           conversation={conversation}
-          onUpdateConversation={onUpdateConversation}
+          onUpdateConversation={updateConversation}
+          conversationUpdatePending={conversationUpdatePending}
+          conversationUpdateError={conversationUpdateError}
           menuController={menuController}
           selectedProvider={selectedProvider}
           selectedBackendProfile={selectedBackendProfile}
@@ -854,4 +892,4 @@ export function Composer({
       </section>
     </div>
   );
-}
+});

@@ -87,6 +87,7 @@ export class RemoteAccessService {
   private readonly sessionAdmissions: RemoteSessionAdmissions;
   private readonly relayMessages: RemoteRelayDispatcher;
   private readonly requests: RemoteRequestDispatcher;
+  private authorityMutationTail: Promise<void> = Promise.resolve();
   private readonly pairingRequestIds = new Set<string>();
   private pairingAttemptTimes: number[] = [];
   private readonly sessionAuthenticationBudget =
@@ -169,7 +170,8 @@ export class RemoteAccessService {
       audit: (type, deviceId, detail) => this.audit(type, deviceId, detail),
       isCurrent: (session) => this.sessionRetainsAuthority(session),
       authorizePromptCommit: (session) =>
-        remoteSessionCanCommitPrompt(this.sessionAuthority(session)),
+        !this.sessionAdmissions.isDeviceBlocked(session.device.id)
+        && remoteSessionCanCommitPrompt(this.sessionAuthority(session)),
       respond: async (session, response) => await this.respond(session, response),
     });
   }
@@ -214,39 +216,47 @@ export class RemoteAccessService {
     const normalizedRelay = relayUrl === undefined
       ? undefined
       : validateRemoteRelayUrl(relayUrl);
-    if (!enabled && !this.data) return;
-    const data = this.data ?? await this.initializeIdentity(
-      normalizedRelay ?? DEFAULT_REMOTE_RELAY_URL,
-    );
-    if (normalizedRelay !== undefined) data.relayUrl = normalizedRelay;
     if (!enabled) {
-      const changed = data.enabled;
-      data.enabled = false;
-      if (changed) {
-        this.audit(
-          "remote.disabled",
-          null,
-          "Remote Companion disabled.",
-        );
+      this.disableLiveRemoteAccess();
+    }
+    await this.serializeAuthorityMutation(async () => {
+      if (!enabled && !this.data) return;
+      const data = this.data ?? await this.initializeIdentity(
+        normalizedRelay ?? DEFAULT_REMOTE_RELAY_URL,
+      );
+      if (!enabled) {
+        this.disableLiveRemoteAccess();
+        if (!data.enabled) {
+          if (normalizedRelay !== undefined) data.relayUrl = normalizedRelay;
+          await this.persist();
+          this.emitState();
+          return;
+        }
+        await this.persistAuthorityReduction(() => {
+          this.disableLiveRemoteAccess();
+          if (normalizedRelay !== undefined) data.relayUrl = normalizedRelay;
+          data.enabled = false;
+          this.audit(
+            "remote.disabled",
+            null,
+            "Remote Companion disabled.",
+          );
+        });
+        this.emitState();
+        return;
       }
-      this.invitation = null;
-      const socket = this.disconnect("disabled", false, false);
-      terminateRemoteSocket(socket);
-      this.forgetRemoteTranscripts();
+      if (normalizedRelay !== undefined) data.relayUrl = normalizedRelay;
+      if (data.enabled) {
+        await this.persist();
+        if (!this.socket) this.connect();
+        return;
+      }
+      data.enabled = true;
+      this.audit("remote.enabled", null, "Remote Companion enabled.");
       await this.persist();
+      this.connect();
       this.emitState();
-      return;
-    }
-    if (data.enabled) {
-      await this.persist();
-      if (!this.socket) this.connect();
-      return;
-    }
-    data.enabled = true;
-    this.audit("remote.enabled", null, "Remote Companion enabled.");
-    await this.persist();
-    this.connect();
-    this.emitState();
+    });
   }
 
   async createInvitation(): Promise<RemotePairingInvitation> {
@@ -284,51 +294,85 @@ export class RemoteAccessService {
       this.pendingPairings.delete(requestId);
       throw new Error("That pairing request expired.");
     }
-    const devicePublicKey = await importRemotePublicKey(
-      pending.payload.devicePublicKey,
-    );
-    if (
-      this.pendingPairings.get(requestId) !== pending
-      || !this.relayMessages.owns(
+    const releaseAdmissionBlock = this.sessionAdmissions.blockDevice(pending.payload.deviceId);
+    try {
+      const devicePublicKey = await importRemotePublicKey(pending.payload.devicePublicKey);
+      if (!this.pairingIsCurrent(requestId, pending)) {
+        throw new Error("That pairing request is no longer pending.");
+      }
+      const { device, replaced } = await this.serializeAuthorityMutation(
+        async () => {
+          if (!this.pairingIsCurrent(requestId, pending)) {
+            throw new Error("That pairing request is no longer pending.");
+          }
+          const currentData = this.requireData();
+          const replacing = currentData.devices.some(
+            ({ id, revokedAt }) => id === pending.payload.deviceId && !revokedAt,
+          );
+          if (replacing) {
+            this.closeDeviceSessions(pending.payload.deviceId, "revoked", false);
+            return await this.persistAuthorityReduction(
+              () => {
+                const applied = applyRemotePairingGrant({
+                  data: currentData,
+                  pending,
+                  scopes,
+                  projectIds,
+                  grants,
+                  grantMs,
+                  now: this.now(),
+                });
+                this.pendingPairings.delete(requestId);
+                this.audit(
+                  "pairing.accepted",
+                  applied.device.id,
+                  "A device was paired.",
+                );
+                return applied;
+              },
+              () => this.pairingIsCurrent(requestId, pending),
+            );
+          }
+          const applied = applyRemotePairingGrant({
+            data: currentData,
+            pending,
+            scopes,
+            projectIds,
+            grants,
+            grantMs,
+            now: this.now(),
+          });
+          this.pendingPairings.delete(requestId);
+          this.audit(
+            "pairing.accepted",
+            applied.device.id,
+            "A device was paired.",
+          );
+          await this.persist();
+          return applied;
+        },
+      );
+      if (replaced) this.closeDeviceSessions(device.id, "revoked", false);
+      const frame = await sealPairingResponse(
+        this.requireHostKeyPair(), devicePublicKey, requestId, {
+          type: "pair.accepted",
+          requestId,
+          deviceId: device.id,
+          hostId: data.hostId,
+          scopes: device.scopes,
+          projectIds: device.projectIds,
+          expiresAt: device.expiresAt,
+          grantVersion: device.grantVersion,
+        },
+      );
+      if (this.relayMessages.owns(
         pending.connectionId,
         pending.connectionEpoch,
-      )
-      || Date.parse(pending.expiresAt) <= this.now().getTime()
-    ) {
-      throw new Error("That pairing request is no longer pending.");
-    }
-    const { device, replaced } = applyRemotePairingGrant({
-      data,
-      pending,
-      scopes,
-      projectIds,
-      grants,
-      grantMs,
-      now: this.now(),
-    });
-    this.pendingPairings.delete(requestId);
-    this.audit("pairing.accepted", device.id, "A device was paired.");
-    await this.persist();
-    if (replaced) this.closeDeviceSessions(device.id, "revoked", false);
-    const frame = await sealPairingResponse(
-      this.requireHostKeyPair(),
-      devicePublicKey,
-      requestId,
-      {
-        type: "pair.accepted",
-        requestId,
-        deviceId: device.id,
-        hostId: data.hostId,
-        scopes: device.scopes,
-        projectIds: device.projectIds,
-        expiresAt: device.expiresAt,
-        grantVersion: device.grantVersion,
-      },
-    );
-    if (this.relayMessages.owns(pending.connectionId, pending.connectionEpoch)) {
-      this.sendFrame(pending.connectionId, frame);
-    }
-    this.emitState();
+      )) {
+        this.sendFrame(pending.connectionId, frame);
+      }
+      this.emitState();
+    } finally { releaseAdmissionBlock(); }
   }
 
   async denyPairing(requestId: string): Promise<void> {
@@ -352,18 +396,36 @@ export class RemoteAccessService {
   }
 
   async revokeDevice(deviceId: string): Promise<void> {
-    const device = revokeRemoteDevice(
-      this.requireData(),
-      deviceId,
-      this.now(),
-    );
-    if (!device) return;
-    this.audit("device.revoked", device.id, "A paired device was revoked.");
-    this.closeDeviceSessions(device.id, "revoked", false);
-    await this.persist();
-    this.emitState();
+    const data = this.requireData();
+    const current = data.devices.find(({ id }) => id === deviceId);
+    if (!current) throw new Error("That paired device was not found.");
+    if (current.revokedAt) return;
+    const releaseAdmissionBlock = this.sessionAdmissions.blockDevice(current.id);
+    try {
+      this.closeDeviceSessions(current.id, "revoked", false);
+      await this.serializeAuthorityMutation(async () => {
+        const durableDevice = this.requireData().devices.find(
+          ({ id }) => id === deviceId,
+        );
+        if (!durableDevice) throw new Error("That paired device was not found.");
+        if (durableDevice.revokedAt) return;
+        this.closeDeviceSessions(durableDevice.id, "revoked", false);
+        await this.persistAuthorityReduction(() => {
+          this.closeDeviceSessions(durableDevice.id, "revoked", false);
+          const revoked = revokeRemoteDevice(
+            this.requireData(),
+            deviceId,
+            this.now(),
+          );
+          if (!revoked) throw new Error("That paired device is already revoked.");
+          this.audit("device.revoked", revoked.id, "A paired device was revoked.");
+        });
+        this.emitState();
+      });
+    } finally {
+      releaseAdmissionBlock();
+    }
   }
-
   async updateDevice(
     deviceId: string,
     scopes: RemoteScope[],
@@ -371,8 +433,9 @@ export class RemoteAccessService {
     expiresAt: string,
     grants?: RemoteConversationGrant[],
   ): Promise<void> {
-    const device = updateRemoteDeviceGrant({
-      data: this.requireData(),
+    const data = this.requireData();
+    const validated = updateRemoteDeviceGrant({
+      data: structuredClone(data),
       deviceId,
       scopes,
       projectIds,
@@ -380,12 +443,45 @@ export class RemoteAccessService {
       expiresAt,
       now: this.now(),
     });
-    this.audit("device.scope-changed", device.id, "Device permissions changed.");
-    this.closeDeviceSessions(device.id, "revoked", false);
-    await this.persist();
-    this.emitState();
+    if (validated.revokedAt) {
+      throw new Error("That paired device is already revoked.");
+    }
+    const releaseAdmissionBlock = this.sessionAdmissions.blockDevice(validated.id);
+    try {
+      this.closeDeviceSessions(validated.id, "revoked", false);
+      await this.serializeAuthorityMutation(async () => {
+        const current = updateRemoteDeviceGrant({
+          data: structuredClone(this.requireData()),
+          deviceId,
+          scopes,
+          projectIds,
+          grants,
+          expiresAt,
+          now: this.now(),
+        });
+        if (current.revokedAt) {
+          throw new Error("That paired device is already revoked.");
+        }
+        this.closeDeviceSessions(current.id, "revoked", false);
+        await this.persistAuthorityReduction(() => {
+          this.closeDeviceSessions(current.id, "revoked", false);
+          const device = updateRemoteDeviceGrant({
+            data: this.requireData(),
+            deviceId,
+            scopes,
+            projectIds,
+            grants,
+            expiresAt,
+            now: this.now(),
+          });
+          this.audit("device.scope-changed", device.id, "Device permissions changed.");
+        });
+        this.emitState();
+      });
+    } finally {
+      releaseAdmissionBlock();
+    }
   }
-
   setPrivacyLocked(
     locked: boolean,
     suspension: RemotePrivacySuspension | null = locked ? "locked" : null,
@@ -420,6 +516,7 @@ export class RemoteAccessService {
       this.clearTimer,
       REMOTE_SHUTDOWN_TIMEOUT_MS,
     );
+    await this.authorityMutationTail;
     await this.persistence.drain();
   }
 
@@ -594,19 +691,24 @@ export class RemoteAccessService {
     try {
       const hostKeys = this.requireHostKeyPair();
       for (const device of data.devices) {
-        if (!remoteDeviceIsCurrent(device, this.now().getTime())) continue;
+        if (
+          this.sessionAdmissions.isDeviceBlocked(device.id)
+          || !remoteDeviceIsCurrent(device, this.now().getTime())
+        ) continue;
         const authenticated = await authenticateRemoteSession({
           data,
           device,
           frame,
           hostKeys,
           now: () => this.now(),
-          current: () => this.sessionAdmissions.owns(admission),
+          current: () => this.sessionAdmissions.owns(admission)
+            && !this.sessionAdmissions.isDeviceBlocked(device.id),
         });
         if (authenticated === "stale") return;
         if (!authenticated) continue;
         if (
           !data.devices.includes(device)
+          || this.sessionAdmissions.isDeviceBlocked(device.id)
           || !remoteDeviceIsCurrent(device, this.now().getTime())
           || authenticated.subject.grantVersion !== device.grantVersion
           || !this.sessionAdmissions.bindDevice(admission, device.id)
@@ -637,7 +739,10 @@ export class RemoteAccessService {
         device.lastSeenAt = this.now().toISOString();
         this.audit("session.connected", device.id, "A remote session connected.");
         await this.persist();
-        if (!this.sessionAdmissions.owns(admission)) return;
+        if (
+          !this.sessionAdmissions.owns(admission)
+          || this.sessionAdmissions.isDeviceBlocked(device.id)
+        ) return;
         this.sessions.set(frame.sessionId, session);
         this.sessionByConnection.set(connectionId, frame.sessionId);
         this.sendFrame(connectionId, {
@@ -760,7 +865,8 @@ export class RemoteAccessService {
   }
 
   private sessionRetainsAuthority(session: ActiveRemoteSession): boolean {
-    return remoteSessionRetainsAuthority(this.sessionAuthority(session));
+    return !this.sessionAdmissions.isDeviceBlocked(session.device.id)
+      && remoteSessionRetainsAuthority(this.sessionAuthority(session));
   }
 
   private sendFrame(connectionId: string, frame: RemoteCipherFrame): void {
@@ -1008,6 +1114,13 @@ export class RemoteAccessService {
     return this.requireData();
   }
 
+  private disableLiveRemoteAccess(): void {
+    this.invitation = null;
+    const socket = this.disconnect("disabled", false, false);
+    terminateRemoteSocket(socket);
+    this.forgetRemoteTranscripts();
+  }
+
   private forgetRemoteTranscripts(): void {
     try {
       this.options.runtime.forgetRemoteTranscripts?.({ kind: "all" });
@@ -1016,6 +1129,11 @@ export class RemoteAccessService {
     }
   }
 
+  private pairingIsCurrent(requestId: string, pending: PendingRemotePairing): boolean {
+    return this.pendingPairings.get(requestId) === pending
+      && this.relayMessages.owns(pending.connectionId, pending.connectionEpoch)
+      && Date.parse(pending.expiresAt) > this.now().getTime();
+  }
   private requireData(): PersistedRemoteAccess {
     if (!this.data || this.storeError) {
       throw new Error(
@@ -1034,6 +1152,53 @@ export class RemoteAccessService {
 
   private persist(): Promise<void> {
     return this.persistence.save(this.requireData());
+  }
+
+  private async serializeAuthorityMutation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.stopped) throw new Error("Remote Companion is shutting down.");
+    const pending = this.authorityMutationTail.then(operation);
+    this.authorityMutationTail = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await pending;
+  }
+
+  private async persistAuthorityReduction<T>(mutate: () => T,
+    remainsCurrent?: () => boolean): Promise<T> {
+    await this.beginAuthorityReduction();
+    if (remainsCurrent && !remainsCurrent()) {
+      await this.completeAuthorityReduction();
+      throw new Error("That pairing request is no longer pending.");
+    }
+    let result: T;
+    try {
+      result = mutate();
+    } catch (error) {
+      this.failClosedStore("Remote Companion could not safely apply its authority update.");
+      throw error;
+    }
+    await this.persist();
+    await this.completeAuthorityReduction();
+    return result;
+  }
+
+  private async beginAuthorityReduction(): Promise<void> {
+    try {
+      await this.options.store.beginAuthorityReduction();
+    } catch (error) {
+      this.failClosedStore("Remote Companion could not durably reduce its authority.");
+      throw error;
+    }
+  }
+
+  private async completeAuthorityReduction(): Promise<void> {
+    try {
+      await this.options.store.completeAuthorityReduction();
+    } catch (error) {
+      this.failClosedStore("Remote Companion could not complete its authority update.");
+      throw error;
+    }
   }
 
   private failClosedStore(message: string): void {

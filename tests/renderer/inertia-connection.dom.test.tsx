@@ -6,8 +6,14 @@ import {
   MAX_WORKSPACE_FILE_EDIT_BYTES,
 } from "../../src/shared/contracts";
 import {
+  AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
+  BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
+  GIT_READ_REQUEST_TIMEOUT_MS,
   MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
   MESSAGE_SEND_REQUEST_TIMEOUT_MS,
+  WORKSPACE_ENTRY_REQUEST_TIMEOUT_MS,
+  WORKSPACE_FILE_REQUEST_TIMEOUT_MS,
+  WORKSPACE_GIT_REFRESH_REQUEST_TIMEOUT_MS,
 } from "../../src/shared/runtime-command-timeouts";
 import { useInertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
 import { runtimeCommandDelivery } from "../../src/renderer/src/utils/connectionMessages";
@@ -100,7 +106,7 @@ describe("useInertiaConnection", () => {
     expect(FakeWebSocket.instances[0]?.close).not.toHaveBeenCalled();
   });
 
-  it("forces authoritative reconciliation after an ambiguous timeout", async () => {
+  it("keeps the socket alive when an idempotent refresh times out", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
@@ -125,10 +131,155 @@ describe("useInertiaConnection", () => {
     });
     await vi.advanceTimersByTimeAsync(15_000);
 
-    expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
-    expect(firstSocket.close).toHaveBeenCalledTimes(1);
+    expect(runtimeCommandDelivery(timeoutError)).toBe("rejected");
+    expect(firstSocket.close).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("keeps a bounded workspace repository scan pending without reconnecting", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection: vi.fn(async () => ({
+          websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+        })),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0]!;
+    vi.useFakeTimers();
+
+    const command = clientCommandSchema.parse({
+      type: "git.workspace.refresh",
+      requestId: "11111111-1111-4111-8111-111111111111",
+      payload: {
+        projectId: "22222222-2222-4222-8222-222222222222",
+        conversationId: "33333333-3333-4333-8333-333333333333",
+      },
+    });
+    let timeoutError: unknown;
+    void hook.result.current.sendCommand(command).catch((error: unknown) => {
+      timeoutError = error;
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(timeoutError).toBeUndefined();
+    expect(socket.close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(
+      WORKSPACE_GIT_REFRESH_REQUEST_TIMEOUT_MS - 15_000,
+    );
+    expect(runtimeCommandDelivery(timeoutError)).toBe("rejected");
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      name: "local Git reads",
+      timeoutMs: GIT_READ_REQUEST_TIMEOUT_MS,
+      delivery: "rejected" as const,
+      command: {
+        type: "git.diff",
+        requestId: "11111111-1111-4111-8111-111111111111",
+        payload: {
+          projectId: "22222222-2222-4222-8222-222222222222",
+          conversationId: "33333333-3333-4333-8333-333333333333",
+          authorityRef: "44444444-4444-4444-8444-444444444444",
+        },
+      },
+    },
+    {
+      name: "workspace directory reads",
+      timeoutMs: WORKSPACE_ENTRY_REQUEST_TIMEOUT_MS,
+      delivery: "rejected" as const,
+      command: {
+        type: "workspace.entries",
+        requestId: "11111111-1111-4111-8111-111111111111",
+        payload: {
+          projectId: "22222222-2222-4222-8222-222222222222",
+          conversationId: "33333333-3333-4333-8333-333333333333",
+          directory: "src",
+        },
+      },
+    },
+    {
+      name: "secure workspace reads",
+      timeoutMs: WORKSPACE_FILE_REQUEST_TIMEOUT_MS,
+      delivery: "rejected" as const,
+      command: {
+        type: "workspace.file.read",
+        requestId: "11111111-1111-4111-8111-111111111111",
+        payload: {
+          projectId: "22222222-2222-4222-8222-222222222222",
+          conversationId: "33333333-3333-4333-8333-333333333333",
+          path: "src/example.ts",
+        },
+      },
+    },
+    {
+      name: "provider workflow reads",
+      timeoutMs: AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
+      delivery: "rejected" as const,
+      command: {
+        type: "agent.workflow.load",
+        requestId: "11111111-1111-4111-8111-111111111111",
+        payload: {
+          conversationId: "33333333-3333-4333-8333-333333333333",
+          refresh: true,
+        },
+      },
+    },
+    {
+      name: "backend compatibility probes",
+      timeoutMs: BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
+      delivery: "ambiguous" as const,
+      command: {
+        type: "backend.profile.probe",
+        requestId: "11111111-1111-4111-8111-111111111111",
+        payload: {
+          profileId: "custom:test",
+          modelId: "model-test",
+        },
+      },
+    },
+  ])("keeps $name pending through its server-side bound", async ({
+    timeoutMs,
+    delivery,
+    command: input,
+  }) => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection: vi.fn(async () => ({
+          websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+        })),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0]!;
+    vi.useFakeTimers();
+
+    const command = clientCommandSchema.parse(input);
+    let timeoutError: unknown;
+    void hook.result.current.sendCommand(command).catch((error: unknown) => {
+      timeoutError = error;
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(timeoutError).toBeUndefined();
+    expect(socket.close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(timeoutMs - 15_000);
+    expect(runtimeCommandDelivery(timeoutError)).toBe(delivery);
+    expect(socket.close).toHaveBeenCalledTimes(
+      delivery === "ambiguous" ? 1 : 0,
+    );
   });
 
   it("keeps message delivery pending through the server preparation deadline", async () => {

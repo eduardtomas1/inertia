@@ -19,17 +19,17 @@ export const accessOptions: Array<{
   {
     value: "supervised",
     label: "Supervised",
-    description: "Ask before commands and edits",
+    description: "Use this provider's restricted mode and native approvals",
   },
   {
     value: "auto-edit",
     label: "Auto-accept edits",
-    description: "Allow edits; ask for other actions",
+    description: "Allow edits; other actions follow the provider's policy",
   },
   {
     value: "full",
     label: "Full access",
-    description: "Run commands and edit without prompts",
+    description: "Bypass provider approval and sandbox protections",
   },
 ];
 

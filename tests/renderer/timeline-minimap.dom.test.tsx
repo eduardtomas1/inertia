@@ -45,46 +45,45 @@ describe("TimelineMinimap", () => {
 
     fireEvent.pointerEnter(first);
     expect(first).toHaveAttribute("data-emphasized", "true");
-    expect(screen.getAllByRole("tooltip")).toHaveLength(1);
-    expect(screen.getByRole("tooltip")).toHaveTextContent(
+    expect(document.querySelectorAll(".timeline-minimap-preview")).toHaveLength(1);
+    expect(document.querySelector(".timeline-minimap-preview")).toHaveTextContent(
       "Turn 1 · Inspect the lifecycle boundary",
     );
-    expect(first).toHaveAttribute(
-      "aria-describedby",
-      screen.getByRole("tooltip").id,
-    );
+    expect(first).not.toHaveAttribute("aria-describedby");
+    expect(document.querySelector(".timeline-minimap-preview"))
+      .toHaveAttribute("aria-hidden", "true");
 
     fireEvent.pointerLeave(first);
     fireEvent.focus(first);
     expect(first).toHaveAttribute("data-emphasized", "true");
-    expect(screen.getAllByRole("tooltip")).toHaveLength(1);
-    expect(screen.getByRole("tooltip")).toHaveTextContent(
+    expect(document.querySelectorAll(".timeline-minimap-preview")).toHaveLength(1);
+    expect(document.querySelector(".timeline-minimap-preview")).toHaveTextContent(
       "Turn 1 · Inspect the lifecycle boundary",
     );
 
     fireEvent.pointerEnter(second);
     expect(first).not.toHaveAttribute("data-emphasized");
     expect(second).toHaveAttribute("data-emphasized", "true");
-    expect(screen.getAllByRole("tooltip")).toHaveLength(1);
-    expect(screen.getByRole("tooltip")).toHaveTextContent(
+    expect(document.querySelectorAll(".timeline-minimap-preview")).toHaveLength(1);
+    expect(document.querySelector(".timeline-minimap-preview")).toHaveTextContent(
       "Turn 2 · Verify the focused regression",
     );
 
     fireEvent.pointerLeave(second);
     expect(first).toHaveAttribute("data-emphasized", "true");
     expect(second).not.toHaveAttribute("data-emphasized");
-    expect(screen.getAllByRole("tooltip")).toHaveLength(1);
-    expect(screen.getByRole("tooltip")).toHaveTextContent(
+    expect(document.querySelectorAll(".timeline-minimap-preview")).toHaveLength(1);
+    expect(document.querySelector(".timeline-minimap-preview")).toHaveTextContent(
       "Turn 1 · Inspect the lifecycle boundary",
     );
 
     fireEvent.keyDown(first, { key: "ArrowDown" });
     expect(second).toHaveFocus();
     expect(second).toHaveAttribute("data-emphasized", "true");
-    expect(screen.getAllByRole("tooltip")).toHaveLength(1);
+    expect(document.querySelectorAll(".timeline-minimap-preview")).toHaveLength(1);
 
     fireEvent.blur(second);
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(document.querySelector(".timeline-minimap-preview")).toBeNull();
     expect(second).not.toHaveAttribute("aria-describedby");
 
     fireEvent.click(first);

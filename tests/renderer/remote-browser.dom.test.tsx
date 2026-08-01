@@ -357,7 +357,15 @@ describe("Remote Companion browser output boundary", () => {
     render(<RemoteAccessSettings projects={[]} conversations={[]} />);
 
     await screen.findByText("Approve New browser?");
-    screen.getByRole("switch", { name: "Allow text prompts" }).click();
+    expect(screen.getByText(/does not bundle or start the reference relay/u))
+      .toBeVisible();
+    const promptAccess = screen.getByRole("switch", {
+      name: "Allow text prompts",
+    });
+    expect(promptAccess).not.toBeChecked();
+    promptAccess.click();
+    await waitFor(() => expect(screen.getAllByText(/project-derived text/u))
+      .not.toHaveLength(0));
     const expiry = screen.getByLabelText(
       "Permission expiry",
     ) as HTMLSelectElement;

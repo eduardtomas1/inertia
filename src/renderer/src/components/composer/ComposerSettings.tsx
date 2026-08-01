@@ -39,7 +39,9 @@ export interface ComposerSettingsProps {
       Conversation,
       "interactionMode" | "accessMode"
     >>,
-  ) => void;
+  ) => Promise<void>;
+  conversationUpdatePending: boolean;
+  conversationUpdateError: string | null;
 }
 
 export function ComposerSettings({
@@ -52,6 +54,8 @@ export function ComposerSettings({
   menuController,
   onUpdateReasoningEffort,
   onUpdateConversation,
+  conversationUpdatePending,
+  conversationUpdateError,
 }: ComposerSettingsProps): React.JSX.Element {
   const {
     menu,
@@ -88,7 +92,7 @@ export function ComposerSettings({
             aria-haspopup="menu"
             aria-controls={menuId("reasoning")}
             aria-expanded={menu === "reasoning"}
-            disabled={disabled || running}
+            disabled={disabled || running || conversationUpdatePending}
             data-composer-setting="reasoning"
             onClick={() => toggleMenu("reasoning")}
             onKeyDown={(event) =>
@@ -193,9 +197,12 @@ export function ComposerSettings({
                 role="menuitemradio"
                 aria-checked={conversation.accessMode === option.value}
                 key={option.value}
+                disabled={conversationUpdatePending}
                 onClick={() => {
-                  onUpdateConversation({ accessMode: option.value });
-                  dismissMenu("selection");
+                  void onUpdateConversation({ accessMode: option.value }).then(
+                    () => dismissMenu("selection"),
+                    () => undefined,
+                  );
                 }}
               >
                 <span>
@@ -207,6 +214,11 @@ export function ComposerSettings({
                 )}
               </button>
             ))}
+            {conversationUpdateError && (
+              <p className="composer-control-error" role="alert">
+                {conversationUpdateError}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -224,7 +236,7 @@ export function ComposerSettings({
           aria-haspopup="menu"
           aria-controls={menuId("mode")}
           aria-expanded={menu === "mode"}
-          disabled={disabled || running}
+          disabled={disabled || running || conversationUpdatePending}
           data-composer-setting="mode"
           onClick={() => toggleMenu("mode")}
           onKeyDown={(event) =>
@@ -261,9 +273,12 @@ export function ComposerSettings({
                 role="menuitemradio"
                 aria-checked={conversation.interactionMode === mode}
                 key={mode}
+                disabled={conversationUpdatePending}
                 onClick={() => {
-                  onUpdateConversation({ interactionMode: mode });
-                  dismissMenu("selection");
+                  void onUpdateConversation({ interactionMode: mode }).then(
+                    () => dismissMenu("selection"),
+                    () => undefined,
+                  );
                 }}
               >
                 <span>

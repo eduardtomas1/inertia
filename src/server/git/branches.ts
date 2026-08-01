@@ -35,8 +35,9 @@ function parseBranches(buffer: Buffer, kind: GitBranch["kind"]): GitBranch[] {
 
 export async function listBranches(
   repositoryPath: string,
+  options: { deadlineAt?: number } = {},
 ): Promise<GitBranches> {
-  const root = await repositoryRoot(repositoryPath);
+  const root = await repositoryRoot(repositoryPath, options);
   const format =
     "%(refname:short)%00%(objectname)%00%(upstream:short)%00%(HEAD)";
   const [localResult, remoteResult] = await Promise.all([
@@ -48,7 +49,10 @@ export async function listBranches(
         "--sort=refname",
         "refs/heads",
       ],
-      { failureMessage: "Unable to list local branches." },
+      {
+        deadlineAt: options.deadlineAt,
+        failureMessage: "Unable to list local branches.",
+      },
     ),
     runGit(
       root,
@@ -58,7 +62,10 @@ export async function listBranches(
         "--sort=refname",
         "refs/remotes",
       ],
-      { failureMessage: "Unable to list remote branches." },
+      {
+        deadlineAt: options.deadlineAt,
+        failureMessage: "Unable to list remote branches.",
+      },
     ),
   ]);
   const local = parseBranches(localResult.stdout, "local");

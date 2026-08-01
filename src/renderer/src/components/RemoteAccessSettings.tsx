@@ -126,6 +126,12 @@ export function RemoteAccessSettings({
               <small>Use wss://. Plain ws:// is accepted only on loopback for local development.</small>
             </label>
             <p className="settings-card-note">
+              Inertia does not bundle or start the reference relay or companion
+              browser. The loopback URL works only after you start the development
+              relay separately; cross-device use requires a reviewed self-hosted
+              browser origin and WSS relay.
+            </p>
+            <p className="settings-card-note">
               Status: {current.connection}
               {current.connectionMessage ? ` · ${current.connectionMessage}` : ""}
               {current.activeSessions > 0 ? ` · ${current.activeSessions} active browser session${current.activeSessions === 1 ? "" : "s"}` : ""}
@@ -204,7 +210,7 @@ export function RemoteAccessSettings({
           <div className="setting-row">
             <span className="setting-copy">
               <strong>Allow text prompts</strong>
-              <small>Starts supervised turns only. Approvals, files, terminal, Git, settings, secrets, and destructive actions stay desktop-only.</small>
+              <small>Starts supervised turns only. The selected agent can read the granted project's files, and its answer can include project-derived text. Approvals, direct file transfer, terminal, Git, settings, secret-input requests, and destructive actions stay desktop-only.</small>
             </span>
             <Switch
               label="Allow text prompts"
@@ -423,6 +429,12 @@ function RemoteDevice({
             />
             Allow text prompts
           </label>
+          {prompting && (
+            <p className="settings-card-note">
+              The selected agent can read this project's files, and its remote
+              answer can include project-derived text.
+            </p>
+          )}
           <label className="remote-expiry-setting">
             <span>Reset expiry</span>
             <select value={expiryDays} onChange={(event) => setExpiryDays(Number(event.target.value))}>

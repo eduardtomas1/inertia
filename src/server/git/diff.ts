@@ -14,9 +14,10 @@ import {
   getRepositoryStatus,
   hasHead,
 } from "./status";
-import type {
-  GitDiffOptions,
-  GitUnifiedDiff,
+import {
+  GitError,
+  type GitDiffOptions,
+  type GitUnifiedDiff,
 } from "./types";
 import type {
   RuntimeSecureFileBroker,
@@ -33,13 +34,19 @@ async function untrackedPreview(
   testHooks?: GitDiffTestHooks,
   secureFiles?: RuntimeSecureFileBroker,
   secureRoot?: SecureFileRootCapability,
+  signal?: AbortSignal,
 ): Promise<{ text: string; truncated: boolean }> {
   try {
     if (!secureFiles || !secureRoot) {
       throw new Error("Secure repository file access is unavailable.");
     }
     await testHooks?.afterUntrackedValidated?.(path);
-    const file = await secureFiles.read(secureRoot, path, maxBytes);
+    const file = await secureFiles.read(
+      secureRoot,
+      path,
+      maxBytes,
+      signal,
+    );
     const content = file.content;
     if (content.includes(0)) {
       return {
@@ -74,8 +81,15 @@ export async function getUnifiedDiff(
   if (secureRoot && !secureFiles) {
     throw new Error("Secure repository file access is unavailable.");
   }
-  if (secureRoot) await secureFiles!.verifyRoot(secureRoot);
-  const root = secureRoot?.root ?? await repositoryRoot(repositoryPath);
+  if (options.signal?.aborted) {
+    throw new GitError("timeout", "Git inspection took too long.");
+  }
+  if (secureRoot) {
+    await secureFiles!.verifyRoot(secureRoot, options.signal);
+  }
+  const root = secureRoot?.root ?? await repositoryRoot(repositoryPath, {
+    deadlineAt: options.deadlineAt,
+  });
   const maxFiles = boundedInteger(
     options.maxFiles,
     DEFAULT_DIFF_FILES,
@@ -86,7 +100,9 @@ export async function getUnifiedDiff(
     DEFAULT_DIFF_BYTES,
     MAX_DIFF_BYTES,
   );
-  const status = await getRepositoryStatus(root);
+  const status = await getRepositoryStatus(root, {
+    deadlineAt: options.deadlineAt,
+  });
   const requested = options.paths
     ? await validatedPaths(root, options.paths)
     : null;
@@ -97,7 +113,7 @@ export async function getUnifiedDiff(
   const selected = candidates.slice(0, maxFiles);
   const rootCapability = selected.some(({ status: fileStatus }) =>
     fileStatus === "untracked") && secureFiles
-    ? secureRoot ?? await secureFiles.authorizeRoot(root)
+    ? secureRoot ?? await secureFiles.authorizeRoot(root, options.signal)
     : secureRoot;
   const tracked = selected
     .filter((file) => file.status !== "untracked")
@@ -114,10 +130,11 @@ export async function getUnifiedDiff(
       "--unified=3",
       ...(options.ignoreWhitespace ? ["--ignore-all-space"] : []),
     ];
-    const args = (await hasHead(root))
+    const args = (await hasHead(root, { deadlineAt: options.deadlineAt }))
       ? [...baseArgs, "HEAD", "--", ...tracked]
       : [...baseArgs, "--cached", "--", ...tracked];
     const result = await runGitInspection(root, args, {
+      deadlineAt: options.deadlineAt,
       maxOutputBytes: maxBytes,
       truncateOutput: true,
       failureMessage: "Unable to generate the repository diff.",
@@ -128,6 +145,15 @@ export async function getUnifiedDiff(
 
   for (const file of selected) {
     if (file.status !== "untracked") continue;
+    if (
+      options.deadlineAt !== undefined
+      && Date.now() >= options.deadlineAt
+    ) {
+      throw new GitError(
+        "timeout",
+        "Git took too long to complete the operation.",
+      );
+    }
     const remaining = maxBytes - Buffer.byteLength(text);
     if (remaining <= 0) {
       truncated = true;
@@ -139,12 +165,15 @@ export async function getUnifiedDiff(
       testHooks,
       secureFiles,
       rootCapability,
+      options.signal,
     );
     const previewBuffer = Buffer.from(preview.text);
     text += utf8Prefix(previewBuffer, remaining);
     truncated ||= preview.truncated || previewBuffer.length > remaining;
   }
-  if (secureRoot) await secureFiles!.verifyRoot(secureRoot);
+  if (secureRoot) {
+    await secureFiles!.verifyRoot(secureRoot, options.signal);
+  }
   return {
     text,
     filesIncluded: selected.length,

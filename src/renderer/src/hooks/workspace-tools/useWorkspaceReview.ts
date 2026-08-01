@@ -16,6 +16,7 @@ import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
+import type { LoadWorkspaceGit } from "./useWorkspaceGit";
 
 interface WorkspaceReviewOptions {
   project: Project | null;
@@ -27,7 +28,7 @@ interface WorkspaceReviewOptions {
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   setGitDiff: (diff: GitDiffSnapshot | null) => void;
-  loadGit: () => Promise<void>;
+  loadGit: LoadWorkspaceGit;
 }
 
 const MAX_RETAINED_REVERSAL_AUTHORITIES = 64;
@@ -312,7 +313,7 @@ export function useWorkspaceReview({
     ));
     if (authorityRef.current !== owner) return;
     setGitDiff(reversed.result.diff);
-    await loadGit();
+    await loadGit({ authoritative: true });
   }, [
     confirmDestructiveActions,
     conversation,
@@ -355,7 +356,7 @@ export function useWorkspaceReview({
     });
     if (authorityRef.current !== owner) return;
     setGitDiff(restored.result.diff);
-    await loadGit();
+    await loadGit({ authoritative: true });
   }, [
     conversation,
     lastDiffReversal,

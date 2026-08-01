@@ -1,4 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelChooser } from "../../src/renderer/src/components/ModelChooser";
@@ -26,6 +33,17 @@ function storage(): Storage {
       return values.size;
     },
   };
+}
+
+function deferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolve!: () => void;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }
 
 function currentRoute(): ComposerModelRoute {
@@ -110,5 +128,40 @@ describe("model chooser active route", () => {
     expect(screen.getByRole("option", { name: /Team Alpha/u }))
       .toHaveAttribute("aria-selected", "false");
     expect(screen.queryByText("Active model")).not.toBeInTheDocument();
+  });
+
+  it("restores trigger focus after an acknowledged selection re-enables it", async () => {
+    const route = currentRoute();
+    const acknowledgement = deferred();
+
+    function PendingSelectionChooser() {
+      const [disabled, setDisabled] = useState(false);
+      return (
+        <ModelChooser
+          routes={[route]}
+          selectedRoute={route}
+          disabled={disabled}
+          onSelect={() => {
+            setDisabled(true);
+            void acknowledgement.promise.then(() => setDisabled(false));
+          }}
+        />
+      );
+    }
+
+    render(<PendingSelectionChooser />);
+    const trigger = screen.getByRole("button", { name: /Choose model/u });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("option", { name: /Team Alpha/u }));
+
+    expect(screen.queryByRole("dialog", { name: "Choose model" }))
+      .not.toBeInTheDocument();
+    expect(trigger).toBeDisabled();
+    expect(trigger).not.toHaveFocus();
+
+    await act(async () => acknowledgement.resolve());
+
+    await waitFor(() => expect(trigger).toBeEnabled());
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 });

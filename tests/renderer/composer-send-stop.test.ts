@@ -93,9 +93,8 @@ describe("composer Send and Stop", () => {
     expect(toolbarSource).toContain('label="Sending message"');
     expect(toolbarSource).toContain('"Stopping agent"');
     expect(toolbarSource).toContain('"Stop agent"');
-    expect(composerSource).toContain(
-      "aria-busy={submissionPending || followUpPending || running || stopping}",
-    );
+    expect(composerSource).toContain("aria-busy={");
+    expect(composerSource).toContain("|| conversationUpdatePending");
     expect(composerSource).toContain("if (stoppingRef.current || !running) return;");
     expect(composerSource).toContain("textareaRef.current?.focus()");
     expect(chatWorkspaceSource).toContain("onStop: () => Promise<void>;");

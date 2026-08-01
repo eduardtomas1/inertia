@@ -38,7 +38,9 @@ export interface ComposerMoreMenuProps {
       Conversation,
       "interactionMode" | "accessMode"
     >>,
-  ) => void;
+  ) => Promise<void>;
+  conversationUpdatePending: boolean;
+  conversationUpdateError: string | null;
 }
 
 export function ComposerMoreMenu({
@@ -53,6 +55,8 @@ export function ComposerMoreMenu({
   onRunAction,
   onUpdateReasoningEffort,
   onUpdateConversation,
+  conversationUpdatePending,
+  conversationUpdateError,
 }: ComposerMoreMenuProps): React.JSX.Element {
   const {
     menu,
@@ -138,9 +142,12 @@ export function ComposerMoreMenu({
           role="menuitemradio"
           aria-checked={conversation.interactionMode === mode}
           key={mode}
+          disabled={conversationUpdatePending}
           onClick={() => {
-            onUpdateConversation({ interactionMode: mode });
-            dismissMenu("selection");
+            void onUpdateConversation({ interactionMode: mode }).then(
+              () => dismissMenu("selection"),
+              () => undefined,
+            );
           }}
         >
           <span>
@@ -163,9 +170,12 @@ export function ComposerMoreMenu({
         role="menuitemradio"
         aria-checked={conversation.accessMode === option.value}
         key={option.value}
+        disabled={conversationUpdatePending}
         onClick={() => {
-          onUpdateConversation({ accessMode: option.value });
-          dismissMenu("selection");
+          void onUpdateConversation({ accessMode: option.value }).then(
+            () => dismissMenu("selection"),
+            () => undefined,
+          );
         }}
       >
         <span>
@@ -223,7 +233,7 @@ export function ComposerMoreMenu({
         aria-haspopup="menu"
         aria-controls={menuId("more")}
         aria-expanded={menu === "more"}
-        disabled={disabled || running}
+        disabled={disabled || running || conversationUpdatePending}
         onClick={() => {
           if (menu !== "more") returnToMoreRoot();
           toggleMenu("more");
@@ -277,6 +287,11 @@ export function ComposerMoreMenu({
                 </div>
                 <div className="composer-more-options" data-more-submenu>
                   {renderMoreSectionOptions(moreSection)}
+                  {moreSection === "access" && conversationUpdateError && (
+                    <p className="composer-control-error" role="alert">
+                      {conversationUpdateError}
+                    </p>
+                  )}
                 </div>
               </>
             ) : (
@@ -353,6 +368,11 @@ export function ComposerMoreMenu({
                 {moreSectionLabel(moreSection)}
               </div>
               {renderMoreSectionOptions(moreSection)}
+              {moreSection === "access" && conversationUpdateError && (
+                <p className="composer-control-error" role="alert">
+                  {conversationUpdateError}
+                </p>
+              )}
             </div>
           )}
         </div>

@@ -10,10 +10,6 @@ import {
   runtimeResumeUrl,
   RuntimeProjectionSequence,
 } from "../utils/runtimeSequencing";
-import {
-  CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
-  MESSAGE_SEND_REQUEST_TIMEOUT_MS,
-} from "@shared/runtime-command-timeouts";
 import { serializeRuntimeClientCommand } from "@shared/runtime-websocket";
 import {
   deliverDecodedServerEvent,
@@ -24,6 +20,7 @@ import {
   type PendingConnectionRequest,
 } from "../utils/connectionMessages";
 import { applyConversationShellEvent } from "../utils/runtimeSnapshotProjection";
+import { runtimeCommandPolicy } from "../utils/runtimeCommandPolicy";
 
 export type ConnectionStatus = "connecting" | "online" | "offline";
 
@@ -37,48 +34,6 @@ export interface InertiaConnection {
   clearError: () => void;
   sendCommand: (command: ClientCommand) => Promise<ServerEvent>;
   subscribe: (listener: EventListener) => () => void;
-}
-
-const QUERY_COMMAND_TYPES = new Set<ClientCommand["type"]>([
-  "agent.skills.list",
-  "agent.workflow.load",
-  "backend.profile.get",
-  "conversation.detail.load",
-  "git.branches",
-  "git.diff",
-  "git.turn.compare",
-  "git.turn.diff",
-  "git.workspace.diff",
-  "project.actions",
-  "workspace.entries",
-  "workspace.file.read",
-]);
-
-function requestTimeoutMs(command: ClientCommand): number {
-  switch (command.type) {
-    case "conversation.detail.load":
-      return CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS;
-    case "message.send":
-      // The server enforces one aggregate preparation deadline before it can
-      // queue a turn. Keep the socket pending through that boundary and its
-      // bounded rollback/attachment cleanup so a retry cannot duplicate work.
-      return MESSAGE_SEND_REQUEST_TIMEOUT_MS;
-    case "git.pull":
-    case "git.push":
-    case "git.commit":
-    case "git.branch.create":
-    case "git.branch.switch":
-    case "git.worktree.create":
-    case "git.selection.inspect":
-    case "git.selection.revert":
-    case "git.selection.undo":
-    case "checkpoint.revert":
-    case "review.selection.ask":
-    case "review.summary.generate":
-      return 150_000;
-    default:
-      return 15_000;
-  }
 }
 
 export function useInertiaConnection(): InertiaConnection {
@@ -306,10 +261,10 @@ export function useInertiaConnection(): InertiaConnection {
     }
 
     return new Promise((resolve, reject) => {
+      const policy = runtimeCommandPolicy(command.type);
       const timeout = window.setTimeout(() => {
         pendingRef.current.delete(command.requestId);
-        const query = QUERY_COMMAND_TYPES.has(command.type);
-        if (!query && socketRef.current === socket) {
+        if (policy.timeoutDelivery === "ambiguous" && socketRef.current === socket) {
           // Delivery is now ambiguous. Drop the resumable cursor and reconnect
           // so the next authoritative snapshot can prove whether the command
           // changed state instead of leaving callers waiting indefinitely.
@@ -318,9 +273,9 @@ export function useInertiaConnection(): InertiaConnection {
         }
         reject(new RuntimeCommandError(
           "The request took too long to complete.",
-          query ? "rejected" : "ambiguous",
+          policy.timeoutDelivery,
         ));
-      }, requestTimeoutMs(command));
+      }, policy.timeoutMs);
 
       pendingRef.current.set(command.requestId, { resolve, reject, timeout });
       try {

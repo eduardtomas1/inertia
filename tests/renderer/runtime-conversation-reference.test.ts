@@ -67,4 +67,17 @@ describe("runtime conversation references", () => {
       "tools: project && !workspaceToolsUnavailable ?",
     );
   });
+
+  it("loads expensive workspace Git discovery only for visible Git surfaces", () => {
+    expect(appSource).toContain(
+      "loadGitStatusOnMount: !workspaceToolsUnavailable,",
+    );
+    expect(appSource).toContain(
+      'sceneActiveTool === "changes"\n'
+      + "          || workspaceLayout.environmentOpen",
+    );
+    expect(appSource).not.toContain(
+      "loadGitOnMount: !workspaceToolsUnavailable,",
+    );
+  });
 });

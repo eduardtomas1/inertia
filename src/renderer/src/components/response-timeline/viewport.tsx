@@ -270,11 +270,6 @@ export function TimelineMinimap({
             type="button"
             key={marker.id}
             aria-current={index === activeMarker ? "true" : undefined}
-            aria-describedby={
-              previewedMarkerId === marker.id
-                ? `timeline-minimap-preview-${marker.id}`
-                : undefined
-            }
             aria-label={`Go to turn ${marker.number}: ${marker.label}`}
             data-emphasized={
               previewedMarkerId === marker.id ? "true" : undefined
@@ -290,9 +285,8 @@ export function TimelineMinimap({
           >
             {previewedMarkerId === marker.id && (
               <span
-                id={`timeline-minimap-preview-${marker.id}`}
                 className="timeline-minimap-preview"
-                role="tooltip"
+                aria-hidden="true"
               >
                 {`Turn ${marker.number} · ${marker.label}`}
               </span>

@@ -189,7 +189,7 @@ describe("useWorkspaceMentions", () => {
           onListSkills={async () => undefined}
           onToggleSkill={() => undefined}
           onClearSelectedSkills={() => undefined}
-          onUpdateConversation={() => undefined}
+          onUpdateConversation={() => Promise.resolve()}
           onCreateConversationForSelection={async () => undefined}
           onChooseAttachments={async () => []}
           onImportAttachments={async () => []}

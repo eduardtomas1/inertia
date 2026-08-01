@@ -128,9 +128,11 @@ export function FilesPanel({
   onSaveFile,
   canSaveFile,
 }: FilesPanelProps): React.JSX.Element {
-  const initialPages = freshWorkspaceDirectoryPages(entries, entriesTruncated);
-  const [directoryPages, setDirectoryPages] = useState(initialPages);
-  const directoryPagesRef = useRef(initialPages);
+  const [directoryPages, setDirectoryPages] = useState(
+    () => freshWorkspaceDirectoryPages(entries, entriesTruncated),
+  );
+  const directoryPagesRef = useRef(directoryPages);
+  const rootInputRef = useRef({ entries, entriesTruncated });
   const directoryGeneration = useRef(0);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
   const expandedPathsRef = useRef(expandedPaths);
@@ -214,6 +216,11 @@ export function FilesPanel({
   }, [onLoadEntries, storePage]);
 
   useEffect(() => {
+    if (
+      rootInputRef.current.entries === entries
+      && rootInputRef.current.entriesTruncated === entriesTruncated
+    ) return;
+    rootInputRef.current = { entries, entriesTruncated };
     directoryGeneration.current += 1;
     const next = freshWorkspaceDirectoryPages(entries, entriesTruncated);
     const rootDirectories = new Set(

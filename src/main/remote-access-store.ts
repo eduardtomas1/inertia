@@ -23,6 +23,7 @@ import {
 const timestamp = z.string().datetime({ offset: true });
 const entityId = z.string().min(1).max(200);
 const keyMaterial = z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/u);
+const AUTHORITY_REDUCTION_MARKER = "inertia-remote-authority-reduction-v1";
 
 const persistedDeviceSchema = z.object({
   id: z.string().uuid(),
@@ -206,6 +207,10 @@ async function boundedStorageAvailability(
 
 export class RemoteAccessStore {
   private readonly persistence: CredentialVaultPersistence;
+  private readonly authorityReduction: FileCredentialVaultPersistence;
+  private authorityReductionDepth = 0;
+  private authorityReductionReady: Promise<void> | null = null;
+  private authorityReductionCleanup: Promise<void> | null = null;
 
   constructor(
     filePath: string,
@@ -216,6 +221,10 @@ export class RemoteAccessStore {
       filePath,
       { temporaryPrefix: ".remote-access-vault-" },
     );
+    this.authorityReduction = new FileCredentialVaultPersistence(
+      `${filePath}.fail-closed`,
+      { temporaryPrefix: ".remote-access-fail-closed-" },
+    );
   }
 
   available(): boolean {
@@ -224,8 +233,18 @@ export class RemoteAccessStore {
 
   async load(): Promise<PersistedRemoteAccess | null> {
     if (!this.available()) return null;
+    const authorityReduction = await this.authorityReduction.read();
+    if (
+      authorityReduction !== null
+      && authorityReduction !== AUTHORITY_REDUCTION_MARKER
+    ) {
+      throw new Error("The Remote Companion fail-closed marker is invalid.");
+    }
     const encoded = await this.persistence.read();
-    if (encoded === null) return null;
+    if (encoded === null) {
+      if (authorityReduction !== null) await this.authorityReduction.remove();
+      return null;
+    }
     if (
       encoded.length > 1_400_000
       || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)
@@ -237,7 +256,17 @@ export class RemoteAccessStore {
     if (!parsed.success) {
       throw new Error("The encrypted Remote Companion store is invalid.");
     }
-    return parsed.data;
+    if (authorityReduction === null) return parsed.data;
+    const failClosed: PersistedRemoteAccess = {
+      ...parsed.data,
+      enabled: false,
+      devices: [],
+      receipts: [],
+      usedSessions: [],
+    };
+    await this.save(failClosed);
+    await this.authorityReduction.remove();
+    return failClosed;
   }
 
   async save(value: PersistedRemoteAccess): Promise<void> {
@@ -249,5 +278,49 @@ export class RemoteAccessStore {
     await this.persistence.write(
       Buffer.from(encrypted).toString("base64"),
     );
+  }
+
+  async beginAuthorityReduction(): Promise<void> {
+    if (this.authorityReductionCleanup) {
+      await this.authorityReductionCleanup;
+    }
+    this.authorityReductionDepth += 1;
+    this.authorityReductionReady ??= this.authorityReduction.write(
+      AUTHORITY_REDUCTION_MARKER,
+    );
+    try {
+      await this.authorityReductionReady;
+    } catch (error) {
+      this.authorityReductionDepth -= 1;
+      if (this.authorityReductionDepth === 0) {
+        this.authorityReductionReady = null;
+      }
+      throw error;
+    }
+  }
+
+  async completeAuthorityReduction(): Promise<void> {
+    if (this.authorityReductionDepth < 1 || !this.authorityReductionReady) {
+      throw new Error("No Remote Companion authority reduction is active.");
+    }
+    await this.authorityReductionReady;
+    if (this.authorityReductionDepth < 1) {
+      throw new Error("No Remote Companion authority reduction is active.");
+    }
+    this.authorityReductionDepth -= 1;
+    if (this.authorityReductionDepth > 0) return;
+    const completedGeneration = this.authorityReductionReady;
+    const cleanup = this.authorityReduction.remove();
+    this.authorityReductionCleanup = cleanup;
+    try {
+      await cleanup;
+    } finally {
+      if (this.authorityReductionCleanup === cleanup) {
+        this.authorityReductionCleanup = null;
+      }
+      if (this.authorityReductionReady === completedGeneration) {
+        this.authorityReductionReady = null;
+      }
+    }
   }
 }

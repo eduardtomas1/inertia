@@ -41,7 +41,8 @@ describe("cohesive composer dock", () => {
     expect(shellStart).toBeGreaterThan(-1);
     expect(composerStart).toBeGreaterThan(shellStart);
     expect(dock).toContain('aria-label="Message composer"');
-    expect(dock).toContain('aria-busy={submissionPending || followUpPending || running || stopping}');
+    expect(dock).toContain("aria-busy={");
+    expect(dock).toContain("|| conversationUpdatePending");
     expect(dock).toContain("<ComposerInputZone");
     expect(dock).toContain("<ComposerToolbar");
     expect(dock.indexOf("<ComposerInputZone"))

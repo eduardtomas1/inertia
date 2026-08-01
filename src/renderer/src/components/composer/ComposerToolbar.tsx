@@ -78,7 +78,9 @@ export interface ComposerToolbarProps {
       Conversation,
       "reasoningEffort" | "interactionMode" | "accessMode" | "modelSelection"
     >>,
-  ) => void;
+  ) => Promise<void>;
+  conversationUpdatePending: boolean;
+  conversationUpdateError: string | null;
   menuController: ComposerMenuController;
   selectedProvider: ProviderInfo | undefined;
   selectedBackendProfile: ModelBackendProfileView | undefined;
@@ -124,6 +126,8 @@ export function ComposerToolbar({
   onUpdateReasoningEffort,
   conversation,
   onUpdateConversation,
+  conversationUpdatePending,
+  conversationUpdateError,
   menuController,
   selectedProvider,
   selectedBackendProfile,
@@ -253,6 +257,8 @@ export function ComposerToolbar({
           menuController={menuController}
           onUpdateReasoningEffort={onUpdateReasoningEffort}
           onUpdateConversation={onUpdateConversation}
+          conversationUpdatePending={conversationUpdatePending}
+          conversationUpdateError={conversationUpdateError}
         />
         <ComposerMoreMenu
           actions={actions}
@@ -266,6 +272,8 @@ export function ComposerToolbar({
           onRunAction={onRunAction}
           onUpdateReasoningEffort={onUpdateReasoningEffort}
           onUpdateConversation={onUpdateConversation}
+          conversationUpdatePending={conversationUpdatePending}
+          conversationUpdateError={conversationUpdateError}
         />
         {selectedProvider && (
           <UsageIndicator

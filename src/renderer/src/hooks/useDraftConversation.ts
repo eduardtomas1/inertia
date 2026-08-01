@@ -84,7 +84,7 @@ export function useDraftConversation({
   updatePersistedConversation: (
     conversationId: string,
     change: ConversationUpdate,
-  ) => void;
+  ) => Promise<void>;
   }) {
   const [draft, setDraft] = useState<DraftConversationState | null>(() => {
     const stored = readPersistedDraftConversation();
@@ -494,10 +494,10 @@ export function useDraftConversation({
     await materializeAndSend(content, attachments, context, skillIds);
   };
 
-  const updateConversation = (change: ConversationUpdate): void => {
+  const updateConversation = async (change: ConversationUpdate): Promise<void> => {
     const current = draftRef.current;
     if (current?.materialized) {
-      updatePersistedConversation(
+      await updatePersistedConversation(
         current.materialized.conversationId,
         // Updates target the server-owned shell while Composer keeps its
         // stable local draft identity until reconciliation finishes.
@@ -506,7 +506,7 @@ export function useDraftConversation({
     } else if (current) {
       updateDraft(change);
     } else if (persistedConversationId) {
-      updatePersistedConversation(persistedConversationId, change);
+      await updatePersistedConversation(persistedConversationId, change);
     } else {
       updateDraft(change);
     }

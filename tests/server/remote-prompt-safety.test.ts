@@ -13,6 +13,7 @@ import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk
 import { RemoteRuntimeGateway } from "../../src/server/remote-gateway";
 import { KNOWN_HARNESS_IDS } from "../../src/shared/model-routing";
 import { remoteConversationGrantsFromProjectIds } from "../../src/shared/remote-grants";
+import { sanitizeRemoteContent } from "../../src/shared/remote-sanitizer";
 import {
   remotePromptSafetyForHarness,
   remotePromptSafetyIsUsable,
@@ -116,7 +117,7 @@ describe("provider remote-prompt safety contract", () => {
       expect(safety.supported).toBe(true);
       expect(safety.writesRequireLocalApproval).toBe(true);
       expect(safety.commandsRequireLocalApproval).toBe(true);
-      expect(safety.filesystemPolicy).not.toBe("unrestricted");
+      expect(safety.filesystemPolicy).toBe("provider-controlled");
       expect(safety.networkPolicy).not.toBe("unrestricted");
       expect(safety.permissionModel).not.toBe("provider-controlled");
       expect(remotePromptSafetyIsUsable(safety)).toBe(true);
@@ -148,6 +149,16 @@ describe("provider remote-prompt safety contract", () => {
       const safety = remotePromptSafetyForHarness(harnessId);
       expect(safety.filesystemPolicy).not.toBe("read-only-sandbox");
       expect(safety.networkPolicy).not.toBe("disabled");
+    }
+  });
+
+  it("discloses that semantic source-derived prose survives sanitization", () => {
+    const paraphrase = "The private configuration describes the launch phrase as violet otter.";
+    expect(sanitizeRemoteContent(paraphrase)).toBe(paraphrase);
+    for (const harnessId of APPROVAL_ROUTING_HARNESSES) {
+      const safety = remotePromptSafetyForHarness(harnessId);
+      expect(safety.filesystemPolicy).toBe("provider-controlled");
+      expect(safety.explanation).toContain("project-derived text");
     }
   });
 

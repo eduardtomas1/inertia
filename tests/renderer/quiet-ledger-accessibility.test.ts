@@ -321,15 +321,30 @@ describe("Quiet Ledger transcript accessibility", () => {
     );
 
     expect(viewportSource).toContain('className="timeline-minimap-preview"');
-    expect(viewportSource).toContain('role="tooltip"');
+    expect(viewportSource).toContain('aria-hidden="true"');
     expect(viewportSource).toContain(
       "aria-label={`Go to turn ${marker.number}: ${marker.label}`}",
     );
+    expect(viewportSource).not.toContain("aria-describedby=");
     expect(viewportSource).not.toContain(
       "title={`Turn ${marker.number}: ${marker.label}`}",
     );
     expect(styles).toContain(
       '.timeline-minimap button[data-emphasized="true"]::before',
     );
+    const buttonRule = styles.match(
+      /\.timeline-minimap button\s*\{(?<body>[\s\S]*?)\n\}/u,
+    )?.groups?.body ?? "";
+    const emphasizedRule = styles.match(
+      /\.timeline-minimap button\[data-emphasized="true"\]::before\s*\{(?<body>[\s\S]*?)\n\}/u,
+    )?.groups?.body ?? "";
+    const scale = emphasizedRule.match(
+      /transform:\s*scale\((?<horizontal>\d+(?:\.\d+)?),\s*(?<vertical>\d+(?:\.\d+)?)\)/u,
+    );
+
+    expect(buttonRule).toContain("width: 6px");
+    expect(buttonRule).toContain("height: 3px");
+    expect(Number(scale?.groups?.horizontal)).toBeGreaterThanOrEqual(2.5);
+    expect(Number(scale?.groups?.vertical)).toBeGreaterThanOrEqual(1.8);
   });
 });

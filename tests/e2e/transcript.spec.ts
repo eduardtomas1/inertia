@@ -247,19 +247,22 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       "data-emphasized",
       "true",
     );
-    await expect(minimap.getByRole("tooltip")).toHaveCount(1);
-    await expect(minimap.getByRole("tooltip")).toHaveText(
+    const minimapPreview = minimap.locator(".timeline-minimap-preview");
+    await expect(minimapPreview).toHaveCount(1);
+    await expect(minimapPreview).toHaveText(
       "Turn 1 · Virtualized request 0",
     );
+    await expect(minimapPreview).toHaveAttribute("aria-hidden", "true");
+    await expect(firstMinimapMarker).not.toHaveAttribute("aria-describedby");
     await expect.poll(() => firstMinimapMarker.evaluate((element) =>
       getComputedStyle(element, "::before").transform)).not.toBe("none");
     expect(await firstMinimapMarker.boundingBox()).toEqual(
       markerBoundsBeforeHover,
     );
     await transcript.hover({ position: { x: 160, y: 160 } });
-    await expect(minimap.getByRole("tooltip")).toHaveCount(0);
+    await expect(minimapPreview).toHaveCount(0);
     await firstMinimapMarker.focus();
-    await expect(minimap.getByRole("tooltip")).toHaveCount(1);
+    await expect(minimapPreview).toHaveCount(1);
     await expect(firstMinimapMarker).toHaveAttribute(
       "data-emphasized",
       "true",

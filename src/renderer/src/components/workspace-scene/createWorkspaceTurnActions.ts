@@ -6,12 +6,13 @@ import type {
 } from "@shared/contracts";
 
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
+import type { LoadWorkspaceGit } from "../../hooks/workspace-tools/useWorkspaceGit";
 
 interface WorkspaceTurnActionInput {
   conversation: Conversation | null;
   confirmDestructiveActions: boolean;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
-  loadGit: () => Promise<void>;
+  loadGit: LoadWorkspaceGit;
   openTurnDiff: (turnId: string, path?: string) => Promise<void>;
   compareTurnArtifacts: (
     earlierTurnId: string,
@@ -41,7 +42,7 @@ export function createWorkspaceTurnActions({
           conversationId: conversation.id,
           checkpointId: checkpoint.id,
         },
-      }).then(loadGit).catch(() => undefined);
+      }).then(() => loadGit({ authoritative: true })).catch(() => undefined);
     },
     openTurnDiff(turnId: string, path?: string): void {
       void openTurnDiff(turnId, path);

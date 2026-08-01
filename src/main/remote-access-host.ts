@@ -168,8 +168,13 @@ export class RemoteAccessHost {
   async shutdown(): Promise<void> {
     this.stopped = true;
     this.privacyMonitor.shutdown();
+    const activeService = this.service;
+    const activeShutdown = activeService?.shutdown();
     await this.serviceInitialization;
-    await this.service?.shutdown();
+    if (this.service && this.service !== activeService) {
+      await this.service.shutdown();
+    }
+    await activeShutdown;
   }
 
   private emitState(state: RemoteAccessState): void {

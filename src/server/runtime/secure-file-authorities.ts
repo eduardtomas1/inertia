@@ -27,6 +27,7 @@ export interface SecureFileAuthorityRegistryOptions {
   maxAuthorities?: number;
   ttlMs?: number;
   now?: () => number;
+  createReference?: () => string;
 }
 
 function sameBinding(
@@ -52,6 +53,7 @@ export class SecureFileAuthorityRegistry {
   private readonly maxAuthorities: number;
   private readonly ttlMs: number;
   private readonly now: () => number;
+  private readonly createReference: () => string;
 
   constructor(
     private readonly secureFiles: RuntimeSecureFileBroker,
@@ -72,6 +74,7 @@ export class SecureFileAuthorityRegistry {
       ),
     );
     this.now = options.now ?? Date.now;
+    this.createReference = options.createReference ?? randomUUID;
   }
 
   async issue(
@@ -79,16 +82,20 @@ export class SecureFileAuthorityRegistry {
     purpose: SecureFileAuthorityPurpose,
     binding: readonly string[],
     root: SecureFileRootCapability,
+    options: { signal?: AbortSignal } = {},
   ): Promise<string> {
-    await this.verify(root);
+    await this.verify(root, options.signal);
+    if (options.signal?.aborted) throw unavailableAuthority();
     this.prune();
     while (this.authorities.size >= this.maxAuthorities) {
       const oldest = this.authorities.keys().next().value;
       if (typeof oldest !== "string") break;
       this.authorities.delete(oldest);
     }
-    let reference = randomUUID();
-    while (this.authorities.has(reference)) reference = randomUUID();
+    let reference = this.createReference();
+    while (this.authorities.has(reference)) {
+      reference = this.createReference();
+    }
     this.authorities.set(reference, {
       owner,
       purpose,
@@ -104,7 +111,7 @@ export class SecureFileAuthorityRegistry {
     reference: string,
     purpose: SecureFileAuthorityPurpose,
     binding: readonly string[],
-    options: { consume?: boolean } = {},
+    options: { consume?: boolean; signal?: AbortSignal } = {},
   ): Promise<SecureFileRootCapability> {
     this.prune();
     const authority = this.authorities.get(reference);
@@ -118,7 +125,8 @@ export class SecureFileAuthorityRegistry {
     }
     if (options.consume) this.authorities.delete(reference);
     try {
-      await this.verify(authority.root);
+      await this.verify(authority.root, options.signal);
+      if (options.signal?.aborted) throw unavailableAuthority();
       return authority.root;
     } catch (error) {
       this.authorities.delete(reference);
@@ -129,6 +137,12 @@ export class SecureFileAuthorityRegistry {
   clearOwner(owner: object): void {
     for (const [reference, authority] of this.authorities) {
       if (authority.owner === owner) this.authorities.delete(reference);
+    }
+  }
+
+  revoke(owner: object, reference: string): void {
+    if (this.authorities.get(reference)?.owner === owner) {
+      this.authorities.delete(reference);
     }
   }
 
@@ -143,9 +157,14 @@ export class SecureFileAuthorityRegistry {
     }
   }
 
-  private async verify(root: SecureFileRootCapability): Promise<void> {
+  private async verify(
+    root: SecureFileRootCapability,
+    signal?: AbortSignal,
+  ): Promise<void> {
     try {
-      await this.secureFiles.verifyRoot(root);
+      if (signal?.aborted) throw unavailableAuthority();
+      await this.secureFiles.verifyRoot(root, signal);
+      if (signal?.aborted) throw unavailableAuthority();
     } catch {
       throw unavailableAuthority();
     }

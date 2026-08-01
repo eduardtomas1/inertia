@@ -14,6 +14,7 @@ import type {
   SessionConfigOption,
   SessionModeState,
   SessionNotification,
+  ToolKind,
   Usage,
 } from "@agentclientprotocol/sdk";
 
@@ -350,7 +351,11 @@ async function cursorPermission(
   approvals: Map<string, PendingApproval>,
 ): Promise<RequestPermissionResponse> {
   const allow = permissionOption(params.options, true);
-  if (options.input.access === "full" || (options.input.access === "auto-edit" && params.toolCall.kind === "edit")) {
+  const fileMutation = isCursorFileMutationKind(params.toolCall.kind);
+  if (
+    options.input.access === "full"
+    || (options.input.access === "auto-edit" && fileMutation)
+  ) {
     return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } };
   }
   const requestId = randomUUID();
@@ -368,7 +373,11 @@ async function cursorPermission(
       type: "approval",
       request: {
         requestId,
-        kind: params.toolCall.kind === "execute" ? "command" : params.toolCall.kind === "edit" || params.toolCall.kind === "delete" || params.toolCall.kind === "move" ? "file-change" : "permissions",
+        kind: params.toolCall.kind === "execute"
+          ? "command"
+          : fileMutation
+            ? "file-change"
+            : "permissions",
         title: bounded(params.toolCall.title || "Cursor requested permission"),
         detail: bounded(jsonSummary(params.toolCall.rawInput)),
         cwd: options.input.cwd,
@@ -380,6 +389,12 @@ async function cursorPermission(
   if (decision === "cancel") return { outcome: { outcome: "cancelled" } };
   const selected = permissionOption(params.options, decision === "approve");
   return selected ? { outcome: { outcome: "selected", optionId: selected.optionId } } : { outcome: { outcome: "cancelled" } };
+}
+
+export function isCursorFileMutationKind(
+  kind: ToolKind | null | undefined,
+): boolean {
+  return kind === "edit" || kind === "delete" || kind === "move";
 }
 
 function permissionOption(options: PermissionOption[], allow: boolean): PermissionOption | undefined {

@@ -28,6 +28,7 @@ export class RemoteSessionAdmissions {
   private readonly bySession = new Map<string, RemoteSessionAdmission>();
   private readonly byConnection = new Map<string, RemoteSessionAdmission>();
   private readonly byDevice = new Map<string, Set<RemoteSessionAdmission>>();
+  private readonly blockedDevices = new Map<string, number>();
 
   constructor(private readonly authority: RemoteSessionAdmissionAuthority) {}
 
@@ -66,7 +67,11 @@ export class RemoteSessionAdmissions {
     admission: RemoteSessionAdmission,
     deviceId: string,
   ): boolean {
-    if (!this.owns(admission) || admission.deviceId !== undefined) return false;
+    if (
+      !this.owns(admission)
+      || admission.deviceId !== undefined
+      || this.isDeviceBlocked(deviceId)
+    ) return false;
     admission.deviceId = deviceId;
     const admissions = this.byDevice.get(deviceId) ?? new Set();
     admissions.add(admission);
@@ -111,6 +116,25 @@ export class RemoteSessionAdmissions {
     for (const admission of this.byDevice.get(deviceId) ?? []) {
       this.release(admission);
     }
+  }
+
+  blockDevice(deviceId: string): () => void {
+    this.blockedDevices.set(
+      deviceId,
+      (this.blockedDevices.get(deviceId) ?? 0) + 1,
+    );
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const remaining = (this.blockedDevices.get(deviceId) ?? 1) - 1;
+      if (remaining > 0) this.blockedDevices.set(deviceId, remaining);
+      else this.blockedDevices.delete(deviceId);
+    };
+  }
+
+  isDeviceBlocked(deviceId: string): boolean {
+    return this.blockedDevices.has(deviceId);
   }
 }
 

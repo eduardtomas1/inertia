@@ -509,6 +509,7 @@ export class RemoteAccessService {
       this.clearTimer,
       REMOTE_SHUTDOWN_TIMEOUT_MS,
     );
+    await this.authorityMutationTail;
     await this.persistence.drain();
   }
 

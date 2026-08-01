@@ -1497,6 +1497,50 @@ describe("Remote Companion outbound encrypted service", () => {
     await pairing.service.shutdown();
   });
 
+  it("drains a pending authority reduction before shutdown completes", async () => {
+    const pairing = await pairedDeviceFixture({ scopes: ["view", "prompt"] });
+    pairing.service.setPrivacyLocked(true);
+    const originalBegin = pairing.store.beginAuthorityReduction.bind(
+      pairing.store,
+    );
+    let enterMarker = (): void => undefined;
+    const markerEntered = new Promise<void>((resolve) => {
+      enterMarker = resolve;
+    });
+    let releaseMarker = (): void => undefined;
+    const markerReleased = new Promise<void>((resolve) => {
+      releaseMarker = resolve;
+    });
+    vi.spyOn(pairing.store, "beginAuthorityReduction")
+      .mockImplementationOnce(async () => {
+        await originalBegin();
+        enterMarker();
+        await markerReleased;
+      });
+
+    const reduction = pairing.service.updateDevice(
+      pairing.deviceId,
+      ["view"],
+      [pairing.projectId],
+      new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(),
+    );
+    await markerEntered;
+    let shutdownSettled = false;
+    const shutdown = pairing.service.shutdown().then(() => {
+      shutdownSettled = true;
+    });
+
+    await Promise.resolve();
+    expect(shutdownSettled).toBe(false);
+    releaseMarker();
+    await Promise.all([reduction, shutdown]);
+
+    expect(await pairing.store.load()).toMatchObject({
+      enabled: true,
+      devices: [{ id: pairing.deviceId, scopes: ["view"] }],
+    });
+  });
+
   it.each(["revoke", "update"] as const)(
     "removes a session admitted while a serialized %s waits for its marker",
     async (operation) => {

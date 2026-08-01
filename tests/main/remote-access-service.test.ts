@@ -1698,14 +1698,39 @@ describe("Remote Companion outbound encrypted service", () => {
   });
 
   it("closes stale sessions before durably replacing a device grant", async () => {
-    const remoteRequest = vi.fn(async (): Promise<RemoteResponse> => {
-      throw new Error("A replaced session reached the runtime.");
+    let enterPrepare = (): void => undefined;
+    const prepareEntered = new Promise<void>((resolve) => {
+      enterPrepare = resolve;
     });
-    const prepareRemotePrompt = vi.fn(async () => ({
-      preparationId: crypto.randomUUID(),
+    let releasePrepare = (): void => undefined;
+    const prepareReleased = new Promise<void>((resolve) => {
+      releasePrepare = resolve;
+    });
+    const commitRemotePrompt = vi.fn(async (
+      _subject: unknown,
+      request: Extract<RemoteRequest, { type: "prompt.send" }>,
+    ): Promise<RemoteResponse> => ({
+      type: "response",
+      requestId: request.requestId,
+      ok: true,
+      result: {
+        kind: "prompt.accepted",
+        deliveryId: request.deliveryId,
+        turnId: crypto.randomUUID(),
+      },
     }));
     const paired = await pairedServiceFixture({
-      runtime: { remoteRequest, prepareRemotePrompt },
+      runtime: {
+        remoteRequest: async (): Promise<RemoteResponse> => {
+          throw new Error("A replaced session reached the runtime.");
+        },
+        prepareRemotePrompt: async () => {
+          enterPrepare();
+          await prepareReleased;
+          return { preparationId: crypto.randomUUID() };
+        },
+        commitRemotePrompt,
+      },
       scopes: ["view", "prompt"],
     });
     const replacementProjectId = crypto.randomUUID();
@@ -1732,69 +1757,6 @@ describe("Remote Companion outbound encrypted service", () => {
     );
     await waitFor(() => paired.service.state().pendingPairings.length === 1);
 
-    const originalSave = paired.store.save.bind(paired.store);
-    let enterSave = (): void => undefined;
-    const saveEntered = new Promise<void>((resolve) => {
-      enterSave = resolve;
-    });
-    let releaseSave = (): void => undefined;
-    const saveReleased = new Promise<void>((resolve) => {
-      releaseSave = resolve;
-    });
-    const save = vi.spyOn(paired.store, "save").mockImplementationOnce(
-      async (value) => {
-        enterSave();
-        await saveReleased;
-        await originalSave(value);
-      },
-    );
-    const closeFrame = nextFrame(
-      paired.session.tunnel.socket,
-      "session.close",
-    );
-    let sessionClosed = false;
-    void closeFrame.then(() => {
-      sessionClosed = true;
-    });
-    const pairingResponse = nextFrame(pairingTunnel.socket, "pair.response");
-    const approval = paired.service.approvePairing(
-      requestId,
-      ["view"],
-      [replacementProjectId],
-    );
-
-    await saveEntered;
-    await waitFor(() => sessionClosed);
-    expect(paired.service.state().activeSessions).toBe(0);
-    releaseSave();
-    await approval;
-    save.mockRestore();
-    expect(await closeFrame).toMatchObject({
-      kind: "session.close",
-      reason: "revoked",
-    });
-    expect(await pairingResponse).toMatchObject({ kind: "pair.response" });
-    expect(paired.service.state()).toMatchObject({
-      activeSessions: 0,
-      devices: [{
-        id: paired.deviceId,
-        scopes: ["view"],
-        projectIds: [replacementProjectId],
-      }],
-    });
-
-    sendFrame(
-      paired.session.tunnel.socket,
-      paired.session.tunnel.connectionId,
-      await sealSessionData(
-        paired.session.sender,
-        paired.session.sessionId,
-        {
-          type: "state.get",
-          requestId: crypto.randomUUID(),
-        },
-      ),
-    );
     sendFrame(
       paired.session.tunnel.socket,
       paired.session.tunnel.connectionId,
@@ -1810,9 +1772,79 @@ describe("Remote Companion outbound encrypted service", () => {
         },
       ),
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(remoteRequest).not.toHaveBeenCalled();
-    expect(prepareRemotePrompt).not.toHaveBeenCalled();
+    await prepareEntered;
+
+    const originalBegin = paired.store.beginAuthorityReduction.bind(
+      paired.store,
+    );
+    let enterMarker = (): void => undefined;
+    const markerEntered = new Promise<void>((resolve) => {
+      enterMarker = resolve;
+    });
+    let releaseMarker = (): void => undefined;
+    const markerReleased = new Promise<void>((resolve) => {
+      releaseMarker = resolve;
+    });
+    const begin = vi.spyOn(paired.store, "beginAuthorityReduction")
+      .mockImplementationOnce(async () => {
+        await originalBegin();
+        enterMarker();
+        await markerReleased;
+      });
+    const closeFrame = nextFrame(
+      paired.session.tunnel.socket,
+      "session.close",
+    );
+    let sessionClosed = false;
+    void closeFrame.then(() => {
+      sessionClosed = true;
+    });
+    const approval = paired.service.approvePairing(
+      requestId,
+      ["view"],
+      [replacementProjectId],
+    );
+
+    await markerEntered;
+    await waitFor(() => sessionClosed);
+    expect(paired.service.state().activeSessions).toBe(0);
+    releasePrepare();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(commitRemotePrompt).not.toHaveBeenCalled();
+
+    const staleAdmission = openAuthenticatedSession({
+      relayUrl: paired.relayUrl,
+      invitation,
+      deviceId: paired.deviceId,
+      deviceKeys: paired.deviceKeys,
+      grantVersion: 1,
+    }).then(
+      () => ({ accepted: true as const }),
+      (error: unknown) => ({ accepted: false as const, error }),
+    );
+    const staleAdmissionResult = await staleAdmission;
+    const pairingResponse = nextFrame(pairingTunnel.socket, "pair.response");
+    releaseMarker();
+    await approval;
+    expect(staleAdmissionResult).toMatchObject({
+      accepted: false,
+      error: expect.objectContaining({ message: "Message timed out." }),
+    });
+    expect(paired.service.state().activeSessions).toBe(0);
+    begin.mockRestore();
+    expect(await closeFrame).toMatchObject({
+      kind: "session.close",
+      reason: "revoked",
+    });
+    expect(await pairingResponse).toMatchObject({ kind: "pair.response" });
+    expect(paired.service.state()).toMatchObject({
+      activeSessions: 0,
+      devices: [{
+        id: paired.deviceId,
+        scopes: ["view"],
+        projectIds: [replacementProjectId],
+      }],
+    });
 
     pairingTunnel.socket.terminate();
     const replacementSession = await openAuthenticatedSession({

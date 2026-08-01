@@ -294,87 +294,82 @@ export class RemoteAccessService {
       this.pendingPairings.delete(requestId);
       throw new Error("That pairing request expired.");
     }
-    const devicePublicKey = await importRemotePublicKey(
-      pending.payload.devicePublicKey,
-    );
-    if (
-      this.pendingPairings.get(requestId) !== pending
-      || !this.relayMessages.owns(
+    const releaseAdmissionBlock = this.sessionAdmissions.blockDevice(pending.payload.deviceId);
+    try {
+      const devicePublicKey = await importRemotePublicKey(pending.payload.devicePublicKey);
+      if (!this.pairingIsCurrent(requestId, pending)) {
+        throw new Error("That pairing request is no longer pending.");
+      }
+      const { device, replaced } = await this.serializeAuthorityMutation(
+        async () => {
+          if (!this.pairingIsCurrent(requestId, pending)) {
+            throw new Error("That pairing request is no longer pending.");
+          }
+          const currentData = this.requireData();
+          const replacing = currentData.devices.some(
+            ({ id, revokedAt }) => id === pending.payload.deviceId && !revokedAt,
+          );
+          if (replacing) {
+            this.closeDeviceSessions(pending.payload.deviceId, "revoked", false);
+            return await this.persistAuthorityReduction(() => {
+              const applied = applyRemotePairingGrant({
+                data: currentData,
+                pending,
+                scopes,
+                projectIds,
+                grants,
+                grantMs,
+                now: this.now(),
+              });
+              this.pendingPairings.delete(requestId);
+              this.audit(
+                "pairing.accepted",
+                applied.device.id,
+                "A device was paired.",
+              );
+              return applied;
+            });
+          }
+          const applied = applyRemotePairingGrant({
+            data: currentData,
+            pending,
+            scopes,
+            projectIds,
+            grants,
+            grantMs,
+            now: this.now(),
+          });
+          this.pendingPairings.delete(requestId);
+          this.audit(
+            "pairing.accepted",
+            applied.device.id,
+            "A device was paired.",
+          );
+          await this.persist();
+          return applied;
+        },
+      );
+      if (replaced) this.closeDeviceSessions(device.id, "revoked", false);
+      const frame = await sealPairingResponse(
+        this.requireHostKeyPair(), devicePublicKey, requestId, {
+          type: "pair.accepted",
+          requestId,
+          deviceId: device.id,
+          hostId: data.hostId,
+          scopes: device.scopes,
+          projectIds: device.projectIds,
+          expiresAt: device.expiresAt,
+          grantVersion: device.grantVersion,
+        },
+      );
+      if (this.relayMessages.owns(
         pending.connectionId,
         pending.connectionEpoch,
-      )
-      || Date.parse(pending.expiresAt) <= this.now().getTime()
-    ) {
-      throw new Error("That pairing request is no longer pending.");
-    }
-    const { device, replaced } = await this.serializeAuthorityMutation(
-      async () => {
-        if (
-          this.pendingPairings.get(requestId) !== pending
-          || !this.relayMessages.owns(
-            pending.connectionId,
-            pending.connectionEpoch,
-          )
-          || Date.parse(pending.expiresAt) <= this.now().getTime()
-        ) {
-          throw new Error("That pairing request is no longer pending.");
-        }
-        const currentData = this.requireData();
-        const replacing = currentData.devices.some(
-          ({ id, revokedAt }) => id === pending.payload.deviceId && !revokedAt,
-        );
-        if (replacing) {
-          this.closeDeviceSessions(pending.payload.deviceId, "revoked", false);
-          return await this.persistAuthorityReduction(() => {
-            const applied = applyRemotePairingGrant({
-              data: currentData,
-              pending,
-              scopes,
-              projectIds,
-              grants,
-              grantMs,
-              now: this.now(),
-            });
-            this.pendingPairings.delete(requestId);
-            this.audit("pairing.accepted", applied.device.id, "A device was paired.");
-            return applied;
-          });
-        }
-        const applied = applyRemotePairingGrant({
-          data: currentData,
-          pending,
-          scopes,
-          projectIds,
-          grants,
-          grantMs,
-          now: this.now(),
-        });
-        this.pendingPairings.delete(requestId);
-        this.audit("pairing.accepted", applied.device.id, "A device was paired.");
-        await this.persist();
-        return applied;
-      },
-    );
-    if (replaced) this.closeDeviceSessions(device.id, "revoked", false);
-    const frame = await sealPairingResponse(
-      this.requireHostKeyPair(),
-      devicePublicKey,
-      requestId,
-      {
-        type: "pair.accepted",
-        requestId,
-        deviceId: device.id,
-        hostId: data.hostId,
-        scopes: device.scopes,
-        projectIds: device.projectIds,
-        expiresAt: device.expiresAt,
-        grantVersion: device.grantVersion,
-      },
-    );
-    if (this.relayMessages.owns(pending.connectionId, pending.connectionEpoch)) {
-      this.sendFrame(pending.connectionId, frame);
-    }
-    this.emitState();
+      )) {
+        this.sendFrame(pending.connectionId, frame);
+      }
+      this.emitState();
+    } finally { releaseAdmissionBlock(); }
   }
 
   async denyPairing(requestId: string): Promise<void> {
@@ -1131,6 +1126,11 @@ export class RemoteAccessService {
     }
   }
 
+  private pairingIsCurrent(requestId: string, pending: PendingRemotePairing): boolean {
+    return this.pendingPairings.get(requestId) === pending
+      && this.relayMessages.owns(pending.connectionId, pending.connectionEpoch)
+      && Date.parse(pending.expiresAt) > this.now().getTime();
+  }
   private requireData(): PersistedRemoteAccess {
     if (!this.data || this.storeError) {
       throw new Error(

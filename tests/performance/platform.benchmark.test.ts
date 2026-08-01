@@ -211,6 +211,7 @@ function printablePtyText(output: string): string {
     const controlType = output[index + 1];
     if (controlType === "[") {
       let cursor = index + 2;
+      let sawIntermediate = false;
       for (; cursor < output.length; cursor += 1) {
         const controlCode = output.charCodeAt(cursor);
         if (controlCode >= 0x40 && controlCode <= 0x7E) break;
@@ -219,6 +220,10 @@ function printablePtyText(output: string): string {
         if (!isParameter && !isIntermediate) {
           throw new Error("Malformed PTY CSI control sequence.");
         }
+        if (isParameter && sawIntermediate) {
+          throw new Error("Malformed PTY CSI control sequence.");
+        }
+        if (isIntermediate) sawIntermediate = true;
       }
       if (cursor >= output.length) {
         throw new Error("Unterminated PTY CSI control sequence.");
@@ -613,6 +618,7 @@ describe("cross-platform performance benchmark", () => {
     )).toThrow();
     expect(() => assertExpectedPtyRecords(`${record0}${record1}\n`, 2)).toThrow();
     expect(() => assertExpectedPtyRecords(`printable-prefix${record0}\n${record1}\n`, 2)).toThrow();
+    expect(() => extractPtyRecords("\u001B[ 1m")).toThrow();
     expect(() => extractPtyRecords("\u001B[?9001")).toThrow();
     expect(() => extractPtyRecords("\u001B]0;unterminated")).toThrow();
   });

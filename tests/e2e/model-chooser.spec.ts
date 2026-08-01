@@ -116,16 +116,10 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   expect(modelResultsAx).toContain('- listbox "Model results"');
   expect(modelResultsAx).toContain("- option ");
   expect(modelResultsAx).toContain("[selected]");
-  expect(modelResultsAx).not.toContain("- button ");
-  const modelFavoriteActions = modelChooser.getByRole("group", {
+  expect(modelResultsAx).toContain('- button "Add ');
+  await expect(modelChooser.getByRole("group", {
     name: "Model favorite actions",
-  });
-  const modelFavoriteActionsAx = await modelFavoriteActions.ariaSnapshot();
-  expect(modelFavoriteActionsAx).toContain(
-    '- group "Model favorite actions"',
-  );
-  expect(modelFavoriteActionsAx).toContain('- button "Add ');
-  expect(modelFavoriteActionsAx).not.toContain("- option ");
+  })).toHaveCount(0);
   const firstResult = modelChooser.locator(".model-chooser-result").first();
   await firstResult.evaluate((element) => {
     element.style.minHeight = "92px";
@@ -135,7 +129,9 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
       const bounds = element.getBoundingClientRect();
       return bounds.top + bounds.height / 2;
     }));
-  const favoriteCenters = await modelFavoriteActions.getByRole("button")
+  const favoriteCenters = await modelResults.locator(
+    ".model-chooser-row-favorite",
+  )
     .evaluateAll((elements) => elements.map((element) => {
       const bounds = element.getBoundingClientRect();
       return bounds.top + bounds.height / 2;
@@ -181,11 +177,11 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
 
   await captureChooserScenario("anchored-model-chooser-1440x720");
 
-  const firstFavorite = modelFavoriteActions.getByRole("button", {
+  const firstFavorite = modelResults.getByRole("button", {
     name: /^Add .+ to favorites$/u,
   }).first();
   await firstFavorite.click();
-  await expect(modelFavoriteActions.getByRole("button", {
+  await expect(modelResults.getByRole("button", {
     name: /^Remove .+ from favorites$/u,
   }).first()).toHaveAttribute("aria-pressed", "true");
   const favoritesSource = modelChooser.getByRole("button", {

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ActivityCenter } from "../../src/renderer/src/components/ActivityCenter";
+import * as activityCenterModel from "../../src/renderer/src/utils/activityCenter";
 import type {
   Conversation,
   Project,
@@ -88,16 +89,23 @@ describe("ActivityCenter agent operation disclosure", () => {
       onAcknowledge: vi.fn(),
       onDismiss: vi.fn(),
     };
+    const presentation = vi.spyOn(
+      activityCenterModel,
+      "activityRunPresentation",
+    );
     const view = render(<ActivityCenter open {...props} />);
 
     expect(screen.getByText("Running · 10s")).toBeInTheDocument();
+    expect(presentation).toHaveBeenCalledTimes(1);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
     expect(screen.getByText("Running · 11s")).toBeInTheDocument();
+    expect(presentation).toHaveBeenCalledTimes(1);
 
     view.rerender(<ActivityCenter open={false} {...props} />);
     expect(vi.getTimerCount()).toBe(0);
+    presentation.mockRestore();
     vi.useRealTimers();
   });
 

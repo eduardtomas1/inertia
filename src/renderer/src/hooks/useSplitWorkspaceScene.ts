@@ -12,6 +12,7 @@ import type {
   Project,
   ProviderMaintenanceProviderId,
   ServerEvent,
+  SubagentTrace,
   TurnRequestContext,
 } from "@shared/contracts";
 
@@ -33,6 +34,8 @@ import {
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
 import { planFromText } from "../utils/planFromText";
+import { requestComposerPrefill } from "../utils/composerPrefill";
+import { canFollowUpSubagentTrace } from "../utils/subagentDisclosure";
 import { useActivityActions } from "./useActivityActions";
 import {
   agentWorkflowRouteIdentity,
@@ -333,7 +336,28 @@ export function useSplitWorkspaceScene({
         await actions.updateConversationById(splitConversation.id, update);
       }
     },
+    followUpSubagent: (trace: SubagentTrace) => {
+      if (!splitConversation || !canFollowUpSubagentTrace(
+        trace,
+        projection.turns,
+      )) return;
+      const task = trace.description ?? trace.providerRole ?? "delegated task";
+      requestComposerPrefill({
+        conversationId: splitConversation.id,
+        text: `Please follow up on the delegated task “${task}” and incorporate its latest result.`,
+      });
+    },
     ...turnActions,
+    stopSubagent: async (trace: SubagentTrace) => {
+      try {
+        await turnActions.stopSubagent(trace);
+      } catch (error) {
+        setActionError(error instanceof Error
+          ? error.message
+          : "The delegated task could not be stopped.");
+        throw error;
+      }
+    },
     run,
   });
   const model = useMemo(() => createWorkspaceSceneModel({

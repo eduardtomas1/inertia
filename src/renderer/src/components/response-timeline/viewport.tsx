@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -302,7 +303,7 @@ export function TimelineMinimap({
   );
 }
 
-export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Element {
+function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const previousTimeline = useRef<ResponseTimelineItem[]>([]);
   const previousBuild = useRef<{
     input: BuildResponseTimelineInput;
@@ -888,15 +889,17 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
               const item = timeline[virtualItem.index];
               if (!item) return null;
               return (
-                <div
+                <article
                   className="response-virtual-item"
                   key={virtualItem.key}
                   data-index={virtualItem.index}
+                  aria-posinset={virtualItem.index + 1}
+                  aria-setsize={timeline.length}
                   ref={virtualizer.measureElement}
                   style={{ transform: `translateY(${virtualItem.start}px)` }}
                 >
                   {renderItem(item)}
-                </div>
+                </article>
               );
             })}
           </div>
@@ -905,3 +908,6 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     </>
   );
 }
+
+export const ResponseTimeline = memo(ResponseTimelineView);
+ResponseTimeline.displayName = "ResponseTimeline";

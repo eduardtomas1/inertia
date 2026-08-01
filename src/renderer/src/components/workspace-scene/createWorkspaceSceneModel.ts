@@ -37,7 +37,6 @@ import {
 import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
 import type { NewConversationLocation } from "../../lib/newConversation";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
-import { requestComposerPrefill } from "../../utils/composerPrefill";
 import {
   canFollowUpSubagentTrace,
   canStopSubagentTrace,
@@ -129,6 +128,7 @@ export interface WorkspaceSceneActions {
     earlierTurnId: string,
     laterTurnId: string,
   ) => void;
+  followUpSubagent: (trace: SubagentTrace) => void;
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
   stopAgent: () => Promise<void>;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
@@ -244,14 +244,6 @@ export function createWorkspaceSceneModel({
       : null;
   const canGuideParent = (trace: SubagentTrace): boolean =>
     canFollowUpSubagentTrace(trace, projection.turns);
-  const guideParent = (trace: SubagentTrace): void => {
-    if (!conversation || !canGuideParent(trace)) return;
-    const task = trace.description ?? trace.providerRole ?? "delegated task";
-    requestComposerPrefill({
-      conversationId: conversation.id,
-      text: `Please follow up on the delegated task “${task}” and incorporate its latest result.`,
-    });
-  };
 
   return {
     view,
@@ -406,17 +398,8 @@ export function createWorkspaceSceneModel({
       onCompareTurnArtifacts: actions.compareTurnArtifacts,
       onOpenTurnFile: workspaceTools.openTurnFile,
       onRevertCheckpoint: actions.revertCheckpoint,
-      onFollowUpSubagent: guideParent,
-      onStopSubagent: async (trace) => {
-        try {
-          await actions.stopSubagent(trace);
-        } catch (error) {
-          setActionError(error instanceof Error
-            ? error.message
-            : "The delegated task could not be stopped.");
-          throw error;
-        }
-      },
+      onFollowUpSubagent: actions.followUpSubagent,
+      onStopSubagent: actions.stopSubagent,
       onStop: actions.stopAgent,
     },
     resizeHandle: project && !workspaceToolsUnavailable && toolsVisible ? {
@@ -584,7 +567,7 @@ export function createWorkspaceSceneModel({
           ));
         },
         canFollowUpSubagent: canGuideParent,
-        onFollowUpSubagent: guideParent,
+        onFollowUpSubagent: actions.followUpSubagent,
         onOpenSubagent: (trace) => {
           setActiveTool(null);
           requestTimelineFocus({

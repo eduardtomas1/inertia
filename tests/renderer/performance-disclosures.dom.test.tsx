@@ -116,7 +116,6 @@ describe("historical execution disclosure performance", () => {
         projectRoot="/workspace"
         projectId="project-performance"
         conversationId={conversationId}
-        providers={[]}
         streamingText=""
         streamingReasoning=""
         approvals={[]}

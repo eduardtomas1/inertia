@@ -8,7 +8,9 @@ import {
   logicalProjectKey,
   nextSidebarNavigationIndex,
   sidebarThreadView,
+  sidebarThreadViewMap,
   sortActivityThreads,
+  sortSidebarThreadViews,
 } from "../../src/renderer/src/utils/sidebarModel";
 import type { Conversation, Project, WorkspaceRun } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
@@ -212,6 +214,32 @@ describe("classic sidebar search", () => {
 });
 
 describe("work-first chat model", () => {
+  it("projects and groups a 1,000-chat catalog within the renderer budget", () => {
+    const conversations = Array.from({ length: 1_000 }, (_, index) =>
+      conversation({
+        id: `catalog-${String(index).padStart(4, "0")}`,
+        projectId: `project-${index % 20}`,
+        status: index % 13 === 0 ? "running" : "idle",
+        updatedAt: new Date(Date.UTC(2026, 6, 20, 10, 0, index))
+          .toISOString(),
+      }));
+    const runs = conversations.map((entry, index) => workspaceRun(entry.id, {
+      status: index % 13 === 0 ? "running" : "succeeded",
+      finishedAt: index % 13 === 0
+        ? null
+        : "2026-07-22T10:01:00.000Z",
+    }));
+    const startedAt = performance.now();
+    const views = sidebarThreadViewMap(conversations, null, runs);
+    const sorted = sortSidebarThreadViews([...views.values()]);
+    const sections = groupWorkThreads(sorted);
+    const elapsed = performance.now() - startedAt;
+
+    expect(views.size).toBe(1_000);
+    expect(sections.flatMap(({ threads }) => threads)).toHaveLength(1_000);
+    expect(elapsed).toBeLessThan(500);
+  });
+
   it("distinguishes every visible state and prioritizes actionable work", () => {
     const entries = [
       conversation({ id: "idle", projectId: "p" }),

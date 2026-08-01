@@ -1,5 +1,6 @@
 import { Search, Star } from "lucide-react";
 import {
+  memo,
   useCallback,
   useEffect,
   useId,
@@ -12,9 +13,9 @@ import {
 
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
-  ModelChooserFavoriteButton,
   modelChooserRowFromRoute,
   ModelChooserRow,
+  type ModelChooserRowData,
 } from "./ModelChooserRow";
 import { ModelSourceRail } from "./ModelSourceRail";
 import { SelectedModelChip } from "./SelectedModelChip";
@@ -150,6 +151,52 @@ export function preferredModelChooserSource(
     ?? { kind: "all" };
 }
 
+interface ModelChooserResultProps {
+  route: ComposerModelRoute;
+  row: ModelChooserRowData;
+  index: number;
+  optionId: string;
+  navigated: boolean;
+  onNavigate: (index: number) => void;
+  onSelect: (route: ComposerModelRoute) => void;
+  onFavoriteToggle: (route: ComposerModelRoute) => void;
+}
+
+const ModelChooserResult = memo(function ModelChooserResult({
+  route,
+  row,
+  index,
+  optionId,
+  navigated,
+  onNavigate,
+  onSelect,
+  onFavoriteToggle,
+}: ModelChooserResultProps): JSX.Element {
+  const selectRow = useCallback(() => onSelect(route), [onSelect, route]);
+  const toggleFavorite = useCallback(
+    () => onFavoriteToggle(route),
+    [onFavoriteToggle, route],
+  );
+  return (
+    <div
+      className={navigated
+        ? "model-chooser-result is-navigated"
+        : "model-chooser-result"}
+      role="presentation"
+      onPointerMove={() => {
+        if (route.selectable) onNavigate(index);
+      }}
+    >
+      <ModelChooserRow
+        row={row}
+        optionId={optionId}
+        onSelect={selectRow}
+        onFavoriteToggle={toggleFavorite}
+      />
+    </div>
+  );
+});
+
 export function ModelChooser({
   routes,
   selectedRoute,
@@ -177,7 +224,7 @@ export function ModelChooser({
   );
   const [activeIndex, setActiveIndex] = useState(-1);
   const favoriteKeys = useMemo(
-    () => favorites.map(modelFavoriteKey),
+    () => new Set(favorites.map(modelFavoriteKey)),
     [favorites],
   );
   const resolvedFavorites = useMemo(
@@ -308,19 +355,25 @@ export function ModelChooser({
     close(false);
   }, [close, closeSignal, disabled, open]);
 
-  const select = (route: ComposerModelRoute): void => {
+  const select = useCallback((route: ComposerModelRoute): void => {
     if (!route.selectable) return;
     onSelect(route);
     close(true);
-  };
+  }, [close, onSelect]);
 
-  const toggleFavorite = (route: ComposerModelRoute): void => {
-    const next = toggleModelFavorite(favorites, route);
-    setFavorites(next);
-    if (typeof window !== "undefined") {
-      writeModelFavorites(window.localStorage, next);
-    }
-  };
+  const toggleFavorite = useCallback((route: ComposerModelRoute): void => {
+    setFavorites((current) => {
+      const next = toggleModelFavorite(current, route);
+      if (typeof window !== "undefined") {
+        writeModelFavorites(window.localStorage, next);
+      }
+      return next;
+    });
+  }, []);
+
+  const navigateTo = useCallback((index: number): void => {
+    setActiveIndex(index);
+  }, []);
 
   const handleNavigation = (
     event: ReactKeyboardEvent<HTMLDivElement>,
@@ -362,13 +415,13 @@ export function ModelChooser({
   const activeDescendant = activeRoute
     ? `${reactId}-model-option-${activeIndex}`
     : undefined;
-  const chooserRows = results.items.map((route) =>
+  const chooserRows = useMemo(() => results.items.map((route) =>
     modelChooserRowFromRoute(route, {
       active: activeKeyForRoute(route) === selectedKey,
-      favorite: favoriteKeys.includes(favoriteKeyForRoute(route)),
+      favorite: favoriteKeys.has(favoriteKeyForRoute(route)),
       shortcut: shortcutsByRoute.get(route.key) ?? null,
       compatibility: route.rowCompatibility,
-    }));
+    })), [favoriteKeys, results.items, selectedKey, shortcutsByRoute]);
 
   return (
     <div
@@ -440,50 +493,19 @@ export function ModelChooser({
                   aria-label="Model results"
                 >
                   {results.items.map((route, index) => (
-                    <div
+                    <ModelChooserResult
                       key={route.key}
-                      className={activeIndex === index
-                        ? "model-chooser-result is-navigated"
-                        : "model-chooser-result"}
-                      role="presentation"
-                      style={{ gridRow: index + 1 }}
-                      onPointerMove={() => {
-                        if (route.selectable) setActiveIndex(index);
-                      }}
-                    >
-                      <ModelChooserRow
-                        row={chooserRows[index]!}
-                        optionId={`${reactId}-model-option-${index}`}
-                        onSelect={() => select(route)}
-                      />
-                    </div>
+                      route={route}
+                      row={chooserRows[index]!}
+                      index={index}
+                      optionId={`${reactId}-model-option-${index}`}
+                      navigated={activeIndex === index}
+                      onNavigate={navigateTo}
+                      onSelect={select}
+                      onFavoriteToggle={toggleFavorite}
+                    />
                   ))}
                 </div>
-                {chooserRows.length > 0 && (
-                  <div
-                    className="model-chooser-favorite-actions"
-                    role="group"
-                    aria-label="Model favorite actions"
-                  >
-                    {chooserRows.map((row, index) => (
-                      <div
-                        key={row.key}
-                        className="model-chooser-favorite-slot"
-                        role="presentation"
-                        style={{ gridRow: index + 1 }}
-                        onPointerMove={() => {
-                          if (row.selectable) setActiveIndex(index);
-                        }}
-                      >
-                        <ModelChooserFavoriteButton
-                          row={row}
-                          onFavoriteToggle={() =>
-                            toggleFavorite(results.items[index]!)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
                 {results.emptyState && (
                   <div className="model-chooser-empty" role="status">
                     <Search size={17} aria-hidden="true" />

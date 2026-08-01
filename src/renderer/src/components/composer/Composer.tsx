@@ -1,4 +1,11 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import clsx from "clsx";
 import type {
   ChatAttachment,
@@ -53,6 +60,8 @@ import {
   type ComposerPrefillDetail,
 } from "../../utils/composerPrefill";
 
+export const DRAFT_PERSISTENCE_DELAY_MS = 275;
+
 export const Composer = memo(function Composer({
   conversation,
   providers,
@@ -97,7 +106,12 @@ export const Composer = memo(function Composer({
   const [promptStash, setPromptStash] = useState(
     () => readPromptStash(window.localStorage),
   );
-  const skipDraftPersistenceRef = useRef(true);
+  const draftValueRef = useRef(message);
+  const pendingDraftRef = useRef<{
+    conversationId: string;
+    value: string;
+  } | null>(null);
+  const draftPersistenceTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -141,6 +155,37 @@ export const Composer = memo(function Composer({
 
   conversationIdRef.current = conversation.id;
 
+  const flushDraftPersistence = useCallback((): void => {
+    if (draftPersistenceTimerRef.current !== null) {
+      window.clearTimeout(draftPersistenceTimerRef.current);
+      draftPersistenceTimerRef.current = null;
+    }
+    const pending = pendingDraftRef.current;
+    pendingDraftRef.current = null;
+    if (!pending) return;
+    try {
+      const key = `inertia:draft:${pending.conversationId}`;
+      if (pending.value) window.localStorage.setItem(key, pending.value);
+      else window.localStorage.removeItem(key);
+    } catch {
+      // Keep editing available when browser storage is unavailable.
+    }
+  }, []);
+
+  const scheduleDraftPersistence = useCallback((
+    conversationId: string,
+    value: string,
+  ): void => {
+    if (draftPersistenceTimerRef.current !== null) {
+      window.clearTimeout(draftPersistenceTimerRef.current);
+    }
+    pendingDraftRef.current = { conversationId, value };
+    draftPersistenceTimerRef.current = window.setTimeout(
+      flushDraftPersistence,
+      DRAFT_PERSISTENCE_DELAY_MS,
+    );
+  }, [flushDraftPersistence]);
+
   const markEditorChanged = (conversationId = conversation.id): void => {
     editorRevisionSequenceRef.current += 1;
     editorRevisionsRef.current.set(
@@ -157,14 +202,22 @@ export const Composer = memo(function Composer({
         || detail.conversationId !== conversationIdRef.current
         || typeof detail.text !== "string"
       ) return;
-      setMessage((current) => current.trim()
-        ? `${current.trim()}\n\n${detail.text}`
-        : detail.text);
+      setMessage((current) => {
+        const next = current.trim()
+          ? `${current.trim()}\n\n${detail.text}`
+          : detail.text;
+        if (next !== current) {
+          markEditorChanged(conversationIdRef.current);
+          draftValueRef.current = next;
+          scheduleDraftPersistence(conversationIdRef.current, next);
+        }
+        return next;
+      });
       window.requestAnimationFrame(() => textareaRef.current?.focus());
     };
     window.addEventListener(COMPOSER_PREFILL_EVENT, prefill);
     return () => window.removeEventListener(COMPOSER_PREFILL_EVENT, prefill);
-  }, []);
+  }, [scheduleDraftPersistence]);
 
   useEffect(() => {
     const refreshPromptStash = (): void => {
@@ -202,8 +255,8 @@ export const Composer = memo(function Composer({
   }, [conversation.id, promptContext]);
 
   useEffect(() => {
+    flushDraftPersistence();
     attachmentAuthorityRef.current += 1;
-    skipDraftPersistenceRef.current = true;
     if (submissionReleaseTimerRef.current !== null) {
       window.clearTimeout(submissionReleaseTimerRef.current);
       submissionReleaseTimerRef.current = null;
@@ -216,7 +269,11 @@ export const Composer = memo(function Composer({
     stoppingRef.current = false;
     setSubmitting(false);
     setStopping(false);
-    setMessage(window.localStorage.getItem(`inertia:draft:${conversation.id}`) ?? "");
+    const nextDraft = window.localStorage.getItem(
+      `inertia:draft:${conversation.id}`,
+    ) ?? "";
+    draftValueRef.current = nextDraft;
+    setMessage(nextDraft);
     for (const attachment of attachmentsRef.current) {
       void onReleaseAttachment(attachment.id);
     }
@@ -230,7 +287,12 @@ export const Composer = memo(function Composer({
     setConversationUpdatePending(false);
     setConversationUpdateError(null);
     dismissMenu("context-change");
-  }, [conversation.id, dismissMenu, onReleaseAttachment]);
+  }, [
+    conversation.id,
+    dismissMenu,
+    flushDraftPersistence,
+    onReleaseAttachment,
+  ]);
 
   useEffect(() => {
     if (running) {
@@ -263,6 +325,15 @@ export const Composer = memo(function Composer({
   }, []);
 
   useEffect(() => {
+    const flushBeforeUnload = (): void => flushDraftPersistence();
+    window.addEventListener("beforeunload", flushBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", flushBeforeUnload);
+      flushDraftPersistence();
+    };
+  }, [flushDraftPersistence]);
+
+  useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -275,16 +346,6 @@ export const Composer = memo(function Composer({
     };
   }, []);
 
-  useEffect(() => {
-    if (skipDraftPersistenceRef.current) {
-      skipDraftPersistenceRef.current = false;
-      return;
-    }
-    const key = `inertia:draft:${conversation.id}`;
-    if (message) window.localStorage.setItem(key, message);
-    else window.localStorage.removeItem(key);
-  }, [conversation.id, message]);
-
   const mentionQuery = mentionMatch?.[1] ?? null;
   useEffect(() => {
     if (mentionQuery) onMentionQuery(mentionQuery);
@@ -293,8 +354,10 @@ export const Composer = memo(function Composer({
   useTextareaAutosize(textareaRef, message);
 
   const updateMessage = (next: string): void => {
-    if (next === message) return;
+    if (next === draftValueRef.current) return;
     markEditorChanged();
+    draftValueRef.current = next;
+    scheduleDraftPersistence(conversation.id, next);
     setMessage(next);
   };
 
@@ -327,6 +390,7 @@ export const Composer = memo(function Composer({
       (!canSend && followUpState !== "ready")
       || submittingRef.current
     ) return;
+    flushDraftPersistence();
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
     const submittedDraft = message;
@@ -378,6 +442,7 @@ export const Composer = memo(function Composer({
       ) return;
       onClearSelectedSkills();
       if (editorUnchanged) {
+        draftValueRef.current = "";
         setMessage("");
         setAttachments([]);
         setFileReferences([]);

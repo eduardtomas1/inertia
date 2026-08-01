@@ -115,7 +115,6 @@ function renderRequest(
     projectRoot: "/workspace",
     projectId: "project-1",
     conversationId,
-    providers: [],
     streamingText: "",
     streamingReasoning: "",
     approvals: [],

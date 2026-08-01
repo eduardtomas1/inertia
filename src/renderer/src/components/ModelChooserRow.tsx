@@ -1,4 +1,9 @@
-import { useId, type JSX, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  memo,
+  useId,
+  type JSX,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { Check, Star } from "lucide-react";
 
 import type { ModelSearchRoute } from "../utils/modelSearch";
@@ -55,6 +60,7 @@ export interface ModelChooserRowProps {
   /** Roving option tab index supplied by the future chooser. */
   tabIndex?: 0 | -1;
   onSelect: (row: ModelChooserRowData) => void;
+  onFavoriteToggle?: (row: ModelChooserRowData) => void;
 }
 
 export interface ModelChooserFavoriteButtonProps {
@@ -156,11 +162,12 @@ export function activateModelChooserRow(
   return true;
 }
 
-export function ModelChooserRow({
+export const ModelChooserRow = memo(function ModelChooserRow({
   row,
   optionId,
   tabIndex = -1,
   onSelect,
+  onFavoriteToggle,
 }: ModelChooserRowProps): JSX.Element {
   const reactId = useId().replaceAll(":", "");
   const reasonId = `${reactId}-model-disabled-reason`;
@@ -237,11 +244,17 @@ export function ModelChooserRow({
           </span>
         )}
       </div>
+      {onFavoriteToggle && (
+        <ModelChooserFavoriteButton
+          row={row}
+          onFavoriteToggle={onFavoriteToggle}
+        />
+      )}
     </div>
   );
-}
+});
 
-export function ModelChooserFavoriteButton({
+export const ModelChooserFavoriteButton = memo(function ModelChooserFavoriteButton({
   row,
   onFavoriteToggle,
 }: ModelChooserFavoriteButtonProps): JSX.Element {
@@ -258,4 +271,4 @@ export function ModelChooserFavoriteButton({
       <Star size={13} fill={row.favorite ? "currentColor" : "none"} aria-hidden="true" />
     </button>
   );
-}
+});

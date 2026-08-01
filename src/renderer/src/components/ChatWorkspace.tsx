@@ -355,7 +355,6 @@ export function ChatWorkspace({
               projectRoot={projectRoot}
               projectId={project.id}
               conversationId={conversation.id}
-              providers={providers}
               streamingText={streamingText}
               streamingReasoning={streamingReasoning}
               approvals={approvals}

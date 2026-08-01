@@ -742,7 +742,6 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       answer: "",
     })])[0]!;
     const baseProps = {
-      providers: [],
       streamingText: "first",
       streamingReasoning: "reasoning",
       showTimestamps: false,
@@ -763,10 +762,6 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       subagents,
     });
 
-    expect(sameTurnTimelineProps(
-      memoInput(settled, baseProps),
-      memoInput(settled, { ...baseProps, providers: [...baseProps.providers] }),
-    )).toBe(true);
     expect(sameTurnTimelineProps(
       memoInput(settled, baseProps),
       memoInput(settled, { ...baseProps, streamingText: "second" }),

@@ -224,10 +224,10 @@ const styles = readFileSync(
     expect(block).toContain("var(--surface-hover)");
     expect(block).toContain("text-overflow: ellipsis");
     expect(block).toContain("@container (max-width: 420px)");
-    expect(chooserLayout).toContain("grid-template-columns: minmax(0, 1fr)");
-    expect(chooserLayout).toContain(".model-chooser-listbox,");
-    expect(chooserLayout).toContain(".model-chooser-favorite-actions");
-    expect(chooserLayout).toContain("display: contents");
+    expect(chooserLayout).toContain(".model-chooser-listbox {");
+    expect(chooserLayout).toContain("display: block");
+    expect(chooserLayout).not.toContain(".model-chooser-favorite-actions");
+    expect(chooserLayout).not.toContain(".model-chooser-favorite-slot");
     expect(chooserLayout).not.toContain("position: absolute");
     expect(block).not.toContain("model-chooser-row-card");
   });

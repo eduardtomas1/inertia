@@ -74,6 +74,9 @@ describe("accessibility focus policy", () => {
     );
     expect(modelChooserSource).toContain('className="model-chooser-listbox"');
     expect(modelChooserSource).toContain(
+      "onFavoriteToggle={toggleFavorite}",
+    );
+    expect(modelChooserSource).not.toContain(
       'aria-label="Model favorite actions"',
     );
   });

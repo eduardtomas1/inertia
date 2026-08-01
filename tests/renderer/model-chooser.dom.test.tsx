@@ -16,6 +16,29 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 
+function catalogRoute(index: number): ComposerModelRoute {
+  const base = currentRoute();
+  const modelId = `team-model-${String(index).padStart(4, "0")}`;
+  const selection = {
+    ...base.selection,
+    modelId,
+    alias: `Team Model ${index}`,
+  };
+  return {
+    ...base,
+    key: `route-${index}`,
+    displayName: `Team Model ${index}`,
+    modelId,
+    alias: selection.alias,
+    selection,
+    continuationIdentity: continuationIdentityForSelection(
+      selection,
+      `opaque-team-route-${index}`,
+      true,
+    ),
+  };
+}
+
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(
   window,
   "localStorage",
@@ -163,5 +186,34 @@ describe("model chooser active route", () => {
 
     await waitFor(() => expect(trigger).toBeEnabled());
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("renders a 750-route catalog as one semantic row per result within budget", () => {
+    const routes = Array.from({ length: 750 }, (_, index) =>
+      catalogRoute(index));
+    render(
+      <ModelChooser
+        routes={routes}
+        selectedRoute={routes[0]!}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const startedAt = performance.now();
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    const elapsed = performance.now() - startedAt;
+
+    const results = document.querySelectorAll(".model-chooser-result");
+    expect(results).toHaveLength(750);
+    expect(screen.getAllByRole("option")).toHaveLength(750);
+    expect(document.querySelector(".model-chooser-favorite-actions"))
+      .toBeNull();
+    const first = results[0]!;
+    expect(first.querySelectorAll('[role="option"]')).toHaveLength(1);
+    expect(first.querySelectorAll(".model-chooser-row-favorite"))
+      .toHaveLength(1);
+    // This bounded, on-demand catalog render did not justify adding a second
+    // virtualization system with new focus and accessibility failure modes.
+    expect(elapsed).toBeLessThan(2_000);
   });
 });

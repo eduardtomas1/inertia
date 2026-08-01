@@ -32,6 +32,57 @@ afterEach(async () => {
 });
 
 describe("SecureFileAuthorityRegistry", () => {
+  it("does not commit an authority after its verification is aborted", async () => {
+    const base = new SecureFileTestBroker();
+    const root = await base.authorizeRoot(await temporaryRoot());
+    let releaseVerification!: () => void;
+    const verification = new Promise<void>((resolve) => {
+      releaseVerification = resolve;
+    });
+    let verificationSignal: AbortSignal | undefined;
+    const secureFiles: typeof base = Object.assign(
+      Object.create(Object.getPrototypeOf(base)) as SecureFileTestBroker,
+      base,
+      {
+        verifyRoot: async (
+          capability: typeof root,
+          signal?: AbortSignal,
+        ): Promise<void> => {
+          verificationSignal = signal;
+          await verification;
+          // Deliberately ignore cancellation like an already-started
+          // filesystem primitive; the registry must fence the late commit.
+          await base.verifyRoot(capability);
+        },
+      },
+    );
+    const owner = {};
+    const reference = "late-authority-reference";
+    const registry = new SecureFileAuthorityRegistry(secureFiles, {
+      createReference: () => reference,
+    });
+    const controller = new AbortController();
+    const issuing = registry.issue(
+      owner,
+      "git-diff",
+      ["project", "."],
+      root,
+      { signal: controller.signal },
+    );
+
+    controller.abort();
+    releaseVerification();
+
+    await expect(issuing).rejects.toThrow(/authorization expired/i);
+    expect(verificationSignal).toBe(controller.signal);
+    await expect(registry.resolve(
+      owner,
+      reference,
+      "git-diff",
+      ["project", "."],
+    )).rejects.toThrow(/authorization expired/i);
+  });
+
   it("binds opaque references to their owner, purpose, and exact context", async () => {
     const secureFiles = new SecureFileTestBroker();
     const registry = new SecureFileAuthorityRegistry(secureFiles);

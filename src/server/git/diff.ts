@@ -34,13 +34,19 @@ async function untrackedPreview(
   testHooks?: GitDiffTestHooks,
   secureFiles?: RuntimeSecureFileBroker,
   secureRoot?: SecureFileRootCapability,
+  signal?: AbortSignal,
 ): Promise<{ text: string; truncated: boolean }> {
   try {
     if (!secureFiles || !secureRoot) {
       throw new Error("Secure repository file access is unavailable.");
     }
     await testHooks?.afterUntrackedValidated?.(path);
-    const file = await secureFiles.read(secureRoot, path, maxBytes);
+    const file = await secureFiles.read(
+      secureRoot,
+      path,
+      maxBytes,
+      signal,
+    );
     const content = file.content;
     if (content.includes(0)) {
       return {
@@ -75,7 +81,12 @@ export async function getUnifiedDiff(
   if (secureRoot && !secureFiles) {
     throw new Error("Secure repository file access is unavailable.");
   }
-  if (secureRoot) await secureFiles!.verifyRoot(secureRoot);
+  if (options.signal?.aborted) {
+    throw new GitError("timeout", "Git inspection took too long.");
+  }
+  if (secureRoot) {
+    await secureFiles!.verifyRoot(secureRoot, options.signal);
+  }
   const root = secureRoot?.root ?? await repositoryRoot(repositoryPath, {
     deadlineAt: options.deadlineAt,
   });
@@ -102,7 +113,7 @@ export async function getUnifiedDiff(
   const selected = candidates.slice(0, maxFiles);
   const rootCapability = selected.some(({ status: fileStatus }) =>
     fileStatus === "untracked") && secureFiles
-    ? secureRoot ?? await secureFiles.authorizeRoot(root)
+    ? secureRoot ?? await secureFiles.authorizeRoot(root, options.signal)
     : secureRoot;
   const tracked = selected
     .filter((file) => file.status !== "untracked")
@@ -154,12 +165,15 @@ export async function getUnifiedDiff(
       testHooks,
       secureFiles,
       rootCapability,
+      options.signal,
     );
     const previewBuffer = Buffer.from(preview.text);
     text += utf8Prefix(previewBuffer, remaining);
     truncated ||= preview.truncated || previewBuffer.length > remaining;
   }
-  if (secureRoot) await secureFiles!.verifyRoot(secureRoot);
+  if (secureRoot) {
+    await secureFiles!.verifyRoot(secureRoot, options.signal);
+  }
   return {
     text,
     filesIncluded: selected.length,

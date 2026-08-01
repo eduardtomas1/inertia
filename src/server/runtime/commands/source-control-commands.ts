@@ -49,6 +49,10 @@ import {
   type RuntimeCommandHandler,
 } from "./command-router";
 import { reconcileReviews } from "./review-support";
+import {
+  mapWithinSourceControlDeadline,
+  SourceControlDeadline,
+} from "./source-control-deadline";
 
 export interface SourceControlCommandDependencies {
   store: RuntimeStore;
@@ -70,6 +74,7 @@ export function createSourceControlCommandHandler(
     purpose: Parameters<SecureFileAuthorityRegistry["issue"]>[1],
     binding: readonly string[],
     root: Parameters<SecureFileAuthorityRegistry["issue"]>[3],
+    signal?: AbortSignal,
   ): Promise<string | null> => {
     return await issueAuthorityForLiveOwner(
       () => socket.readyState === WebSocket.OPEN,
@@ -78,6 +83,7 @@ export function createSourceControlCommandHandler(
         purpose,
         binding,
         root,
+        { signal },
       ),
       () => dependencies.secureFileAuthorities.clearOwner(socket),
     );
@@ -102,29 +108,43 @@ export function createSourceControlCommandHandler(
     switch (command.type) {
       case "git.refresh": {
         const deadlineAt = Date.now() + GIT_READ_OPERATION_TIMEOUT_MS;
+        const deadline = new SourceControlDeadline(deadlineAt, "read");
         const path = dependencies.workspacePath(
           command.payload.projectId,
           command.payload.conversationId,
         );
         let status: GitStatusSnapshot;
         try {
-          const root = await repositoryRoot(path, { deadlineAt });
-          const secureRoot = await dependencies.secureFiles.authorizeRoot(root);
-          const inspected = await getRepositoryStatus(secureRoot.root, {
-            deadlineAt,
-          });
-          await dependencies.secureFiles.verifyRoot(secureRoot);
+          const root = await deadline.run(
+            async () => await repositoryRoot(path, { deadlineAt }),
+          );
+          const secureRoot = await deadline.run(
+            async (signal) =>
+              await dependencies.secureFiles.authorizeRoot(root, signal),
+          );
+          const inspected = await deadline.run(
+            async () => await getRepositoryStatus(secureRoot.root, {
+              deadlineAt,
+            }),
+          );
+          await deadline.run(
+            async (signal) =>
+              await dependencies.secureFiles.verifyRoot(secureRoot, signal),
+          );
           const authorityRef =
-            await issueLiveAuthority(
-              socket,
-              "git-diff",
-              [
-                command.payload.projectId,
-                command.payload.conversationId ?? "",
-                path,
-                ".",
-              ],
-              secureRoot,
+            await deadline.run(
+              async (signal) => await issueLiveAuthority(
+                socket,
+                "git-diff",
+                [
+                  command.payload.projectId,
+                  command.payload.conversationId ?? "",
+                  path,
+                  ".",
+                ],
+                secureRoot,
+                signal,
+              ),
             );
           if (!authorityRef) return "handled";
           status = gitStatusSnapshot(inspected, authorityRef);
@@ -135,6 +155,8 @@ export function createSourceControlCommandHandler(
             throw error;
           }
           status = emptyGitStatusSnapshot();
+        } finally {
+          deadline.dispose();
         }
         dependencies.send(socket, {
           type: "request.result",
@@ -145,87 +167,110 @@ export function createSourceControlCommandHandler(
       }
       case "git.diff": {
         const deadlineAt = Date.now() + GIT_READ_OPERATION_TIMEOUT_MS;
+        const deadline = new SourceControlDeadline(deadlineAt, "read");
         const path = dependencies.workspacePath(
           command.payload.projectId,
           command.payload.conversationId,
         );
-        const secureRoot = await dependencies.secureFileAuthorities.resolve(
-          socket,
-          command.payload.authorityRef,
-          "git-diff",
-          [
-            command.payload.projectId,
-            command.payload.conversationId ?? "",
-            path,
-            ".",
-          ],
-        );
-        const [diff, status] = await Promise.all([
-          getUnifiedDiff(secureRoot.root, {
-            deadlineAt,
-            ...(
-              command.payload.path
-                ? { paths: [command.payload.path] }
-                : {}
-            ),
-            ignoreWhitespace: command.payload.ignoreWhitespace,
-          }, undefined, dependencies.secureFiles, secureRoot),
-          getRepositoryStatus(secureRoot.root, { deadlineAt }),
-        ]);
-        await dependencies.secureFiles.verifyRoot(secureRoot);
-        if (
-          command.payload.conversationId
-          && !command.payload.path
-          && !diff.truncated
-        ) {
-          reconcileReviews(
-            dependencies.store,
-            command.payload.conversationId,
-            diff.text,
+        try {
+          const secureRoot = await deadline.run(
+            async (signal) =>
+              await dependencies.secureFileAuthorities.resolve(
+                socket,
+                command.payload.authorityRef,
+                "git-diff",
+                [
+                  command.payload.projectId,
+                  command.payload.conversationId ?? "",
+                  path,
+                  ".",
+                ],
+                { signal },
+              ),
           );
-        }
-        dependencies.send(socket, {
-          type: "request.result",
-          requestId: command.requestId,
-          result: {
-            kind: "git.diff",
-            diff: {
-              patch: diff.text,
-              truncated: diff.truncated,
-              files: changedFiles(status),
+          const [diff, status] = await deadline.run(
+            async (signal) => await Promise.all([
+              getUnifiedDiff(secureRoot.root, {
+                deadlineAt,
+                signal,
+                ...(
+                  command.payload.path
+                    ? { paths: [command.payload.path] }
+                    : {}
+                ),
+                ignoreWhitespace: command.payload.ignoreWhitespace,
+              }, undefined, dependencies.secureFiles, secureRoot),
+              getRepositoryStatus(secureRoot.root, { deadlineAt }),
+            ]),
+          );
+          await deadline.run(
+            async (signal) =>
+              await dependencies.secureFiles.verifyRoot(secureRoot, signal),
+          );
+          if (
+            command.payload.conversationId
+            && !command.payload.path
+            && !diff.truncated
+          ) {
+            reconcileReviews(
+              dependencies.store,
+              command.payload.conversationId,
+              diff.text,
+            );
+          }
+          dependencies.send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: {
+              kind: "git.diff",
+              diff: {
+                patch: diff.text,
+                truncated: diff.truncated,
+                files: changedFiles(status),
+              },
             },
-          },
-        });
-        if (
-          command.payload.conversationId
-          && !command.payload.path
-          && !diff.truncated
-        ) {
-          dependencies.broadcastSnapshot();
+          });
+          if (
+            command.payload.conversationId
+            && !command.payload.path
+            && !diff.truncated
+          ) {
+            dependencies.broadcastSnapshot();
+          }
+          return "handled";
+        } finally {
+          deadline.dispose();
         }
-        return "handled";
       }
       case "git.workspace.refresh": {
+        const deadlineAt = Date.now() + WORKSPACE_GIT_DISCOVERY_TIMEOUT_MS;
+        const deadline = new SourceControlDeadline(
+          deadlineAt,
+          "workspace-discovery",
+        );
         const path = dependencies.workspacePath(
           command.payload.projectId,
           command.payload.conversationId,
         );
         const maxRepositories = dependencies.store
           .project(command.payload.projectId).gitRepositoryLimit;
-        const discovered = await discoverFreshWorkspaceGitRepositories(
-          path,
-          {
-            deadlineAt:
-              Date.now() + WORKSPACE_GIT_DISCOVERY_TIMEOUT_MS,
-            maxRepositories,
-            secureFiles: dependencies.secureFiles,
-          },
-        );
-        if (socket.readyState !== WebSocket.OPEN) return "handled";
-        const status = {
-          ...discovered.snapshot,
-          repositories: await Promise.all(
-            discovered.snapshot.repositories.map(async (repository) => {
+        const issuedAuthorityRefs: string[] = [];
+        try {
+          const discovered = await discoverFreshWorkspaceGitRepositories(
+            path,
+            {
+              deadlineAt,
+              maxRepositories,
+              secureFiles: dependencies.secureFiles,
+            },
+          );
+          deadline.requireTime();
+          if (socket.readyState !== WebSocket.OPEN) return "handled";
+          const repositories = await mapWithinSourceControlDeadline(
+            discovered.snapshot.repositories,
+            4,
+            deadline,
+            async (repository, signal) => {
               const secureRoot = discovered.secureRoots.get(
                 repository.repositoryPath,
               );
@@ -243,81 +288,107 @@ export function createSourceControlCommandHandler(
                     repository.repositoryPath,
                   ],
                   secureRoot,
+                  signal,
                 );
+              if (authorityRef) issuedAuthorityRefs.push(authorityRef);
               return { ...repository, authorityRef };
-            }),
-          ),
-        };
-        if (socket.readyState !== WebSocket.OPEN) {
-          dependencies.secureFileAuthorities.clearOwner(socket);
+            },
+          );
+          const status = { ...discovered.snapshot, repositories };
+          if (socket.readyState !== WebSocket.OPEN) {
+            dependencies.secureFileAuthorities.clearOwner(socket);
+            return "handled";
+          }
+          dependencies.send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: { kind: "git.workspace.status", status },
+          });
           return "handled";
+        } catch (error) {
+          deadline.cancel();
+          for (const reference of issuedAuthorityRefs) {
+            dependencies.secureFileAuthorities.revoke(socket, reference);
+          }
+          throw error;
+        } finally {
+          deadline.dispose();
         }
-        dependencies.send(socket, {
-          type: "request.result",
-          requestId: command.requestId,
-          result: { kind: "git.workspace.status", status },
-        });
-        return "handled";
       }
       case "git.workspace.diff": {
         const deadlineAt = Date.now() + GIT_READ_OPERATION_TIMEOUT_MS;
+        const deadline = new SourceControlDeadline(deadlineAt, "read");
         const path = dependencies.workspacePath(
           command.payload.projectId,
           command.payload.conversationId,
         );
-        const secureRoot = await dependencies.secureFileAuthorities.resolve(
-          socket,
-          command.payload.authorityRef,
-          "git-diff",
-          [
-            command.payload.projectId,
-            command.payload.conversationId ?? "",
-            path,
-            command.payload.repositoryPath,
-          ],
-        );
-        const [diff, repositoryStatus] = await Promise.all([
-          getUnifiedDiff(secureRoot.root, {
-            deadlineAt,
-            ...(
-              command.payload.path
-                ? { paths: [command.payload.path] }
-                : {}
+        try {
+          const secureRoot = await deadline.run(
+            async (signal) =>
+              await dependencies.secureFileAuthorities.resolve(
+                socket,
+                command.payload.authorityRef,
+                "git-diff",
+                [
+                  command.payload.projectId,
+                  command.payload.conversationId ?? "",
+                  path,
+                  command.payload.repositoryPath,
+                ],
+                { signal },
+              ),
+          );
+          const [diff, repositoryStatus] = await deadline.run(
+            async (signal) => await Promise.all([
+              getUnifiedDiff(secureRoot.root, {
+                deadlineAt,
+                signal,
+                ...(
+                  command.payload.path
+                    ? { paths: [command.payload.path] }
+                    : {}
+                ),
+                ignoreWhitespace: command.payload.ignoreWhitespace,
+              }, undefined, dependencies.secureFiles, secureRoot),
+              getRepositoryStatus(secureRoot.root, { deadlineAt }),
+            ]),
+          );
+          await deadline.run(
+            async (signal) =>
+              await dependencies.secureFiles.verifyRoot(secureRoot, signal),
+          );
+          const reviewMetadataChanged = Boolean(
+            command.payload.conversationId
+            && !diff.truncated
+            && reconcileReviews(
+              dependencies.store,
+              command.payload.conversationId!,
+              diff.text,
+              command.payload.repositoryPath,
+              command.payload.path,
             ),
-            ignoreWhitespace: command.payload.ignoreWhitespace,
-          }, undefined, dependencies.secureFiles, secureRoot),
-          getRepositoryStatus(secureRoot.root, { deadlineAt }),
-        ]);
-        await dependencies.secureFiles.verifyRoot(secureRoot);
-        const reviewMetadataChanged = Boolean(
-          command.payload.conversationId
-          && !diff.truncated
-          && reconcileReviews(
-            dependencies.store,
-            command.payload.conversationId!,
-            diff.text,
-            command.payload.repositoryPath,
-            command.payload.path,
-          ),
-        );
-        dependencies.send(socket, {
-          type: "request.result",
-          requestId: command.requestId,
-          result: {
-            kind: "git.workspace.diff",
-            diff: {
-              repositoryPath: command.payload.repositoryPath,
-              reviewMetadataChanged,
-              patch: diff.text,
-              truncated: diff.truncated,
-              files: changedFiles(repositoryStatus),
+          );
+          dependencies.send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: {
+              kind: "git.workspace.diff",
+              diff: {
+                repositoryPath: command.payload.repositoryPath,
+                reviewMetadataChanged,
+                patch: diff.text,
+                truncated: diff.truncated,
+                files: changedFiles(repositoryStatus),
+              },
             },
-          },
-        });
-        if (reviewMetadataChanged) {
-          dependencies.broadcastSnapshot();
+          });
+          if (reviewMetadataChanged) {
+            dependencies.broadcastSnapshot();
+          }
+          return "handled";
+        } finally {
+          deadline.dispose();
         }
-        return "handled";
       }
       case "git.turn.diff": {
         const conversation = dependencies.store.conversation(

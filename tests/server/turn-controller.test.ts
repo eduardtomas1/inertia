@@ -231,7 +231,6 @@ interface TestRuntime {
   metadataRefreshes: string[];
   attachmentReleases: string[][];
 }
-
 interface TestRuntimeOptions {
   interactionMode?: "build" | "plan";
   modelSelection?: ModelSelection;
@@ -357,12 +356,10 @@ async function flushPromises(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
 }
-
 afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) =>
     rm(directory, { recursive: true, force: true })));
 });
-
 describe("TurnController authoritative lifecycle", () => {
   it("persists parent follow-ups only after the active harness acknowledges them", async () => {
     const runtime = await testRuntime();
@@ -390,11 +387,13 @@ describe("TurnController authoritative lifecycle", () => {
     await flushPromises();
     const settledConversation = runtime.store.conversation(runtime.conversationId);
     const settledProject = runtime.store.project(settledConversation.projectId);
+    const explicitlySettled = runtime.store.settleConversation(runtime.conversationId, true);
     acknowledgeFollowUp(true);
     const followedUp = await pendingFollowUp;
     expect(followedUp).toMatchObject({ role: "user", turnId: queued.turn.id, content: "Inspect the edge case next." });
     expect(followedUp!.createdAt < interimActivity!.createdAt).toBe(true);
     const refreshedConversation = runtime.store.conversation(runtime.conversationId);
+    expect(refreshedConversation.settledAt).toBe(explicitlySettled.settledAt);
     expect([refreshedConversation.updatedAt >= settledConversation.updatedAt, refreshedConversation.lastViewedAt! >= settledConversation.lastViewedAt!, runtime.store.project(settledConversation.projectId).updatedAt >= settledProject.updatedAt]).toEqual([true, true, true]);
     expect(runtime.store.conversationDetail(runtime.conversationId)?.messages)
       .toContainEqual(expect.objectContaining({ id: followedUp?.id }));
@@ -404,6 +403,7 @@ describe("TurnController authoritative lifecycle", () => {
     const persisted = reopened.conversationDetail(runtime.conversationId);
     expect(persisted?.messages.find(({ id }) => id === followedUp?.id)?.createdAt).toBe(followedUp?.createdAt);
     expect(persisted?.activities.find(({ id }) => id === interimActivity?.id)?.createdAt).toBe(interimActivity?.createdAt);
+    expect(reopened.conversation(runtime.conversationId).settledAt).toBe(explicitlySettled.settledAt);
     reopened.close();
   });
 

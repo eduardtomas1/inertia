@@ -107,7 +107,7 @@ export class TranscriptRepository {
       `).run(message);
       this.context.database.prepare(`
         UPDATE conversations
-        SET updated_at = MAX(updated_at, ?), settled_at = NULL,
+        SET updated_at = MAX(updated_at, ?),
           last_viewed_at = MAX(last_viewed_at, ?)
         WHERE id = ?
       `).run(freshnessAt, freshnessAt, conversationId);

@@ -74,10 +74,11 @@ function launchStatusMessage(status: DuoStatusResult): string | null {
   return `The duo is ${status.state}. Refresh before starting another launch.`;
 }
 
-function launchNeedsFurtherReconciliation(status: DuoStatusResult): boolean {
+function launchRetainsRecoveryIdentity(status: DuoStatusResult): boolean {
   return status.state === "preparing"
     || status.state === "prepared"
-    || status.state === "dispatching";
+    || status.state === "dispatching"
+    || status.state === "recovery-required";
 }
 
 function orderedPreparedSides(result: DuoPreparedResult): DuoPreparedResult["sides"] {
@@ -157,21 +158,30 @@ export function useMultiSpawn({
     updateSplitConversationId,
   ]);
 
+  const queryLaunchStatus = useCallback(async (
+    launchId: string,
+  ): Promise<DuoStatusResult> => {
+    const event = resultEvent(await run("multi-spawn:status", {
+      type: "duo.status",
+      payload: { launchId },
+    }));
+    if (event.result.kind !== "duo.status") {
+      throw new Error("The local service returned an unexpected duo status.");
+    }
+    return event.result;
+  }, [run]);
+
   const reconcilePendingLaunch = useCallback(async (
     launchId: string,
   ): Promise<void> => {
-    let durablePrepared = false;
+    let durableLaunchFound = false;
     try {
-      const event = resultEvent(await run("multi-spawn:status", {
-        type: "duo.status",
-        payload: { launchId },
-      }));
-      if (event.result.kind !== "duo.status") {
-        throw new Error("The local service returned an unexpected duo status.");
-      }
-      let status = event.result;
-      if (status.state === "prepared") {
-        durablePrepared = true;
+      let status = await queryLaunchStatus(launchId);
+      durableLaunchFound = true;
+      if (
+        status.state === "prepared"
+        || status.state === "recovery-required"
+      ) {
         const cancellation = resultEvent(await run("multi-spawn:cancel", {
           type: "duo.cancel",
           payload: { launchId },
@@ -184,20 +194,22 @@ export function useMultiSpawn({
         status = cancellation.result;
       }
       const message = launchStatusMessage(status);
-      if (!launchNeedsFurtherReconciliation(status)) {
+      if (!launchRetainsRecoveryIdentity(status)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
-        durablePrepared = false;
       }
       if (message) setError(message);
     } catch (caught) {
-      if (!durablePrepared && runtimeCommandDelivery(caught) === "rejected") {
+      if (
+        !durableLaunchFound
+        && runtimeCommandDelivery(caught) === "rejected"
+      ) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
       }
       setError(
         "A previous duo launch could not be reconciled yet. Refresh before launching another pair.",
       );
     }
-  }, [run]);
+  }, [queryLaunchStatus, run]);
 
   const openDialog = useCallback(() => {
     if (!snapshot?.activeProjectId || submittingRef.current) return;
@@ -222,7 +234,7 @@ export function useMultiSpawn({
       if (event.result.kind !== "duo.status") {
         throw new Error("The local service returned an unexpected cancellation response.");
       }
-      if (!launchNeedsFurtherReconciliation(event.result)) {
+      if (!launchRetainsRecoveryIdentity(event.result)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
       }
       setOpen(false);
@@ -336,7 +348,7 @@ export function useMultiSpawn({
         throw new Error("The local service returned an unexpected dispatch response.");
       }
       const launchMessage = launchStatusMessage(dispatchEvent.result);
-      if (!launchNeedsFurtherReconciliation(dispatchEvent.result)) {
+      if (!launchRetainsRecoveryIdentity(dispatchEvent.result)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
       }
       if (launchMessage) setActionError(launchMessage);
@@ -349,8 +361,40 @@ export function useMultiSpawn({
         return;
       }
       if (!prepared) {
-        clearPendingMultiSpawnLaunchId(window.localStorage);
-        setError(errorMessage(caught));
+        let durableStatusReceived = false;
+        try {
+          let status = await queryLaunchStatus(launchId);
+          durableStatusReceived = true;
+          if (status.state === "recovery-required") {
+            const recovery = resultEvent(await run("multi-spawn:cancel", {
+              type: "duo.cancel",
+              payload: { launchId },
+            }));
+            if (recovery.result.kind !== "duo.status") {
+              throw new Error(
+                "The local service returned an unexpected Duo recovery response.",
+              );
+            }
+            status = recovery.result;
+          }
+          const message = launchStatusMessage(status);
+          if (!launchRetainsRecoveryIdentity(status)) {
+            clearPendingMultiSpawnLaunchId(window.localStorage);
+          }
+          setError(message ?? errorMessage(caught));
+        } catch (statusError) {
+          if (
+            !durableStatusReceived
+            && runtimeCommandDelivery(statusError) === "rejected"
+          ) {
+            clearPendingMultiSpawnLaunchId(window.localStorage);
+            setError(errorMessage(caught));
+          } else {
+            setOpen(false);
+            setActionError(reconciliationMessage(errorMessage(caught)));
+            focusWorkspace();
+          }
+        }
         return;
       }
       setOpen(false);
@@ -373,6 +417,7 @@ export function useMultiSpawn({
     focusWorkspace,
     run,
     reconcilePendingLaunch,
+    queryLaunchStatus,
     setActionError,
     settings,
     snapshot,

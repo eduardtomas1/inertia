@@ -86,6 +86,10 @@ function publicStatus(status: ReturnType<RuntimeStore["pairedLaunch"]>): DuoLaun
 
 export class DuoLaunchCoordinator {
   private readonly prepareTasks = new Map<string, Promise<PreparedDuoLaunch>>();
+  private readonly recoveryCleanupTasks = new Map<
+    string,
+    Promise<DuoLaunchStatus>
+  >();
   private readonly cancellationRequests = new Set<string>();
   private readonly worktrees: WorktreeOperations;
 
@@ -177,10 +181,18 @@ export class DuoLaunchCoordinator {
       latest.state === "cancelled"
       || latest.state === "failed"
       || latest.state === "interrupted"
-      || latest.state === "recovery-required"
     ) return publicStatus(latest);
     for (const { conversationId } of latest.sides) {
       if (conversationId) this.turns.cancel(conversationId);
+    }
+    if (latest.state === "recovery-required") {
+      const current = this.recoveryCleanupTasks.get(launchId);
+      if (current) return current;
+      const cleanup = this.retryRecoveryCleanup(latest).finally(() => {
+        this.recoveryCleanupTasks.delete(launchId);
+      });
+      this.recoveryCleanupTasks.set(launchId, cleanup);
+      return cleanup;
     }
     if (latest.state === "preparing" && this.prepareTasks.has(launchId)) {
       return publicStatus(latest);
@@ -307,6 +319,38 @@ export class DuoLaunchCoordinator {
       }
       throw error;
     }
+  }
+
+  private async retryRecoveryCleanup(
+    launch: ReturnType<RuntimeStore["pairedLaunch"]>,
+  ): Promise<DuoLaunchStatus> {
+    const cleanup = await Promise.allSettled(launch.plans.flatMap((plan) => {
+      const side = launch.sides[plan.ordinal];
+      if (
+        !plan.ownsWorktree
+        || !plan.plannedWorktreePath
+        || side.conversationId
+      ) return [];
+      return [this.worktrees.remove(
+        this.store.projectPath(plan.projectId),
+        plan.plannedWorktreePath,
+        false,
+      ).catch((error: unknown) => {
+        if (error instanceof GitError && error.code === "not-found") return;
+        throw error;
+      })];
+    }));
+    const rejected = cleanup.find((result) => result.status === "rejected");
+    if (rejected?.status === "rejected") {
+      return publicStatus(this.store.failPairedLaunch(
+        launch.launchId,
+        "recovery-required",
+        `Owned worktree cleanup still needs attention: ${errorMessage(rejected.reason)}`,
+      ));
+    }
+    return publicStatus(this.store.finishPairedLaunchCancellation(
+      launch.launchId,
+    ));
   }
 
   private async preflightSide(

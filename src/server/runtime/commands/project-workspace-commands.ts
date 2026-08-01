@@ -83,14 +83,28 @@ export function createProjectWorkspaceCommandHandler(
             "Stop active work for this project before removing it.",
           );
         }
-        for (const conversation of dependencies.store.shellSnapshot()
-          .conversations) {
-          if (conversation.projectId === command.payload.projectId) {
-            dependencies.rememberDeletedConversation(conversation.id);
-            dependencies.forgetRemoteTranscript(conversation.id);
-          }
+        try {
+          dependencies.store.assertProjectDeletionAllowed(
+            command.payload.projectId,
+          );
+        } catch (error) {
+          if (
+            error instanceof Error
+            && error.message === "Cancel the active Duo launch before removing this project."
+          ) throw new RuntimeRequestError(error.message);
+          throw error;
         }
+        const removedConversationIds = dependencies.store.shellSnapshot()
+          .conversations
+          .filter((conversation) => (
+            conversation.projectId === command.payload.projectId
+          ))
+          .map(({ id }) => id);
         dependencies.store.removeProject(command.payload.projectId);
+        for (const conversationId of removedConversationIds) {
+          dependencies.rememberDeletedConversation(conversationId);
+          dependencies.forgetRemoteTranscript(conversationId);
+        }
         return "mutation";
       case "project.update": {
         const { projectId, ...update } = command.payload;

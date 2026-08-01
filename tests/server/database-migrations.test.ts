@@ -982,6 +982,7 @@ describe("atomic Duo schema migration", () => {
       ]);
       for (const trigger of triggers) {
         expect(trigger.sql).toMatch(/Cancel the active Duo launch/u);
+        expect(trigger.sql).toMatch(/recovery-required/u);
         expect(trigger.sql).toMatch(/live_turn\.status NOT IN/u);
         expect(trigger.sql).toMatch(/DELETE FROM paired_launches/u);
       }

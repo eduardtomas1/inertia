@@ -106,6 +106,84 @@ export class PairedLaunchRepository {
     return launch;
   }
 
+  assertConversationDeletionAllowed(conversationId: string): void {
+    const blocked = this.database.prepare(`
+      SELECT 1
+      FROM paired_launches AS launch
+      JOIN paired_launch_sides AS conversation_side
+        ON conversation_side.launch_id = launch.id
+      WHERE conversation_side.conversation_id = ?
+        AND (
+          launch.status IN (
+            'preparing', 'prepared', 'dispatching', 'recovery-required'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM paired_launch_sides AS live_side
+            JOIN agent_turns AS live_turn ON live_turn.id = live_side.turn_id
+            WHERE live_side.launch_id = launch.id
+              AND live_turn.status NOT IN (
+                'completed', 'failed', 'cancelled', 'interrupted'
+              )
+          )
+          OR (
+            launch.status = 'running'
+            AND EXISTS (
+              SELECT 1
+              FROM paired_launch_sides AS missing_turn
+              WHERE missing_turn.launch_id = launch.id
+                AND missing_turn.turn_id IS NULL
+            )
+          )
+        )
+      LIMIT 1
+    `).get(conversationId);
+    if (blocked) {
+      throw new Error(
+        "Cancel the active Duo launch before deleting this thread.",
+      );
+    }
+  }
+
+  assertProjectDeletionAllowed(projectId: string): void {
+    const blocked = this.database.prepare(`
+      SELECT 1
+      FROM paired_launches AS launch
+      JOIN paired_launch_sides AS project_side
+        ON project_side.launch_id = launch.id
+      WHERE project_side.project_id = ?
+        AND (
+          launch.status IN (
+            'preparing', 'prepared', 'dispatching', 'recovery-required'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM paired_launch_sides AS live_side
+            JOIN agent_turns AS live_turn ON live_turn.id = live_side.turn_id
+            WHERE live_side.launch_id = launch.id
+              AND live_turn.status NOT IN (
+                'completed', 'failed', 'cancelled', 'interrupted'
+              )
+          )
+          OR (
+            launch.status = 'running'
+            AND EXISTS (
+              SELECT 1
+              FROM paired_launch_sides AS missing_turn
+              WHERE missing_turn.launch_id = launch.id
+                AND missing_turn.turn_id IS NULL
+            )
+          )
+        )
+      LIMIT 1
+    `).get(projectId);
+    if (blocked) {
+      throw new Error(
+        "Cancel the active Duo launch before removing this project.",
+      );
+    }
+  }
+
   updateWorktree(
     launchId: string,
     ordinal: 0 | 1,

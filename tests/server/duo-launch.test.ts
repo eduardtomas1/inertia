@@ -552,6 +552,12 @@ describe("atomic Duo launch persistence", () => {
     const runtime = await createRuntime();
     const prepared = preparePair(runtime);
 
+    for (const { id } of prepared.conversations) {
+      expect(() => runtime.store.assertConversationDeletionAllowed(id))
+        .toThrow(/Cancel the active Duo launch/u);
+    }
+    expect(() => runtime.store.assertProjectDeletionAllowed(runtime.projectId))
+      .toThrow(/Cancel the active Duo launch/u);
     expect(() => runtime.store.deleteConversation(
       prepared.conversations[0].id,
     )).toThrow(/Cancel the active Duo launch/u);
@@ -565,6 +571,44 @@ describe("atomic Duo launch persistence", () => {
     expect(runtime.store.findPairedLaunch(prepared.launchId)).toBeNull();
     expect(runtime.store.conversation(prepared.conversations[1].id).id)
       .toBe(prepared.conversations[1].id);
+    runtime.store.close();
+  });
+
+  it("retains recovery-required chat identity until cleanup is cancelled", async () => {
+    const runtime = await createRuntime();
+    const prepared = preparePair(runtime);
+    runtime.store.failPairedLaunch(
+      prepared.launchId,
+      "recovery-required",
+      "Owned worktree cleanup needs attention.",
+    );
+
+    for (const { id } of prepared.conversations) {
+      expect(() => runtime.store.assertConversationDeletionAllowed(id))
+        .toThrow(/Cancel the active Duo launch/u);
+      expect(() => runtime.store.deleteConversation(id))
+        .toThrow(/Cancel the active Duo launch/u);
+    }
+    expect(runtime.store.pairedLaunch(prepared.launchId)).toMatchObject({
+      state: "recovery-required",
+      sides: [
+        { conversationId: prepared.conversations[0].id },
+        { conversationId: prepared.conversations[1].id },
+      ],
+    });
+
+    await expect(coordinator(runtime).cancel(prepared.launchId))
+      .resolves.toMatchObject({ state: "cancelled" });
+    expect(prepared.queued.map(({ turn }) =>
+      runtime.store.agentTurn(turn.id).status)).toEqual([
+      "cancelled",
+      "cancelled",
+    ]);
+    expect(() => runtime.store.assertConversationDeletionAllowed(
+      prepared.conversations[0].id,
+    )).not.toThrow();
+    runtime.store.deleteConversation(prepared.conversations[0].id);
+    expect(runtime.store.findPairedLaunch(prepared.launchId)).toBeNull();
     runtime.store.close();
   });
 
@@ -582,6 +626,12 @@ describe("atomic Duo launch persistence", () => {
         "completed",
         "completed",
       ]);
+      expect(() => runtime.store.assertConversationDeletionAllowed(
+        prepared.conversations[deletedOrdinal].id,
+      )).not.toThrow();
+      expect(() => runtime.store.assertProjectDeletionAllowed(
+        runtime.projectId,
+      )).not.toThrow();
 
       runtime.store.deleteConversation(
         prepared.conversations[deletedOrdinal].id,
@@ -832,6 +882,121 @@ describe("atomic Duo launch persistence", () => {
     expect(removed).toEqual([created[0]]);
     expect(runtime.store.snapshot().conversations).toEqual([]);
     expect(runtime.store.pairedLaunch(payload.launchId).state).toBe("failed");
+    runtime.store.close();
+  });
+
+  it("persists recovery identity when owned-worktree compensation fails", async () => {
+    const runtime = await createRuntime();
+    await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
+    const created: string[] = [];
+    let cleanupAttempts = 0;
+    const cleanupPaths: string[] = [];
+    const launches = new DuoLaunchCoordinator(
+      runtime.store,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {
+        validateSelection: (selection: unknown) => selection,
+        readiness: async () => null,
+      } as never,
+      runtime.controller,
+      join(runtime.workspace, ".inertia"),
+      () => [providerInfo()],
+      {
+        worktrees: {
+          create: async (_repositoryPath, worktreePath, options) => {
+            created.push(worktreePath);
+            if (created.length === 2) {
+              throw new Error("second worktree rejected");
+            }
+            return {
+              root: worktreePath,
+              branch: options.branch,
+              detached: false,
+              upstream: null,
+              ahead: 0,
+              behind: 0,
+              hasRemote: false,
+              pullRequest: {
+                available: false,
+                remoteName: null,
+                forge: null,
+                unavailableReason: "no-remotes",
+              },
+              files: [],
+              insertions: 0,
+              deletions: 0,
+              clean: true,
+              truncated: false,
+            } satisfies GitRepositoryStatus;
+          },
+          remove: async (_repositoryPath, worktreePath) => {
+            cleanupAttempts += 1;
+            cleanupPaths.push(worktreePath);
+            if (cleanupAttempts === 1) {
+              throw new Error(`could not remove orphaned worktree ${worktreePath}`);
+            }
+            return {
+              status: {
+                root: runtime.workspace,
+                branch: "main",
+                detached: false,
+                upstream: null,
+                ahead: 0,
+                behind: 0,
+                hasRemote: false,
+                pullRequest: {
+                  available: false,
+                  remoteName: null,
+                  forge: null,
+                  unavailableReason: "no-remotes",
+                },
+                files: [],
+                insertions: 0,
+                deletions: 0,
+                clean: true,
+                truncated: false,
+              },
+            };
+          },
+        },
+      },
+    );
+    const payload = preparePayload(runtime, true);
+
+    await expect(launches.prepare(payload)).rejects.toThrow(
+      /second worktree rejected/u,
+    );
+
+    expect(created).toHaveLength(2);
+    expect(() => runtime.store.assertProjectDeletionAllowed(runtime.projectId))
+      .toThrow(/Cancel the active Duo launch/u);
+    expect(() => runtime.store.removeProject(runtime.projectId))
+      .toThrow(/Cancel the active Duo launch/u);
+    expect(launches.status(payload.launchId)).toMatchObject({
+      launchId: payload.launchId,
+      state: "recovery-required",
+      error: expect.stringMatching(
+        new RegExp(`Owned worktree cleanup needs attention: could not remove orphaned worktree ${created[0]}`, "u"),
+      ),
+      sides: [
+        { ordinal: 0, conversationId: null, turnId: null },
+        { ordinal: 1, conversationId: null, turnId: null },
+      ],
+    });
+    expect(runtime.store.pairedLaunch(payload.launchId).plans[0])
+      .toMatchObject({ plannedWorktreePath: created[0], ownsWorktree: true });
+    expect(runtime.store.snapshot().conversations).toEqual([]);
+    await expect(launches.cancel(payload.launchId)).resolves.toMatchObject({
+      launchId: payload.launchId,
+      state: "cancelled",
+      error: null,
+    });
+    expect(cleanupAttempts).toBe(3);
+    expect(cleanupPaths).toEqual([created[0], created[0], created[1]]);
+    expect(() => runtime.store.assertProjectDeletionAllowed(runtime.projectId))
+      .not.toThrow();
+    runtime.store.removeProject(runtime.projectId);
+    expect(runtime.store.findPairedLaunch(payload.launchId)).toBeNull();
     runtime.store.close();
   });
 });

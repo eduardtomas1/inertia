@@ -951,7 +951,9 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
               ON conversation_side.launch_id = launch.id
             WHERE conversation_side.conversation_id = OLD.id
               AND (
-                launch.status IN ('preparing', 'prepared', 'dispatching')
+                launch.status IN (
+                  'preparing', 'prepared', 'dispatching', 'recovery-required'
+                )
                 OR EXISTS (
                   SELECT 1
                   FROM paired_launch_sides AS live_side
@@ -992,7 +994,9 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
               ON project_side.launch_id = launch.id
             WHERE project_side.project_id = OLD.id
               AND (
-                launch.status IN ('preparing', 'prepared', 'dispatching')
+                launch.status IN (
+                  'preparing', 'prepared', 'dispatching', 'recovery-required'
+                )
                 OR EXISTS (
                   SELECT 1
                   FROM paired_launch_sides AS live_side

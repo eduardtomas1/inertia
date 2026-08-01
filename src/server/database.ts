@@ -364,6 +364,16 @@ export class RuntimeStore {
     return this.pairedLaunchRepository.find(launchId);
   }
 
+  assertConversationDeletionAllowed(conversationId: string): void {
+    this.pairedLaunchRepository.assertConversationDeletionAllowed(
+      conversationId,
+    );
+  }
+
+  assertProjectDeletionAllowed(projectId: string): void {
+    this.pairedLaunchRepository.assertProjectDeletionAllowed(projectId);
+  }
+
   updatePairedLaunchWorktree(
     launchId: string,
     ordinal: 0 | 1,

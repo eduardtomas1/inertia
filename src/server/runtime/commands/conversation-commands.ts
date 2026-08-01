@@ -436,6 +436,17 @@ export function createConversationCommandHandler(
             "Stop the active run or review before deleting this thread.",
           );
         }
+        try {
+          dependencies.store.assertConversationDeletionAllowed(
+            conversation.id,
+          );
+        } catch (error) {
+          if (
+            error instanceof Error
+            && error.message === "Cancel the active Duo launch before deleting this thread."
+          ) throw new RuntimeRequestError(error.message);
+          throw error;
+        }
         if (conversation.worktreePath) {
           const sharedCheckout = dependencies.store.shellSnapshot()
             .conversations.some((candidate) => (

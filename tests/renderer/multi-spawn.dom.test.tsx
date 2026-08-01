@@ -800,18 +800,20 @@ describe("multi-spawn", () => {
   });
 
   it.each([
-    "failed",
-    "cancelled",
-    "interrupted",
-    "recovery-required",
+    { state: "failed", expectedStored: false },
+    { state: "cancelled", expectedStored: false },
+    { state: "interrupted", expectedStored: false },
+    { state: "recovery-required", expectedStored: true },
   ] as const)(
-    "clears the recovery identity after a deterministic %s dispatch result",
-    async (state) => {
+    "retains recovery identity after dispatch: $expectedStored ($state)",
+    async ({ state, expectedStored }) => {
+      let launchId = "";
       const run = vi.fn(async (
         _key: string,
         command: CommandWithoutId,
       ): Promise<ServerEvent> => {
         if (command.type === "duo.prepare") {
+          launchId = command.payload.launchId;
           return {
             type: "request.result",
             requestId: crypto.randomUUID(),
@@ -864,7 +866,7 @@ describe("multi-spawn", () => {
 
       expect(window.localStorage.getItem(
         MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
-      )).toBeNull();
+      )).toBe(expectedStored ? launchId : null);
     },
   );
 
@@ -878,6 +880,9 @@ describe("multi-spawn", () => {
           "Chat 2 route is unavailable. Neither chat was launched.",
           "rejected",
         );
+      }
+      if (command.type === "duo.status") {
+        throw new RuntimeCommandError("Duo launch not found.", "rejected");
       }
       return { type: "request.ok", requestId: crypto.randomUUID() };
     });
@@ -899,11 +904,138 @@ describe("multi-spawn", () => {
 
     await act(async () => hook.result.current.submit(multiSpawnDraft()));
 
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.prepare",
+      "duo.status",
+    ]);
     expect(updateSplitConversationId).not.toHaveBeenCalled();
     expect(discardDraftConversation).not.toHaveBeenCalled();
     expect(hook.result.current.error).toContain("Neither chat was launched");
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBeNull();
   });
+
+  it.each([
+    {
+      recoveredState: "cancelled",
+      recoveredError: null,
+      expectedStored: false,
+      expectedError: "The duo launch was cancelled before both providers began.",
+    },
+    {
+      recoveredState: "recovery-required",
+      recoveredError: "Owned worktree cleanup still needs attention.",
+      expectedStored: true,
+      expectedError: "Owned worktree cleanup still needs attention.",
+    },
+  ] as const)(
+    "recovers a rejected preparation and leaves identity stored: $expectedStored",
+    async ({
+      recoveredState,
+      recoveredError,
+      expectedStored,
+      expectedError,
+    }) => {
+      let launchId = "";
+      const firstRecoveryError = "Owned worktree cleanup needs attention: could not remove /workspace/orphaned-duo.";
+      const run = vi.fn(async (
+        _key: string,
+        command: CommandWithoutId,
+      ): Promise<ServerEvent> => {
+        if (command.type === "duo.prepare") {
+          launchId = command.payload.launchId;
+          expect(window.localStorage.getItem(
+            MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+          )).toBe(launchId);
+          throw new RuntimeCommandError(
+            "The second worktree could not be created.",
+            "rejected",
+          );
+        }
+        if (command.type === "duo.status") {
+          expect(command.payload.launchId).toBe(launchId);
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId,
+              state: "recovery-required",
+              error: firstRecoveryError,
+              sides: [
+                { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+                { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+              ],
+            },
+          };
+        }
+        if (command.type === "duo.cancel") {
+          expect(command.payload.launchId).toBe(launchId);
+          expect(window.localStorage.getItem(
+            MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+          )).toBe(launchId);
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId,
+              state: recoveredState,
+              error: recoveredError,
+              sides: [
+                {
+                  ordinal: 0,
+                  conversationId: null,
+                  turnId: null,
+                  dispatchState: recoveredState === "cancelled"
+                    ? "cancelled"
+                    : "pending",
+                },
+                {
+                  ordinal: 1,
+                  conversationId: null,
+                  turnId: null,
+                  dispatchState: recoveredState === "cancelled"
+                    ? "cancelled"
+                    : "pending",
+                },
+              ],
+            },
+          };
+        }
+        throw new Error(`Unexpected command: ${command.type}`);
+      });
+      const updateSplitConversationId = vi.fn();
+      const discardDraftConversation = vi.fn();
+      const hook = renderHook(() => useMultiSpawn({
+        snapshot,
+        settings,
+        run,
+        splitSelectionTransitionsRef: { current: 0 },
+        updateSplitConversationId,
+        showWorkspace: vi.fn(),
+        closeSidebar: vi.fn(),
+        focusWorkspace: vi.fn(),
+        discardDraftConversation,
+        setActionError: vi.fn(),
+      }));
+
+      await act(async () => hook.result.current.submit(multiSpawnDraft()));
+
+      expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+        "duo.prepare",
+        "duo.status",
+        "duo.cancel",
+      ]);
+      expect(window.localStorage.getItem(
+        MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+      )).toBe(expectedStored ? launchId : null);
+      expect(hook.result.current.error).toBe(expectedError);
+      expect(updateSplitConversationId).not.toHaveBeenCalled();
+      expect(discardDraftConversation).not.toHaveBeenCalled();
+    },
+  );
 
   it("ignores duplicate submission while atomic preparation is pending", async () => {
     let releasePreparation!: () => void;
@@ -1055,7 +1187,87 @@ describe("multi-spawn", () => {
     expect(hook.result.current.open).toBe(false);
   });
 
-  it("reconciles a persisted launch on restart without retrying it", async () => {
+  it("retains recovery identity when explicit cancellation still needs cleanup", async () => {
+    let releasePreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    let launchId = "";
+    const recoveryError = "Owned worktree cleanup still needs attention.";
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.prepare") {
+        launchId = command.payload.launchId;
+        await preparation;
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.prepared",
+            launchId,
+            state: "prepared",
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+            ],
+          },
+        };
+      }
+      if (command.type === "duo.cancel") {
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId,
+            state: "recovery-required",
+            error: recoveryError,
+            sides: [
+              { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+              { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+            ],
+          },
+        };
+      }
+      throw new Error(`Unexpected command: ${command.type}`);
+    });
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError,
+    }));
+    let submission!: Promise<void>;
+    act(() => {
+      hook.result.current.openDialog();
+      submission = hook.result.current.submit(multiSpawnDraft());
+    });
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+
+    act(() => hook.result.current.closeDialog());
+    await waitFor(() => expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.cancel")).toBe(true));
+    releasePreparation();
+    await act(async () => submission);
+
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBe(launchId);
+    expect(setActionError).toHaveBeenCalledWith(recoveryError);
+    expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.dispatch")).toBe(false);
+  });
+
+  it("retains recovery identity across repeated cleanup failures", async () => {
     const launchId = "77777777-7777-4777-8777-777777777777";
     window.localStorage.setItem(
       MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
@@ -1065,7 +1277,10 @@ describe("multi-spawn", () => {
       _key: string,
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
-      expect(command).toEqual({ type: "duo.status", payload: { launchId } });
+      if (command.type !== "duo.status" && command.type !== "duo.cancel") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      expect(command.payload.launchId).toBe(launchId);
       return {
         type: "request.result",
         requestId: crypto.randomUUID(),
@@ -1073,10 +1288,10 @@ describe("multi-spawn", () => {
           kind: "duo.status",
           launchId,
           state: "recovery-required",
-          error: "Review the two idle chats before starting new work.",
+          error: "Owned worktree cleanup still needs attention.",
           sides: [
-            { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "cancelled" },
-            { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "cancelled" },
+            { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+            { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
           ],
         },
       };
@@ -1095,11 +1310,24 @@ describe("multi-spawn", () => {
     }));
 
     act(() => hook.result.current.openDialog());
-    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
 
     await waitFor(() => expect(hook.result.current.error).toBe(
-      "Review the two idle chats before starting new work.",
+      "Owned worktree cleanup still needs attention.",
     ));
+    act(() => hook.result.current.closeDialog());
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(4));
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.status",
+      "duo.cancel",
+      "duo.status",
+      "duo.cancel",
+    ]);
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBe(launchId);
     expect(run.mock.calls.some(([, command]) =>
       command.type === "duo.prepare" || command.type === "duo.dispatch"))
       .toBe(false);

@@ -48,6 +48,9 @@ import { nativeProviderRunInput } from "../server/model-route-fixture";
 
 const execFileAsync = promisify(execFile);
 const enforce = process.env.INERTIA_BENCHMARK_ENFORCE === "1";
+const PTY_RECORD_PREFIX = "INERTIA_PTY_RECORD_BEGIN:";
+const PTY_RECORD_SEPARATOR = ":PAYLOAD:";
+const PTY_RECORD_SUFFIX = ":INERTIA_PTY_RECORD_END";
 const reportPath = resolve(
   process.env.INERTIA_BENCHMARK_REPORT
     ?? `performance-results/platform-${process.platform}-${process.arch}.json`,
@@ -162,7 +165,7 @@ async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
         process.execPath,
         [
           "-e",
-          "for(let i=0;i<2000;i++)process.stdout.write(`line-${i}\\n`)",
+          "for(let i=0;i<2000;i++)process.stdout.write(`INERTIA_PTY_RECORD_BEGIN:${i}:PAYLOAD:payload-${i}:INERTIA_PTY_RECORD_END\\n`)",
         ],
         process.env,
         120,
@@ -173,11 +176,7 @@ async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
         },
       );
     });
-    const expectedLines = Array.from(
-      { length: 2_000 },
-      (_, index) => `line-${index}`,
-    );
-    expect(ptyOutputLines(output)).toEqual(expectedLines);
+    assertExpectedPtyRecords(output, 2_000);
     samples.push(performance.now() - startedAt);
     frameCounts.push(frames);
     outputFrameCounts.push(outputFrames);
@@ -192,17 +191,107 @@ async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
     frameCounts,
     outputFrameCounts,
     outputBytes,
-    expectedLinesPerSample: 2_000,
+    expectedRecordsPerSample: 2_000,
   };
 }
 
-function ptyOutputLines(output: string): string[] {
-  const withoutTerminalControls = output
-    .replace(/\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)/gu, "")
-    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, "");
-  const lines = withoutTerminalControls.split(/\r\n|\r|\n/u);
+function printablePtyText(output: string): string {
+  let printable = "";
+  for (let index = 0; index < output.length;) {
+    const code = output.charCodeAt(index);
+    if (code !== 0x1B) {
+      if ((code < 0x20 && code !== 0x0A && code !== 0x0D) || code === 0x7F) {
+        throw new Error(`Unexpected PTY control byte 0x${code.toString(16)}.`);
+      }
+      printable += output[index];
+      index += 1;
+      continue;
+    }
+
+    const controlType = output[index + 1];
+    if (controlType === "[") {
+      let cursor = index + 2;
+      for (; cursor < output.length; cursor += 1) {
+        const controlCode = output.charCodeAt(cursor);
+        if (controlCode >= 0x40 && controlCode <= 0x7E) break;
+        const isParameter = controlCode >= 0x30 && controlCode <= 0x3F;
+        const isIntermediate = controlCode >= 0x20 && controlCode <= 0x2F;
+        if (!isParameter && !isIntermediate) {
+          throw new Error("Malformed PTY CSI control sequence.");
+        }
+      }
+      if (cursor >= output.length) {
+        throw new Error("Unterminated PTY CSI control sequence.");
+      }
+      index = cursor + 1;
+      continue;
+    }
+
+    if (controlType === "]") {
+      let cursor = index + 2;
+      let terminated = false;
+      for (; cursor < output.length; cursor += 1) {
+        const controlCode = output.charCodeAt(cursor);
+        if (controlCode === 0x07) {
+          index = cursor + 1;
+          terminated = true;
+          break;
+        }
+        if (controlCode === 0x1B) {
+          if (output[cursor + 1] !== "\\") {
+            throw new Error("Malformed PTY OSC control sequence.");
+          }
+          index = cursor + 2;
+          terminated = true;
+          break;
+        }
+        if (controlCode < 0x20 || controlCode === 0x7F) {
+          throw new Error("Malformed PTY OSC control sequence.");
+        }
+      }
+      if (!terminated) throw new Error("Unterminated PTY OSC control sequence.");
+      continue;
+    }
+
+    throw new Error("Unsupported PTY escape sequence.");
+  }
+  return printable;
+}
+
+function expectedPtyRecord(id: number): { id: number; payload: string } {
+  return { id, payload: `payload-${id}` };
+}
+
+function serializedPtyRecord(id: number): string {
+  return `${PTY_RECORD_PREFIX}${id}${PTY_RECORD_SEPARATOR}payload-${id}${PTY_RECORD_SUFFIX}`;
+}
+
+function extractPtyRecords(output: string): Array<{ id: number; payload: string }> {
+  const lines = printablePtyText(output).split(/\r\n|\r|\n/u);
   if (lines.at(-1) === "") lines.pop();
-  return lines;
+  return lines.map((line) => {
+    if (!line.startsWith(PTY_RECORD_PREFIX) || !line.endsWith(PTY_RECORD_SUFFIX)) {
+      throw new Error("Malformed PTY benchmark record delimiters.");
+    }
+    const body = line.slice(PTY_RECORD_PREFIX.length, -PTY_RECORD_SUFFIX.length);
+    const separator = body.indexOf(PTY_RECORD_SEPARATOR);
+    if (separator <= 0) throw new Error("Malformed PTY benchmark record body.");
+    const idText = body.slice(0, separator);
+    const id = Number(idText);
+    if (!Number.isSafeInteger(id) || id < 0 || String(id) !== idText) {
+      throw new Error("Malformed PTY benchmark record id.");
+    }
+    return {
+      id,
+      payload: body.slice(separator + PTY_RECORD_SEPARATOR.length),
+    };
+  });
+}
+
+function assertExpectedPtyRecords(output: string, count: number): void {
+  expect(extractPtyRecords(output)).toEqual(
+    Array.from({ length: count }, (_, id) => expectedPtyRecord(id)),
+  );
 }
 
 async function providerHarnessLifecycleMeasurement(root: string): Promise<Measurement> {
@@ -497,42 +586,35 @@ function terminalBurstMeasurement(): Promise<Measurement> {
 
 describe("cross-platform performance benchmark", () => {
   it("reconstructs ordered PTY records across platform newline conventions", () => {
-    expect(ptyOutputLines("line-0\rline-1\r")).toEqual([
-      "line-0",
-      "line-1",
-    ]);
-    expect(ptyOutputLines("line-0\r\nline-1\r\n")).toEqual([
-      "line-0",
-      "line-1",
-    ]);
-    expect(ptyOutputLines("line-0\nline-1\rline-2\r\nline-3\n")).toEqual([
-      "line-0",
-      "line-1",
-      "line-2",
-      "line-3",
-    ]);
-    expect(ptyOutputLines(
-      "\u001B[?9001h\u001B[?1004h\u001B[?25lline-0\r\n"
-      + "\u001B]0;C:\\node\\node.exe\u0007\u001B[?25hline-1\r\n",
-    )).toEqual(["line-0", "line-1"]);
-    expect(ptyOutputLines("line-0\nline-2\n")).not.toEqual([
-      "line-0",
-      "line-1",
-      "line-2",
-    ]);
-    expect(ptyOutputLines("line-0\nline-2\nline-1\n")).not.toEqual([
-      "line-0",
-      "line-1",
-      "line-2",
-    ]);
-    expect(ptyOutputLines("line-0line-1\n")).not.toEqual([
-      "line-0",
-      "line-1",
-    ]);
-    expect(ptyOutputLines("printable-prefixline-0\nline-1\n")).not.toEqual([
-      "line-0",
-      "line-1",
-    ]);
+    const record0 = serializedPtyRecord(0);
+    const record1 = serializedPtyRecord(1);
+    const record2 = serializedPtyRecord(2);
+    expect(() => assertExpectedPtyRecords(`${record0}\r${record1}\r`, 2)).not.toThrow();
+    expect(() => assertExpectedPtyRecords(`${record0}\r\n${record1}\r\n`, 2)).not.toThrow();
+    expect(() => assertExpectedPtyRecords(
+      `${record0}\n${record1}\r${record2}\r\n`,
+      3,
+    )).not.toThrow();
+
+    const conPtyOutput = "\u001B[?9001h\u001B[?1004h\u001B[?25l\u001B[2J\u001B[H"
+      + `${record0}\r\n`
+      + "\u001B]0;C:\\node\\node.exe\u0007\u001B[?25h"
+      + `${record1}\r\n`;
+    expect(() => assertExpectedPtyRecords(conPtyOutput, 2)).not.toThrow();
+
+    expect(() => assertExpectedPtyRecords(`${record0}\n${record2}\n`, 3)).toThrow();
+    expect(() => assertExpectedPtyRecords(
+      `${record0}\n${record2}\n${record1}\n`,
+      3,
+    )).toThrow();
+    expect(() => assertExpectedPtyRecords(
+      `${record0}\n${record1}\n${record1}\n${record2}\n`,
+      3,
+    )).toThrow();
+    expect(() => assertExpectedPtyRecords(`${record0}${record1}\n`, 2)).toThrow();
+    expect(() => assertExpectedPtyRecords(`printable-prefix${record0}\n${record1}\n`, 2)).toThrow();
+    expect(() => extractPtyRecords("\u001B[?9001")).toThrow();
+    expect(() => extractPtyRecords("\u001B]0;unterminated")).toThrow();
   });
 
   it("records bounded product-path measurements and host metadata", async () => {

@@ -69,10 +69,12 @@ application produced alongside the AppImage, not AppImage mount time.
   capped at 16,384 UTF-16 code units per terminal payload and eight milliseconds
   before a partial flush.
 - Real PTY lifecycle: three node-pty launches that each emit 2,000 lines and
-  exit normally. The fixture reconstructs every output payload, treats CR, LF,
-  and CRLF only as PTY record delimiters, removes only recognized zero-width
-  CSI/OSC terminal controls, and asserts every line and its order. On Windows
-  this exercises node-pty's ConPTY backend.
+  exit normally. Each line has explicit record, ID, and payload delimiters. A
+  stateful terminal parser accepts only complete CSI/OSC controls and CR, LF,
+  or CRLF record boundaries before asserting all 2,000 IDs and payloads in
+  order. Focused fixtures reject dropped, reordered, duplicated, fused, or
+  malformed records and controls. On Windows this exercises node-pty's ConPTY
+  backend.
 - Desktop cold start: a fresh Electron profile with a pre-seeded runtime
   database in provider-disabled `NODE_ENV=test`; operating-system cache is
   uncontrolled.

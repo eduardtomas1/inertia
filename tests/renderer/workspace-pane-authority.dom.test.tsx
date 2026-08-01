@@ -736,6 +736,56 @@ describe("workspace pane authority", () => {
     });
   });
 
+  it("loads fresh root status without waiting for a stale workspace scan", async () => {
+    const deferred = deferredWorkspaceGitRequests();
+    const run = async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => await deferred.request(command);
+    const setActionError = vi.fn();
+    const hook = renderHook(
+      ({ workspaceOpen }: { workspaceOpen: boolean }) => useWorkspaceGit({
+        enabled: true,
+        loadStatusOnMount: true,
+        loadWorkspaceOnMount: workspaceOpen,
+        project: alpha,
+        conversation: alphaChat,
+        online: true,
+        ignoreWhitespace: false,
+        refreshVersion: 0,
+        request: deferred.request,
+        run,
+        setActionError,
+      }),
+      { initialProps: { workspaceOpen: true } },
+    );
+
+    await waitFor(() => {
+      expect(deferred.request.mock.calls.filter(
+        ([command]) => command.type === "git.workspace.refresh",
+      )).toHaveLength(1);
+    });
+    hook.rerender({ workspaceOpen: false });
+
+    await waitFor(() => {
+      expect(deferred.request.mock.calls.filter(
+        ([command]) => command.type === "git.refresh",
+      )).toHaveLength(2);
+    });
+    expect(deferred.request.mock.calls.filter(
+      ([command]) => command.type === "git.workspace.refresh",
+    )).toHaveLength(1);
+
+    act(() => deferred.settle(1, "/fresh-status"));
+    await waitFor(() => {
+      expect(hook.result.current.gitStatus?.root).toBe("/fresh-status");
+      expect(hook.result.current.loading).toBe(false);
+    });
+
+    act(() => deferred.settle(0, "/stale-workspace"));
+    expect(hook.result.current.gitStatus?.root).toBe("/fresh-status");
+  });
+
   it("queues one authoritative trailing load for explicit refreshes during a scan", async () => {
     const deferred = deferredWorkspaceGitRequests();
     const run = async (

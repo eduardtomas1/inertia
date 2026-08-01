@@ -93,32 +93,39 @@ export function useWorkspaceGit({
         return active.promise;
       }
 
-      const queued = trailingGitLoadRef.current;
-      if (queued?.identity === identity) {
-        queued.generation = generation;
-        if (scope === "workspace") queued.scope = scope;
-        return queued.promise;
-      }
-
-      const trailing = {
-        identity,
-        generation,
-        scope,
-        promise: Promise.resolve(),
-      };
-      trailing.promise = active.promise.catch(() => undefined).then(() => {
-        if (trailingGitLoadRef.current !== trailing) return;
-        trailingGitLoadRef.current = null;
-        if (
-          authorityRef.current !== owner
-          || requestGenerationRef.current !== trailing.generation
-        ) {
-          return;
+      const bypassStaleWorkspaceScan = scope === "status"
+        && active.scope === "workspace"
+        && active.generation !== generation;
+      if (bypassStaleWorkspaceScan) {
+        loadGitInFlightRef.current = null;
+      } else {
+        const queued = trailingGitLoadRef.current;
+        if (queued?.identity === identity) {
+          queued.generation = generation;
+          if (scope === "workspace") queued.scope = scope;
+          return queued.promise;
         }
-        return loadGit({ scope: trailing.scope });
-      });
-      trailingGitLoadRef.current = trailing;
-      return trailing.promise;
+
+        const trailing = {
+          identity,
+          generation,
+          scope,
+          promise: Promise.resolve(),
+        };
+        trailing.promise = active.promise.catch(() => undefined).then(() => {
+          if (trailingGitLoadRef.current !== trailing) return;
+          trailingGitLoadRef.current = null;
+          if (
+            authorityRef.current !== owner
+            || requestGenerationRef.current !== trailing.generation
+          ) {
+            return;
+          }
+          return loadGit({ scope: trailing.scope });
+        });
+        trailingGitLoadRef.current = trailing;
+        return trailing.promise;
+      }
     }
 
     let promise: Promise<void>;

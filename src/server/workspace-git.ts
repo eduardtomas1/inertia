@@ -148,10 +148,37 @@ function positiveLimit(value: number | undefined, fallback: number): number {
 
 function requireDiscoveryTime(deadlineAt: number | undefined): void {
   if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
-    throw new GitError(
-      "timeout",
-      "Workspace repository discovery took too long.",
-    );
+    throw discoveryTimeoutError();
+  }
+}
+
+function discoveryTimeoutError(): GitError {
+  return new GitError(
+    "timeout",
+    "Workspace repository discovery took too long.",
+  );
+}
+
+async function beforeDiscoveryDeadline<T>(
+  operation: () => Promise<T>,
+  deadlineAt: number | undefined,
+): Promise<T> {
+  if (deadlineAt === undefined) return await operation();
+  requireDiscoveryTime(deadlineAt);
+  const pending = operation();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(discoveryTimeoutError()),
+          Math.max(1, deadlineAt - Date.now()),
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -165,7 +192,10 @@ function normalizedLimits(input: Partial<WorkspaceGitDiscoveryLimits>): Workspac
   };
 }
 
-async function requireWorkspaceDirectory(workspacePath: string): Promise<string> {
+async function requireWorkspaceDirectory(
+  workspacePath: string,
+  deadlineAt?: number,
+): Promise<string> {
   if (
     typeof workspacePath !== "string"
     || workspacePath.length === 0
@@ -175,8 +205,16 @@ async function requireWorkspaceDirectory(workspacePath: string): Promise<string>
     throw new GitError("invalid-input", "The workspace path is invalid.");
   }
   try {
-    const root = await realpath(resolve(workspacePath));
-    if (!(await stat(root)).isDirectory()) throw new Error();
+    const root = await beforeDiscoveryDeadline(
+      () => realpath(resolve(workspacePath)),
+      deadlineAt,
+    );
+    if (!(await beforeDiscoveryDeadline(
+      () => stat(root),
+      deadlineAt,
+    )).isDirectory()) {
+      throw new Error();
+    }
     return root;
   } catch (error) {
     if (error instanceof GitError) throw error;
@@ -242,7 +280,10 @@ export async function discoverWorkspaceGitRepositories(
   inputLimits: WorkspaceGitDiscoveryOptions = {},
 ): Promise<WorkspaceGitSnapshot> {
   const limits = normalizedLimits(inputLimits);
-  const workspaceRoot = await requireWorkspaceDirectory(workspacePath);
+  const workspaceRoot = await requireWorkspaceDirectory(
+    workspacePath,
+    inputLimits.deadlineAt,
+  );
   const queue: QueuedDirectory[] = [{ absolutePath: workspaceRoot, repositoryPath: ".", depth: 0 }];
   const candidates: DiscoveryCandidate[] = [];
   const issues: WorkspaceGitIssue[] = [];
@@ -264,7 +305,10 @@ export async function discoverWorkspaceGitRepositories(
 
     let entries;
     try {
-      entries = await readdir(current.absolutePath, { withFileTypes: true });
+      entries = await beforeDiscoveryDeadline(
+        () => readdir(current.absolutePath, { withFileTypes: true }),
+        inputLimits.deadlineAt,
+      );
       requireDiscoveryTime(inputLimits.deadlineAt);
     } catch (error) {
       if (error instanceof GitError && error.code === "timeout") throw error;
@@ -277,7 +321,10 @@ export async function discoverWorkspaceGitRepositories(
     const marker = entries.find((entry) => entry.name.toLocaleLowerCase("en-US") === ".git");
     if (marker) {
       try {
-        const markerInfo = await lstat(resolve(current.absolutePath, marker.name));
+        const markerInfo = await beforeDiscoveryDeadline(
+          () => lstat(resolve(current.absolutePath, marker.name)),
+          inputLimits.deadlineAt,
+        );
         if (markerInfo.isSymbolicLink()) {
           partial = true;
           safeIssue(issues, limits, current.repositoryPath, "An unsafe symbolic-link Git marker was ignored.");
@@ -292,13 +339,15 @@ export async function discoverWorkspaceGitRepositories(
             });
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof GitError && error.code === "timeout") throw error;
         partial = true;
         safeIssue(issues, limits, current.repositoryPath, "The Git marker could not be inspected.");
       }
     }
 
     for (const entry of entries) {
+      requireDiscoveryTime(inputLimits.deadlineAt);
       const foldedName = entry.name.toLocaleLowerCase("en-US");
       if (IGNORED_DIRECTORY_NAMES.has(foldedName)) {
         if (entry.isDirectory() || entry.isSymbolicLink()) skippedDirectories += 1;
@@ -307,8 +356,12 @@ export async function discoverWorkspaceGitRepositories(
       const childAbsolute = resolve(current.absolutePath, entry.name);
       let childInfo;
       try {
-        childInfo = await lstat(childAbsolute);
-      } catch {
+        childInfo = await beforeDiscoveryDeadline(
+          () => lstat(childAbsolute),
+          inputLimits.deadlineAt,
+        );
+      } catch (error) {
+        if (error instanceof GitError && error.code === "timeout") throw error;
         partial = true;
         safeIssue(
           issues,
@@ -330,8 +383,12 @@ export async function discoverWorkspaceGitRepositories(
       }
       let canonicalChild;
       try {
-        canonicalChild = await realpath(childAbsolute);
-      } catch {
+        canonicalChild = await beforeDiscoveryDeadline(
+          () => realpath(childAbsolute),
+          inputLimits.deadlineAt,
+        );
+      } catch (error) {
+        if (error instanceof GitError && error.code === "timeout") throw error;
         partial = true;
         skippedDirectories += 1;
         continue;

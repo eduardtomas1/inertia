@@ -144,9 +144,14 @@ export function createTurnInteractionCommandHandler(
           );
         let documentContexts;
         try {
+          const extractionAbort = new AbortController();
           documentContexts = await awaitMessageSendPreparation(
-            documentAttachmentContexts(resolvedAttachments),
+            documentAttachmentContexts(resolvedAttachments, {
+              deadlineAt: preparationDeadlineAt,
+              signal: extractionAbort.signal,
+            }),
             preparationDeadlineAt,
+            () => extractionAbort.abort(),
           );
         } catch (error) {
           await relinquishAttachments();

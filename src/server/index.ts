@@ -119,6 +119,11 @@ import { RemoteTranscriptCache } from "./remote-transcript-cache";
 import {
   remotePromptSafetyForHarness,
 } from "../shared/remote-prompt-safety";
+import {
+  readDatabaseRecoveryExportFile,
+  writeDatabaseRecoveryExportFile,
+} from "./persistence/database-export-file";
+import type { DatabaseRecoveryImportResult } from "./persistence/database-export";
 
 export {
   assembleReadOnlyReviewRequest,
@@ -153,6 +158,7 @@ export interface RuntimeBackendCredentialBroker {
 
 export interface RunningRuntime {
   websocketUrl: string;
+  databaseRecovery: ReturnType<RuntimeStore["databaseRecoveryReport"]>;
   resolveProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
   remoteRequest: (
     subject: RemoteAuthorizationSubject,
@@ -168,6 +174,8 @@ export interface RunningRuntime {
     preparationId: string,
   ) => RemoteResponse;
   forgetRemoteTranscripts: (scope: RuntimeRemoteForgetScope) => void;
+  exportRecoveryData: (path: string) => Promise<void>;
+  importRecoveryData: (path: string) => Promise<DatabaseRecoveryImportResult>;
   close: (cause?: "runtime-shutdown" | "runtime-crash") => Promise<void>;
 }
 
@@ -179,6 +187,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     options.defaultWorkspacePath,
     { recoverInterruptedRuns: false },
   );
+  store.startBackups();
   const secureFiles: RuntimeSecureFileBroker = options.secureFiles ?? {
     authorizeRoot: async () => {
       throw new SecureFileError(
@@ -786,6 +795,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
 
   return {
     websocketUrl: `ws://127.0.0.1:${address.port}${websocketPath}`,
+    databaseRecovery: store.databaseRecoveryReport(),
     resolveProjectPath: async (request) => (await resolveAuthoritativeProjectPath(
       store,
       request,
@@ -799,6 +809,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     forgetRemoteTranscripts: (scope) => {
       if (scope.kind === "all") remoteGateway.reset();
       else remoteGateway.forgetConversation(scope.conversationId);
+    },
+    exportRecoveryData: async (path) => {
+      await writeDatabaseRecoveryExportFile(path, store.exportRecoveryData());
+    },
+    importRecoveryData: async (path) => {
+      const result = store.importRecoveryData(
+        await readDatabaseRecoveryExportFile(path),
+      );
+      broadcastSnapshot();
+      return result;
     },
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
@@ -832,7 +852,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           );
           if (failed) throw failed.reason;
         },
-        closeStore: () => store.close(),
+        closeStore: () => store.backupAndClose(),
       });
     },
   };

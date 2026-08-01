@@ -1203,6 +1203,30 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         }
       },
     });
+    migrationExtensions.push({
+      name: "AppendStreamTextChunks",
+      up: `
+        CREATE TABLE IF NOT EXISTS message_content_chunks (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          message_id TEXT NOT NULL
+            REFERENCES messages(id) ON DELETE CASCADE,
+          content TEXT NOT NULL
+            CHECK (length(content) BETWEEN 1 AND 1048576)
+        );
+        CREATE INDEX IF NOT EXISTS message_content_chunks_message_sequence_idx
+          ON message_content_chunks(message_id, sequence ASC);
+
+        CREATE TABLE IF NOT EXISTS reasoning_content_chunks (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          reasoning_id TEXT NOT NULL
+            REFERENCES agent_reasonings(id) ON DELETE CASCADE,
+          content TEXT NOT NULL
+            CHECK (length(content) BETWEEN 1 AND 1048576)
+        );
+        CREATE INDEX IF NOT EXISTS reasoning_content_chunks_reasoning_sequence_idx
+          ON reasoning_content_chunks(reasoning_id, sequence ASC);
+      `,
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

@@ -78,6 +78,8 @@ const IPC = {
   runtimeReady: "inertia:runtime-ready",
   selectDirectory: "inertia:select-directory",
   selectCodexExecutable: "inertia:select-codex-executable",
+  exportRecoveryData: "inertia:export-recovery-data",
+  importRecoveryData: "inertia:import-recovery-data",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
   copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
   copyText: "inertia:copy-text",
@@ -343,6 +345,46 @@ function registerIpcHandlers(): void {
       properties: ["openFile"],
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle(IPC.exportRecoveryData, async (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    if (!mainWindow || !runtimeSupervisor) {
+      throw new Error("Database recovery export is unavailable.");
+    }
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: "Export Inertia recovery data",
+      defaultPath: join(
+        app.getPath("documents"),
+        `Inertia recovery ${timestamp}.json`,
+      ),
+      buttonLabel: "Export recovery file",
+      filters: [{ name: "JSON", extensions: ["json"] }],
+      properties: ["createDirectory", "showOverwriteConfirmation"],
+    });
+    if (result.canceled || !result.filePath) return { status: "cancelled" };
+    await runtimeSupervisor.databaseRecovery("export", result.filePath);
+    return { status: "exported" };
+  });
+
+  ipcMain.handle(IPC.importRecoveryData, async (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    if (!mainWindow || !runtimeSupervisor) {
+      throw new Error("Database recovery import is unavailable.");
+    }
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Import Inertia recovery data",
+      defaultPath: app.getPath("documents"),
+      buttonLabel: "Import recovery file",
+      filters: [{ name: "JSON", extensions: ["json"] }],
+      properties: ["openFile"],
+    });
+    const path = result.canceled ? undefined : result.filePaths[0];
+    if (!path) return { status: "cancelled" };
+    const summary = await runtimeSupervisor.databaseRecovery("import", path);
+    if (!summary) throw new Error("The recovery import returned no summary.");
+    return { status: "imported", summary };
   });
 
   ipcMain.handle(IPC.revealRuntimeLogs, async (event, ...args) => {

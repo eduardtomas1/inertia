@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
@@ -5,18 +6,34 @@ import type { TextItem } from "pdfjs-dist/types/src/display/api";
 
 import type { ChatAttachment } from "../../../shared/contracts";
 import type { ResolvedAttachmentPayload } from "./trusted-attachment-resolver";
+import {
+  DocumentExtractionCancelledError,
+  DocumentExtractionDeadlineError,
+  DocumentExtractionScheduler,
+} from "./document-extraction-scheduler";
 
 const MAX_DOCUMENT_CONTEXT_BYTES = 64 * 1024;
 export const MAX_DOCUMENT_CONTEXT_TOTAL_BYTES = 96 * 1024;
 const MAX_PDF_PAGES = 80;
-const PDF_EXTRACTION_TIMEOUT_MS = 12_000;
+export const DOCUMENT_EXTRACTION_TURN_TIMEOUT_MS = 12_000;
+export const MAX_DOCUMENT_EXTRACTION_INPUT_BYTES = 20 * 1024 * 1024;
+export const MAX_DOCUMENT_EXTRACTION_COUNT = 8;
 const require = createRequire(import.meta.url);
+const sharedExtractionScheduler = new DocumentExtractionScheduler();
 
 export interface DocumentAttachmentContext {
   attachmentId: string;
   label: string;
   content: string;
   truncated: boolean;
+}
+
+export interface DocumentAttachmentContextOptions {
+  readonly deadlineAt?: number;
+  readonly groupId?: string;
+  readonly now?: () => number;
+  readonly scheduler?: DocumentExtractionScheduler;
+  readonly signal?: AbortSignal;
 }
 
 async function ensurePdfNodePrimitives(): Promise<void> {
@@ -124,9 +141,10 @@ async function extractPdfText(
   attachment: ChatAttachment,
   bytes: Uint8Array,
   maximumJsonBytes: number,
+  signal: AbortSignal,
+  deadlineAt: number,
 ): Promise<{ content: string; truncated: boolean }> {
   const { getDocument } = await loadPdfModule();
-  const deadline = Date.now() + PDF_EXTRACTION_TIMEOUT_MS;
   const loadingTask = getDocument({
     data: new Uint8Array(bytes),
     disableFontFace: true,
@@ -134,35 +152,32 @@ async function extractPdfText(
     isOffscreenCanvasSupported: false,
     useWasm: false,
     useWorkerFetch: false,
+    verbosity: 0,
   });
-  let timeout: NodeJS.Timeout | undefined;
+  const cancel = () => {
+    void loadingTask.destroy();
+  };
+  signal.addEventListener("abort", cancel, { once: true });
   try {
-    const timeoutPromise = new Promise<never>((_resolve, reject) => {
-      timeout = setTimeout(() => {
-        void loadingTask.destroy();
-        reject(new Error("PDF text extraction timed out."));
-      }, PDF_EXTRACTION_TIMEOUT_MS);
-      timeout.unref();
-    });
-    const document = await Promise.race([loadingTask.promise, timeoutPromise]);
+    if (signal.aborted) throw new DocumentExtractionCancelledError();
+    const document = await loadingTask.promise;
     const pageLimit = Math.min(document.numPages, MAX_PDF_PAGES);
     const accumulator = boundedTextAccumulator(maximumJsonBytes);
     let hasSelectableText = false;
     let truncated = document.numPages > pageLimit;
     for (let pageNumber = 1; pageNumber <= pageLimit; pageNumber += 1) {
-      const page = await Promise.race([
-        document.getPage(pageNumber),
-        timeoutPromise,
-      ]);
+      if (signal.aborted) throw new DocumentExtractionCancelledError();
+      if (Date.now() >= deadlineAt) {
+        throw new DocumentExtractionDeadlineError();
+      }
+      const page = await document.getPage(pageNumber);
       const reader = page.streamTextContent().getReader();
       let streamDone = false;
       let pageStarted = false;
       try {
         while (!streamDone) {
-          const chunk = await Promise.race([
-            reader.read(),
-            timeoutPromise,
-          ]);
+          if (signal.aborted) throw new DocumentExtractionCancelledError();
+          const chunk = await reader.read();
           streamDone = chunk.done;
           if (streamDone) break;
           const items = (chunk.value as { items?: readonly unknown[] }).items;
@@ -170,10 +185,10 @@ async function extractPdfText(
           for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
             if (
               itemIndex % 256 === 0
-              && Date.now() >= deadline
+              && Date.now() >= deadlineAt
             ) {
               void loadingTask.destroy();
-              throw new Error("PDF text extraction timed out.");
+              throw new DocumentExtractionDeadlineError();
             }
             const item = items[itemIndex];
             if (
@@ -218,13 +233,14 @@ async function extractPdfText(
     if (
       error instanceof Error
       && (
-        error.message === "PDF text extraction timed out."
+        error instanceof DocumentExtractionCancelledError
+        || error instanceof DocumentExtractionDeadlineError
         || error.message.includes("has no selectable text")
       )
     ) throw error;
     throw new Error(`${attachment.name} could not be read as a PDF.`);
   } finally {
-    if (timeout) clearTimeout(timeout);
+    signal.removeEventListener("abort", cancel);
     await loadingTask.destroy().catch(() => undefined);
   }
 }
@@ -247,18 +263,49 @@ function extractTextDocument(
 
 export async function documentAttachmentContexts(
   payloads: readonly ResolvedAttachmentPayload[],
+  options: DocumentAttachmentContextOptions = {},
 ): Promise<DocumentAttachmentContext[]> {
   const documents = payloads.flatMap((payload) =>
     payload.attachment.mimeType.startsWith("image/")
       ? []
       : [payload]);
   if (documents.length === 0) return [];
+  if (
+    documents.length > MAX_DOCUMENT_EXTRACTION_COUNT
+    || documents.reduce((total, { bytes }) => total + bytes.byteLength, 0)
+      > MAX_DOCUMENT_EXTRACTION_INPUT_BYTES
+  ) {
+    throw new Error("The selected documents exceed the shared extraction budget.");
+  }
+  if (options.signal?.aborted) {
+    throw new DocumentExtractionCancelledError();
+  }
+  const now = options.now ?? Date.now;
+  const deadlineAt = Math.min(
+    options.deadlineAt ?? Number.POSITIVE_INFINITY,
+    now() + DOCUMENT_EXTRACTION_TURN_TIMEOUT_MS,
+  );
+  if (deadlineAt <= now()) throw new DocumentExtractionDeadlineError();
+  const groupId = options.groupId ?? randomUUID();
+  const scheduler = options.scheduler ?? sharedExtractionScheduler;
   const maximumJsonBytes = Math.floor(
     MAX_DOCUMENT_CONTEXT_TOTAL_BYTES / documents.length,
   );
-  return await Promise.all(documents.map(async ({ attachment, bytes }) => {
+  const extractions = documents.map(async ({ attachment, bytes }) => {
     const extracted = attachment.mimeType === "application/pdf"
-      ? await extractPdfText(attachment, bytes, maximumJsonBytes)
+      ? await scheduler.schedule({
+          groupId,
+          weight: bytes.byteLength,
+          deadlineAt,
+          signal: options.signal,
+          operation: (signal) => extractPdfText(
+            attachment,
+            bytes,
+            maximumJsonBytes,
+            signal,
+            deadlineAt,
+          ),
+        })
       : extractTextDocument(attachment, bytes, maximumJsonBytes);
     return {
       attachmentId: attachment.id,
@@ -266,5 +313,19 @@ export async function documentAttachmentContexts(
       content: extracted.content,
       truncated: extracted.truncated,
     };
-  }));
+  });
+  const settled = await Promise.allSettled(extractions);
+  const failed = settled.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failed) {
+    if (failed.reason instanceof DocumentExtractionDeadlineError) {
+      throw new Error("PDF text extraction timed out.");
+    }
+    throw failed.reason;
+  }
+  return settled.map((result) => {
+    if (result.status === "rejected") throw result.reason;
+    return result.value;
+  });
 }

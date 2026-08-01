@@ -166,13 +166,19 @@ export class RuntimeDiagnostics {
   }
 
   recordState(snapshot: RuntimeSupervisorSnapshot): void {
+    const recovery = snapshot.databaseRecovery;
+    const recoveryMessage = recovery?.outcome === "restored"
+      ? `Database restored from validated backup ${recovery.restoredBackup ?? "unknown"}; corrupt primary preserved: ${recovery.preservedCorruptPrimary ? "yes" : "no"}; invalid backups skipped: ${recovery.invalidBackupsSkipped}.`
+      : recovery?.outcome === "created-empty"
+        ? `Database started empty after ${recovery.trigger}; corrupt primary preserved: ${recovery.preservedCorruptPrimary ? "yes" : "no"}; invalid backups skipped: ${recovery.invalidBackupsSkipped}.`
+        : undefined;
     this.record(snapshot.lastError ? "runtime.failure" : "runtime.state", {
       phase: snapshot.phase,
       generation: snapshot.generation,
       processId: snapshot.pid,
       restartAttempt: snapshot.restartAttempt,
       restartScheduled: snapshot.restartScheduled,
-      message: snapshot.lastError,
+      message: snapshot.lastError ?? recoveryMessage,
       // websocketUrl is deliberately excluded because it contains a capability.
     });
   }

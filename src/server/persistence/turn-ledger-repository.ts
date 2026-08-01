@@ -39,6 +39,10 @@ import type {
   BeginAgentTurnInput,
   CreateAgentTurnInput,
 } from "./types";
+import {
+  compactMessageContentForTurn,
+  compactReasoningContentForTurn,
+} from "./stream-text-storage";
 
 type TurnLedgerPersistenceContext = Pick<
   PersistenceContext,
@@ -472,6 +476,10 @@ export class TurnLedgerRepository {
       }
       if (terminalMessage) {
         this.context.database.prepare("UPDATE messages SET turn_id = ? WHERE id = ?").run(current.id, terminalMessage.id);
+      }
+      if (terminal) {
+        compactMessageContentForTurn(this.context.database, current.id);
+        compactReasoningContentForTurn(this.context.database, current.id);
       }
     })();
     return next;

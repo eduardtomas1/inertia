@@ -287,6 +287,33 @@ describe("runtime process protocol", () => {
     expect(isRuntimeWebSocketUrl(`ws://127.0.0.1:43210/runtime/${"a".repeat(42)}`)).toBe(false);
     expect(isRuntimeWebSocketUrl(`ws://127.0.0.1:43210/runtime/${"a".repeat(43)}?leak=1`)).toBe(false);
     expect(isRuntimeWebSocketUrl(`wss://127.0.0.1:43210/runtime/${"a".repeat(43)}`)).toBe(false);
+    const recoveredReady = {
+      type: "runtime.ready",
+      websocketUrl: capabilityUrl,
+      databaseRecovery: {
+        checkedAt: "2026-01-01T00:00:00.000Z",
+        outcome: "restored",
+        trigger: "primary-corrupt",
+        restoredBackup: "inertia-20260101T000000000Z.sqlite",
+        preservedCorruptPrimary: true,
+        invalidBackupsSkipped: 1,
+      },
+    } as const;
+    expect(parseRuntimeWorkerEvent(recoveredReady)).toEqual(recoveredReady);
+    expect(parseRuntimeWorkerEvent({
+      ...recoveredReady,
+      databaseRecovery: {
+        ...recoveredReady.databaseRecovery,
+        restoredBackup: "../outside.sqlite",
+      },
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...recoveredReady,
+      databaseRecovery: {
+        ...recoveredReady.databaseRecovery,
+        outcome: "healthy",
+      },
+    })).toBeNull();
   });
 
   it("accepts only scoped relative project-path requests and absolute resolutions", () => {
@@ -321,6 +348,58 @@ describe("runtime process protocol", () => {
       type: "runtime.project-path-resolved",
       requestId,
       path: "src/index.ts",
+    })).toBeNull();
+  });
+
+  it("strictly bounds database recovery file operations and summaries", () => {
+    const requestId = crypto.randomUUID();
+    const path = resolve(workspaceDirectory, "recovery.json");
+    const command = {
+      type: "runtime.database-recovery",
+      requestId,
+      operation: "export",
+      path,
+    } as const;
+    expect(parseRuntimeWorkerCommand(command)).toEqual(command);
+    expect(parseRuntimeWorkerCommand({ ...command, path: "recovery.json" }))
+      .toBeNull();
+    expect(parseRuntimeWorkerCommand({ ...command, operation: "delete" }))
+      .toBeNull();
+    const imported = {
+      type: "runtime.database-recovery-result",
+      requestId,
+      operation: "import",
+      ok: true,
+      summary: { projects: 2, conversations: 3, messages: 4 },
+    } as const;
+    expect(parseRuntimeWorkerEvent(imported)).toEqual(imported);
+    expect(parseRuntimeWorkerEvent({
+      ...imported,
+      operation: "export",
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...imported,
+      summary: { ...imported.summary, messages: -1 },
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.database-recovery-result",
+      requestId,
+      operation: "export",
+      ok: true,
+      summary: null,
+    })).toEqual({
+      type: "runtime.database-recovery-result",
+      requestId,
+      operation: "export",
+      ok: true,
+      summary: null,
+    });
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.database-recovery-result",
+      requestId,
+      operation: "import",
+      ok: true,
+      summary: null,
     })).toBeNull();
   });
 

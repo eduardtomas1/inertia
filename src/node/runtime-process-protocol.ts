@@ -57,6 +57,23 @@ export type RuntimeRemoteForgetScope =
   | { kind: "all" }
   | { kind: "conversation"; conversationId: string };
 
+export type RuntimeDatabaseRecoveryOperation = "export" | "import";
+
+export interface RuntimeDatabaseRecoverySummary {
+  projects: number;
+  conversations: number;
+  messages: number;
+}
+
+export interface RuntimeDatabaseStartupRecoveryReport {
+  checkedAt: string;
+  outcome: "healthy" | "restored" | "created-empty";
+  trigger: "none" | "primary-missing" | "primary-corrupt";
+  restoredBackup: string | null;
+  preservedCorruptPrimary: boolean;
+  invalidBackupsSkipped: number;
+}
+
 export type RuntimeWorkerCommand =
   | { type: "runtime.start"; options: RuntimeWorkerOptions }
   | { type: "runtime.shutdown" }
@@ -81,6 +98,12 @@ export type RuntimeWorkerCommand =
       request: Extract<RemoteRequest, { type: "prompt.send" }>;
     }
   | { type: "runtime.remote-forget"; scope: RuntimeRemoteForgetScope }
+  | {
+      type: "runtime.database-recovery";
+      requestId: string;
+      operation: RuntimeDatabaseRecoveryOperation;
+      path: string;
+    }
   | RuntimeCredentialResult
   | RuntimeAttachmentResult
   | RuntimeAttachmentReleaseResult
@@ -175,12 +198,30 @@ export interface RuntimeSecureFileResult {
 }
 
 export type RuntimeWorkerEvent =
-  | { type: "runtime.ready"; websocketUrl: string }
+  | {
+      type: "runtime.ready";
+      websocketUrl: string;
+      databaseRecovery?: RuntimeDatabaseStartupRecoveryReport;
+    }
   | { type: "runtime.startup-failed"; message: string }
   | { type: "runtime.shutdown-unconfirmed" }
   | { type: "runtime.stopped" }
   | { type: "runtime.project-path-resolved"; requestId: string; path: string }
   | { type: "runtime.project-path-rejected"; requestId: string; message: string }
+  | {
+      type: "runtime.database-recovery-result";
+      requestId: string;
+      operation: RuntimeDatabaseRecoveryOperation;
+      ok: true;
+      summary: RuntimeDatabaseRecoverySummary | null;
+    }
+  | {
+      type: "runtime.database-recovery-result";
+      requestId: string;
+      operation: RuntimeDatabaseRecoveryOperation;
+      ok: false;
+      message: string;
+    }
   | {
       type: "runtime.remote-response";
       requestId: string;
@@ -340,6 +381,21 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   ) {
     const request = parseOpenProjectPathRequest(value.request);
     return request ? { type: "runtime.resolve-project-path", requestId: value.requestId, request } : null;
+  }
+  if (
+    value.type === "runtime.database-recovery"
+    && Object.keys(value).length === 4
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+    && (value.operation === "export" || value.operation === "import")
+    && runtimePath(value.path)
+  ) {
+    return {
+      type: "runtime.database-recovery",
+      requestId: value.requestId,
+      operation: value.operation,
+      path: value.path,
+    };
   }
   if (value.type !== "runtime.start" || Object.keys(value).length !== 2 || !plainObject(value.options)) return null;
   const options = value.options;
@@ -535,14 +591,149 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       ? { type: "runtime.project-path-rejected", requestId: value.requestId, message }
       : null;
   }
+  if (
+    value.type === "runtime.database-recovery-result"
+    && typeof value.requestId === "string"
+    && UUID_PATTERN.test(value.requestId)
+    && (value.operation === "export" || value.operation === "import")
+    && typeof value.ok === "boolean"
+  ) {
+    if (!value.ok) {
+      if (Object.keys(value).length !== 5 || typeof value.message !== "string") {
+        return null;
+      }
+      const message = value.message.trim();
+      return message.length > 0 && message.length <= 1_000
+        ? {
+            type: "runtime.database-recovery-result",
+            requestId: value.requestId,
+            operation: value.operation,
+            ok: false,
+            message,
+          }
+        : null;
+    }
+    if (Object.keys(value).length !== 5) return null;
+    if (value.summary === null) {
+      if (value.operation !== "export") return null;
+      return {
+        type: "runtime.database-recovery-result",
+        requestId: value.requestId,
+        operation: value.operation,
+        ok: true,
+        summary: null,
+      };
+    }
+    if (!plainObject(value.summary) || Object.keys(value.summary).length !== 3) {
+      return null;
+    }
+    if (value.operation !== "import") return null;
+    const summary = value.summary;
+    if (![
+      summary.projects,
+      summary.conversations,
+      summary.messages,
+    ].every((count) =>
+      typeof count === "number"
+      && Number.isSafeInteger(count)
+      && count >= 0)) return null;
+    return {
+      type: "runtime.database-recovery-result",
+      requestId: value.requestId,
+      operation: value.operation,
+      ok: true,
+      summary: {
+        projects: summary.projects as number,
+        conversations: summary.conversations as number,
+        messages: summary.messages as number,
+      },
+    };
+  }
   if (value.type === "runtime.startup-failed" && Object.keys(value).length === 2 && typeof value.message === "string") {
     const message = value.message.trim();
     return message && message.length <= 1000 ? { type: "runtime.startup-failed", message } : null;
   }
-  if (value.type === "runtime.ready" && Object.keys(value).length === 2 && isRuntimeWebSocketUrl(value.websocketUrl)) {
-    return { type: "runtime.ready", websocketUrl: value.websocketUrl };
+  if (
+    value.type === "runtime.ready"
+    && (
+      Object.keys(value).length === 2
+      || Object.keys(value).length === 3
+    )
+    && isRuntimeWebSocketUrl(value.websocketUrl)
+  ) {
+    if (!Object.hasOwn(value, "databaseRecovery")) {
+      return { type: "runtime.ready", websocketUrl: value.websocketUrl };
+    }
+    const recovery = parseRuntimeDatabaseStartupRecovery(value.databaseRecovery);
+    return recovery
+      ? {
+          type: "runtime.ready",
+          websocketUrl: value.websocketUrl,
+          databaseRecovery: recovery,
+        }
+      : null;
   }
   return null;
+}
+
+function parseRuntimeDatabaseStartupRecovery(
+  value: unknown,
+): RuntimeDatabaseStartupRecoveryReport | null {
+  if (!plainObject(value) || Object.keys(value).length !== 6) return null;
+  if (
+    typeof value.checkedAt !== "string"
+    || value.checkedAt.length > 64
+    || !Number.isFinite(Date.parse(value.checkedAt))
+    || (
+      value.outcome !== "healthy"
+      && value.outcome !== "restored"
+      && value.outcome !== "created-empty"
+    )
+    || (
+      value.trigger !== "none"
+      && value.trigger !== "primary-missing"
+      && value.trigger !== "primary-corrupt"
+    )
+    || (
+      value.restoredBackup !== null
+      && (
+        typeof value.restoredBackup !== "string"
+        || !/^[A-Za-z0-9_.-]{1,200}$/u.test(value.restoredBackup)
+      )
+    )
+    || typeof value.preservedCorruptPrimary !== "boolean"
+    || typeof value.invalidBackupsSkipped !== "number"
+    || !Number.isSafeInteger(value.invalidBackupsSkipped)
+    || value.invalidBackupsSkipped < 0
+  ) return null;
+  if (
+    (
+      value.outcome === "healthy"
+      && (
+        value.trigger !== "none"
+        || value.restoredBackup !== null
+        || value.preservedCorruptPrimary
+        || value.invalidBackupsSkipped !== 0
+      )
+    )
+    || (
+      value.outcome === "restored"
+      && (value.trigger === "none" || value.restoredBackup === null)
+    )
+    || (
+      value.outcome === "created-empty"
+      && (value.trigger === "none" || value.restoredBackup !== null)
+    )
+    || (value.preservedCorruptPrimary && value.trigger !== "primary-corrupt")
+  ) return null;
+  return {
+    checkedAt: value.checkedAt,
+    outcome: value.outcome,
+    trigger: value.trigger,
+    restoredBackup: value.restoredBackup,
+    preservedCorruptPrimary: value.preservedCorruptPrimary,
+    invalidBackupsSkipped: value.invalidBackupsSkipped,
+  };
 }
 
 function parseRuntimeRemoteForgetScope(

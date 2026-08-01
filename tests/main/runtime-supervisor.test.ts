@@ -133,6 +133,46 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 1, pid: 10_000 });
   });
 
+  it("correlates bounded database recovery operations with the ready runtime", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const path = resolve(dataDirectory, "recovery.json");
+    const pending = supervisor.databaseRecovery("import", path);
+    const request = children[0].messages.at(-1) as {
+      type: string;
+      requestId: string;
+      operation: string;
+      path: string;
+    };
+    expect(request).toMatchObject({
+      type: "runtime.database-recovery",
+      operation: "import",
+      path,
+    });
+    children[0].message({
+      type: "runtime.database-recovery-result",
+      requestId: request.requestId,
+      operation: "export",
+      ok: true,
+      summary: null,
+    });
+    children[0].message({
+      type: "runtime.database-recovery-result",
+      requestId: request.requestId,
+      operation: "import",
+      ok: true,
+      summary: { projects: 1, conversations: 2, messages: 3 },
+    });
+    await expect(pending).resolves.toEqual({
+      projects: 1,
+      conversations: 2,
+      messages: 3,
+    });
+  });
+
   it("brokers startup credentials only for the current accepted runtime generation", async () => {
     const credentialBroker: RuntimeCredentialBroker = {
       resolve: vi.fn(async () => "ephemeral-secret"),

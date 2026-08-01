@@ -12,6 +12,10 @@ import {
 import type { PersistenceContext } from "./context";
 import { RecordNotFoundError } from "./errors";
 import type { MessageRow } from "./rows";
+import {
+  MESSAGE_PROJECTION_COLUMNS,
+  replaceMessageContent,
+} from "./stream-text-storage";
 import type { CreateMessageOptions } from "./types";
 
 type TranscriptPersistenceContext = Pick<
@@ -123,7 +127,11 @@ export class TranscriptRepository {
     turnId: string,
   ): ChatMessage {
     const turn = this.context.assertAgentTurnIdentity(conversationId, runId, turnId);
-    const row = this.context.database.prepare("SELECT * FROM messages WHERE id = ?").get(messageId) as MessageRow | undefined;
+    const row = this.context.database.prepare(`
+      SELECT ${MESSAGE_PROJECTION_COLUMNS}
+      FROM messages
+      WHERE messages.id = ?
+    `).get(messageId) as MessageRow | undefined;
     if (!row || row.conversation_id !== conversationId) throw new RecordNotFoundError("Message not found.");
     if (row.role === "user" && turn.userMessageId !== messageId) {
       throw new Error("The user message is owned by a different turn.");
@@ -138,24 +146,26 @@ export class TranscriptRepository {
   }
 
   updateMessageContent(messageId: string, content: string): void {
-    const result = this.context.database.prepare(
-      "UPDATE messages SET content = ? WHERE id = ?",
-    ).run(content, messageId);
-    if (result.changes === 0) throw new RecordNotFoundError("Message not found.");
+    if (replaceMessageContent(this.context.database, messageId, content) === 0) {
+      throw new RecordNotFoundError("Message not found.");
+    }
   }
 
   appendMessageContent(messageId: string, delta: string): void {
     if (!delta) return;
-    const result = this.context.database.prepare(
-      "UPDATE messages SET content = content || ? WHERE id = ?",
-    ).run(delta, messageId);
+    const result = this.context.database.prepare(`
+      INSERT INTO message_content_chunks (message_id, content)
+      SELECT id, ? FROM messages WHERE id = ?
+    `).run(delta, messageId);
     if (result.changes === 0) throw new RecordNotFoundError("Message not found.");
   }
 
   message(messageId: string): ChatMessage {
-    const row = this.context.database.prepare(
-      "SELECT * FROM messages WHERE id = ?",
-    ).get(messageId) as MessageRow | undefined;
+    const row = this.context.database.prepare(`
+      SELECT ${MESSAGE_PROJECTION_COLUMNS}
+      FROM messages
+      WHERE messages.id = ?
+    `).get(messageId) as MessageRow | undefined;
     if (!row) throw new RecordNotFoundError("Message not found.");
     return messageFromRow(row);
   }

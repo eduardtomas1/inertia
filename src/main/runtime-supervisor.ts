@@ -10,6 +10,9 @@ import type {
 import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
 import {
   parseRuntimeWorkerEvent,
+  type RuntimeDatabaseRecoveryOperation,
+  type RuntimeDatabaseStartupRecoveryReport,
+  type RuntimeDatabaseRecoverySummary,
   type RuntimeCredentialOperation,
   type RuntimeRemoteForgetScope,
   type RuntimeRemotePromptPreparation,
@@ -34,6 +37,7 @@ const DEFAULT_STABLE_UPTIME_MS = 30_000;
 const DEFAULT_SHUTDOWN_GRACE_MS = 3_000;
 const DEFAULT_FORCE_KILL_WAIT_MS = 1_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_DATABASE_RECOVERY_TIMEOUT_MS = 120_000;
 const DEFAULT_CREDENTIAL_REQUEST_TIMEOUT_MS = 10_000;
 const INITIAL_RESTART_DELAY_MS = 500;
 const MAX_RESTART_DELAY_MS = 8_000;
@@ -80,6 +84,14 @@ interface PendingRemoteRequest {
   reject: (error: Error) => void;
 }
 
+interface PendingDatabaseRecoveryRequest {
+  record: RuntimeProcessRecord;
+  operation: RuntimeDatabaseRecoveryOperation;
+  timer: Timer;
+  resolve: (summary: RuntimeDatabaseRecoverySummary | null) => void;
+  reject: (error: Error) => void;
+}
+
 type RemotePromptRequest = Extract<RemoteRequest, { type: "prompt.send" }>;
 
 interface PendingSecureFileRequest {
@@ -118,6 +130,7 @@ export interface RuntimeSupervisorSnapshot {
   restartAttempt: number;
   restartScheduled: boolean;
   lastError: string | null;
+  databaseRecovery?: RuntimeDatabaseStartupRecoveryReport | null;
 }
 
 export interface RuntimeSupervisorOptions {
@@ -169,6 +182,7 @@ export class RuntimeSupervisor {
   private websocketUrl: string | null = null;
   private restartAttempt = 0;
   private lastError: string | null = null;
+  private databaseRecoveryReport: RuntimeDatabaseStartupRecoveryReport | null = null;
   private desiredRunning = false;
   private restartTimer: Timer | null = null;
   private startupTimer: Timer | null = null;
@@ -177,6 +191,8 @@ export class RuntimeSupervisor {
   private shutdownDeadlineTimer: Timer | null = null;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
   private readonly pendingRemoteRequests = new Map<string, PendingRemoteRequest>();
+  private readonly pendingDatabaseRecoveryRequests =
+    new Map<string, PendingDatabaseRecoveryRequest>();
   private readonly remotePrompts:
     RuntimeRemotePromptCoordinator<RuntimeProcessRecord>;
   private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
@@ -252,6 +268,38 @@ export class RuntimeSupervisor {
       }, DEFAULT_REQUEST_TIMEOUT_MS);
       this.pendingProjectPaths.set(requestId, { record, timer, resolve, reject });
       this.post(record.child, { type: "runtime.resolve-project-path", requestId, request });
+    });
+  }
+
+  databaseRecovery(
+    operation: RuntimeDatabaseRecoveryOperation,
+    path: string,
+  ): Promise<RuntimeDatabaseRecoverySummary | null> {
+    const record = this.current;
+    if (this.phase !== "ready" || !record?.ready) {
+      return Promise.reject(new Error(this.lastError
+        ? `The local service is restarting. ${this.lastError}`
+        : "The local service is starting. Try again in a moment."));
+    }
+    const requestId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = this.setTimer(() => {
+        this.pendingDatabaseRecoveryRequests.delete(requestId);
+        reject(new Error("The database recovery request timed out."));
+      }, DEFAULT_DATABASE_RECOVERY_TIMEOUT_MS);
+      this.pendingDatabaseRecoveryRequests.set(requestId, {
+        record,
+        operation,
+        timer,
+        resolve,
+        reject,
+      });
+      this.post(record.child, {
+        type: "runtime.database-recovery",
+        requestId,
+        operation,
+        path,
+      });
     });
   }
 
@@ -347,6 +395,7 @@ export class RuntimeSupervisor {
       restartAttempt: this.restartAttempt,
       restartScheduled: this.restartTimer !== null,
       lastError: this.lastError,
+      databaseRecovery: this.databaseRecoveryReport,
     };
   }
 
@@ -370,7 +419,12 @@ export class RuntimeSupervisor {
     this.clearTimerValue("startupTimer");
     this.clearTimerValue("stableTimer");
     this.websocketUrl = null;
+    this.databaseRecoveryReport = null;
     this.rejectProjectPaths(this.current, "The local service is stopping.");
+    this.rejectDatabaseRecoveryRequests(
+      this.current,
+      "The local service is stopping.",
+    );
     this.rejectRemoteRequests(this.current, "The local service is stopping.");
     this.clearCredentialRequests(this.current);
     this.clearSecureFileRequests(this.current);
@@ -524,6 +578,19 @@ export class RuntimeSupervisor {
       pending.resolve(event.response);
       return;
     }
+    if (event.type === "runtime.database-recovery-result") {
+      const pending = this.pendingDatabaseRecoveryRequests.get(event.requestId);
+      if (
+        !pending
+        || pending.record !== record
+        || pending.operation !== event.operation
+      ) return;
+      this.pendingDatabaseRecoveryRequests.delete(event.requestId);
+      this.clearTimer(pending.timer);
+      if (event.ok) pending.resolve(event.summary);
+      else pending.reject(new Error(event.message));
+      return;
+    }
     if (event.type === "runtime.remote-prompt-result") {
       this.remotePrompts.handle(record, event);
       return;
@@ -560,6 +627,7 @@ export class RuntimeSupervisor {
     if (!this.desiredRunning || !record.acceptingReady || record.ready) return;
     record.ready = true;
     this.websocketUrl = event.websocketUrl;
+    this.databaseRecoveryReport = event.databaseRecovery ?? null;
     this.lastError = null;
     this.phase = "ready";
     this.clearTimerValue("startupTimer");
@@ -578,6 +646,10 @@ export class RuntimeSupervisor {
     this.clearTimerValue("startupTimer");
     this.clearTimerValue("stableTimer");
     this.rejectProjectPaths(record, "The local service stopped before the project path was resolved.");
+    this.rejectDatabaseRecoveryRequests(
+      record,
+      "The local service stopped before the database recovery request completed.",
+    );
     this.rejectRemoteRequests(
       record,
       "The local service stopped before the remote request completed.",
@@ -593,6 +665,7 @@ export class RuntimeSupervisor {
 
     this.current = null;
     this.websocketUrl = null;
+    this.databaseRecoveryReport = null;
     this.clearShutdownTimers();
     this.lastError = record.reportedFailure
       ?? this.lastError
@@ -686,6 +759,19 @@ export class RuntimeSupervisor {
       pending.reject(new Error(message));
     }
     this.remotePrompts.reject(record, message);
+  }
+
+  private rejectDatabaseRecoveryRequests(
+    record: RuntimeProcessRecord | null,
+    message: string,
+  ): void {
+    if (!record) return;
+    for (const [requestId, pending] of this.pendingDatabaseRecoveryRequests) {
+      if (pending.record !== record) continue;
+      this.pendingDatabaseRecoveryRequests.delete(requestId);
+      this.clearTimer(pending.timer);
+      pending.reject(new Error(message));
+    }
   }
 
   private handleCredentialRequest(

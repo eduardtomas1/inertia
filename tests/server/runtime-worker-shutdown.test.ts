@@ -8,6 +8,14 @@ function runtimeWithClose(
 ): RunningRuntime {
   return {
     websocketUrl: "ws://127.0.0.1:1/runtime/test",
+    databaseRecovery: {
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      outcome: "healthy",
+      trigger: "none",
+      restoredBackup: null,
+      preservedCorruptPrimary: false,
+      invalidBackupsSkipped: 0,
+    },
     resolveProjectPath: vi.fn(),
     remoteRequest: vi.fn(async () => {
       throw new Error("unused");
@@ -19,6 +27,12 @@ function runtimeWithClose(
       throw new Error("unused");
     }),
     forgetRemoteTranscripts: vi.fn(),
+    exportRecoveryData: vi.fn(async () => undefined),
+    importRecoveryData: vi.fn(async () => ({
+      projects: 0,
+      conversations: 0,
+      messages: 0,
+    })),
     close,
   };
 }

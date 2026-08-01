@@ -47,6 +47,10 @@ import type {
   WorkspaceRunRow,
 } from "./rows";
 import type { RuntimeStoreSnapshot } from "./types";
+import {
+  MESSAGE_PROJECTION_COLUMNS,
+  REASONING_PROJECTION_COLUMNS,
+} from "./stream-text-storage";
 
 type SnapshotPersistenceContext = Pick<PersistenceContext, "database">;
 
@@ -62,12 +66,20 @@ export class SnapshotRepository {
       turnGitArtifacts: (this.context.database.prepare(
         "SELECT * FROM turn_git_artifacts ORDER BY created_at ASC, id ASC",
       ).all() as TurnGitArtifactRow[]).map(turnGitArtifactFromRow),
-      messages: (this.context.database.prepare("SELECT * FROM messages ORDER BY created_at ASC, id ASC").all() as MessageRow[]).map(messageFromRow),
+      messages: (this.context.database.prepare(`
+        SELECT ${MESSAGE_PROJECTION_COLUMNS}
+        FROM messages
+        ORDER BY messages.created_at ASC, messages.id ASC
+      `).all() as MessageRow[]).map(messageFromRow),
       activities: (this.context.database.prepare("SELECT * FROM activities ORDER BY created_at ASC, id ASC").all() as ActivityRow[]).map(activityFromRow),
       subagents: (this.context.database.prepare(
         "SELECT * FROM subagent_traces ORDER BY created_at ASC, sequence ASC, id ASC",
       ).all() as SubagentTraceRow[]).map(subagentTraceFromRow),
-      reasonings: (this.context.database.prepare("SELECT * FROM agent_reasonings ORDER BY created_at ASC, id ASC").all() as AgentReasoningRow[]).map(reasoningFromRow),
+      reasonings: (this.context.database.prepare(`
+        SELECT ${REASONING_PROJECTION_COLUMNS}
+        FROM agent_reasonings
+        ORDER BY agent_reasonings.created_at ASC, agent_reasonings.id ASC
+      `).all() as AgentReasoningRow[]).map(reasoningFromRow),
       usage: (this.context.database.prepare("SELECT * FROM thread_usage ORDER BY updated_at ASC").all() as ThreadUsageRow[]).map(usageFromRow),
       plans: (this.context.database.prepare(`
         SELECT conversation_id, run_id, turn_id, explanation, steps_json
@@ -167,9 +179,10 @@ export class SnapshotRepository {
         ORDER BY created_at ASC, id ASC
       `).all(conversationId) as TurnGitArtifactRow[]).map(turnGitArtifactFromRow),
       messages: (this.context.database.prepare(`
-        SELECT * FROM messages
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, id ASC
+        SELECT ${MESSAGE_PROJECTION_COLUMNS}
+        FROM messages
+        WHERE messages.conversation_id = ?
+        ORDER BY messages.created_at ASC, messages.id ASC
       `).all(conversationId) as MessageRow[]).map(messageFromRow),
       activities: (this.context.database.prepare(`
         SELECT * FROM activities
@@ -182,9 +195,10 @@ export class SnapshotRepository {
         ORDER BY created_at ASC, sequence ASC, id ASC
       `).all(conversationId) as SubagentTraceRow[]).map(subagentTraceFromRow),
       reasonings: (this.context.database.prepare(`
-        SELECT * FROM agent_reasonings
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, id ASC
+        SELECT ${REASONING_PROJECTION_COLUMNS}
+        FROM agent_reasonings
+        WHERE agent_reasonings.conversation_id = ?
+        ORDER BY agent_reasonings.created_at ASC, agent_reasonings.id ASC
       `).all(conversationId) as AgentReasoningRow[]).map(reasoningFromRow),
       usage: (this.context.database.prepare(`
         SELECT * FROM thread_usage

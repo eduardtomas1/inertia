@@ -25,6 +25,20 @@ export interface RuntimeConnection {
   websocketUrl: string;
 }
 
+export interface DatabaseRecoveryImportSummary {
+  projects: number;
+  conversations: number;
+  messages: number;
+}
+
+export type DatabaseRecoveryExportResult =
+  | { status: "cancelled" }
+  | { status: "exported" };
+
+export type DatabaseRecoveryImportResult =
+  | { status: "cancelled" }
+  | { status: "imported"; summary: DatabaseRecoveryImportSummary };
+
 export type AppUpdateState = "available" | "current" | "unavailable";
 export type AppUpdateFreshness = "fresh" | "cached" | "unavailable";
 
@@ -283,6 +297,10 @@ export interface DesktopBridge {
   onRuntimeReady: (listener: () => void) => () => void;
   selectDirectory: () => Promise<string | null>;
   selectCodexExecutable: () => Promise<string | null>;
+  /** Writes a bounded transcript-only recovery export chosen by the user. */
+  exportRecoveryData: () => Promise<DatabaseRecoveryExportResult>;
+  /** Imports a strictly validated recovery export under fresh local identities. */
+  importRecoveryData: () => Promise<DatabaseRecoveryImportResult>;
   /** Reveals Inertia's fixed local diagnostics directory; no caller-supplied path is accepted. */
   revealRuntimeLogs: () => Promise<string>;
   /** Copies a fixed, allowlisted lifecycle summary. Prompts, source, paths, and credentials are excluded. */

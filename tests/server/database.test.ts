@@ -366,7 +366,8 @@ describe("RuntimeStore conversation lifecycle", () => {
     });
     const reasoning = store.createReasoning(conversation.id, turn.runId, turn.id);
     store.appendReasoningContent(reasoning.id, "First ");
-    expect(store.appendReasoningContent(reasoning.id, "second."))
+    store.appendReasoningContent(reasoning.id, "second.");
+    expect(store.conversationDetail(conversation.id)?.reasonings[0])
       .toMatchObject({ content: "First second.", status: "running" });
     store.upsertAgentPlan({
       conversationId: conversation.id,

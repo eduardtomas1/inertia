@@ -43,6 +43,21 @@ import {
   type NativeAgentGoalMergeResult,
 } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
+import {
+  DatabaseBackupManager,
+  type DatabaseBackupResult,
+  type DatabaseRecoveryReport,
+  recoverDatabaseOnStartup,
+} from "./persistence/database-recovery";
+import {
+  DATABASE_RECOVERY_EXPORT_FORMAT,
+  DATABASE_RECOVERY_EXPORT_MAX_BYTES,
+  DATABASE_RECOVERY_EXPORT_VERSION,
+  type DatabaseRecoveryExport,
+  type DatabaseRecoveryImportResult,
+  parseDatabaseRecoveryExport,
+  serializeDatabaseRecoveryExport,
+} from "./persistence/database-export";
 import { RecordNotFoundError } from "./persistence/errors";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
@@ -104,6 +119,8 @@ export type {
 
 export class RuntimeStore {
   private readonly database: Database.Database;
+  private readonly backupManager: DatabaseBackupManager;
+  private readonly recoveryReport: DatabaseRecoveryReport;
   private readonly backendProfileRepository: BackendProfileRepository;
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
   private readonly conversationRepository: ConversationRepository;
@@ -125,7 +142,17 @@ export class RuntimeStore {
     _defaultWorkspacePath: string,
     options: { recoverInterruptedRuns?: boolean } = {},
   ) {
+    this.recoveryReport = recoverDatabaseOnStartup(databasePath);
     this.database = new Database(databasePath);
+    this.backupManager = new DatabaseBackupManager(
+      this.database,
+      databasePath,
+      {
+        onError: () => {
+          console.error("The scheduled database backup failed.");
+        },
+      },
+    );
     this.backendProfileRepository = new BackendProfileRepository({
       database: this.database,
       requireProject: (projectId) => this.requireProject(projectId),
@@ -226,7 +253,150 @@ export class RuntimeStore {
   }
 
   close(): void {
+    this.backupManager.stop();
     if (this.database.open) this.database.close();
+  }
+
+  startBackups(): void {
+    this.backupManager.start();
+  }
+
+  createBackup(): Promise<DatabaseBackupResult> {
+    return this.backupManager.createBackup();
+  }
+
+  databaseRecoveryReport(): DatabaseRecoveryReport {
+    return this.recoveryReport;
+  }
+
+  exportRecoveryData(): string {
+    const shell = this.shellSnapshot();
+    let estimatedBytes = 1_024;
+    const account = (value: unknown): void => {
+      estimatedBytes += Buffer.byteLength(JSON.stringify(value), "utf8") + 64;
+      if (estimatedBytes > DATABASE_RECOVERY_EXPORT_MAX_BYTES) {
+        throw new Error("The recovery export exceeds its safe size limit.");
+      }
+    };
+    const value: DatabaseRecoveryExport = {
+      format: DATABASE_RECOVERY_EXPORT_FORMAT,
+      version: DATABASE_RECOVERY_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      projects: shell.projects.map((project) => {
+        account({ name: project.name, path: project.path });
+        return {
+          name: project.name,
+          path: project.path,
+          conversations: shell.conversations
+            .filter((conversation) => conversation.projectId === project.id)
+            .map((conversation) => {
+              account({
+                title: conversation.title,
+                providerId: conversation.providerId,
+                model: conversation.model,
+                reasoningEffort: conversation.reasoningEffort,
+                interactionMode: conversation.interactionMode,
+                accessMode: conversation.accessMode,
+              });
+              const detail = this.conversationDetail(conversation.id);
+              if (!detail) {
+                throw new Error(
+                  "A conversation disappeared during recovery export.",
+                );
+              }
+              return {
+                title: detail.conversation.title,
+                providerId: detail.conversation.providerId,
+                model: detail.conversation.model,
+                reasoningEffort: detail.conversation.reasoningEffort,
+                interactionMode: detail.conversation.interactionMode,
+                accessMode: detail.conversation.accessMode,
+                messages: detail.messages.map((message) => {
+                  const exportedMessage = {
+                    role: message.role,
+                    content: message.content,
+                    createdAt: message.createdAt,
+                  };
+                  account(exportedMessage);
+                  return exportedMessage;
+                }),
+              };
+            }),
+        };
+      }),
+    };
+    return serializeDatabaseRecoveryExport(value);
+  }
+
+  importRecoveryData(serialized: string): DatabaseRecoveryImportResult {
+    const recovery = parseDatabaseRecoveryExport(serialized);
+    return this.database.transaction(() => {
+      const active = this.database.prepare(`
+        SELECT active_project_id, active_conversation_id
+        FROM app_state WHERE id = 1
+      `).get() as {
+        active_project_id: string | null;
+        active_conversation_id: string | null;
+      };
+      let conversationCount = 0;
+      let messageCount = 0;
+      for (const importedProject of recovery.projects) {
+        const project = this.createProject(
+          importedProject.name,
+          importedProject.path,
+        );
+        for (const importedConversation of importedProject.conversations) {
+          const conversation = this.createConversation(
+            project.id,
+            importedConversation.title,
+            {
+              providerId: importedConversation.providerId,
+              model: importedConversation.model || "provider-default",
+              reasoningEffort: importedConversation.reasoningEffort,
+              interactionMode: importedConversation.interactionMode,
+              accessMode: importedConversation.accessMode,
+              activate: false,
+            },
+          );
+          conversationCount += 1;
+          for (const importedMessage of importedConversation.messages) {
+            this.createMessage(
+              conversation.id,
+              importedMessage.content,
+              importedMessage.role,
+              [],
+              null,
+              importedMessage.createdAt,
+              { activateConversation: false },
+            );
+            messageCount += 1;
+          }
+        }
+      }
+      this.database.prepare(`
+        UPDATE app_state
+        SET active_project_id = ?, active_conversation_id = ?
+        WHERE id = 1
+      `).run(active.active_project_id, active.active_conversation_id);
+      return {
+        projects: recovery.projects.length,
+        conversations: conversationCount,
+        messages: messageCount,
+      };
+    })();
+  }
+
+  async backupAndClose(): Promise<void> {
+    this.backupManager.stop();
+    let backupError: unknown;
+    try {
+      await this.backupManager.createBackup();
+    } catch (error) {
+      backupError = error;
+    } finally {
+      if (this.database.open) this.database.close();
+    }
+    if (backupError !== undefined) throw backupError;
   }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {
@@ -799,8 +969,8 @@ export class RuntimeStore {
     return this.executionLedgerRepository.updateReasoning(id, update);
   }
 
-  appendReasoningContent(id: string, delta: string): AgentReasoning {
-    return this.executionLedgerRepository.appendReasoningContent(id, delta);
+  appendReasoningContent(id: string, delta: string): void {
+    this.executionLedgerRepository.appendReasoningContent(id, delta);
   }
 
   upsertUsage(

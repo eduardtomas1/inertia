@@ -107,6 +107,43 @@ parentPort.on("message", (messageEvent) => {
     );
     return;
   }
+  if (command.type === "runtime.database-recovery") {
+    if (!runtime || stopping) {
+      post({
+        type: "runtime.database-recovery-result",
+        requestId: command.requestId,
+        operation: command.operation,
+        ok: false,
+        message: "The local runtime is not ready.",
+      });
+      return;
+    }
+    const operation = command.operation === "export"
+      ? runtime.exportRecoveryData(command.path).then(() => null)
+      : runtime.importRecoveryData(command.path);
+    void operation.then(
+      (summary) => post({
+        type: "runtime.database-recovery-result",
+        requestId: command.requestId,
+        operation: command.operation,
+        ok: true,
+        summary,
+      }),
+      (error: unknown) => {
+        const detail = error instanceof Error
+          ? error.message.trim().replace(/\s+/gu, " ").slice(0, 1_000)
+          : "";
+        post({
+          type: "runtime.database-recovery-result",
+          requestId: command.requestId,
+          operation: command.operation,
+          ok: false,
+          message: detail || "The database recovery operation failed.",
+        });
+      },
+    );
+    return;
+  }
   if (command.type === "runtime.remote-forget") {
     runtime?.forgetRemoteTranscripts(command.scope);
     return;
@@ -257,7 +294,11 @@ parentPort.on("message", (messageEvent) => {
       return;
     }
     runtime = startedRuntime;
-    post({ type: "runtime.ready", websocketUrl: startedRuntime.websocketUrl });
+    post({
+      type: "runtime.ready",
+      websocketUrl: startedRuntime.websocketUrl,
+      databaseRecovery: startedRuntime.databaseRecovery,
+    });
   }).catch(async (error: unknown) => {
     starting = false;
     const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 800) : "";

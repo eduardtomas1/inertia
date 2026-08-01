@@ -144,7 +144,6 @@ function renderTimeline(turn: AgentTurn, showTimestamps = false): string {
     projectRoot: "/workspace",
     projectId: "project-metadata",
     conversationId,
-    providers: [],
     streamingText: "",
     streamingReasoning: "",
     approvals: [],

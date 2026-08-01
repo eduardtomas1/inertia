@@ -1,4 +1,9 @@
-import { useId, type JSX, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  memo,
+  useId,
+  type JSX,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { Check, Star } from "lucide-react";
 
 import type { ModelSearchRoute } from "../utils/modelSearch";
@@ -50,11 +55,12 @@ export interface ModelChooserRowState {
 
 export interface ModelChooserRowProps {
   row: ModelChooserRowData;
-  /** Stable ID for aria-activedescendant integration; generated when omitted. */
+  /** Stable ID for searchbox aria-activedescendant; generated when omitted. */
   optionId?: string;
-  /** Roving option tab index supplied by the future chooser. */
+  /** Result-action tab index; search owns ordinary chooser navigation. */
   tabIndex?: 0 | -1;
   onSelect: (row: ModelChooserRowData) => void;
+  onFavoriteToggle?: (row: ModelChooserRowData) => void;
 }
 
 export interface ModelChooserFavoriteButtonProps {
@@ -156,11 +162,12 @@ export function activateModelChooserRow(
   return true;
 }
 
-export function ModelChooserRow({
+export const ModelChooserRow = memo(function ModelChooserRow({
   row,
   optionId,
   tabIndex = -1,
   onSelect,
+  onFavoriteToggle,
 }: ModelChooserRowProps): JSX.Element {
   const reactId = useId().replaceAll(":", "");
   const reasonId = `${reactId}-model-disabled-reason`;
@@ -178,13 +185,12 @@ export function ModelChooserRow({
   return (
     <div
       className={`model-chooser-row${row.active ? " is-active" : ""}${row.selectable ? "" : " is-disabled"}`}
-      role="presentation"
     >
-      <div
+      <button
+        type="button"
         id={optionId ?? `${reactId}-model-option`}
         className="model-chooser-row-option"
-        role="option"
-        aria-selected={row.active}
+        aria-current={row.active ? "true" : undefined}
         aria-disabled={!row.selectable}
         aria-describedby={describedBy}
         aria-keyshortcuts={row.shortcut?.ariaKeyShortcuts}
@@ -193,11 +199,6 @@ export function ModelChooserRow({
         tabIndex={tabIndex}
         title={row.disabledReason ?? undefined}
         onClick={select}
-        onKeyDown={(event) => {
-          if (!isModelChooserSelectionKey(event.nativeEvent)) return;
-          event.preventDefault();
-          select();
-        }}
       >
         <span className="model-chooser-row-main">
           <span className="model-chooser-row-primary">
@@ -236,12 +237,18 @@ export function ModelChooserRow({
             <span className="visually-hidden">Active model</span>
           </span>
         )}
-      </div>
+      </button>
+      {onFavoriteToggle && (
+        <ModelChooserFavoriteButton
+          row={row}
+          onFavoriteToggle={onFavoriteToggle}
+        />
+      )}
     </div>
   );
-}
+});
 
-export function ModelChooserFavoriteButton({
+export const ModelChooserFavoriteButton = memo(function ModelChooserFavoriteButton({
   row,
   onFavoriteToggle,
 }: ModelChooserFavoriteButtonProps): JSX.Element {
@@ -258,4 +265,4 @@ export function ModelChooserFavoriteButton({
       <Star size={13} fill={row.favorite ? "currentColor" : "none"} aria-hidden="true" />
     </button>
   );
-}
+});

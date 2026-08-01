@@ -1,8 +1,11 @@
 import { Search, Star } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  memo,
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,9 +15,9 @@ import {
 
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
-  ModelChooserFavoriteButton,
   modelChooserRowFromRoute,
   ModelChooserRow,
+  type ModelChooserRowData,
 } from "./ModelChooserRow";
 import { ModelSourceRail } from "./ModelSourceRail";
 import { SelectedModelChip } from "./SelectedModelChip";
@@ -56,6 +59,14 @@ export interface ModelChooserProps {
   onSelect: (route: ComposerModelRoute) => void;
   onOpenChange?: (open: boolean) => void;
 }
+
+export const MODEL_CHOOSER_VIRTUALIZATION_MIN_RESULTS = 100;
+const MODEL_CHOOSER_INITIAL_VIRTUAL_RECT = {
+  width: 640,
+  height: 400,
+};
+const MODEL_CHOOSER_ESTIMATED_ROW_SIZE = 54;
+const MODEL_CHOOSER_FALLBACK_RENDER_COUNT = 16;
 
 function availableIndices(routes: readonly ComposerModelRoute[]): number[] {
   return routes.flatMap((route, index) => route.selectable ? [index] : []);
@@ -150,6 +161,68 @@ export function preferredModelChooserSource(
     ?? { kind: "all" };
 }
 
+interface ModelChooserResultProps {
+  route: ComposerModelRoute;
+  row: ModelChooserRowData;
+  index: number;
+  resultCount: number;
+  optionId: string;
+  navigated: boolean;
+  onNavigate: (index: number) => void;
+  onSelect: (route: ComposerModelRoute) => void;
+  onFavoriteToggle: (route: ComposerModelRoute) => void;
+  virtualStart?: number;
+  onMeasure?: (element: Element | null) => void;
+}
+
+const ModelChooserResult = memo(function ModelChooserResult({
+  route,
+  row,
+  index,
+  resultCount,
+  optionId,
+  navigated,
+  onNavigate,
+  onSelect,
+  onFavoriteToggle,
+  virtualStart,
+  onMeasure,
+}: ModelChooserResultProps): JSX.Element {
+  const selectRow = useCallback(() => onSelect(route), [onSelect, route]);
+  const toggleFavorite = useCallback(
+    () => onFavoriteToggle(route),
+    [onFavoriteToggle, route],
+  );
+  return (
+    <li
+      className={navigated
+        ? "model-chooser-result is-navigated"
+        : "model-chooser-result"}
+      data-index={virtualStart === undefined ? undefined : index}
+      ref={virtualStart === undefined ? undefined : onMeasure}
+      style={virtualStart === undefined ? undefined : {
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        transform: `translateY(${virtualStart}px)`,
+      }}
+      aria-posinset={index + 1}
+      aria-setsize={resultCount}
+      onPointerMove={() => {
+        if (route.selectable) onNavigate(index);
+      }}
+    >
+      <ModelChooserRow
+        row={row}
+        optionId={optionId}
+        onSelect={selectRow}
+        onFavoriteToggle={toggleFavorite}
+      />
+    </li>
+  );
+});
+
 export function ModelChooser({
   routes,
   selectedRoute,
@@ -165,6 +238,7 @@ export function ModelChooser({
   const anchorRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const resultsScrollRef = useRef<HTMLDivElement>(null);
   const restoreFocusWhenEnabledRef = useRef(false);
   const [open, setOpen] = useState(false);
   useNativePreviewSuspension(open);
@@ -177,7 +251,7 @@ export function ModelChooser({
   );
   const [activeIndex, setActiveIndex] = useState(-1);
   const favoriteKeys = useMemo(
-    () => favorites.map(modelFavoriteKey),
+    () => new Set(favorites.map(modelFavoriteKey)),
     [favorites],
   );
   const resolvedFavorites = useMemo(
@@ -217,6 +291,48 @@ export function ModelChooser({
     () => searchModelRoutes(sourceRoutes, query),
     [query, sourceRoutes],
   );
+  const virtualized = results.items.length
+    >= MODEL_CHOOSER_VIRTUALIZATION_MIN_RESULTS;
+  const resultVirtualizer = useVirtualizer({
+    count: virtualized ? results.items.length : 0,
+    getScrollElement: () => resultsScrollRef.current,
+    estimateSize: () => MODEL_CHOOSER_ESTIMATED_ROW_SIZE,
+    initialRect: MODEL_CHOOSER_INITIAL_VIRTUAL_RECT,
+    overscan: 6,
+    getItemKey: (index) => results.items[index]?.key ?? index,
+  });
+  const virtualItems = virtualized
+    ? resultVirtualizer.getVirtualItems()
+    : [];
+  const renderedResultItems: readonly {
+    index: number;
+    virtualStart?: number;
+  }[] = !virtualized
+    ? results.items.map((_, index) => ({ index }))
+    : virtualItems.length > 0
+      ? virtualItems.map(({ index, start }) => ({ index, virtualStart: start }))
+      : Array.from(
+          {
+            length: Math.min(
+              MODEL_CHOOSER_FALLBACK_RENDER_COUNT,
+              results.items.length,
+            ),
+          },
+          (_, offset) => {
+            const startIndex = Math.min(
+              Math.max(activeIndex - 6, 0),
+              Math.max(
+                results.items.length - MODEL_CHOOSER_FALLBACK_RENDER_COUNT,
+                0,
+              ),
+            );
+            const index = startIndex + offset;
+            return {
+              index,
+              virtualStart: index * MODEL_CHOOSER_ESTIMATED_ROW_SIZE,
+            };
+          },
+        );
   const platform = typeof navigator === "undefined"
     ? "unknown"
     : modelShortcutPlatform(navigator.platform);
@@ -308,19 +424,25 @@ export function ModelChooser({
     close(false);
   }, [close, closeSignal, disabled, open]);
 
-  const select = (route: ComposerModelRoute): void => {
+  const select = useCallback((route: ComposerModelRoute): void => {
     if (!route.selectable) return;
     onSelect(route);
     close(true);
-  };
+  }, [close, onSelect]);
 
-  const toggleFavorite = (route: ComposerModelRoute): void => {
-    const next = toggleModelFavorite(favorites, route);
-    setFavorites(next);
-    if (typeof window !== "undefined") {
-      writeModelFavorites(window.localStorage, next);
-    }
-  };
+  const toggleFavorite = useCallback((route: ComposerModelRoute): void => {
+    setFavorites((current) => {
+      const next = toggleModelFavorite(current, route);
+      if (typeof window !== "undefined") {
+        writeModelFavorites(window.localStorage, next);
+      }
+      return next;
+    });
+  }, []);
+
+  const navigateTo = useCallback((index: number): void => {
+    setActiveIndex(index);
+  }, []);
 
   const handleNavigation = (
     event: ReactKeyboardEvent<HTMLDivElement>,
@@ -335,6 +457,7 @@ export function ModelChooser({
     const target = event.target as HTMLElement;
     if (
       target.closest(".model-source-rail")
+      || target.closest(".model-chooser-row-option")
       || target.closest(".model-chooser-row-favorite")
     ) {
       return;
@@ -359,16 +482,23 @@ export function ModelChooser({
   };
 
   const activeRoute = results.items[activeIndex] ?? null;
-  const activeDescendant = activeRoute
+  const activeResultMounted = !virtualized
+    || renderedResultItems.some(({ index }) => index === activeIndex);
+  const activeDescendant = activeRoute && activeResultMounted
     ? `${reactId}-model-option-${activeIndex}`
     : undefined;
-  const chooserRows = results.items.map((route) =>
+  const chooserRows = useMemo(() => results.items.map((route) =>
     modelChooserRowFromRoute(route, {
       active: activeKeyForRoute(route) === selectedKey,
-      favorite: favoriteKeys.includes(favoriteKeyForRoute(route)),
+      favorite: favoriteKeys.has(favoriteKeyForRoute(route)),
       shortcut: shortcutsByRoute.get(route.key) ?? null,
       compatibility: route.rowCompatibility,
-    }));
+    })), [favoriteKeys, results.items, selectedKey, shortcutsByRoute]);
+
+  useLayoutEffect(() => {
+    if (!open || !virtualized || activeIndex < 0) return;
+    resultVirtualizer.scrollToIndex(activeIndex, { align: "auto" });
+  }, [activeIndex, open, resultVirtualizer, virtualized]);
 
   return (
     <div
@@ -431,59 +561,40 @@ export function ModelChooser({
             />
             <div className="model-chooser-results-wrap">
               <div
+                ref={resultsScrollRef}
                 className="model-chooser-results"
               >
-                <div
+                <ul
                   id={resultsId}
-                  className="model-chooser-listbox"
-                  role="listbox"
+                  className="model-chooser-list"
                   aria-label="Model results"
+                  style={virtualized ? {
+                    position: "relative",
+                    height: `${resultVirtualizer.getTotalSize()}px`,
+                  } : undefined}
                 >
-                  {results.items.map((route, index) => (
-                    <div
-                      key={route.key}
-                      className={activeIndex === index
-                        ? "model-chooser-result is-navigated"
-                        : "model-chooser-result"}
-                      role="presentation"
-                      style={{ gridRow: index + 1 }}
-                      onPointerMove={() => {
-                        if (route.selectable) setActiveIndex(index);
-                      }}
-                    >
-                      <ModelChooserRow
-                        row={chooserRows[index]!}
-                        optionId={`${reactId}-model-option-${index}`}
-                        onSelect={() => select(route)}
+                  {renderedResultItems.map((item) => {
+                    const route = results.items[item.index]!;
+                    return (
+                      <ModelChooserResult
+                        key={route.key}
+                        route={route}
+                        row={chooserRows[item.index]!}
+                        index={item.index}
+                        resultCount={results.items.length}
+                        optionId={`${reactId}-model-option-${item.index}`}
+                        navigated={activeIndex === item.index}
+                        onNavigate={navigateTo}
+                        onSelect={select}
+                        onFavoriteToggle={toggleFavorite}
+                        {...(item.virtualStart === undefined ? {} : {
+                          virtualStart: item.virtualStart,
+                          onMeasure: resultVirtualizer.measureElement,
+                        })}
                       />
-                    </div>
-                  ))}
-                </div>
-                {chooserRows.length > 0 && (
-                  <div
-                    className="model-chooser-favorite-actions"
-                    role="group"
-                    aria-label="Model favorite actions"
-                  >
-                    {chooserRows.map((row, index) => (
-                      <div
-                        key={row.key}
-                        className="model-chooser-favorite-slot"
-                        role="presentation"
-                        style={{ gridRow: index + 1 }}
-                        onPointerMove={() => {
-                          if (row.selectable) setActiveIndex(index);
-                        }}
-                      >
-                        <ModelChooserFavoriteButton
-                          row={row}
-                          onFavoriteToggle={() =>
-                            toggleFavorite(results.items[index]!)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
+                    );
+                  })}
+                </ul>
                 {results.emptyState && (
                   <div className="model-chooser-empty" role="status">
                     <Search size={17} aria-hidden="true" />

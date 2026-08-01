@@ -123,7 +123,6 @@ describe("long user request expansion", () => {
             projectRoot="/workspace"
             projectId="project-1"
             conversationId={conversationId}
-            providers={[]}
             streamingText=""
             streamingReasoning=""
             approvals={[]}

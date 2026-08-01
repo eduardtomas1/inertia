@@ -9,7 +9,6 @@ import type {
   AgentTurn,
   ChatMessage,
   CheckpointSummary,
-  ProviderInfo,
   SubagentTrace,
 } from "@shared/contracts";
 import type { TurnGitArtifactSummary } from "../../utils/responseTimeline";
@@ -26,7 +25,6 @@ export interface ResponseTimelineProps {
   projectRoot: string;
   projectId: string;
   conversationId: string;
-  providers: ProviderInfo[];
   streamingText: string;
   streamingReasoning: string;
   approvals: AgentApprovalRequest[];

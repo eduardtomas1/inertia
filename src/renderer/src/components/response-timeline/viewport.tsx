@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -40,6 +41,24 @@ import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
 
 type TimelineJumpTarget = "turn" | "request" | "final" | "artifact";
+const TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS = 96;
+
+export function responseTimelineArticleLabel(
+  item: ResponseTimelineItem,
+): string {
+  if (item.kind === "compatibility") {
+    return "Recovered legacy and orphaned history";
+  }
+  const request = item.turn.userMessage.content.trim().replace(/\s+/gu, " ");
+  const requestLabel = request
+    ? request.length > TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS
+      ? `${request.slice(0, TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS - 1)}…`
+      : request
+    : item.turn.userMessage.attachments.length > 0
+      ? "Request with attachments"
+      : "Request";
+  return `Turn ${item.turn.index}: ${requestLabel}`;
+}
 
 function findTurnElement(
   root: HTMLElement | null | undefined,
@@ -302,7 +321,7 @@ export function TimelineMinimap({
   );
 }
 
-export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Element {
+function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const previousTimeline = useRef<ResponseTimelineItem[]>([]);
   const previousBuild = useRef<{
     input: BuildResponseTimelineInput;
@@ -888,15 +907,18 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
               const item = timeline[virtualItem.index];
               if (!item) return null;
               return (
-                <div
+                <article
                   className="response-virtual-item"
                   key={virtualItem.key}
                   data-index={virtualItem.index}
+                  aria-posinset={virtualItem.index + 1}
+                  aria-setsize={timeline.length}
+                  aria-label={responseTimelineArticleLabel(item)}
                   ref={virtualizer.measureElement}
                   style={{ transform: `translateY(${virtualItem.start}px)` }}
                 >
                   {renderItem(item)}
-                </div>
+                </article>
               );
             })}
           </div>
@@ -905,3 +927,6 @@ export function ResponseTimeline(props: ResponseTimelineProps): React.JSX.Elemen
     </>
   );
 }
+
+export const ResponseTimeline = memo(ResponseTimelineView);
+ResponseTimeline.displayName = "ResponseTimeline";

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  responseTimelineArticleLabel,
   sameTurnTimelineProps,
   type ResponseTimelineProps,
 } from "../../src/renderer/src/components/ResponseTimeline";
@@ -254,6 +255,21 @@ function responseTurns(items: ResponseTimelineItem[]): ResponseTurn[] {
 }
 
 describe("quiet-ledger timeline virtualization estimates", () => {
+  it("gives every virtualized feed article a stable request-derived name", () => {
+    expect(responseTimelineArticleLabel(buildItem({
+      id: "named",
+      request: "  Preserve   focus\nacross the virtual window.  ",
+    }))).toBe("Turn 1: Preserve focus across the virtual window.");
+    expect(responseTimelineArticleLabel(buildItem({
+      id: "bounded-name",
+      request: "x".repeat(120),
+    }))).toBe(`Turn 1: ${"x".repeat(95)}…`);
+    expect(responseTimelineArticleLabel(buildItem({
+      id: "empty-name",
+      request: "  ",
+    }))).toBe("Turn 1: Request");
+  });
+
   it("virtualizes short histories when mounted content weight exceeds ordinary rows", () => {
     const turns = Array.from({ length: 36 }, (_, index) =>
       agentTurn(`weighted-${index}`));
@@ -742,7 +758,6 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       answer: "",
     })])[0]!;
     const baseProps = {
-      providers: [],
       streamingText: "first",
       streamingReasoning: "reasoning",
       showTimestamps: false,
@@ -763,10 +778,6 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       subagents,
     });
 
-    expect(sameTurnTimelineProps(
-      memoInput(settled, baseProps),
-      memoInput(settled, { ...baseProps, providers: [...baseProps.providers] }),
-    )).toBe(true);
     expect(sameTurnTimelineProps(
       memoInput(settled, baseProps),
       memoInput(settled, { ...baseProps, streamingText: "second" }),

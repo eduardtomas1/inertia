@@ -181,7 +181,6 @@ function renderTimeline(input: {
     projectRoot: "/workspace",
     projectId: "project-accessibility",
     conversationId,
-    providers: [],
     streamingText: input.streamingText ?? "",
     streamingReasoning: "",
     approvals: [],

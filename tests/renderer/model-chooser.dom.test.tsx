@@ -16,6 +16,29 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 
+function catalogRoute(index: number): ComposerModelRoute {
+  const base = currentRoute();
+  const modelId = `team-model-${String(index).padStart(4, "0")}`;
+  const selection = {
+    ...base.selection,
+    modelId,
+    alias: `Team Model ${index}`,
+  };
+  return {
+    ...base,
+    key: `route-${index}`,
+    displayName: `Team Model ${index}`,
+    modelId,
+    alias: selection.alias,
+    selection,
+    continuationIdentity: continuationIdentityForSelection(
+      selection,
+      `opaque-team-route-${index}`,
+      true,
+    ),
+  };
+}
+
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(
   window,
   "localStorage",
@@ -125,8 +148,10 @@ describe("model chooser active route", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
 
-    expect(screen.getByRole("option", { name: /Team Alpha/u }))
-      .toHaveAttribute("aria-selected", "false");
+    const result = screen.getByRole("list", { name: "Model results" })
+      .querySelector(".model-chooser-row-option");
+    expect(result).not.toBeNull();
+    expect(result).not.toHaveAttribute("aria-current");
     expect(screen.queryByText("Active model")).not.toBeInTheDocument();
   });
 
@@ -152,7 +177,10 @@ describe("model chooser active route", () => {
     render(<PendingSelectionChooser />);
     const trigger = screen.getByRole("button", { name: /Choose model/u });
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole("option", { name: /Team Alpha/u }));
+    const result = screen.getByRole("list", { name: "Model results" })
+      .querySelector(".model-chooser-row-option");
+    if (!result) throw new Error("Expected a model result action.");
+    fireEvent.click(result);
 
     expect(screen.queryByRole("dialog", { name: "Choose model" }))
       .not.toBeInTheDocument();
@@ -163,5 +191,71 @@ describe("model chooser active route", () => {
 
     await waitFor(() => expect(trigger).toBeEnabled());
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("windows a 750-route catalog within render and keyboard latency budgets", async () => {
+    const routes = Array.from({ length: 750 }, (_, index) =>
+      catalogRoute(index));
+    render(
+      <ModelChooser
+        routes={routes}
+        selectedRoute={routes[0]!}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const startedAt = performance.now();
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    const elapsed = performance.now() - startedAt;
+
+    const resultList = screen.getByRole("list", { name: "Model results" });
+    await waitFor(() => {
+      expect(resultList.querySelectorAll(":scope > li").length)
+        .toBeGreaterThan(0);
+    });
+    const results = resultList.querySelectorAll(":scope > li");
+    expect(results.length).toBeLessThanOrEqual(24);
+    expect(results.length).toBeLessThan(750);
+    expect(document.querySelector(".model-chooser-favorite-actions"))
+      .toBeNull();
+    const first = results[0]!;
+    expect(first).toHaveAttribute("aria-posinset", "1");
+    expect(first).toHaveAttribute("aria-setsize", "750");
+    expect(first.querySelectorAll(".model-chooser-row-option"))
+      .toHaveLength(1);
+    expect(first.querySelectorAll("button")).toHaveLength(2);
+    expect(first.querySelectorAll(".model-chooser-row-favorite"))
+      .toHaveLength(1);
+    expect(elapsed).toBeLessThan(750);
+
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    const endStartedAt = performance.now();
+    fireEvent.keyDown(search, { key: "End" });
+    await waitFor(() => {
+      const activeId = search.getAttribute("aria-activedescendant");
+      expect(activeId).not.toBeNull();
+      expect(document.getElementById(activeId!)).toHaveTextContent(
+        "Team Model 749",
+      );
+    });
+    expect(performance.now() - endStartedAt).toBeLessThan(500);
+    expect(resultList.querySelectorAll(":scope > li").length)
+      .toBeLessThanOrEqual(24);
+
+    fireEvent.keyDown(search, { key: "Home" });
+    await waitFor(() => {
+      const activeId = search.getAttribute("aria-activedescendant");
+      expect(document.getElementById(activeId!)).toHaveTextContent(
+        "Team Model 0",
+      );
+    });
+
+    const favorite = resultList.querySelector<HTMLButtonElement>(
+      ".model-chooser-row-favorite",
+    )!;
+    favorite.focus();
+    fireEvent.click(favorite);
+    expect(favorite).toHaveFocus();
+    expect(favorite).toHaveAttribute("aria-pressed", "true");
   });
 });

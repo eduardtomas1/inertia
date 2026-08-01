@@ -72,8 +72,13 @@ describe("accessibility focus policy", () => {
     expect(modelChooserSource).toMatch(
       /<input[\s\S]*?aria-controls=\{resultsId\}[\s\S]*?aria-activedescendant=\{activeDescendant\}/u,
     );
-    expect(modelChooserSource).toContain('className="model-chooser-listbox"');
+    expect(modelChooserSource).toContain('className="model-chooser-list"');
+    expect(modelChooserSource).toContain("<ul");
+    expect(modelChooserSource).not.toContain('role="listbox"');
     expect(modelChooserSource).toContain(
+      "onFavoriteToggle={toggleFavorite}",
+    );
+    expect(modelChooserSource).not.toContain(
       'aria-label="Model favorite actions"',
     );
   });

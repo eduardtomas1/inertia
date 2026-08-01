@@ -10,6 +10,7 @@ import {
   type Project,
   type ProviderId,
   type ProviderMaintenanceProviderId,
+  type SubagentTrace,
   type WorkspaceRun,
 } from "@shared/contracts";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
@@ -57,6 +58,8 @@ import {
 } from "./utils/splitConversation";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
+import { requestComposerPrefill } from "./utils/composerPrefill";
+import { canFollowUpSubagentTrace } from "./utils/subagentDisclosure";
 
 function useDocumentActive(): boolean {
   const [active, setActive] = useState(
@@ -733,7 +736,28 @@ export default function App(): React.JSX.Element {
       openProviderSetup,
       openBackendSetup,
       openProjectPath,
+      followUpSubagent: (trace: SubagentTrace) => {
+        if (!conversation || !canFollowUpSubagentTrace(
+          trace,
+          conversationProjection.turns,
+        )) return;
+        const task = trace.description ?? trace.providerRole ?? "delegated task";
+        requestComposerPrefill({
+          conversationId: conversation.id,
+          text: `Please follow up on the delegated task “${task}” and incorporate its latest result.`,
+        });
+      },
       ...turnSceneActions,
+      stopSubagent: async (trace: SubagentTrace) => {
+        try {
+          await turnSceneActions.stopSubagent(trace);
+        } catch (error) {
+          setActionError(error instanceof Error
+            ? error.message
+            : "The delegated task could not be stopped.");
+          throw error;
+        }
+      },
       run,
   });
   const workspaceScene = useMemo(() => createWorkspaceSceneModel({

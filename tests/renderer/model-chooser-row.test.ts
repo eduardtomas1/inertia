@@ -50,6 +50,7 @@ function render(modelRow: ModelChooserRowData): string {
     optionId: "model-option-sol",
     tabIndex: 0,
     onSelect: () => undefined,
+    onFavoriteToggle: () => undefined,
   }));
 }
 
@@ -73,10 +74,10 @@ describe("ModelChooserRow", () => {
       },
     }));
 
-    expect(html).toContain('role="presentation"');
+    expect(html).not.toContain('role="presentation"');
     expect(html).toContain('id="model-option-sol"');
-    expect(html).toContain('role="option"');
-    expect(html).toContain('aria-selected="true"');
+    expect(html).not.toContain('role="option"');
+    expect(html).toContain('aria-current="true"');
     expect(html).toContain('aria-disabled="false"');
     expect(html).toContain('aria-keyshortcuts="Meta+1"');
     expect(html).toContain('tabindex="0"');
@@ -94,16 +95,18 @@ describe("ModelChooserRow", () => {
     }))).toContain('aria-pressed="true"');
   });
 
-  it("keeps the favorite control outside the listbox option", () => {
+  it("renders independent result and favorite buttons in one semantic row", () => {
     const html = render(row());
-    const favoriteHtml = renderFavorite(row());
-    const option = html.match(/<div[^>]+role="option"[^>]*>(.*?)<\/div>/s);
+    const resultAction = html.match(
+      /<button[^>]+class="model-chooser-row-option"[^>]*>(.*?)<\/button>/s,
+    );
 
-    expect(option?.[1]).toBeDefined();
-    expect(option?.[1]).not.toContain("<button");
-    expect(html).not.toContain('class="model-chooser-row-favorite"');
-    expect(favoriteHtml).toContain('class="model-chooser-row-favorite"');
-    expect(favoriteHtml).toContain('aria-pressed="false"');
+    expect(resultAction?.[1]).toBeDefined();
+    expect(resultAction?.[1]).not.toContain("model-chooser-row-favorite");
+    expect(html).toContain('class="model-chooser-row-favorite"');
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).not.toContain('role="listbox"');
+    expect(html).not.toContain('role="option"');
   });
 
   it("uses only harness and backend identity and explicitly marks custom routes", () => {
@@ -224,10 +227,10 @@ const styles = readFileSync(
     expect(block).toContain("var(--surface-hover)");
     expect(block).toContain("text-overflow: ellipsis");
     expect(block).toContain("@container (max-width: 420px)");
-    expect(chooserLayout).toContain("grid-template-columns: minmax(0, 1fr)");
-    expect(chooserLayout).toContain(".model-chooser-listbox,");
-    expect(chooserLayout).toContain(".model-chooser-favorite-actions");
-    expect(chooserLayout).toContain("display: contents");
+    expect(chooserLayout).toContain(".model-chooser-list {");
+    expect(chooserLayout).toContain("display: block");
+    expect(chooserLayout).not.toContain(".model-chooser-favorite-actions");
+    expect(chooserLayout).not.toContain(".model-chooser-favorite-slot");
     expect(chooserLayout).not.toContain("position: absolute");
     expect(block).not.toContain("model-chooser-row-card");
   });

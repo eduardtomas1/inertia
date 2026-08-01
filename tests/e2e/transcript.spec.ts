@@ -205,6 +205,25 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await expect.poll(
       () => weightedVirtualWindow.locator(".response-virtual-item").count(),
     ).toBeLessThan(24);
+    const weightedFeedSemantics = await weightedVirtualWindow.evaluate(
+      (feed) => [...feed.children].map((child) => ({
+        tagName: child.tagName,
+        label: child.getAttribute("aria-label"),
+        position: child.getAttribute("aria-posinset"),
+        size: child.getAttribute("aria-setsize"),
+      })),
+    );
+    expect(weightedFeedSemantics.length).toBeGreaterThan(0);
+    expect(weightedFeedSemantics.every(({ tagName, label, position, size }) =>
+      tagName === "ARTICLE"
+      && /^Turn \d+: Weighted request \d+$/u.test(label ?? "")
+      && Number(position) > 0
+      && size === "36")).toBe(true);
+    const weightedFeedAx = await weightedVirtualWindow.ariaSnapshot();
+    expect(weightedFeedAx).toContain('- feed "36 conversation turns"');
+    expect(weightedFeedAx).toMatch(
+      /article "Turn \d+: Weighted request \d+"/u,
+    );
     expect(await page.locator("body").textContent())
       .not.toContain("CLOSED_WEIGHTED_SENTINEL");
 

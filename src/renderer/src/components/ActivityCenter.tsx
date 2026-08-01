@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Activity,
   Check,
@@ -21,6 +29,7 @@ import {
   activityRunPresentation,
   activityStatusLabel,
   activityWaitingKind,
+  type ActivityWaitingKind,
   type ActivityRunOperationGroup,
 } from "../utils/activityCenter";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -50,6 +59,46 @@ type PrimaryRunAction = {
   label: string;
   run: () => void;
 };
+
+const ActivityClockContext = createContext(Date.now());
+
+function ActivityClockProvider({
+  active,
+  now: providedNow,
+  children,
+}: {
+  active: boolean;
+  now?: number;
+  children: ReactNode;
+}): React.JSX.Element {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (providedNow !== undefined || !active) return;
+    setNow(Date.now());
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [active, providedNow]);
+  return (
+    <ActivityClockContext.Provider value={providedNow ?? now}>
+      {children}
+    </ActivityClockContext.Provider>
+  );
+}
+
+function ActivityRunTime({
+  run,
+  waitingKind,
+}: {
+  run: WorkspaceRun;
+  waitingKind: ActivityWaitingKind | null;
+}): React.JSX.Element {
+  const now = useContext(ActivityClockContext);
+  return (
+    <time dateTime={run.startedAt}>
+      {activityStatusLabel(run, now, waitingKind)}
+    </time>
+  );
+}
 
 function RunState({ run }: { run: WorkspaceRun }): React.JSX.Element {
   if (run.status === "failed") return <TriangleAlert size={13} aria-hidden="true" />;
@@ -141,8 +190,6 @@ export function ActivityCenter({
   onAcknowledge,
   onDismiss,
 }: ActivityCenterProps): React.JSX.Element | null {
-  const [now, setNow] = useState(Date.now());
-  const visibleNow = providedNow ?? now;
   const [expandedFailure, setExpandedFailure] = useState<string | null>(null);
   const [expandedOperations, setExpandedOperations] = useState<Set<string>>(
     () => new Set(),
@@ -151,15 +198,6 @@ export function ActivityCenter({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   useNativePreviewSuspension(open);
-
-  useEffect(() => {
-    if (!open || providedNow !== undefined) return;
-    setNow(Date.now());
-    if (!runs.some(({ status }) =>
-      status === "running" || status === "waiting")) return;
-    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(interval);
-  }, [open, providedNow, runs]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -206,8 +244,8 @@ export function ActivityCenter({
   }, [open]);
 
   const presentation = useMemo(
-    () => activityRunPresentation(runs, visibleNow),
-    [runs, visibleNow],
+    () => activityRunPresentation(runs),
+    [runs],
   );
   const { sections, summary } = presentation;
   if (!open) return null;
@@ -241,17 +279,21 @@ export function ActivityCenter({
           </span>
           <IconButton label="Close runs" onClick={onClose}><X size={15} /></IconButton>
         </header>
-        <div className="activity-center-content">
-          {sections.length === 0 ? (
-            <div className="activity-empty" role="status">
-              <CheckCircle2 size={20} aria-hidden="true" />
-              <strong>All clear</strong>
-              <p>Active agents, checks, and services will appear here.</p>
-            </div>
-          ) : sections.map((section) => (
-            <section className={`activity-category is-${section.id}`} key={section.id}>
-              <h2>{section.label}<span>{section.runs.length}</span></h2>
-              {section.runs.map((run) => {
+        <ActivityClockProvider
+          active={summary.activeCount > 0}
+          now={providedNow}
+        >
+          <div className="activity-center-content">
+            {sections.length === 0 ? (
+              <div className="activity-empty" role="status">
+                <CheckCircle2 size={20} aria-hidden="true" />
+                <strong>All clear</strong>
+                <p>Active agents, checks, and services will appear here.</p>
+              </div>
+            ) : sections.map((section) => (
+              <section className={`activity-category is-${section.id}`} key={section.id}>
+                <h2>{section.label}<span>{section.runs.length}</span></h2>
+                {section.runs.map((run) => {
                   const project = projectById.get(run.projectId);
                   const conversation = run.conversationId ? conversationById.get(run.conversationId) : undefined;
                   const actions = activityRunActions(run);
@@ -298,7 +340,10 @@ export function ActivityCenter({
                             {run.attentionState === "unseen" && <span className="activity-unread-state">New</span>}
                           </small>
                         </span>
-                        <time dateTime={run.startedAt}>{activityStatusLabel(run, visibleNow, waitingKind)}</time>
+                        <ActivityRunTime
+                          run={run}
+                          waitingKind={waitingKind}
+                        />
                       </div>
                       {operationGroup && operationGroup.all.length > 0 && (
                         <RunOperations
@@ -376,10 +421,11 @@ export function ActivityCenter({
                       {detailOpen && run.detail && <pre className="activity-failure-detail">{run.detail}</pre>}
                     </article>
                   );
-                })}
-            </section>
-          ))}
-        </div>
+                  })}
+              </section>
+            ))}
+          </div>
+        </ActivityClockProvider>
       </aside>
     </div>
   );

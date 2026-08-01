@@ -98,7 +98,6 @@ describe("delegated-agent parent-turn navigation", () => {
       checkpoints: [],
       projectRoot: "/workspace",
       projectId: "project-1",
-      providers: [],
       streamingText: "",
       streamingReasoning: "",
       approvals: [],

@@ -503,6 +503,16 @@ export class RuntimeStore {
     return this.executionLedgerRepository.subagentTrace(traceId);
   }
 
+  acknowledgeSubagentStop(
+    traceId: string,
+    updatedAt = new Date().toISOString(),
+  ): UpsertSubagentTraceResult | null {
+    return this.executionLedgerRepository.acknowledgeSubagentStop(
+      traceId,
+      updatedAt,
+    );
+  }
+
   upsertSubagentTrace(
     input: UpsertSubagentTraceInput,
   ): UpsertSubagentTraceResult | null {

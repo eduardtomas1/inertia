@@ -148,6 +148,26 @@ export class ExecutionLedgerRepository {
     return subagentTraceFromRow(row);
   }
 
+  acknowledgeSubagentStop(
+    traceId: string,
+    updatedAt = new Date().toISOString(),
+  ): UpsertSubagentTraceResult | null {
+    const now = requireTimestamp(updatedAt, "Delegated task stop time");
+    const result = this.context.database.prepare(`
+      UPDATE subagent_traces
+      SET status = 'cancelled',
+          is_live = 0,
+          progress = 'Stopped by the user.',
+          updated_at = MAX(updated_at, @updatedAt)
+      WHERE id = @id AND is_live = 1
+    `).run({ id: traceId, updatedAt: now });
+    const trace = this.subagentTrace(traceId);
+    if (result.changes > 0) return { trace, changed: true };
+    return trace.status === "cancelled" && !trace.isLive
+      ? { trace, changed: false }
+      : null;
+  }
+
   upsertSubagentTrace(
     input: UpsertSubagentTraceInput,
   ): UpsertSubagentTraceResult | null {

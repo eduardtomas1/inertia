@@ -91,6 +91,17 @@ export function subagentTraceLabel(trace: SubagentTrace): string {
     ?? `${subagentProviderLabel(trace)} delegated task`;
 }
 
+const LIVE_PROVIDER_STATUSES = new Set([
+  "pending",
+  "pendinginit",
+  "queued",
+  "spawned",
+  "running",
+  "in_progress",
+  "paused",
+  "waiting",
+]);
+
 export function subagentStatusLabel(trace: SubagentTrace): string {
   const normalized = trace.status === "queued"
     ? "Queued"
@@ -111,7 +122,13 @@ export function subagentStatusLabel(trace: SubagentTrace): string {
                   : trace.status === "lost"
                     ? "Lost"
                     : "Unknown";
-  return trace.providerStatus && trace.providerStatus !== trace.status
+  const providerStatus = trace.providerStatus?.trim();
+  const contradictsTerminalState = !trace.isLive
+    && providerStatus
+    && LIVE_PROVIDER_STATUSES.has(providerStatus.toLowerCase());
+  return providerStatus
+    && providerStatus !== trace.status
+    && !contradictsTerminalState
     ? `${normalized} (${trace.providerStatus})`
     : normalized;
 }

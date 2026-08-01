@@ -421,20 +421,16 @@ export class TurnController {
       || !trace.providerTaskId
       || !trace.isLive
     ) return false;
-    const accepted = await this.providers.stopSubagent(
-      conversationId,
-      trace.providerTaskId,
-      { runId: active.turn.runId, turnId: active.turn.id },
-    );
-    if (!accepted) return false;
-    const currentActive = this.activeByConversation.get(conversationId);
-    if (
-      currentActive !== active
-      || currentActive.settled
-      || !currentActive.acceptingProviderEvents
-      || currentActive.turn.runId !== trace.runId
-      || currentActive.turn.id !== trace.turnId
-    ) return false;
+    let accepted = false;
+    try {
+      accepted = await this.providers.stopSubagent(
+        conversationId,
+        trace.providerTaskId,
+        { runId: active.turn.runId, turnId: active.turn.id },
+      );
+    } catch {
+      // The provider event stream may still have proved the exact stop.
+    }
     let currentTrace: SubagentTrace;
     try {
       currentTrace = this.store.subagentTrace(traceId);
@@ -447,31 +443,19 @@ export class TurnController {
       || currentTrace.turnId !== trace.turnId
       || currentTrace.providerId !== trace.providerId
       || currentTrace.providerTaskId !== trace.providerTaskId
-      || !currentTrace.isLive
     ) return false;
-    const stopped = this.store.upsertSubagentTrace({
-      conversationId: currentTrace.conversationId,
-      runId: currentTrace.runId,
-      turnId: currentTrace.turnId,
-      providerId: currentTrace.providerId,
-      providerTaskId: currentTrace.providerTaskId,
-      providerAgentId: currentTrace.providerAgentId,
-      parentProviderAgentId: currentTrace.parentProviderAgentId,
-      parentProviderToolUseId: currentTrace.parentProviderToolUseId,
-      providerToolUseId: currentTrace.providerToolUseId,
-      providerRole: currentTrace.providerRole,
-      providerName: currentTrace.providerName,
-      providerStatus: currentTrace.providerStatus,
-      status: "cancelled",
-      isLive: false,
-      description: currentTrace.description,
-      progress: "Stopped by the user.",
-      result: currentTrace.result,
-      // A successful SDK stop acknowledgement is authoritative. Reserve the
-      // terminal sequence so a delayed provider replay cannot resurrect it.
-      sequence: 2_147_483_647,
-      updatedAt: this.now(),
-    });
+    if (!currentTrace.isLive) return currentTrace.status === "cancelled";
+    if (!accepted) return false;
+    const currentActive = this.activeByConversation.get(conversationId);
+    if (
+      currentActive !== active
+      || currentActive.settled
+      || !currentActive.acceptingProviderEvents
+      || currentActive.turn.runId !== trace.runId
+      || currentActive.turn.id !== trace.turnId
+    ) return false;
+    const stopped = this.store.acknowledgeSubagentStop(traceId, this.now());
+    if (!stopped) return false;
     if (stopped?.changed) {
       this.hooks.broadcast({
         type: "agent.subagent.updated",

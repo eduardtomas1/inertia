@@ -186,6 +186,12 @@ describe("inline delegated-agent disclosure", () => {
       status: "cancelled",
       isLive: false,
     }))).toBe("Cancelled (killed)");
+    expect(subagentStatusLabel(trace({
+      providerId: "claude",
+      providerStatus: "running",
+      status: "cancelled",
+      isLive: false,
+    }))).toBe("Cancelled");
     expect(canStopSubagentTrace(
       trace({ providerStatus: "pending", status: "queued" }),
       [turn()],

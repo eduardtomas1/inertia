@@ -237,7 +237,6 @@ interface TestRuntimeOptions {
   modelSelection?: ModelSelection;
   resolveModelRoute?: TurnProviderRuntime["resolveModelRoute"];
 }
-
 async function testRuntime(
   hookOverrides: Partial<TurnControllerHooks> = {},
   options: TestRuntimeOptions = {},
@@ -328,7 +327,6 @@ async function testRuntime(
     attachmentReleases,
   };
 }
-
 async function testAttachment(
   runtime: Pick<TestRuntime, "workspace">,
   id: string,
@@ -345,7 +343,6 @@ async function testAttachment(
     size: bytes.byteLength,
   };
 }
-
 function identity(runtime: TestRuntime) {
   const input = runtime.provider.input;
   if (!input?.runId || !input.turnId) throw new Error("Turn is not started.");
@@ -356,7 +353,6 @@ function identity(runtime: TestRuntime) {
     turnId: input.turnId,
   } as const;
 }
-
 async function flushPromises(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -372,8 +368,12 @@ describe("TurnController authoritative lifecycle", () => {
     const runtime = await testRuntime();
     const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start the parent turn." });
     runtime.controller.start(queued.turn.id);
+    const beforeRejected = runtime.store.snapshot();
+    vi.spyOn(runtime.provider, "steer").mockResolvedValue(false);
+    expect(await runtime.controller.steer(runtime.conversationId, "Do not leave this rejected follow-up behind.")).toBeNull();
+    expect(runtime.store.snapshot()).toEqual(beforeRejected);
     let acknowledgeFollowUp!: (accepted: boolean) => void;
-    vi.spyOn(runtime.provider, "steer").mockImplementation(async (_conversationId, content) => {
+    vi.mocked(runtime.provider.steer).mockImplementation(async (_conversationId, content) => {
       runtime.provider.steerCalls.push(content);
       return await new Promise<boolean>((resolve) => { acknowledgeFollowUp = resolve; });
     });
@@ -386,18 +386,18 @@ describe("TurnController authoritative lifecycle", () => {
       label: "Observed during acknowledgement", activityId: "follow-up-race",
     });
     const interimActivity = runtime.store.snapshot().activities.find(({ title }) => title === "Observed during acknowledgement");
+    runtime.provider.resolve();
+    await flushPromises();
+    const settledConversation = runtime.store.conversation(runtime.conversationId);
+    const settledProject = runtime.store.project(settledConversation.projectId);
     acknowledgeFollowUp(true);
     const followedUp = await pendingFollowUp;
     expect(followedUp).toMatchObject({ role: "user", turnId: queued.turn.id, content: "Inspect the edge case next." });
     expect(followedUp!.createdAt < interimActivity!.createdAt).toBe(true);
+    const refreshedConversation = runtime.store.conversation(runtime.conversationId);
+    expect([refreshedConversation.updatedAt >= settledConversation.updatedAt, refreshedConversation.lastViewedAt! >= settledConversation.lastViewedAt!, runtime.store.project(settledConversation.projectId).updatedAt >= settledProject.updatedAt]).toEqual([true, true, true]);
     expect(runtime.store.conversationDetail(runtime.conversationId)?.messages)
       .toContainEqual(expect.objectContaining({ id: followedUp?.id }));
-    const beforeRejected = runtime.store.snapshot().messages;
-    vi.mocked(runtime.provider.steer).mockResolvedValue(false);
-    expect(await runtime.controller.steer(runtime.conversationId, "Do not leave this rejected follow-up behind.")).toBeNull();
-    expect(runtime.store.snapshot().messages).toEqual(beforeRejected);
-    runtime.provider.resolve();
-    await flushPromises();
     const databasePath = join(runtime.directory, "inertia.sqlite");
     runtime.store.close();
     const reopened = new RuntimeStore(databasePath, runtime.workspace, { recoverInterruptedRuns: false });

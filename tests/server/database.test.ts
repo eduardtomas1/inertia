@@ -182,12 +182,16 @@ describe("RuntimeStore conversation lifecycle", () => {
       conversation.id,
       turn.id,
       "Accepted immediately before the parent settled.",
+      at(4_000),
       at(7_000),
     );
     expect(acknowledgedFollowUp).toMatchObject({
       turnId: turn.id,
       role: "user",
+      createdAt: at(4_000),
     });
+    expect(store.conversation(conversation.id)).toMatchObject({ updatedAt: at(7_000), lastViewedAt: at(7_000) });
+    expect(store.project(conversation.projectId).updatedAt).toBe(at(7_000));
     expect(store.shellSnapshot().conversations.find(({ id }) => id === conversation.id)?.latestTurn)
       .toEqual(expect.objectContaining({
         id: turn.id,

@@ -68,22 +68,27 @@ export class TranscriptRepository {
    * Persists a parent follow-up only after the active harness acknowledged it.
    * The turn may have settled during that acknowledgement race; retaining the
    * accepted input is more truthful than either dropping it or persisting it
-   * before the harness has accepted it.
+   * before the harness has accepted it. Message ordering uses submission time;
+   * transcript and project freshness use the later acknowledgement time.
    */
   createAcknowledgedFollowUpMessage(
     conversationId: string,
     turnId: string,
     content: string,
     createdAt?: string,
+    acknowledgedAt?: string,
   ): ChatMessage {
     const conversation = this.context.requireConversation(conversationId);
     const turn = agentTurnFromRow(this.context.requireAgentTurn(turnId));
     if (turn.conversationId !== conversationId) {
       throw new Error("The follow-up turn belongs to a different conversation.");
     }
-    const now = createdAt === undefined
+    const submittedAt = createdAt === undefined
       ? new Date().toISOString()
       : requireTimestamp(createdAt, "Follow-up creation time");
+    const freshnessAt = acknowledgedAt === undefined
+      ? submittedAt
+      : requireTimestamp(acknowledgedAt, "Follow-up acknowledgement time");
     const message: ChatMessage = {
       id: randomUUID(),
       conversationId,
@@ -91,7 +96,7 @@ export class TranscriptRepository {
       role: "user",
       content,
       attachments: [],
-      createdAt: now,
+      createdAt: submittedAt,
     };
     this.context.database.transaction(() => {
       this.context.database.prepare(`
@@ -102,10 +107,11 @@ export class TranscriptRepository {
       `).run(message);
       this.context.database.prepare(`
         UPDATE conversations
-        SET updated_at = ?, settled_at = NULL, last_viewed_at = ?
+        SET updated_at = MAX(updated_at, ?), settled_at = NULL,
+          last_viewed_at = MAX(last_viewed_at, ?)
         WHERE id = ?
-      `).run(now, now, conversationId);
-      this.context.touchProject(conversation.project_id, now);
+      `).run(freshnessAt, freshnessAt, conversationId);
+      this.context.touchProject(conversation.project_id, freshnessAt);
     })();
     return message;
   }

@@ -411,12 +411,14 @@ export class RuntimeStore {
     turnId: string,
     content: string,
     createdAt?: string,
+    acknowledgedAt?: string,
   ): ChatMessage {
     return this.transcriptRepository.createAcknowledgedFollowUpMessage(
       conversationId,
       turnId,
       content,
       createdAt,
+      acknowledgedAt,
     );
   }
 

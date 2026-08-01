@@ -392,6 +392,7 @@ export class TurnController {
       active.turn.id,
       followUp,
       submittedAt,
+      this.now(),
     );
   }
 

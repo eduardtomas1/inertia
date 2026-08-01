@@ -14,7 +14,8 @@ import {
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
 const MAX_BUFFERED_OUTPUT = 1024 * 1024;
-const OUTPUT_CHUNK_SIZE = 16 * 1024;
+const OUTPUT_CHUNK_CODE_UNITS = 16 * 1024;
+const OUTPUT_FLUSH_MS = 8;
 // node-pty's Windows ConPTY backend intentionally delays its public exit event
 // for 1 second while output drains. Leave bounded headroom for that signal and
 // the final resource-settle check while still finishing well before the
@@ -34,12 +35,15 @@ interface TerminalSession {
   terminationRequested: boolean;
   closing: Promise<void> | null;
   terminateProcessTree: OwnedPidProcessTreeTermination | null;
+  flushOutput: () => void;
+  disposeOutput: () => void;
   onExit?: (exitCode: number) => void;
 }
 
 export interface TerminalManagerOptions {
   spawnTerminal?: typeof spawn;
   shutdownTimeoutMs?: number;
+  outputFlushMs?: number;
   createProcessTreeTermination?: (
     pid: number,
     waitForExit: WaitForProcessExit,
@@ -64,13 +68,27 @@ function userShell(): { executable: string; args: string[] } {
   return { executable: fallback, args: ["-l"] };
 }
 
-function send(socket: WebSocket, event: ServerEvent): void {
-  if (socket.readyState !== WebSocket.OPEN) return;
-  if (socket.bufferedAmount > MAX_BUFFERED_OUTPUT) {
+function stopSlowSocket(socket: WebSocket): void {
+  try {
     socket.terminate();
-    return;
+  } catch {
+    // A concurrent close may already have released the transport.
   }
-  socket.send(JSON.stringify(event));
+}
+
+function send(socket: WebSocket, event: ServerEvent): boolean {
+  if (socket.readyState !== WebSocket.OPEN) return false;
+  if (socket.bufferedAmount > MAX_BUFFERED_OUTPUT) {
+    stopSlowSocket(socket);
+    return false;
+  }
+  try {
+    socket.send(JSON.stringify(event));
+    return true;
+  } catch {
+    stopSlowSocket(socket);
+    return false;
+  }
 }
 
 export class TerminalManager {
@@ -78,6 +96,7 @@ export class TerminalManager {
   private readonly closingSessions = new Set<Promise<void>>();
   private readonly spawnTerminal: typeof spawn;
   private readonly shutdownTimeoutMs: number;
+  private readonly outputFlushMs: number;
   private readonly createProcessTreeTermination: (
     pid: number,
     waitForExit: WaitForProcessExit,
@@ -94,6 +113,10 @@ export class TerminalManager {
         ),
         30_000,
       ),
+    );
+    this.outputFlushMs = Math.max(
+      1,
+      Math.min(Math.trunc(options.outputFlushMs ?? OUTPUT_FLUSH_MS), 50),
     );
     const terminateProcessTree = options.terminateProcessTree;
     this.createProcessTreeTermination = options.createProcessTreeTermination
@@ -151,13 +174,59 @@ export class TerminalManager {
     }
 
     let session!: TerminalSession;
+    let pendingOutput = "";
+    let outputTimer: ReturnType<typeof setTimeout> | null = null;
+    let outputTransportOpen = true;
+    const sendOutput = (data: string): boolean => {
+      if (!outputTransportOpen) return false;
+      outputTransportOpen = send(owner, {
+        type: "terminal.output",
+        terminalId: id,
+        data,
+      });
+      return outputTransportOpen;
+    };
+    const flushOutput = (): void => {
+      if (outputTimer) {
+        clearTimeout(outputTimer);
+        outputTimer = null;
+      }
+      while (pendingOutput.length > 0) {
+        const data = pendingOutput.slice(0, OUTPUT_CHUNK_CODE_UNITS);
+        pendingOutput = pendingOutput.slice(data.length);
+        if (!sendOutput(data)) {
+          pendingOutput = "";
+          break;
+        }
+      }
+    };
+    const queueOutput = (data: string): void => {
+      if (!outputTransportOpen) return;
+      pendingOutput += data;
+      while (pendingOutput.length >= OUTPUT_CHUNK_CODE_UNITS) {
+        const chunk = pendingOutput.slice(0, OUTPUT_CHUNK_CODE_UNITS);
+        pendingOutput = pendingOutput.slice(OUTPUT_CHUNK_CODE_UNITS);
+        if (!sendOutput(chunk)) {
+          pendingOutput = "";
+          return;
+        }
+      }
+      if (pendingOutput.length > 0 && !outputTimer) {
+        outputTimer = setTimeout(flushOutput, this.outputFlushMs);
+        outputTimer.unref();
+      }
+    };
+    const disposeOutput = (): void => {
+      flushOutput();
+      if (outputTimer) clearTimeout(outputTimer);
+      outputTimer = null;
+    };
     const dataListener = pseudoterminal.onData((data) => {
       onOutput?.(data);
-      for (let offset = 0; offset < data.length; offset += OUTPUT_CHUNK_SIZE) {
-        send(owner, { type: "terminal.output", terminalId: id, data: data.slice(offset, offset + OUTPUT_CHUNK_SIZE) });
-      }
+      queueOutput(data);
     });
     const exitListener = pseudoterminal.onExit(({ exitCode }) => {
+      flushOutput();
       session.exitObserved = true;
       for (const resolveExit of session.exitWaiters) resolveExit();
       session.exitWaiters.clear();
@@ -177,6 +246,8 @@ export class TerminalManager {
       terminationRequested: false,
       closing: null,
       terminateProcessTree: null,
+      flushOutput,
+      disposeOutput,
       onExit,
     };
     this.sessions.set(id, session);
@@ -262,6 +333,7 @@ export class TerminalManager {
     const session = this.sessions.get(terminalId);
     if (!session) return;
     this.sessions.delete(terminalId);
+    session.disposeOutput();
     session.dataListener.dispose();
     session.exitListener.dispose();
     if (kill) {

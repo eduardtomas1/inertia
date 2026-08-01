@@ -20,7 +20,10 @@ export default defineConfig({
           name: "node",
           environment: "node",
           include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
-          exclude: ["tests/renderer/**/*.dom.test.tsx"],
+          exclude: [
+            "tests/performance/**/*.benchmark.test.ts",
+            "tests/renderer/**/*.dom.test.tsx",
+          ],
         },
       },
       {

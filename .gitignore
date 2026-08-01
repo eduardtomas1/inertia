@@ -9,6 +9,7 @@ coverage/
 playwright-report/
 blob-report/
 test-results/
+performance-results/
 .nyc_output/
 .vite/
 .electron-vite/

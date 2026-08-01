@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, copyFile, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
 
 const STARTUP_TIMEOUT_MS = 30_000;
@@ -294,6 +294,7 @@ let child = null;
 let readiness = null;
 let stdout = "";
 let stderr = "";
+let launchedAt = 0;
 
 try {
   await Promise.all([
@@ -307,6 +308,7 @@ try {
     `--user-data-dir=${profileDirectory}`,
     ...(process.platform === "linux" && process.env.INERTIA_PACKAGE_SMOKE_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
   ];
+  launchedAt = Date.now();
   child = spawn(executable, launchArguments, {
     detached: process.platform !== "win32",
     env: {
@@ -350,6 +352,7 @@ try {
       throw new Error(`The packaged app exited before reporting readiness (${earlyExit.code ?? earlyExit.signal ?? "unknown"}).`);
     }),
   ]);
+  const readinessObservedAt = Date.now();
   const runtimeWasObserved = processExists(readiness.runtimePid);
   const pdfResult = await waitUntil(
     () => readJsonIfPresent(packagedPdf.resultPath),
@@ -374,6 +377,7 @@ try {
     readiness.mainPid,
     EXIT_TIMEOUT_MS,
   );
+  const shutdownObservedAt = Date.now();
   const exit = await withTimeout(
     exitResult,
     EXIT_TIMEOUT_MS,
@@ -391,7 +395,30 @@ try {
   if (process.platform !== "win32") {
     await waitUntil(() => !processGroupExists(readiness.mainPid), CLEANUP_TIMEOUT_MS, "packaged app process-group cleanup");
   }
-  console.log(`Packaged smoke passed (${process.platform}/${process.arch}); main=${readiness.mainPid}, runtime=${readiness.runtimePid}, generation=${readiness.generation}, runtimeObserved=${runtimeWasObserved}, pdfExtraction=true, exit=${exit.code ?? exit.signal ?? "unknown"}.`);
+  const benchmark = {
+    schemaVersion: 1,
+    collectedAt: new Date().toISOString(),
+    platform: process.platform,
+    architecture: process.arch,
+    node: process.version,
+    packageKind: process.platform === "linux" ? "linux-unpacked" : "unpacked",
+    signingState: process.platform === "darwin" ? "ci-ad-hoc-or-local" : "not-recorded",
+    launchToRuntimeReadyMs: readinessObservedAt - launchedAt,
+    shutdownToProcessExitMs: Date.now() - shutdownObservedAt,
+    mainPid: readiness.mainPid,
+    runtimePid: readiness.runtimePid,
+    generation: readiness.generation,
+  };
+  const benchmarkReport = process.env.INERTIA_PACKAGE_BENCHMARK_REPORT;
+  if (benchmarkReport) {
+    const target = resolve(benchmarkReport);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, `${JSON.stringify(benchmark, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  }
+  console.log(`Packaged smoke passed (${process.platform}/${process.arch}); main=${readiness.mainPid}, runtime=${readiness.runtimePid}, generation=${readiness.generation}, runtimeObserved=${runtimeWasObserved}, pdfExtraction=true, launchToReadyMs=${benchmark.launchToRuntimeReadyMs}, shutdownMs=${benchmark.shutdownToProcessExitMs}, exit=${exit.code ?? exit.signal ?? "unknown"}.`);
 } catch (error) {
   const detail = error instanceof Error ? error.message : String(error);
   if (stdout.trim()) console.error(`Packaged app stdout:\n${stdout.trim()}`);

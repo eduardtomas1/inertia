@@ -15,7 +15,10 @@ function multiMegabyteMessage(index: number): string {
 
 describe("remote transcript cache", () => {
   it("keeps retained memory under the budget for hundreds of huge messages", () => {
-    const cache = new RemoteTranscriptCache();
+    const cache = new RemoteTranscriptCache({
+      fingerprint: () => "shared",
+      sanitize: (source) => source,
+    });
     const message = multiMegabyteMessage(0);
     for (let index = 0; index < 300; index += 1) {
       cache.content("conversation", `message-${index}`, message);
@@ -26,6 +29,7 @@ describe("remote transcript cache", () => {
     expect(cache.retainedBytes()).toBeLessThanOrEqual(
       REMOTE_TRANSCRIPT_CACHE_BUDGET_BYTES,
     );
+    expect(cache.size()).toBeGreaterThan(0);
     expect(cache.size()).toBeLessThan(300);
   });
 

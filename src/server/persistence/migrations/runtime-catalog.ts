@@ -937,6 +937,15 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         );
         CREATE INDEX IF NOT EXISTS paired_launches_status_updated_idx
           ON paired_launches(status, updated_at ASC, id ASC);
+        CREATE TRIGGER IF NOT EXISTS paired_launches_project_delete
+        BEFORE DELETE ON projects
+        BEGIN
+          DELETE FROM paired_launches
+          WHERE id IN (
+            SELECT launch_id FROM paired_launch_sides
+            WHERE project_id = OLD.id
+          );
+        END;
       `,
     });
     const runtimeMigrations = createRuntimeMigrationCatalog(

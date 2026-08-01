@@ -397,6 +397,39 @@ describe("atomic Duo launch persistence", () => {
     runtime.store.close();
   });
 
+  it.each(["prepared", "failed", "successfully-dispatched"] as const)(
+    "does not let %s paired launch history block project removal",
+    async (state) => {
+      const runtime = await createRuntime();
+      const prepared = preparePair(runtime);
+      if (state === "failed") {
+        runtime.store.failPairedLaunch(
+          prepared.launchId,
+          "failed",
+          "Expected test failure",
+        );
+      } else if (state === "successfully-dispatched") {
+        expect(runtime.store.claimPairedLaunchDispatch(prepared.launchId))
+          .toBe(true);
+        runtime.store.finishPairedLaunchDispatch(
+          prepared.launchId,
+          [true, true],
+        );
+      }
+
+      runtime.store.removeProject(runtime.projectId);
+
+      expect(runtime.store.findPairedLaunch(prepared.launchId)).toBeNull();
+      expect(runtime.store.snapshot()).toMatchObject({
+        projects: [],
+        conversations: [],
+        agentTurns: [],
+        messages: [],
+      });
+      runtime.store.close();
+    },
+  );
+
   it("acknowledges cancellation requested while both sides are still validating", async () => {
     let readinessCount = 0;
     let announceReady!: () => void;

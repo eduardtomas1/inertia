@@ -927,6 +927,61 @@ describe("published database fixtures", () => {
   });
 });
 
+describe("atomic Duo schema migration", () => {
+  it.each(["current", "v37-upgrade"] as const)(
+    "installs project deletion cleanup for a %s database",
+    async (source) => {
+      const directory = await temporaryDirectory("inertia-duo-migration-");
+      const workspacePath = join(directory, "workspace");
+      await mkdir(workspacePath);
+      const databasePath = join(directory, "inertia.sqlite");
+      const current = new RuntimeStore(databasePath, workspacePath, {
+        recoverInterruptedRuns: false,
+      });
+      current.close();
+
+      if (source === "v37-upgrade") {
+        const previous = new Database(databasePath);
+        previous.exec(`
+          DROP TRIGGER paired_launches_project_delete;
+          DROP TABLE paired_launch_sides;
+          DROP TABLE paired_launches;
+        `);
+        previous.prepare(
+          "DELETE FROM schema_migrations WHERE version = ?",
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION);
+        expect((previous.prepare(
+          "SELECT MAX(version) AS version FROM schema_migrations",
+        ).get() as { version: number }).version).toBe(
+          CURRENT_DATABASE_SCHEMA_VERSION - 1,
+        );
+        previous.close();
+      }
+
+      const migrated = new RuntimeStore(databasePath, workspacePath, {
+        recoverInterruptedRuns: false,
+      });
+      migrated.close();
+      const inspection = new Database(databasePath, { readonly: true });
+      expect((inspection.prepare(`
+        SELECT COUNT(*) AS count FROM sqlite_master
+        WHERE type = 'table' AND name IN ('paired_launches', 'paired_launch_sides')
+      `).get() as { count: number }).count).toBe(2);
+      expect((inspection.prepare(`
+        SELECT COUNT(*) AS count FROM sqlite_master
+        WHERE type = 'trigger' AND name = 'paired_launches_project_delete'
+      `).get() as { count: number }).count).toBe(1);
+      expect((inspection.prepare(
+        "SELECT MAX(version) AS version FROM schema_migrations",
+      ).get() as { version: number }).version).toBe(
+        CURRENT_DATABASE_SCHEMA_VERSION,
+      );
+      expect(inspection.pragma("foreign_key_check")).toEqual([]);
+      inspection.close();
+    },
+  );
+});
+
 describe("transactional database migrations", () => {
   it("rolls back the tracking table and every earlier step when a later step fails", () => {
     const database = new Database(":memory:");

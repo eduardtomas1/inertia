@@ -33,7 +33,11 @@ import {
   providerPromiseFailure,
   publicTurnError,
 } from "./turn-controller-support";
-import { prepareTurnRequest } from "./turn-request-preparation";
+import {
+  prepareTurnRequest,
+  resolveTurnRequest,
+  type PreparedTurnRequest,
+} from "./turn-request-preparation";
 import { TurnStreamProjection } from "./turn-stream-projection";
 import { TurnActivityProjection } from "./turn-activity-projection";
 import { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
@@ -203,6 +207,51 @@ export class TurnController {
       now: () => this.now(),
       clock: this.clock,
     }, request);
+    return this.adoptPreparedTurn(prepared);
+  }
+
+  queuePair(
+    launchId: string,
+    requests: readonly [QueueTurnRequest, QueueTurnRequest],
+  ): [QueuedTurn, QueuedTurn] {
+    if (this.closing) throw new Error("The local runtime is shutting down.");
+    for (const request of requests) {
+      if (this.activeByConversation.has(request.conversationId)) {
+        throw new Error("A Duo conversation already has an active turn.");
+      }
+    }
+    if (requests[0].conversationId === requests[1].conversationId) {
+      throw new Error("A Duo requires two distinct conversations.");
+    }
+    const dependencies = {
+      store: this.store,
+      providers: this.providers,
+      hooks: this.hooks,
+      id: this.id,
+      now: () => this.now(),
+      clock: this.clock,
+    };
+    const resolved = requests.map((request) =>
+      resolveTurnRequest(dependencies, request)) as [
+        ReturnType<typeof resolveTurnRequest>,
+        ReturnType<typeof resolveTurnRequest>,
+      ];
+    const durable = this.store.beginPairedAgentTurns(
+      launchId,
+      [resolved[0].input, resolved[1].input],
+      this.now(),
+    );
+    const prepared: [PreparedTurnRequest, PreparedTurnRequest] = [
+      resolved[0].adopt(durable[0]),
+      resolved[1].adopt(durable[1]),
+    ];
+    return [
+      this.adoptPreparedTurn(prepared[0]),
+      this.adoptPreparedTurn(prepared[1]),
+    ];
+  }
+
+  private adoptPreparedTurn(prepared: PreparedTurnRequest): QueuedTurn {
     const { queued } = prepared;
     let active: ActiveTurn;
     const assistantStream = this.streams.create(
@@ -245,11 +294,90 @@ export class TurnController {
     return queued;
   }
 
+  async startPair(turnIds: readonly [string, string]): Promise<[boolean, boolean]> {
+    const active = turnIds.map((turnId) => this.activeByTurn.get(turnId)) as [
+      ActiveTurn | undefined,
+      ActiveTurn | undefined,
+    ];
+    if (
+      this.closing
+      || !active[0]
+      || !active[1]
+      || active[0].settled
+      || active[1].settled
+    ) return [false, false];
+    const firstActive = active[0];
+    const secondActive = active[1];
+
+    this.beginStart(firstActive);
+    this.beginStart(secondActive);
+    const ready = await Promise.all([
+      this.awaitProviderStartReady(firstActive),
+      this.awaitProviderStartReady(secondActive),
+    ]);
+    if (!ready[0] || !ready[1]) {
+      for (const sibling of [firstActive, secondActive]) {
+        if (!sibling.settled) {
+          this.settle(
+            sibling,
+            "cancelled",
+            "turn-start-failed",
+            "The paired provider did not become ready to start.",
+          );
+        }
+      }
+      return [false, false];
+    }
+
+    const first = this.startProvider(firstActive);
+    if (!first) {
+      if (!secondActive.settled) {
+        this.settle(
+          secondActive,
+          "failed",
+          "turn-start-failed",
+          "The paired provider did not start.",
+        );
+      }
+      return [false, false];
+    }
+    const second = this.startProvider(secondActive);
+    if (!second) {
+      if (!firstActive.settled) {
+        this.providers.cancel(firstActive.conversation.id);
+        this.settle(
+          firstActive,
+          "cancelled",
+          "turn-start-failed",
+          "The paired provider did not start.",
+        );
+      }
+    }
+    return [first, second];
+  }
+
   start(turnId: string): boolean {
     const active = this.activeByTurn.get(turnId);
     if (!active || active.settled || this.closing) return false;
+    this.beginStart(active);
+
+    const priorProviderCleanup = this.providerCleanupBarriers.get(
+      active.conversation.id,
+    );
+    if (priorProviderCleanup) {
+      this.track(priorProviderCleanup
+        .catch(() => undefined)
+        .then(() => {
+          this.captureBeforeAndStartProvider(active);
+        }));
+      return true;
+    }
+    return this.captureBeforeAndStartProvider(active);
+  }
+
+  private beginStart(active: ActiveTurn): void {
     const now = this.now();
-    active.turn = this.store.updateAgentTurnLifecycle(turnId, {
+    active.turn = this.store.updateAgentTurnLifecycle(active.turn.id, {
       status: "starting",
       startedAt: now,
       updatedAt: now,
@@ -280,19 +408,20 @@ export class TurnController {
       this.providers.cancel(active.conversation.id);
       this.settle(active, "failed", "turn-timeout", "The agent turn timed out.");
     }, this.turnTimeoutMs);
+  }
 
+  private async awaitProviderStartReady(active: ActiveTurn): Promise<boolean> {
     const priorProviderCleanup = this.providerCleanupBarriers.get(
       active.conversation.id,
     );
-    if (priorProviderCleanup) {
-      this.track(priorProviderCleanup
-        .catch(() => undefined)
-        .then(() => {
-          this.captureBeforeAndStartProvider(active);
-        }));
-      return true;
+    if (priorProviderCleanup) await priorProviderCleanup.catch(() => undefined);
+    if (active.settled || this.closing) return false;
+    const preCapture = this.artifacts.captureBefore(active);
+    if (preCapture) {
+      active.gitBeforeCapture = preCapture;
+      await preCapture;
     }
-    return this.captureBeforeAndStartProvider(active);
+    return !active.settled && !this.closing;
   }
 
   private captureBeforeAndStartProvider(active: ActiveTurn): boolean {

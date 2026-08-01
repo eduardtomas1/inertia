@@ -12,6 +12,7 @@ import type {
   CheckpointSummary,
   Conversation,
   ModelSelection,
+  MessageSendAcceptance,
   Project,
   ProviderId,
   ProviderMaintenanceProviderId,
@@ -83,7 +84,7 @@ export interface WorkspaceSceneActions {
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
     skillIds?: readonly string[],
-  ) => Promise<void>;
+  ) => Promise<MessageSendAcceptance | null>;
   listSkills: (forceReload?: boolean) => Promise<void>;
   toggleSkill: (skill: AgentSkillSummary) => void;
   clearSelectedSkills: () => void;

@@ -21,6 +21,8 @@ import type {
   TurnGitArtifactStatus,
   TurnGitPatchState,
   WorkspaceRun,
+  DuoDispatchState,
+  DuoLaunchState,
 } from "../../shared/contracts";
 import type { ModelBackendDefault } from "../../shared/backend-profile-settings";
 import type { PersistedProviderMetadata } from "../provider/metadata";
@@ -95,6 +97,28 @@ export interface AgentTurnRow {
   association: AgentTurnAssociation;
   created_at: string;
   updated_at: string;
+}
+
+export interface PairedLaunchRow {
+  id: string;
+  status: DuoLaunchState;
+  cancel_requested: 0 | 1;
+  failure_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PairedLaunchSideRow {
+  launch_id: string;
+  ordinal: 0 | 1;
+  project_id: string;
+  planned_conversation_id: string;
+  conversation_id: string | null;
+  turn_id: string | null;
+  planned_worktree_path: string | null;
+  planned_branch: string | null;
+  owns_worktree: 0 | 1;
+  dispatch_state: DuoDispatchState;
 }
 
 export interface TurnGitArtifactRow {

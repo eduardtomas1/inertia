@@ -1,6 +1,7 @@
 import type {
   DiffReversalOperation,
   DiffReversalValidation,
+  GitPullRequestCapability,
   TurnGitArtifactFile,
 } from "../../shared/contracts";
 
@@ -58,6 +59,8 @@ export interface GitRepositoryStatus {
   upstream: string | null;
   ahead: number;
   behind: number;
+  hasRemote: boolean;
+  pullRequest: GitPullRequestCapability;
   files: GitChangedFile[];
   insertions: number;
   deletions: number;

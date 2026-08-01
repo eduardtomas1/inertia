@@ -9,35 +9,35 @@ import {
 import type {
   AppSettings,
   AppSnapshot,
-  ChatAttachment,
   ServerEvent,
-  TurnRequestContext,
 } from "@shared/contracts";
 import {
   clearMultiSpawnPreset,
+  clearPendingMultiSpawnLaunchId,
   multiSpawnConversationPayload,
+  readPendingMultiSpawnLaunchId,
   validateMultiSpawnDraft,
   writeMultiSpawnPreset,
+  writePendingMultiSpawnLaunchId,
   type MultiSpawnDraft,
 } from "../utils/multiSpawn";
 import { resultEvent } from "../lib/runtimeCommands";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 
-interface CreatedSide {
-  index: 0 | 1;
-  conversationId: string;
-  title: string;
-}
-
-interface CreationFailure {
-  message: string;
-  deliveryAmbiguous: boolean;
-}
+type DuoPreparedResult = Extract<
+  Extract<ServerEvent, { type: "request.result" }>["result"],
+  { kind: "duo.prepared" }
+>;
+type DuoStatusResult = Extract<
+  Extract<ServerEvent, { type: "request.result" }>["result"],
+  { kind: "duo.status" }
+>;
 
 export interface MultiSpawnController {
   open: boolean;
   submitting: boolean;
+  cancelling: boolean;
   error: string | null;
   openDialog: () => void;
   closeDialog: () => void;
@@ -47,31 +47,54 @@ export interface MultiSpawnController {
 function errorMessage(error: unknown): string {
   return error instanceof Error
     ? error.message
-    : "That chat could not be launched.";
+    : "That duo could not be launched.";
 }
 
-function partialFailureMessage(
-  created: readonly CreatedSide[],
-  failures: readonly string[],
-): string {
-  const createdNames = created.map(({ title }) => `“${title}”`).join(" and ");
-  const summary = created.length === 2
-    ? "Both chat shells were created. One detail needs attention."
-    : `Only ${createdNames} was created.`;
-  return `${summary} ${failures.join(" ")}`;
+function reconciliationMessage(detail: string): string {
+  return "The connection changed while Inertia was preparing the duo. "
+    + "The launch will not be retried automatically. Refresh to reconcile its "
+    + `two chats safely. ${detail}`;
 }
 
-function reconciliationMessage(failures: readonly string[]): string {
-  return "The connection changed while Inertia was creating the duo. "
-    + "Refresh before trying again so an acknowledged chat is not duplicated. "
-    + failures.join(" ");
+function launchStatusMessage(status: DuoStatusResult): string | null {
+  if (status.state === "running") return null;
+  if (status.error) return status.error;
+  if (status.state === "cancelled") {
+    return "The duo launch was cancelled before both providers began.";
+  }
+  if (status.state === "interrupted" || status.state === "recovery-required") {
+    return "The duo needs recovery after an interrupted launch. Both chats remain visible; refresh before starting new work.";
+  }
+  if (status.state === "failed") {
+    return "Neither side will be retried automatically. Open the two saved chats to inspect the launch failure.";
+  }
+  if (status.state === "prepared") {
+    return "Both chats are saved and idle. The ambiguous launch was not dispatched automatically; open the saved chats to recover or start again deliberately.";
+  }
+  return `The duo is ${status.state}. Refresh before starting another launch.`;
+}
+
+function launchNeedsFurtherReconciliation(status: DuoStatusResult): boolean {
+  return status.state === "preparing" || status.state === "dispatching";
+}
+
+function orderedPreparedSides(result: DuoPreparedResult): DuoPreparedResult["sides"] {
+  const ordered = [...result.sides].sort((left, right) =>
+    left.ordinal - right.ordinal);
+  if (
+    ordered.length !== 2
+    || ordered[0]?.ordinal !== 0
+    || ordered[1]?.ordinal !== 1
+  ) {
+    throw new Error("The local service returned an invalid duo assignment.");
+  }
+  return ordered as DuoPreparedResult["sides"];
 }
 
 export function useMultiSpawn({
   snapshot,
   settings,
   run,
-  sendMessage,
   splitSelectionTransitionsRef,
   updateSplitConversationId,
   showWorkspace,
@@ -86,14 +109,6 @@ export function useMultiSpawn({
     key: string,
     command: CommandWithoutId,
   ) => Promise<ServerEvent>;
-  sendMessage: (
-    conversationId: string,
-    content: string,
-    attachments: ChatAttachment[],
-    context?: TurnRequestContext,
-    skillIds?: readonly string[],
-    activate?: boolean,
-  ) => Promise<void>;
   splitSelectionTransitionsRef: MutableRefObject<number>;
   updateSplitConversationId: (conversationId: string | null) => void;
   showWorkspace: () => void;
@@ -104,11 +119,16 @@ export function useMultiSpawn({
 }): MultiSpawnController {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef(false);
-  const activateCreatedConversations = useCallback(async (
+  const cancellingRef = useRef(false);
+  const activeLaunchIdRef = useRef<string | null>(null);
+  const cancelRequestedRef = useRef(false);
+
+  const activatePreparedConversations = useCallback(async (
     primaryConversationId: string,
-    secondaryConversationId: string | null,
+    secondaryConversationId: string,
   ): Promise<void> => {
     splitSelectionTransitionsRef.current += 1;
     try {
@@ -135,144 +155,206 @@ export function useMultiSpawn({
     updateSplitConversationId,
   ]);
 
+  const reconcilePendingLaunch = useCallback(async (
+    launchId: string,
+  ): Promise<void> => {
+    try {
+      const event = resultEvent(await run("multi-spawn:status", {
+        type: "duo.status",
+        payload: { launchId },
+      }));
+      if (event.result.kind !== "duo.status") {
+        throw new Error("The local service returned an unexpected duo status.");
+      }
+      const message = launchStatusMessage(event.result);
+      if (!launchNeedsFurtherReconciliation(event.result)) {
+        clearPendingMultiSpawnLaunchId(window.localStorage);
+      }
+      if (message) setError(message);
+    } catch (caught) {
+      if (runtimeCommandDelivery(caught) === "rejected") {
+        clearPendingMultiSpawnLaunchId(window.localStorage);
+      }
+      setError(
+        "A previous duo launch could not be reconciled yet. Refresh before launching another pair.",
+      );
+    }
+  }, [run]);
+
   const openDialog = useCallback(() => {
     if (!snapshot?.activeProjectId || submittingRef.current) return;
     setError(null);
     setOpen(true);
-  }, [snapshot?.activeProjectId]);
+    const pendingLaunchId = readPendingMultiSpawnLaunchId(window.localStorage);
+    if (pendingLaunchId) void reconcilePendingLaunch(pendingLaunchId);
+  }, [reconcilePendingLaunch, snapshot?.activeProjectId]);
+
+  const cancelActiveLaunch = useCallback(async (): Promise<void> => {
+    const launchId = activeLaunchIdRef.current;
+    if (!launchId || cancellingRef.current) return;
+    cancelRequestedRef.current = true;
+    cancellingRef.current = true;
+    setCancelling(true);
+    setError(null);
+    try {
+      const event = resultEvent(await run("multi-spawn:cancel", {
+        type: "duo.cancel",
+        payload: { launchId },
+      }));
+      if (event.result.kind !== "duo.status") {
+        throw new Error("The local service returned an unexpected cancellation response.");
+      }
+      if (!launchNeedsFurtherReconciliation(event.result)) {
+        clearPendingMultiSpawnLaunchId(window.localStorage);
+      }
+      setOpen(false);
+      setActionError(launchStatusMessage(event.result));
+      focusWorkspace();
+    } catch (caught) {
+      const message = runtimeCommandDelivery(caught) === "ambiguous"
+        ? reconciliationMessage("Cancellation delivery was not confirmed.")
+        : errorMessage(caught);
+      setOpen(false);
+      setActionError(message);
+      focusWorkspace();
+    } finally {
+      cancellingRef.current = false;
+      setCancelling(false);
+    }
+  }, [focusWorkspace, run, setActionError]);
 
   const closeDialog = useCallback(() => {
-    if (submittingRef.current) return;
+    if (submittingRef.current) {
+      void cancelActiveLaunch();
+      return;
+    }
     setError(null);
     setOpen(false);
-  }, []);
+  }, [cancelActiveLaunch]);
 
   const submit = useCallback(async (draft: MultiSpawnDraft): Promise<void> => {
     if (submittingRef.current || !snapshot) return;
+    const pendingLaunchId = readPendingMultiSpawnLaunchId(window.localStorage);
+    if (pendingLaunchId) {
+      setError("Reconciling the previous duo before accepting another launch.");
+      await reconcilePendingLaunch(pendingLaunchId);
+      return;
+    }
     const validationError = validateMultiSpawnDraft(draft);
     if (validationError) {
       setError(validationError);
       return;
     }
+    const launchId = crypto.randomUUID();
+    activeLaunchIdRef.current = launchId;
+    cancelRequestedRef.current = false;
     submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     setActionError(null);
+    if (!writePendingMultiSpawnLaunchId(window.localStorage, launchId)) {
+      activeLaunchIdRef.current = null;
+      submittingRef.current = false;
+      setSubmitting(false);
+      setError(
+        "This browser cannot save a safe Duo recovery identity, so neither chat was launched.",
+      );
+      return;
+    }
 
+    let prepared = false;
     try {
-      const creations: (
-        | { status: "fulfilled"; value: CreatedSide }
-        | { status: "rejected"; reason: CreationFailure }
-      )[] = [];
-      for (const [index, side] of draft.sides.entries()) {
-        try {
-          const event = resultEvent(await run(
-            `multi-spawn:create:${index}`,
+      const prepareEvent = resultEvent(await run("multi-spawn:prepare", {
+        type: "duo.prepare",
+        payload: {
+          launchId,
+          prompt: draft.prompt.trim(),
+          sides: [
             {
-              type: "conversation.create",
-              payload: multiSpawnConversationPayload(side, settings),
+              ...multiSpawnConversationPayload(draft.sides[0], settings),
+              activate: false,
             },
-          ));
-          if (event.result.kind !== "conversation.created") {
-            throw new Error("The local service returned an unexpected chat response.");
-          }
-          creations.push({ status: "fulfilled", value: {
-            index: index as 0 | 1,
-            conversationId: event.result.conversationId,
-            title: side.title.trim(),
-          } });
-        } catch (reason) {
-          const delivery = runtimeCommandDelivery(reason);
-          creations.push({ status: "rejected", reason: {
-            message: errorMessage(reason),
-            deliveryAmbiguous: delivery === "ambiguous" || delivery === null,
-          } });
-        }
+            {
+              ...multiSpawnConversationPayload(draft.sides[1], settings),
+              activate: false,
+            },
+          ],
+        },
+      }));
+      if (prepareEvent.result.kind !== "duo.prepared") {
+        throw new Error("The local service returned an unexpected duo response.");
       }
-      const created = creations.flatMap((result) =>
-        result.status === "fulfilled" ? [result.value] : []);
-      const creationFailures = creations.flatMap((result) =>
-        result.status === "rejected" ? [result.reason.message] : []);
-      const requiresReconciliation = creations.some((result) =>
-        result.status === "rejected" && result.reason.deliveryAmbiguous);
-      if (created.length === 0) {
-        const message = creationFailures.join(" ")
-          || "Neither chat could be created.";
-        if (requiresReconciliation) {
-          setOpen(false);
-          setActionError(reconciliationMessage([message]));
-          focusWorkspace();
-        } else {
-          setError(message);
-        }
-        return;
-      }
+      prepared = true;
+      const sides = orderedPreparedSides(prepareEvent.result);
+      if (cancelRequestedRef.current) return;
 
-      const ordered = [...created].sort((left, right) =>
-        left.index - right.index);
-      const launchFailures = [...creationFailures];
-      // Keep an unrelated unsent draft intact until at least one durable duo
-      // chat exists. From this point the workspace is intentionally switching.
+      // The prepare receipt proves both conversation shells and queued turns
+      // are durable. Only now may local navigation discard an unrelated draft.
       discardDraftConversation();
-      try {
-        await activateCreatedConversations(
-          ordered[0]!.conversationId,
-          ordered[1]?.conversationId ?? null,
-        );
-      } catch (activationError) {
-        launchFailures.push(
-          `Workspace: ${errorMessage(activationError)}`,
-        );
-      }
+      await activatePreparedConversations(
+        sides[0].conversationId,
+        sides[1].conversationId,
+      );
       setOpen(false);
       focusWorkspace();
 
-      const sends = await Promise.allSettled(ordered.map((side) =>
-        sendMessage(
-          side.conversationId,
-          draft.prompt.trim(),
-          [],
-          undefined,
-          undefined,
-          false,
-        )));
-      const sendFailures = sends.flatMap((result, index) =>
-        result.status === "rejected"
-          ? [`${ordered[index]!.title}: ${errorMessage(result.reason)}`]
-          : []);
-      const failures = [...launchFailures, ...sendFailures];
-      if (requiresReconciliation) {
-        failures.unshift(
-          "Refresh before recreating the missing chat because its delivery was not confirmed.",
-        );
-      }
       const presetStored = draft.rememberPreset
         ? writeMultiSpawnPreset(window.localStorage, draft)
         : clearMultiSpawnPreset(window.localStorage);
       if (!presetStored) {
-        failures.push(
+        setActionError(
           draft.rememberPreset
-            ? "The default duo could not be saved locally."
-            : "The previous default duo could not be cleared locally.",
+            ? "The duo is prepared, but its default pairing could not be saved locally."
+            : "The duo is prepared, but the previous default pairing could not be cleared locally.",
         );
       }
-      if (failures.length > 0) {
-        setActionError(partialFailureMessage(ordered, failures));
+      if (cancelRequestedRef.current) return;
+
+      const dispatchEvent = resultEvent(await run("multi-spawn:dispatch", {
+        type: "duo.dispatch",
+        payload: { launchId },
+      }));
+      if (dispatchEvent.result.kind !== "duo.status") {
+        throw new Error("The local service returned an unexpected dispatch response.");
       }
+      const launchMessage = launchStatusMessage(dispatchEvent.result);
+      if (dispatchEvent.result.state === "running") {
+        clearPendingMultiSpawnLaunchId(window.localStorage);
+      }
+      if (launchMessage) setActionError(launchMessage);
     } catch (caught) {
-      const message = errorMessage(caught);
-      setError(message);
-      setActionError(message);
+      const delivery = runtimeCommandDelivery(caught);
+      if (!prepared && (delivery === "ambiguous" || delivery === null)) {
+        setOpen(false);
+        setActionError(reconciliationMessage(errorMessage(caught)));
+        focusWorkspace();
+        return;
+      }
+      if (!prepared) {
+        clearPendingMultiSpawnLaunchId(window.localStorage);
+        setError(errorMessage(caught));
+        return;
+      }
+      setOpen(false);
+      setActionError(
+        delivery === "ambiguous" || delivery === null
+          ? reconciliationMessage(errorMessage(caught))
+          : `Both chats are saved and remain idle. ${errorMessage(caught)}`,
+      );
+      focusWorkspace();
     } finally {
+      if (activeLaunchIdRef.current === launchId) {
+        activeLaunchIdRef.current = null;
+      }
       submittingRef.current = false;
       setSubmitting(false);
     }
   }, [
-    activateCreatedConversations,
+    activatePreparedConversations,
     discardDraftConversation,
     focusWorkspace,
     run,
-    sendMessage,
+    reconcilePendingLaunch,
     setActionError,
     settings,
     snapshot,
@@ -281,6 +363,7 @@ export function useMultiSpawn({
   return {
     open,
     submitting,
+    cancelling,
     error,
     openDialog,
     closeDialog,

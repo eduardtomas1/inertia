@@ -40,6 +40,13 @@ export {
   pullRepository,
   pushCurrentBranch,
 } from "./git/remotes";
+export {
+  inspectGitRemoteRouting,
+  parseGitRemoteWebTarget,
+  type GitPullRequestTarget,
+  type GitRemoteRoutingInspection,
+  type GitRemoteWebTarget,
+} from "./git/remote-routing";
 export { cleanupReversalOperations } from "./git/reversal-registry-adapter";
 export {
   inspectDiffSelection,

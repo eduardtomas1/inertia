@@ -67,6 +67,18 @@ describe("runtime command delivery policy", () => {
       timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "ambiguous",
     });
+    expect(runtimeCommandPolicy("duo.prepare")).toEqual({
+      timeoutMs: GIT_MUTATION_REQUEST_TIMEOUT_MS,
+      timeoutDelivery: "ambiguous",
+    });
+    expect(runtimeCommandPolicy("duo.dispatch")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "ambiguous",
+    });
+    expect(runtimeCommandPolicy("duo.status")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "rejected",
+    });
   });
 
   it("assigns an explicit supported timeout-delivery state to every mapped command", () => {

@@ -98,7 +98,7 @@ describe("useDraftConversation", () => {
         result: { kind: "conversation.created", conversationId },
       };
     });
-    const sendMessage = vi.fn(async () => undefined);
+    const sendMessage = vi.fn(async () => null);
     const hook = renderHook(() => useDraftConversation({
       snapshot: null,
       settings: defaultSettings,
@@ -364,7 +364,7 @@ describe("useDraftConversation", () => {
     const run = vi.fn(() => new Promise<ServerEvent>((resolve) => {
       settleCreation = resolve;
     }));
-    const sendMessage = vi.fn(async () => undefined);
+    const sendMessage = vi.fn(async () => null);
     const hook = renderHook(() => useDraftConversation({
       snapshot,
       settings: defaultSettings,
@@ -375,7 +375,7 @@ describe("useDraftConversation", () => {
     }));
     act(() => hook.result.current.start(projectId));
 
-    let sending!: Promise<void>;
+    let sending!: Promise<unknown>;
     act(() => {
       sending = hook.result.current.sendFromComposer(
         "Keep working in the chat I left.",

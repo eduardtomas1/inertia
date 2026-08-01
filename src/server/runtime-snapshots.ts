@@ -84,7 +84,8 @@ export function gitStatusSnapshot(
     upstream: status.upstream,
     ahead: status.ahead,
     behind: status.behind,
-    hasRemote: status.upstream !== null,
+    hasRemote: status.hasRemote,
+    pullRequest: status.pullRequest,
     files: changedFiles(status),
     insertions: status.insertions,
     deletions: status.deletions,
@@ -92,7 +93,25 @@ export function gitStatusSnapshot(
 }
 
 export function emptyGitStatusSnapshot(): GitStatusSnapshot {
-  return { isRepository: false, authorityRef: null, root: null, branch: null, upstream: null, ahead: 0, behind: 0, hasRemote: false, files: [], insertions: 0, deletions: 0 };
+  return {
+    isRepository: false,
+    authorityRef: null,
+    root: null,
+    branch: null,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    hasRemote: false,
+    pullRequest: {
+      available: false,
+      remoteName: null,
+      forge: null,
+      unavailableReason: "no-remotes",
+    },
+    files: [],
+    insertions: 0,
+    deletions: 0,
+  };
 }
 
 export function agentActivityKind(event: ProviderActivityEvent): AgentActivity["kind"] {

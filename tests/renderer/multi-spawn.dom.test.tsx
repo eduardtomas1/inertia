@@ -27,13 +27,18 @@ import { MultiSpawnDialog } from "../../src/renderer/src/components/MultiSpawnDi
 import { useMultiSpawn } from "../../src/renderer/src/hooks/useMultiSpawn";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
-import type { MultiSpawnDraft } from "../../src/renderer/src/utils/multiSpawn";
+import {
+  MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+  type MultiSpawnDraft,
+} from "../../src/renderer/src/utils/multiSpawn";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 
 const firstProjectId = "11111111-1111-4111-8111-111111111111";
 const secondProjectId = "22222222-2222-4222-8222-222222222222";
 const firstConversationId = "33333333-3333-4333-8333-333333333333";
 const secondConversationId = "44444444-4444-4444-8444-444444444444";
+const firstTurnId = "55555555-5555-4555-8555-555555555555";
+const secondTurnId = "66666666-6666-4666-8666-666666666666";
 const now = "2026-07-29T14:00:00.000Z";
 const browserLocalStorage = window.localStorage;
 
@@ -690,30 +695,48 @@ describe("multi-spawn", () => {
     expect(onOpenBackendSetup).toHaveBeenCalledWith("custom:team");
   });
 
-  it("creates both shells before selecting and starting them", async () => {
+  it("prepares both durable sides before selecting and dispatching them", async () => {
     const calls: string[] = [];
     const run = vi.fn(async (
       key: string,
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
       calls.push(key);
-      if (command.type === "conversation.create") {
-        const conversationId = command.payload.title === "First perspective"
-          ? firstConversationId
-          : secondConversationId;
+      if (command.type === "duo.prepare") {
         return {
           type: "request.result",
           requestId: crypto.randomUUID(),
-          result: { kind: "conversation.created", conversationId },
+          result: {
+            kind: "duo.prepared",
+            launchId: command.payload.launchId,
+            state: "prepared",
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+            ],
+          },
+        };
+      }
+      if (command.type === "duo.dispatch") {
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId: command.payload.launchId,
+            state: "running",
+            error: null,
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "started" },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "started" },
+            ],
+          },
         };
       }
       return {
         type: "request.ok",
         requestId: crypto.randomUUID(),
       };
-    });
-    const sendMessage = vi.fn(async (conversationId: string) => {
-      calls.push(`send:${conversationId}`);
     });
     const updateSplitConversationId = vi.fn();
     const focusWorkspace = vi.fn();
@@ -722,7 +745,6 @@ describe("multi-spawn", () => {
       snapshot,
       settings,
       run,
-      sendMessage,
       splitSelectionTransitionsRef: transitionRef,
       updateSplitConversationId,
       showWorkspace: vi.fn(),
@@ -735,149 +757,132 @@ describe("multi-spawn", () => {
 
     await act(async () => hook.result.current.submit(draft));
 
-    expect(calls.slice(0, 2).sort()).toEqual([
-      "multi-spawn:create:0",
-      "multi-spawn:create:1",
+    expect(calls).toEqual([
+      "multi-spawn:prepare",
+      "multi-spawn:select",
+      "multi-spawn:dispatch",
     ]);
-    expect(calls[2]).toBe("multi-spawn:select");
     expect(updateSplitConversationId).toHaveBeenCalledWith(
       secondConversationId,
     );
-    const creationPayloads = run.mock.calls.flatMap(([, command]) =>
-      command.type === "conversation.create" ? [command.payload] : []);
-    expect(creationPayloads).toMatchObject([
-      {
-        projectId: firstProjectId,
-        title: "First perspective",
-        activate: false,
-        accessMode: "supervised",
-        interactionMode: "build",
-        modelSelection: {
-          modelId: "gpt-5.6-sol",
-          reasoningEffort: "high",
-        },
+    const prepare = run.mock.calls.find(([, command]) =>
+      command.type === "duo.prepare")?.[1];
+    expect(prepare).toMatchObject({
+      type: "duo.prepare",
+      payload: {
+        prompt: "Compare this change.",
+        sides: [
+          {
+            projectId: firstProjectId,
+            title: "First perspective",
+            accessMode: "supervised",
+            interactionMode: "build",
+            modelSelection: {
+              modelId: "gpt-5.6-sol",
+              reasoningEffort: "high",
+            },
+          },
+          {
+            projectId: secondProjectId,
+            title: "Second perspective",
+            accessMode: "full",
+            interactionMode: "build",
+            modelSelection: {
+              modelId: "gpt-5.6-sol",
+              reasoningEffort: "high",
+            },
+          },
+        ],
       },
-      {
-        projectId: secondProjectId,
-        title: "Second perspective",
-        activate: false,
-        accessMode: "full",
-        interactionMode: "build",
-        modelSelection: {
-          modelId: "gpt-5.6-sol",
-          reasoningEffort: "high",
-        },
-      },
-    ]);
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    });
     expect(focusWorkspace).toHaveBeenCalledTimes(1);
-    expect(sendMessage).toHaveBeenCalledWith(
-      firstConversationId,
-      "Compare this change.",
-      [],
-      undefined,
-      undefined,
-      false,
-    );
   });
 
-  it("continues a surviving chat and reports a partial creation failure", async () => {
+  it("prompts neither side when atomic preparation rejects the second side", async () => {
     const run = vi.fn(async (
-      key: string,
+      _key: string,
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
-      if (key === "multi-spawn:create:1") {
-        throw new Error("Claude route unavailable.");
-      }
-      if (command.type === "conversation.create") {
-        return {
-          type: "request.result",
-          requestId: crypto.randomUUID(),
-          result: {
-            kind: "conversation.created",
-            conversationId: firstConversationId,
-          },
-        };
+      if (command.type === "duo.prepare") {
+        throw new RuntimeCommandError(
+          "Chat 2 route is unavailable. Neither chat was launched.",
+          "rejected",
+        );
       }
       return { type: "request.ok", requestId: crypto.randomUUID() };
     });
-    const sendMessage = vi.fn(async () => undefined);
     const setActionError = vi.fn();
-    const selection = nativeModelSelection({
-      providerId: "codex",
-      modelId: "gpt-5.6-sol",
-      reasoningEffort: "high",
-    });
+    const updateSplitConversationId = vi.fn();
+    const discardDraftConversation = vi.fn();
     const hook = renderHook(() => useMultiSpawn({
       snapshot,
       settings,
       run,
-      sendMessage,
       splitSelectionTransitionsRef: { current: 0 },
-      updateSplitConversationId: vi.fn(),
+      updateSplitConversationId,
       showWorkspace: vi.fn(),
       closeSidebar: vi.fn(),
       focusWorkspace: vi.fn(),
-      discardDraftConversation: vi.fn(),
+      discardDraftConversation,
       setActionError,
     }));
 
-    await act(async () => hook.result.current.submit({
-      prompt: "Review.",
-      rememberPreset: false,
-      sides: [
-        {
-          projectId: firstProjectId,
-          title: "Survivor",
-          selection,
-          accessMode: "supervised",
-          interactionMode: "build",
-        },
-        {
-          projectId: secondProjectId,
-          title: "Unavailable",
-          selection,
-          accessMode: "supervised",
-          interactionMode: "build",
-        },
-      ],
-    }));
+    await act(async () => hook.result.current.submit(multiSpawnDraft()));
 
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(setActionError).toHaveBeenLastCalledWith(
-      expect.stringContaining("Claude route unavailable."),
-    );
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(updateSplitConversationId).not.toHaveBeenCalled();
+    expect(discardDraftConversation).not.toHaveBeenCalled();
+    expect(hook.result.current.error).toContain("Neither chat was launched");
   });
 
-  it("ignores duplicate submission while the first duo is being created", async () => {
-    let releaseFirstCreation!: () => void;
-    const firstCreation = new Promise<void>((resolve) => {
-      releaseFirstCreation = resolve;
+  it("ignores duplicate submission while atomic preparation is pending", async () => {
+    let releasePreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
     });
     const run = vi.fn(async (
       key: string,
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
-      if (key === "multi-spawn:create:0") await firstCreation;
-      if (command.type === "conversation.create") {
+      if (command.type === "duo.prepare") {
+        await preparation;
         return {
           type: "request.result",
           requestId: crypto.randomUUID(),
           result: {
-            kind: "conversation.created",
-            conversationId: key.endsWith(":0")
-              ? firstConversationId
-              : secondConversationId,
+            kind: "duo.prepared",
+            launchId: command.payload.launchId,
+            state: "prepared",
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+            ],
           },
         };
       }
+      if (command.type === "duo.dispatch") {
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId: command.payload.launchId,
+            state: "running",
+            error: null,
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "started" },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "started" },
+            ],
+          },
+        };
+      }
+      expect(key).toBe("multi-spawn:select");
       return { type: "request.ok", requestId: crypto.randomUUID() };
     });
     const hook = renderHook(() => useMultiSpawn({
       snapshot,
       settings,
       run,
-      sendMessage: vi.fn(async () => undefined),
       splitSelectionTransitionsRef: { current: 0 },
       updateSplitConversationId: vi.fn(),
       showWorkspace: vi.fn(),
@@ -892,15 +897,145 @@ describe("multi-spawn", () => {
     await act(async () => {
       await duplicateSubmit;
       expect(run).toHaveBeenCalledTimes(1);
-      releaseFirstCreation();
+      releasePreparation();
       await firstSubmit;
     });
 
     expect(run.mock.calls.filter(([, command]) =>
-      command.type === "conversation.create")).toHaveLength(2);
+      command.type === "duo.prepare")).toHaveLength(1);
+    expect(run.mock.calls.filter(([, command]) =>
+      command.type === "duo.dispatch")).toHaveLength(1);
   });
 
-  it("closes for authoritative reconciliation after ambiguous creation", async () => {
+  it("cancels a launch in progress without dispatching either provider", async () => {
+    let releasePreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    let launchId = "";
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.prepare") {
+        launchId = command.payload.launchId;
+        await preparation;
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.prepared",
+            launchId,
+            state: "prepared",
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+            ],
+          },
+        };
+      }
+      if (command.type === "duo.cancel") {
+        expect(command.payload.launchId).toBe(launchId);
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId,
+            state: "cancelled",
+            error: null,
+            sides: [
+              { ordinal: 0, conversationId: null, turnId: null, dispatchState: "cancelled" },
+              { ordinal: 1, conversationId: null, turnId: null, dispatchState: "cancelled" },
+            ],
+          },
+        };
+      }
+      throw new Error(`Unexpected command: ${command.type}`);
+    });
+    const updateSplitConversationId = vi.fn();
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId,
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+    let submission!: Promise<void>;
+    act(() => {
+      hook.result.current.openDialog();
+      submission = hook.result.current.submit(multiSpawnDraft());
+    });
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+
+    act(() => hook.result.current.closeDialog());
+    await waitFor(() => expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.cancel")).toBe(true));
+    releasePreparation();
+    await act(async () => submission);
+
+    expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.dispatch")).toBe(false);
+    expect(updateSplitConversationId).not.toHaveBeenCalled();
+    expect(hook.result.current.open).toBe(false);
+  });
+
+  it("reconciles a persisted launch on restart without retrying it", async () => {
+    const launchId = "77777777-7777-4777-8777-777777777777";
+    window.localStorage.setItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+      launchId,
+    );
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      expect(command).toEqual({ type: "duo.status", payload: { launchId } });
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId,
+          state: "recovery-required",
+          error: "Review the two idle chats before starting new work.",
+          sides: [
+            { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "cancelled" },
+            { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "cancelled" },
+          ],
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+
+    await waitFor(() => expect(hook.result.current.error).toBe(
+      "Review the two idle chats before starting new work.",
+    ));
+    expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.prepare" || command.type === "duo.dispatch"))
+      .toBe(false);
+  });
+
+  it("closes for authoritative reconciliation after ambiguous preparation", async () => {
     const setActionError = vi.fn();
     const discardDraftConversation = vi.fn();
     const focusWorkspace = vi.fn();
@@ -911,7 +1046,6 @@ describe("multi-spawn", () => {
       snapshot,
       settings,
       run,
-      sendMessage: vi.fn(async () => undefined),
       splitSelectionTransitionsRef: { current: 0 },
       updateSplitConversationId: vi.fn(),
       showWorkspace: vi.fn(),
@@ -927,7 +1061,7 @@ describe("multi-spawn", () => {
 
     expect(hook.result.current.open).toBe(false);
     expect(setActionError).toHaveBeenLastCalledWith(
-      expect.stringContaining("Refresh before trying again"),
+      expect.stringContaining("will not be retried automatically"),
     );
     expect(discardDraftConversation).not.toHaveBeenCalled();
     expect(focusWorkspace).toHaveBeenCalledTimes(1);

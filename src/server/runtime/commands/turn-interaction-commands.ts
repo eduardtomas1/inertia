@@ -86,14 +86,21 @@ export function createTurnInteractionCommandHandler(
             conversation.id,
             command.payload.content,
           );
-          if (!followUpMessage) {
+          if (!followUpMessage?.turnId) {
             throw new RuntimeRequestError(
               "This active agent route cannot accept a follow-up.",
             );
           }
           dependencies.send(socket, {
-            type: "request.ok",
+            type: "request.result",
             requestId: command.requestId,
+            result: {
+              kind: "message.accepted",
+              conversationId: followUpMessage.conversationId,
+              turnId: followUpMessage.turnId,
+              userMessageId: followUpMessage.id,
+              disposition: "follow-up",
+            },
           });
           dependencies.broadcast({
             type: "conversation.message.persisted",
@@ -358,10 +365,24 @@ export function createTurnInteractionCommandHandler(
               title: command.payload.content.slice(0, 64),
             });
           }
-          dependencies.send(socket, {
-            type: "request.ok",
-            requestId: command.requestId,
-          });
+          dependencies.send(socket, queued
+            ? {
+                type: "request.result",
+                requestId: command.requestId,
+                result: {
+                  kind: "message.accepted",
+                  conversationId: queued.turn.conversationId,
+                  turnId: queued.turn.id,
+                  userMessageId: queued.message.id,
+                  disposition: "new-turn",
+                },
+              }
+            : {
+                // Provider-disabled desktop fixtures persist transcript-only
+                // messages and therefore have no authoritative turn to name.
+                type: "request.ok",
+                requestId: command.requestId,
+              });
           dependencies.broadcast({
             type: "conversation.detail.invalidated",
             conversationId: conversation.id,

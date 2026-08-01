@@ -19,6 +19,7 @@ import {
   isTimelineFocusDetail,
   TIMELINE_FOCUS_EVENT,
 } from "../../utils/timelineFocus";
+import { isTranscriptReaderNavigationKey } from "../../utils/transcriptNavigation";
 import {
   buildResponseTimeline,
   buildTimelineMinimapMarkers,
@@ -393,6 +394,10 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     previousTimeline.current = next;
     return next;
   }, [builtTimeline]);
+  const turnAnchorIndex = useMemo(() => props.turnAnchorId
+    ? timeline.findIndex((item) =>
+        item.kind === "turn" && item.turn.id === props.turnAnchorId)
+    : -1, [props.turnAnchorId, timeline]);
   const timelineRef = useRef(timeline);
   timelineRef.current = timeline;
   const previousComparableTurn = useMemo(() => {
@@ -513,6 +518,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const activeAnchorRestorations = useRef(new Map<string, number>());
   const manuallyAdjustedRows = useRef(new Set<string>());
   const layoutAnchorActive = useRef(false);
+  const turnAnchorActive = useRef(false);
+  const onTurnAnchorSettledRef = useRef(props.onTurnAnchorSettled);
+  const onTurnAnchorCancelledRef = useRef(props.onTurnAnchorCancelled);
+  onTurnAnchorSettledRef.current = props.onTurnAnchorSettled;
+  onTurnAnchorCancelledRef.current = props.onTurnAnchorCancelled;
   const cancelLayoutAnchorRestoration = useRef<(() => void) | null>(null);
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
     shouldAdjustTimelineScrollPosition({
@@ -522,8 +532,115 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       firstMeasurement: !instance.itemSizeCache.has(item.key),
       scrollDirection: instance.scrollDirection,
       manuallyAnchored: layoutAnchorActive.current
+        || turnAnchorActive.current
         || manuallyAdjustedRows.current.has(String(item.key)),
     });
+
+  useEffect(() => {
+    const turnId = props.turnAnchorId;
+    if (!turnId) return;
+    const anchorIndex = turnAnchorIndex;
+    if (anchorIndex < 0) return;
+    const scrollElement = props.scrollElementRef?.current;
+    const root = props.timelineElementRef?.current;
+    if (!scrollElement || !root) return;
+
+    cancelLayoutAnchorRestoration.current?.();
+    turnAnchorActive.current = true;
+    let finished = false;
+    let frame = 0;
+    let attempts = 0;
+    let stableFrames = 0;
+    const maximumSettleFrames = 30;
+    const settleUntil = performance.now() + 600;
+
+    const removeIntentListeners = (): void => {
+      scrollElement.removeEventListener("wheel", cancelForUserIntent);
+      scrollElement.removeEventListener("touchstart", cancelForUserIntent);
+      scrollElement.removeEventListener("pointerdown", cancelForUserIntent);
+      scrollElement.removeEventListener("keydown", cancelForUserIntent);
+    };
+    const finish = (settled: boolean): void => {
+      if (finished) return;
+      finished = true;
+      turnAnchorActive.current = false;
+      window.cancelAnimationFrame(frame);
+      removeIntentListeners();
+      if (settled) onTurnAnchorSettledRef.current?.(turnId);
+      else onTurnAnchorCancelledRef.current?.(turnId);
+    };
+    const settle = (): void => {
+      if (finished) return;
+      const row = findTurnElement(root, turnId);
+      if (!row) {
+        if (virtualized && attempts % 4 === 0) {
+          virtualizer.scrollToIndex(anchorIndex, {
+            align: "start",
+            behavior: "auto",
+          });
+        }
+        attempts += 1;
+        if (
+          attempts < maximumSettleFrames
+          && performance.now() < settleUntil
+        ) {
+          frame = window.requestAnimationFrame(settle);
+        } else {
+          finish(false);
+        }
+        return;
+      }
+      const currentOffset = row.getBoundingClientRect().top
+        - scrollElement.getBoundingClientRect().top;
+      const delta = currentOffset - 8;
+      if (Math.abs(delta) >= 0.5) scrollElement.scrollTop += delta;
+      stableFrames = Math.abs(delta) < 0.5 ? stableFrames + 1 : 0;
+      attempts += 1;
+      if (
+        stableFrames < 2
+        && attempts < maximumSettleFrames
+        && performance.now() < settleUntil
+      ) {
+        frame = window.requestAnimationFrame(settle);
+      } else {
+        finish(stableFrames >= 2);
+      }
+    };
+    function cancelForUserIntent(event: Event): void {
+      if (
+        event instanceof KeyboardEvent
+        && !isTranscriptReaderNavigationKey(event.key)
+      ) return;
+      if (event instanceof PointerEvent && event.target !== scrollElement) return;
+      finish(false);
+    }
+
+    scrollElement.addEventListener("wheel", cancelForUserIntent, { passive: true });
+    scrollElement.addEventListener("touchstart", cancelForUserIntent, { passive: true });
+    scrollElement.addEventListener("pointerdown", cancelForUserIntent);
+    scrollElement.addEventListener("keydown", cancelForUserIntent);
+    if (virtualized) {
+      virtualizer.scrollToIndex(anchorIndex, {
+        align: "start",
+        behavior: "auto",
+      });
+    }
+    frame = window.requestAnimationFrame(settle);
+    return () => {
+      if (finished) return;
+      finished = true;
+      turnAnchorActive.current = false;
+      window.cancelAnimationFrame(frame);
+      removeIntentListeners();
+    };
+  }, [
+    props.scrollElementRef,
+    props.timelineElementRef,
+    props.turnAnchorId,
+    turnAnchorIndex,
+    virtualized,
+    virtualizer,
+  ]);
   captureLayoutAnchorRef.current = () => {
     if (pendingLayoutAnchor.current) {
       if (!cancelLayoutAnchorRestoration.current) return;

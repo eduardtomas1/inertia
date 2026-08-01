@@ -51,6 +51,7 @@ export interface MultiSpawnDialogProps {
   snapshot: AppSnapshot | null;
   settings: AppSettings;
   submitting: boolean;
+  cancelling?: boolean;
   error: string | null;
   onClose: () => void;
   onSubmit: (draft: MultiSpawnDraft) => Promise<void>;
@@ -266,6 +267,7 @@ export function MultiSpawnDialog({
   snapshot,
   settings,
   submitting,
+  cancelling = false,
   error,
   onClose,
   onSubmit,
@@ -357,7 +359,7 @@ export function MultiSpawnDialog({
         // and unmount the trigger that should receive restored focus.
         event.stopImmediatePropagation();
         event.preventDefault();
-        if (!submitting) onClose();
+        if (!cancelling) onClose();
         return;
       }
       if (event.key !== "Tab" || !dialogRef.current) return;
@@ -375,7 +377,7 @@ export function MultiSpawnDialog({
     };
     document.addEventListener("keydown", handleKeyDown, true);
     return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose, open, submitting]);
+  }, [cancelling, onClose, open]);
 
   if (!open || !snapshot || !draft) return null;
 
@@ -501,7 +503,7 @@ export function MultiSpawnDialog({
           </span>
           <IconButton
             label="Close multi-spawn"
-            disabled={submitting}
+            disabled={cancelling}
             onClick={onClose}
           >
             <X size={16} />
@@ -590,10 +592,10 @@ export function MultiSpawnDialog({
             <button
               type="button"
               className="secondary-button"
-              disabled={submitting}
+              disabled={cancelling}
               onClick={onClose}
             >
-              Cancel
+              {cancelling ? "Cancelling…" : submitting ? "Cancel launch" : "Cancel"}
             </button>
             <button
               type="button"

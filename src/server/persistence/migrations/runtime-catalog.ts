@@ -897,6 +897,48 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         WHERE status IN ('queued', 'spawned', 'running', 'waiting');
       `,
     });
+    migrationExtensions.push({
+      name: "PersistAtomicDuoLaunches",
+      up: `
+        CREATE TABLE IF NOT EXISTS paired_launches (
+          id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+          status TEXT NOT NULL CHECK (status IN (
+            'preparing', 'prepared', 'dispatching', 'running', 'cancelled',
+            'failed', 'interrupted', 'recovery-required'
+          )),
+          cancel_requested INTEGER NOT NULL DEFAULT 0
+            CHECK (cancel_requested IN (0, 1)),
+          failure_message TEXT
+            CHECK (failure_message IS NULL OR length(failure_message) <= 2000),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (created_at <= updated_at)
+        );
+        CREATE TABLE IF NOT EXISTS paired_launch_sides (
+          launch_id TEXT NOT NULL
+            REFERENCES paired_launches(id) ON DELETE CASCADE,
+          ordinal INTEGER NOT NULL CHECK (ordinal IN (0, 1)),
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+          planned_conversation_id TEXT NOT NULL UNIQUE
+            CHECK (length(planned_conversation_id) BETWEEN 1 AND 200),
+          conversation_id TEXT UNIQUE
+            REFERENCES conversations(id) ON DELETE SET NULL,
+          turn_id TEXT UNIQUE REFERENCES agent_turns(id) ON DELETE SET NULL,
+          planned_worktree_path TEXT
+            CHECK (planned_worktree_path IS NULL OR length(planned_worktree_path) <= 4096),
+          planned_branch TEXT
+            CHECK (planned_branch IS NULL OR length(planned_branch) <= 255),
+          owns_worktree INTEGER NOT NULL DEFAULT 0
+            CHECK (owns_worktree IN (0, 1)),
+          dispatch_state TEXT NOT NULL DEFAULT 'pending' CHECK (dispatch_state IN (
+            'pending', 'claimed', 'started', 'failed', 'cancelled', 'uncertain'
+          )),
+          PRIMARY KEY (launch_id, ordinal)
+        );
+        CREATE INDEX IF NOT EXISTS paired_launches_status_updated_idx
+          ON paired_launches(status, updated_at ASC, id ASC);
+      `,
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

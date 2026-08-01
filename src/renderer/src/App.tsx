@@ -333,7 +333,6 @@ export default function App(): React.JSX.Element {
     snapshot: connection.snapshot,
     settings,
     run,
-    sendMessage: sendMessageToConversation,
     splitSelectionTransitionsRef,
     updateSplitConversationId,
     showWorkspace: () => setView("workspace"),

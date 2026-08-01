@@ -12,6 +12,7 @@ export * from "./contracts/agent-workflows";
 export * from "./contracts/app";
 export * from "./contracts/client-command";
 export * from "./contracts/conversation-detail";
+export * from "./contracts/duo";
 export * from "./contracts/events";
 export * from "./contracts/git";
 export * from "./contracts/workspace";

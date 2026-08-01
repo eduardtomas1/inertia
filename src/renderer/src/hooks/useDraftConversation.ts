@@ -9,6 +9,7 @@ import type {
   AppSettings,
   AppSnapshot,
   ChatAttachment,
+  MessageSendAcceptance,
   ClientCommand,
   Conversation,
   ModelSelection,
@@ -79,7 +80,7 @@ export function useDraftConversation({
     context?: TurnRequestContext,
     skillIds?: readonly string[],
     activate?: boolean,
-  ) => Promise<void>;
+  ) => Promise<MessageSendAcceptance | null>;
   persistedConversationId: string | null;
   updatePersistedConversation: (
     conversationId: string,
@@ -354,9 +355,9 @@ export function useDraftConversation({
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
     skillIds?: readonly string[],
-  ): Promise<boolean> => {
+  ): Promise<MessageSendAcceptance | null> => {
     const sendingDraft = draftRef.current;
-    if (!sendingDraft) return false;
+    if (!sendingDraft) return null;
     const creation = await run("conversation.create:draft", {
       type: "conversation.create",
       payload: {
@@ -398,7 +399,7 @@ export function useDraftConversation({
     if (stillOwnsDraft) replaceDraft(materializedState, false);
 
     try {
-      await sendMessage(
+      const acceptance = await sendMessage(
         conversationId,
         content,
         attachments,
@@ -412,7 +413,7 @@ export function useDraftConversation({
       ) {
         replaceDraft(null, false);
       }
-      return true;
+      return acceptance;
     } catch (error) {
       if (
         draftRef.current?.materialized?.conversationId === conversationId
@@ -436,7 +437,7 @@ export function useDraftConversation({
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
     skillIds?: readonly string[],
-  ): Promise<void> => {
+  ): Promise<MessageSendAcceptance | null> => {
     const current = draftRef.current;
     if (current?.materialized) {
       if (current.materialized.awaitingReconciliation) {
@@ -445,7 +446,7 @@ export function useDraftConversation({
         );
       }
       try {
-        await sendMessage(
+        const acceptance = await sendMessage(
           current.materialized.conversationId,
           content,
           attachments,
@@ -462,6 +463,7 @@ export function useDraftConversation({
         ) {
           replaceDraft(null, false);
         }
+        return acceptance;
       } catch (error) {
         if (
           draftRef.current?.materialized?.conversationId
@@ -479,19 +481,17 @@ export function useDraftConversation({
         }
         throw error;
       }
-      return;
     }
     if (persistedConversationId && !current) {
-      await sendMessage(
+      return await sendMessage(
         persistedConversationId,
         content,
         attachments,
         context,
         skillIds,
       );
-      return;
     }
-    await materializeAndSend(content, attachments, context, skillIds);
+    return await materializeAndSend(content, attachments, context, skillIds);
   };
 
   const updateConversation = async (change: ConversationUpdate): Promise<void> => {

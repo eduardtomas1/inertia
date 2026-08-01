@@ -33,6 +33,19 @@ const trustedAttachment: ChatAttachment = {
   path: "/private/runtime/request.png",
 };
 
+function queuedTurn(
+  turnId = "44444444-4444-4444-8444-444444444444",
+) {
+  return {
+    turn: { id: turnId, conversationId },
+    message: {
+      id: "99999999-9999-4999-8999-999999999999",
+      conversationId,
+      turnId,
+    },
+  };
+}
+
 function messageCommand(
   activate?: boolean,
 ): Extract<ClientCommand, { type: "message.send" }> {
@@ -238,6 +251,17 @@ describe("message attachment ownership transfer", () => {
       type: "conversation.message.persisted",
       message: followUp,
     });
+    expect(handlerDependencies.send).toHaveBeenCalledWith(expect.anything(), {
+      type: "request.result",
+      requestId: command.requestId,
+      result: {
+        kind: "message.accepted",
+        conversationId,
+        turnId: followUp.turnId,
+        userMessageId: followUp.id,
+        disposition: "follow-up",
+      },
+    });
     expect(handlerDependencies.broadcast).not.toHaveBeenCalledWith({
       type: "conversation.detail.invalidated",
       conversationId,
@@ -272,9 +296,7 @@ describe("message attachment ownership transfer", () => {
       .mockImplementationOnce(() => {
         throw new Error("queue preparation rejected");
       })
-      .mockImplementationOnce(() => ({
-        turn: { id: "44444444-4444-4444-8444-444444444444" },
-      }));
+      .mockImplementationOnce(() => queuedTurn());
     const handlerDependencies = dependencies({
       queue,
       relinquishAll,
@@ -329,9 +351,7 @@ describe("message attachment ownership transfer", () => {
       path: "/workspace/project/.codex/skills/review/SKILL.md",
     };
     const resolveSkills = vi.fn(async () => [skill]);
-    const queue = vi.fn(() => ({
-      turn: { id: "44444444-4444-4444-8444-444444444444" },
-    }));
+    const queue = vi.fn(() => queuedTurn());
     const handlerDependencies = dependencies({
       queue,
       relinquishAll: vi.fn(async () => undefined),
@@ -414,9 +434,7 @@ describe("message attachment ownership transfer", () => {
     try {
       await execFileAsync("git", ["init", "--quiet", repository]);
       await writeFile(join(repository, "request.txt"), "pending\n");
-      const queue = vi.fn(() => ({
-        turn: { id: "44444444-4444-4444-8444-444444444444" },
-      }));
+      const queue = vi.fn(() => queuedTurn());
       const handlerDependencies = dependencies({
         queue,
         relinquishAll: vi.fn(async () => undefined),
@@ -449,9 +467,7 @@ describe("message attachment ownership transfer", () => {
 
   it("does not release after an authoritative turn accepts ownership", async () => {
     const relinquishAll = vi.fn(async () => undefined);
-    const queue = vi.fn(() => ({
-      turn: { id: "44444444-4444-4444-8444-444444444444" },
-    }));
+    const queue = vi.fn(() => queuedTurn());
     const handlerDependencies = dependencies({ queue, relinquishAll });
     const handler = createTurnInteractionCommandHandler(handlerDependencies);
 
@@ -462,12 +478,21 @@ describe("message attachment ownership transfer", () => {
     expect(handlerDependencies.turns.start).toHaveBeenCalledWith(
       "44444444-4444-4444-8444-444444444444",
     );
+    expect(handlerDependencies.send).toHaveBeenCalledWith(expect.anything(), {
+      type: "request.result",
+      requestId: messageCommand().requestId,
+      result: {
+        kind: "message.accepted",
+        conversationId,
+        turnId: "44444444-4444-4444-8444-444444444444",
+        userMessageId: "99999999-9999-4999-8999-999999999999",
+        disposition: "new-turn",
+      },
+    });
   });
 
   it("preserves a background conversation when queueing a split-pane turn", async () => {
-    const queue = vi.fn(() => ({
-      turn: { id: "44444444-4444-4444-8444-444444444444" },
-    }));
+    const queue = vi.fn(() => queuedTurn());
     const handlerDependencies = dependencies({
       queue,
       relinquishAll: vi.fn(async () => undefined),
@@ -485,9 +510,9 @@ describe("message attachment ownership transfer", () => {
 
   it("settles an accepted queued turn if acknowledgement work throws before start", async () => {
     const relinquishAll = vi.fn(async () => undefined);
-    const queue = vi.fn(() => ({
-      turn: { id: "55555555-5555-4555-8555-555555555555" },
-    }));
+    const queue = vi.fn(() => queuedTurn(
+      "55555555-5555-4555-8555-555555555555",
+    ));
     const handlerDependencies = dependencies({
       queue,
       relinquishAll,

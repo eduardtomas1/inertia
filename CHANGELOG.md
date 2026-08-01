@@ -4,6 +4,31 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.20 — 2026-08-01
+
+### Remote Companion fails closed at every authority edge
+
+- Disable, revoke, permission reduction, replacement pairing, screen lock, disconnect, and shutdown serialize through durable authority-reduction markers. New sessions and late mutations remain blocked until the exact reduced state is safely persisted.
+- Pairing replacement revalidates the same live request after the durable marker and before changing a key or grant, so an expired or disconnected route cannot become authorized after the fact.
+- Remote prompts recheck the exact device, session, route, project, conversation, supervised access mode, and runtime state immediately before posting. The self-hosting docs now state plainly that Inertia neither bundles nor operates a public relay or companion site, and that transcript sanitization is not semantic data-loss prevention.
+
+### Runtime reads recover without replaying writes
+
+- Retry-safe reads keep the local socket alive through bounded slow operations, while ambiguous mutations reconnect and hydrate authoritative state before the user can retry.
+- Workspace Git discovery, diffing, turn comparison, secure-root checks, and renderer authority issuance share aggregate deadlines. Stale generations cannot replace newer scans, and work that finishes after a deadline cannot create late authorities or update the UI.
+- Supervised/access-mode and provider-route changes are acknowledged before a prompt is sent. Cursor's auto-edit mode now preserves its real approval semantics instead of being flattened into another access label.
+- Packaged shutdown destroys the renderer only after owned runtime cleanup, while Remote Companion rejects authority mutations admitted after shutdown starts and still drains reductions already in flight.
+
+### Long workspaces stay clearer and lighter
+
+- Conversation minimap markers grow into a readable request preview on hover or keyboard focus without duplicate tooltips or unstable scroll anchoring.
+- The active model name uses a stronger animated colour wave with explicit reduced-motion and forced-colour fallbacks.
+- Files, Git state, workspace mentions, provider controls, and split panes initialize lazily and keep their state attached to the exact conversation that requested it.
+
+### Release confidence
+
+- Architecture and lint checks, four TypeScript projects, 2,002 unit and integration tests, 202 portable provider contracts, 42 Electron scenarios, production audit, exact-head review, and green Linux, macOS, and Windows packaging, fuse, and smoke gates protect the release.
+
 ## 0.0.19 — 2026-07-31
 
 ### Remote authority is narrower and easier to revoke

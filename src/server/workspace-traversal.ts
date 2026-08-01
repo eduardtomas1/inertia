@@ -37,6 +37,11 @@ export interface StableWorkspaceEntry {
   identity: WorkspaceEntryIdentity;
 }
 
+export interface ObservedWorkspaceEntry {
+  absolute: string;
+  kind: WorkspaceEntryKind;
+}
+
 function isContained(root: string, target: string): boolean {
   const child = relative(root, target);
   return child === ""
@@ -67,6 +72,16 @@ async function stableContainedDirectory(
     && info.isDirectory()
     && sameIdentity(info, identity)
     && isContained(root, await realpath(absolute));
+}
+
+async function stableDirectoryIdentity(
+  absolute: string,
+  identity: WorkspaceEntryIdentity,
+): Promise<boolean> {
+  const info = await lstat(absolute);
+  return !info.isSymbolicLink()
+    && info.isDirectory()
+    && sameIdentity(info, identity);
 }
 
 export async function openStableWorkspaceDirectory(
@@ -117,19 +132,47 @@ export async function describeStableWorkspaceEntry(
   absolute: string,
   observedKind: WorkspaceEntryKind,
 ): Promise<StableWorkspaceEntry | null> {
+  return (await describeStableWorkspaceEntries(
+    root,
+    parentAbsolute,
+    parentIdentity,
+    [{ absolute, kind: observedKind }],
+  ))[0] ?? null;
+}
+
+/**
+ * Describes one bounded directory page under a shared parent-stability check.
+ * The parent is verified before and after the complete metadata batch, so a
+ * replacement invalidates every result rather than exposing a mixed page.
+ */
+export async function describeStableWorkspaceEntries(
+  root: string,
+  parentAbsolute: string,
+  parentIdentity: WorkspaceEntryIdentity,
+  observed: readonly ObservedWorkspaceEntry[],
+): Promise<Array<StableWorkspaceEntry | null>> {
   if (!(await stableContainedDirectory(root, parentAbsolute, parentIdentity))) {
-    return null;
+    return observed.map(() => null);
   }
-  const info = await lstat(absolute);
-  const kind = entryKind(info);
-  if (
-    (observedKind !== "other" && kind !== observedKind)
-    || !(await stableContainedDirectory(root, parentAbsolute, parentIdentity))
-  ) return null;
-  return {
-    kind,
-    size: kind === "file" ? info.size : null,
-    modifiedAt: Number.isFinite(info.mtimeMs) ? info.mtime.toISOString() : null,
-    identity: { dev: info.dev, ino: info.ino },
-  };
+  const described = await Promise.all(observed.map(async ({ absolute, kind: observedKind }) => {
+    if (!(await stableDirectoryIdentity(parentAbsolute, parentIdentity))) {
+      return null;
+    }
+    const info = await lstat(absolute);
+    const kind = entryKind(info);
+    if (
+      (observedKind !== "other" && kind !== observedKind)
+      || !(await stableDirectoryIdentity(parentAbsolute, parentIdentity))
+    ) return null;
+    return {
+      kind,
+      size: kind === "file" ? info.size : null,
+      modifiedAt: Number.isFinite(info.mtimeMs) ? info.mtime.toISOString() : null,
+      identity: { dev: info.dev, ino: info.ino },
+    } satisfies StableWorkspaceEntry;
+  }));
+  if (!(await stableContainedDirectory(root, parentAbsolute, parentIdentity))) {
+    return observed.map(() => null);
+  }
+  return described;
 }

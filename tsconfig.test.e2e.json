@@ -6,5 +6,9 @@
     "noEmit": true,
     "types": ["node", "electron-vite/node"]
   },
-  "include": ["src/shared/desktop.ts", "tests/e2e/**/*.ts"]
+  "include": [
+    "src/shared/desktop.ts",
+    "tests/e2e/**/*.ts",
+    "tests/performance/**/*.spec.ts"
+  ]
 }

@@ -884,7 +884,13 @@ async function bootstrap(): Promise<void> {
         packageSmokeScheduled = true;
         void writeFile(
           packageSmokeFilePath,
-          JSON.stringify({ mainPid: process.pid, runtimePid: snapshot.pid, generation: snapshot.generation, websocketUrl: snapshot.websocketUrl }),
+          JSON.stringify({
+            mainPid: process.pid,
+            runtimePid: snapshot.pid,
+            generation: snapshot.generation,
+            websocketUrl: snapshot.websocketUrl,
+            timestampMs: Date.now(),
+          }),
           { encoding: "utf8", mode: 0o600, flag: "wx" },
         ).finally(() => setTimeout(
           () => app.quit(),
@@ -999,7 +1005,11 @@ if (!hasSingleInstanceLock) {
 function recordPackageSmokeStage(stage: string): void {
   if (!packageSmokeFilePath) return;
   try {
-    writeFileSync(`${packageSmokeFilePath}.${stage}.json`, JSON.stringify({ stage, pid: process.pid }), { encoding: "utf8", mode: 0o600, flag: "wx" });
+    writeFileSync(`${packageSmokeFilePath}.${stage}.json`, JSON.stringify({
+      stage,
+      pid: process.pid,
+      timestampMs: Date.now(),
+    }), { encoding: "utf8", mode: 0o600, flag: "wx" });
   } catch {
     // Packaged smoke diagnostics are best effort and test-only.
   }

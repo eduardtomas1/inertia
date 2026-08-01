@@ -24,6 +24,7 @@ import {
 import {
   compareWorkspaceEntries,
   describeStableWorkspaceEntry,
+  describeStableWorkspaceEntries,
   openStableWorkspaceDirectory,
   workspaceDirentKind,
   type WorkspaceEntry,
@@ -382,21 +383,29 @@ export async function listWorkspaceEntries(
     // Bound metadata fan-out so large directories remain responsive without
     // opening hundreds of filesystem operations at once.
     for (let offset = 0; offset < children.length; offset += 32) {
-      const described = await Promise.all(
-        children.slice(offset, offset + 32)
-          .map(async ({ absolute, name, kind }) => {
-            await options.afterEntryObserved?.(slashPath(relative(root, absolute)));
-            return describeEntry(
-              root,
-              target.absolute,
-              target.identity,
-              absolute,
-              name,
-              kind,
-            );
-          }),
+      const batch = children.slice(offset, offset + 32);
+      await Promise.all(batch.map(async ({ absolute }) => {
+        await options.afterEntryObserved?.(slashPath(relative(root, absolute)));
+      }));
+      const described = await describeStableWorkspaceEntries(
+        root,
+        target.absolute,
+        target.identity,
+        batch.map(({ absolute, kind }) => ({ absolute, kind })),
       );
-      entries.push(...described.flatMap((result) => result ? [result.entry] : []));
+      for (let index = 0; index < batch.length; index += 1) {
+        const stable = described[index];
+        const child = batch[index];
+        if (!stable || !child) continue;
+        entries.push({
+          name: child.name,
+          path: slashPath(relative(root, child.absolute)),
+          kind: stable.kind,
+          size: stable.size,
+          modifiedAt: stable.modifiedAt,
+          hidden: child.name.startsWith("."),
+        });
+      }
     }
     entries.sort(compareWorkspaceEntries);
     return { directory: target.relativePath === "." ? "" : target.relativePath, entries, truncated };

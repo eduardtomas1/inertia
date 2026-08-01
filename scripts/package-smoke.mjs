@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, copyFile, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
 
 const STARTUP_TIMEOUT_MS = 30_000;
@@ -122,16 +122,18 @@ async function readJsonIfPresent(path) {
 
 function parseReadiness(value, expectedMainPid) {
   if (!value || typeof value !== "object") return null;
-  const { mainPid, runtimePid, generation, websocketUrl } = value;
+  const { mainPid, runtimePid, generation, websocketUrl, timestampMs } = value;
   if (mainPid !== expectedMainPid
     || !Number.isSafeInteger(runtimePid)
     || runtimePid <= 0
     || runtimePid === mainPid
     || !Number.isSafeInteger(generation)
     || generation < 1
+    || !Number.isSafeInteger(timestampMs)
+    || timestampMs <= 0
     || typeof websocketUrl !== "string"
     || !websocketUrl.startsWith("ws://127.0.0.1:")) return null;
-  return { mainPid, runtimePid, generation, websocketUrl };
+  return { mainPid, runtimePid, generation, websocketUrl, timestampMs };
 }
 
 async function createWindowsCodexFixture(root, workspace) {
@@ -276,7 +278,13 @@ async function requireLifecycleMarker(
     timeoutMs,
     `${stage} lifecycle marker`,
   );
-  if (value.stage !== stage || value.pid !== mainPid) throw new Error(`Invalid ${stage} lifecycle marker.`);
+  if (
+    value.stage !== stage
+    || value.pid !== mainPid
+    || !Number.isSafeInteger(value.timestampMs)
+    || value.timestampMs <= 0
+  ) throw new Error(`Invalid ${stage} lifecycle marker.`);
+  return value;
 }
 
 function appendOutput(current, chunk) {
@@ -294,6 +302,7 @@ let child = null;
 let readiness = null;
 let stdout = "";
 let stderr = "";
+let launchedAt = 0;
 
 try {
   await Promise.all([
@@ -307,6 +316,7 @@ try {
     `--user-data-dir=${profileDirectory}`,
     ...(process.platform === "linux" && process.env.INERTIA_PACKAGE_SMOKE_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
   ];
+  launchedAt = Date.now();
   child = spawn(executable, launchArguments, {
     detached: process.platform !== "win32",
     env: {
@@ -337,8 +347,18 @@ try {
   child.stderr?.on("data", (chunk) => { stderr = appendOutput(stderr, chunk); });
 
   const exitResult = new Promise((settle) => {
-    child.once("error", (error) => settle({ error, code: null, signal: null }));
-    child.once("exit", (code, signal) => settle({ error: null, code, signal }));
+    child.once("error", (error) => settle({
+      error,
+      code: null,
+      signal: null,
+      endedAt: Date.now(),
+    }));
+    child.once("exit", (code, signal) => settle({
+      error: null,
+      code,
+      signal,
+      endedAt: Date.now(),
+    }));
   });
   readiness = await Promise.race([
     waitUntil(async () => {
@@ -368,12 +388,13 @@ try {
   // Provider discovery deliberately keeps the packaged app alive before
   // shutdown. Start the exit deadline only after Electron begins quitting so
   // that dwell time cannot consume the process-tree cleanup budget.
-  await requireLifecycleMarker(
+  const beforeQuit = await requireLifecycleMarker(
     markerPath,
     "before-quit",
     readiness.mainPid,
     EXIT_TIMEOUT_MS,
   );
+  const shutdownStartedAt = beforeQuit.timestampMs;
   const exit = await withTimeout(
     exitResult,
     EXIT_TIMEOUT_MS,
@@ -391,7 +412,32 @@ try {
   if (process.platform !== "win32") {
     await waitUntil(() => !processGroupExists(readiness.mainPid), CLEANUP_TIMEOUT_MS, "packaged app process-group cleanup");
   }
-  console.log(`Packaged smoke passed (${process.platform}/${process.arch}); main=${readiness.mainPid}, runtime=${readiness.runtimePid}, generation=${readiness.generation}, runtimeObserved=${runtimeWasObserved}, pdfExtraction=true, exit=${exit.code ?? exit.signal ?? "unknown"}.`);
+  const cleanupCompletedAt = Date.now();
+  const benchmark = {
+    schemaVersion: 1,
+    collectedAt: new Date().toISOString(),
+    platform: process.platform,
+    architecture: process.arch,
+    node: process.version,
+    packageKind: process.platform === "linux" ? "linux-unpacked" : "unpacked",
+    signingState: process.platform === "darwin" ? "ci-ad-hoc-or-local" : "not-recorded",
+    launchToRuntimeReadyMs: readiness.timestampMs - launchedAt,
+    shutdownToProcessExitMs: exit.endedAt - shutdownStartedAt,
+    postExitCleanupMs: cleanupCompletedAt - exit.endedAt,
+    mainPid: readiness.mainPid,
+    runtimePid: readiness.runtimePid,
+    generation: readiness.generation,
+  };
+  const benchmarkReport = process.env.INERTIA_PACKAGE_BENCHMARK_REPORT;
+  if (benchmarkReport) {
+    const target = resolve(benchmarkReport);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, `${JSON.stringify(benchmark, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  }
+  console.log(`Packaged smoke passed (${process.platform}/${process.arch}); main=${readiness.mainPid}, runtime=${readiness.runtimePid}, generation=${readiness.generation}, runtimeObserved=${runtimeWasObserved}, pdfExtraction=true, launchToReadyMs=${benchmark.launchToRuntimeReadyMs}, shutdownMs=${benchmark.shutdownToProcessExitMs}, exit=${exit.code ?? exit.signal ?? "unknown"}.`);
 } catch (error) {
   const detail = error instanceof Error ? error.message : String(error);
   if (stdout.trim()) console.error(`Packaged app stdout:\n${stdout.trim()}`);

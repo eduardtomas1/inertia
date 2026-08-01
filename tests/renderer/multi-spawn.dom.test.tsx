@@ -799,6 +799,75 @@ describe("multi-spawn", () => {
     expect(focusWorkspace).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    "failed",
+    "cancelled",
+    "interrupted",
+    "recovery-required",
+  ] as const)(
+    "clears the recovery identity after a deterministic %s dispatch result",
+    async (state) => {
+      const run = vi.fn(async (
+        _key: string,
+        command: CommandWithoutId,
+      ): Promise<ServerEvent> => {
+        if (command.type === "duo.prepare") {
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.prepared",
+              launchId: command.payload.launchId,
+              state: "prepared",
+              sides: [
+                { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+                { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+              ],
+            },
+          };
+        }
+        if (command.type === "duo.dispatch") {
+          expect(window.localStorage.getItem(
+            MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+          )).toBe(command.payload.launchId);
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId: command.payload.launchId,
+              state,
+              error: `Deterministic ${state} result.`,
+              sides: [
+                { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "failed" },
+                { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "failed" },
+              ],
+            },
+          };
+        }
+        return { type: "request.ok", requestId: crypto.randomUUID() };
+      });
+      const hook = renderHook(() => useMultiSpawn({
+        snapshot,
+        settings,
+        run,
+        splitSelectionTransitionsRef: { current: 0 },
+        updateSplitConversationId: vi.fn(),
+        showWorkspace: vi.fn(),
+        closeSidebar: vi.fn(),
+        focusWorkspace: vi.fn(),
+        discardDraftConversation: vi.fn(),
+        setActionError: vi.fn(),
+      }));
+
+      await act(async () => hook.result.current.submit(multiSpawnDraft()));
+
+      expect(window.localStorage.getItem(
+        MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+      )).toBeNull();
+    },
+  );
+
   it("prompts neither side when atomic preparation rejects the second side", async () => {
     const run = vi.fn(async (
       _key: string,

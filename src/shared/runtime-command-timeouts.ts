@@ -19,6 +19,18 @@ export const GIT_READ_REQUEST_TIMEOUT_MS =
 // ambiguous if this outer client deadline is ever reached.
 export const GIT_MUTATION_REQUEST_TIMEOUT_MS = 10 * 60_000;
 
+// Duo dispatch captures both pre-turn Git states in parallel. Each side's
+// longest path combines an isolated checkpoint's individually bounded Git
+// steps with bounded repository fingerprinting, so it shares the conservative
+// mutation envelope instead of the 15-second ordinary-command deadline.
+export const DUO_DISPATCH_REQUEST_TIMEOUT_MS =
+  GIT_MUTATION_REQUEST_TIMEOUT_MS;
+
+// Cancellation may join the same bounded preparation task (including owned
+// worktree compensation) before returning its authoritative terminal state.
+export const DUO_CANCEL_REQUEST_TIMEOUT_MS =
+  GIT_MUTATION_REQUEST_TIMEOUT_MS;
+
 // Workspace file reads may cross the privileged secure-file broker, whose
 // operations are bounded at 30 seconds. Leave enough room for the runtime to
 // return its authoritative result without reconnecting the shared socket.

@@ -4,10 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clientCommandSchema,
   MAX_WORKSPACE_FILE_EDIT_BYTES,
+  type ServerEvent,
 } from "../../src/shared/contracts";
 import {
   AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
   BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
+  DUO_CANCEL_REQUEST_TIMEOUT_MS,
+  DUO_DISPATCH_REQUEST_TIMEOUT_MS,
   GIT_READ_REQUEST_TIMEOUT_MS,
   MESSAGE_SEND_PREPARATION_TIMEOUT_MS,
   MESSAGE_SEND_REQUEST_TIMEOUT_MS,
@@ -327,5 +330,82 @@ describe("useInertiaConnection", () => {
     );
     expect(runtimeCommandDelivery(timeoutError)).toBe("ambiguous");
     expect(socket.close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      type: "duo.dispatch" as const,
+      timeoutMs: DUO_DISPATCH_REQUEST_TIMEOUT_MS,
+      state: "failed" as const,
+    },
+    {
+      type: "duo.cancel" as const,
+      timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
+      state: "cancelled" as const,
+    },
+  ])("accepts a slow authoritative $type result within its bounded budget", async ({
+    type,
+    timeoutMs,
+    state,
+  }) => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection: vi.fn(async () => ({
+          websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+        })),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0]!;
+    vi.useFakeTimers();
+    const requestId = type === "duo.dispatch"
+      ? "55555555-5555-4555-8555-555555555555"
+      : "66666666-6666-4666-8666-666666666666";
+    const launchId = "77777777-7777-4777-8777-777777777777";
+    const command = clientCommandSchema.parse({
+      type,
+      requestId,
+      payload: { launchId },
+    });
+    let outcome: ServerEvent | Error | undefined;
+    const pending = hook.result.current.sendCommand(command).then(
+      (event) => {
+        outcome = event;
+      },
+      (error: unknown) => {
+        outcome = error instanceof Error ? error : new Error("Unknown error");
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+    expect(outcome).toBeUndefined();
+    expect(socket.close).not.toHaveBeenCalled();
+
+    socket.dispatchEvent(new MessageEvent("message", {
+      data: JSON.stringify({
+        type: "request.result",
+        requestId,
+        result: {
+          kind: "duo.status",
+          launchId,
+          state,
+          error: state === "failed" ? "Provider start rejected." : null,
+          sides: [
+            { ordinal: 0, conversationId: null, turnId: null, dispatchState: state === "failed" ? "failed" : "cancelled" },
+            { ordinal: 1, conversationId: null, turnId: null, dispatchState: state === "failed" ? "failed" : "cancelled" },
+          ],
+        },
+      }),
+    }));
+    await pending;
+
+    expect(outcome).toMatchObject({
+      type: "request.result",
+      requestId,
+    });
+    expect(socket.close).not.toHaveBeenCalled();
   });
 });

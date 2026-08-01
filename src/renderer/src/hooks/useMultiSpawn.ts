@@ -75,7 +75,9 @@ function launchStatusMessage(status: DuoStatusResult): string | null {
 }
 
 function launchNeedsFurtherReconciliation(status: DuoStatusResult): boolean {
-  return status.state === "preparing" || status.state === "dispatching";
+  return status.state === "preparing"
+    || status.state === "prepared"
+    || status.state === "dispatching";
 }
 
 function orderedPreparedSides(result: DuoPreparedResult): DuoPreparedResult["sides"] {
@@ -182,7 +184,7 @@ export function useMultiSpawn({
         status = cancellation.result;
       }
       const message = launchStatusMessage(status);
-      if (!launchNeedsFurtherReconciliation(status) && status.state !== "prepared") {
+      if (!launchNeedsFurtherReconciliation(status)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
         durablePrepared = false;
       }
@@ -334,7 +336,7 @@ export function useMultiSpawn({
         throw new Error("The local service returned an unexpected dispatch response.");
       }
       const launchMessage = launchStatusMessage(dispatchEvent.result);
-      if (dispatchEvent.result.state === "running") {
+      if (!launchNeedsFurtherReconciliation(dispatchEvent.result)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
       }
       if (launchMessage) setActionError(launchMessage);

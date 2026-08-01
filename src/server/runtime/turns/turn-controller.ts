@@ -380,6 +380,7 @@ export class TurnController {
       || !followUp
       || !this.providers.steer
     ) return null;
+    const submittedAt = this.now();
     const accepted = await this.providers.steer(
       conversationId,
       followUp,
@@ -390,7 +391,7 @@ export class TurnController {
       conversationId,
       active.turn.id,
       followUp,
-      this.now(),
+      submittedAt,
     );
   }
 

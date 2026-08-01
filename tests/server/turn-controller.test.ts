@@ -381,9 +381,15 @@ describe("TurnController authoritative lifecycle", () => {
     const pendingFollowUp = runtime.controller.steer(runtime.conversationId, "Inspect the edge case next.");
     await flushPromises();
     expect(runtime.store.snapshot().messages).toEqual(beforeAcknowledgement);
+    runtime.provider.emit({
+      ...identity(runtime), type: "activity", kind: "reasoning", phase: "completed",
+      label: "Observed during acknowledgement", activityId: "follow-up-race",
+    });
+    const interimActivity = runtime.store.snapshot().activities.find(({ title }) => title === "Observed during acknowledgement");
     acknowledgeFollowUp(true);
     const followedUp = await pendingFollowUp;
     expect(followedUp).toMatchObject({ role: "user", turnId: queued.turn.id, content: "Inspect the edge case next." });
+    expect(followedUp!.createdAt < interimActivity!.createdAt).toBe(true);
     expect(runtime.store.conversationDetail(runtime.conversationId)?.messages)
       .toContainEqual(expect.objectContaining({ id: followedUp?.id }));
     const beforeRejected = runtime.store.snapshot().messages;
@@ -392,7 +398,13 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.store.snapshot().messages).toEqual(beforeRejected);
     runtime.provider.resolve();
     await flushPromises();
+    const databasePath = join(runtime.directory, "inertia.sqlite");
     runtime.store.close();
+    const reopened = new RuntimeStore(databasePath, runtime.workspace, { recoverInterruptedRuns: false });
+    const persisted = reopened.conversationDetail(runtime.conversationId);
+    expect(persisted?.messages.find(({ id }) => id === followedUp?.id)?.createdAt).toBe(followedUp?.createdAt);
+    expect(persisted?.activities.find(({ id }) => id === interimActivity?.id)?.createdAt).toBe(interimActivity?.createdAt);
+    reopened.close();
   });
 
   it("persists and broadcasts only native goals for the active Codex thread", async () => {

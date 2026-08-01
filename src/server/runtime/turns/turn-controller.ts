@@ -380,24 +380,18 @@ export class TurnController {
       || !followUp
       || !this.providers.steer
     ) return null;
-    const message = this.store.createFollowUpMessage(
-      conversationId,
-      active.turn.id,
-      followUp,
-      this.now(),
-    );
     const accepted = await this.providers.steer(
       conversationId,
       followUp,
       { runId: active.turn.runId, turnId: active.turn.id },
     );
-    if (accepted) return message;
-    this.store.deleteFollowUpMessage(
-      message.id,
+    if (!accepted) return null;
+    return this.store.createAcknowledgedFollowUpMessage(
       conversationId,
       active.turn.id,
+      followUp,
+      this.now(),
     );
-    return null;
   }
 
   async stopSubagent(

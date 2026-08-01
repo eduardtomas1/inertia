@@ -406,29 +406,17 @@ export class RuntimeStore {
     );
   }
 
-  createFollowUpMessage(
+  createAcknowledgedFollowUpMessage(
     conversationId: string,
     turnId: string,
     content: string,
     createdAt?: string,
   ): ChatMessage {
-    return this.transcriptRepository.createFollowUpMessage(
+    return this.transcriptRepository.createAcknowledgedFollowUpMessage(
       conversationId,
       turnId,
       content,
       createdAt,
-    );
-  }
-
-  deleteFollowUpMessage(
-    messageId: string,
-    conversationId: string,
-    turnId: string,
-  ): boolean {
-    return this.transcriptRepository.deleteFollowUpMessage(
-      messageId,
-      conversationId,
-      turnId,
     );
   }
 

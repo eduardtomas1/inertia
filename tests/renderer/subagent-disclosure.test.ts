@@ -7,10 +7,13 @@ import type {
   SubagentTrace,
 } from "../../src/shared/contracts";
 import {
+  canFollowUpSubagentTrace,
   canStopSubagentTrace,
   subagentDisclosureRows,
   subagentDisclosureSummary,
+  subagentRouteLabel,
   subagentStatusLabel,
+  subagentTraceSummary,
 } from "../../src/renderer/src/utils/subagentDisclosure";
 
 const styles = readFileSync(
@@ -148,6 +151,28 @@ describe("inline delegated-agent disclosure", () => {
     ])).toBe(false);
   });
 
+  it("derives parent guidance and route identity from the persisted owner turn", () => {
+    const claude = trace();
+    expect(canFollowUpSubagentTrace(claude, [turn()])).toBe(true);
+    expect(subagentRouteLabel(claude, [turn()])).toBe("Claude · Agent SDK");
+    expect(canFollowUpSubagentTrace(claude, [turn({
+      status: "completed",
+      completedAt: "2030-01-01T00:01:00.000Z",
+    })])).toBe(false);
+
+    const codex = trace({ providerId: "codex" });
+    const codexTurn = turn({
+      providerId: "codex",
+      harnessId: "codex-app-server",
+    });
+    expect(canFollowUpSubagentTrace(codex, [codexTurn])).toBe(true);
+    expect(canStopSubagentTrace(codex, [codexTurn])).toBe(false);
+    expect(subagentRouteLabel(codex, [codexTurn])).toBe("Codex · App Server");
+    expect(subagentRouteLabel(codex, [])).toBe(
+      "Codex · historical harness unavailable",
+    );
+  });
+
   it("keeps future provider states visibly unknown instead of relabeling them", () => {
     expect(subagentStatusLabel(trace({
       providerId: "codex",
@@ -182,12 +207,20 @@ describe("inline delegated-agent disclosure", () => {
     ])).toBe("1 delegated task · 1 active");
   });
 
+  it("bounds collapsed recent activity while leaving the persisted detail intact", () => {
+    const result = "provider detail ".repeat(2_000);
+    const completed = trace({ status: "completed", isLive: false, result });
+    expect(subagentTraceSummary(completed)).toHaveLength(280);
+    expect(subagentTraceSummary(completed)).toMatch(/…$/u);
+    expect(completed.result).toBe(result);
+  });
+
   it("keeps one intentional danger hover and adjacent focus treatment for Stop", () => {
     const hoverRules = [...styles.matchAll(
-      /\.subagent-stop-button:hover\s*\{(?<body>[^}]*)\}/gu,
+      /\.subagent-stop-button:hover:not\(:disabled\)\s*\{(?<body>[^}]*)\}/gu,
     )];
     const focusRules = [...styles.matchAll(
-      /\.subagent-stop-button:focus-visible\s*\{(?<body>[^}]*)\}/gu,
+      /\.subagent-row-actions button:focus-visible\s*\{(?<body>[^}]*)\}/gu,
     )];
     expect(hoverRules).toHaveLength(1);
     expect(hoverRules[0]?.groups?.body).toContain("color: var(--danger)");
@@ -195,12 +228,19 @@ describe("inline delegated-agent disclosure", () => {
     expect(focusRules).toHaveLength(1);
     expect(focusRules[0]?.groups?.body).toContain("var(--focus-ring)");
 
-    const componentRule = styles.indexOf(".subagent-stop-button {");
-    const hoverRule = styles.indexOf(".subagent-stop-button:hover {");
-    const focusRule = styles.indexOf(".subagent-stop-button:focus-visible {");
+    const componentRule = styles.indexOf(".subagent-row-actions button {");
+    const hoverRule = styles.indexOf(
+      ".subagent-stop-button:hover:not(:disabled) {",
+    );
+    const focusRule = styles.indexOf(
+      ".subagent-row-actions button:focus-visible {",
+    );
     const usagePopover = styles.indexOf(".usage-popover {");
-    expect(componentRule).toBeLessThan(hoverRule);
-    expect(hoverRule).toBeLessThan(focusRule);
+    expect(componentRule).toBeLessThan(focusRule);
+    expect(focusRule).toBeLessThan(hoverRule);
     expect(focusRule).toBeLessThan(usagePopover);
+    expect(styles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.subagent-details-button svg,[\s\S]*?transition: none;/u,
+    );
   });
 });

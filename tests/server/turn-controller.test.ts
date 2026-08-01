@@ -368,40 +368,28 @@ afterEach(async () => {
 });
 
 describe("TurnController authoritative lifecycle", () => {
-  it("queues parent follow-ups on the same turn and rolls back unsupported sends", async () => {
+  it("persists parent follow-ups only after the active harness acknowledges them", async () => {
     const runtime = await testRuntime();
-    const queued = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Start the parent turn.",
-    });
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start the parent turn." });
     runtime.controller.start(queued.turn.id);
-
-    const followedUp = await runtime.controller.steer(
-      runtime.conversationId,
-      "Inspect the edge case next.",
-    );
-    expect(followedUp).toMatchObject({
-      role: "user",
-      turnId: queued.turn.id,
-      content: "Inspect the edge case next.",
+    let acknowledgeFollowUp!: (accepted: boolean) => void;
+    vi.spyOn(runtime.provider, "steer").mockImplementation(async (_conversationId, content) => {
+      runtime.provider.steerCalls.push(content);
+      return await new Promise<boolean>((resolve) => { acknowledgeFollowUp = resolve; });
     });
-    expect(runtime.provider.steerCalls).toEqual([
-      "Inspect the edge case next.",
-    ]);
+    const beforeAcknowledgement = runtime.store.snapshot().messages;
+    const pendingFollowUp = runtime.controller.steer(runtime.conversationId, "Inspect the edge case next.");
+    await flushPromises();
+    expect(runtime.store.snapshot().messages).toEqual(beforeAcknowledgement);
+    acknowledgeFollowUp(true);
+    const followedUp = await pendingFollowUp;
+    expect(followedUp).toMatchObject({ role: "user", turnId: queued.turn.id, content: "Inspect the edge case next." });
     expect(runtime.store.conversationDetail(runtime.conversationId)?.messages)
-      .toContainEqual(expect.objectContaining({
-        id: followedUp?.id,
-        turnId: queued.turn.id,
-      }));
-
+      .toContainEqual(expect.objectContaining({ id: followedUp?.id }));
     const beforeRejected = runtime.store.snapshot().messages;
-    runtime.provider.steerSupported = false;
-    expect(await runtime.controller.steer(
-      runtime.conversationId,
-      "Do not leave this rejected follow-up behind.",
-    )).toBeNull();
+    vi.mocked(runtime.provider.steer).mockResolvedValue(false);
+    expect(await runtime.controller.steer(runtime.conversationId, "Do not leave this rejected follow-up behind.")).toBeNull();
     expect(runtime.store.snapshot().messages).toEqual(beforeRejected);
-
     runtime.provider.resolve();
     await flushPromises();
     runtime.store.close();

@@ -2,6 +2,7 @@ import type {
   AgentTurn,
   SubagentTrace,
 } from "@shared/contracts";
+import { supportsActiveParentFollowUp } from "./composerPrimaryAction";
 
 export interface SubagentDisclosureRow {
   trace: SubagentTrace;
@@ -33,11 +34,55 @@ export function canStopSubagentTrace(
   );
 }
 
+export function canFollowUpSubagentTrace(
+  trace: SubagentTrace,
+  turns: readonly AgentTurn[],
+): boolean {
+  const turn = turns.find(({ id }) => id === trace.turnId);
+  return Boolean(
+    turn
+    && (
+      turn.status === "running"
+      || turn.status === "waiting-for-approval"
+      || turn.status === "waiting-for-input"
+    )
+    && supportsActiveParentFollowUp(turn.harnessId)
+    && isLiveSubagentTrace(trace),
+  );
+}
+
 export function subagentProviderLabel(trace: SubagentTrace): string {
   if (trace.providerId === "codex") return "Codex";
   if (trace.providerId === "claude") return "Claude";
   if (trace.providerId === "cursor") return "Cursor";
   return "OpenCode";
+}
+
+const HARNESS_LABELS: Readonly<Record<string, string>> = {
+  "codex-app-server": "App Server",
+  "codex-cli": "CLI",
+  "claude-agent-sdk": "Agent SDK",
+  "claude-cli": "CLI",
+  "cursor-acp": "ACP",
+  "cursor-cli": "CLI",
+  "opencode-sdk": "SDK",
+  "opencode-cli": "CLI",
+};
+
+export function subagentHarnessLabel(
+  trace: SubagentTrace,
+  turns: readonly AgentTurn[],
+): string {
+  const harnessId = turns.find(({ id }) => id === trace.turnId)?.harnessId;
+  if (!harnessId) return "historical harness unavailable";
+  return HARNESS_LABELS[harnessId] ?? harnessId;
+}
+
+export function subagentRouteLabel(
+  trace: SubagentTrace,
+  turns: readonly AgentTurn[],
+): string {
+  return `${subagentProviderLabel(trace)} · ${subagentHarnessLabel(trace, turns)}`;
 }
 
 export function subagentTraceLabel(trace: SubagentTrace): string {
@@ -75,6 +120,26 @@ export function subagentTraceDetail(trace: SubagentTrace): string | null {
   return isLiveSubagentTrace(trace)
     ? trace.progress ?? trace.description ?? trace.result
     : trace.result ?? trace.progress ?? trace.description;
+}
+
+const MAX_SUBAGENT_SUMMARY_CHARS = 280;
+
+export function subagentTraceSummary(trace: SubagentTrace): string | null {
+  const detail = subagentTraceDetail(trace);
+  if (!detail || detail.length <= MAX_SUBAGENT_SUMMARY_CHARS) return detail;
+  return `${detail.slice(0, MAX_SUBAGENT_SUMMARY_CHARS - 1).trimEnd()}…`;
+}
+
+export function subagentRelationshipLabel(
+  trace: SubagentTrace,
+  traces: readonly SubagentTrace[],
+): string {
+  const parent = trace.parentTraceId
+    ? traces.find(({ id }) => id === trace.parentTraceId)
+    : undefined;
+  return parent
+    ? `Child of ${subagentTraceLabel(parent)}`
+    : "Delegated by this parent turn";
 }
 
 export function subagentElapsedMs(

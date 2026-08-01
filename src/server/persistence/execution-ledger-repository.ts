@@ -196,9 +196,15 @@ export class ExecutionLedgerRepository {
       && existing.is_live === 0
       && (
         input.isLive
-        || (existing.status !== "unknown" && input.status === "unknown")
+        || (
+          existing.status !== "unknown"
+          && input.status !== existing.status
+        )
       )
     ) {
+      // A known terminal outcome is durable historical truth. Later matching
+      // patches may enrich its detail, and terminal unknown may be clarified,
+      // but contradictory or revived edges are necessarily out of order.
       return { trace: subagentTraceFromRow(existing), changed: false };
     }
     if (

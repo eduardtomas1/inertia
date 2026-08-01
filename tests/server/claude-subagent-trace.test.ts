@@ -78,6 +78,13 @@ describe("Claude delegated-agent projection", () => {
         content: [{ type: "text", text: "Found the exact cause." }],
       },
     }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "task-parent",
+      status: "failed",
+      summary: "A stale aggregate incorrectly reported failure.",
+    }));
 
     expect(updates).toEqual([
       expect.objectContaining({
@@ -103,6 +110,10 @@ describe("Claude delegated-agent projection", () => {
       }),
     ]);
     expect(tracker.isLiveTask("task-parent")).toBe(false);
+    expect(updates).not.toContainEqual(expect.objectContaining({
+      providerTaskId: "task-parent",
+      status: "failed",
+    }));
   });
 
   it("retains exact nested tool ownership and ignores unrelated background tasks", () => {
@@ -250,6 +261,27 @@ describe("Claude delegated-agent projection", () => {
       status: "stopped",
       summary: "The provider stopped this task.",
     }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-terminal-unknown",
+      description: "Wait for a future terminal state clarification.",
+      subagent_type: "reviewer",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "task-terminal-unknown",
+      status: "future_terminal_state",
+      summary: "The provider reported a future terminal state.",
+    }));
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "task-terminal-unknown",
+      status: "completed",
+      summary: "The provider clarified the outcome.",
+    }));
 
     expect(updates).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -277,6 +309,19 @@ describe("Claude delegated-agent projection", () => {
         status: "cancelled",
         isLive: false,
         result: "The provider stopped this task.",
+      }),
+      expect.objectContaining({
+        providerTaskId: "task-terminal-unknown",
+        providerStatus: "future_terminal_state",
+        status: "unknown",
+        isLive: false,
+      }),
+      expect.objectContaining({
+        providerTaskId: "task-terminal-unknown",
+        providerStatus: "completed",
+        status: "completed",
+        isLive: false,
+        result: "The provider clarified the outcome.",
       }),
     ]));
     expect(tracker.hasLiveTasks()).toBe(false);

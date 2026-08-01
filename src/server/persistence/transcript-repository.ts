@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
 
-import {
-  isAgentTurnTerminalStatus,
-  type ChatAttachment,
-  type ChatMessage,
+import type {
+  ChatAttachment,
+  ChatMessage,
 } from "../../shared/contracts";
 import {
   agentTurnFromRow,
@@ -65,7 +64,13 @@ export class TranscriptRepository {
     return message;
   }
 
-  createFollowUpMessage(
+  /**
+   * Persists a parent follow-up only after the active harness acknowledged it.
+   * The turn may have settled during that acknowledgement race; retaining the
+   * accepted input is more truthful than either dropping it or persisting it
+   * before the harness has accepted it.
+   */
+  createAcknowledgedFollowUpMessage(
     conversationId: string,
     turnId: string,
     content: string,
@@ -73,11 +78,8 @@ export class TranscriptRepository {
   ): ChatMessage {
     const conversation = this.context.requireConversation(conversationId);
     const turn = agentTurnFromRow(this.context.requireAgentTurn(turnId));
-    if (
-      turn.conversationId !== conversationId
-      || isAgentTurnTerminalStatus(turn.status)
-    ) {
-      throw new Error("The active turn cannot accept this follow-up.");
+    if (turn.conversationId !== conversationId) {
+      throw new Error("The follow-up turn belongs to a different conversation.");
     }
     const now = createdAt === undefined
       ? new Date().toISOString()
@@ -106,21 +108,6 @@ export class TranscriptRepository {
       this.context.touchProject(conversation.project_id, now);
     })();
     return message;
-  }
-
-  deleteFollowUpMessage(
-    messageId: string,
-    conversationId: string,
-    turnId: string,
-  ): boolean {
-    const result = this.context.database.prepare(`
-      DELETE FROM messages
-      WHERE id = ? AND conversation_id = ? AND turn_id = ? AND role = 'user'
-        AND id <> (
-          SELECT user_message_id FROM agent_turns WHERE id = ?
-        )
-    `).run(messageId, conversationId, turnId, turnId);
-    return result.changes > 0;
   }
 
   associateMessageWithTurn(

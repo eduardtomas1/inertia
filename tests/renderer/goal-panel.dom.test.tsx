@@ -2,6 +2,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -344,21 +345,32 @@ describe("GoalPanel", () => {
 
   it("shows provider-aware delegated actions without inventing direct controls", async () => {
     const user = userEvent.setup();
-    const onStopSubagent = vi.fn();
+    const onStopSubagent = vi.fn(async () => undefined);
     const onFollowUpSubagent = vi.fn();
+    const onOpenSubagent = vi.fn();
     const claude = trace();
     const codex = trace({
       id: "trace-2",
       providerId: "codex",
+      turnId: "turn-codex",
       providerTaskId: "task-2",
       providerAgentId: "agent-2",
       providerName: "Codex audit",
     });
     renderPanel({
       subagents: [claude, codex],
+      turns: [
+        turn(),
+        turn({
+          id: "turn-codex",
+          providerId: "codex",
+          harnessId: "codex-app-server",
+        }),
+      ],
       onStopSubagent,
       canFollowUpSubagent: (item) => item.providerId === "codex",
       onFollowUpSubagent,
+      onOpenSubagent,
     });
 
     expect(screen.getByRole("button", {
@@ -371,6 +383,19 @@ describe("GoalPanel", () => {
       name: "Guide parent about Codex audit",
     }));
     expect(onFollowUpSubagent).toHaveBeenCalledWith(codex);
+    const codexRow = screen.getByRole("listitem", {
+      name: /Codex audit, Codex · App Server, Running/u,
+    });
+    await user.click(within(codexRow).getByRole("button", {
+      name: "View parent turn for Codex audit",
+    }));
+    expect(onOpenSubagent).toHaveBeenCalledWith(codex);
+    await user.click(within(codexRow).getByRole("button", {
+      name: "Details",
+    }));
+    expect(within(codexRow).getByText("Route")).toBeInTheDocument();
+    expect(within(codexRow).getByText("Codex · App Server"))
+      .toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Stop Audit" }));
     expect(onStopSubagent).toHaveBeenCalledWith(claude);
   });

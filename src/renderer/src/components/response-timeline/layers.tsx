@@ -217,7 +217,10 @@ export function AgentExecutionLayer({
       <SubagentDisclosure
         subagents={subagents}
         turns={props.turns}
+        onFollowUpSubagent={props.onFollowUpSubagent}
         onStopSubagent={props.onStopSubagent}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
       />
       <span
         className="visually-hidden"

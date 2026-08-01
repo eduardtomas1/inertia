@@ -1,26 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Network, Square } from "lucide-react";
+import { ChevronDown, MessageSquare, Network, Square } from "lucide-react";
 
 import type {
   AgentTurn,
   SubagentTrace,
 } from "@shared/contracts";
 import {
+  canFollowUpSubagentTrace,
   isLiveSubagentTrace,
   subagentElapsedMs,
   subagentDisclosureRows,
   subagentDisclosureSummary,
-  subagentProviderLabel,
+  subagentRelationshipLabel,
+  subagentRouteLabel,
   subagentStatusLabel,
-  subagentTraceDetail,
   subagentTraceLabel,
+  subagentTraceSummary,
 } from "../utils/subagentDisclosure";
 import { formatElapsed } from "../utils/responseTimeline";
+import { SubagentTraceDetails } from "./SubagentTraceDetails";
 
 interface SubagentDisclosureProps {
   subagents: readonly SubagentTrace[];
   turns: readonly AgentTurn[];
+  onFollowUpSubagent?: (trace: SubagentTrace) => void;
   onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
   now?: number;
 }
 
@@ -45,7 +51,10 @@ function useDisclosureNow(
 export function SubagentDisclosure({
   subagents,
   turns,
+  onFollowUpSubagent,
   onStopSubagent,
+  onBeforeToggle,
+  onAfterToggle,
   now: fixedNow,
 }: SubagentDisclosureProps): React.JSX.Element | null {
   const hasLiveSubagents = subagents.some(isLiveSubagentTrace);
@@ -55,6 +64,12 @@ export function SubagentDisclosure({
     .join("\0");
   const now = useDisclosureNow(hasLiveSubagents, fixedNow);
   const [open, setOpen] = useState(hasLiveSubagents);
+  const [expandedTraceIds, setExpandedTraceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [stoppingTraceIds, setStoppingTraceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const previousActiveIdentity = useRef(activeIdentity);
   useEffect(() => {
     const previouslyActive = previousActiveIdentity.current.length > 0;
@@ -67,18 +82,50 @@ export function SubagentDisclosure({
     () => subagentDisclosureRows(subagents, turns),
     [subagents, turns],
   );
+  const finishToggle = (): void => {
+    if (!onAfterToggle) return;
+    window.requestAnimationFrame(() => onAfterToggle?.());
+  };
+  const toggleTraceDetails = (traceId: string): void => {
+    onBeforeToggle?.();
+    setExpandedTraceIds((current) => {
+      const next = new Set(current);
+      if (next.has(traceId)) next.delete(traceId);
+      else next.add(traceId);
+      return next;
+    });
+    finishToggle();
+  };
+  const stopTrace = async (trace: SubagentTrace): Promise<void> => {
+    if (!onStopSubagent || stoppingTraceIds.has(trace.id)) return;
+    setStoppingTraceIds((current) => new Set(current).add(trace.id));
+    try {
+      await onStopSubagent(trace);
+    } finally {
+      setStoppingTraceIds((current) => {
+        const next = new Set(current);
+        next.delete(trace.id);
+        return next;
+      });
+    }
+  };
   if (subagents.length === 0) return null;
   return (
     <details
       className="subagent-disclosure"
       data-active={hasLiveSubagents}
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open);
+        finishToggle();
+      }}
     >
       <summary
+        onPointerDown={() => onBeforeToggle?.()}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
+          onBeforeToggle?.();
           setOpen((current) => !current);
         }}
       >
@@ -86,7 +133,8 @@ export function SubagentDisclosure({
         <span className="subagent-summary-copy">
           <strong>{subagentDisclosureSummary(subagents)}</strong>
           <small>
-            {[...new Set(subagents.map(subagentProviderLabel))].join(" · ")}
+            {[...new Set(subagents.map((trace) =>
+              subagentRouteLabel(trace, turns)))].join(" · ")}
           </small>
         </span>
         <ChevronDown
@@ -97,19 +145,24 @@ export function SubagentDisclosure({
       </summary>
       <ol aria-label="Delegated agent tree">
         {rows.map(({ trace, depth, canStop }) => {
-          const detail = subagentTraceDetail(trace);
+          const detail = subagentTraceSummary(trace);
           const label = subagentTraceLabel(trace);
-          const provider = subagentProviderLabel(trace);
+          const route = subagentRouteLabel(trace, turns);
           const state = subagentStatusLabel(trace);
-          const parent = trace.parentTraceId
-            ? subagents.find(({ id }) => id === trace.parentTraceId)
-            : undefined;
+          const relationship = subagentRelationshipLabel(trace, subagents);
+          const canFollowUp = Boolean(
+            onFollowUpSubagent
+            && canFollowUpSubagentTrace(trace, turns),
+          );
+          const expanded = expandedTraceIds.has(trace.id);
+          const stopping = stoppingTraceIds.has(trace.id);
+          const detailId = `subagent-${trace.id}-details`;
           return (
             <li
               key={trace.id}
               data-status={trace.status}
               data-depth={depth}
-              aria-label={`${label}, ${provider}, ${state}`}
+              aria-label={`${label}, ${route}, ${state}`}
               style={{ "--subagent-depth": depth } as React.CSSProperties}
             >
               <span className="subagent-status-dot" aria-hidden="true" />
@@ -121,14 +174,14 @@ export function SubagentDisclosure({
                       ? `Exact provider state: ${trace.providerStatus}`
                       : undefined}
                   >
-                    {provider} · {state} ·{" "}
+                    {route} · {state} ·{" "}
                     {formatElapsed(subagentElapsedMs(trace, now))}
                   </small>
                 </span>
-                {parent && (
-                  <span className="visually-hidden">
-                    Child of {subagentTraceLabel(parent)}.
-                  </span>
+                {trace.parentTraceId && (
+                  <small className="subagent-relationship">
+                    {relationship}
+                  </small>
                 )}
                 {detail && (
                   <small className="subagent-detail" title={detail}>
@@ -136,18 +189,50 @@ export function SubagentDisclosure({
                   </small>
                 )}
               </span>
-              {canStop && onStopSubagent && (
+              <span className="subagent-row-actions">
+                {canFollowUp && (
+                  <button
+                    type="button"
+                    className="subagent-guide-button"
+                    title="Draft guidance to the active parent; nothing is sent yet."
+                    onClick={() => onFollowUpSubagent?.(trace)}
+                  >
+                    <MessageSquare size={11} aria-hidden="true" />
+                    Guide parent
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="subagent-stop-button"
-                  aria-label={`Stop ${label}`}
-                  onClick={() => {
-                    void onStopSubagent(trace).catch(() => undefined);
-                  }}
+                  className="subagent-details-button"
+                  aria-controls={detailId}
+                  aria-expanded={expanded}
+                  onClick={() => toggleTraceDetails(trace.id)}
                 >
-                  <Square size={10} fill="currentColor" />
-                  Stop
+                  Details
+                  <ChevronDown size={11} aria-hidden="true" />
                 </button>
+                {canStop && onStopSubagent && (
+                  <button
+                    type="button"
+                    className="subagent-stop-button"
+                    aria-label={`${stopping ? "Stopping" : "Stop"} ${label}`}
+                    disabled={stopping}
+                    onClick={() => {
+                      void stopTrace(trace).catch(() => undefined);
+                    }}
+                  >
+                    <Square size={10} fill="currentColor" aria-hidden="true" />
+                    {stopping ? "Stopping…" : "Stop"}
+                  </button>
+                )}
+              </span>
+              {expanded && (
+                <SubagentTraceDetails
+                  id={detailId}
+                  trace={trace}
+                  traces={subagents}
+                  turns={turns}
+                />
               )}
             </li>
           );

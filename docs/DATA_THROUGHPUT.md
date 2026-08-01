@@ -26,6 +26,13 @@ eight documents, 20 MiB aggregate input, 96 KiB extracted output, and a shared
 12 MiB of input at once, rejects a single over-budget extraction, propagates
 cancellation, and rotates fairly between turns.
 
+PDF.js and its native canvas polyfills are initialized through one process-wide
+promise. Cold initialization is bounded to 30 seconds, cancelled callers stop
+waiting without starting a duplicate native load, failed initialization is
+evicted for retry, and a successful load remains cached. The shared 12-second
+extraction deadline begins after that one-time module initialization; the outer
+120-second message-preparation deadline still bounds the complete operation.
+
 Remote relay byte measurements intentionally remain absent from this baseline.
 Remote revisioning is a separate dependent change and must be measured only
 after the authoritative remote protocol/state contracts are integrated.

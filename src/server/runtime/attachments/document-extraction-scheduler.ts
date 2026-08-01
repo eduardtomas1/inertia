@@ -22,6 +22,13 @@ export class DocumentExtractionBudgetError extends Error {
   }
 }
 
+export class DocumentExtractionInitializationError extends Error {
+  constructor() {
+    super("PDF support initialization exceeded its bounded cold-start deadline.");
+    this.name = "DocumentExtractionInitializationError";
+  }
+}
+
 interface ScheduledExtraction {
   readonly groupId: string;
   readonly weight: number;

@@ -9,6 +9,7 @@ import type { ResolvedAttachmentPayload } from "./trusted-attachment-resolver";
 import {
   DocumentExtractionCancelledError,
   DocumentExtractionDeadlineError,
+  DocumentExtractionInitializationError,
   DocumentExtractionScheduler,
 } from "./document-extraction-scheduler";
 
@@ -16,10 +17,17 @@ const MAX_DOCUMENT_CONTEXT_BYTES = 64 * 1024;
 export const MAX_DOCUMENT_CONTEXT_TOTAL_BYTES = 96 * 1024;
 const MAX_PDF_PAGES = 80;
 export const DOCUMENT_EXTRACTION_TURN_TIMEOUT_MS = 12_000;
+export const PDF_MODULE_INITIALIZATION_TIMEOUT_MS = 30_000;
 export const MAX_DOCUMENT_EXTRACTION_INPUT_BYTES = 20 * 1024 * 1024;
 export const MAX_DOCUMENT_EXTRACTION_COUNT = 8;
 const require = createRequire(import.meta.url);
 const sharedExtractionScheduler = new DocumentExtractionScheduler();
+
+type PdfTextModule = Pick<
+  typeof import("pdfjs-dist/legacy/build/pdf.mjs"),
+  "getDocument"
+>;
+type PdfModuleLoader = () => Promise<PdfTextModule>;
 
 export interface DocumentAttachmentContext {
   attachmentId: string;
@@ -32,6 +40,7 @@ export interface DocumentAttachmentContextOptions {
   readonly deadlineAt?: number;
   readonly groupId?: string;
   readonly now?: () => number;
+  readonly pdfModuleLoader?: PdfModuleLoader;
   readonly scheduler?: DocumentExtractionScheduler;
   readonly signal?: AbortSignal;
 }
@@ -42,6 +51,8 @@ async function ensurePdfNodePrimitives(): Promise<void> {
     && typeof Reflect.get(globalThis, "Path2D") === "function"
   ) return;
 
+  // PDF.js identifies Electron utility processes as non-Node and therefore
+  // does not install its own canvas globals in the packaged runtime.
   const canvas = await import("@napi-rs/canvas");
   if (typeof Reflect.get(globalThis, "DOMMatrix") !== "function") {
     Reflect.set(globalThis, "DOMMatrix", canvas.DOMMatrix);
@@ -51,13 +62,73 @@ async function ensurePdfNodePrimitives(): Promise<void> {
   }
 }
 
-async function loadPdfModule() {
+async function loadPdfModule(): Promise<PdfTextModule> {
   await ensurePdfNodePrimitives();
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
     require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs"),
   ).href;
   return pdfjs;
+}
+
+export function createCachedPdfModuleLoader<T>(
+  initialize: () => Promise<T>,
+): () => Promise<T> {
+  let cached: Promise<T> | null = null;
+  return () => {
+    if (cached) return cached;
+    const started = Promise.resolve().then(initialize);
+    const tracked = started.catch((error: unknown) => {
+      if (cached === tracked) cached = null;
+      throw error;
+    });
+    cached = tracked;
+    return tracked;
+  };
+}
+
+const sharedPdfModuleLoader = createCachedPdfModuleLoader(loadPdfModule);
+
+export function awaitPdfModuleInitialization<T>(input: {
+  readonly deadlineAt: number;
+  readonly load: () => Promise<T>;
+  readonly now?: () => number;
+  readonly signal?: AbortSignal;
+}): Promise<T> {
+  if (input.signal?.aborted) {
+    return Promise.reject(new DocumentExtractionCancelledError());
+  }
+  const now = input.now ?? Date.now;
+  const remainingMs = input.deadlineAt - now();
+  if (remainingMs <= 0) {
+    return Promise.reject(new DocumentExtractionInitializationError());
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (operation: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      input.signal?.removeEventListener("abort", cancel);
+      operation();
+    };
+    const cancel = () => {
+      finish(() => reject(new DocumentExtractionCancelledError()));
+    };
+    const timer = setTimeout(() => {
+      finish(() => reject(new DocumentExtractionInitializationError()));
+    }, Math.max(1, Math.trunc(remainingMs)));
+    timer.unref();
+    input.signal?.addEventListener("abort", cancel, { once: true });
+    // Dynamic import cannot be cancelled safely. The shared initializer keeps
+    // running after an individual waiter times out or is cancelled, allowing a
+    // successful cold load to serve the next turn without duplicate native
+    // initialization. Rejected loads are evicted by the cached loader.
+    void Promise.resolve().then(input.load).then(
+      (module) => finish(() => resolve(module)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
 }
 
 function jsonStringContentBytes(value: string): number {
@@ -138,14 +209,14 @@ export function pdfTextItemsToText(items: readonly unknown[]): string {
 }
 
 async function extractPdfText(
+  pdfModule: PdfTextModule,
   attachment: ChatAttachment,
   bytes: Uint8Array,
   maximumJsonBytes: number,
   signal: AbortSignal,
   deadlineAt: number,
 ): Promise<{ content: string; truncated: boolean }> {
-  const { getDocument } = await loadPdfModule();
-  const loadingTask = getDocument({
+  const loadingTask = pdfModule.getDocument({
     data: new Uint8Array(bytes),
     disableFontFace: true,
     isImageDecoderSupported: false,
@@ -281,8 +352,24 @@ export async function documentAttachmentContexts(
     throw new DocumentExtractionCancelledError();
   }
   const now = options.now ?? Date.now;
+  const preparationDeadlineAt = options.deadlineAt
+    ?? Number.POSITIVE_INFINITY;
+  const hasPdf = documents.some(
+    ({ attachment }) => attachment.mimeType === "application/pdf",
+  );
+  const pdfModule = hasPdf
+    ? await awaitPdfModuleInitialization({
+        deadlineAt: Math.min(
+          preparationDeadlineAt,
+          now() + PDF_MODULE_INITIALIZATION_TIMEOUT_MS,
+        ),
+        load: options.pdfModuleLoader ?? sharedPdfModuleLoader,
+        now,
+        signal: options.signal,
+      })
+    : null;
   const deadlineAt = Math.min(
-    options.deadlineAt ?? Number.POSITIVE_INFINITY,
+    preparationDeadlineAt,
     now() + DOCUMENT_EXTRACTION_TURN_TIMEOUT_MS,
   );
   if (deadlineAt <= now()) throw new DocumentExtractionDeadlineError();
@@ -299,6 +386,7 @@ export async function documentAttachmentContexts(
           deadlineAt,
           signal: options.signal,
           operation: (signal) => extractPdfText(
+            pdfModule!,
             attachment,
             bytes,
             maximumJsonBytes,

@@ -28,6 +28,8 @@ import { describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
+import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
+import { createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
 import {
   ProviderNdjsonDecoder,
   ProviderRunEventBudget,
@@ -38,6 +40,11 @@ import {
   searchWorkspaceEntries,
 } from "../../src/server/workspace";
 import { discoverWorkspaceGitRepositories } from "../../src/server/workspace-git";
+import {
+  portableNodeExecutable,
+  writeNodeSubcommand,
+} from "../helpers/portable-provider-fixture";
+import { nativeProviderRunInput } from "../server/model-route-fixture";
 
 const execFileAsync = promisify(execFile);
 const enforce = process.env.INERTIA_BENCHMARK_ENFORCE === "1";
@@ -119,16 +126,27 @@ function boundedHostLabel(value: string): string {
 async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
   const samples: number[] = [];
   const frameCounts: number[] = [];
+  const outputFrameCounts: number[] = [];
   const outputBytes: number[] = [];
   for (let sample = 0; sample < 3; sample += 1) {
     let frames = 0;
+    let outputFrames = 0;
     let bytes = 0;
+    let output = "";
     const owner = {
       readyState: 1,
       bufferedAmount: 0,
       send: (payload: string) => {
         frames += 1;
         bytes += Buffer.byteLength(payload);
+        const event = JSON.parse(payload) as {
+          type: string;
+          data?: string;
+        };
+        if (event.type === "terminal.output" && event.data) {
+          outputFrames += 1;
+          output += event.data;
+        }
       },
     } as unknown as WebSocket;
     const manager = new TerminalManager();
@@ -155,8 +173,14 @@ async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
         },
       );
     });
+    const expectedOutput = Array.from(
+      { length: 2_000 },
+      (_, index) => `line-${index}\n`,
+    ).join("");
+    expect(output.replaceAll("\r\n", "\n")).toBe(expectedOutput);
     samples.push(performance.now() - startedAt);
     frameCounts.push(frames);
+    outputFrameCounts.push(outputFrames);
     outputBytes.push(bytes);
   }
   const ordered = [...samples].sort((left, right) => left - right);
@@ -166,7 +190,80 @@ async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
     maximumMs: Number(ordered[2]!.toFixed(3)),
     samples: samples.map((value) => Number(value.toFixed(3))),
     frameCounts,
+    outputFrameCounts,
     outputBytes,
+    expectedLinesPerSample: 2_000,
+  };
+}
+
+async function providerHarnessLifecycleMeasurement(root: string): Promise<Measurement> {
+  const executable = portableNodeExecutable(root, "benchmark-claude");
+  const program = writeNodeSubcommand(root, "benchmark-claude-fixture.cjs", `
+const sessionId = "33333333-3333-4333-8333-333333333333";
+const send = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
+send({ type: "system", subtype: "init", session_id: sessionId });
+for (let index = 0; index < 200; index += 1) {
+  send({
+    type: "stream_event",
+    event: {
+      type: "content_block_delta",
+      delta: { text: "chunk-" + index + "|" },
+    },
+  });
+}
+send({ type: "result", is_error: false });
+`);
+  const expectedText = Array.from(
+    { length: 200 },
+    (_, index) => `chunk-${index}|`,
+  ).join("");
+  const samples: number[] = [];
+  const callbackCounts: number[] = [];
+  for (let sample = 0; sample < 3; sample += 1) {
+    const conversationId = `provider-benchmark-${sample}`;
+    const textEvents: string[] = [];
+    const manager = new ProviderManager(
+      { commands: { claude: executable } },
+      new AgentHarnessRegistry([
+        createCliAgentHarness("claude", { prefixArgs: [program] }),
+      ]),
+    );
+    const startedAt = performance.now();
+    try {
+      const result = await manager.run(nativeProviderRunInput({
+        providerId: "claude",
+        harnessId: "claude-cli",
+        conversationId,
+        cwd: root,
+        prompt: "Emit the deterministic benchmark stream.",
+        interactionMode: "build",
+        access: "auto-edit",
+      }), {
+        onText: ({ text }) => textEvents.push(text),
+      });
+      const elapsed = performance.now() - startedAt;
+      expect(result).toMatchObject({
+        status: "completed",
+        sessionId: "33333333-3333-4333-8333-333333333333",
+        text: expectedText,
+      });
+      expect(textEvents).toHaveLength(200);
+      expect(textEvents.join("")).toBe(expectedText);
+      samples.push(elapsed);
+      callbackCounts.push(textEvents.length);
+    } finally {
+      await manager.disposeAll();
+    }
+  }
+  const ordered = [...samples].sort((left, right) => left - right);
+  return {
+    medianMs: Number(ordered[1]!.toFixed(3)),
+    minimumMs: Number(ordered[0]!.toFixed(3)),
+    maximumMs: Number(ordered[2]!.toFixed(3)),
+    samples: samples.map((value) => Number(value.toFixed(3))),
+    streamEventsPerSample: 200,
+    callbackCounts,
+    normalizedCharactersPerSample: expectedText.length,
   };
 }
 
@@ -218,7 +315,7 @@ async function activeProviderStreamMeasurement(): Promise<Measurement> {
   };
 }
 
-async function providerProcessLifecycleMeasurement(): Promise<Measurement> {
+async function processTreeLifecycleMeasurement(): Promise<Measurement> {
   const samples: number[] = [];
   const spawnSamples: number[] = [];
   const shutdownSamples: number[] = [];
@@ -454,7 +551,10 @@ describe("cross-platform performance benchmark", () => {
         });
       });
       const activeProviderStream = await activeProviderStreamMeasurement();
-      const providerProcessLifecycle = await providerProcessLifecycleMeasurement();
+      const providerHarnessLifecycle = await providerHarnessLifecycleMeasurement(
+        fixtureRoot,
+      );
+      const processTreeLifecycle = await processTreeLifecycleMeasurement();
       const terminalBurst = await terminalBurstMeasurement();
       const terminalPtyLifecycle = await terminalPtyLifecycleMeasurement();
 
@@ -504,7 +604,8 @@ describe("cross-platform performance benchmark", () => {
           sqliteWarmOpen,
           processSpawn,
           activeProviderStream,
-          providerProcessLifecycle,
+          providerHarnessLifecycle,
+          processTreeLifecycle,
           terminalBurst,
           terminalPtyLifecycle,
         },
@@ -533,8 +634,9 @@ describe("cross-platform performance benchmark", () => {
         expect(sqliteWrites.medianMs).toBeLessThan(15_000);
         expect(processSpawn.medianMs).toBeLessThan(5_000);
         expect(activeProviderStream.medianMs).toBeLessThan(5_000);
-        expect(providerProcessLifecycle.medianMs).toBeLessThan(10_000);
-        expect(providerProcessLifecycle.confirmedStops).toBe(3);
+        expect(providerHarnessLifecycle.medianMs).toBeLessThan(10_000);
+        expect(processTreeLifecycle.medianMs).toBeLessThan(10_000);
+        expect(processTreeLifecycle.confirmedStops).toBe(3);
         expect(terminalBurst.medianMs).toBeLessThan(2_000);
         expect(terminalBurst.frames).toBeLessThanOrEqual(64);
         expect(terminalPtyLifecycle.medianMs).toBeLessThan(10_000);

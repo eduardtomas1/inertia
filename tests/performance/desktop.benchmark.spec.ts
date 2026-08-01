@@ -14,6 +14,7 @@ import {
 } from "@playwright/test";
 
 import { RuntimeStore } from "../../src/server/database";
+import { processExists } from "../e2e/support/app-fixture";
 
 const execFileAsync = promisify(execFile);
 const reportPath = resolve(
@@ -194,7 +195,10 @@ async function scrollSample(page: Page) {
   });
 }
 
-async function closeApp(electronApp: ElectronApplication): Promise<number> {
+async function closeApp(
+  electronApp: ElectronApplication,
+  runtimePid: number | null,
+): Promise<number> {
   const startedAt = performance.now();
   await electronApp.evaluate(() => {
     const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
@@ -203,6 +207,12 @@ async function closeApp(electronApp: ElectronApplication): Promise<number> {
     runtime?.quit?.();
   });
   await electronApp.close();
+  if (runtimePid) {
+    await expect.poll(
+      () => processExists(runtimePid),
+      { timeout: 5_000 },
+    ).toBe(false);
+  }
   return performance.now() - startedAt;
 }
 
@@ -264,7 +274,10 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       firstWindowMs: cold.firstWindowMs,
       runtimeInteractiveMs: cold.startupMs,
     };
-    const coldShutdownMs = await closeApp(cold.electronApp);
+    const coldShutdownMs = await closeApp(
+      cold.electronApp,
+      activeSample.runtimePid,
+    );
     cold = null;
 
     warm = await launchApp(dataDirectory, workspace, profile);
@@ -273,10 +286,24 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       firstWindowMs: warm.firstWindowMs,
       runtimeInteractiveMs: warm.startupMs,
     };
-    const warmShutdownMs = await closeApp(warm.electronApp);
+    const warmShutdownMs = await closeApp(
+      warm.electronApp,
+      warmSample.runtimePid,
+    );
     warm = null;
 
     const cpu = cpus();
+    const sessionType = process.env.XDG_SESSION_TYPE?.trim().toLocaleLowerCase()
+      || null;
+    const displayPresent = Boolean(process.env.DISPLAY);
+    const waylandPresent = Boolean(process.env.WAYLAND_DISPLAY);
+    const displayServer = sessionType === "x11" || sessionType === "wayland"
+      ? sessionType
+      : waylandPresent
+        ? "wayland"
+        : displayPresent
+          ? "x11"
+          : "none";
     const report = {
       schemaVersion: 1,
       collectedAt: new Date().toISOString(),
@@ -293,7 +320,10 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         cpuModel: cpu[0]?.model?.slice(0, 120) ?? "unknown",
         logicalCpuCount: cpu.length,
         totalMemoryBytes: totalmem(),
-        displayServer: process.env.XDG_SESSION_TYPE ?? null,
+        displayServer,
+        sessionType,
+        displayPresent,
+        waylandPresent,
       },
       fixture: {
         conversations: 2,
@@ -301,15 +331,16 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         secondaryMessages: 40,
         workspaceFiles: 120,
         profileReuse: true,
+        providerMode: "disabled-test-mode",
       },
       scenarios: {
         coldStartup: {
           ...coldStartup,
-          definition: "fresh Electron profile and pre-seeded runtime database; operating-system cache uncontrolled",
+          definition: "fresh Electron profile and pre-seeded runtime database in provider-disabled NODE_ENV=test; operating-system cache uncontrolled",
         },
         warmStartup: {
           ...warmStartup,
-          definition: "same Electron profile and runtime database after a clean shutdown",
+          definition: "same Electron profile and runtime database after the prior utility-runtime PID was confirmed stopped; providers remain disabled in NODE_ENV=test",
         },
         idle: { durationMs: 1_500, start: idleStart, end: idleEnd },
         longThreadScroll: scroll,
@@ -321,7 +352,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         shutdown: { coldMs: coldShutdownMs, warmMs: warmShutdownMs },
       },
       limitations: [
-        "Active provider streaming is covered by deterministic protocol benchmarks, not a live external provider in this desktop run.",
+        "Desktop startup, idle, and workload numbers are a provider-disabled NODE_ENV=test baseline; provider-enabled behavior is measured separately through the production ProviderManager and CLI harness boundary.",
         "The product owns one BrowserWindow; split chat is measured instead of inventing a multi-window mode.",
         "GPU information is observational; the benchmark does not force an adapter or Chromium feature flag.",
       ],
@@ -333,6 +364,9 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     });
 
     expect(report.scenarios.longThreadScroll.frames).toBe(120);
+    expect(["none", "wayland", "x11"]).toContain(report.host.displayServer);
+    expect(report.host.displayPresent).toBe(Boolean(process.env.DISPLAY));
+    expect(report.host.waylandPresent).toBe(Boolean(process.env.WAYLAND_DISPLAY));
     expect(report.scenarios.active.browserWindowCount).toBe(1);
     expect(report.scenarios.active.runtimePid).not.toBeNull();
     expect(report.scenarios.active.rendererPid).not.toBeNull();
@@ -340,8 +374,14 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.shutdown.coldMs).toBeLessThan(15_000);
     expect(report.scenarios.shutdown.warmMs).toBeLessThan(15_000);
   } finally {
-    if (cold) await closeApp(cold.electronApp).catch(() => undefined);
-    if (warm) await closeApp(warm.electronApp).catch(() => undefined);
+    if (cold) {
+      const runtimePid = (await runtimeSnapshot(cold.electronApp).catch(() => null))?.pid ?? null;
+      await closeApp(cold.electronApp, runtimePid).catch(() => undefined);
+    }
+    if (warm) {
+      const runtimePid = (await runtimeSnapshot(warm.electronApp).catch(() => null))?.pid ?? null;
+      await closeApp(warm.electronApp, runtimePid).catch(() => undefined);
+    }
     await rm(fixtureRoot, {
       recursive: true,
       force: true,

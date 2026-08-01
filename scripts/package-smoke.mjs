@@ -122,16 +122,18 @@ async function readJsonIfPresent(path) {
 
 function parseReadiness(value, expectedMainPid) {
   if (!value || typeof value !== "object") return null;
-  const { mainPid, runtimePid, generation, websocketUrl } = value;
+  const { mainPid, runtimePid, generation, websocketUrl, timestampMs } = value;
   if (mainPid !== expectedMainPid
     || !Number.isSafeInteger(runtimePid)
     || runtimePid <= 0
     || runtimePid === mainPid
     || !Number.isSafeInteger(generation)
     || generation < 1
+    || !Number.isSafeInteger(timestampMs)
+    || timestampMs <= 0
     || typeof websocketUrl !== "string"
     || !websocketUrl.startsWith("ws://127.0.0.1:")) return null;
-  return { mainPid, runtimePid, generation, websocketUrl };
+  return { mainPid, runtimePid, generation, websocketUrl, timestampMs };
 }
 
 async function createWindowsCodexFixture(root, workspace) {
@@ -345,8 +347,18 @@ try {
   child.stderr?.on("data", (chunk) => { stderr = appendOutput(stderr, chunk); });
 
   const exitResult = new Promise((settle) => {
-    child.once("error", (error) => settle({ error, code: null, signal: null }));
-    child.once("exit", (code, signal) => settle({ error: null, code, signal }));
+    child.once("error", (error) => settle({
+      error,
+      code: null,
+      signal: null,
+      endedAt: Date.now(),
+    }));
+    child.once("exit", (code, signal) => settle({
+      error: null,
+      code,
+      signal,
+      endedAt: Date.now(),
+    }));
   });
   readiness = await Promise.race([
     waitUntil(async () => {
@@ -358,7 +370,6 @@ try {
       throw new Error(`The packaged app exited before reporting readiness (${earlyExit.code ?? earlyExit.signal ?? "unknown"}).`);
     }),
   ]);
-  const readinessObservedAt = Date.now();
   const runtimeWasObserved = processExists(readiness.runtimePid);
   const pdfResult = await waitUntil(
     () => readJsonIfPresent(packagedPdf.resultPath),
@@ -401,6 +412,7 @@ try {
   if (process.platform !== "win32") {
     await waitUntil(() => !processGroupExists(readiness.mainPid), CLEANUP_TIMEOUT_MS, "packaged app process-group cleanup");
   }
+  const cleanupCompletedAt = Date.now();
   const benchmark = {
     schemaVersion: 1,
     collectedAt: new Date().toISOString(),
@@ -409,8 +421,9 @@ try {
     node: process.version,
     packageKind: process.platform === "linux" ? "linux-unpacked" : "unpacked",
     signingState: process.platform === "darwin" ? "ci-ad-hoc-or-local" : "not-recorded",
-    launchToRuntimeReadyMs: readinessObservedAt - launchedAt,
-    shutdownToProcessExitMs: Date.now() - shutdownStartedAt,
+    launchToRuntimeReadyMs: readiness.timestampMs - launchedAt,
+    shutdownToProcessExitMs: exit.endedAt - shutdownStartedAt,
+    postExitCleanupMs: cleanupCompletedAt - exit.endedAt,
     mainPid: readiness.mainPid,
     runtimePid: readiness.runtimePid,
     generation: readiness.generation,

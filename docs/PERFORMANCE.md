@@ -16,17 +16,19 @@ npm run benchmark:desktop
 ```
 
 `benchmark:platform` measures product filesystem traversal, nested Git status,
-identical SQLite append fixtures, active provider-stream decoding, supervised
-provider process startup/shutdown, raw process startup, deterministic terminal
+identical SQLite append fixtures, active provider-stream decoding, a
+representative production ProviderManager/CLI-harness lifecycle, confirmed
+process-tree termination overhead, raw process startup, deterministic terminal
 framing, and a real node-pty lifecycle. It writes
 `performance-results/platform-<platform>-<architecture>.json`.
 
-`benchmark:desktop` builds Inertia, launches the real Electron application, and
-measures a fresh-profile launch, a reused-profile launch, 1.5 seconds of idle
-CPU/RSS, a 600-message scroll, file-tree interaction, terminal creation,
-split-chat activation, shutdown, display scale, GPU feature observations, and
-per-process metrics for the main, renderer, supervised utility runtime, GPU,
-and other Electron utility processes. It writes
+`benchmark:desktop` builds Inertia and launches the real Electron application
+under `NODE_ENV=test`, which deliberately disables provider discovery. It is a
+provider-disabled test-mode baseline for a fresh-profile launch, a reused-profile
+launch, 1.5 seconds of idle CPU/RSS, a 600-message scroll, file-tree interaction,
+terminal creation, split-chat activation, shutdown, display scale, GPU feature
+observations, and per-process metrics for the main, renderer, supervised utility
+runtime, GPU, and other Electron utility processes. It writes
 `performance-results/desktop-<platform>-<architecture>.json`.
 
 `npm run benchmark:platform:smoke` adds deliberately generous catastrophic
@@ -35,7 +37,8 @@ checks structural properties such as bounded terminal frames. CI runs both
 harnesses on Windows x64, Linux x64 under X11/Xvfb, and macOS arm64 and retains
 the JSON reports for 14 days.
 
-Native package smoke records launch-to-runtime-ready and shutdown phase timing
+Native package smoke records authoritative main-process runtime-ready and
+before-quit timestamps, the child exit timestamp, and post-exit cleanup timing
 in `performance-results/package-*.json`. On Linux this measures the unpacked
 application produced alongside the AppImage, not AppImage mount time.
 
@@ -54,19 +57,26 @@ application produced alongside the AppImage, not AppImage mount time.
 - Active provider stream: 5,000 ordered NDJSON events fragmented across
   non-record-aligned input chunks and checked through the production line and
   total-event budgets.
-- Provider process lifecycle: three native Node children launched with the
-  provider process shape and stopped through Inertia's confirmed process-tree
-  terminator. Windows uses taskkill/child-resource confirmation; POSIX uses a
-  detached process group.
+- Provider harness lifecycle: three representative Claude CLI runs through the
+  production ProviderManager, child-environment sanitation, provider invocation,
+  process spawn, bounded NDJSON decoder, 200 ordered stream callbacks, result
+  normalization, and owned run settlement.
+- Process-tree lifecycle: three native Node children stopped through Inertia's
+  confirmed process-tree terminator. This isolates termination overhead and is
+  not labeled as an end-to-end provider run. Windows uses
+  taskkill/child-resource confirmation; POSIX uses a detached process group.
 - Terminal framing: 10,000 ordered one-character PTY callbacks. Delivery is
   capped at 16,384 UTF-16 code units per terminal payload and eight milliseconds
   before a partial flush.
 - Real PTY lifecycle: three node-pty launches that each emit 2,000 lines and
-  exit normally. On Windows this exercises node-pty's ConPTY backend.
+  exit normally. The fixture reconstructs every output payload, normalizes only
+  PTY newline convention, and asserts all lines and their order. On Windows this
+  exercises node-pty's ConPTY backend.
 - Desktop cold start: a fresh Electron profile with a pre-seeded runtime
-  database; operating-system cache is uncontrolled.
-- Desktop warm start: the same profile and database after a confirmed clean
-  shutdown.
+  database in provider-disabled `NODE_ENV=test`; operating-system cache is
+  uncontrolled.
+- Desktop warm start: the same provider-disabled profile and database only
+  after the prior utility-runtime PID is confirmed gone.
 - Long-thread scroll: 120 animation frames alternating between the ends of a
   600-message timeline; the report includes median, p95, and frames over 25 ms.
 - Split workload: Inertia's supported two-chat split view. Inertia intentionally
@@ -76,6 +86,12 @@ application produced alongside the AppImage, not AppImage mount time.
 Reports contain runtime, OS, CPU model/core count, RAM, display/session facts,
 and GPU feature status. They exclude hostnames, account names, workspace paths,
 environment contents, prompts, credentials, and provider output.
+
+The desktop report describes the exact Electron process environment with a
+normalized `displayServer` (`x11`, `wayland`, or `none`), normalized
+`sessionType`, and boolean `displayPresent`/`waylandPresent` fields. It never
+stores raw display identifiers. The platform report is a separate Node-process
+observation and must not be used as a proxy for an Xvfb-wrapped desktop run.
 
 ## Same-host optimization evidence
 
@@ -94,19 +110,21 @@ that every real terminal burst becomes one frame. Large output remains bounded
 to 16,384-code-unit payloads, partial output flushes within eight milliseconds,
 pending output flushes before exit or managed close, slow consumers are
 terminated at the existing 1 MiB WebSocket backpressure ceiling, and disposal
-cancels later sends. The real macOS PTY fixture completed in a 46.795 ms median
-and used three frames per 2,000-line sample after the change.
+cancels later sends. The real macOS PTY fixture completed in a 47.943 ms median;
+every one of its 2,000 ordered lines was reconstructed and asserted.
 
 Search, Git scan, SQLite, and raw process-spawn controls did not receive product
 changes in this pass and remained within ordinary run-to-run noise. The desktop
-harness was introduced with this change, so its first run is observational and
-is not presented as a before/after optimization claim. That run recorded:
+harness was introduced with this change, so its provider-disabled test-mode run
+is observational and is not presented as a general provider-enabled baseline or
+a before/after optimization claim. That run recorded:
 
-- fresh-profile runtime interactivity in 769.9 ms and reused-profile
-  interactivity in 521.9 ms;
-- 600-message scroll p95 of 10.0 ms with no frames over 25 ms;
-- terminal creation in 36.9 ms and split-chat activation in 189.7 ms;
-- clean shutdown in 126.2 ms (workload run) and 228.1 ms (warm relaunch).
+- fresh-profile runtime interactivity in 733.5 ms and reused-profile
+  interactivity in 497.8 ms;
+- 600-message scroll p95 of 9.7 ms with no frames over 25 ms;
+- terminal creation in 26.0 ms and split-chat activation in 188.4 ms;
+- shutdown with confirmed utility-runtime exit in 134.2 ms (workload run) and
+  237.2 ms (warm relaunch).
 
 The same run separated Browser/main, Tab/renderer, utility runtime, GPU, and
 Chromium utility RSS/CPU. Renderer working set grew from about 165 MiB before
@@ -140,8 +158,10 @@ automatic GPU/Ozone selection and existing font fallbacks.
 Hosted CI does not provide a native Wayland comparison, real AppImage
 mount-to-first-paint timing, desktop font-family inventory, or representative
 GPU hardware. Those require a physical Linux matrix; the reports record
-`XDG_SESSION_TYPE`, `WAYLAND_DISPLAY`, `DISPLAY`, scale, and GPU status so such
-runs remain comparable.
+normalized session type, display/Wayland presence, scale, and GPU status for the
+exact desktop process so such runs remain comparable. The Linux package report
+retains `packageKind: linux-unpacked`; software-rendered Xvfb GPU status remains
+an observation rather than a physical-GPU claim.
 
 ### macOS
 
@@ -167,11 +187,19 @@ to this PR; exact-head hosted CI remains required before review readiness.
 Active streaming remains covered by deterministic provider protocol,
 persistence, WebSocket coalescing, renderer projection, and E2E fixtures. The
 platform benchmark additionally times bounded parsing of a deterministic 5,000
-event stream and three confirmed provider-shaped process lifecycles. The
-desktop benchmark deliberately does not call a live external provider or
-collect private provider output. Provider spawn/stop correctness and complete
-process-tree confirmation remain release-blocking through `test:portable` and
-the lifecycle suites.
+event stream and three provider-enabled representative runs through the
+production ProviderManager and Claude CLI harness, including environment,
+spawn, protocol, ordered callbacks, and settlement. A separate direct-child
+scenario is named only as process-tree lifecycle overhead. The desktop benchmark
+is explicitly provider-disabled `NODE_ENV=test`; it neither calls a live
+external provider nor collects private provider output. Provider spawn/stop
+correctness and complete process-tree confirmation remain release-blocking
+through `test:portable` and the lifecycle suites.
+
+On the same macOS host, the representative provider-enabled CLI harness
+lifecycle completed in a 43.729 ms median while preserving all 200 ordered text
+callbacks per sample. The separately named process-tree termination floor was
+15.789 ms median; it is not presented as provider startup evidence.
 
 T3 Code's current first-party design uses a persistent Rust resource-monitor
 child with bounded in-memory history and OS counters, requests

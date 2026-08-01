@@ -50,6 +50,10 @@ describe("cross-platform packaged behavior contract", () => {
       "The packaged app did not finish shutdown after before-quit.",
     );
     expect(smoke).toContain("const shutdownStartedAt = beforeQuit.timestampMs");
+    expect(smoke).toContain("launchToRuntimeReadyMs: readiness.timestampMs - launchedAt");
+    expect(smoke).toContain("shutdownToProcessExitMs: exit.endedAt - shutdownStartedAt");
+    expect(smoke).toContain("postExitCleanupMs: cleanupCompletedAt - exit.endedAt");
+    expect(smoke).toContain("endedAt: Date.now()");
     expect(smoke).toContain("process-group cleanup");
     expect(smoke).toContain("Packaged Codex Ω (profile)");
     expect(smoke).toContain('join(root, "codex-bin")');
@@ -63,7 +67,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(main).toContain(
       "codexBinaryPath: packageSmokeCodexExecutable",
     );
-    expect(main).toContain("timestampMs: Date.now()");
+    expect(main.match(/timestampMs: Date\.now\(\)/gu)).toHaveLength(2);
     expect(main).toContain("packageSmokePdf:");
     expect(await source("src/server/runtime-worker.ts")).toContain(
       "await runPackagedPdfSmoke(",

@@ -884,7 +884,13 @@ async function bootstrap(): Promise<void> {
         packageSmokeScheduled = true;
         void writeFile(
           packageSmokeFilePath,
-          JSON.stringify({ mainPid: process.pid, runtimePid: snapshot.pid, generation: snapshot.generation, websocketUrl: snapshot.websocketUrl }),
+          JSON.stringify({
+            mainPid: process.pid,
+            runtimePid: snapshot.pid,
+            generation: snapshot.generation,
+            websocketUrl: snapshot.websocketUrl,
+            timestampMs: Date.now(),
+          }),
           { encoding: "utf8", mode: 0o600, flag: "wx" },
         ).finally(() => setTimeout(
           () => app.quit(),

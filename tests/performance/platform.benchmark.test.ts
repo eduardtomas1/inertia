@@ -272,13 +272,19 @@ function serializedPtyRecord(id: number): string {
 }
 
 function extractPtyRecords(output: string): Array<{ id: number; payload: string }> {
-  const lines = printablePtyText(output).split(/\r\n|\r|\n/u);
-  if (lines.at(-1) === "") lines.pop();
-  return lines.map((line) => {
-    if (!line.startsWith(PTY_RECORD_PREFIX) || !line.endsWith(PTY_RECORD_SUFFIX)) {
+  const text = printablePtyText(output);
+  const records: Array<{ id: number; payload: string }> = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    if (!text.startsWith(PTY_RECORD_PREFIX, cursor)) {
       throw new Error("Malformed PTY benchmark record delimiters.");
     }
-    const body = line.slice(PTY_RECORD_PREFIX.length, -PTY_RECORD_SUFFIX.length);
+    const bodyStart = cursor + PTY_RECORD_PREFIX.length;
+    const suffix = text.indexOf(PTY_RECORD_SUFFIX, bodyStart);
+    if (suffix < 0) {
+      throw new Error("Malformed PTY benchmark record delimiters.");
+    }
+    const body = text.slice(bodyStart, suffix);
     const separator = body.indexOf(PTY_RECORD_SEPARATOR);
     if (separator <= 0) throw new Error("Malformed PTY benchmark record body.");
     const idText = body.slice(0, separator);
@@ -286,11 +292,20 @@ function extractPtyRecords(output: string): Array<{ id: number; payload: string 
     if (!Number.isSafeInteger(id) || id < 0 || String(id) !== idText) {
       throw new Error("Malformed PTY benchmark record id.");
     }
-    return {
+    records.push({
       id,
       payload: body.slice(separator + PTY_RECORD_SEPARATOR.length),
-    };
-  });
+    });
+
+    cursor = suffix + PTY_RECORD_SUFFIX.length;
+    if (cursor === text.length) break;
+    const newlineStart = cursor;
+    while (text[cursor] === "\r" || text[cursor] === "\n") cursor += 1;
+    if (cursor === newlineStart) {
+      throw new Error("Malformed PTY benchmark record delimiters.");
+    }
+  }
+  return records;
 }
 
 function assertExpectedPtyRecords(output: string, count: number): void {
@@ -596,6 +611,7 @@ describe("cross-platform performance benchmark", () => {
     const record2 = serializedPtyRecord(2);
     expect(() => assertExpectedPtyRecords(`${record0}\r${record1}\r`, 2)).not.toThrow();
     expect(() => assertExpectedPtyRecords(`${record0}\r\n${record1}\r\n`, 2)).not.toThrow();
+    expect(() => assertExpectedPtyRecords(`${record0}\r\r\n${record1}\r\r\n`, 2)).not.toThrow();
     expect(() => assertExpectedPtyRecords(
       `${record0}\n${record1}\r${record2}\r\n`,
       3,
@@ -618,6 +634,8 @@ describe("cross-platform performance benchmark", () => {
     )).toThrow();
     expect(() => assertExpectedPtyRecords(`${record0}${record1}\n`, 2)).toThrow();
     expect(() => assertExpectedPtyRecords(`printable-prefix${record0}\n${record1}\n`, 2)).toThrow();
+    expect(() => assertExpectedPtyRecords(`${record0}\r\r\nprintable-noise${record1}\n`, 2)).toThrow();
+    expect(() => assertExpectedPtyRecords(`${record0.slice(0, -1)}\n`, 1)).toThrow();
     expect(() => extractPtyRecords("\u001B[ 1m")).toThrow();
     expect(() => extractPtyRecords("\u001B[?9001")).toThrow();
     expect(() => extractPtyRecords("\u001B]0;unterminated")).toThrow();

@@ -29,11 +29,34 @@ export interface DuoLaunchSideStatus {
   dispatchState: DuoDispatchState;
 }
 
+export interface DuoGitRecoveryAction {
+  label: string;
+  cwd: string;
+  executable: "git";
+  args: string[];
+}
+
+export interface DuoWorktreeRecoveryGuidance {
+  kind: "git-worktree";
+  ordinal: 0 | 1;
+  topology: "owned" | "conflict" | "ambiguous" | "branch-retained";
+  repositoryPath: string;
+  plannedPath: string;
+  observedPath: string | null;
+  worktreeId: string | null;
+  generatedBranch: string;
+  expectedHead: string | null;
+  observedBranch: string | null;
+  observedHead: string | null;
+  actions: DuoGitRecoveryAction[];
+}
+
 export interface DuoLaunchStatus {
   launchId: string;
   state: DuoLaunchState;
   error: string | null;
   sides: [DuoLaunchSideStatus, DuoLaunchSideStatus];
+  recoveryGuidance?: DuoWorktreeRecoveryGuidance[];
 }
 
 export interface DuoPreparedSide {

@@ -38,8 +38,11 @@ export {
   inspectOwnedWorktreeCleanupState,
   inspectRegisteredWorktreeOwnership,
   type OwnedWorktreeCreationHooks,
+  type OwnedWorktreeCreationDependencies,
   type OwnedWorktreeCleanupInspection,
+  type RegisteredWorktreeIdentity,
   type RegisteredWorktreeOwnership,
+  type RegisteredWorktreeRegistration,
   removeWorktree,
 } from "./git/worktrees";
 export { commitChanges } from "./git/commits";

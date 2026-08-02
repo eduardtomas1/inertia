@@ -4,7 +4,9 @@ import { join, resolve } from "node:path";
 
 import type {
   ClientCommand,
+  DuoGitRecoveryAction,
   DuoLaunchStatus,
+  DuoWorktreeRecoveryGuidance,
   ModelSelection,
   ProviderInfo,
 } from "../../../shared/contracts";
@@ -63,6 +65,9 @@ export interface DuoWorktreeOperations {
     worktreePath: string,
     expectedBranch: string,
     expectedHead: string,
+    expectedWorktreeId: string,
+    expectedRepositoryIdentity: string,
+    expectedOwnershipToken: string,
   ): ReturnType<typeof inspectOwnedWorktreeCleanupState>;
   inspectBranch(
     repositoryPath: string,
@@ -91,12 +96,82 @@ function errorMessage(error: unknown): string {
     : "The Duo launch could not be prepared.";
 }
 
-function publicStatus(status: ReturnType<RuntimeStore["pairedLaunch"]>): DuoLaunchStatus {
+function recoveryGuidance(
+  store: RuntimeStore,
+  status: ReturnType<RuntimeStore["pairedLaunch"]>,
+): DuoWorktreeRecoveryGuidance[] {
+  if (status.state !== "recovery-required") return [];
+  return status.plans.flatMap((plan): DuoWorktreeRecoveryGuidance[] => {
+    if (
+      !plan.ownsWorktree
+      || !plan.plannedWorktreePath
+      || !plan.plannedBranch
+      || status.sides[plan.ordinal].conversationId
+    ) return [];
+    let topology: DuoWorktreeRecoveryGuidance["topology"];
+    if (
+      plan.worktreeCleanupOutcome === "absent"
+      && plan.branchCleanupOutcome === "retained"
+    ) {
+      topology = "branch-retained";
+    } else if (plan.worktreeCleanupOutcome === "retained") {
+      topology = plan.worktreeCleanupTopology ?? "ambiguous";
+    } else if (
+      plan.worktreeCreationState === "creating"
+      || plan.worktreeCreationState === "created"
+    ) {
+      topology = "ambiguous";
+    } else {
+      return [];
+    }
+    const cwd = store.projectPath(plan.projectId);
+    const branchAction: DuoGitRecoveryAction = {
+      label: "Remove generated branch after inspecting it",
+      cwd,
+      executable: "git",
+      args: ["branch", "-d", "--", plan.plannedBranch],
+    };
+    const actions: DuoGitRecoveryAction[] = topology === "owned"
+      && plan.cleanupObservedPath
+      ? [
+        {
+          label: "Remove retained linked worktree",
+          cwd,
+          executable: "git",
+          args: ["worktree", "remove", "--", plan.cleanupObservedPath],
+        },
+        branchAction,
+      ]
+      : topology === "branch-retained"
+        ? [branchAction]
+        : [];
+    return [{
+      kind: "git-worktree",
+      ordinal: plan.ordinal,
+      topology,
+      repositoryPath: cwd,
+      plannedPath: plan.plannedWorktreePath,
+      observedPath: plan.cleanupObservedPath,
+      worktreeId: plan.cleanupWorktreeId,
+      generatedBranch: plan.plannedBranch,
+      expectedHead: plan.cleanupBranchHead,
+      observedBranch: plan.cleanupObservedBranch,
+      observedHead: plan.cleanupObservedHead,
+      actions,
+    }];
+  });
+}
+
+function publicStatus(
+  store: RuntimeStore,
+  status: ReturnType<RuntimeStore["pairedLaunch"]>,
+): DuoLaunchStatus {
   return {
     launchId: status.launchId,
     state: status.state,
     error: status.error,
     sides: status.sides,
+    recoveryGuidance: recoveryGuidance(store, status),
   };
 }
 
@@ -138,8 +213,13 @@ async function cleanupUnadoptedOwnedWorktree(
     );
   }
   const branchHead = plan.cleanupBranchHead;
-  if (!branchHead) {
-    throw new Error("The Duo worktree cleanup ownership receipt was not durable.");
+  const worktreeId = plan.cleanupWorktreeId;
+  const repositoryIdentity = plan.cleanupRepositoryIdentity;
+  const ownershipToken = plan.cleanupWorktreeToken;
+  if (!branchHead || !worktreeId || !repositoryIdentity || !ownershipToken) {
+    throw new Error(
+      "The durable linked-worktree identity is incomplete. Automatic cleanup was withheld and absence cannot be inferred.",
+    );
   }
   const repositoryPath = store.projectPath(plan.projectId);
   const inspection = await worktrees.inspectWorktree(
@@ -147,27 +227,43 @@ async function cleanupUnadoptedOwnedWorktree(
     worktreePath,
     branch,
     branchHead,
+    worktreeId,
+    repositoryIdentity,
+    ownershipToken,
   );
   if (inspection.state !== "absent") {
-    store.recordPairedLaunchWorktreeCleanupOutcome(
+    const registered = inspection.state === "registered"
+      ? inspection.identity
+      : null;
+    const exact = registered !== null
+      && resolve(registered.path) === resolve(worktreePath)
+      && registered.branch === branch
+      && registered.head === branchHead;
+    store.recordPairedLaunchWorktreeCleanupObservation(
       launchId,
       ordinal,
       "retained",
+      {
+        topology: exact ? "owned" : "conflict",
+        path: registered?.path ?? null,
+        branch: registered?.branch ?? null,
+        head: registered?.head ?? null,
+      },
     );
-    const expected = `path ${JSON.stringify(worktreePath)} on branch ${branch}`;
-    if (inspection.state === "conflict") {
+    if (!exact) {
       throw new RetainedWorktreeError(
-        `The retained Duo worktree topology changed from ${expected}. Automatic cleanup was withheld. Inspect it with \`git worktree list\`; do not remove anything until the path, branch, and commit are verified.`,
+        "A launch-owned linked-worktree identity remains or conflicts with the expected topology. Automatic cleanup was withheld. Review the structured recovery details before making a manual change.",
       );
     }
     throw new RetainedWorktreeError(
-      `The owned Duo worktree remains at ${expected}. Automatic cleanup was withheld because Git cannot atomically guard worktree identity during removal. After inspection, remove it manually from the project repository with \`git worktree remove -- ${JSON.stringify(worktreePath)}\`, then remove its generated branch with \`git branch -d -- '${branch}'\`. Inertia will never run these commands automatically.`,
+      "A launch-owned linked worktree remains registered. Automatic cleanup was withheld because Git cannot atomically guard its identity during removal. Review the structured recovery details and remove it manually with a platform-appropriate Git client.",
     );
   }
-  store.recordPairedLaunchWorktreeCleanupOutcome(
+  store.recordPairedLaunchWorktreeCleanupObservation(
     launchId,
     ordinal,
     "absent",
+    { topology: null, path: null, branch: null, head: null },
   );
   const branchOutcome = await worktrees.inspectBranch(
     repositoryPath,
@@ -181,7 +277,7 @@ async function cleanupUnadoptedOwnedWorktree(
   );
   if (branchOutcome === "retained") {
     throw new RetainedWorktreeError(
-      `The Duo worktree path ${JSON.stringify(worktreePath)} is absent, but its generated branch ${branch} remains. Inspect it, then remove it manually from the project repository with \`git branch -d -- '${branch}'\`. Inertia will never delete it automatically.`,
+      "The launch-owned linked worktree registration is absent, but its generated branch remains. Review the structured recovery details and remove the branch manually with a platform-appropriate Git client.",
     );
   }
 }
@@ -235,17 +331,17 @@ export class DuoLaunchCoordinator {
 
   async dispatch(launchId: string): Promise<DuoLaunchStatus> {
     let launch = this.store.pairedLaunch(launchId);
-    if (launch.state !== "prepared") return publicStatus(launch);
+    if (launch.state !== "prepared") return publicStatus(this.store, launch);
     if (launch.cancelRequested || this.cancellationRequests.has(launchId)) {
       return this.cancel(launchId);
     }
     if (!this.store.claimPairedLaunchDispatch(launchId)) {
-      return publicStatus(this.store.pairedLaunch(launchId));
+      return publicStatus(this.store, this.store.pairedLaunch(launchId));
     }
     launch = this.store.pairedLaunch(launchId);
     const turnIds = launch.sides.map(({ turnId }) => turnId);
     if (!turnIds[0] || !turnIds[1]) {
-      return publicStatus(this.store.failPairedLaunch(
+      return publicStatus(this.store, this.store.failPairedLaunch(
         launchId,
         "interrupted",
         "The durable Duo dispatch claim is missing a turn identity. It was not retried.",
@@ -258,18 +354,20 @@ export class DuoLaunchCoordinator {
       for (const { conversationId } of launch.sides) {
         if (conversationId) this.turns.cancel(conversationId);
       }
-      return publicStatus(this.store.failPairedLaunch(
+      return publicStatus(this.store, this.store.failPairedLaunch(
         launchId,
         "interrupted",
         `Provider dispatch returned an ambiguous result and was not retried: ${errorMessage(error)}`,
       ));
     }
     const afterStart = this.store.pairedLaunch(launchId);
-    if (afterStart.state !== "dispatching") return publicStatus(afterStart);
+    if (afterStart.state !== "dispatching") {
+      return publicStatus(this.store, afterStart);
+    }
     const failure = started.every(Boolean)
       ? null
       : "Only part of the provider dispatch was accepted. Any started sibling was stopped; dispatch was not retried.";
-    return publicStatus(this.store.finishPairedLaunchDispatch(
+    return publicStatus(this.store, this.store.finishPairedLaunchDispatch(
       launchId,
       started,
       failure,
@@ -285,7 +383,9 @@ export class DuoLaunchCoordinator {
         await preparing.catch(() => undefined);
         launch = this.store.findPairedLaunch(launchId);
       }
-      if (!launch) return publicStatus(this.store.pairedLaunch(launchId));
+      if (!launch) {
+        return publicStatus(this.store, this.store.pairedLaunch(launchId));
+      }
     }
     this.store.requestPairedLaunchCancellation(launchId);
     const latest = this.store.pairedLaunch(launchId);
@@ -293,7 +393,7 @@ export class DuoLaunchCoordinator {
       latest.state === "cancelled"
       || latest.state === "failed"
       || latest.state === "interrupted"
-    ) return publicStatus(latest);
+    ) return publicStatus(this.store, latest);
     for (const { conversationId } of latest.sides) {
       if (conversationId) this.turns.cancel(conversationId);
     }
@@ -307,13 +407,16 @@ export class DuoLaunchCoordinator {
       return cleanup;
     }
     if (latest.state === "preparing" && this.prepareTasks.has(launchId)) {
-      return publicStatus(latest);
+      return publicStatus(this.store, latest);
     }
-    return publicStatus(this.store.finishPairedLaunchCancellation(launchId));
+    return publicStatus(
+      this.store,
+      this.store.finishPairedLaunchCancellation(launchId),
+    );
   }
 
   status(launchId: string): DuoLaunchStatus {
-    return publicStatus(this.store.pairedLaunch(launchId));
+    return publicStatus(this.store, this.store.pairedLaunch(launchId));
   }
 
   private async prepareFresh(
@@ -349,12 +452,13 @@ export class DuoLaunchCoordinator {
             startPoint: side.startPoint!,
           },
           {
-            beforeAdd: () => {
+            beforeAdd: (ownershipToken) => {
               this.store.beginPairedLaunchWorktreeCreation(
                 payload.launchId,
                 side.ordinal,
                 plannedWorktreePath,
                 plannedBranch,
+                ownershipToken,
               );
             },
             notAdded: () => {
@@ -371,6 +475,9 @@ export class DuoLaunchCoordinator {
                 ownership.path,
                 ownership.branch,
                 ownership.head,
+                ownership.worktreeId,
+                ownership.repositoryIdentity,
+                ownership.ownershipToken,
               );
               side.worktreePath = ownership.path;
               side.branch = ownership.branch;
@@ -478,15 +585,16 @@ export class DuoLaunchCoordinator {
       "Owned worktree cleanup still needs attention",
     );
     if (failure) {
-      return publicStatus(this.store.failPairedLaunch(
+      return publicStatus(this.store, this.store.failPairedLaunch(
         launch.launchId,
         "recovery-required",
         failure,
       ));
     }
-    return publicStatus(this.store.finishPairedLaunchCancellation(
-      launch.launchId,
-    ));
+    return publicStatus(
+      this.store,
+      this.store.finishPairedLaunchCancellation(launch.launchId),
+    );
   }
 
   private async preflightSide(

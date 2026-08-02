@@ -19,6 +19,7 @@ import type {
   AccessMode,
   AppSettings,
   AppSnapshot,
+  DuoWorktreeRecoveryGuidance,
   ModelSelection,
   ProviderId,
 } from "@shared/contracts";
@@ -53,6 +54,7 @@ export interface MultiSpawnDialogProps {
   submitting: boolean;
   cancelling?: boolean;
   error: string | null;
+  recoveryGuidance?: DuoWorktreeRecoveryGuidance[];
   onClose: () => void;
   onSubmit: (draft: MultiSpawnDraft) => Promise<void>;
   onOpenProviderSetup: (providerId: ProviderId) => void;
@@ -269,6 +271,7 @@ export function MultiSpawnDialog({
   submitting,
   cancelling = false,
   error,
+  recoveryGuidance = [],
   onClose,
   onSubmit,
   onOpenProviderSetup,
@@ -569,6 +572,54 @@ export function MultiSpawnDialog({
           >
             {error
               ?? "Choose two ready routes before launching the duo."}
+            {recoveryGuidance.map((guidance) => (
+              <section
+                key={`${guidance.ordinal}:${guidance.worktreeId ?? "unknown"}`}
+                className="multi-spawn-recovery-guidance"
+                aria-label={`Manual Git recovery for route ${guidance.ordinal + 1}`}
+              >
+                <p>
+                  These are literal values, not a shell command. Inspect them
+                  with your platform&apos;s Git client before making a manual change.
+                </p>
+                <dl>
+                  <dt>Repository</dt>
+                  <dd><code>{guidance.repositoryPath}</code></dd>
+                  <dt>Planned path</dt>
+                  <dd><code>{guidance.plannedPath}</code></dd>
+                  <dt>Registered path</dt>
+                  <dd><code>{guidance.observedPath ?? "Not verified"}</code></dd>
+                  <dt>Worktree ID</dt>
+                  <dd><code>{guidance.worktreeId ?? "Not verified"}</code></dd>
+                  <dt>Generated branch</dt>
+                  <dd><code>{guidance.generatedBranch}</code></dd>
+                  <dt>Expected commit</dt>
+                  <dd><code>{guidance.expectedHead ?? "Not verified"}</code></dd>
+                </dl>
+                {guidance.actions.length > 0 && (
+                  <ol>
+                    {guidance.actions.map((action) => (
+                      <li key={`${action.label}:${action.args.join("\0")}`}>
+                        <strong>{action.label}</strong>
+                        <span>Working directory: <code>{action.cwd}</code></span>
+                        <span>Executable: <code>{action.executable}</code></span>
+                        <span className="multi-spawn-recovery-arguments">
+                          Arguments:
+                          {action.args.map((argument, index) => (
+                            <code
+                              key={`${index}:${argument}`}
+                              data-git-argument={index}
+                            >
+                              {argument}
+                            </code>
+                          ))}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </section>
+            ))}
           </div>
         )}
 

@@ -393,12 +393,14 @@ export class RuntimeStore {
     ordinal: 0 | 1,
     worktreePath: string,
     branch: string,
+    ownershipToken: string,
   ): void {
     this.pairedLaunchRepository.beginWorktreeCreation(
       launchId,
       ordinal,
       worktreePath,
       branch,
+      ownershipToken,
     );
   }
 
@@ -416,6 +418,9 @@ export class RuntimeStore {
     createdWorktreePath: string,
     branch: string,
     head: string,
+    worktreeId: string,
+    repositoryIdentity: string,
+    ownershipToken: string,
   ): void {
     this.pairedLaunchRepository.recordWorktreeCleanupOwnership(
       launchId,
@@ -424,6 +429,9 @@ export class RuntimeStore {
       createdWorktreePath,
       branch,
       head,
+      worktreeId,
+      repositoryIdentity,
+      ownershipToken,
     );
   }
 
@@ -453,15 +461,22 @@ export class RuntimeStore {
     );
   }
 
-  recordPairedLaunchWorktreeCleanupOutcome(
+  recordPairedLaunchWorktreeCleanupObservation(
     launchId: string,
     ordinal: 0 | 1,
     outcome: "absent" | "retained",
+    observation: {
+      topology: "owned" | "conflict" | null;
+      path: string | null;
+      branch: string | null;
+      head: string | null;
+    },
   ): void {
-    this.pairedLaunchRepository.recordWorktreeCleanupOutcome(
+    this.pairedLaunchRepository.recordWorktreeCleanupObservation(
       launchId,
       ordinal,
       outcome,
+      observation,
     );
   }
 

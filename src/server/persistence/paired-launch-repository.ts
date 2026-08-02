@@ -18,11 +18,18 @@ export interface PairedLaunchSidePlan {
 }
 
 export interface StoredPairedLaunchSidePlan extends PairedLaunchSidePlan {
+  cleanupWorktreeToken: string | null;
+  cleanupWorktreeId: string | null;
+  cleanupRepositoryIdentity: string | null;
   cleanupBranchHead: string | null;
   worktreeCreationState: "pending" | "creating" | "created" | "not-created";
   worktreeRemovalStarted: boolean;
   worktreeRemovalConfirmed: boolean;
   worktreeCleanupOutcome: "absent" | "retained" | null;
+  worktreeCleanupTopology: "owned" | "conflict" | null;
+  cleanupObservedPath: string | null;
+  cleanupObservedBranch: string | null;
+  cleanupObservedHead: string | null;
   branchCleanupOutcome: "absent" | "retained" | null;
 }
 
@@ -106,10 +113,17 @@ export class PairedLaunchRepository {
         plannedBranch: side.planned_branch,
         ownsWorktree: side.owns_worktree === 1,
         worktreeCreationState: side.worktree_creation_state,
+        cleanupWorktreeToken: side.cleanup_worktree_token,
+        cleanupWorktreeId: side.cleanup_worktree_id,
+        cleanupRepositoryIdentity: side.cleanup_repository_identity,
         cleanupBranchHead: side.cleanup_branch_head,
         worktreeRemovalStarted: side.worktree_removal_started === 1,
         worktreeRemovalConfirmed: side.worktree_removal_confirmed === 1,
         worktreeCleanupOutcome: side.worktree_cleanup_outcome,
+        worktreeCleanupTopology: side.worktree_cleanup_topology,
+        cleanupObservedPath: side.cleanup_observed_path,
+        cleanupObservedBranch: side.cleanup_observed_branch,
+        cleanupObservedHead: side.cleanup_observed_head,
         branchCleanupOutcome: side.branch_cleanup_outcome,
       })) as StoredPairedLaunch["plans"],
     };
@@ -189,9 +203,24 @@ export class PairedLaunchRepository {
                 AND missing_turn.turn_id IS NULL
             )
           )
+          OR EXISTS (
+            SELECT 1
+            FROM paired_launch_sides AS unresolved_worktree
+            WHERE unresolved_worktree.launch_id = launch.id
+              AND unresolved_worktree.project_id = ?
+              AND unresolved_worktree.owns_worktree = 1
+              AND unresolved_worktree.conversation_id IS NULL
+              AND unresolved_worktree.worktree_creation_state IN (
+                'creating', 'created'
+              )
+              AND (
+                unresolved_worktree.worktree_cleanup_outcome IS NULL
+                OR unresolved_worktree.worktree_cleanup_outcome <> 'absent'
+              )
+          )
         )
       LIMIT 1
-    `).get(projectId);
+    `).get(projectId, projectId);
     if (blocked) {
       throw new Error(
         "Cancel the active Duo launch before removing this project.",
@@ -218,10 +247,11 @@ export class PairedLaunchRepository {
     ordinal: 0 | 1,
     worktreePath: string,
     branch: string,
+    ownershipToken: string,
   ): void {
     const result = this.database.prepare(`
       UPDATE paired_launch_sides
-      SET worktree_creation_state = 'creating'
+      SET worktree_creation_state = 'creating', cleanup_worktree_token = ?
       WHERE launch_id = ? AND ordinal = ?
         AND owns_worktree = 1
         AND conversation_id IS NULL
@@ -229,7 +259,8 @@ export class PairedLaunchRepository {
         AND planned_branch = ?
         AND worktree_creation_state = 'pending'
         AND cleanup_branch_head IS NULL
-    `).run(launchId, ordinal, worktreePath, branch);
+        AND cleanup_worktree_token IS NULL
+    `).run(ownershipToken, launchId, ordinal, worktreePath, branch);
     if (result.changes !== 1) {
       throw new Error(
         "The Duo worktree creation attempt did not match its durable plan.",
@@ -243,7 +274,7 @@ export class PairedLaunchRepository {
   ): void {
     const result = this.database.prepare(`
       UPDATE paired_launch_sides
-      SET worktree_creation_state = 'not-created'
+      SET worktree_creation_state = 'not-created', cleanup_worktree_token = NULL
       WHERE launch_id = ? AND ordinal = ?
         AND owns_worktree = 1
         AND conversation_id IS NULL
@@ -264,30 +295,45 @@ export class PairedLaunchRepository {
     createdWorktreePath: string,
     branch: string,
     head: string,
+    worktreeId: string,
+    repositoryIdentity: string,
+    ownershipToken: string,
   ): void {
-    if (!/^[0-9a-f]{40,64}$/u.test(head)) {
+    if (
+      !/^[0-9a-f]{40,64}$/u.test(head)
+      || !/^[0-9a-f]{64}$/u.test(repositoryIdentity)
+      || !/^[0-9a-f-]{36}$/u.test(ownershipToken)
+      || !worktreeId
+      || worktreeId.length > 255
+      || worktreeId.includes("\0")
+    ) {
       throw new Error("The Duo worktree cleanup commit identity is invalid.");
     }
     const result = this.database.prepare(`
       UPDATE paired_launch_sides
       SET planned_worktree_path = ?, planned_branch = ?,
-        worktree_creation_state = 'created', cleanup_branch_head = ?
+        worktree_creation_state = 'created', cleanup_branch_head = ?,
+        cleanup_worktree_id = ?, cleanup_repository_identity = ?
       WHERE launch_id = ? AND ordinal = ?
         AND owns_worktree = 1
         AND conversation_id IS NULL
         AND planned_worktree_path = ?
         AND planned_branch = ?
         AND worktree_creation_state = 'creating'
+        AND cleanup_worktree_token = ?
         AND worktree_removal_confirmed = 0
         AND cleanup_branch_head IS NULL
     `).run(
       createdWorktreePath,
       branch,
       head,
+      worktreeId,
+      repositoryIdentity,
       launchId,
       ordinal,
       plannedWorktreePath,
       branch,
+      ownershipToken,
     );
     if (result.changes !== 1) {
       throw new Error(
@@ -369,19 +415,44 @@ export class PairedLaunchRepository {
     }
   }
 
-  recordWorktreeCleanupOutcome(
+  recordWorktreeCleanupObservation(
     launchId: string,
     ordinal: 0 | 1,
     outcome: "absent" | "retained",
+    observation: {
+      topology: "owned" | "conflict" | null;
+      path: string | null;
+      branch: string | null;
+      head: string | null;
+    },
   ): void {
+    if (
+      outcome === "retained"
+      && observation.topology === null
+    ) {
+      throw new Error("A retained Duo worktree needs a topology receipt.");
+    }
+    if (outcome === "absent" && (
+      observation.topology !== null
+      || observation.path !== null
+      || observation.branch !== null
+      || observation.head !== null
+    )) {
+      throw new Error("An absent Duo worktree cannot retain observed topology.");
+    }
     const result = this.database.prepare(`
       UPDATE paired_launch_sides
-      SET worktree_cleanup_outcome = ?
+      SET worktree_cleanup_outcome = ?, worktree_cleanup_topology = ?,
+        cleanup_observed_path = ?, cleanup_observed_branch = ?,
+        cleanup_observed_head = ?
       WHERE launch_id = ? AND ordinal = ?
         AND owns_worktree = 1
         AND conversation_id IS NULL
         AND worktree_creation_state = 'created'
         AND cleanup_branch_head IS NOT NULL
+        AND cleanup_worktree_token IS NOT NULL
+        AND cleanup_worktree_id IS NOT NULL
+        AND cleanup_repository_identity IS NOT NULL
         AND (
           worktree_cleanup_outcome IS NULL
           OR worktree_cleanup_outcome = ?
@@ -390,7 +461,17 @@ export class PairedLaunchRepository {
             AND ? = 'absent'
           )
         )
-    `).run(outcome, launchId, ordinal, outcome, outcome);
+    `).run(
+      outcome,
+      observation.topology,
+      observation.path,
+      observation.branch,
+      observation.head,
+      launchId,
+      ordinal,
+      outcome,
+      outcome,
+    );
     if (result.changes !== 1) {
       throw new Error(
         "The Duo worktree cleanup outcome did not match its durable ownership proof.",

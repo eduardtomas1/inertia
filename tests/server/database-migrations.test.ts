@@ -928,7 +928,7 @@ describe("published database fixtures", () => {
 });
 
 describe("atomic Duo schema migration", () => {
-  it.each(["current", "v37-upgrade", "v38-upgrade"] as const)(
+  it.each(["current", "v37-upgrade", "v38-upgrade", "v39-upgrade"] as const)(
     "installs active-launch deletion protection for a %s database",
     async (source) => {
       const directory = await temporaryDirectory("inertia-duo-migration-");
@@ -938,7 +938,10 @@ describe("atomic Duo schema migration", () => {
       const current = new RuntimeStore(databasePath, workspacePath, {
         recoverInterruptedRuns: false,
       });
-      const retainedLaunchId = source === "v38-upgrade" ? randomUUID() : null;
+      const retainedLaunchId = source === "v38-upgrade"
+        || source === "v39-upgrade"
+        ? randomUUID()
+        : null;
       if (retainedLaunchId) {
         const project = current.createProject("Retained Duo", workspacePath);
         current.createPairedLaunch(retainedLaunchId, [0, 1].map((ordinal) => ({
@@ -962,22 +965,49 @@ describe("atomic Duo schema migration", () => {
         `);
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version >= ?",
-        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 1);
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 2);
         expect((previous.prepare(
           "SELECT MAX(version) AS version FROM schema_migrations",
         ).get() as { version: number }).version).toBe(
-          CURRENT_DATABASE_SCHEMA_VERSION - 2,
+          CURRENT_DATABASE_SCHEMA_VERSION - 3,
         );
         previous.close();
       } else if (source === "v38-upgrade") {
         const previous = new Database(databasePath);
         previous.exec(`
+          DROP TRIGGER paired_launches_project_delete;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_head;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_branch;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_path;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_cleanup_topology;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_repository_identity;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_worktree_id;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_worktree_token;
           ALTER TABLE paired_launch_sides DROP COLUMN branch_cleanup_outcome;
           ALTER TABLE paired_launch_sides DROP COLUMN worktree_cleanup_outcome;
           ALTER TABLE paired_launch_sides DROP COLUMN worktree_removal_confirmed;
           ALTER TABLE paired_launch_sides DROP COLUMN worktree_removal_started;
           ALTER TABLE paired_launch_sides DROP COLUMN worktree_creation_state;
           ALTER TABLE paired_launch_sides DROP COLUMN cleanup_branch_head;
+        `);
+        previous.prepare(
+          "DELETE FROM schema_migrations WHERE version >= ?",
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 1);
+        previous.close();
+      } else if (source === "v39-upgrade") {
+        const previous = new Database(databasePath);
+        previous.exec(`
+          UPDATE paired_launch_sides
+          SET worktree_creation_state = 'created',
+            cleanup_branch_head = '${"a".repeat(40)}'
+          WHERE owns_worktree = 1;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_head;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_branch;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_path;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_cleanup_topology;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_repository_identity;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_worktree_id;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_worktree_token;
         `);
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version = ?",
@@ -989,24 +1019,47 @@ describe("atomic Duo schema migration", () => {
         recoverInterruptedRuns: false,
       });
       if (retainedLaunchId) {
+        const expectedCreationState = source === "v39-upgrade"
+          ? "created"
+          : "pending";
+        const expectedHead = source === "v39-upgrade" ? "a".repeat(40) : null;
         expect(migrated.pairedLaunch(retainedLaunchId).plans).toEqual([
           expect.objectContaining({
-            cleanupBranchHead: null,
-            worktreeCreationState: "pending",
+            cleanupBranchHead: expectedHead,
+            worktreeCreationState: expectedCreationState,
             worktreeRemovalStarted: false,
             worktreeRemovalConfirmed: false,
             worktreeCleanupOutcome: null,
             branchCleanupOutcome: null,
+            cleanupWorktreeToken: null,
+            cleanupWorktreeId: null,
+            cleanupRepositoryIdentity: null,
+            worktreeCleanupTopology: null,
+            cleanupObservedPath: null,
+            cleanupObservedBranch: null,
+            cleanupObservedHead: null,
           }),
           expect.objectContaining({
-            cleanupBranchHead: null,
-            worktreeCreationState: "pending",
+            cleanupBranchHead: expectedHead,
+            worktreeCreationState: expectedCreationState,
             worktreeRemovalStarted: false,
             worktreeRemovalConfirmed: false,
             worktreeCleanupOutcome: null,
             branchCleanupOutcome: null,
+            cleanupWorktreeToken: null,
+            cleanupWorktreeId: null,
+            cleanupRepositoryIdentity: null,
+            worktreeCleanupTopology: null,
+            cleanupObservedPath: null,
+            cleanupObservedBranch: null,
+            cleanupObservedHead: null,
           }),
         ]);
+        if (source === "v39-upgrade") {
+          expect(() => migrated.removeProject(
+            migrated.pairedLaunch(retainedLaunchId).plans[0].projectId,
+          )).toThrow(/Cancel the active Duo launch/u);
+        }
       }
       migrated.close();
       const inspection = new Database(databasePath, { readonly: true });
@@ -1045,7 +1098,14 @@ describe("atomic Duo schema migration", () => {
           || name === "worktree_removal_started"
           || name === "worktree_removal_confirmed"
           || name === "worktree_cleanup_outcome"
-          || name === "branch_cleanup_outcome",
+          || name === "branch_cleanup_outcome"
+          || name === "cleanup_worktree_token"
+          || name === "cleanup_worktree_id"
+          || name === "cleanup_repository_identity"
+          || name === "worktree_cleanup_topology"
+          || name === "cleanup_observed_path"
+          || name === "cleanup_observed_branch"
+          || name === "cleanup_observed_head",
       )).toEqual([
         expect.objectContaining({
           name: "cleanup_branch_head",
@@ -1071,6 +1131,13 @@ describe("atomic Duo schema migration", () => {
           name: "branch_cleanup_outcome",
           dflt_value: null,
         }),
+        expect.objectContaining({ name: "cleanup_worktree_token", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_worktree_id", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_repository_identity", dflt_value: null }),
+        expect.objectContaining({ name: "worktree_cleanup_topology", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_observed_path", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_observed_branch", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_observed_head", dflt_value: null }),
       ]);
       expect(inspection.pragma("foreign_key_check")).toEqual([]);
       inspection.close();

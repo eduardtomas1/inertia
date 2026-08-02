@@ -119,10 +119,17 @@ export interface PairedLaunchSideRow {
   planned_branch: string | null;
   owns_worktree: 0 | 1;
   worktree_creation_state: "pending" | "creating" | "created" | "not-created";
+  cleanup_worktree_token: string | null;
+  cleanup_worktree_id: string | null;
+  cleanup_repository_identity: string | null;
   cleanup_branch_head: string | null;
   worktree_removal_started: 0 | 1;
   worktree_removal_confirmed: 0 | 1;
   worktree_cleanup_outcome: "absent" | "retained" | null;
+  worktree_cleanup_topology: "owned" | "conflict" | null;
+  cleanup_observed_path: string | null;
+  cleanup_observed_branch: string | null;
+  cleanup_observed_head: string | null;
   branch_cleanup_outcome: "absent" | "retained" | null;
   dispatch_state: DuoDispatchState;
 }

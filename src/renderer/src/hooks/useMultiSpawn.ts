@@ -9,6 +9,7 @@ import {
 import type {
   AppSettings,
   AppSnapshot,
+  DuoWorktreeRecoveryGuidance,
   ServerEvent,
 } from "@shared/contracts";
 import {
@@ -39,6 +40,7 @@ export interface MultiSpawnController {
   submitting: boolean;
   cancelling: boolean;
   error: string | null;
+  recoveryGuidance: DuoWorktreeRecoveryGuidance[];
   openDialog: () => void;
   closeDialog: () => void;
   submit: (draft: MultiSpawnDraft) => Promise<void>;
@@ -124,6 +126,9 @@ export function useMultiSpawn({
   const [submitting, setSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recoveryGuidance, setRecoveryGuidance] = useState<
+    DuoWorktreeRecoveryGuidance[]
+  >([]);
   const submittingRef = useRef(false);
   const cancellingRef = useRef(false);
   const activeLaunchIdRef = useRef<string | null>(null);
@@ -194,6 +199,7 @@ export function useMultiSpawn({
         status = cancellation.result;
       }
       const message = launchStatusMessage(status);
+      setRecoveryGuidance(status.recoveryGuidance ?? []);
       if (!launchRetainsRecoveryIdentity(status)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
       }
@@ -214,6 +220,7 @@ export function useMultiSpawn({
   const openDialog = useCallback(() => {
     if (!snapshot?.activeProjectId || submittingRef.current) return;
     setError(null);
+    setRecoveryGuidance([]);
     setOpen(true);
     const pendingLaunchId = readPendingMultiSpawnLaunchId(window.localStorage);
     if (pendingLaunchId) void reconcilePendingLaunch(pendingLaunchId);
@@ -234,6 +241,7 @@ export function useMultiSpawn({
       if (event.result.kind !== "duo.status") {
         throw new Error("The local service returned an unexpected cancellation response.");
       }
+      setRecoveryGuidance(event.result.recoveryGuidance ?? []);
       if (!launchRetainsRecoveryIdentity(event.result)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
       }
@@ -259,6 +267,7 @@ export function useMultiSpawn({
       return;
     }
     setError(null);
+    setRecoveryGuidance([]);
     setOpen(false);
   }, [cancelActiveLaunch]);
 
@@ -348,6 +357,7 @@ export function useMultiSpawn({
         throw new Error("The local service returned an unexpected dispatch response.");
       }
       const launchMessage = launchStatusMessage(dispatchEvent.result);
+      setRecoveryGuidance(dispatchEvent.result.recoveryGuidance ?? []);
       if (!launchRetainsRecoveryIdentity(dispatchEvent.result)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
       }
@@ -378,6 +388,7 @@ export function useMultiSpawn({
             status = recovery.result;
           }
           const message = launchStatusMessage(status);
+          setRecoveryGuidance(status.recoveryGuidance ?? []);
           if (!launchRetainsRecoveryIdentity(status)) {
             clearPendingMultiSpawnLaunchId(window.localStorage);
           }
@@ -428,6 +439,7 @@ export function useMultiSpawn({
     submitting,
     cancelling,
     error,
+    recoveryGuidance,
     openDialog,
     closeDialog,
     submit,

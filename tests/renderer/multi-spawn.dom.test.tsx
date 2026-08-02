@@ -663,6 +663,76 @@ describe("multi-spawn", () => {
     )).toBeVisible();
   });
 
+  it("renders recovery instructions as inert argv on Windows and metacharacter paths", () => {
+    const repositoryPath = "C:\\Users\\Ada $()\\project`name`";
+    const worktreePath = `${repositoryPath}\\.inertia\\worktrees\\route\nnext-line`;
+    const branch = "inertia/33333333";
+    render(
+      <MultiSpawnDialog
+        open
+        snapshot={snapshot}
+        settings={settings}
+        submitting={false}
+        error="Owned worktree cleanup still needs attention."
+        recoveryGuidance={[{
+          kind: "git-worktree",
+          ordinal: 0,
+          topology: "owned",
+          repositoryPath,
+          plannedPath: worktreePath,
+          observedPath: worktreePath,
+          worktreeId: "route",
+          generatedBranch: branch,
+          expectedHead: "a".repeat(40),
+          observedBranch: branch,
+          observedHead: "a".repeat(40),
+          actions: [
+            {
+              label: "Remove retained linked worktree",
+              cwd: repositoryPath,
+              executable: "git",
+              args: ["worktree", "remove", "--", worktreePath],
+            },
+            {
+              label: "Remove generated branch after inspecting it",
+              cwd: repositoryPath,
+              executable: "git",
+              args: ["branch", "-d", "--", branch],
+            },
+          ],
+        }]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn(async () => undefined)}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+
+    const guidance = screen.getByRole("region", {
+      name: "Manual Git recovery for route 1",
+    });
+    expect(guidance).toHaveTextContent(
+      "These are literal values, not a shell command.",
+    );
+    expect(guidance).toHaveTextContent(repositoryPath);
+    expect(guidance).toHaveTextContent(`Expected commit${"a".repeat(40)}`);
+    expect(Array.from(guidance.querySelectorAll("[data-git-argument]"))
+      .map((argument) => argument.textContent)).toEqual([
+      "worktree",
+      "remove",
+      "--",
+      worktreePath,
+      "branch",
+      "-d",
+      "--",
+      branch,
+    ]);
+    expect(guidance.querySelectorAll("code")).not.toHaveLength(0);
+    expect(guidance.textContent).not.toContain(
+      `git worktree remove -- ${JSON.stringify(worktreePath)}`,
+    );
+  });
+
   it("keeps setup available for an exact custom route that needs a probe", () => {
     const onOpenBackendSetup = vi.fn();
     render(
@@ -1343,9 +1413,28 @@ describe("multi-spawn", () => {
       { ordinal: 0 as const, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "pending" as const },
       { ordinal: 1 as const, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "pending" as const },
     ];
-    const worktreePath = "/workspace/.inertia/worktrees/33333333";
+    const worktreePath = "C:\\workspace $()\\.inertia\\worktrees\\33333333`tick`";
     const branch = "inertia/33333333";
-    const retainedWorktreeMessage = `The owned Duo worktree remains at path ${JSON.stringify(worktreePath)} on branch ${branch}. Automatic cleanup was withheld. Remove it manually with \`git worktree remove -- ${JSON.stringify(worktreePath)}\`, then \`git branch -d -- '${branch}'\`.`;
+    const retainedWorktreeMessage = "Owned worktree cleanup still needs attention. Review the structured recovery details.";
+    const recoveryGuidance = [{
+      kind: "git-worktree" as const,
+      ordinal: 0 as const,
+      topology: "owned" as const,
+      repositoryPath: "C:\\workspace $()",
+      plannedPath: worktreePath,
+      observedPath: worktreePath,
+      worktreeId: "33333333",
+      generatedBranch: branch,
+      expectedHead: "b".repeat(40),
+      observedBranch: branch,
+      observedHead: "b".repeat(40),
+      actions: [{
+        label: "Remove retained linked worktree",
+        cwd: "C:\\workspace $()",
+        executable: "git" as const,
+        args: ["worktree", "remove", "--", worktreePath],
+      }],
+    }];
     let recoveryRequired = false;
     let manualCleanupComplete = false;
     const run = vi.fn(async (
@@ -1362,6 +1451,7 @@ describe("multi-spawn", () => {
             state: recoveryRequired ? "recovery-required" : "prepared",
             error: recoveryRequired ? retainedWorktreeMessage : null,
             sides,
+            recoveryGuidance: recoveryRequired ? recoveryGuidance : [],
           },
         };
       }
@@ -1375,6 +1465,7 @@ describe("multi-spawn", () => {
           launchId,
           state: recoveryRequired ? "recovery-required" : "cancelled",
           error: recoveryRequired ? retainedWorktreeMessage : null,
+          recoveryGuidance: recoveryRequired ? recoveryGuidance : [],
           sides: [
             { ...sides[0], dispatchState: recoveryRequired ? "pending" : "cancelled" },
             { ...sides[1], dispatchState: recoveryRequired ? "pending" : "cancelled" },
@@ -1408,6 +1499,7 @@ describe("multi-spawn", () => {
     expect(hook.result.current.error).toBe(
       retainedWorktreeMessage,
     );
+    expect(hook.result.current.recoveryGuidance).toEqual(recoveryGuidance);
 
     manualCleanupComplete = true;
     act(() => hook.result.current.closeDialog());
@@ -1426,6 +1518,7 @@ describe("multi-spawn", () => {
     expect(hook.result.current.error).toBe(
       "The duo launch was cancelled before both providers began.",
     );
+    expect(hook.result.current.recoveryGuidance).toEqual([]);
   });
 
   it("closes for authoritative reconciliation after ambiguous preparation", async () => {

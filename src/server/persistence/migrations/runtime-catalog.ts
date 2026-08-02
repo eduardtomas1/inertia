@@ -21,6 +21,7 @@ import {
   createRuntimeMigrationCatalog,
   type DatabaseMigrationDefinition,
 } from "./catalog";
+import { rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
 import { quotedSqlIdentifier } from "./sql-identifiers";
 
@@ -1106,6 +1107,84 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         `);
       },
     });
+    migrationExtensions.push({
+      name: "PersistDuoWorktreeRegistrationIdentity",
+      up: (database) => {
+        const columns = database.prepare("PRAGMA table_info(paired_launch_sides)")
+          .all() as Array<{ name: string }>;
+        if (!columns.some(({ name }) => name === "cleanup_worktree_token")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_worktree_token TEXT
+              CHECK (
+                cleanup_worktree_token IS NULL
+                OR length(cleanup_worktree_token) = 36
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "cleanup_worktree_id")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_worktree_id TEXT
+              CHECK (
+                cleanup_worktree_id IS NULL
+                OR length(cleanup_worktree_id) BETWEEN 1 AND 255
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "cleanup_repository_identity")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_repository_identity TEXT
+              CHECK (
+                cleanup_repository_identity IS NULL
+                OR length(cleanup_repository_identity) = 64
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "worktree_cleanup_topology")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN worktree_cleanup_topology TEXT
+              CHECK (
+                worktree_cleanup_topology IS NULL
+                OR worktree_cleanup_topology IN ('owned', 'conflict')
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "cleanup_observed_path")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_observed_path TEXT
+              CHECK (
+                cleanup_observed_path IS NULL
+                OR length(cleanup_observed_path) <= 4096
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "cleanup_observed_branch")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_observed_branch TEXT
+              CHECK (
+                cleanup_observed_branch IS NULL
+                OR length(cleanup_observed_branch) <= 255
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "cleanup_observed_head")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_observed_head TEXT
+              CHECK (
+                cleanup_observed_head IS NULL
+                OR length(cleanup_observed_head) BETWEEN 40 AND 64
+              );
+          `);
+        }
+        rebuildPairedLaunchProjectDeletionTrigger(database);
+      },
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,
@@ -1126,7 +1205,6 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
       },
     });
   }
-
 
 function ensureTurnAssociationColumns(database: Database.Database): void {
     const associations = [

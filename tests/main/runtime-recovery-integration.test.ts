@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
+import { RuntimeStore } from "../../src/server/database";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const temporaryDirectories: string[] = [];
@@ -388,6 +389,94 @@ describe("runtime recovery supervisor integration", () => {
     assertNoLateCommit();
     await new Promise<void>((resolveWait) => setTimeout(resolveWait, 250));
     assertNoLateCommit();
+    await expect(supervisor.stop()).resolves.toBe(true);
+  }, 30_000);
+
+  it("rejects import while a background provider run remains active", async () => {
+    const testRoot = mkdtempSync(join(tmpdir(), "inertia-recovery-active-run-"));
+    temporaryDirectories.push(testRoot);
+    const dataDirectory = join(testRoot, "data");
+    const workspaceDirectory = join(testRoot, "workspace");
+    const targetDirectory = join(testRoot, "recovered");
+    mkdirSync(dataDirectory, { mode: 0o700 });
+    mkdirSync(workspaceDirectory, { mode: 0o700 });
+    mkdirSync(targetDirectory, { mode: 0o700 });
+    const recoveryPath = join(testRoot, "recovery.json");
+    writeFileSync(recoveryPath, JSON.stringify({
+      format: "inertia-recovery-export",
+      version: 1,
+      exportedAt: "2026-08-02T08:00:00.000Z",
+      projects: [],
+    }), { encoding: "utf8", mode: 0o600 });
+    const seeded = new RuntimeStore(
+      join(dataDirectory, "inertia.sqlite"),
+      workspaceDirectory,
+      { recoverInterruptedRuns: false },
+    );
+    const project = seeded.createProject("Active", workspaceDirectory);
+    const conversation = seeded.createConversation(project.id, "Active provider");
+    seeded.close();
+
+    const runtimeWorkerPath = buildRuntimeWorkers();
+    const children: NodeUtilityProcess[] = [];
+    const supervisor = new RuntimeSupervisor({
+      workerOptions: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+      },
+      spawn: () => {
+        const child = new NodeUtilityProcess(runtimeWorkerPath);
+        children.push(child);
+        return child as never;
+      },
+      startupTimeoutMs: 10_000,
+      shutdownGraceMs: 2_000,
+      forceKillWaitMs: 1_000,
+    });
+    const diagnostics = () => JSON.stringify({
+      stderr: children.flatMap(({ stderr }) => stderr),
+      snapshot: supervisor.snapshot(),
+    });
+    supervisor.start();
+    await waitFor(
+      () => supervisor.snapshot().phase === "ready",
+      "runtime readiness",
+      diagnostics,
+    );
+    // Insert after startup reconciliation to model a provider callback that
+    // still owns a live run after the command that launched it has returned.
+    const active = new RuntimeStore(
+      join(dataDirectory, "inertia.sqlite"),
+      workspaceDirectory,
+      { recoverInterruptedRuns: false },
+    );
+    active.createWorkspaceRun({
+      kind: "agent",
+      projectId: project.id,
+      conversationId: conversation.id,
+      label: "Active provider",
+      detail: "Streaming",
+      status: "running",
+      port: null,
+    });
+    active.close();
+
+    await expect(supervisor.databaseRecovery(
+      "import",
+      recoveryPath,
+      targetDirectory,
+    )).rejects.toThrow(/while runtime work is active/u);
+    expect(readdirSync(targetDirectory)).toEqual([]);
+    const database = new Database(join(dataDirectory, "inertia.sqlite"), {
+      readonly: true,
+    });
+    expect(database.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM recovery_import_receipts) AS receipts,
+        (SELECT COUNT(*) FROM recovery_import_journals) AS journals
+    `).get()).toEqual({ receipts: 0, journals: 0 });
+    database.close();
     await expect(supervisor.stop()).resolves.toBe(true);
   }, 30_000);
 });

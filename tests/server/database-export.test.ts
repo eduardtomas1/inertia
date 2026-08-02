@@ -111,35 +111,79 @@ describe("safe database recovery exports", () => {
     });
     const database = new Database(databasePath);
     let raced = false;
-    expect(() => reconcileRecoveryImportJournal(database, {
-      operations: {
-        beforeDelete: () => {
-          if (raced) return;
-          raced = true;
-          renameSync(authorizedRoot, originalRoot);
-          mkdirSync(replacementRoot, { mode: 0o700 });
-          renameSync(replacementRoot, authorizedRoot);
-          writeFileSync(join(authorizedRoot, "must-not-be-touched"), "external\n");
+    let replacementBlocked = false;
+    let reconciliationError: unknown;
+    try {
+      reconcileRecoveryImportJournal(database, {
+        operations: {
+          beforeDelete: () => {
+            if (raced) return;
+            raced = true;
+            try {
+              renameSync(authorizedRoot, originalRoot);
+            } catch (error) {
+              replacementBlocked = true;
+              throw new Error(
+                "The pinned recovery root blocked pathname replacement.",
+                { cause: error },
+              );
+            }
+            mkdirSync(join(
+              replacementRoot,
+              `recovered-${operationId}`,
+              "project-00001",
+            ), { recursive: true, mode: 0o700 });
+            writeFileSync(join(replacementRoot, "must-not-be-touched"), "external\n");
+            renameSync(replacementRoot, authorizedRoot);
+          },
         },
-      },
-    })).toThrow(/destination changed.*remains pending/u);
-    expect(readdirSync(authorizedRoot)).toEqual(["must-not-be-touched"]);
-    expect(existsSync(join(
-      originalRoot,
-      `recovered-${operationId}`,
-      "project-00001",
-    ))).toBe(true);
+      });
+    } catch (error) {
+      reconciliationError = error;
+    }
+    expect(reconciliationError).toBeInstanceOf(Error);
+    expect((reconciliationError as Error).message).toMatch(
+      replacementBlocked
+        ? /pinned recovery root blocked/u
+        : /destination changed.*remains pending/u,
+    );
+    if (replacementBlocked) {
+      expect(existsSync(join(
+        authorizedRoot,
+        `recovered-${operationId}`,
+        "project-00001",
+      ))).toBe(true);
+    } else {
+      expect(readdirSync(authorizedRoot).sort()).toEqual([
+        "must-not-be-touched",
+        `recovered-${operationId}`,
+      ].sort());
+      expect(existsSync(join(
+        authorizedRoot,
+        `recovered-${operationId}`,
+        "project-00001",
+      ))).toBe(true);
+      expect(existsSync(join(originalRoot, `recovered-${operationId}`))).toBe(false);
+    }
     expect((database.prepare(
       "SELECT COUNT(*) AS count FROM recovery_import_journals",
     ).get() as { count: number }).count).toBe(1);
 
-    rmSync(authorizedRoot, { recursive: true });
-    renameSync(originalRoot, authorizedRoot);
+    if (!replacementBlocked) {
+      renameSync(authorizedRoot, replacementRoot);
+      renameSync(originalRoot, authorizedRoot);
+    }
     reconcileRecoveryImportJournal(database);
     expect(readdirSync(authorizedRoot)).toEqual([]);
     expect((database.prepare(
       "SELECT COUNT(*) AS count FROM recovery_import_journals",
     ).get() as { count: number }).count).toBe(0);
+    if (!replacementBlocked) {
+      expect(readdirSync(replacementRoot).sort()).toEqual([
+        "must-not-be-touched",
+        `recovered-${operationId}`,
+      ].sort());
+    }
     database.close();
   });
 

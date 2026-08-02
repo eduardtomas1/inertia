@@ -417,7 +417,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       metadataState: metadata.metadataState,
     } : current);
   };
-  const refreshProviderInfo = async (
+  let activeProviderRefreshes = 0;
+  const refreshProviderInfoCore = async (
     providerId?: ProviderInfo["id"],
     refreshEnvironment = false,
     forceMetadata = false,
@@ -474,6 +475,22 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }));
     }
     if (!closed) broadcastSnapshot();
+  };
+  const refreshProviderInfo = async (
+    providerId?: ProviderInfo["id"],
+    refreshEnvironment = false,
+    forceMetadata = false,
+  ): Promise<void> => {
+    activeProviderRefreshes += 1;
+    try {
+      await refreshProviderInfoCore(
+        providerId,
+        refreshEnvironment,
+        forceMetadata,
+      );
+    } finally {
+      activeProviderRefreshes -= 1;
+    }
   };
   const maintenanceTarget = (
     providerId: ProviderMaintenanceProviderId,
@@ -894,6 +911,21 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           await new Promise<void>((resolveDrain) => {
             runtimeCommandDrainWaiters.add(resolveDrain);
           });
+        }
+        await projectIdentityRefresh;
+        await artifactReconciliation;
+        const backgroundRunActive = currentSnapshot().runs.some(
+          ({ status }) => status === "running" || status === "waiting",
+        );
+        if (
+          turns.activeConversationIds().length > 0
+          || backgroundRunActive
+          || providerMaintenance.activeOperations().length > 0
+          || activeProviderRefreshes > 0
+        ) {
+          throw new Error(
+            "Database recovery cannot start while runtime work is active.",
+          );
         }
         const result = await runRecoveryImportWorker({
           databasePath,

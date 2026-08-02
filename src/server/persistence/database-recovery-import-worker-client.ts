@@ -80,6 +80,11 @@ export function runRecoveryImportWorker(
     };
     const onAbort = (): void => {
       if (stopping) return;
+      // The worker closes its SQLite connection before publishing success.
+      // Once that validated receipt is visible, the transaction is already
+      // authoritative; let the exit event settle it instead of reporting a
+      // cancellation that could not roll the import back.
+      if (result?.ok) return;
       stopping = true;
       const error = options.signal
         ? cancellationError(options.signal)

@@ -7,7 +7,7 @@ import {
   rmdirSync,
 } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import type Database from "better-sqlite3";
 
@@ -83,11 +83,15 @@ function assertActive(signal?: AbortSignal): void {
 
 function removeIncompleteRoot(
   path: string,
-  authorizedRoot: string,
   expectedIdentity: RecoveryImportRootIdentity,
   projectCount: number,
   options: ReconcileRecoveryImportOptions,
 ): void {
+  if (!/^(?:\.inertia-recovery-[0-9a-f-]+\.partial|recovered-[0-9a-f-]+)$/iu.test(path)) {
+    throw new Error(
+      "The interrupted recovery import path cannot be reconciled safely.",
+    );
+  }
   let rootMetadata: ReturnType<typeof lstatSync> | undefined;
   try {
     rootMetadata = lstatSync(path);
@@ -100,19 +104,6 @@ function removeIncompleteRoot(
       "The interrupted recovery import path cannot be reconciled safely.",
     );
   }
-  const canonical = resolve(realpathSync(path));
-  const relativeRoot = relative(authorizedRoot, canonical);
-  if (
-    canonical !== resolve(path)
-    || !relativeRoot
-    || relativeRoot.includes(sep)
-    || isAbsolute(relativeRoot)
-  ) {
-    throw new Error(
-      "The interrupted recovery import path cannot be reconciled safely.",
-    );
-  }
-
   for (const entry of readdirSync(path, { withFileTypes: true })) {
     const match = /^project-([0-9]{5})$/u.exec(entry.name);
     const ordinal = match ? Number.parseInt(match[1]!, 10) : 0;
@@ -124,13 +115,9 @@ function removeIncompleteRoot(
     ) continue;
     try {
       const child = join(path, entry.name);
-      assertAuthorizedRootAvailable(authorizedRoot, expectedIdentity);
+      assertBoundAuthorizedRoot(expectedIdentity);
       options.operations?.beforeDelete?.(child);
-      // Bind the destructive boundary itself to the journaled filesystem
-      // identity. A path replacement observed by the race seam (or between
-      // directory inspection and removal) must leave both contents and the
-      // durable journal untouched.
-      assertAuthorizedRootAvailable(authorizedRoot, expectedIdentity);
+      assertBoundAuthorizedRoot(expectedIdentity);
       rmdirSync(child);
     } catch (error) {
       if (![
@@ -141,9 +128,9 @@ function removeIncompleteRoot(
     }
   }
   try {
-    assertAuthorizedRootAvailable(authorizedRoot, expectedIdentity);
+    assertBoundAuthorizedRoot(expectedIdentity);
     options.operations?.beforeDelete?.(path);
-    assertAuthorizedRootAvailable(authorizedRoot, expectedIdentity);
+    assertBoundAuthorizedRoot(expectedIdentity);
     rmdirSync(path);
     return;
   } catch (error) {
@@ -219,6 +206,46 @@ function assertAuthorizedRootAvailable(
   }
 }
 
+function assertBoundAuthorizedRoot(
+  expectedIdentity: RecoveryImportRootIdentity,
+): void {
+  const metadata = lstatSync(".", { bigint: true });
+  if (
+    !metadata.isDirectory()
+    || metadata.isSymbolicLink()
+    || metadata.dev.toString() !== expectedIdentity.device
+    || metadata.ino.toString() !== expectedIdentity.inode
+  ) {
+    throw new Error(
+      "The recovery import destination changed; reconciliation remains pending.",
+    );
+  }
+}
+
+function withBoundAuthorizedRoot(
+  authorizedRoot: string,
+  expectedIdentity: RecoveryImportRootIdentity,
+  operation: () => void,
+): void {
+  const previousDirectory = process.cwd();
+  if (resolve(previousDirectory) === authorizedRoot) {
+    throw new Error(
+      "The recovery import destination is the active process directory; reconciliation remains pending.",
+    );
+  }
+  assertAuthorizedRootAvailable(authorizedRoot, expectedIdentity);
+  try {
+    // chdir binds the process to the selected directory object. If another
+    // process renames/replaces its pathname afterward, every relative removal
+    // below still targets the journaled inode (or Windows refuses the rename).
+    process.chdir(authorizedRoot);
+    assertBoundAuthorizedRoot(expectedIdentity);
+    operation();
+  } finally {
+    process.chdir(previousDirectory);
+  }
+}
+
 export function reconcileRecoveryImportJournal(
   database: Database.Database,
   options: ReconcileRecoveryImportOptions = {},
@@ -251,21 +278,23 @@ export function reconcileRecoveryImportJournal(
     device: journal.authorized_root_device,
     inode: journal.authorized_root_inode,
   };
-  assertAuthorizedRootAvailable(journal.authorized_root, expectedIdentity);
-  const journalRoots = roots(journal.authorized_root, journal.operation_id);
-  removeIncompleteRoot(
-    journalRoots.staging,
+  withBoundAuthorizedRoot(
     journal.authorized_root,
     expectedIdentity,
-    journal.projects,
-    options,
-  );
-  removeIncompleteRoot(
-    journalRoots.final,
-    journal.authorized_root,
-    expectedIdentity,
-    journal.projects,
-    options,
+    () => {
+      removeIncompleteRoot(
+        `.inertia-recovery-${journal.operation_id}.partial`,
+        expectedIdentity,
+        journal.projects,
+        options,
+      );
+      removeIncompleteRoot(
+        `recovered-${journal.operation_id}`,
+        expectedIdentity,
+        journal.projects,
+        options,
+      );
+    },
   );
   // A mount or directory identity can disappear while the children are being
   // reconciled. Confirm the canonical destination again before forgetting the

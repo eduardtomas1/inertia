@@ -88,6 +88,7 @@ export class EndpointAuthenticator {
     maxChallenges?: number;
     maxIpFailures?: number;
     maxEndpointFailures?: number;
+    maxClaimsPerSourcePerMinute?: number;
     maxRateKeys?: number;
   });
 

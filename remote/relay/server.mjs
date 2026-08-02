@@ -90,6 +90,7 @@ export async function createReferenceRelay(options = {}) {
     maxChallenges: options.maxChallenges,
     maxIpFailures: options.maxIpFailures,
     maxEndpointFailures: options.maxEndpointFailures,
+    maxClaimsPerSourcePerMinute: options.maxClaimsPerSourcePerMinute,
     maxRateKeys: options.maxRateKeys,
   });
   const persistence = temporaryStateDirectory === null ? "durable" : "ephemeral";

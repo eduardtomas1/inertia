@@ -311,6 +311,7 @@ The relay applies these independent bounds:
 | Challenge lifetime | 5 seconds |
 | Failed proofs per source IP | 5/minute, then 60-second block |
 | Failed proofs per endpoint | 10/minute |
+| Successful first claims per source IP | 5/minute |
 | Challenge messages per socket | 3 total including begin/proof |
 | Durable endpoints | Configured hard cap, default 10,000 |
 | Binding record | 4 KiB |

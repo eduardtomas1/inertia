@@ -21,6 +21,7 @@ export function createReferenceRelay(options?: {
   maxChallenges?: number;
   maxIpFailures?: number;
   maxEndpointFailures?: number;
+  maxClaimsPerSourcePerMinute?: number;
   maxRateKeys?: number;
   now?: () => number;
 }): Promise<ReferenceRelay>;

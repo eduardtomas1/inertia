@@ -8,6 +8,7 @@ import {
   verify,
 } from "node:crypto";
 import {
+  access,
   lstat,
   mkdir,
   open,
@@ -110,6 +111,7 @@ export class EndpointBindingStore {
       await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
     }
     await requirePrivateDirectory(stateDirectory);
+    await requireWritableDirectory(stateDirectory);
     const endpointDirectory = join(stateDirectory, ENDPOINT_DIRECTORY);
     if (initialize) {
       await mkdir(endpointDirectory, { mode: 0o700 }).catch((error) => {
@@ -117,6 +119,7 @@ export class EndpointBindingStore {
       });
     }
     await requirePrivateDirectory(endpointDirectory);
+    await requireWritableDirectory(endpointDirectory);
 
     let metadata = await loadMetadata(stateDirectory, maxEndpoints);
     if (metadata === null) {
@@ -348,6 +351,16 @@ export class EndpointAuthenticator {
       blockMs: 0,
       maxKeys: boundedInteger(options.maxRateKeys, 1, 100_000, MAX_RATE_KEYS),
     });
+    this.successfulClaims = new FailureBudget({
+      maximum: boundedInteger(
+        options.maxClaimsPerSourcePerMinute,
+        1,
+        1_000,
+        5,
+      ),
+      blockMs: 0,
+      maxKeys: boundedInteger(options.maxRateKeys, 1, 100_000, MAX_RATE_KEYS),
+    });
   }
 
   async beginClaim(input) {
@@ -385,6 +398,13 @@ export class EndpointAuthenticator {
     if (!this.verifyProof(challenge, proof.signature)) {
       this.recordFailure(source, challenge.endpointId, now);
       return failure("proof-invalid");
+    }
+    if (
+      challenge.purpose === "claim"
+      && !this.successfulClaims.allowed(source, now)
+    ) return failure("rate-limited");
+    if (challenge.purpose === "claim") {
+      this.successfulClaims.fail(source, now);
     }
     try {
       const connectedAt = isoTimestamp(now);
@@ -745,6 +765,25 @@ async function requirePrivateDirectory(path) {
   if (process.platform !== "win32" && (status.mode & 0o077) !== 0) {
     throw new EndpointBindingStoreError(
       "The relay state directory permissions must exclude group and other users.",
+    );
+  }
+}
+
+async function requireWritableDirectory(path) {
+  if (process.platform !== "win32") {
+    const status = await lstat(path);
+    if ((status.mode & 0o200) === 0) {
+      throw new EndpointBindingStoreError(
+        "The relay state directory must be writable by its owner.",
+      );
+    }
+  }
+  try {
+    await access(path, constants.W_OK);
+  } catch (error) {
+    throw new EndpointBindingStoreError(
+      "The relay state directory is not writable.",
+      { cause: error },
     );
   }
 }

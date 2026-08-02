@@ -3,7 +3,7 @@ import {
   sign,
   type KeyObject,
 } from "node:crypto";
-import { mkdtemp, readdir, rm, unlink } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -323,6 +323,56 @@ describe("Remote Companion relay endpoint authentication", () => {
     })).ok).toBe(true);
   });
 
+  it("rate-limits valid first claims before consuming durable slots", async () => {
+    let clock = Date.parse("2026-08-01T12:00:00.000Z");
+    const bindingStore = await store(await stateDirectory(), () => clock);
+    const authenticator = new EndpointAuthenticator({
+      store: bindingStore,
+      now: () => clock,
+      maxClaimsPerSourcePerMinute: 1,
+    });
+    const source = "198.51.100.21";
+    const firstKeys = endpointKeys();
+    const first = expectChallenge(await authenticator.beginClaim({
+      socketId: "first-valid-claim",
+      source,
+      endpointId: "first_limited_claim",
+      endpointPublicKey: firstKeys.publicKey,
+    }));
+    expect(await authenticator.prove(
+      "first-valid-claim",
+      source,
+      proof(first, firstKeys.privateKey),
+    )).toMatchObject({ ok: true, ownership: "claimed" });
+
+    const secondKeys = endpointKeys();
+    const second = expectChallenge(await authenticator.beginClaim({
+      socketId: "second-valid-claim",
+      source,
+      endpointId: "second_limited_claim",
+      endpointPublicKey: secondKeys.publicKey,
+    }));
+    expect(await authenticator.prove(
+      "second-valid-claim",
+      source,
+      proof(second, secondKeys.privateKey),
+    )).toEqual({ ok: false, code: "rate-limited" });
+    expect(await bindingStore.get("second_limited_claim")).toBeNull();
+
+    clock += 60_001;
+    const recovered = expectChallenge(await authenticator.beginClaim({
+      socketId: "recovered-valid-claim",
+      source,
+      endpointId: "second_limited_claim",
+      endpointPublicKey: secondKeys.publicKey,
+    }));
+    expect(await authenticator.prove(
+      "recovered-valid-claim",
+      source,
+      proof(recovered, secondKeys.privateKey),
+    )).toMatchObject({ ok: true, ownership: "claimed" });
+  });
+
   it("rejects a squatter without the endpoint key and preserves the endpoint", async () => {
     const fixture = await claimedFixture();
     const attackerKeys = endpointKeys();
@@ -353,4 +403,20 @@ describe("Remote Companion relay endpoint authentication", () => {
       stateDirectory: fixture.directory,
     })).rejects.toThrow("known relay endpoint binding record is missing");
   });
+
+  it.runIf(process.platform !== "win32")(
+    "rejects a durable state directory that is not owner-writable",
+    async () => {
+      const directory = await stateDirectory();
+      await store(directory);
+      await chmod(directory, 0o500);
+      try {
+        await expect(EndpointBindingStore.open({
+          stateDirectory: directory,
+        })).rejects.toThrow("must be writable by its owner");
+      } finally {
+        await chmod(directory, 0o700);
+      }
+    },
+  );
 });

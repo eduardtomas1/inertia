@@ -227,6 +227,10 @@ export class DuoLaunchCoordinator {
           recursive: true,
           mode: 0o700,
         });
+        // createWorktree mutates before its final status read. Treat every
+        // attempted owned path as potentially created until compensation can
+        // prove otherwise with a not-found result.
+        createdOwned.push(side);
         const status = await this.worktrees.create(
           side.repositoryPath,
           side.worktreePath,
@@ -238,7 +242,6 @@ export class DuoLaunchCoordinator {
         );
         side.worktreePath = status.root;
         side.branch = status.branch ?? side.branch;
-        createdOwned.push(side);
         this.store.updatePairedLaunchWorktree(
           payload.launchId,
           side.ordinal,
@@ -298,7 +301,13 @@ export class DuoLaunchCoordinator {
             side.repositoryPath,
             side.worktreePath!,
             false,
-          )),
+          ).catch((cleanupError: unknown) => {
+            if (
+              cleanupError instanceof GitError
+              && cleanupError.code === "not-found"
+            ) return;
+            throw cleanupError;
+          })),
         );
         const rejected = compensation.find((result) => result.status === "rejected");
         if (rejected?.status === "rejected") {

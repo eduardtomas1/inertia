@@ -76,6 +76,12 @@ export interface RemoteClientCallbacks {
   pairingCode(code: string): void;
   shell(shell: RemoteSafeShell): void;
   detail(detail: RemoteSafeConversationDetail | null): void;
+  freshness?(value: {
+    checkedAt: string;
+    resource:
+      | { kind: "state" }
+      | { kind: "conversation"; conversationId: string };
+  }): void;
   promptResult(
     message: string,
     uncertain: boolean,
@@ -622,6 +628,10 @@ export class RemoteCompanionClient {
           && this.hasShellProjection
           && this.shellValidator === state.result.validator
         ) {
+          this.callbacks.freshness?.({
+            checkedAt: state.result.checkedAt,
+            resource: state.result.resource,
+          });
           void this.persistAuthenticatedActivity(epoch);
         } else if (state.result.kind === "not-modified") {
           this.shellValidator = null;
@@ -679,7 +689,10 @@ export class RemoteCompanionClient {
           && this.detailProjectionId === conversationId
           && this.detailValidator === detail.result.validator
         ) {
-          // The existing authorized detail remains current.
+          this.callbacks.freshness?.({
+            checkedAt: detail.result.checkedAt,
+            resource: detail.result.resource,
+          });
         } else {
           this.detailProjectionId = null;
           this.detailValidator = null;

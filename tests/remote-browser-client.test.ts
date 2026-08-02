@@ -1367,6 +1367,7 @@ describe("Remote Companion browser connection ownership", () => {
     const detailValidator = "B".repeat(43);
     const shell = vi.fn();
     const detail = vi.fn();
+    const freshness = vi.fn();
     let stateReads = 0;
     let detailReads = 0;
     const request = vi.fn(async (
@@ -1456,6 +1457,7 @@ describe("Remote Companion browser connection ownership", () => {
       pairingCode: vi.fn(),
       shell,
       detail,
+      freshness,
       promptResult: vi.fn(),
     });
     Object.assign(client as unknown as Record<string, unknown>, {
@@ -1473,6 +1475,7 @@ describe("Remote Companion browser connection ownership", () => {
     });
     expect(shell).toHaveBeenCalledTimes(1);
     expect(detail).toHaveBeenCalledTimes(2);
+    expect(freshness).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(2_000);
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(4));
@@ -1486,6 +1489,15 @@ describe("Remote Companion browser connection ownership", () => {
     });
     expect(shell).toHaveBeenCalledTimes(1);
     expect(detail).toHaveBeenCalledTimes(2);
+    expect(freshness).toHaveBeenCalledTimes(2);
+    expect(freshness).toHaveBeenCalledWith({
+      checkedAt: now,
+      resource: { kind: "state" },
+    });
+    expect(freshness).toHaveBeenCalledWith({
+      checkedAt: now,
+      resource: { kind: "conversation", conversationId },
+    });
     (
       client as unknown as { disconnect(message: string): void }
     ).disconnect("cleanup");

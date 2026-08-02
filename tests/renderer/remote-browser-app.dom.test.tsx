@@ -271,6 +271,15 @@ describe("Remote Companion browser selection boundary", () => {
     appHarness.callbacks!.detail(detail(1));
 
     const field = screen.getByLabelText("Text prompt") as HTMLTextAreaElement;
+    const checkedAt = new Date(Date.parse(now) + 2_000).toISOString();
+    appHarness.callbacks!.freshness?.({
+      checkedAt,
+      resource: { kind: "conversation", conversationId },
+    });
+    expect(screen.getByText(
+      `Last updated ${new Date(checkedAt).toLocaleString()}`,
+    )).toBeVisible();
+    expect(screen.getByLabelText("Text prompt")).toBe(field);
     field.focus();
     fireEvent.change(field, { target: { value: "Half typed prompt" } });
     field.setSelectionRange(5, 10);

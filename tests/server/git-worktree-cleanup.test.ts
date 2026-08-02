@@ -81,14 +81,33 @@ function expectSamePath(actual: string, expected: string): void {
 }
 
 function linuxBirthtimeProbe(
-  mode: "valid" | "zero" | "mismatch" | "overflow" | "timeout" | "missing",
+  mode:
+    | "valid"
+    | "zero"
+    | "device-mismatch"
+    | "inode-mismatch"
+    | "malformed"
+    | "trailing"
+    | "nonzero-exit"
+    | "overflow"
+    | "timeout"
+    | "missing",
 ): WorktreeFilesystemIdentityDependencies {
+  const validScript = "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const b=s.birthtimeNs;const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,`${b/1000000000n}.${String(b%1000000000n).padStart(9,'0')}`].join(z)+z);";
   const script = mode === "valid"
-    ? "const {statSync}=require('node:fs');const s=statSync(process.argv[1],{bigint:true});process.stdout.write(String(s.birthtimeNs/1000000000n));"
+    ? validScript
     : mode === "zero"
-      ? "process.stdout.write('0')"
-      : mode === "mismatch"
-        ? "process.stdout.write('1')"
+      ? "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,'0.000000000'].join(z)+z);"
+      : mode === "device-mismatch"
+        ? "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const z=String.fromCharCode(0);process.stdout.write([s.dev+1n,s.ino,'1.000000000'].join(z)+z);"
+        : mode === "inode-mismatch"
+          ? "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino+1n,'1.000000000'].join(z)+z);"
+          : mode === "malformed"
+            ? "process.stdout.write('not-stat-output')"
+            : mode === "trailing"
+              ? `${validScript}process.stdout.write('trailing');`
+              : mode === "nonzero-exit"
+                ? "process.exit(7)"
         : mode === "overflow"
           ? "process.stdout.write('x'.repeat(1024))"
           : "setInterval(() => undefined, 1000)";
@@ -97,7 +116,7 @@ function linuxBirthtimeProbe(
     linuxStatExecutable: mode === "missing"
       ? join(tmpdir(), "inertia-missing-stat-executable")
       : process.execPath,
-    linuxStatArguments: (path) => ["-e", script, path],
+    linuxStatArguments: () => ["-e", script],
     linuxStatTimeoutMs: mode === "timeout" ? 25 : 2_000,
   };
 }
@@ -106,6 +125,7 @@ async function createOwnedWorktree(
   root: string,
   path: string,
   branch: string,
+  filesystemIdentity?: WorktreeFilesystemIdentityDependencies,
 ): Promise<RegisteredWorktreeIdentity> {
   let receipt: RegisteredWorktreeIdentity | null = null;
   await createWorktreeWithOwnershipReceipt(root, path, {
@@ -118,6 +138,8 @@ async function createOwnedWorktree(
     added: (ownership) => {
       receipt = ownership;
     },
+  }, {
+    filesystemIdentity,
   });
   if (!receipt) throw new Error("The linked-worktree receipt was not recorded.");
   return receipt;
@@ -130,13 +152,28 @@ afterEach(() => {
 });
 
 describe("launch-owned Git cleanup", () => {
-  it.each(["zero", "mismatch", "missing", "overflow", "timeout"] as const)(
+  it.each([
+    "zero",
+    "device-mismatch",
+    "inode-mismatch",
+    "malformed",
+    "trailing",
+    "nonzero-exit",
+    "missing",
+    "overflow",
+    "timeout",
+  ] as const)(
     "rejects a Linux %s birth-time probe before worktree mutation",
     async (mode) => {
       const root = repository();
       const path = ownedPath(root, `linux ${mode} birthtime`);
       const branch = `inertia/linux-birthtime-${mode}`;
       const phases: string[] = [];
+      let closeCount = 0;
+      const filesystemIdentity = linuxBirthtimeProbe(mode);
+      filesystemIdentity.afterLinuxStatClose = () => {
+        closeCount += 1;
+      };
 
       await expect(createWorktreeWithOwnershipReceipt(root, path, {
         branch,
@@ -147,10 +184,11 @@ describe("launch-owned Git cleanup", () => {
         notAdded: () => phases.push("not-added"),
         added: () => phases.push("added"),
       }, {
-        filesystemIdentity: linuxBirthtimeProbe(mode),
+        filesystemIdentity,
       })).rejects.toThrow(/birth time.*isolated Duo worktrees are unsupported/iu);
 
       expect(phases).toEqual([]);
+      expect(closeCount).toBe(1);
       expect(existsSync(path)).toBe(false);
       expect(git(
         root,
@@ -164,7 +202,7 @@ describe("launch-owned Git cleanup", () => {
     },
   );
 
-  it("accepts a Linux birth-time probe that agrees with Node", async () => {
+  it("uses the fd-bound Linux birth time instead of Node metadata", async () => {
     const root = repository();
     const path = ownedPath(root, "linux verified birthtime");
     const branch = "inertia/linux-birthtime-valid";
@@ -181,12 +219,119 @@ describe("launch-owned Git cleanup", () => {
         ownership = value;
       },
     }, {
-      filesystemIdentity: linuxBirthtimeProbe("valid"),
+      filesystemIdentity: {
+        ...linuxBirthtimeProbe("valid"),
+        linuxStatArguments: () => [
+          "-e",
+          "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,'123456789.987654321'].join(z)+z);",
+        ],
+      },
     });
 
-    expect(ownership).toMatchObject({ branch });
+    expect(ownership).toMatchObject({
+      branch,
+      filesystemReceipt: {
+        worktreesDirectory: { birthtimeNs: "123456789987654321" },
+        adminDirectory: { birthtimeNs: "123456789987654321" },
+      },
+    });
     expect(existsSync(path)).toBe(true);
   });
+
+  it("rejects path replacement after the Linux fd is opened", async () => {
+    const root = repository();
+    const path = ownedPath(root, "linux path replacement");
+    const commonDirectory = realpathSync(git(
+      root,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ));
+    const original = `${commonDirectory}-opened`;
+    const phases: string[] = [];
+    let replaced = false;
+
+    await expect(createWorktreeWithOwnershipReceipt(root, path, {
+      branch: "inertia/linux-path-replacement",
+      createBranch: true,
+      startPoint: "main",
+    }, {
+      beforeAdd: () => phases.push("before-add"),
+      notAdded: () => phases.push("not-added"),
+      added: () => phases.push("added"),
+    }, {
+      filesystemIdentity: {
+        ...linuxBirthtimeProbe("valid"),
+        beforeLinuxStatProbe: (identityPath) => {
+          if (replaced || identityPath !== commonDirectory) return;
+          replaced = true;
+          renameSync(commonDirectory, original);
+          mkdirSync(commonDirectory);
+        },
+      },
+    })).rejects.toMatchObject({ code: "conflict" });
+
+    expect(phases).toEqual([]);
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(original)).toBe(true);
+  });
+
+  it("rejects an ABA path restore after the Linux fd is opened", async () => {
+    const root = repository();
+    const path = ownedPath(root, "linux ABA path restore");
+    const commonDirectory = realpathSync(git(
+      root,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ));
+    const original = `${commonDirectory}-opened`;
+    const phases: string[] = [];
+    let restored = false;
+
+    await expect(createWorktreeWithOwnershipReceipt(root, path, {
+      branch: "inertia/linux-aba-restore",
+      createBranch: true,
+      startPoint: "main",
+    }, {
+      beforeAdd: () => phases.push("before-add"),
+      notAdded: () => phases.push("not-added"),
+      added: () => phases.push("added"),
+    }, {
+      filesystemIdentity: {
+        ...linuxBirthtimeProbe("valid"),
+        beforeLinuxStatProbe: (identityPath) => {
+          if (restored || identityPath !== commonDirectory) return;
+          restored = true;
+          renameSync(commonDirectory, original);
+          mkdirSync(commonDirectory);
+          rmSync(commonDirectory, { recursive: true });
+          renameSync(original, commonDirectory);
+        },
+      },
+    })).rejects.toMatchObject({ code: "conflict" });
+
+    expect(phases).toEqual([]);
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(commonDirectory)).toBe(true);
+  });
+
+  it.runIf(process.platform === "linux")(
+    "accepts the real GNU stat fd protocol on Linux",
+    async () => {
+      const root = repository();
+      const path = ownedPath(root, "real GNU stat identity");
+      const ownership = await createOwnedWorktree(
+        root,
+        path,
+        "inertia/real-gnu-stat",
+      );
+
+      expect(BigInt(ownership.filesystemReceipt.adminDirectory.birthtimeNs))
+        .toBeGreaterThan(0n);
+      expect(existsSync(path)).toBe(true);
+    },
+  );
 
   it("acknowledges add success before post-create status inspection", async () => {
     const root = repository();
@@ -760,6 +905,60 @@ describe("launch-owned Git cleanup", () => {
       unrelatedPath,
       "user/unrelated-third",
     )).resolves.toBeDefined();
+  });
+
+  it("bounds the aggregate Linux administrative identity scan", async () => {
+    const root = repository();
+    const path = ownedPath(root, "aggregate scan owned path");
+    const branch = "inertia/aggregate-scan";
+    const ownership = await createOwnedWorktree(
+      root,
+      path,
+      branch,
+      linuxBirthtimeProbe("valid"),
+    );
+    const worktreesDirectory = dirname(adminDirectory(path));
+    mkdirSync(join(worktreesDirectory, "scan-keeper"));
+    await removeWorktree(root, path, true);
+    for (let index = 0; index < 6; index += 1) {
+      mkdirSync(join(worktreesDirectory, `slow-admin-${index}`));
+    }
+    let slowProbeCount = 0;
+    const validScript = "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const b=s.birthtimeNs;const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,`${b/1000000000n}.${String(b%1000000000n).padStart(9,'0')}`].join(z)+z);";
+    const slowScript = "const {fstatSync}=require('node:fs');setTimeout(()=>{const s=fstatSync(3,{bigint:true});const b=s.birthtimeNs;const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,`${b/1000000000n}.${String(b%1000000000n).padStart(9,'0')}`].join(z)+z);},75);";
+    const startedAt = Date.now();
+
+    await expect(inspectOwnedWorktreeCleanupState(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+      {
+        administrativeScanTimeoutMs: 160,
+        filesystemIdentity: {
+          platform: "linux",
+          linuxStatExecutable: process.execPath,
+          beforeLinuxStatProbe: (identityPath) => {
+            if (basename(identityPath).startsWith("slow-admin-")) {
+              slowProbeCount += 1;
+            }
+          },
+          linuxStatArguments: (_descriptorPath, identityPath) => {
+            const slow = basename(identityPath).startsWith("slow-admin-");
+            return ["-e", slow ? slowScript : validScript];
+          },
+        },
+      },
+    )).rejects.toMatchObject({ code: "timeout" });
+
+    expect(Date.now() - startedAt).toBeLessThan(1_500);
+    expect(slowProbeCount).toBeGreaterThan(0);
+    expect(slowProbeCount).toBeLessThan(6);
+    expect(git(root, "rev-parse", branch)).toBe(ownership.head);
   });
 
   it("rejects replacement of the canonical worktrees parent", async () => {

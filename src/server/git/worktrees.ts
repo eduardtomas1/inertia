@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { constants as fsConstants, type BigIntStats } from "node:fs";
 import {
   access,
@@ -74,14 +74,18 @@ export interface OwnedWorktreeCreationDependencies {
 }
 
 export interface OwnedWorktreeInspectionDependencies {
+  administrativeScanTimeoutMs?: number;
   afterIdentityFileStat?(path: string): Promise<void> | void;
   filesystemIdentity?: WorktreeFilesystemIdentityDependencies;
 }
 
 export interface WorktreeFilesystemIdentityDependencies {
+  afterLinuxStatClose?(): void;
+  beforeLinuxStatProbe?(path: string): Promise<void> | void;
+  deadlineAt?: number;
   platform?: NodeJS.Platform;
   linuxStatExecutable?: string;
-  linuxStatArguments?(path: string): string[];
+  linuxStatArguments?(descriptorPath: string, inspectedPath: string): string[];
   linuxStatTimeoutMs?: number;
 }
 
@@ -91,8 +95,9 @@ export type OwnedWorktreeCleanupInspection =
   | { state: "registered"; identity: RegisteredWorktreeRegistration };
 
 const MAX_GIT_IDENTITY_FILE_BYTES = 16 * 1024;
-const MAX_LINUX_BIRTHTIME_OUTPUT_BYTES = 64;
+const MAX_LINUX_BIRTHTIME_OUTPUT_BYTES = 256;
 const LINUX_BIRTHTIME_TIMEOUT_MS = 2_000;
+const ADMINISTRATIVE_IDENTITY_SCAN_TIMEOUT_MS = 15_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 function pathsEqual(left: string, right: string): boolean {
@@ -200,13 +205,6 @@ export function durableWorktreeDirectoryIdentity(
   };
 }
 
-function sameCaptureObservation(left: BigIntStats, right: BigIntStats): boolean {
-  return worktreeFilesystemIdentitiesEqual(
-    durableWorktreeDirectoryIdentity(left),
-    durableWorktreeDirectoryIdentity(right),
-  ) && left.ctimeNs === right.ctimeNs;
-}
-
 function linuxStatEnvironment(): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {
     LANG: "C",
@@ -221,51 +219,124 @@ function linuxStatEnvironment(): NodeJS.ProcessEnv {
 
 async function verifyLinuxDirectoryBirthtime(
   path: string,
-  birthtimeNs: bigint,
+  fileDescriptor: number,
+  opened: BigIntStats,
   dependencies: WorktreeFilesystemIdentityDependencies,
-): Promise<void> {
+): Promise<WorktreeFilesystemIdentity> {
   const executable = dependencies.linuxStatExecutable ?? "/usr/bin/stat";
-  const args = dependencies.linuxStatArguments?.(path)
-    ?? ["--format=%W", "--", path];
-  const timeoutMs = Math.max(
-    1,
-    Math.min(
-      dependencies.linuxStatTimeoutMs ?? LINUX_BIRTHTIME_TIMEOUT_MS,
-      LINUX_BIRTHTIME_TIMEOUT_MS,
-    ),
-  );
+  const descriptorPath = "/proc/self/fd/3";
+  const requestedTimeout = dependencies.linuxStatTimeoutMs;
+  const configuredTimeoutMs = Number.isSafeInteger(requestedTimeout)
+    && requestedTimeout !== undefined
+    && requestedTimeout > 0
+    ? Math.min(requestedTimeout, LINUX_BIRTHTIME_TIMEOUT_MS)
+    : LINUX_BIRTHTIME_TIMEOUT_MS;
+  await dependencies.beforeLinuxStatProbe?.(path);
+  const deadlineTimeoutMs = dependencies.deadlineAt === undefined
+    ? configuredTimeoutMs
+    : Math.floor(dependencies.deadlineAt - Date.now());
+  if (deadlineTimeoutMs <= 0) {
+    throw new GitError(
+      "timeout",
+      "The linked-worktree administrative identity scan took too long.",
+    );
+  }
+  const timeoutMs = Math.min(configuredTimeoutMs, deadlineTimeoutMs);
+  const deadlineControlsTimeout = dependencies.deadlineAt !== undefined
+    && deadlineTimeoutMs <= configuredTimeoutMs;
+  const args = dependencies.linuxStatArguments?.(descriptorPath, path)
+    ?? [
+      "--dereference",
+      "--printf=%d\\0%i\\0%.9W\\0",
+      "--",
+      descriptorPath,
+    ];
   let stdout: string;
   try {
     stdout = await new Promise<string>((resolveProbe, rejectProbe) => {
-      execFile(executable, args, {
-        encoding: "utf8",
+      const child = spawn(executable, args, {
         env: linuxStatEnvironment(),
-        killSignal: "SIGKILL",
-        maxBuffer: MAX_LINUX_BIRTHTIME_OUTPUT_BYTES,
         shell: false,
-        timeout: timeoutMs,
+        stdio: ["ignore", "pipe", "ignore", fileDescriptor],
         windowsHide: true,
-      }, (error, result) => {
-        if (error) rejectProbe(error);
-        else resolveProbe(result);
+      });
+      const chunks: Buffer[] = [];
+      let bytes = 0;
+      let failure: Error | null = null;
+      const fail = (error: Error): void => {
+        if (failure) return;
+        failure = error;
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+      };
+      const timer = setTimeout(() => {
+        fail(new Error("linux-stat-timeout"));
+      }, timeoutMs);
+      if (!child.stdout) {
+        fail(new Error("linux-stat-output-unavailable"));
+      } else {
+        child.stdout.on("data", (chunk: Buffer) => {
+          bytes += chunk.length;
+          if (bytes > MAX_LINUX_BIRTHTIME_OUTPUT_BYTES) {
+            fail(new Error("linux-stat-overflow"));
+            return;
+          }
+          chunks.push(chunk);
+        });
+      }
+      child.once("error", (error) => fail(error));
+      child.once("close", (code, signal) => {
+        clearTimeout(timer);
+        dependencies.afterLinuxStatClose?.();
+        if (failure) {
+          rejectProbe(failure);
+          return;
+        }
+        if (code !== 0 || signal !== null) {
+          rejectProbe(new Error("linux-stat-failed"));
+          return;
+        }
+        resolveProbe(Buffer.concat(chunks, bytes).toString("utf8"));
       });
     });
-  } catch {
+  } catch (error) {
+    if (
+      deadlineControlsTimeout
+      && error instanceof Error
+      && error.message === "linux-stat-timeout"
+    ) {
+      throw new GitError(
+        "timeout",
+        "The linked-worktree administrative identity scan took too long.",
+      );
+    }
     throw new GitError(
       "operation-failed",
       "The Linux filesystem birth time could not be verified safely; isolated Duo worktrees are unsupported on this filesystem.",
     );
   }
-  const match = /^([1-9][0-9]{0,19})\n?$/u.exec(stdout);
+  const match = /^([1-9][0-9]{0,19})\0([1-9][0-9]{0,19})\0([1-9][0-9]{0,19})\.([0-9]{9})\0$/u.exec(stdout);
   if (
     !match?.[1]
-    || BigInt(match[1]) !== birthtimeNs / 1_000_000_000n
+    || !match[2]
+    || !match[3]
+    || !match[4]
+    || BigInt(match[1]) !== opened.dev
+    || BigInt(match[2]) !== opened.ino
   ) {
     throw new GitError(
       "operation-failed",
       "The Linux filesystem does not expose a trustworthy directory birth time; isolated Duo worktrees are unsupported on this filesystem.",
     );
   }
+  return {
+    device: match[1],
+    inode: match[2],
+    birthtimeNs: (
+      BigInt(match[3]) * 1_000_000_000n + BigInt(match[4])
+    ).toString(10),
+  };
 }
 
 async function captureDirectoryIdentity(
@@ -288,33 +359,54 @@ async function captureDirectoryIdentity(
   try {
     const opened = await handle.stat({ bigint: true });
     const after = await lstat(path, { bigint: true });
-    const openedIdentity = durableWorktreeDirectoryIdentity(opened);
     if (
-      !sameCaptureObservation(before, opened)
-      || !sameCaptureObservation(opened, after)
+      before.isSymbolicLink()
+      || !before.isDirectory()
+      || !opened.isDirectory()
+      || after.isSymbolicLink()
+      || !after.isDirectory()
+      || before.dev <= 0n
+      || before.ino <= 0n
+      || before.dev !== opened.dev
+      || before.ino !== opened.ino
+      || opened.dev !== after.dev
+      || opened.ino !== after.ino
+      || before.ctimeNs !== opened.ctimeNs
+      || opened.ctimeNs !== after.ctimeNs
     ) {
       throw new GitError(
         "conflict",
         "The linked-worktree administrative identity changed during inspection.",
       );
     }
+    let openedIdentity: WorktreeFilesystemIdentity;
     if ((dependencies.platform ?? process.platform) === "linux") {
-      await verifyLinuxDirectoryBirthtime(
+      openedIdentity = await verifyLinuxDirectoryBirthtime(
         path,
-        opened.birthtimeNs,
+        handle.fd,
+        opened,
         dependencies,
       );
       const verifiedOpened = await handle.stat({ bigint: true });
       const verifiedPath = await lstat(path, { bigint: true });
       if (
-        !sameCaptureObservation(opened, verifiedOpened)
-        || !sameCaptureObservation(verifiedOpened, verifiedPath)
+        !verifiedOpened.isDirectory()
+        || verifiedPath.isSymbolicLink()
+        || !verifiedPath.isDirectory()
+        || opened.dev !== verifiedOpened.dev
+        || opened.ino !== verifiedOpened.ino
+        || verifiedOpened.dev !== verifiedPath.dev
+        || verifiedOpened.ino !== verifiedPath.ino
+        || opened.ctimeNs !== verifiedOpened.ctimeNs
+        || verifiedOpened.ctimeNs !== verifiedPath.ctimeNs
       ) {
         throw new GitError(
           "conflict",
           "The linked-worktree administrative identity changed during birth-time verification.",
         );
       }
+    } else {
+      openedIdentity = durableWorktreeDirectoryIdentity(opened);
     }
     return openedIdentity;
   } finally {
@@ -815,18 +907,42 @@ export async function inspectOwnedWorktreeCleanupState(
     if (nodeErrorCode(error) !== "ENOENT") throw error;
     const entries = await readdir(worktreesDirectory, { withFileTypes: true });
     if (entries.length > 1_024) return { state: "conflict" };
+    const requestedScanTimeout = dependencies.administrativeScanTimeoutMs;
+    const scanTimeoutMs = Number.isSafeInteger(requestedScanTimeout)
+      && requestedScanTimeout !== undefined
+      && requestedScanTimeout > 0
+      ? Math.min(
+          requestedScanTimeout,
+          ADMINISTRATIVE_IDENTITY_SCAN_TIMEOUT_MS,
+        )
+      : ADMINISTRATIVE_IDENTITY_SCAN_TIMEOUT_MS;
+    const scanDeadlineAt = Date.now() + scanTimeoutMs;
+    const configuredDeadline = dependencies.filesystemIdentity?.deadlineAt;
+    const scanIdentityDependencies = {
+      ...dependencies.filesystemIdentity,
+      deadlineAt: configuredDeadline === undefined
+        ? scanDeadlineAt
+        : Math.min(configuredDeadline, scanDeadlineAt),
+    };
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      if (Date.now() >= scanIdentityDependencies.deadlineAt) {
+        throw new GitError(
+          "timeout",
+          "The linked-worktree administrative identity scan took too long.",
+        );
+      }
       try {
         const identity = await captureDirectoryIdentity(
           resolve(worktreesDirectory, entry.name),
-          dependencies.filesystemIdentity,
+          scanIdentityDependencies,
         );
         if (worktreeFilesystemIdentitiesEqual(
           identity,
           expectedFilesystemReceipt.adminDirectory,
         )) return { state: "conflict" };
-      } catch {
+      } catch (error) {
+        if (error instanceof GitError && error.code === "timeout") throw error;
         return { state: "conflict" };
       }
     }

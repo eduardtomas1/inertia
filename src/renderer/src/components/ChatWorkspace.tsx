@@ -33,7 +33,6 @@ import type {
   CheckpointSummary,
   Conversation,
   ModelBackendProfileView,
-  MessageSendAcceptance,
   ModelSelection,
   Project,
   ProjectAction,
@@ -54,6 +53,7 @@ import { shouldFollowTimeline } from "../utils/responseTimeline";
 import {
   initialTranscriptNavigation,
   isTranscriptReaderNavigationKey,
+  type TranscriptMessageSendAcceptance,
   transcriptNavigationFollowsContent,
   transcriptNavigationReducer,
 } from "../utils/transcriptNavigation";
@@ -110,7 +110,7 @@ type ChatWorkspaceProps = {
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
     skillIds?: readonly string[],
-  ) => Promise<MessageSendAcceptance | null>;
+  ) => Promise<TranscriptMessageSendAcceptance | null>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onToggleSkill: (skill: AgentSkillSummary) => void;
   onClearSelectedSkills: () => void;
@@ -341,6 +341,7 @@ export function ChatWorkspace({
     context?: TurnRequestContext,
     skillIds?: readonly string[],
   ): Promise<void> => {
+    const sourceConversationId = conversationId;
     const acceptance = await onSendMessage(
       content,
       attachments,
@@ -348,8 +349,12 @@ export function ChatWorkspace({
       skillIds,
     );
     if (!acceptance) return;
-    dispatchNavigation({ type: "message.accepted", acceptance });
-  }, [onSendMessage]);
+    dispatchNavigation({
+      type: "message.accepted",
+      acceptance,
+      sourceConversationId,
+    });
+  }, [conversationId, onSendMessage]);
 
   const turnAnchorId = activeNavigation.mode === "await-turn"
     ? activeNavigation.turnId

@@ -1,5 +1,9 @@
 import type { MessageSendAcceptance } from "@shared/contracts";
 
+export type TranscriptMessageSendAcceptance = MessageSendAcceptance & {
+  materializedFromConversationId?: string;
+};
+
 export type TranscriptNavigationState =
   | { mode: "follow-latest"; conversationId: string | null }
   | { mode: "reading-history"; conversationId: string | null }
@@ -8,7 +12,11 @@ export type TranscriptNavigationState =
 
 export type TranscriptNavigationAction =
   | { type: "conversation.changed"; conversationId: string | null }
-  | { type: "message.accepted"; acceptance: MessageSendAcceptance }
+  | {
+      type: "message.accepted";
+      acceptance: TranscriptMessageSendAcceptance;
+      sourceConversationId: string | null;
+    }
   | { type: "turn.anchored"; conversationId: string; turnId: string }
   | { type: "turn.anchor-cancelled"; conversationId: string; turnId: string }
   | {
@@ -31,12 +39,21 @@ export function transcriptNavigationReducer(
 ): TranscriptNavigationState {
   switch (action.type) {
     case "conversation.changed":
-      return initialTranscriptNavigation(action.conversationId);
+      return state.conversationId === action.conversationId
+        ? state
+        : initialTranscriptNavigation(action.conversationId);
     case "message.accepted": {
       const { acceptance } = action;
       if (
         acceptance.disposition !== "new-turn"
-        || acceptance.conversationId !== state.conversationId
+        || (
+          acceptance.conversationId !== state.conversationId
+          && (
+            action.sourceConversationId !== state.conversationId
+            || acceptance.materializedFromConversationId
+              !== state.conversationId
+          )
+        )
       ) return state;
       if (
         (state.mode === "await-turn" || state.mode === "follow-turn")

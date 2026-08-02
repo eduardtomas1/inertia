@@ -14,6 +14,9 @@ import {
   buildNewConversationPayload,
 } from "../../src/renderer/src/lib/newConversation";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
+import type {
+  TranscriptMessageSendAcceptance,
+} from "../../src/renderer/src/utils/transcriptNavigation";
 import {
   readPersistedMaterializedDraftConversation,
 } from "../../src/renderer/src/utils/draftConversationPersistence";
@@ -98,7 +101,13 @@ describe("useDraftConversation", () => {
         result: { kind: "conversation.created", conversationId },
       };
     });
-    const sendMessage = vi.fn(async () => null);
+    const sendMessage = vi.fn(async () => ({
+      kind: "message.accepted" as const,
+      conversationId,
+      turnId: "turn-1",
+      userMessageId: "message-1",
+      disposition: "new-turn" as const,
+    }));
     const hook = renderHook(() => useDraftConversation({
       snapshot: null,
       settings: defaultSettings,
@@ -117,8 +126,10 @@ describe("useDraftConversation", () => {
     expect(hook.result.current.requiresWorkspaceMaterialization).toBe(false);
     expect(run).not.toHaveBeenCalled();
 
+    const draftId = hook.result.current.conversation?.id;
+    let acceptance: TranscriptMessageSendAcceptance | null | undefined;
     await act(async () => {
-      await hook.result.current.sendFromComposer(
+      acceptance = await hook.result.current.sendFromComposer(
         "Start with the current implementation.",
         [],
       );
@@ -141,6 +152,11 @@ describe("useDraftConversation", () => {
       undefined,
       true,
     );
+    expect(acceptance).toMatchObject({
+      conversationId,
+      materializedFromConversationId: draftId,
+      turnId: "turn-1",
+    });
     expect(hook.result.current.conversation).toBeNull();
   });
 

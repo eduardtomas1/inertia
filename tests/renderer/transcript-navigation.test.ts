@@ -30,6 +30,7 @@ describe("transcript new-turn navigation", () => {
     const awaiting = transcriptNavigationReducer(reading, {
       type: "message.accepted",
       acceptance: newTurn,
+      sourceConversationId: "conversation-1",
     });
     expect(awaiting).toEqual({
       mode: "await-turn",
@@ -56,6 +57,31 @@ describe("transcript new-turn navigation", () => {
       followsLatest: false,
       intentional: false,
     })).toBe(anchored);
+  });
+
+  it("carries a draft acceptance onto its materialized conversation", () => {
+    const readingDraft = {
+      mode: "reading-history" as const,
+      conversationId: "draft-conversation",
+    };
+    const accepted = transcriptNavigationReducer(readingDraft, {
+      type: "message.accepted",
+      acceptance: {
+        ...newTurn,
+        materializedFromConversationId: "draft-conversation",
+      },
+      sourceConversationId: "draft-conversation",
+    });
+
+    expect(accepted).toEqual({
+      mode: "await-turn",
+      conversationId: "conversation-1",
+      turnId: "turn-2",
+    });
+    expect(transcriptNavigationReducer(accepted, {
+      type: "conversation.changed",
+      conversationId: "conversation-1",
+    })).toBe(accepted);
   });
 
   it("releases turn following only for deliberate reader navigation", () => {
@@ -89,21 +115,28 @@ describe("transcript new-turn navigation", () => {
     expect(transcriptNavigationReducer(reading, {
       type: "message.accepted",
       acceptance: followUp,
+      sourceConversationId: "conversation-1",
     })).toBe(reading);
     expect(transcriptNavigationReducer(reading, {
       type: "message.accepted",
       acceptance: { ...newTurn, conversationId: "conversation-2" },
+      sourceConversationId: "conversation-2",
     })).toBe(reading);
   });
 
   it("cancels a pending anchor and treats duplicate acceptance as exactly once", () => {
     const awaiting = transcriptNavigationReducer(
       initialTranscriptNavigation("conversation-1"),
-      { type: "message.accepted", acceptance: newTurn },
+      {
+        type: "message.accepted",
+        acceptance: newTurn,
+        sourceConversationId: "conversation-1",
+      },
     );
     expect(transcriptNavigationReducer(awaiting, {
       type: "message.accepted",
       acceptance: newTurn,
+      sourceConversationId: "conversation-1",
     })).toBe(awaiting);
     expect(transcriptNavigationReducer(awaiting, {
       type: "turn.anchor-cancelled",

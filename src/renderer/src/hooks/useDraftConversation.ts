@@ -33,6 +33,9 @@ import {
   readPersistedMaterializedDraftConversation,
   writePersistedDraftConversation,
 } from "../utils/draftConversationPersistence";
+import type {
+  TranscriptMessageSendAcceptance,
+} from "../utils/transcriptNavigation";
 
 type ConversationCreatePayload = Extract<
   ClientCommand,
@@ -355,7 +358,7 @@ export function useDraftConversation({
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
     skillIds?: readonly string[],
-  ): Promise<MessageSendAcceptance | null> => {
+  ): Promise<TranscriptMessageSendAcceptance | null> => {
     const sendingDraft = draftRef.current;
     if (!sendingDraft) return null;
     const creation = await run("conversation.create:draft", {
@@ -413,7 +416,12 @@ export function useDraftConversation({
       ) {
         replaceDraft(null, false);
       }
-      return acceptance;
+      return acceptance
+        ? {
+            ...acceptance,
+            materializedFromConversationId: sendingDraft.conversation.id,
+          }
+        : null;
     } catch (error) {
       if (
         draftRef.current?.materialized?.conversationId === conversationId
@@ -437,7 +445,7 @@ export function useDraftConversation({
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
     skillIds?: readonly string[],
-  ): Promise<MessageSendAcceptance | null> => {
+  ): Promise<TranscriptMessageSendAcceptance | null> => {
     const current = draftRef.current;
     if (current?.materialized) {
       if (current.materialized.awaitingReconciliation) {
@@ -463,7 +471,13 @@ export function useDraftConversation({
         ) {
           replaceDraft(null, false);
         }
-        return acceptance;
+        return acceptance
+          ? {
+              ...acceptance,
+              materializedFromConversationId:
+                current.materialized.draftConversationId,
+            }
+          : null;
       } catch (error) {
         if (
           draftRef.current?.materialized?.conversationId

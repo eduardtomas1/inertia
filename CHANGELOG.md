@@ -4,6 +4,35 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.22 — 2026-08-02
+
+### Long sessions stay lighter across every platform
+
+- Historical transcript rows now remain stable through unrelated workspace updates, conversation drafts persist on a bounded cadence, and Activity Center clocks update without rebuilding the surrounding run list.
+- Large model catalogs virtualize while preserving search, favorites, focus, and keyboard navigation. A 750-route regression keeps only a small visible window mounted instead of paying for the complete catalog.
+- Workspace file metadata shares bounded containment work, and terminal output coalesces for at most 8 ms into bounded frames. The measured 10,000-callback fixture falls from 10,000 WebSocket frames to one without losing ordering or final output.
+- Reproducible core, desktop, and packaged-app performance reports now run across Windows, Linux, and macOS so platform-specific regressions have evidence instead of guesses.
+
+### Local data has a real recovery path
+
+- SQLite startup distinguishes a clean first launch, a valid database, an unsupported future schema, and corruption. Validated rotating backups can restore the newest safe state while preserving the corrupt primary for investigation.
+- Settings exposes explicit native-dialog export and import recovery flows. Imports are serialized, idempotent, project roots are reauthorized, and recovered access returns to supervised mode.
+- Streamed messages and reasoning append through bounded chunks instead of repeatedly rewriting the complete growing value, then compact atomically when the turn settles. The measured WAL volume falls from 69.62 MiB to 7.19 MiB in the representative stream fixture.
+- PDF and document extraction uses bounded initialization, concurrency, memory, deadlines, cancellation, and sibling cleanup. The packaged smoke path validates extraction only after the runtime is ready.
+
+### Remote Companion becomes deployable and cheaper to keep open
+
+- A guided local-development or self-hosted setup validates HTTPS/WSS, TLS, origin policy, headers, component compatibility, endpoint ownership, and persistence before Remote Companion can be enabled.
+- Pairing uses a fragment-only companion link and QR code with a visible countdown, exact grant summary, regeneration, cancellation, and recovery actions. No invitation secret is placed in a server-visible query string.
+- Relay endpoint authentication v2 adds durable host-key binding, signed challenges, epochs, bounded first claims, authenticated takeover, replay resistance, and crash-safe reset/re-pair behavior while keeping application payloads end-to-end encrypted.
+- Versioned, checksummed browser and relay artifacts ship with a pinned private-network deployment recipe. The desktop still opens only an outbound connection and Inertia still operates no hosted relay.
+- Browser lifecycle supervision uses one generation-owned connection attempt with bounded backoff, wakeups, terminal failure classification, stale-cache labeling, and no replay of ambiguous prompt mutations.
+- Repeated unchanged state and conversation reads now use strong grant-bound validators and encrypted `not-modified` responses. A bounded large-history fixture reduces the unchanged relay envelope to under 1 KiB and saves more than 90 KiB without hiding acknowledgements or authority changes.
+
+### Release confidence
+
+- Architecture and lint checks, four TypeScript projects, 2,359 local unit and integration tests, 213 portable provider contracts, focused Remote Electron lifecycle coverage, production audit, exact-head review, and green Linux, macOS, and Windows E2E and packaging gates protect the release.
+
 ## 0.0.21 — 2026-08-01
 
 ### Delegated work is readable and truthful

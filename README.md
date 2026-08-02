@@ -27,6 +27,8 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Start from a compact Environment summary of the current branch, changes, active work, delegated agents, and attached context, while keeping the full workspace tools one click away.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
 - Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
+- Recover local history from validated rotating SQLite backups, or use explicit native-dialog export and import flows when manual recovery is required.
+- Pair the experimental self-hosted Remote Companion through a guided, tested HTTPS/WSS setup without exposing files, terminals, approvals, Git, provider settings, or Full Access to the browser.
 - Search commands, projects, and threads from one keyboard-friendly palette.
 - Resize or collapse either side of the workspace whenever the conversation needs more room.
 - Choose System, Light, or Dark with a restrained glass finish and clear contrast.
@@ -103,15 +105,17 @@ Nested module repositories keep their own review marks, notes, questions, and se
 
 ### Remote Companion, without surrendering the desktop
 
-Remote Companion is an experimental, self-hosted, opt-in way to follow safe conversation projections and send text prompts to an existing supervised chat while the Inertia desktop remains online. The desktop stays authoritative and opens only an outbound WebSocket; Inertia does not ship or start a relay, bundle the companion browser, operate a hosted service, or open an inbound listener on your machine. The stock loopback URL is for a separately started development relay; remote use requires deploying the reference browser and a reviewed WSS relay first.
+Remote Companion is an experimental, self-hosted, opt-in way to follow safe conversation projections and send text prompts to an existing supervised chat while the Inertia desktop remains online. The desktop stays authoritative and opens only an outbound WebSocket; it never starts a relay, operates a hosted service, or opens an inbound listener on your machine. Releases include versioned, checksummed browser and relay artifacts plus a pinned private-network deployment recipe, but you deploy and operate that infrastructure yourself.
 
-Pairing requires an explicit comparison and a device-specific grant for selected projects and, optionally, selected conversations. Prompt-capable grants expire within seven days; every prompt is revalidated immediately before posting, and stale or archived scopes are removed. Grants remain revocable, pause on screen lock or suspend, and are recorded in a local audit history. Application payloads are end-to-end encrypted, while the reference relay sees only unavoidable routing, timing, and size metadata.
+Settings guides you through Local development or Self-hosted/private-network setup and tests HTTPS/WSS, TLS, origin policy, headers, component compatibility, endpoint ownership, and persistence before enablement. Pairing uses a fragment-only link and QR code with a visible countdown and exact device grant for selected projects and, optionally, selected conversations. Prompt-capable grants expire within seven days; every prompt is revalidated immediately before posting, and stale or archived scopes are removed.
 
-The browser keeps its device identity in a non-extractable ECDH P-256 key and rejects malformed or mismatched stored key pairs. Remote transcript projections are sanitized and byte-bounded, and the desktop, browser, and relay must agree on the same explicit protocol version.
+The browser keeps its device identity in a non-extractable ECDH P-256 key and rejects malformed or mismatched stored key pairs. Relay endpoint authentication uses a durable host key, signed challenges, epochs, replay protection, and explicit reset/re-pair recovery. Application payloads remain end-to-end encrypted; the relay sees only unavoidable routing, timing, and size metadata.
+
+Remote transcript projections are sanitized and byte-bounded. Capable browsers retain strong grant-bound validators only in memory and receive an encrypted `not-modified` response when a projection is unchanged, avoiding repeated large-history transfers and re-renders without delaying acknowledgements or authority reductions. Legacy compatible peers keep the full-response contract.
 
 The remote boundary is deliberately small. It can show sanitized user and assistant text and can submit text to an existing supervised conversation. Granting prompts lets the selected provider read project material under its own supervised policy, and its answer can contain project-derived prose; sanitization is not semantic data-loss prevention. The browser cannot directly browse or transfer files, approve commands, answer secret-input questions, use attachments or terminals, change provider settings, mutate Git, create projects or chats, stop runs, expose diagnostics, or enable Full Access.
 
-See the [Remote Companion protocol](docs/REMOTE_COMPANION_PROTOCOL.md), [threat model](docs/REMOTE_COMPANION_THREAT_MODEL.md), [deferred relay-authentication design](docs/RELAY_ENDPOINT_AUTHENTICATION.md), and [self-hosting guide](remote/README.md) before enabling it. The current [database recovery gap and proposed design](docs/DATABASE_RECOVERY.md), implemented [renderer isolation](docs/RENDERER_ISOLATION.md), and [security boundary coverage expectations](docs/SECURITY_BOUNDARY_COVERAGE.md) are documented separately.
+See the [Remote Companion protocol](docs/REMOTE_COMPANION_PROTOCOL.md), [threat model](docs/REMOTE_COMPANION_THREAT_MODEL.md), [onboarding and endpoint-security design](docs/REMOTE_COMPANION_ONBOARDING_SECURITY_DESIGN.md), and [self-hosting guide](remote/README.md) before enabling it. The implemented [database recovery model](docs/DATABASE_RECOVERY.md), [data-throughput design](docs/DATA_THROUGHPUT.md), [renderer isolation](docs/RENDERER_ISOLATION.md), and [security boundary coverage expectations](docs/SECURITY_BOUNDARY_COVERAGE.md) are documented separately.
 
 ### Provider-native, local by default
 
@@ -142,13 +146,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.19
+### Version 0.0.22
 
-This release hardens the experimental **Remote Companion** without widening it. Device grants can be limited to explicit projects and conversations, prompt authority expires within seven days, stale scopes are removed, and every prompt is revalidated against the live supervised route immediately before posting.
+This release makes long sessions cheaper, local history recoverable, and the experimental **Remote Companion** practical to self-host without widening its authority.
 
-Browser identities now use non-extractable ECDH P-256 keys and reject malformed or mismatched stored key pairs. Remote projections remain sanitized and bounded, privileged IPC rejects unknown fields, project identity refresh and shutdown remain bounded, and new threat-model, recovery, relay-authentication, renderer-isolation, and boundary-coverage documents make those guarantees reviewable.
+Terminal bursts and growing transcript streams now use bounded coalescing and append storage, SQLite has validated rotating backups plus explicit export/import recovery, and PDF extraction is bounded across initialization, concurrency, memory, and cancellation. Remote Companion adds guided setup diagnostics, durable endpoint authentication, checksummed deployment artifacts, resilient browser lifecycle supervision, and conditional encrypted projections that avoid resending unchanged histories.
 
-Download [Inertia v0.0.19](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.19):
+Download [Inertia v0.0.22](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.22):
 
 | Platform | Download |
 | --- | --- |

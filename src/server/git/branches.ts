@@ -151,7 +151,6 @@ export async function deleteBranchIfUnchanged(
   repositoryPath: string,
   branch: string,
   expectedHead: string,
-  hooks: { beforeDelete?(): void } = {},
 ): Promise<void> {
   const root = await repositoryRoot(repositoryPath);
   const name = await validateBranch(root, branch);
@@ -171,13 +170,11 @@ export async function deleteBranchIfUnchanged(
       "The launch-owned branch changed after cleanup began and was not deleted.",
     );
   }
-  hooks.beforeDelete?.();
+  await assertBranchNotCheckedOut(root, name);
   try {
-    // Git checks occupancy inside this non-force deletion and refuses an
-    // unmerged ref that moved after the expected-head read.
     await runGit(
       root,
-      ["branch", "-d", "--", name],
+      ["update-ref", "-d", `refs/heads/${name}`, expectedHead],
       { failureMessage: "Unable to delete the launch-owned branch." },
     );
   } catch (error) {
@@ -191,7 +188,6 @@ export async function deleteBranchIfUnchanged(
         "The launch-owned branch changed after cleanup began and was not deleted.",
       );
     }
-    await assertBranchNotCheckedOut(root, name);
     throw error;
   }
 }

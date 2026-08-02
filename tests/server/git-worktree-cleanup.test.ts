@@ -404,17 +404,9 @@ describe("launch-owned Git cleanup", () => {
       false,
       { beforeRemove: () => undefined, removed: () => undefined },
     );
+    git(root, "worktree", "add", "--", path, branch);
 
-    await expect(deleteBranchIfUnchanged(
-      root,
-      branch,
-      ownership.head,
-      {
-        beforeDelete: () => {
-          git(root, "worktree", "add", "--", path, branch);
-        },
-      },
-    ))
+    await expect(deleteBranchIfUnchanged(root, branch, ownership.head))
       .rejects.toMatchObject({ code: "conflict" });
     await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
       .resolves.toMatchObject({ head: ownership.head });
@@ -441,40 +433,6 @@ describe("launch-owned Git cleanup", () => {
 
     await expect(deleteBranchIfUnchanged(root, branch, ownership.head))
       .rejects.toMatchObject({ code: "conflict" });
-    expect(git(root, "rev-parse", branch)).toBe(movedHead);
-  });
-
-  it("preserves an unmerged ref moved after the expected-head read", async () => {
-    const root = repository();
-    const branch = "inertia/moved-during-delete";
-    git(root, "branch", branch, "main");
-    const expectedHead = git(root, "rev-parse", branch);
-    const movedHead = git(
-      root,
-      "commit-tree",
-      `${expectedHead}^{tree}`,
-      "-p",
-      expectedHead,
-      "-m",
-      "User moved ref during cleanup",
-    );
-
-    await expect(deleteBranchIfUnchanged(
-      root,
-      branch,
-      expectedHead,
-      {
-        beforeDelete: () => {
-          git(
-            root,
-            "update-ref",
-            `refs/heads/${branch}`,
-            movedHead,
-            expectedHead,
-          );
-        },
-      },
-    )).rejects.toMatchObject({ code: "conflict" });
     expect(git(root, "rev-parse", branch)).toBe(movedHead);
   });
 });

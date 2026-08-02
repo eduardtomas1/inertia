@@ -54,11 +54,18 @@ describe("Remote Companion browser connection supervisor", () => {
     expect(attempt).toHaveBeenCalledTimes(1);
     rejectFirst();
     await Promise.all([starting, overlapping]);
-    await vi.waitFor(() => expect(attempt).toHaveBeenCalledTimes(2));
-    expect(states.at(-1)?.phase).toBe("backoff");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attempt).toHaveBeenCalledTimes(2);
+    expect(supervisor.current()).toMatchObject({
+      phase: "backoff",
+      retryAt: Date.now() + 2_000,
+    });
 
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.waitFor(() => expect(attempt).toHaveBeenCalledTimes(3));
+    const retryAt = supervisor.current().retryAt;
+    if (retryAt === null) throw new Error("Expected a scheduled retry");
+    await vi.advanceTimersByTimeAsync(retryAt - Date.now());
+    await Promise.resolve();
+    expect(attempt).toHaveBeenCalledTimes(3);
     expect(states.at(-1)?.phase).toBe("online");
   });
 

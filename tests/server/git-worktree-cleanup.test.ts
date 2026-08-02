@@ -146,6 +146,26 @@ describe("launch-owned Git cleanup", () => {
       .resolves.toBeUndefined();
   });
 
+  it("treats an absent exact branch as deleted while preserving descendants", async () => {
+    const root = repository();
+    const branch = "inertia/absent-parent";
+    const descendant = `${branch}/user-topic`;
+    git(root, "branch", branch, "main");
+    const expectedHead = git(root, "rev-parse", branch);
+    git(root, "branch", "-D", branch);
+    git(root, "branch", descendant, "main");
+
+    await expect(deleteBranchIfUnchanged(root, branch, expectedHead))
+      .resolves.toBeUndefined();
+    expect(git(root, "rev-parse", descendant)).toBe(expectedHead);
+    expect(git(
+      root,
+      "for-each-ref",
+      "--format=%(refname)",
+      `refs/heads/${branch}`,
+    )).toBe(`refs/heads/${descendant}`);
+  });
+
   it("leaves a pre-existing branch intact when worktree creation collides", async () => {
     const root = repository();
     const path = ownedPath(root, "colliding owned path");

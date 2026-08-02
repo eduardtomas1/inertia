@@ -111,18 +111,21 @@ async function localBranchHead(
   root: string,
   branch: string,
 ): Promise<string | null> {
+  const ref = `refs/heads/${branch}`;
   const result = await runGit(
     root,
     [
       "for-each-ref",
-      "--format=%(objectname)",
-      "--count=1",
-      `refs/heads/${branch}`,
+      "--format=%(refname)%00%(objectname)",
+      ref,
     ],
     { failureMessage: "Unable to inspect the local branch." },
   );
-  const head = result.stdout.toString("utf8").trim();
-  return head || null;
+  for (const line of result.stdout.toString("utf8").split("\n")) {
+    const [candidate = "", head = ""] = line.split("\0");
+    if (candidate === ref) return head || null;
+  }
+  return null;
 }
 
 async function assertBranchNotCheckedOut(

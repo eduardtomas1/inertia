@@ -1845,7 +1845,7 @@ describe("atomic Duo launch persistence", () => {
     }
   });
 
-  it("confirms an absent claimed removal after restart before deleting its branch", async () => {
+  it("confirms an absent claimed removal with a surviving descendant branch", async () => {
     const runtime = await createRuntime();
     let originalClosed = false;
     let reopened: RuntimeStore | null = null;
@@ -1934,6 +1934,21 @@ describe("atomic Duo launch persistence", () => {
         "recovery-required",
         "Removal completion is ambiguous.",
       );
+      const descendantBranch = `${branch}/user-topic`;
+      await execFileAsync("git", [
+        "-C",
+        runtime.workspace,
+        "branch",
+        "-D",
+        branch,
+      ]);
+      await execFileAsync("git", [
+        "-C",
+        runtime.workspace,
+        "branch",
+        descendantBranch,
+        "main",
+      ]);
       expect(runtime.store.pairedLaunch(launchId).plans[0]).toMatchObject({
         worktreeRemovalStarted: true,
         worktreeRemovalConfirmed: false,
@@ -1963,6 +1978,14 @@ describe("atomic Duo launch persistence", () => {
         "--verify",
         `refs/heads/${branch}`,
       ])).rejects.toBeDefined();
+      await expect(execFileAsync("git", [
+        "-C",
+        runtime.workspace,
+        "rev-parse",
+        descendantBranch,
+      ])).resolves.toMatchObject({
+        stdout: expect.stringContaining(created.cleanupBranchHead!),
+      });
       await expect(confirmWorktreeRemovalIfAbsent(
         runtime.workspace,
         worktreePath,

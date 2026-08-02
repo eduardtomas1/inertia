@@ -418,6 +418,113 @@ process.exit(child.status ?? 1);
     expect(new URL(runtime.websocketUrl).hostname).toBe("127.0.0.1");
   }, 30_000);
 
+  it("waits for terminal settlement work before opening a recovery import", async () => {
+    const { root, data, workspace } = temporaryWorkspace();
+    const recoveryPath = join(root, "recovery.json");
+    const targetDirectory = join(root, "recovered");
+    mkdirSync(targetDirectory, { mode: 0o700 });
+    writeFileSync(recoveryPath, JSON.stringify({
+      format: "inertia-recovery-export",
+      version: 1,
+      exportedAt: "2026-08-02T08:00:00.000Z",
+      projects: [],
+    }), { encoding: "utf8", mode: 0o600 });
+    const { authFile, executable } = fakeCodex(root, [
+      {
+        type: "item.completed",
+        item: { type: "agent_message", text: "Settlement is authoritative." },
+      },
+      { type: "turn.completed", delayMs: 500 },
+    ]);
+    writeFileSync(authFile, "connected");
+    let releaseIdentityRefresh!: () => void;
+    const identityRefreshGate = new Promise<void>((resolve) => {
+      releaseIdentityRefresh = resolve;
+    });
+    let releaseSettlement!: () => void;
+    let settlementStarted = false;
+    const settlementGate = new Promise<void>((resolve) => {
+      releaseSettlement = resolve;
+    });
+    const runtime = await startRuntime({
+      dataDirectory: data,
+      defaultWorkspacePath: workspace,
+      enableProviders: true,
+      codexBinaryPath: executable,
+      testOnlyProjectIdentityRefresh: identityRefreshGate,
+      testOnlyOnTurnSettled: (turn) => {
+        expect(turn.status).toBe("completed");
+        settlementStarted = true;
+        return settlementGate;
+      },
+    });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+        event.type === "server.welcome",
+    );
+    const ready = await providerSnapshot(
+      client.events,
+      welcome.snapshot,
+      "codex",
+      (provider) => provider.authState === "authenticated" && provider.canRun,
+    );
+    const conversationId = ready.activeConversationId!;
+    const requestId = randomUUID();
+    send(client.socket, {
+      type: "message.send",
+      requestId,
+      payload: { conversationId, content: "Complete before recovery." },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === requestId
+        && event.result.kind === "message.accepted",
+    );
+    const cancellation = new AbortController();
+    let importSettled = false;
+    const pendingImport = runtime.importRecoveryData(
+      recoveryPath,
+      targetDirectory,
+      cancellation.signal,
+      randomUUID(),
+    );
+    void pendingImport.then(
+      () => { importSettled = true; },
+      () => { importSettled = true; },
+    );
+    try {
+      await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+          event.type === "snapshot.updated"
+          && event.snapshot.conversations.some(
+            ({ id, latestTurn }) =>
+              id === conversationId && latestTurn?.status === "completed",
+          ),
+      );
+      expect(settlementStarted).toBe(true);
+      expect(importSettled).toBe(false);
+
+      // The turn settled while recovery was inside its project-identity await.
+      // Releasing that await must still reach the final settlement drain.
+      releaseIdentityRefresh();
+      await delay(100);
+      expect(importSettled).toBe(false);
+      expect(readdirSync(targetDirectory)).toEqual([]);
+
+      cancellation.abort(new Error("Cancel while settlement is draining."));
+      await expect(pendingImport).rejects.toThrow(
+        "Cancel while settlement is draining.",
+      );
+      expect(readdirSync(targetDirectory)).toEqual([]);
+    } finally {
+      releaseIdentityRefresh();
+      releaseSettlement();
+    }
+  }, 30_000);
+
   it("starts empty, mutates, and persists a deterministic app snapshot", async () => {
     const { data, workspace } = temporaryWorkspace({ withProject: false });
     const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false });

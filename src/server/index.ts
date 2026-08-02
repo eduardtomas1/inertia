@@ -9,6 +9,7 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AgentPlan,
+  type AgentTurn,
   type AppSnapshot,
   type ProviderInfo,
   type ProviderMaintenanceProviderId,
@@ -152,6 +153,10 @@ export interface RuntimeOptions {
     markerPath: string;
     stallMs: number;
   };
+  /** Test-only settlement seam; absent from the validated worker protocol. */
+  testOnlyOnTurnSettled?: (turn: AgentTurn) => void | Promise<void>;
+  /** Test-only recovery ordering seam; absent from the validated worker protocol. */
+  testOnlyProjectIdentityRefresh?: Promise<void>;
 }
 
 export interface RuntimeBackendCredentialBroker {
@@ -202,6 +207,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
     : undefined;
+  const testOnlyOnTurnSettled = process.env.NODE_ENV === "test"
+    ? options.testOnlyOnTurnSettled
+    : undefined;
+  const testOnlyProjectIdentityRefresh = process.env.NODE_ENV === "test"
+    ? options.testOnlyProjectIdentityRefresh
+    : undefined;
   store.startBackups();
   const secureFiles: RuntimeSecureFileBroker = options.secureFiles ?? {
     authorizeRoot: async () => {
@@ -251,7 +262,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       id,
       path,
     })))
-    .catch(() => undefined);
+    .catch(() => undefined)
+    .then(() => testOnlyProjectIdentityRefresh);
   const projectIdentityAuthority = {
     revalidate: async (projectId: string, projectPath: string) => {
       if (projectIdentityIsUsable(projectIdentities.state(projectId))) {
@@ -589,6 +601,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         );
         applyProviderMetadata(providerId, metadata);
       },
+      onTurnSettled: testOnlyOnTurnSettled,
     },
   );
   const duoLaunches = new DuoLaunchCoordinator(
@@ -927,6 +940,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             "Database recovery cannot start while runtime work is active.",
           );
         }
+        // With command admission closed and active turns ruled out, no new
+        // terminal task can appear after this final store-writer drain.
+        await turns.drainSettlementTasks(signal);
         const result = await runRecoveryImportWorker({
           databasePath,
           defaultWorkspacePath: options.defaultWorkspacePath,

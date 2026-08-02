@@ -300,6 +300,18 @@ describe("runtime process protocol", () => {
         ...command.options,
         recoveryImportFault: {
           ...command.options.recoveryImportFault,
+          phase: "during-message-import",
+        },
+      },
+    })).toMatchObject({
+      options: { recoveryImportFault: { phase: "during-message-import" } },
+    });
+    expect(parseRuntimeWorkerCommand({
+      ...command,
+      options: {
+        ...command.options,
+        recoveryImportFault: {
+          ...command.options.recoveryImportFault,
           markerPath: "relative.marker",
         },
       },

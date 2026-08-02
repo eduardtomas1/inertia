@@ -328,6 +328,10 @@ export class RuntimeStore {
     );
   }
 
+  reconcileRecoveryImport(): void {
+    reconcileRecoveryImportJournal(this.database);
+  }
+
   async backupAndClose(): Promise<void> {
     let backupError: unknown;
     try {

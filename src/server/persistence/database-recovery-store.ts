@@ -34,7 +34,10 @@ type RecoveryMessage = RecoveryConversation["messages"][number];
 export interface DatabaseRecoveryImportOptions {
   signal?: AbortSignal;
   operationId?: string;
-  operations?: PrepareRecoveryImportOptions["operations"];
+  operations?: PrepareRecoveryImportOptions["operations"] & {
+    /** Privileged test-only worker fault seam. */
+    afterMessageCreate?: () => void;
+  };
 }
 
 export interface DatabaseRecoveryImportWriters {
@@ -310,6 +313,7 @@ export async function importDatabaseRecoveryData(
           for (const importedMessage of importedConversation.messages) {
             writers.createMessage(conversationId, importedMessage);
             messageCount += 1;
+            options.operations?.afterMessageCreate?.();
           }
         }
       }

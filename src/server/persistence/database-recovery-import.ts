@@ -44,6 +44,13 @@ export interface PrepareRecoveryImportOptions {
   };
 }
 
+export interface ReconcileRecoveryImportOptions {
+  operations?: {
+    /** Test-only race seam; production callers never supply filesystem hooks. */
+    beforeDelete?: (path: string) => void;
+  };
+}
+
 function roots(authorizedRoot: string, operationId: string): {
   staging: string;
   final: string;
@@ -77,7 +84,9 @@ function assertActive(signal?: AbortSignal): void {
 function removeIncompleteRoot(
   path: string,
   authorizedRoot: string,
+  expectedIdentity: RecoveryImportRootIdentity,
   projectCount: number,
+  options: ReconcileRecoveryImportOptions,
 ): void {
   let rootMetadata: ReturnType<typeof lstatSync> | undefined;
   try {
@@ -114,7 +123,15 @@ function removeIncompleteRoot(
       || entry.isSymbolicLink()
     ) continue;
     try {
-      rmdirSync(join(path, entry.name));
+      const child = join(path, entry.name);
+      assertAuthorizedRootAvailable(authorizedRoot, expectedIdentity);
+      options.operations?.beforeDelete?.(child);
+      // Bind the destructive boundary itself to the journaled filesystem
+      // identity. A path replacement observed by the race seam (or between
+      // directory inspection and removal) must leave both contents and the
+      // durable journal untouched.
+      assertAuthorizedRootAvailable(authorizedRoot, expectedIdentity);
+      rmdirSync(child);
     } catch (error) {
       if (![
         "ENOENT",
@@ -124,6 +141,9 @@ function removeIncompleteRoot(
     }
   }
   try {
+    assertAuthorizedRootAvailable(authorizedRoot, expectedIdentity);
+    options.operations?.beforeDelete?.(path);
+    assertAuthorizedRootAvailable(authorizedRoot, expectedIdentity);
     rmdirSync(path);
     return;
   } catch (error) {
@@ -201,6 +221,7 @@ function assertAuthorizedRootAvailable(
 
 export function reconcileRecoveryImportJournal(
   database: Database.Database,
+  options: ReconcileRecoveryImportOptions = {},
 ): void {
   const journal = database.prepare(`
     SELECT operation_id, digest, authorized_root,
@@ -235,12 +256,16 @@ export function reconcileRecoveryImportJournal(
   removeIncompleteRoot(
     journalRoots.staging,
     journal.authorized_root,
+    expectedIdentity,
     journal.projects,
+    options,
   );
   removeIncompleteRoot(
     journalRoots.final,
     journal.authorized_root,
+    expectedIdentity,
     journal.projects,
+    options,
   );
   // A mount or directory identity can disappear while the children are being
   // reconciled. Confirm the canonical destination again before forgetting the

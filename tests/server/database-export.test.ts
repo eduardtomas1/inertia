@@ -25,6 +25,7 @@ import {
   readDatabaseRecoveryExportFile,
   writeDatabaseRecoveryExportFile,
 } from "../../src/server/persistence/database-export-file";
+import { reconcileRecoveryImportJournal } from "../../src/server/persistence/database-recovery-import";
 
 const directories: string[] = [];
 
@@ -89,6 +90,59 @@ function recoveryImportJournalCount(databasePath: string): number {
 }
 
 describe("safe database recovery exports", () => {
+  it("revalidates the authorized root at every destructive cleanup boundary", () => {
+    const dataDirectory = temporaryDirectory();
+    const authorizedRoot = temporaryDirectory();
+    const replacementRoot = join(dirname(authorizedRoot), `${Date.now()}-replacement`);
+    const originalRoot = join(dirname(authorizedRoot), `${Date.now()}-original`);
+    directories.push(replacementRoot, originalRoot);
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const initialized = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    initialized.close();
+    const operationId = "66666666-6666-4666-8666-666666666666";
+    seedInterruptedRecoveryImport({
+      authorizedRoot,
+      databasePath,
+      digest: "d".repeat(64),
+      operationId,
+      phase: "final",
+    });
+    const database = new Database(databasePath);
+    let raced = false;
+    expect(() => reconcileRecoveryImportJournal(database, {
+      operations: {
+        beforeDelete: () => {
+          if (raced) return;
+          raced = true;
+          renameSync(authorizedRoot, originalRoot);
+          mkdirSync(replacementRoot, { mode: 0o700 });
+          renameSync(replacementRoot, authorizedRoot);
+          writeFileSync(join(authorizedRoot, "must-not-be-touched"), "external\n");
+        },
+      },
+    })).toThrow(/destination changed.*remains pending/u);
+    expect(readdirSync(authorizedRoot)).toEqual(["must-not-be-touched"]);
+    expect(existsSync(join(
+      originalRoot,
+      `recovered-${operationId}`,
+      "project-00001",
+    ))).toBe(true);
+    expect((database.prepare(
+      "SELECT COUNT(*) AS count FROM recovery_import_journals",
+    ).get() as { count: number }).count).toBe(1);
+
+    rmSync(authorizedRoot, { recursive: true });
+    renameSync(originalRoot, authorizedRoot);
+    reconcileRecoveryImportJournal(database);
+    expect(readdirSync(authorizedRoot)).toEqual([]);
+    expect((database.prepare(
+      "SELECT COUNT(*) AS count FROM recovery_import_journals",
+    ).get() as { count: number }).count).toBe(0);
+    database.close();
+  });
+
   it("rejects reconstructed stream chunks in the bounded preflight", () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");

@@ -120,10 +120,10 @@ import {
   remotePromptSafetyForHarness,
 } from "../shared/remote-prompt-safety";
 import {
-  readDatabaseRecoveryExportFile,
   writeDatabaseRecoveryExportFile,
 } from "./persistence/database-export-file";
 import type { DatabaseRecoveryImportResult } from "./persistence/database-export";
+import { runRecoveryImportWorker } from "./persistence/database-recovery-import-worker-client";
 
 export {
   assembleReadOnlyReviewRequest,
@@ -148,7 +148,7 @@ export interface RuntimeOptions {
   secureFiles?: RuntimeSecureFileBroker;
   /** Privileged deterministic lifecycle fault; never renderer-controlled. */
   recoveryImportFault?: {
-    phase: "after-staging-publish";
+    phase: "after-staging-publish" | "during-message-import";
     markerPath: string;
     stallMs: number;
   };
@@ -193,15 +193,16 @@ export interface RunningRuntime {
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
   const dataDirectory = resolve(options.dataDirectory);
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+  const databasePath = join(dataDirectory, "inertia.sqlite");
   const store = new RuntimeStore(
-    join(dataDirectory, "inertia.sqlite"),
+    databasePath,
     options.defaultWorkspacePath,
     { recoverInterruptedRuns: false },
   );
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
     : undefined;
-  const afterStagingPublish = recoveryImportFault
+  const afterStagingPublish = recoveryImportFault?.phase === "after-staging-publish"
     ? () => {
         try {
           writeFileSync(
@@ -340,6 +341,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const token = randomBytes(32).toString("base64url");
   const websocketPath = `/runtime/${token}`;
   let closed = false;
+  let databaseRecoveryImportActive = false;
+  let activeRuntimeCommands = 0;
+  const runtimeCommandDrainWaiters = new Set<() => void>();
   let artifactReconciliation: Promise<void> | null = null;
 
   const server = createServer((_request, response) => {
@@ -604,7 +608,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     () => providerInfo,
   );
 
-  const dispatchCommand = createRuntimeCommandExecutor({
+  const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       createDuoCommandHandler({
         coordinator: duoLaunches,
@@ -717,6 +721,29 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     broadcastSnapshot: flushSnapshot,
     publicError,
   });
+  const dispatchCommand = async (
+    socket: WebSocket,
+    command: Parameters<typeof executeCommand>[1],
+  ): Promise<void> => {
+    if (databaseRecoveryImportActive) {
+      send(socket, {
+        type: "request.error",
+        requestId: command.requestId,
+        message: "Database recovery is in progress. Try again after it finishes.",
+      });
+      return;
+    }
+    activeRuntimeCommands += 1;
+    try {
+      await executeCommand(socket, command);
+    } finally {
+      activeRuntimeCommands -= 1;
+      if (activeRuntimeCommands === 0) {
+        for (const resolveDrain of runtimeCommandDrainWaiters) resolveDrain();
+        runtimeCommandDrainWaiters.clear();
+      }
+    }
+  };
 
   const webSocketBoundary = attachRuntimeWebSocketBoundary({
     server,
@@ -840,11 +867,34 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       request,
       projectIdentityAuthority,
     )).absolute,
-    remoteRequest: (subject, request) => remoteGateway.request(subject, request),
-    prepareRemotePrompt: (subject, request) =>
-      remoteGateway.preparePrompt(subject, request),
+    remoteRequest: (subject, request) => databaseRecoveryImportActive
+      ? Promise.resolve({
+          type: "response",
+          requestId: request.requestId,
+          ok: false,
+          code: "unavailable",
+          message: "Database recovery is in progress.",
+        })
+      : remoteGateway.request(subject, request),
+    prepareRemotePrompt: (subject, request) => databaseRecoveryImportActive
+      ? Promise.resolve({
+          type: "response",
+          requestId: request.requestId,
+          ok: false,
+          code: "unavailable",
+          message: "Database recovery is in progress.",
+        })
+      : remoteGateway.preparePrompt(subject, request),
     commitRemotePrompt: (subject, request, preparationId) =>
-      remoteGateway.commitPrompt(subject, request, preparationId),
+      databaseRecoveryImportActive
+        ? {
+            type: "response",
+            requestId: request.requestId,
+            ok: false,
+            code: "unavailable",
+            message: "Database recovery is in progress.",
+          }
+        : remoteGateway.commitPrompt(subject, request, preparationId),
     forgetRemoteTranscripts: (scope) => {
       if (scope.kind === "all") remoteGateway.reset();
       else remoteGateway.forgetConversation(scope.conversationId);
@@ -857,19 +907,49 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       );
     },
     importRecoveryData: async (path, targetDirectory, signal, operationId) => {
-      const result = await store.importRecoveryData(
-        await readDatabaseRecoveryExportFile(path, { signal }),
-        targetDirectory,
-        {
-          signal,
+      if (databaseRecoveryImportActive) {
+        throw new Error("A database recovery import is already active.");
+      }
+      if (!operationId) {
+        throw new Error("The database recovery import identity is required.");
+      }
+      databaseRecoveryImportActive = true;
+      try {
+        if (activeRuntimeCommands > 0) {
+          await new Promise<void>((resolveDrain) => {
+            runtimeCommandDrainWaiters.add(resolveDrain);
+          });
+        }
+        const result = await runRecoveryImportWorker({
+          databasePath,
+          defaultWorkspacePath: options.defaultWorkspacePath,
+          recoveryPath: path,
+          targetDirectory,
           operationId,
-          ...(afterStagingPublish
-            ? { operations: { afterStagingPublish } }
+          signal,
+          afterStagingPublish,
+          ...(recoveryImportFault?.phase === "during-message-import"
+            ? {
+                fault: {
+                  phase: "during-message-import" as const,
+                  markerPath: recoveryImportFault.markerPath,
+                  stallMs: recoveryImportFault.stallMs,
+                },
+              }
             : {}),
-        },
-      );
-      broadcastSnapshot();
-      return result;
+        });
+        broadcastSnapshot();
+        return result;
+      } catch (error) {
+        // Worker termination is confirmed before rejection. Reconcile its
+        // durable filesystem journal only after SQLite has rolled back and
+        // released the independent connection.
+        store.reconcileRecoveryImport();
+        broadcastSnapshot();
+        throw error;
+      } finally {
+        databaseRecoveryImportActive = false;
+      }
     },
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;

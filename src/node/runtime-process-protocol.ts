@@ -49,7 +49,7 @@ export interface RuntimeWorkerOptions {
   };
   /** Privileged deterministic fault injection used by lifecycle tests only. */
   recoveryImportFault?: {
-    phase: "after-staging-publish";
+    phase: "after-staging-publish" | "during-message-import";
     markerPath: string;
     stallMs: number;
   };
@@ -483,7 +483,10 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       && (
         !plainObject(options.recoveryImportFault)
         || Object.keys(options.recoveryImportFault).length !== 3
-        || options.recoveryImportFault.phase !== "after-staging-publish"
+        || ![
+          "after-staging-publish",
+          "during-message-import",
+        ].includes(String(options.recoveryImportFault.phase))
         || !runtimePath(options.recoveryImportFault.markerPath)
         || typeof options.recoveryImportFault.stallMs !== "number"
         || !Number.isSafeInteger(options.recoveryImportFault.stallMs)
@@ -524,7 +527,9 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       ...(hasRecoveryImportFault
         ? {
             recoveryImportFault: {
-              phase: "after-staging-publish" as const,
+              phase: (options.recoveryImportFault as Record<string, unknown>).phase as
+                | "after-staging-publish"
+                | "during-message-import",
               markerPath: (options.recoveryImportFault as Record<string, unknown>).markerPath as string,
               stallMs: (options.recoveryImportFault as Record<string, unknown>).stallMs as number,
             },

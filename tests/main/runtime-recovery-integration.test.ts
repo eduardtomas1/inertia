@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -94,12 +95,49 @@ async function waitFor(
   }
 }
 
+function buildRuntimeWorkers(): string {
+  const buildDirectory = mkdtempSync(join(repositoryRoot, ".recovery-integration-"));
+  temporaryDirectories.push(buildDirectory);
+  const runtimeWorkerPath = join(buildDirectory, "runtime-worker.js");
+  execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      "import { build } from 'esbuild'; await build(JSON.parse(process.argv[1]));",
+      JSON.stringify({
+        entryPoints: {
+          "runtime-worker": join(repositoryRoot, "src", "server", "runtime-worker.ts"),
+          "database-recovery-import-worker": join(
+            repositoryRoot,
+            "src",
+            "server",
+            "persistence",
+            "database-recovery-import-worker.ts",
+          ),
+        },
+        outdir: buildDirectory,
+        bundle: true,
+        packages: "external",
+        platform: "node",
+        format: "esm",
+        target: "node22",
+      }),
+    ],
+    { cwd: repositoryRoot, stdio: "pipe" },
+  );
+  expect(existsSync(runtimeWorkerPath)).toBe(true);
+  expect(existsSync(join(
+    buildDirectory,
+    "database-recovery-import-worker.js",
+  ))).toBe(true);
+  return runtimeWorkerPath;
+}
+
 describe("runtime recovery supervisor integration", () => {
   it("force-terminates a post-rename import, reconciles on restart, and retries once", async () => {
     const testRoot = mkdtempSync(join(tmpdir(), "inertia-recovery-supervisor-"));
     temporaryDirectories.push(testRoot);
-    const buildDirectory = mkdtempSync(join(repositoryRoot, ".recovery-integration-"));
-    temporaryDirectories.push(buildDirectory);
     const dataDirectory = join(testRoot, "data");
     const workspaceDirectory = join(testRoot, "workspace");
     const targetDirectory = join(testRoot, "recovered");
@@ -125,26 +163,7 @@ describe("runtime recovery supervisor integration", () => {
         },
       ],
     }), { encoding: "utf8", mode: 0o600 });
-    const runtimeWorkerPath = join(buildDirectory, "runtime-worker.js");
-    execFileSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "--eval",
-        "import { build } from 'esbuild'; await build(JSON.parse(process.argv[1]));",
-        JSON.stringify({
-          entryPoints: [join(repositoryRoot, "src", "server", "runtime-worker.ts")],
-          outfile: runtimeWorkerPath,
-          bundle: true,
-          packages: "external",
-          platform: "node",
-          format: "esm",
-          target: "node22",
-        }),
-      ],
-      { cwd: repositoryRoot, stdio: "pipe" },
-    );
-    expect(existsSync(runtimeWorkerPath)).toBe(true);
+    const runtimeWorkerPath = buildRuntimeWorkers();
 
     const children: NodeUtilityProcess[] = [];
     const states: string[] = [];
@@ -235,6 +254,113 @@ describe("runtime recovery supervisor integration", () => {
     expect(counts).toEqual({ journals: 0, receipts: 1, projects: 2 });
     expect(projectPaths).toHaveLength(2);
     expect(projectPaths.every((path) => existsSync(path))).toBe(true);
+    await expect(supervisor.stop()).resolves.toBe(true);
+  }, 30_000);
+
+  it("cancels a near-limit import while its isolated transaction is busy", async () => {
+    const testRoot = mkdtempSync(join(tmpdir(), "inertia-recovery-cancel-"));
+    temporaryDirectories.push(testRoot);
+    const dataDirectory = join(testRoot, "data");
+    const workspaceDirectory = join(testRoot, "workspace");
+    const targetDirectory = join(testRoot, "recovered");
+    mkdirSync(dataDirectory, { mode: 0o700 });
+    mkdirSync(workspaceDirectory, { mode: 0o700 });
+    mkdirSync(targetDirectory, { mode: 0o700 });
+    const recoveryPath = join(testRoot, "near-limit-recovery.json");
+    const markerPath = join(testRoot, "message-import.marker");
+    const message = {
+      role: "assistant",
+      content: "bounded",
+      createdAt: "2026-08-02T08:00:00.000Z",
+    };
+    writeFileSync(recoveryPath, JSON.stringify({
+      format: "inertia-recovery-export",
+      version: 1,
+      exportedAt: "2026-08-02T08:00:00.000Z",
+      projects: [{
+        name: "Near limit",
+        path: process.platform === "win32" ? "C:\\source\\large" : "/source/large",
+        conversations: [{
+          title: "Near limit",
+          providerId: "codex",
+          model: "gpt-test",
+          reasoningEffort: "high",
+          interactionMode: "build",
+          accessMode: "supervised",
+          messages: Array.from({ length: 249_000 }, () => message),
+        }],
+      }],
+    }), { encoding: "utf8", mode: 0o600 });
+    const runtimeWorkerPath = buildRuntimeWorkers();
+    const children: NodeUtilityProcess[] = [];
+    const states: string[] = [];
+    const supervisor = new RuntimeSupervisor({
+      workerOptions: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+        recoveryImportFault: {
+          phase: "during-message-import",
+          markerPath,
+          stallMs: 30_000,
+        },
+      },
+      spawn: () => {
+        const child = new NodeUtilityProcess(runtimeWorkerPath);
+        children.push(child);
+        return child as never;
+      },
+      startupTimeoutMs: 10_000,
+      stableUptimeMs: 30_000,
+      shutdownGraceMs: 2_000,
+      forceKillWaitMs: 1_000,
+      databaseRecoveryRequestTimeoutMs: 5_000,
+      databaseRecoveryCancelTimeoutMs: 2_000,
+      onStateChange: ({ phase, generation, pid }) => {
+        states.push(`${phase}:${generation}:${pid ?? 0}`);
+      },
+    });
+    const diagnostics = () => JSON.stringify({
+      states,
+      stderr: children.flatMap(({ stderr }) => stderr),
+    });
+    supervisor.start();
+    await waitFor(
+      () => supervisor.snapshot().phase === "ready",
+      "runtime readiness",
+      diagnostics,
+    );
+
+    const pending = supervisor.databaseRecovery(
+      "import",
+      recoveryPath,
+      targetDirectory,
+    );
+    await waitFor(
+      () => existsSync(markerPath),
+      "busy import transaction marker",
+      diagnostics,
+    );
+    await expect(pending).rejects.toThrow(/timed out and was cancelled/u);
+    expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 1 });
+    expect(readdirSync(targetDirectory)).toEqual([]);
+
+    const assertNoLateCommit = (): void => {
+      const database = new Database(join(dataDirectory, "inertia.sqlite"), {
+        readonly: true,
+      });
+      expect(database.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM projects) AS projects,
+          (SELECT COUNT(*) FROM messages) AS messages,
+          (SELECT COUNT(*) FROM recovery_import_receipts) AS receipts,
+          (SELECT COUNT(*) FROM recovery_import_journals) AS journals
+      `).get()).toEqual({ projects: 0, messages: 0, receipts: 0, journals: 0 });
+      database.close();
+    };
+    assertNoLateCommit();
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 250));
+    assertNoLateCommit();
     await expect(supervisor.stop()).resolves.toBe(true);
   }, 30_000);
 });

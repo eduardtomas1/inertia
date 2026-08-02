@@ -1526,6 +1526,14 @@ describe("Remote Companion outbound encrypted service", () => {
 
   it("persists a reduction before a stalled active invalidation", async () => {
     const paired = await pairedServiceFixture({ scopes: ["view", "prompt"] });
+    const originalComplete = paired.store.completeAuthorityReduction.bind(paired.store);
+    let markDurable = (): void => undefined;
+    const durable = new Promise<void>((resolve) => { markDurable = resolve; });
+    vi.spyOn(paired.store, "completeAuthorityReduction")
+      .mockImplementationOnce(async () => {
+        await originalComplete();
+        markDurable();
+      });
     let releaseNotification = (): void => undefined;
     const stalled = new Promise<void>((resolve) => {
       releaseNotification = resolve;
@@ -1545,9 +1553,11 @@ describe("Remote Companion outbound encrypted service", () => {
     ).finally(() => {
       settled = true;
     });
-    await vi.waitFor(async () => expect(await paired.store.load()).toMatchObject({
+    await durable;
+    await vi.waitFor(() => expect(active.outboundTail).not.toBe(stalled));
+    expect(await paired.store.load()).toMatchObject({
       devices: [{ scopes: ["view"], grantVersion: 2 }],
-    }));
+    });
     expect(settled).toBe(false);
     await paired.service.shutdown();
     const restarted = await RemoteAccessService.create({

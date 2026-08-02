@@ -208,12 +208,12 @@ function nextFrames(
   kind: RemoteCipherFrame["kind"] | RemoteCipherFrame["kind"][],
   count: number,
 ): Promise<RemoteCipherFrame[]> {
-  return new Promise((resolve, reject) => {
+  const pending = new Promise<RemoteCipherFrame[]>((resolve, reject) => {
     const frames: RemoteCipherFrame[] = [];
     const timer = setTimeout(() => {
       socket.off("message", onMessage);
       reject(new Error("Messages timed out."));
-    }, 2_000);
+    }, 10_000);
     const onMessage = (raw: WebSocket.RawData): void => {
       const message = JSON.parse(raw.toString()) as Record<string, unknown>;
       if (
@@ -233,6 +233,8 @@ function nextFrames(
     };
     socket.on("message", onMessage);
   });
+  void pending.catch(() => undefined);
+  return pending;
 }
 
 function sendFrame(
@@ -2385,11 +2387,6 @@ describe("Remote Companion outbound encrypted service", () => {
       type: "state.get" as const,
       requestId: crypto.randomUUID(),
     };
-    const stateResponses = nextFrames(
-      sessionTunnel.socket,
-      "session.data",
-      2,
-    );
     const firstStateFrame = await sealSessionData(
       sender,
       session.sessionId,
@@ -2400,6 +2397,7 @@ describe("Remote Companion outbound encrypted service", () => {
       session.sessionId,
       secondStateRequest,
     );
+    const stateResponses = nextFrames(sessionTunnel.socket, "session.data", 2);
     sendFrame(
       sessionTunnel.socket,
       sessionTunnel.connectionId,

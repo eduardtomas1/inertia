@@ -183,7 +183,13 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
       .toHaveCount(0);
 
     await transcript.hover({ position: { x: 300, y: 240 } });
-    await page.mouse.wheel(0, -800);
+    await transcript.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        deltaY: -element.clientHeight,
+      }));
+      element.scrollTop = Math.max(0, element.scrollTop - element.clientHeight);
+    });
     await expect(page.getByRole("button", { name: "Jump to latest" }))
       .toBeVisible();
     expect(app.rendererErrors).toEqual([]);

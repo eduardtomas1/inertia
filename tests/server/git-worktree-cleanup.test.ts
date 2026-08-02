@@ -1004,7 +1004,7 @@ describe("launch-owned Git cleanup", () => {
       linuxBirthtimeProbe("valid"),
     );
     const worktreesDirectory = dirname(adminDirectory(path));
-    mkdirSync(join(worktreesDirectory, "scan-keeper"));
+    writeFileSync(join(worktreesDirectory, "scan-keeper"), "", "utf8");
     await removeWorktree(root, path, true);
     let parentProbeCount = 0;
     const startedAt = Date.now();

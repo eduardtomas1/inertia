@@ -11,32 +11,27 @@ interface RecoveryImportWorkerData {
   recoveryPath: string;
   targetDirectory: string;
   operationId: string;
-  stagingBarrier?: SharedArrayBuffer;
   fault?: RecoveryImportWorkerFault;
 }
 
 const input = workerData as RecoveryImportWorkerData;
 
-function waitForParentAfterStagingPublish(): void {
-  if (!input.stagingBarrier) return;
-  parentPort?.postMessage({ type: "staging-published" });
-  const barrier = new Int32Array(input.stagingBarrier);
-  Atomics.wait(barrier, 0, 0);
-  if (Atomics.load(barrier, 0) !== 1) {
-    throw new Error("The recovery import staging fault was cancelled.");
-  }
-}
-
-let messageFaultStarted = false;
-function applyMessageFault(): void {
-  if (messageFaultStarted || input.fault?.phase !== "during-message-import") return;
-  messageFaultStarted = true;
+let faultStarted = false;
+function applyFault(phase: RecoveryImportWorkerFault["phase"]): void {
+  if (faultStarted || input.fault?.phase !== phase) return;
+  faultStarted = true;
   try {
-    writeFileSync(input.fault.markerPath, "message-import-started\n", {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
+    writeFileSync(
+      input.fault.markerPath,
+      phase === "after-staging-publish"
+        ? "staging-published\n"
+        : "message-import-started\n",
+      {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      },
+    );
   } catch (error) {
     if (
       typeof error === "object"
@@ -69,11 +64,11 @@ async function run(): Promise<void> {
       {
         operationId: input.operationId,
         operations: {
-          ...(input.stagingBarrier
-            ? { afterStagingPublish: waitForParentAfterStagingPublish }
+          ...(input.fault?.phase === "after-staging-publish"
+            ? { afterStagingPublish: () => applyFault("after-staging-publish") }
             : {}),
           ...(input.fault?.phase === "during-message-import"
-            ? { afterMessageCreate: applyMessageFault }
+            ? { afterMessageCreate: () => applyFault("during-message-import") }
             : {}),
         },
       },

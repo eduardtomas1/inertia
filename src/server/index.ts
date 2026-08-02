@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 
@@ -201,31 +201,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   );
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
-    : undefined;
-  const afterStagingPublish = recoveryImportFault?.phase === "after-staging-publish"
-    ? () => {
-        try {
-          writeFileSync(
-            recoveryImportFault.markerPath,
-            "staging-published\n",
-            { encoding: "utf8", flag: "wx", mode: 0o600 },
-          );
-        } catch (error) {
-          if (
-            typeof error === "object"
-            && error !== null
-            && "code" in error
-            && error.code === "EEXIST"
-          ) return;
-          throw error;
-        }
-        Atomics.wait(
-          new Int32Array(new SharedArrayBuffer(4)),
-          0,
-          0,
-          recoveryImportFault.stallMs,
-        );
-      }
     : undefined;
   store.startBackups();
   const secureFiles: RuntimeSecureFileBroker = options.secureFiles ?? {
@@ -927,11 +902,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           targetDirectory,
           operationId,
           signal,
-          afterStagingPublish,
-          ...(recoveryImportFault?.phase === "during-message-import"
+          ...(recoveryImportFault
             ? {
                 fault: {
-                  phase: "during-message-import" as const,
+                  phase: recoveryImportFault.phase,
                   markerPath: recoveryImportFault.markerPath,
                   stallMs: recoveryImportFault.stallMs,
                 },

@@ -8,7 +8,7 @@ import {
 } from "./database-export";
 
 export interface RecoveryImportWorkerFault {
-  phase: "during-message-import";
+  phase: "after-staging-publish" | "during-message-import";
   markerPath: string;
   stallMs: number;
 }
@@ -20,12 +20,10 @@ export interface RunRecoveryImportWorkerOptions {
   targetDirectory: string;
   operationId: string;
   signal?: AbortSignal;
-  afterStagingPublish?: () => void;
   fault?: RecoveryImportWorkerFault;
 }
 
 type RecoveryImportWorkerEvent =
-  | { type: "staging-published" }
   | { type: "result"; ok: true; result: DatabaseRecoveryImportResult }
   | { type: "result"; ok: false; message: string };
 
@@ -57,9 +55,6 @@ export function runRecoveryImportWorker(
   if (options.signal?.aborted) {
     return Promise.reject(cancellationError(options.signal));
   }
-  const stagingBarrier = options.afterStagingPublish
-    ? new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)
-    : undefined;
   const worker = new Worker(
     new URL("./database-recovery-import-worker.js", import.meta.url),
     {
@@ -69,7 +64,6 @@ export function runRecoveryImportWorker(
         recoveryPath: options.recoveryPath,
         targetDirectory: options.targetDirectory,
         operationId: options.operationId,
-        stagingBarrier,
         fault: options.fault,
       },
     },
@@ -80,12 +74,6 @@ export function runRecoveryImportWorker(
     let workerError: Error | null = null;
     let stopping = false;
 
-    const releaseStagingBarrier = (state: 1 | 2): void => {
-      if (!stagingBarrier) return;
-      const barrier = new Int32Array(stagingBarrier);
-      Atomics.store(barrier, 0, state);
-      Atomics.notify(barrier, 0);
-    };
     const cleanup = (): void => {
       options.signal?.removeEventListener("abort", onAbort);
       worker.removeAllListeners();
@@ -93,7 +81,6 @@ export function runRecoveryImportWorker(
     const onAbort = (): void => {
       if (stopping) return;
       stopping = true;
-      releaseStagingBarrier(2);
       const error = options.signal
         ? cancellationError(options.signal)
         : new Error("The database recovery import was cancelled.");
@@ -102,7 +89,14 @@ export function runRecoveryImportWorker(
       void worker.terminate().then(
         () => {
           cleanup();
-          reject(error);
+          if (options.fault?.phase === "after-staging-publish") {
+            // Privileged lifecycle fault: the worker and SQLite handle are
+            // already gone, but cancellation acknowledgement remains pending
+            // long enough for the supervisor to prove forced restart fencing.
+            setTimeout(() => reject(error), options.fault.stallMs);
+          } else {
+            reject(error);
+          }
         },
         (terminationError: unknown) => {
           cleanup();
@@ -118,16 +112,6 @@ export function runRecoveryImportWorker(
     }
     worker.on("message", (event: RecoveryImportWorkerEvent) => {
       if (stopping) return;
-      if (event.type === "staging-published") {
-        try {
-          options.afterStagingPublish?.();
-          releaseStagingBarrier(1);
-        } catch (error) {
-          workerError = error instanceof Error ? error : new Error(String(error));
-          releaseStagingBarrier(2);
-        }
-        return;
-      }
       result = event.ok && !validReceipt(event.result)
         ? { type: "result", ok: false, message: "The recovery import worker returned an invalid receipt." }
         : event;

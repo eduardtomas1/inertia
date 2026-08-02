@@ -167,6 +167,27 @@ describe("runtime recovery supervisor integration", () => {
 
     const children: NodeUtilityProcess[] = [];
     const states: string[] = [];
+    let recoveryDeadlineCount = 0;
+    const markerGatedSetTimer = ((
+      callback: (...args: unknown[]) => void,
+      delay?: number,
+      ...args: unknown[]
+    ) => {
+      if (delay !== 1) return setTimeout(callback, delay, ...args);
+      recoveryDeadlineCount += 1;
+      if (recoveryDeadlineCount > 1) {
+        return setTimeout(callback, 10_000, ...args);
+      }
+      // Arm the request deadline only once the privileged post-rename fault
+      // has taken control. This removes cold worker startup from the forced
+      // cancellation assertion without changing any product timeout.
+      const timer = setInterval(() => {
+        if (!existsSync(markerPath)) return;
+        clearInterval(timer);
+        callback(...args);
+      }, 10);
+      return timer;
+    }) as typeof setTimeout;
     const supervisor = new RuntimeSupervisor({
       workerOptions: {
         dataDirectory,
@@ -187,7 +208,8 @@ describe("runtime recovery supervisor integration", () => {
       stableUptimeMs: 30_000,
       shutdownGraceMs: 2_000,
       forceKillWaitMs: 1_000,
-      databaseRecoveryRequestTimeoutMs: 250,
+      setTimer: markerGatedSetTimer,
+      databaseRecoveryRequestTimeoutMs: 1,
       databaseRecoveryCancelTimeoutMs: 250,
       onStateChange: ({ phase, generation, pid }) => {
         states.push(`${phase}:${generation}:${pid ?? 0}`);
@@ -209,6 +231,11 @@ describe("runtime recovery supervisor integration", () => {
       "import",
       recoveryPath,
       targetDirectory,
+    );
+    await waitFor(
+      () => existsSync(markerPath),
+      "post-rename import fault marker",
+      diagnostics,
     );
     await expect(first).rejects.toThrow(
       /timed out.*before cancellation was confirmed/u,

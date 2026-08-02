@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { ENDPOINT_CHALLENGE_TTL_MS } from "../remote/relay/endpoint-auth.mjs";
 import {
   highestIntersection,
   negotiateCompatibility,
   type ComponentCompatibility,
   type ProtocolRange,
 } from "../remote/relay/compatibility.mjs";
+import { REMOTE_RELAY_CHALLENGE_TTL_MS } from "../src/main/remote-access-relay-registration";
 
 const range = (minimum: number, maximum = minimum): ProtocolRange => ({
   minimum,
@@ -21,6 +23,10 @@ function component(
 }
 
 describe("Remote Companion relay compatibility negotiation", () => {
+  it("keeps the desktop clock check aligned with the supported relay TTL", () => {
+    expect(REMOTE_RELAY_CHALLENGE_TTL_MS).toBe(ENDPOINT_CHALLENGE_TTL_MS);
+  });
+
   it("selects the highest common relay and application versions", () => {
     expect(negotiateCompatibility({
       relay: component("relay", range(2, 4), range(2, 3)) as

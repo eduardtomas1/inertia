@@ -5,6 +5,7 @@ import {
 } from "../../src/main/remote-access-endpoint-auth";
 import {
   REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS,
+  REMOTE_RELAY_CHALLENGE_TTL_MS,
   RemoteRelayRegistration,
 } from "../../src/main/remote-access-relay-registration";
 import type { PersistedRemoteAccess } from "../../src/main/remote-access-store";
@@ -16,7 +17,7 @@ import {
 } from "../../src/shared/remote-protocol";
 
 const NOW = new Date("2032-01-02T03:04:05.000Z");
-const TIMEOUT_MS = 5_000;
+const TIMEOUT_MS = 10_000;
 const RELAY_IDENTITY = "40e581f4-afc6-4eb3-b663-f0ce27f07145";
 
 type RelayChallenge = Extract<
@@ -28,11 +29,11 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("Remote Companion relay registration", () => {
   it.each([
-    ["relay clock ahead within the bound", TIMEOUT_MS + REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS, true],
+    ["relay clock ahead within the bound", REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS, true],
     ["desktop clock ahead within the bound", -REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS, true],
-    ["relay clock ahead beyond the bound", TIMEOUT_MS + REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS + 1, false],
+    ["relay clock ahead beyond the bound", REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS + 1, false],
     ["desktop clock ahead beyond the bound", -REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS - 1, false],
-  ] as const)("handles %s", (_label, expiryOffset, accepted) => {
+  ] as const)("handles %s", (_label, clockOffset, accepted) => {
     vi.spyOn(Date, "now").mockReturnValue(NOW.getTime());
     const endpointKeyPair = generateRemoteEndpointKeyPair();
     const data = {
@@ -85,7 +86,7 @@ describe("Remote Companion relay registration", () => {
       endpointPublicKey: endpointKeyPair.publicKey,
       nonce: "challenge_nonce",
       epoch: 1,
-      expiresAt: NOW.getTime() + expiryOffset,
+      expiresAt: NOW.getTime() + REMOTE_RELAY_CHALLENGE_TTL_MS + clockOffset,
     };
 
     registration.prove(challenge, TIMEOUT_MS);

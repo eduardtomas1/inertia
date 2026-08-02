@@ -37,6 +37,7 @@ export interface RegisteredRemoteRelay {
 
 export class RemoteRelayRegistration {
   private helloMessage: RelayHello | null = null;
+  private challengeRequestedAt: number | null = null;
 
   constructor(private readonly options: {
     data(): PersistedRemoteAccess;
@@ -54,6 +55,7 @@ export class RemoteRelayRegistration {
 
   reset(): void {
     this.helloMessage = null;
+    this.challengeRequestedAt = null;
   }
 
   begin(message: RelayHello): void {
@@ -76,6 +78,7 @@ export class RemoteRelayRegistration {
       return;
     }
     this.helloMessage = message;
+    this.challengeRequestedAt = Date.now();
     const endpointPublicKey = this.options.endpointKeyPair().publicKey;
     this.options.send(relayBinding === null
       ? {
@@ -99,19 +102,26 @@ export class RemoteRelayRegistration {
     const relayBinding = data.relayBinding ?? null;
     const purpose = relayBinding === null ? "claim" : "register";
     const epoch = relayBinding === null ? 1 : relayBinding.epoch + 1;
-    const transportNow = Date.now();
-    const estimatedRelayNow = message.expiresAt
+    const requestedAt = this.challengeRequestedAt;
+    const receivedAt = Date.now();
+    this.challengeRequestedAt = null;
+    const estimatedRelayIssuedAt = message.expiresAt
       - REMOTE_RELAY_CHALLENGE_TTL_MS;
-    const clockDifference = Math.abs(estimatedRelayNow - transportNow);
     if (
       !hello
+      || requestedAt === null
+      || receivedAt < requestedAt
+      || receivedAt - requestedAt > timeoutMs
       || message.relayIdentity !== hello.relayIdentity
       || message.endpointId !== data.endpointId
       || message.endpointPublicKey !== this.options.endpointKeyPair().publicKey
       || message.purpose !== purpose
       || (purpose === "claim" ? message.epoch !== epoch : message.epoch < epoch)
       || timeoutMs < REMOTE_RELAY_CHALLENGE_TTL_MS
-      || clockDifference > REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS
+      || estimatedRelayIssuedAt < requestedAt
+        - REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS
+      || estimatedRelayIssuedAt > receivedAt
+        + REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS
     ) {
       this.options.reject("The relay endpoint challenge was invalid.");
       return;

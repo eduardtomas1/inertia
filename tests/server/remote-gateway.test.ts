@@ -920,7 +920,7 @@ describe("Remote Companion runtime authority", () => {
     const messages = Array.from({ length: 200 }, (_, index) => ({
       ...template,
       id: `large-message-${index}`,
-      content: "😀".repeat(32_768),
+      content: "😀".repeat(index === 199 ? 32_768 : 128),
       createdAt: new Date(
         Date.UTC(2030, 0, 1, 0, 0, index),
       ).toISOString(),

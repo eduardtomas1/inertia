@@ -26,6 +26,11 @@ interface LaunchRemoteBrowserOptions {
   profilePrefix?: string;
   ready?(page: Page): Promise<void>;
   closeApp?(app: ElectronApp): Promise<void>;
+  forceKillProcessTree?(
+    pid: number,
+    options: { deadlineAt: number },
+  ): Promise<boolean>;
+  removeOwnedProfile?(path: string): Promise<void>;
 }
 
 export async function launchRemoteBrowser({
@@ -33,6 +38,8 @@ export async function launchRemoteBrowser({
   profilePrefix = "inertia-remote-e2e-",
   ready,
   closeApp = async (app) => await app.close(),
+  forceKillProcessTree = forceKillRuntimeProcessTree,
+  removeOwnedProfile = removeProfile,
 }: LaunchRemoteBrowserOptions): Promise<RemoteBrowserElectronFixture> {
   const userDataDir = await mkdtemp(join(tmpdir(), profilePrefix));
   let electronApp: ElectronApp | null = null;
@@ -54,14 +61,22 @@ export async function launchRemoteBrowser({
         ownedApp,
         userDataDir,
         closeApp,
+        forceKillProcessTree,
+        removeOwnedProfile,
       ),
     };
   } catch (error) {
     try {
       if (electronApp) {
-        await cleanupOwnedApp(electronApp, userDataDir, closeApp);
+        await cleanupOwnedApp(
+          electronApp,
+          userDataDir,
+          closeApp,
+          forceKillProcessTree,
+          removeOwnedProfile,
+        );
       } else {
-        await removeProfile(userDataDir);
+        await removeOwnedProfile(userDataDir);
       }
     } catch (cleanupError) {
       throw new AggregateError(
@@ -100,57 +115,76 @@ async function cleanupOwnedApp(
   app: ElectronApp,
   userDataDir: string,
   closeApp: (app: ElectronApp) => Promise<void>,
+  forceKillProcessTree: (
+    pid: number,
+    options: { deadlineAt: number },
+  ) => Promise<boolean>,
+  removeOwnedProfile: (path: string) => Promise<void>,
 ): Promise<void> {
   const child = app.process();
+  const errors: unknown[] = [];
+  let closeSucceeded = false;
   try {
     await withTimeout(
       closeApp(app),
       GRACEFUL_CLOSE_TIMEOUT_MS,
       "Remote browser fixture close timed out.",
     );
-    if (!await waitForRootExit(
-      child,
-      Date.now() + GRACEFUL_CLOSE_TIMEOUT_MS,
-    )) {
-      throw new Error("Remote browser fixture root did not exit after close.");
+    closeSucceeded = true;
+  } catch (error) {
+    errors.push(error);
+  }
+
+  let rootExited = await waitForRootExit(
+    child,
+    Date.now() + GRACEFUL_CLOSE_TIMEOUT_MS,
+  );
+  if (!rootExited) {
+    if (closeSucceeded) {
+      errors.push(new Error(
+        "Remote browser fixture root did not exit after close.",
+      ));
     }
-    await removeProfile(userDataDir);
-    return;
-  } catch (closeError) {
-    const errors: unknown[] = [closeError];
     const deadlineAt = Date.now() + FORCE_KILL_TIMEOUT_MS;
     let treeConfirmed = false;
     const pid = child.pid;
-    if (typeof pid !== "number") {
+    if (rootHasExited(child)) {
+      rootExited = true;
+    } else if (typeof pid !== "number") {
       errors.push(new Error(
         "Remote browser fixture root PID was unavailable for forced cleanup.",
       ));
     } else {
       try {
-        treeConfirmed = await forceKillRuntimeProcessTree(pid, {
+        treeConfirmed = await forceKillProcessTree(pid, {
           deadlineAt,
         });
       } catch (error) {
         errors.push(error);
       }
     }
-    if (!treeConfirmed) {
+    if (!rootExited && !treeConfirmed) {
       errors.push(new Error(
         "Remote browser fixture process-tree cleanup was not confirmed.",
       ));
     }
-    const rootExited = await waitForRootExit(child, deadlineAt);
+    if (!rootExited) rootExited = await waitForRootExit(child, deadlineAt);
     if (!rootExited) {
       errors.push(new Error(
         "Remote browser fixture root remained alive after forced cleanup.",
       ));
-    } else {
-      try {
-        await removeProfile(userDataDir);
-      } catch (error) {
-        errors.push(error);
-      }
     }
+  }
+
+  if (rootExited) {
+    try {
+      await removeOwnedProfile(userDataDir);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+
+  if (errors.length > 0) {
     throw new AggregateError(
       errors,
       "Remote browser fixture cleanup failed.",
@@ -193,7 +227,7 @@ async function waitForRootExit(
   child: ElectronProcess,
   deadlineAt: number,
 ): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null) return true;
+  if (rootHasExited(child)) return true;
   const remainingMs = Math.trunc(deadlineAt - Date.now());
   if (remainingMs <= 0) return false;
   return await new Promise<boolean>((resolveExit) => {
@@ -208,8 +242,12 @@ async function waitForRootExit(
     const onExit = (): void => finish(true);
     const timer = setTimeout(() => finish(false), remainingMs);
     child.once("exit", onExit);
-    if (child.exitCode !== null || child.signalCode !== null) finish(true);
+    if (rootHasExited(child)) finish(true);
   });
+}
+
+function rootHasExited(child: ElectronProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
 }
 
 async function withTimeout<T>(

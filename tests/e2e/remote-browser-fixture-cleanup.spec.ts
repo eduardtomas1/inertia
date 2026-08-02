@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { WebSocket, WebSocketServer } from "ws";
@@ -49,6 +49,101 @@ test("force-kills the owned tree before profile removal when close rejects", asy
   expect(browser.page.isClosed()).toBe(true);
   expect((await readdir(tmpdir())).some((entry) =>
     entry.startsWith(profilePrefix))).toBe(false);
+});
+
+test("does not force-kill a reused PID when profile removal fails after exit", async () => {
+  const profilePrefix = `inertia-remote-remove-failure-${randomUUID()}-`;
+  const removeError = new Error("Injected profile removal failure");
+  let profilePath: string | null = null;
+  let forceKillCalls = 0;
+  const browser = await launchRemoteBrowser({
+    staticUrl: "data:text/html,<title>remove failure fixture</title>",
+    profilePrefix,
+    forceKillProcessTree: async () => {
+      forceKillCalls += 1;
+      return true;
+    },
+    removeOwnedProfile: async (path) => {
+      profilePath = path;
+      throw removeError;
+    },
+  });
+  const child = browser.electronApp.process();
+
+  try {
+    await expect(browser.close()).rejects.toMatchObject({
+      message: "Remote browser fixture cleanup failed.",
+      errors: [removeError],
+    });
+
+    expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+    expect(forceKillCalls).toBe(0);
+  } finally {
+    if (profilePath) await rm(profilePath, { recursive: true, force: true });
+  }
+});
+
+test("does not force-kill when close rejects after the owned root exits", async () => {
+  const profilePrefix = `inertia-remote-post-exit-close-${randomUUID()}-`;
+  const closeError = new Error("Injected post-exit close failure");
+  let forceKillCalls = 0;
+  const browser = await launchRemoteBrowser({
+    staticUrl: "data:text/html,<title>post-exit close fixture</title>",
+    profilePrefix,
+    closeApp: async (app) => {
+      await app.close();
+      throw closeError;
+    },
+    forceKillProcessTree: async () => {
+      forceKillCalls += 1;
+      return true;
+    },
+  });
+  const child = browser.electronApp.process();
+
+  await expect(browser.close()).rejects.toMatchObject({
+    message: "Remote browser fixture cleanup failed.",
+    errors: [closeError],
+  });
+
+  expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+  expect(forceKillCalls).toBe(0);
+  expect((await readdir(tmpdir())).some((entry) =>
+    entry.startsWith(profilePrefix))).toBe(false);
+});
+
+test("aggregates post-exit close and profile removal failures without killing", async () => {
+  const profilePrefix = `inertia-remote-aggregate-cleanup-${randomUUID()}-`;
+  const closeError = new Error("Injected post-exit close failure");
+  const removeError = new Error("Injected profile removal failure");
+  let profilePath: string | null = null;
+  let forceKillCalls = 0;
+  const browser = await launchRemoteBrowser({
+    staticUrl: "data:text/html,<title>aggregate cleanup fixture</title>",
+    profilePrefix,
+    closeApp: async (app) => {
+      await app.close();
+      throw closeError;
+    },
+    forceKillProcessTree: async () => {
+      forceKillCalls += 1;
+      return true;
+    },
+    removeOwnedProfile: async (path) => {
+      profilePath = path;
+      throw removeError;
+    },
+  });
+
+  try {
+    await expect(browser.close()).rejects.toMatchObject({
+      message: "Remote browser fixture cleanup failed.",
+      errors: [closeError, removeError],
+    });
+    expect(forceKillCalls).toBe(0);
+  } finally {
+    if (profilePath) await rm(profilePath, { recursive: true, force: true });
+  }
 });
 
 test("terminates relay clients even when browser cleanup fails", async () => {

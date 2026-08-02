@@ -581,6 +581,38 @@ describe("multi-spawn", () => {
     trigger.remove();
   });
 
+  it.each(["Escape", "close button", "Cancel launch"] as const)(
+    "routes %s through the same launch-cancellation callback",
+    (route) => {
+      const onClose = vi.fn();
+      render(
+        <MultiSpawnDialog
+          open
+          snapshot={snapshot}
+          settings={settings}
+          submitting
+          error="Checking these projects for previous duo launches."
+          onClose={onClose}
+          onSubmit={vi.fn(async () => undefined)}
+          onOpenProviderSetup={vi.fn()}
+          onOpenBackendSetup={vi.fn()}
+        />,
+      );
+
+      if (route === "Escape") {
+        fireEvent.keyDown(document, { key: "Escape" });
+      } else if (route === "close button") {
+        fireEvent.click(screen.getByRole("button", {
+          name: "Close multi-spawn",
+        }));
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Cancel launch" }));
+      }
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("keeps launch completion focused in the resulting workspace", async () => {
     const trigger = document.createElement("button");
     const workspace = document.createElement("section");
@@ -1227,6 +1259,106 @@ describe("multi-spawn", () => {
       command.type === "duo.dispatch")).toHaveLength(1);
   });
 
+  it("honors cancellation while durable pending-launch lookup is unresolved", async () => {
+    let releaseLookup!: () => void;
+    const lookup = new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    let lookupCount = 0;
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type !== "duo.pending") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      lookupCount += 1;
+      if (lookupCount === 1) await lookup;
+      return pendingLaunchesEvent();
+    });
+    const focusWorkspace = vi.fn();
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace,
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    let submission!: Promise<void>;
+    act(() => {
+      submission = hook.result.current.submit(multiSpawnDraft());
+    });
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect(hook.result.current.submitting).toBe(true);
+
+    act(() => hook.result.current.closeDialog());
+    expect(hook.result.current.open).toBe(false);
+    expect(hook.result.current.submitting).toBe(false);
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    expect(hook.result.current.open).toBe(true);
+    expect(hook.result.current.error).toBeNull();
+    releaseLookup();
+    await act(async () => submission);
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+      "duo.pending",
+    ]);
+    expect(hook.result.current.submitting).toBe(false);
+    expect(hook.result.current.open).toBe(true);
+    expect(hook.result.current.error).toBeNull();
+    expect(focusWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates an unresolved pending lookup when the hook unmounts", async () => {
+    let releaseLookup!: () => void;
+    const lookup = new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type !== "duo.pending") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      await lookup;
+      return pendingLaunchesEvent();
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    let submission!: Promise<void>;
+    act(() => {
+      submission = hook.result.current.submit(multiSpawnDraft());
+    });
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    hook.unmount();
+    releaseLookup();
+    await act(async () => submission);
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+    ]);
+  });
+
   it("cancels a launch in progress without dispatching either provider", async () => {
     let releasePreparation!: () => void;
     const preparation = new Promise<void>((resolve) => {
@@ -1308,6 +1440,7 @@ describe("multi-spawn", () => {
       command.type === "duo.dispatch")).toBe(false);
     expect(updateSplitConversationId).not.toHaveBeenCalled();
     expect(hook.result.current.open).toBe(false);
+    expect(hook.result.current.submitting).toBe(false);
   });
 
   it("retains recovery identity when explicit cancellation still needs cleanup", async () => {

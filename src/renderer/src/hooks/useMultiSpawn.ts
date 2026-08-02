@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   type Dispatch,
@@ -136,20 +137,28 @@ export function useMultiSpawn({
   const cancellingRef = useRef(false);
   const activeLaunchIdRef = useRef<string | null>(null);
   const cancelRequestedRef = useRef(false);
+  const operationGenerationRef = useRef(0);
+
+  useEffect(() => () => {
+    operationGenerationRef.current += 1;
+  }, []);
 
   const activatePreparedConversations = useCallback(async (
     primaryConversationId: string,
     secondaryConversationId: string,
-  ): Promise<void> => {
+    isCurrent: () => boolean,
+  ): Promise<boolean> => {
     splitSelectionTransitionsRef.current += 1;
     try {
       await run("multi-spawn:select", {
         type: "conversation.select",
         payload: { conversationId: primaryConversationId },
       });
+      if (!isCurrent()) return false;
       updateSplitConversationId(secondaryConversationId);
       showWorkspace();
       closeSidebar();
+      return true;
     } finally {
       window.setTimeout(() => {
         splitSelectionTransitionsRef.current = Math.max(
@@ -181,8 +190,10 @@ export function useMultiSpawn({
 
   const reconcilePendingLaunch = useCallback(async (
     launchId: string,
-  ): Promise<DuoStatusResult> => {
+    isCurrent: () => boolean,
+  ): Promise<DuoStatusResult | null> => {
     let status = await queryLaunchStatus(launchId);
+    if (!isCurrent()) return null;
     if (
       status.state === "prepared"
       || status.state === "recovery-required"
@@ -191,6 +202,7 @@ export function useMultiSpawn({
         type: "duo.cancel",
         payload: { launchId },
       }));
+      if (!isCurrent()) return null;
       if (cancellation.result.kind !== "duo.status") {
         throw new Error(
           "The local service returned an unexpected Duo recovery response.",
@@ -216,16 +228,22 @@ export function useMultiSpawn({
 
   const reconcileProjectLaunches = useCallback(async (
     projectIds: readonly string[],
-  ): Promise<boolean> => {
+    generation: number,
+  ): Promise<"blocked" | "clear" | "stale"> => {
+    const isCurrent = () => operationGenerationRef.current === generation;
     try {
       const pending = await queryPendingLaunches(projectIds);
+      if (!isCurrent()) return "stale";
       clearPendingMultiSpawnLaunchId(window.localStorage);
       const statuses: DuoStatusResult[] = [];
       let reconciliationFailed = false;
       for (const launchId of pending.launchIds) {
         try {
-          statuses.push(await reconcilePendingLaunch(launchId));
+          const status = await reconcilePendingLaunch(launchId, isCurrent);
+          if (!isCurrent() || !status) return "stale";
+          statuses.push(status);
         } catch {
+          if (!isCurrent()) return "stale";
           reconciliationFailed = true;
         }
       }
@@ -243,13 +261,13 @@ export function useMultiSpawn({
         setError(
           "One or more previous duo launches could not be reconciled yet. Refresh before launching another pair.",
         );
-        return true;
+        return "blocked";
       }
       if (pending.hasMore) {
         setError(
           "More previous duo launches need reconciliation for these projects. Reconcile again before starting another pair.",
         );
-        return true;
+        return "blocked";
       }
       if (retained.length > 1) {
         setError(
@@ -260,28 +278,50 @@ export function useMultiSpawn({
       } else if (statusMessages[0]) {
         setError(statusMessages[0]);
       }
-      return retained.length > 0;
+      return retained.length > 0 ? "blocked" : "clear";
     } catch {
+      if (!isCurrent()) return "stale";
       setError(
         "Previous duo launches could not be discovered or reconciled yet. Refresh before launching another pair.",
       );
-      return true;
+      return "blocked";
     }
   }, [queryPendingLaunches, reconcilePendingLaunch]);
 
   const openDialog = useCallback(() => {
-    if (!snapshot?.activeProjectId || submittingRef.current) return;
+    if (
+      !snapshot?.activeProjectId
+      || submittingRef.current
+      || cancellingRef.current
+    ) return;
+    const generation = operationGenerationRef.current + 1;
+    operationGenerationRef.current = generation;
     setError(null);
     setRecoveryGuidance([]);
     setOpen(true);
-    void reconcileProjectLaunches([snapshot.activeProjectId]);
+    void reconcileProjectLaunches([snapshot.activeProjectId], generation);
   }, [reconcileProjectLaunches, snapshot?.activeProjectId]);
 
   const cancelActiveLaunch = useCallback(async (): Promise<void> => {
-    const launchId = activeLaunchIdRef.current;
-    if (!launchId || cancellingRef.current) return;
+    if (cancellingRef.current) return;
+    const generation = operationGenerationRef.current + 1;
+    operationGenerationRef.current = generation;
     cancelRequestedRef.current = true;
+    const launchId = activeLaunchIdRef.current;
+    if (!launchId) {
+      if (submittingRef.current) {
+        submittingRef.current = false;
+        setSubmitting(false);
+        setError(null);
+        setRecoveryGuidance([]);
+        setOpen(false);
+        focusWorkspace();
+      }
+      return;
+    }
     cancellingRef.current = true;
+    submittingRef.current = false;
+    setSubmitting(false);
     setCancelling(true);
     setError(null);
     try {
@@ -289,6 +329,7 @@ export function useMultiSpawn({
         type: "duo.cancel",
         payload: { launchId },
       }));
+      if (operationGenerationRef.current !== generation) return;
       if (event.result.kind !== "duo.status") {
         throw new Error("The local service returned an unexpected cancellation response.");
       }
@@ -300,6 +341,7 @@ export function useMultiSpawn({
       setActionError(launchStatusMessage(event.result));
       focusWorkspace();
     } catch (caught) {
+      if (operationGenerationRef.current !== generation) return;
       const message = runtimeCommandDelivery(caught) === "ambiguous"
         ? reconciliationMessage("Cancellation delivery was not confirmed.")
         : errorMessage(caught);
@@ -307,8 +349,10 @@ export function useMultiSpawn({
       setActionError(message);
       focusWorkspace();
     } finally {
-      cancellingRef.current = false;
-      setCancelling(false);
+      if (operationGenerationRef.current === generation) {
+        cancellingRef.current = false;
+        setCancelling(false);
+      }
     }
   }, [focusWorkspace, run, setActionError]);
 
@@ -317,6 +361,7 @@ export function useMultiSpawn({
       void cancelActiveLaunch();
       return;
     }
+    operationGenerationRef.current += 1;
     setError(null);
     setRecoveryGuidance([]);
     setOpen(false);
@@ -330,16 +375,24 @@ export function useMultiSpawn({
       return;
     }
     submittingRef.current = true;
+    const generation = operationGenerationRef.current + 1;
+    operationGenerationRef.current = generation;
+    const isCurrent = () => operationGenerationRef.current === generation;
+    cancelRequestedRef.current = false;
     setSubmitting(true);
     setError("Checking these projects for previous duo launches.");
-    if (await reconcileProjectLaunches(draft.sides.map(({ projectId }) => projectId))) {
+    const reconciliation = await reconcileProjectLaunches(
+      draft.sides.map(({ projectId }) => projectId),
+      generation,
+    );
+    if (!isCurrent() || reconciliation === "stale") return;
+    if (reconciliation === "blocked") {
       submittingRef.current = false;
       setSubmitting(false);
       return;
     }
     const launchId = crypto.randomUUID();
     activeLaunchIdRef.current = launchId;
-    cancelRequestedRef.current = false;
     setError(null);
     setActionError(null);
     writePendingMultiSpawnLaunchId(window.localStorage, launchId);
@@ -363,6 +416,7 @@ export function useMultiSpawn({
           ],
         },
       }));
+      if (!isCurrent()) return;
       if (prepareEvent.result.kind !== "duo.prepared") {
         throw new Error("The local service returned an unexpected duo response.");
       }
@@ -373,10 +427,12 @@ export function useMultiSpawn({
       // The prepare receipt proves both conversation shells and queued turns
       // are durable. Only now may local navigation discard an unrelated draft.
       discardDraftConversation();
-      await activatePreparedConversations(
+      const activated = await activatePreparedConversations(
         sides[0].conversationId,
         sides[1].conversationId,
+        isCurrent,
       );
+      if (!activated || !isCurrent()) return;
       setOpen(false);
       focusWorkspace();
 
@@ -396,6 +452,7 @@ export function useMultiSpawn({
         type: "duo.dispatch",
         payload: { launchId },
       }));
+      if (!isCurrent()) return;
       if (dispatchEvent.result.kind !== "duo.status") {
         throw new Error("The local service returned an unexpected dispatch response.");
       }
@@ -406,6 +463,7 @@ export function useMultiSpawn({
       }
       if (launchMessage) setActionError(launchMessage);
     } catch (caught) {
+      if (!isCurrent()) return;
       const delivery = runtimeCommandDelivery(caught);
       if (!prepared && (delivery === "ambiguous" || delivery === null)) {
         setOpen(false);
@@ -417,12 +475,14 @@ export function useMultiSpawn({
         let durableStatusReceived = false;
         try {
           let status = await queryLaunchStatus(launchId);
+          if (!isCurrent()) return;
           durableStatusReceived = true;
           if (status.state === "recovery-required") {
             const recovery = resultEvent(await run("multi-spawn:cancel", {
               type: "duo.cancel",
               payload: { launchId },
             }));
+            if (!isCurrent()) return;
             if (recovery.result.kind !== "duo.status") {
               throw new Error(
                 "The local service returned an unexpected Duo recovery response.",
@@ -437,6 +497,7 @@ export function useMultiSpawn({
           }
           setError(message ?? errorMessage(caught));
         } catch (statusError) {
+          if (!isCurrent()) return;
           if (
             !durableStatusReceived
             && runtimeCommandDelivery(statusError) === "rejected"
@@ -462,8 +523,10 @@ export function useMultiSpawn({
       if (activeLaunchIdRef.current === launchId) {
         activeLaunchIdRef.current = null;
       }
-      submittingRef.current = false;
-      setSubmitting(false);
+      if (isCurrent()) {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
     }
   }, [
     activatePreparedConversations,

@@ -1,10 +1,7 @@
-export type WorktreeIdentityTimestampKind = "birthtime" | "ctime";
-
 export interface WorktreeFilesystemIdentity {
   device: string;
   inode: string;
-  timestampKind: WorktreeIdentityTimestampKind;
-  timestampNs: string;
+  birthtimeNs: string;
 }
 
 export interface WorktreeFilesystemReceipt {
@@ -48,13 +45,11 @@ export function isWorktreeFilesystemIdentity(
   return isPlainRecordWithExactKeys(value, [
     "device",
     "inode",
-    "timestampKind",
-    "timestampNs",
+    "birthtimeNs",
   ])
     && isPositiveDecimal(value.device)
     && isPositiveDecimal(value.inode)
-    && (value.timestampKind === "birthtime" || value.timestampKind === "ctime")
-    && isPositiveDecimal(value.timestampNs);
+    && isPositiveDecimal(value.birthtimeNs);
 }
 
 export function isWorktreeFilesystemReceipt(
@@ -78,14 +73,12 @@ function canonicalWorktreeFilesystemReceipt(
     worktreesDirectory: {
       device: value.worktreesDirectory.device,
       inode: value.worktreesDirectory.inode,
-      timestampKind: value.worktreesDirectory.timestampKind,
-      timestampNs: value.worktreesDirectory.timestampNs,
+      birthtimeNs: value.worktreesDirectory.birthtimeNs,
     },
     adminDirectory: {
       device: value.adminDirectory.device,
       inode: value.adminDirectory.inode,
-      timestampKind: value.adminDirectory.timestampKind,
-      timestampNs: value.adminDirectory.timestampNs,
+      birthtimeNs: value.adminDirectory.birthtimeNs,
     },
   };
 }
@@ -125,6 +118,5 @@ export function worktreeFilesystemIdentitiesEqual(
 ): boolean {
   return left.device === right.device
     && left.inode === right.inode
-    && left.timestampKind === right.timestampKind
-    && left.timestampNs === right.timestampNs;
+    && left.birthtimeNs === right.birthtimeNs;
 }

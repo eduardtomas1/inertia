@@ -35,8 +35,10 @@ export {
 export {
   createWorktree,
   createWorktreeWithOwnershipReceipt,
+  durableWorktreeDirectoryIdentity,
   inspectOwnedWorktreeCleanupState,
   inspectRegisteredWorktreeOwnership,
+  preflightWorktreeFilesystemIdentity,
   type OwnedWorktreeCreationHooks,
   type OwnedWorktreeCreationDependencies,
   type OwnedWorktreeInspectionDependencies,

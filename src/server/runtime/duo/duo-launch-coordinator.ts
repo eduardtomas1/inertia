@@ -21,6 +21,7 @@ import {
   GitError,
   inspectBranchCleanupOutcome,
   inspectOwnedWorktreeCleanupState,
+  preflightWorktreeFilesystemIdentity,
   type OwnedWorktreeCreationHooks,
 } from "../../git";
 import type { NewConversationOptions } from "../../persistence/types";
@@ -56,6 +57,7 @@ interface PreflightSide {
 }
 
 export interface DuoWorktreeOperations {
+  preflightFilesystem(repositoryPath: string): Promise<void>;
   create(
     repositoryPath: string,
     worktreePath: string,
@@ -321,6 +323,7 @@ export class DuoLaunchCoordinator {
     options: { worktrees?: DuoWorktreeOperations } = {},
   ) {
     this.worktrees = options.worktrees ?? {
+      preflightFilesystem: preflightWorktreeFilesystemIdentity,
       create: createWorktreeWithOwnershipReceipt,
       inspectWorktree: inspectOwnedWorktreeCleanupState,
       inspectBranch: inspectBranchCleanupOutcome,
@@ -704,6 +707,9 @@ export class DuoLaunchCoordinator {
     if (payload.useWorktree && !status?.branch) {
       throw new Error("Check out a branch before creating an isolated worktree.");
     }
+    if (payload.useWorktree) {
+      await this.worktrees.preflightFilesystem(repositoryPath);
+    }
     return {
       ordinal,
       payload,
@@ -814,6 +820,7 @@ export async function reconcileInterruptedDuoLaunches(
   options: { worktrees?: DuoWorktreeOperations } = {},
 ): Promise<void> {
   const worktrees = options.worktrees ?? {
+    preflightFilesystem: preflightWorktreeFilesystemIdentity,
     create: createWorktreeWithOwnershipReceipt,
     inspectWorktree: inspectOwnedWorktreeCleanupState,
     inspectBranch: inspectBranchCleanupOutcome,

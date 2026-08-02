@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, type BigIntStats } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AgentApprovalDecision,
@@ -21,6 +21,7 @@ import { RuntimeStore } from "../../src/server/database";
 import {
   createWorktree,
   createWorktreeWithOwnershipReceipt,
+  durableWorktreeDirectoryIdentity,
   GitError,
   inspectOwnedWorktreeCleanupState,
   inspectRegisteredWorktreeOwnership,
@@ -54,14 +55,12 @@ const OWNED_FILESYSTEM_RECEIPT = {
   worktreesDirectory: {
     device: "1",
     inode: "2",
-    timestampKind: "birthtime",
-    timestampNs: "3",
+    birthtimeNs: "3",
   },
   adminDirectory: {
     device: "1",
     inode: "4",
-    timestampKind: "birthtime",
-    timestampNs: "5",
+    birthtimeNs: "5",
   },
 } as const;
 
@@ -388,6 +387,7 @@ function ownedWorktreeOperations(
   overrides: Partial<DuoWorktreeOperations> = {},
 ): DuoWorktreeOperations {
   return {
+    preflightFilesystem: async () => undefined,
     create: async (_repositoryPath, worktreePath, options, hooks) => {
       acknowledgeMockOwnedWorktree(hooks, worktreePath, options.branch);
       return {
@@ -459,6 +459,47 @@ afterEach(async () => {
 });
 
 describe("atomic Duo launch persistence", () => {
+  it("rejects an unsupported birthtime filesystem before either worktree add", async () => {
+    const runtime = await createRuntime();
+    await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
+    const create = vi.fn(ownedWorktreeOperations(runtime).create);
+    let preflightCount = 0;
+    const launches = new DuoLaunchCoordinator(
+      runtime.store,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {
+        validateSelection: (selection: unknown) => selection,
+        readiness: async () => null,
+      } as never,
+      runtime.controller,
+      join(runtime.workspace, ".inertia"),
+      () => [providerInfo()],
+      {
+        worktrees: ownedWorktreeOperations(runtime, {
+          preflightFilesystem: async () => {
+            preflightCount += 1;
+            durableWorktreeDirectoryIdentity({
+              isDirectory: () => true,
+              dev: 1n,
+              ino: 2n,
+              birthtimeNs: 0n,
+            } as BigIntStats);
+          },
+          create,
+        }),
+      },
+    );
+    const payload = preparePayload(runtime, true);
+
+    await expect(launches.prepare(payload)).rejects.toThrow(
+      /does not expose reliable nonzero directory birth times/u,
+    );
+    expect(preflightCount).toBeGreaterThan(0);
+    expect(create).not.toHaveBeenCalled();
+    expect(runtime.store.findPairedLaunch(payload.launchId)).toBeNull();
+    runtime.store.close();
+  });
+
   it("rolls back the first chat when the second chat cannot be created", async () => {
     const runtime = await createRuntime();
     const { conversationIds, launchId } = createIntent(runtime);
@@ -1875,6 +1916,7 @@ describe("atomic Duo launch persistence", () => {
         () => [providerInfo()],
         {
           worktrees: {
+            preflightFilesystem: async () => undefined,
             create: async (repositoryPath, worktreePath, options, hooks) => {
               await createWorktreeWithOwnershipReceipt(
                 repositoryPath,

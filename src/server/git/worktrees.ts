@@ -166,29 +166,33 @@ async function canonicalizeThroughExistingParent(path: string): Promise<string> 
   }
 }
 
-function filesystemIdentity(info: BigIntStats): WorktreeFilesystemIdentity {
+export function durableWorktreeDirectoryIdentity(
+  info: BigIntStats,
+): WorktreeFilesystemIdentity {
   if (!info.isDirectory() || info.dev <= 0n || info.ino <= 0n) {
     throw new GitError(
       "conflict",
       "The linked-worktree filesystem does not expose a stable directory identity.",
     );
   }
-  const timestampKind = info.birthtimeNs > 0n ? "birthtime" : "ctime";
-  const timestampNs = timestampKind === "birthtime"
-    ? info.birthtimeNs
-    : info.ctimeNs;
-  if (timestampNs <= 0n) {
+  if (info.birthtimeNs <= 0n) {
     throw new GitError(
-      "conflict",
-      "The linked-worktree filesystem does not expose a stable directory timestamp.",
+      "operation-failed",
+      "The repository filesystem does not expose reliable nonzero directory birth times; isolated Duo worktrees are unsupported safely.",
     );
   }
   return {
     device: info.dev.toString(10),
     inode: info.ino.toString(10),
-    timestampKind,
-    timestampNs: timestampNs.toString(10),
+    birthtimeNs: info.birthtimeNs.toString(10),
   };
+}
+
+function sameCaptureObservation(left: BigIntStats, right: BigIntStats): boolean {
+  return worktreeFilesystemIdentitiesEqual(
+    durableWorktreeDirectoryIdentity(left),
+    durableWorktreeDirectoryIdentity(right),
+  ) && left.ctimeNs === right.ctimeNs;
 }
 
 async function captureDirectoryIdentity(
@@ -210,12 +214,10 @@ async function captureDirectoryIdentity(
   try {
     const opened = await handle.stat({ bigint: true });
     const after = await lstat(path, { bigint: true });
-    const beforeIdentity = filesystemIdentity(before);
-    const openedIdentity = filesystemIdentity(opened);
-    const afterIdentity = filesystemIdentity(after);
+    const openedIdentity = durableWorktreeDirectoryIdentity(opened);
     if (
-      !worktreeFilesystemIdentitiesEqual(beforeIdentity, openedIdentity)
-      || !worktreeFilesystemIdentitiesEqual(openedIdentity, afterIdentity)
+      !sameCaptureObservation(before, opened)
+      || !sameCaptureObservation(opened, after)
     ) {
       throw new GitError(
         "conflict",
@@ -234,9 +236,16 @@ async function repositoryIdentity(commonDirectory: string): Promise<string> {
     commonDirectory,
     info.device,
     info.inode,
-    info.timestampKind,
-    info.timestampNs,
+    info.birthtimeNs,
   ].join("\0")).digest("hex");
+}
+
+export async function preflightWorktreeFilesystemIdentity(
+  repositoryPath: string,
+): Promise<void> {
+  const root = await repositoryRoot(repositoryPath);
+  const commonDirectory = await canonicalGitDirectory(root, "--git-common-dir");
+  await captureDirectoryIdentity(commonDirectory);
 }
 
 async function readBoundedIdentityFile(
@@ -491,6 +500,7 @@ export async function createWorktreeWithOwnershipReceipt(
       "Git returned an invalid worktree starting revision.",
     );
   }
+  await preflightWorktreeFilesystemIdentity(root);
   const ownershipToken = randomUUID();
   hooks.beforeAdd(ownershipToken);
   try {

@@ -542,12 +542,12 @@ describe("launch-owned Git cleanup", () => {
       worktreesDirectory: expect.objectContaining({
         device: expect.stringMatching(/^[1-9][0-9]*$/u),
         inode: expect.stringMatching(/^[1-9][0-9]*$/u),
-        timestampNs: expect.stringMatching(/^[1-9][0-9]*$/u),
+        birthtimeNs: expect.stringMatching(/^[1-9][0-9]*$/u),
       }),
       adminDirectory: expect.objectContaining({
         device: expect.stringMatching(/^[1-9][0-9]*$/u),
         inode: expect.stringMatching(/^[1-9][0-9]*$/u),
-        timestampNs: expect.stringMatching(/^[1-9][0-9]*$/u),
+        birthtimeNs: expect.stringMatching(/^[1-9][0-9]*$/u),
       }),
     });
     expect(serialized).not.toContain(root);
@@ -556,14 +556,12 @@ describe("launch-owned Git cleanup", () => {
     if (!parsed) throw new Error("The filesystem receipt did not round-trip.");
     const reordered = JSON.stringify({
       adminDirectory: {
-        timestampNs: parsed.adminDirectory.timestampNs,
-        timestampKind: parsed.adminDirectory.timestampKind,
+        birthtimeNs: parsed.adminDirectory.birthtimeNs,
         inode: parsed.adminDirectory.inode,
         device: parsed.adminDirectory.device,
       },
       worktreesDirectory: {
-        timestampNs: parsed.worktreesDirectory.timestampNs,
-        timestampKind: parsed.worktreesDirectory.timestampKind,
+        birthtimeNs: parsed.worktreesDirectory.birthtimeNs,
         inode: parsed.worktreesDirectory.inode,
         device: parsed.worktreesDirectory.device,
       },
@@ -602,14 +600,14 @@ describe("launch-owned Git cleanup", () => {
         ...ownership.filesystemReceipt,
         adminDirectory: {
           ...ownership.filesystemReceipt.adminDirectory,
-          timestampNs: "-1",
+          birthtimeNs: "-1",
         },
       }),
       JSON.stringify({
         ...ownership.filesystemReceipt,
         adminDirectory: {
           ...ownership.filesystemReceipt.adminDirectory,
-          timestampNs: "01",
+          birthtimeNs: "01",
         },
       }),
       JSON.stringify({
@@ -632,6 +630,79 @@ describe("launch-owned Git cleanup", () => {
         '"adminDirectory":{"constructor":{"prototype":{"polluted":true}},',
       ),
     ]) expect(parseWorktreeFilesystemReceipt(invalid)).toBeNull();
+  });
+
+  it("keeps both ownership receipts valid after later worktree registrations", async () => {
+    const root = repository();
+    const firstPath = ownedPath(root, "first durable receipt");
+    const secondPath = ownedPath(root, "second durable receipt");
+    const unrelatedPath = ownedPath(root, "unrelated third registration");
+    const firstBranch = "inertia/stable-first";
+    const secondBranch = "inertia/stable-second";
+    const first = await createOwnedWorktree(root, firstPath, firstBranch);
+    const second = await createOwnedWorktree(root, secondPath, secondBranch);
+
+    await expect(inspectOwnedWorktreeCleanupState(
+      root,
+      firstPath,
+      firstBranch,
+      first.head,
+      first.worktreeId,
+      first.repositoryIdentity,
+      first.ownershipToken,
+      first.filesystemReceipt,
+    )).resolves.toMatchObject({ state: "registered" });
+
+    await createWorktree(root, unrelatedPath, {
+      branch: "user/unrelated-third",
+      createBranch: true,
+      startPoint: "main",
+    });
+
+    for (const [path, branch, ownership] of [
+      [firstPath, firstBranch, first],
+      [secondPath, secondBranch, second],
+    ] as const) {
+      await expect(inspectOwnedWorktreeCleanupState(
+        root,
+        path,
+        branch,
+        ownership.head,
+        ownership.worktreeId,
+        ownership.repositoryIdentity,
+        ownership.ownershipToken,
+        ownership.filesystemReceipt,
+      )).resolves.toMatchObject({ state: "registered" });
+    }
+    await expect(inspectRegisteredWorktreeOwnership(
+      root,
+      unrelatedPath,
+      "user/unrelated-third",
+    )).resolves.toBeDefined();
+  });
+
+  it("rejects replacement of the canonical worktrees parent", async () => {
+    const root = repository();
+    const path = ownedPath(root, "parent replacement path");
+    const branch = "inertia/parent-replacement";
+    const ownership = await createOwnedWorktree(root, path, branch);
+    const parent = dirname(adminDirectory(path));
+    const original = `${parent}-original`;
+    renameSync(parent, original);
+    mkdirSync(parent);
+
+    await expect(inspectOwnedWorktreeCleanupState(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+    )).resolves.toEqual({ state: "conflict" });
+    expect(existsSync(original)).toBe(true);
+    expect(existsSync(parent)).toBe(true);
   });
 
   it("fails closed when the administrative parent is swapped before identity capture", async () => {

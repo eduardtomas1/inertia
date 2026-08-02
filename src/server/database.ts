@@ -82,6 +82,7 @@ import type {
   UpsertSubagentTraceInput,
   UpsertSubagentTraceResult,
 } from "./persistence/types";
+import type { WorktreeFilesystemReceipt } from "./worktree-filesystem-identity";
 
 export { RecordNotFoundError } from "./persistence/errors";
 export type {
@@ -428,6 +429,7 @@ export class RuntimeStore {
     worktreeId: string,
     repositoryIdentity: string,
     ownershipToken: string,
+    filesystemReceipt: WorktreeFilesystemReceipt,
   ): void {
     this.pairedLaunchRepository.recordWorktreeCleanupOwnership(
       launchId,
@@ -439,6 +441,7 @@ export class RuntimeStore {
       worktreeId,
       repositoryIdentity,
       ownershipToken,
+      filesystemReceipt,
     );
   }
 

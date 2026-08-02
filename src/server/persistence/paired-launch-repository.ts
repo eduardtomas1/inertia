@@ -7,6 +7,11 @@ import type {
 } from "../../shared/contracts";
 import { RecordNotFoundError } from "./errors";
 import type { PairedLaunchRow, PairedLaunchSideRow } from "./rows";
+import {
+  parseWorktreeFilesystemReceipt,
+  serializeWorktreeFilesystemReceipt,
+  type WorktreeFilesystemReceipt,
+} from "../worktree-filesystem-identity";
 
 export interface PairedLaunchSidePlan {
   ordinal: 0 | 1;
@@ -21,6 +26,7 @@ export interface StoredPairedLaunchSidePlan extends PairedLaunchSidePlan {
   cleanupWorktreeToken: string | null;
   cleanupWorktreeId: string | null;
   cleanupRepositoryIdentity: string | null;
+  cleanupFilesystemReceipt: WorktreeFilesystemReceipt | null;
   cleanupBranchHead: string | null;
   worktreeCreationState: "pending" | "creating" | "created" | "not-created";
   worktreeRemovalStarted: boolean;
@@ -121,6 +127,9 @@ export class PairedLaunchRepository {
         cleanupWorktreeToken: side.cleanup_worktree_token,
         cleanupWorktreeId: side.cleanup_worktree_id,
         cleanupRepositoryIdentity: side.cleanup_repository_identity,
+        cleanupFilesystemReceipt: parseWorktreeFilesystemReceipt(
+          side.cleanup_filesystem_identity_json,
+        ),
         cleanupBranchHead: side.cleanup_branch_head,
         worktreeRemovalStarted: side.worktree_removal_started === 1,
         worktreeRemovalConfirmed: side.worktree_removal_confirmed === 1,
@@ -339,6 +348,7 @@ export class PairedLaunchRepository {
     worktreeId: string,
     repositoryIdentity: string,
     ownershipToken: string,
+    filesystemReceipt: WorktreeFilesystemReceipt,
   ): void {
     if (
       !/^[0-9a-f]{40,64}$/u.test(head)
@@ -350,11 +360,15 @@ export class PairedLaunchRepository {
     ) {
       throw new Error("The Duo worktree cleanup commit identity is invalid.");
     }
+    const filesystemIdentity = serializeWorktreeFilesystemReceipt(
+      filesystemReceipt,
+    );
     const result = this.database.prepare(`
       UPDATE paired_launch_sides
       SET planned_worktree_path = ?, planned_branch = ?,
         worktree_creation_state = 'created', cleanup_branch_head = ?,
-        cleanup_worktree_id = ?, cleanup_repository_identity = ?
+        cleanup_worktree_id = ?, cleanup_repository_identity = ?,
+        cleanup_filesystem_identity_json = ?
       WHERE launch_id = ? AND ordinal = ?
         AND owns_worktree = 1
         AND conversation_id IS NULL
@@ -370,6 +384,7 @@ export class PairedLaunchRepository {
       head,
       worktreeId,
       repositoryIdentity,
+      filesystemIdentity,
       launchId,
       ordinal,
       plannedWorktreePath,
@@ -494,6 +509,7 @@ export class PairedLaunchRepository {
         AND cleanup_worktree_token IS NOT NULL
         AND cleanup_worktree_id IS NOT NULL
         AND cleanup_repository_identity IS NOT NULL
+        AND cleanup_filesystem_identity_json IS NOT NULL
         AND (
           worktree_cleanup_outcome IS NULL
           OR worktree_cleanup_outcome = ?

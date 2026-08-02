@@ -49,6 +49,21 @@ const temporaryDirectories: string[] = [];
 const execFileAsync = promisify(execFile);
 const OWNED_WORKTREE_HEAD = "a".repeat(40);
 const OWNED_REPOSITORY_IDENTITY = "b".repeat(64);
+const OWNED_FILESYSTEM_RECEIPT = {
+  version: 1,
+  worktreesDirectory: {
+    device: "1",
+    inode: "2",
+    timestampKind: "birthtime",
+    timestampNs: "3",
+  },
+  adminDirectory: {
+    device: "1",
+    inode: "4",
+    timestampKind: "birthtime",
+    timestampNs: "5",
+  },
+} as const;
 
 function registeredCleanupInspection(
   path: string,
@@ -67,6 +82,7 @@ function registeredCleanupInspection(
       worktreeId,
       repositoryIdentity,
       ownershipToken,
+      filesystemReceipt: OWNED_FILESYSTEM_RECEIPT,
     },
   };
 }
@@ -85,6 +101,7 @@ function acknowledgeMockOwnedWorktree(
     worktreeId: `test-${ownershipToken}`,
     repositoryIdentity: OWNED_REPOSITORY_IDENTITY,
     ownershipToken,
+    filesystemReceipt: OWNED_FILESYSTEM_RECEIPT,
   });
 }
 
@@ -119,6 +136,11 @@ function providerInfo(): ProviderInfo {
     rateLimits: [],
     metadataState: { models: field, rateLimits: field },
   };
+}
+
+function canonicalTestPath(path: string): string {
+  const canonical = realpathSync(path).replaceAll("\\", "/");
+  return process.platform === "win32" ? canonical.toLocaleLowerCase("en-US") : canonical;
 }
 
 class PairProvider implements TurnProviderRuntime {
@@ -1090,7 +1112,7 @@ describe("atomic Duo launch persistence", () => {
     runtime.store.close();
   });
 
-  it("keeps a failed ownership-marker receipt creating and blocks deletion without cleanup inference", async () => {
+  it("keeps a failed filesystem-identity receipt creating and blocks deletion without cleanup inference", async () => {
     const runtime = await createRuntime();
     try {
       await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
@@ -1126,8 +1148,8 @@ describe("atomic Duo launch persistence", () => {
                 options,
                 hooks,
                 {
-                  writeOwnershipMarker: async () => {
-                    throw new Error("ownership marker write failed");
+                  beforeFilesystemIdentityCapture: async () => {
+                    throw new Error("filesystem identity capture failed");
                   },
                 },
               ),
@@ -1142,7 +1164,7 @@ describe("atomic Duo launch persistence", () => {
       payload.sides[1].useWorktree = false;
 
       await expect(launches.prepare(payload)).rejects.toThrow(
-        /ownership marker write failed/u,
+        /filesystem identity capture failed/u,
       );
       const recovery = runtime.store.pairedLaunch(payload.launchId);
       expect(recovery).toMatchObject({ state: "recovery-required" });
@@ -1439,6 +1461,7 @@ describe("atomic Duo launch persistence", () => {
               worktreeId,
               repositoryIdentity,
               ownershipToken,
+              _filesystemReceipt,
             ) => {
               inspectedPaths.push(worktreePath);
               return manualCleanupComplete
@@ -1646,7 +1669,8 @@ describe("atomic Duo launch persistence", () => {
         { worktrees: retryWorktrees },
       );
 
-      await expect(restarted.cancel(payload.launchId)).resolves.toMatchObject({
+      const cancelled = await restarted.cancel(payload.launchId);
+      expect(cancelled).toMatchObject({
         state: "cancelled",
         error: null,
       });
@@ -1775,7 +1799,8 @@ describe("atomic Duo launch persistence", () => {
         },
       );
 
-      await expect(restarted.cancel(payload.launchId)).resolves.toMatchObject({
+      const cancelled = await restarted.cancel(payload.launchId);
+      expect(cancelled).toMatchObject({
         state: "recovery-required",
         error: expect.stringContaining("structured recovery details"),
         recoveryGuidance: [expect.objectContaining({ topology: "conflict", actions: [] })],
@@ -1861,6 +1886,7 @@ describe("atomic Duo launch persistence", () => {
               worktreeId,
               repositoryIdentity,
               ownershipToken,
+              filesystemReceipt,
             ) => {
               const inspection = await inspectOwnedWorktreeCleanupState(
                 repositoryPath,
@@ -1870,6 +1896,7 @@ describe("atomic Duo launch persistence", () => {
                 worktreeId,
                 repositoryIdentity,
                 ownershipToken,
+                filesystemReceipt,
               );
               if (
                 inspection.state === "registered"
@@ -1955,18 +1982,22 @@ describe("atomic Duo launch persistence", () => {
       );
       reopened = restartedStore;
       const restarted = coordinator({ ...runtime, store: restartedStore });
-      await expect(restarted.cancel(payload.launchId)).resolves.toMatchObject({
+      const cancelled = await restarted.cancel(payload.launchId);
+      expect(cancelled).toMatchObject({
         state: "recovery-required",
         error: expect.stringContaining("structured recovery details"),
         recoveryGuidance: [expect.objectContaining({
           topology: "conflict",
           plannedPath: recovery.plans[0].plannedWorktreePath,
-          observedPath: realpathSync(movedPath),
+          observedPath: expect.any(String),
           observedBranch: replacementBranch,
           observedHead: changedOwnership.head,
           actions: [],
         })],
       });
+      const observedPath = cancelled.recoveryGuidance?.[0]?.observedPath;
+      if (!observedPath) throw new Error("The conflicting worktree path was omitted.");
+      expect(canonicalTestPath(observedPath)).toBe(canonicalTestPath(movedPath));
       expect(() => restartedStore.removeProject(runtime.projectId))
         .toThrow(/Cancel the active Duo launch/u);
       await expect(inspectRegisteredWorktreeOwnership(
@@ -2070,6 +2101,7 @@ describe("atomic Duo launch persistence", () => {
               ownership.worktreeId,
               ownership.repositoryIdentity,
               ownership.ownershipToken,
+              ownership.filesystemReceipt,
             );
           },
         },
@@ -2190,6 +2222,7 @@ describe("atomic Duo launch persistence", () => {
               ownership.worktreeId,
               ownership.repositoryIdentity,
               ownership.ownershipToken,
+              ownership.filesystemReceipt,
             );
           },
         },

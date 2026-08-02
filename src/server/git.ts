@@ -39,12 +39,22 @@ export {
   inspectRegisteredWorktreeOwnership,
   type OwnedWorktreeCreationHooks,
   type OwnedWorktreeCreationDependencies,
+  type OwnedWorktreeInspectionDependencies,
   type OwnedWorktreeCleanupInspection,
   type RegisteredWorktreeIdentity,
   type RegisteredWorktreeOwnership,
   type RegisteredWorktreeRegistration,
   removeWorktree,
 } from "./git/worktrees";
+export {
+  isWorktreeFilesystemIdentity,
+  isWorktreeFilesystemReceipt,
+  parseWorktreeFilesystemReceipt,
+  serializeWorktreeFilesystemReceipt,
+  type WorktreeFilesystemIdentity,
+  type WorktreeFilesystemReceipt,
+  worktreeFilesystemIdentitiesEqual,
+} from "./worktree-filesystem-identity";
 export { commitChanges } from "./git/commits";
 export {
   getPullRequestCreateUrl,

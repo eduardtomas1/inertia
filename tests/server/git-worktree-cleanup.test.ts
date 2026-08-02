@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -21,8 +21,11 @@ import {
   inspectBranchCleanupOutcome,
   inspectOwnedWorktreeCleanupState,
   inspectRegisteredWorktreeOwnership,
+  parseWorktreeFilesystemReceipt,
   removeWorktree,
+  serializeWorktreeFilesystemReceipt,
   type RegisteredWorktreeIdentity,
+  worktreeFilesystemIdentitiesEqual,
 } from "../../src/server/git";
 
 const roots: string[] = [];
@@ -64,6 +67,15 @@ function adminDirectory(path: string): string {
   ));
 }
 
+function canonicalTestPath(path: string): string {
+  const canonical = resolve(realpathSync(path)).replaceAll("\\", "/");
+  return process.platform === "win32" ? canonical.toLocaleLowerCase("en-US") : canonical;
+}
+
+function expectSamePath(actual: string, expected: string): void {
+  expect(canonicalTestPath(actual)).toBe(canonicalTestPath(expected));
+}
+
 async function createOwnedWorktree(
   root: string,
   path: string,
@@ -97,7 +109,7 @@ describe("launch-owned Git cleanup", () => {
     const path = ownedPath(root, "receipt owned path");
     const branch = "inertia/receipt-owned";
     const phases: string[] = [];
-    let receipt: RegisteredWorktreeIdentity | null = null;
+    const receipts: RegisteredWorktreeIdentity[] = [];
 
     await createWorktreeWithOwnershipReceipt(root, path, {
       branch,
@@ -108,13 +120,12 @@ describe("launch-owned Git cleanup", () => {
       notAdded: () => phases.push("not-added"),
       added: (ownership) => {
         phases.push("added");
-        receipt = ownership;
+        receipts.push(ownership);
       },
     });
 
     expect(phases).toEqual(["before-add", "added"]);
-    expect(receipt).toMatchObject({
-      path: realpathSync(path),
+    expect(receipts[0]).toMatchObject({
       branch,
       head: git(root, "rev-parse", branch),
       worktreeId: expect.any(String),
@@ -123,6 +134,9 @@ describe("launch-owned Git cleanup", () => {
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
       ),
     });
+    const receipt = receipts[0];
+    if (!receipt) throw new Error("The linked-worktree receipt was not recorded.");
+    expectSamePath(receipt.path, path);
     const commonDirectory = realpathSync(git(
       root,
       "rev-parse",
@@ -142,12 +156,16 @@ describe("launch-owned Git cleanup", () => {
       startPoint: "main",
     });
 
-    await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
-      .resolves.toEqual({
-        path: realpathSync(path),
-        branch,
-        head: git(root, "rev-parse", branch),
-      });
+    const inspected = await inspectRegisteredWorktreeOwnership(
+      root,
+      path,
+      branch,
+    );
+    expect(inspected).toMatchObject({
+      branch,
+      head: git(root, "rev-parse", branch),
+    });
+    expectSamePath(inspected.path, path);
     await expect(inspectRegisteredWorktreeOwnership(
       root,
       path,
@@ -165,7 +183,7 @@ describe("launch-owned Git cleanup", () => {
     const path = ownedPath(root, "unchanged owned path");
     const branch = "inertia/unchanged-owned";
     const ownership = await createOwnedWorktree(root, path, branch);
-    await expect(inspectOwnedWorktreeCleanupState(
+    const cleanup = await inspectOwnedWorktreeCleanupState(
       root,
       path,
       branch,
@@ -173,9 +191,17 @@ describe("launch-owned Git cleanup", () => {
       ownership.worktreeId,
       ownership.repositoryIdentity,
       ownership.ownershipToken,
-    )).resolves.toEqual({ state: "registered", identity: ownership });
-    await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
-      .resolves.toEqual({ path: realpathSync(path), branch, head: ownership.head });
+      ownership.filesystemReceipt,
+    );
+    expect(cleanup).toMatchObject({
+      state: "registered",
+      identity: { branch, head: ownership.head },
+    });
+    if (cleanup.state !== "registered") throw new Error("Worktree was not retained.");
+    expectSamePath(cleanup.identity.path, path);
+    const inspected = await inspectRegisteredWorktreeOwnership(root, path, branch);
+    expect(inspected).toMatchObject({ branch, head: ownership.head });
+    expectSamePath(inspected.path, path);
     expect(git(root, "for-each-ref", "--format=%(refname)", `refs/heads/${branch}`))
       .toBe(`refs/heads/${branch}`);
   });
@@ -306,6 +332,7 @@ describe("launch-owned Git cleanup", () => {
       receipt.worktreeId,
       receipt.repositoryIdentity,
       receipt.ownershipToken,
+      receipt.filesystemReceipt,
     )).resolves.toEqual({ state: "conflict" });
     await expect(inspectRegisteredWorktreeOwnership(
       root,
@@ -325,7 +352,7 @@ describe("launch-owned Git cleanup", () => {
     const branch = "inertia/moved-worktree";
     const ownership = await createOwnedWorktree(root, path, branch);
     git(root, "worktree", "move", path, movedPath);
-    await expect(inspectOwnedWorktreeCleanupState(
+    const inspection = await inspectOwnedWorktreeCleanupState(
       root,
       path,
       branch,
@@ -333,10 +360,14 @@ describe("launch-owned Git cleanup", () => {
       ownership.worktreeId,
       ownership.repositoryIdentity,
       ownership.ownershipToken,
-    )).resolves.toMatchObject({
+      ownership.filesystemReceipt,
+    );
+    expect(inspection).toMatchObject({
       state: "registered",
-      identity: { path: realpathSync(movedPath), branch, head: ownership.head },
+      identity: { branch, head: ownership.head },
     });
+    if (inspection.state !== "registered") throw new Error("Worktree was not retained.");
+    expectSamePath(inspection.identity.path, movedPath);
     await expect(inspectRegisteredWorktreeOwnership(root, movedPath, branch))
       .resolves.toMatchObject({ head: ownership.head });
     expect(git(root, "rev-parse", branch)).toBe(ownership.head);
@@ -366,7 +397,7 @@ describe("launch-owned Git cleanup", () => {
     expect(existsSync(path)).toBe(false);
     expect(() => git(root, "show-ref", "--verify", `refs/heads/${branch}`))
       .toThrow();
-    await expect(inspectOwnedWorktreeCleanupState(
+    const inspection = await inspectOwnedWorktreeCleanupState(
       root,
       path,
       branch,
@@ -374,27 +405,27 @@ describe("launch-owned Git cleanup", () => {
       ownership.worktreeId,
       ownership.repositoryIdentity,
       ownership.ownershipToken,
-    )).resolves.toMatchObject({
+      ownership.filesystemReceipt,
+    );
+    expect(inspection).toMatchObject({
       state: "registered",
       identity: {
         worktreeId: ownership.worktreeId,
-        path: realpathSync(movedPath),
         branch: switchedBranch,
         head: switchedHead,
       },
     });
+    if (inspection.state !== "registered") throw new Error("Worktree was not retained.");
+    expectSamePath(inspection.identity.path, movedPath);
   });
 
-  it("allows stock move, remove, and prune while the ownership marker exists", async () => {
+  it("allows stock move, remove, and prune without mutating Git metadata", async () => {
     const root = repository();
-    const path = ownedPath(root, "marker lifecycle path");
-    const movedPath = ownedPath(root, "marker moved path");
-    const branch = "inertia/marker-lifecycle";
+    const path = ownedPath(root, "receipt lifecycle path");
+    const movedPath = ownedPath(root, "receipt moved path");
+    const branch = "inertia/receipt-lifecycle";
     const ownership = await createOwnedWorktree(root, path, branch);
-    expect(readFileSync(
-      join(adminDirectory(path), "inertia-duo-owner"),
-      "utf8",
-    )).toContain(ownership.ownershipToken);
+    expect(existsSync(join(adminDirectory(path), "inertia-duo-owner"))).toBe(false);
 
     git(root, "worktree", "move", path, movedPath);
     await removeWorktree(root, movedPath, false);
@@ -409,6 +440,7 @@ describe("launch-owned Git cleanup", () => {
       ownership.worktreeId,
       ownership.repositoryIdentity,
       ownership.ownershipToken,
+      ownership.filesystemReceipt,
     )).resolves.toEqual({ state: "absent" });
   });
 
@@ -428,6 +460,7 @@ describe("launch-owned Git cleanup", () => {
       ownership.worktreeId,
       ownership.repositoryIdentity,
       ownership.ownershipToken,
+      ownership.filesystemReceipt,
     )).resolves.toMatchObject({ state: "registered" });
     git(path, "switch", "-q", "-c", replacementBranch);
     git(
@@ -447,6 +480,7 @@ describe("launch-owned Git cleanup", () => {
       ownership.worktreeId,
       ownership.repositoryIdentity,
       ownership.ownershipToken,
+      ownership.filesystemReceipt,
     )).resolves.toMatchObject({
       state: "registered",
       identity: { branch: replacementBranch, head: changedHead },
@@ -485,32 +519,86 @@ describe("launch-owned Git cleanup", () => {
       ownership.worktreeId,
       ownership.repositoryIdentity,
       ownership.ownershipToken,
+      ownership.filesystemReceipt,
     )).resolves.toEqual({ state: "conflict" });
     await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
       .resolves.toMatchObject({ head: ownership.head });
   });
 
-  it("preserves the exclusive bounded marker when duplicate creation is refused", async () => {
+  it("round-trips a bounded decimal-string filesystem receipt", async () => {
     const root = repository();
-    const path = ownedPath(root, "exclusive marker path");
-    const branch = "inertia/exclusive-marker";
-    await createOwnedWorktree(root, path, branch);
-    const markerPath = join(adminDirectory(path), "inertia-duo-owner");
-    const before = readFileSync(markerPath, "utf8");
-    expect(Buffer.byteLength(before)).toBeLessThan(512);
-    expect(JSON.parse(before)).toEqual({
+    const path = ownedPath(root, "filesystem receipt path");
+    const branch = "inertia/filesystem-receipt";
+    const ownership = await createOwnedWorktree(root, path, branch);
+    const serialized = serializeWorktreeFilesystemReceipt(
+      ownership.filesystemReceipt,
+    );
+    expect(Buffer.byteLength(serialized)).toBeLessThan(1_024);
+    expect(parseWorktreeFilesystemReceipt(serialized)).toEqual({
       version: 1,
-      ownershipToken: expect.stringMatching(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
-      ),
-      repositoryIdentity: expect.stringMatching(/^[0-9a-f]{64}$/u),
-      worktreeId: basename(adminDirectory(path)),
-      createdPathHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
-      branch,
-      head: git(root, "rev-parse", branch),
+      worktreesDirectory: expect.objectContaining({
+        device: expect.stringMatching(/^[1-9][0-9]*$/u),
+        inode: expect.stringMatching(/^[1-9][0-9]*$/u),
+        timestampNs: expect.stringMatching(/^[1-9][0-9]*$/u),
+      }),
+      adminDirectory: expect.objectContaining({
+        device: expect.stringMatching(/^[1-9][0-9]*$/u),
+        inode: expect.stringMatching(/^[1-9][0-9]*$/u),
+        timestampNs: expect.stringMatching(/^[1-9][0-9]*$/u),
+      }),
     });
-    expect(before).not.toContain(root);
-    expect(before).not.toContain(path);
+    expect(serialized).not.toContain(root);
+    expect(serialized).not.toContain(path);
+    const parsed = parseWorktreeFilesystemReceipt(serialized);
+    if (!parsed) throw new Error("The filesystem receipt did not round-trip.");
+    expect(worktreeFilesystemIdentitiesEqual(
+      parsed.adminDirectory,
+      ownership.filesystemReceipt.adminDirectory,
+    )).toBe(true);
+    expect(worktreeFilesystemIdentitiesEqual(
+      { ...parsed.adminDirectory, inode: `${BigInt(parsed.adminDirectory.inode) + 1n}` },
+      ownership.filesystemReceipt.adminDirectory,
+    )).toBe(false);
+    for (const invalid of [
+      "{}",
+      JSON.stringify({ ...ownership.filesystemReceipt, version: 2 }),
+      JSON.stringify({
+        ...ownership.filesystemReceipt,
+        adminDirectory: {
+          ...ownership.filesystemReceipt.adminDirectory,
+          inode: "0",
+        },
+      }),
+      JSON.stringify({
+        ...ownership.filesystemReceipt,
+        adminDirectory: {
+          ...ownership.filesystemReceipt.adminDirectory,
+          device: "1".repeat(33),
+        },
+      }),
+      JSON.stringify({
+        ...ownership.filesystemReceipt,
+        adminDirectory: {
+          ...ownership.filesystemReceipt.adminDirectory,
+          timestampNs: "-1",
+        },
+      }),
+      JSON.stringify({
+        ...ownership.filesystemReceipt,
+        adminDirectory: {
+          ...ownership.filesystemReceipt.adminDirectory,
+          timestampNs: "01",
+        },
+      }),
+    ]) expect(parseWorktreeFilesystemReceipt(invalid)).toBeNull();
+  });
+
+  it("fails closed when the administrative parent is swapped before identity capture", async () => {
+    const root = repository();
+    const path = ownedPath(root, "parent swap path");
+    const branch = "inertia/parent-swap";
+    let added = false;
+    let externalDirectory = "";
 
     await expect(createWorktreeWithOwnershipReceipt(root, path, {
       branch,
@@ -519,94 +607,36 @@ describe("launch-owned Git cleanup", () => {
     }, {
       beforeAdd: () => undefined,
       notAdded: () => undefined,
-      added: () => undefined,
-    })).rejects.toBeDefined();
-    expect(readFileSync(markerPath, "utf8")).toBe(before);
-  });
-
-  it("exclusively creates the marker and never overwrites an existing file", async () => {
-    const root = repository();
-    const path = ownedPath(root, "marker collision path");
-    const branch = "inertia/marker-collision";
-    const existing = "pre-existing marker data\n";
-    let added = false;
-    let rejectedBeforeMutation = false;
-
-    await expect(createWorktreeWithOwnershipReceipt(root, path, {
-      branch,
-      createBranch: true,
-      startPoint: "main",
-    }, {
-      beforeAdd: () => undefined,
-      notAdded: () => {
-        rejectedBeforeMutation = true;
-      },
       added: () => {
         added = true;
       },
     }, {
-      beforeOwnershipMarkerWrite: (admin) => {
-        writeFileSync(join(admin, "inertia-duo-owner"), existing, {
-          encoding: "utf8",
-          flag: "wx",
-          mode: 0o600,
-        });
+      beforeFilesystemIdentityCapture: (admin) => {
+        const parent = dirname(admin);
+        const relocated = `${parent}-relocated`;
+        externalDirectory = `${parent}-external`;
+        renameSync(parent, relocated);
+        mkdirSync(externalDirectory);
+        symlinkSync(
+          externalDirectory,
+          parent,
+          process.platform === "win32" ? "junction" : "dir",
+        );
       },
-    })).rejects.toMatchObject({ code: "EEXIST" });
+    })).rejects.toMatchObject({ code: "conflict" });
 
     expect(added).toBe(false);
-    expect(rejectedBeforeMutation).toBe(false);
-    expect(readFileSync(
-      join(adminDirectory(path), "inertia-duo-owner"),
-      "utf8",
-    )).toBe(existing);
-    await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
-      .resolves.toMatchObject({ branch });
+    expect(existsSync(join(externalDirectory, "inertia-duo-owner"))).toBe(false);
+    expect(existsSync(externalDirectory)).toBe(true);
   });
 
-  it.each([
-    {
-      name: "malformed",
-      replace(markerPath: string): void {
-        writeFileSync(markerPath, "not-json", "utf8");
-      },
-      outcome: "conflict" as const,
-    },
-    {
-      name: "valid-but-replaced",
-      replace(markerPath: string): void {
-        const marker = JSON.parse(readFileSync(markerPath, "utf8")) as {
-          ownershipToken: string;
-        };
-        marker.ownershipToken = "00000000-0000-4000-8000-000000000000";
-        writeFileSync(markerPath, `${JSON.stringify(marker)}\n`, "utf8");
-      },
-      outcome: "conflict" as const,
-    },
-    {
-      name: "oversized",
-      replace(markerPath: string): void {
-        writeFileSync(markerPath, "x".repeat(20 * 1024), "utf8");
-      },
-      outcome: "rejected" as const,
-    },
-    {
-      name: "symlinked",
-      replace(markerPath: string): void {
-        const target = `${markerPath}.target`;
-        writeFileSync(target, "{}", "utf8");
-        rmSync(markerPath);
-        symlinkSync(target, markerPath);
-      },
-      outcome: "rejected" as const,
-    },
-  ])("fails closed for a $name ownership marker", async ({ replace, outcome }) => {
+  it("caps a Git metadata read when the file grows after its first stat", async () => {
     const root = repository();
-    const path = ownedPath(root, `unsafe marker ${outcome}`);
-    const branch = `inertia/unsafe-marker-${outcome}`;
+    const path = ownedPath(root, "growing gitdir path");
+    const branch = "inertia/growing-gitdir";
     const ownership = await createOwnedWorktree(root, path, branch);
-    replace(join(adminDirectory(path), "inertia-duo-owner"));
-    const inspection = inspectOwnedWorktreeCleanupState(
+    const gitdirPath = join(adminDirectory(path), "gitdir");
+    await expect(inspectOwnedWorktreeCleanupState(
       root,
       path,
       branch,
@@ -614,14 +644,106 @@ describe("launch-owned Git cleanup", () => {
       ownership.worktreeId,
       ownership.repositoryIdentity,
       ownership.ownershipToken,
-    );
-    if (outcome === "conflict") {
-      await expect(inspection).resolves.toEqual({ state: "conflict" });
-    } else {
-      await expect(inspection).rejects.toMatchObject({ code: "conflict" });
-    }
-    await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
-      .resolves.toBeDefined();
+      ownership.filesystemReceipt,
+      {
+        afterIdentityFileStat: (identityPath) => {
+          if (identityPath === gitdirPath) {
+            writeFileSync(identityPath, "x".repeat(2 * 1024 * 1024), "utf8");
+          }
+        },
+      },
+    )).rejects.toMatchObject({ code: "conflict" });
+    expect(readFileSync(gitdirPath).byteLength).toBe(2 * 1024 * 1024);
+  });
+
+  it("rejects a parent swap between metadata stat and fixed-buffer read", async () => {
+    const root = repository();
+    const path = ownedPath(root, "metadata parent swap path");
+    const branch = "inertia/metadata-parent-swap";
+    const ownership = await createOwnedWorktree(root, path, branch);
+    const admin = adminDirectory(path);
+    const gitdirPath = join(admin, "gitdir");
+    const originalGitdir = readFileSync(gitdirPath, "utf8");
+    let swapped = false;
+
+    await expect(inspectOwnedWorktreeCleanupState(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+      {
+        afterIdentityFileStat: () => {
+          if (swapped) return;
+          swapped = true;
+          const parent = dirname(admin);
+          const relocated = `${parent}-metadata-relocated`;
+          const external = `${parent}-metadata-external`;
+          renameSync(parent, relocated);
+          mkdirSync(join(external, ownership.worktreeId), { recursive: true });
+          writeFileSync(
+            join(external, ownership.worktreeId, "gitdir"),
+            originalGitdir,
+            "utf8",
+          );
+          symlinkSync(
+            external,
+            parent,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        },
+      },
+    )).rejects.toMatchObject({ code: "conflict" });
+    expect(swapped).toBe(true);
+    expect(existsSync(join(dirname(admin), "inertia-duo-owner"))).toBe(false);
+  });
+
+  it("rejects replacement of an exact administrative ID", async () => {
+    const root = repository();
+    const path = ownedPath(root, "admin replacement path");
+    const branch = "inertia/admin-replacement";
+    const ownership = await createOwnedWorktree(root, path, branch);
+    const admin = adminDirectory(path);
+    const original = `${admin}-original`;
+    renameSync(admin, original);
+    mkdirSync(admin);
+
+    await expect(inspectOwnedWorktreeCleanupState(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+    )).resolves.toEqual({ state: "conflict" });
+    expect(existsSync(original)).toBe(true);
+    expect(existsSync(admin)).toBe(true);
+  });
+
+  it("confirms absence when the canonical worktrees parent is gone", async () => {
+    const root = repository();
+    const path = ownedPath(root, "missing parent path");
+    const branch = "inertia/missing-parent";
+    const ownership = await createOwnedWorktree(root, path, branch);
+    const parent = dirname(adminDirectory(path));
+    renameSync(parent, `${parent}-unavailable`);
+
+    await expect(inspectOwnedWorktreeCleanupState(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+    )).resolves.toEqual({ state: "absent" });
+    expect(existsSync(path)).toBe(true);
   });
 
   it.each(["admin", "common-worktrees"] as const)(
@@ -635,7 +757,11 @@ describe("launch-owned Git cleanup", () => {
       const original = target === "admin" ? admin : dirname(admin);
       const relocated = `${original}-relocated`;
       renameSync(original, relocated);
-      symlinkSync(relocated, original, "dir");
+      symlinkSync(
+        relocated,
+        original,
+        process.platform === "win32" ? "junction" : "dir",
+      );
 
       await expect(inspectOwnedWorktreeCleanupState(
         root,
@@ -645,23 +771,25 @@ describe("launch-owned Git cleanup", () => {
         ownership.worktreeId,
         ownership.repositoryIdentity,
         ownership.ownershipToken,
-      )).resolves.toEqual({ state: "conflict" });
+        ownership.filesystemReceipt,
+      )).rejects.toMatchObject({ code: "conflict" });
       expect(existsSync(path)).toBe(true);
-      const retainedMarker = target === "admin"
-        ? join(relocated, "inertia-duo-owner")
-        : join(relocated, ownership.worktreeId, "inertia-duo-owner");
-      expect(readFileSync(retainedMarker, "utf8"))
-        .toContain(ownership.ownershipToken);
+      expect(existsSync(join(relocated, "inertia-duo-owner"))).toBe(false);
     },
   );
 
-  it("round-trips metacharacters and newlines as literal worktree identity data", async () => {
+  it("round-trips platform-valid metacharacters as literal worktree identity data", async () => {
     const root = repository();
-    const path = ownedPath(root, "literal $() `ticks`\nsecond line");
+    const path = ownedPath(
+      root,
+      process.platform === "win32"
+        ? "literal $() `ticks` second line"
+        : "literal $() `ticks`\nsecond line",
+    );
     const branch = "inertia/literal-metachar-path";
     const ownership = await createOwnedWorktree(root, path, branch);
 
-    await expect(inspectOwnedWorktreeCleanupState(
+    const inspection = await inspectOwnedWorktreeCleanupState(
       root,
       path,
       branch,
@@ -669,10 +797,14 @@ describe("launch-owned Git cleanup", () => {
       ownership.worktreeId,
       ownership.repositoryIdentity,
       ownership.ownershipToken,
-    )).resolves.toMatchObject({
+      ownership.filesystemReceipt,
+    );
+    expect(inspection).toMatchObject({
       state: "registered",
-      identity: { path: realpathSync(path), branch, head: ownership.head },
+      identity: { branch, head: ownership.head },
     });
+    if (inspection.state !== "registered") throw new Error("Worktree was not retained.");
+    expectSamePath(inspection.identity.path, path);
   });
 
   it("preserves a branch whose ref moved after the ownership receipt", async () => {

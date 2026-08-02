@@ -24,6 +24,7 @@ import {
   type OwnedWorktreeCreationHooks,
 } from "../../git";
 import type { NewConversationOptions } from "../../persistence/types";
+import type { WorktreeFilesystemReceipt } from "../../worktree-filesystem-identity";
 import type { ProviderManager } from "../../providers";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { TurnController } from "../turns/turn-controller";
@@ -69,6 +70,7 @@ export interface DuoWorktreeOperations {
     expectedWorktreeId: string,
     expectedRepositoryIdentity: string,
     expectedOwnershipToken: string,
+    expectedFilesystemReceipt: WorktreeFilesystemReceipt,
   ): ReturnType<typeof inspectOwnedWorktreeCleanupState>;
   inspectBranch(
     repositoryPath: string,
@@ -217,7 +219,14 @@ async function cleanupUnadoptedOwnedWorktree(
   const worktreeId = plan.cleanupWorktreeId;
   const repositoryIdentity = plan.cleanupRepositoryIdentity;
   const ownershipToken = plan.cleanupWorktreeToken;
-  if (!branchHead || !worktreeId || !repositoryIdentity || !ownershipToken) {
+  const filesystemReceipt = plan.cleanupFilesystemReceipt;
+  if (
+    !branchHead
+    || !worktreeId
+    || !repositoryIdentity
+    || !ownershipToken
+    || !filesystemReceipt
+  ) {
     throw new Error(
       "The durable linked-worktree identity is incomplete. Automatic cleanup was withheld and absence cannot be inferred.",
     );
@@ -231,6 +240,7 @@ async function cleanupUnadoptedOwnedWorktree(
     worktreeId,
     repositoryIdentity,
     ownershipToken,
+    filesystemReceipt,
   );
   if (inspection.state !== "absent") {
     const registered = inspection.state === "registered"
@@ -489,6 +499,7 @@ export class DuoLaunchCoordinator {
                 ownership.worktreeId,
                 ownership.repositoryIdentity,
                 ownership.ownershipToken,
+                ownership.filesystemReceipt,
               );
               side.worktreePath = ownership.path;
               side.branch = ownership.branch;

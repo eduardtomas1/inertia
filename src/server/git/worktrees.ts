@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, type BigIntStats } from "node:fs";
 import {
   access,
   lstat,
   open,
+  readdir,
   realpath,
   stat,
 } from "node:fs/promises";
@@ -30,6 +31,12 @@ import {
   type GitMutationResult,
   type GitRepositoryStatus,
 } from "./types";
+import {
+  isWorktreeFilesystemReceipt,
+  type WorktreeFilesystemIdentity,
+  type WorktreeFilesystemReceipt,
+  worktreeFilesystemIdentitiesEqual,
+} from "../worktree-filesystem-identity";
 
 export interface RegisteredWorktreeOwnership {
   branch: string;
@@ -38,6 +45,7 @@ export interface RegisteredWorktreeOwnership {
 }
 
 export interface RegisteredWorktreeIdentity extends RegisteredWorktreeOwnership {
+  filesystemReceipt: WorktreeFilesystemReceipt;
   repositoryIdentity: string;
   worktreeId: string;
   ownershipToken: string;
@@ -50,6 +58,7 @@ export interface RegisteredWorktreeRegistration {
   repositoryIdentity: string;
   worktreeId: string;
   ownershipToken: string;
+  filesystemReceipt: WorktreeFilesystemReceipt;
 }
 
 export interface OwnedWorktreeCreationHooks {
@@ -59,14 +68,11 @@ export interface OwnedWorktreeCreationHooks {
 }
 
 export interface OwnedWorktreeCreationDependencies {
-  beforeOwnershipMarkerWrite?(
-    adminDirectory: string,
-    marker: WorktreeOwnershipMarker,
-  ): Promise<void> | void;
-  writeOwnershipMarker?(
-    adminDirectory: string,
-    marker: WorktreeOwnershipMarker,
-  ): Promise<void>;
+  beforeFilesystemIdentityCapture?(adminDirectory: string): Promise<void> | void;
+}
+
+export interface OwnedWorktreeInspectionDependencies {
+  afterIdentityFileStat?(path: string): Promise<void> | void;
 }
 
 export type OwnedWorktreeCleanupInspection =
@@ -74,19 +80,8 @@ export type OwnedWorktreeCleanupInspection =
   | { state: "conflict" }
   | { state: "registered"; identity: RegisteredWorktreeRegistration };
 
-const OWNERSHIP_MARKER = "inertia-duo-owner";
 const MAX_GIT_IDENTITY_FILE_BYTES = 16 * 1024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-
-export interface WorktreeOwnershipMarker {
-  version: 1;
-  ownershipToken: string;
-  repositoryIdentity: string;
-  worktreeId: string;
-  createdPathHash: string;
-  branch: string;
-  head: string;
-}
 
 function pathsEqual(left: string, right: string): boolean {
   return relative(resolve(left), resolve(right)) === "";
@@ -143,10 +138,6 @@ async function canonicalGitDirectory(
   }
 }
 
-function pathIdentity(path: string): string {
-  return createHash("sha256").update(path).digest("hex");
-}
-
 async function canonicalizeThroughExistingParent(path: string): Promise<string> {
   const target = resolve(path);
   let existing = target;
@@ -175,84 +166,142 @@ async function canonicalizeThroughExistingParent(path: string): Promise<string> 
   }
 }
 
-async function repositoryIdentity(commonDirectory: string): Promise<string> {
-  const info = await stat(commonDirectory, { bigint: true });
-  if (!info.isDirectory()) {
+function filesystemIdentity(info: BigIntStats): WorktreeFilesystemIdentity {
+  if (!info.isDirectory() || info.dev <= 0n || info.ino <= 0n) {
     throw new GitError(
       "conflict",
-      "The Git common directory identity is invalid.",
+      "The linked-worktree filesystem does not expose a stable directory identity.",
     );
   }
+  const timestampKind = info.birthtimeNs > 0n ? "birthtime" : "ctime";
+  const timestampNs = timestampKind === "birthtime"
+    ? info.birthtimeNs
+    : info.ctimeNs;
+  if (timestampNs <= 0n) {
+    throw new GitError(
+      "conflict",
+      "The linked-worktree filesystem does not expose a stable directory timestamp.",
+    );
+  }
+  return {
+    device: info.dev.toString(10),
+    inode: info.ino.toString(10),
+    timestampKind,
+    timestampNs: timestampNs.toString(10),
+  };
+}
+
+async function captureDirectoryIdentity(
+  path: string,
+): Promise<WorktreeFilesystemIdentity> {
+  const before = await lstat(path, { bigint: true });
+  if (before.isSymbolicLink() || !before.isDirectory()) {
+    throw new GitError(
+      "conflict",
+      "The linked-worktree administrative identity is not a real directory.",
+    );
+  }
+  const handle = await open(
+    path,
+    fsConstants.O_RDONLY
+      | (fsConstants.O_NOFOLLOW ?? 0)
+      | (fsConstants.O_DIRECTORY ?? 0),
+  );
+  try {
+    const opened = await handle.stat({ bigint: true });
+    const after = await lstat(path, { bigint: true });
+    const beforeIdentity = filesystemIdentity(before);
+    const openedIdentity = filesystemIdentity(opened);
+    const afterIdentity = filesystemIdentity(after);
+    if (
+      !worktreeFilesystemIdentitiesEqual(beforeIdentity, openedIdentity)
+      || !worktreeFilesystemIdentitiesEqual(openedIdentity, afterIdentity)
+    ) {
+      throw new GitError(
+        "conflict",
+        "The linked-worktree administrative identity changed during inspection.",
+      );
+    }
+    return openedIdentity;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function repositoryIdentity(commonDirectory: string): Promise<string> {
+  const info = await captureDirectoryIdentity(commonDirectory);
   return createHash("sha256").update([
     commonDirectory,
-    String(info.dev),
-    String(info.ino),
+    info.device,
+    info.inode,
+    info.timestampKind,
+    info.timestampNs,
   ].join("\0")).digest("hex");
 }
 
-async function readBoundedIdentityFile(path: string): Promise<string> {
-  const before = await lstat(path);
+async function readBoundedIdentityFile(
+  path: string,
+  dependencies: OwnedWorktreeInspectionDependencies = {},
+): Promise<string> {
+  const before = await lstat(path, { bigint: true });
   if (
     before.isSymbolicLink()
     || !before.isFile()
-    || before.size > MAX_GIT_IDENTITY_FILE_BYTES
+    || before.size > BigInt(MAX_GIT_IDENTITY_FILE_BYTES)
   ) {
     throw new GitError(
       "conflict",
       "The linked-worktree identity metadata is invalid.",
     );
   }
+  await dependencies.afterIdentityFileStat?.(path);
   const handle = await open(
     path,
-    fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
   );
   try {
-    const after = await handle.stat();
+    const opened = await handle.stat({ bigint: true });
     if (
-      !after.isFile()
-      || after.size > MAX_GIT_IDENTITY_FILE_BYTES
-      || after.dev !== before.dev
-      || after.ino !== before.ino
+      !opened.isFile()
+      || opened.size > BigInt(MAX_GIT_IDENTITY_FILE_BYTES)
+      || opened.dev !== before.dev
+      || opened.ino !== before.ino
     ) {
       throw new GitError(
         "conflict",
         "The linked-worktree identity metadata is invalid.",
       );
     }
-    return await handle.readFile({ encoding: "utf8" });
+    const buffer = Buffer.alloc(MAX_GIT_IDENTITY_FILE_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    const after = await lstat(path, { bigint: true });
+    if (
+      bytesRead > MAX_GIT_IDENTITY_FILE_BYTES
+      || after.isSymbolicLink()
+      || !after.isFile()
+      || after.dev !== opened.dev
+      || after.ino !== opened.ino
+      || after.size !== opened.size
+      || after.ctimeNs !== opened.ctimeNs
+      || after.mtimeNs !== opened.mtimeNs
+    ) {
+      throw new GitError(
+        "conflict",
+        "The linked-worktree identity metadata changed during inspection.",
+      );
+    }
+    return buffer.subarray(0, bytesRead).toString("utf8");
   } finally {
     await handle.close();
-  }
-}
-
-async function writeOwnershipMarker(
-  adminDirectory: string,
-  markerValue: WorktreeOwnershipMarker,
-): Promise<void> {
-  const marker = await open(
-    resolve(adminDirectory, OWNERSHIP_MARKER),
-    "wx",
-    0o600,
-  );
-  try {
-    await marker.writeFile(`${JSON.stringify(markerValue)}\n`, "utf8");
-    await marker.sync();
-  } finally {
-    await marker.close();
   }
 }
 
 async function linkedWorktreeIdentity(
   root: string,
   worktreePath: string,
-  branch: string,
-  head: string,
-  ownershipToken: string,
-  writeMarker: boolean,
-  markerWriter = writeOwnershipMarker,
-  beforeMarkerWrite?: OwnedWorktreeCreationDependencies["beforeOwnershipMarkerWrite"],
+  beforeFilesystemIdentityCapture?: OwnedWorktreeCreationDependencies["beforeFilesystemIdentityCapture"],
 ): Promise<{
-  commonDirectory: string;
+  filesystemReceipt: WorktreeFilesystemReceipt;
   repositoryIdentity: string;
   worktreeId: string;
 }> {
@@ -261,25 +310,20 @@ async function linkedWorktreeIdentity(
     reportedGitDirectory(worktreePath, "--git-dir"),
   ]);
   const worktreeDirectory = resolve(commonDirectory, "worktrees");
-  const [worktreeDirectoryInfo, adminDirectoryInfo] = await Promise.all([
-    lstat(worktreeDirectory),
-    lstat(reportedAdminDirectory),
-  ]);
-  if (
-    worktreeDirectoryInfo.isSymbolicLink()
-    || !worktreeDirectoryInfo.isDirectory()
-    || adminDirectoryInfo.isSymbolicLink()
-    || !adminDirectoryInfo.isDirectory()
-  ) {
+  await beforeFilesystemIdentityCapture?.(reportedAdminDirectory);
+  let canonicalWorktreeDirectory: string;
+  let gitDirectory: string;
+  try {
+    [canonicalWorktreeDirectory, gitDirectory] = await Promise.all([
+      realpath(worktreeDirectory),
+      realpath(reportedAdminDirectory),
+    ]);
+  } catch {
     throw new GitError(
       "conflict",
-      "The linked-worktree administrative identity is not a real directory.",
+      "The linked-worktree administrative identity changed during inspection.",
     );
   }
-  const [canonicalWorktreeDirectory, gitDirectory] = await Promise.all([
-    realpath(worktreeDirectory),
-    realpath(reportedAdminDirectory),
-  ]);
   if (
     !pathsEqual(canonicalWorktreeDirectory, worktreeDirectory)
     || !pathsEqual(dirname(gitDirectory), canonicalWorktreeDirectory)
@@ -306,21 +350,31 @@ async function linkedWorktreeIdentity(
       "Git returned an invalid linked-worktree identifier.",
     );
   }
-  const identity = await repositoryIdentity(commonDirectory);
-  if (writeMarker) {
-    const marker: WorktreeOwnershipMarker = {
-      version: 1,
-      ownershipToken,
-      repositoryIdentity: identity,
-      worktreeId,
-      createdPathHash: pathIdentity(worktreePath),
-      branch,
-      head,
-    };
-    await beforeMarkerWrite?.(gitDirectory, marker);
-    await markerWriter(gitDirectory, marker);
+  let worktreesIdentity: WorktreeFilesystemIdentity;
+  let adminIdentity: WorktreeFilesystemIdentity;
+  let identity: string;
+  try {
+    [worktreesIdentity, adminIdentity, identity] = await Promise.all([
+      captureDirectoryIdentity(worktreeDirectory),
+      captureDirectoryIdentity(gitDirectory),
+      repositoryIdentity(commonDirectory),
+    ]);
+  } catch (error) {
+    if (error instanceof GitError) throw error;
+    throw new GitError(
+      "conflict",
+      "The linked-worktree administrative identity changed during inspection.",
+    );
   }
-  return { commonDirectory, repositoryIdentity: identity, worktreeId };
+  return {
+    filesystemReceipt: {
+      version: 1,
+      worktreesDirectory: worktreesIdentity,
+      adminDirectory: adminIdentity,
+    },
+    repositoryIdentity: identity,
+    worktreeId,
+  };
 }
 
 async function validateNewAbsolutePath(
@@ -461,15 +515,11 @@ export async function createWorktreeWithOwnershipReceipt(
   const identity = await linkedWorktreeIdentity(
     root,
     target,
-    branch,
-    head,
-    ownershipToken,
-    true,
-    dependencies.writeOwnershipMarker,
-    dependencies.beforeOwnershipMarkerWrite,
+    dependencies.beforeFilesystemIdentityCapture,
   );
   hooks.added({
     branch,
+    filesystemReceipt: identity.filesystemReceipt,
     head,
     path: target,
     ownershipToken,
@@ -569,6 +619,8 @@ export async function inspectOwnedWorktreeCleanupState(
   expectedWorktreeId: string,
   expectedRepositoryIdentity: string,
   expectedOwnershipToken: string,
+  expectedFilesystemReceipt: WorktreeFilesystemReceipt | null = null,
+  dependencies: OwnedWorktreeInspectionDependencies = {},
 ): Promise<OwnedWorktreeCleanupInspection> {
   if (!/^[0-9a-f]{40,64}$/u.test(expectedHead)) {
     throw new GitError(
@@ -604,6 +656,7 @@ export async function inspectOwnedWorktreeCleanupState(
     || expectedWorktreeId.includes("\0")
     || !/^[0-9a-f]{64}$/u.test(expectedRepositoryIdentity)
     || !UUID_PATTERN.test(expectedOwnershipToken)
+    || !isWorktreeFilesystemReceipt(expectedFilesystemReceipt)
   ) {
     throw new GitError(
       "conflict",
@@ -623,9 +676,9 @@ export async function inspectOwnedWorktreeCleanupState(
     );
   }
   const worktrees = await registeredWorktrees(root);
-  let worktreesDirectoryInfo;
+  let currentWorktreesIdentity: WorktreeFilesystemIdentity;
   try {
-    worktreesDirectoryInfo = await lstat(worktreesDirectory);
+    currentWorktreesIdentity = await captureDirectoryIdentity(worktreesDirectory);
   } catch (error) {
     if (nodeErrorCode(error) !== "ENOENT") throw error;
     const replacement = worktrees.some(({ branch: registeredBranch, path }) =>
@@ -634,48 +687,64 @@ export async function inspectOwnedWorktreeCleanupState(
       || registeredBranch === branch);
     return replacement ? { state: "conflict" } : { state: "absent" };
   }
-  if (
-    worktreesDirectoryInfo.isSymbolicLink()
-    || !worktreesDirectoryInfo.isDirectory()
-    || !pathsEqual(await realpath(worktreesDirectory), worktreesDirectory)
-  ) return { state: "conflict" };
-  let adminInfo;
+  if (!worktreeFilesystemIdentitiesEqual(
+    currentWorktreesIdentity,
+    expectedFilesystemReceipt.worktreesDirectory,
+  )) return { state: "conflict" };
+  let currentAdminIdentity: WorktreeFilesystemIdentity;
   try {
-    adminInfo = await lstat(adminDirectory);
+    currentAdminIdentity = await captureDirectoryIdentity(adminDirectory);
   } catch (error) {
     if (nodeErrorCode(error) !== "ENOENT") throw error;
-    const replacement = worktrees.some(({ branch: registeredBranch, path }) =>
-      pathsEqual(path, requestedTarget)
-      || pathsEqual(path, canonicalTarget)
-      || registeredBranch === branch);
-    return replacement ? { state: "conflict" } : { state: "absent" };
-  }
-  if (adminInfo.isSymbolicLink() || !adminInfo.isDirectory()) {
-    return { state: "conflict" };
-  }
-  let marker: Partial<WorktreeOwnershipMarker>;
-  try {
-    marker = JSON.parse(await readBoundedIdentityFile(
-      resolve(adminDirectory, OWNERSHIP_MARKER),
-    )) as typeof marker;
-  } catch (error) {
-    if (nodeErrorCode(error) === "ENOENT" || error instanceof SyntaxError) {
-      return { state: "conflict" };
+    const entries = await readdir(worktreesDirectory, { withFileTypes: true });
+    if (entries.length > 1_024) return { state: "conflict" };
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      try {
+        const identity = await captureDirectoryIdentity(
+          resolve(worktreesDirectory, entry.name),
+        );
+        if (worktreeFilesystemIdentitiesEqual(
+          identity,
+          expectedFilesystemReceipt.adminDirectory,
+        )) return { state: "conflict" };
+      } catch {
+        return { state: "conflict" };
+      }
     }
-    throw error;
+    const verifiedParent = await captureDirectoryIdentity(worktreesDirectory);
+    if (!worktreeFilesystemIdentitiesEqual(
+      verifiedParent,
+      expectedFilesystemReceipt.worktreesDirectory,
+    )) return { state: "conflict" };
+    const replacement = worktrees.some(({ branch: registeredBranch, path }) =>
+      pathsEqual(path, requestedTarget)
+      || pathsEqual(path, canonicalTarget)
+      || registeredBranch === branch);
+    return replacement ? { state: "conflict" } : { state: "absent" };
   }
-  if (
-    marker.version !== 1
-    || marker.ownershipToken !== expectedOwnershipToken
-    || marker.repositoryIdentity !== expectedRepositoryIdentity
-    || marker.worktreeId !== expectedWorktreeId
-    || marker.createdPathHash !== pathIdentity(canonicalTarget)
-    || marker.branch !== branch
-    || marker.head !== expectedHead
-  ) return { state: "conflict" };
+  if (!worktreeFilesystemIdentitiesEqual(
+    currentAdminIdentity,
+    expectedFilesystemReceipt.adminDirectory,
+  )) return { state: "conflict" };
   const rawGitdir = await readBoundedIdentityFile(
     resolve(adminDirectory, "gitdir"),
+    dependencies,
   );
+  const [verifiedAdmin, verifiedParent] = await Promise.all([
+    captureDirectoryIdentity(adminDirectory),
+    captureDirectoryIdentity(worktreesDirectory),
+  ]);
+  if (
+    !worktreeFilesystemIdentitiesEqual(
+      verifiedAdmin,
+      expectedFilesystemReceipt.adminDirectory,
+    )
+    || !worktreeFilesystemIdentitiesEqual(
+      verifiedParent,
+      expectedFilesystemReceipt.worktreesDirectory,
+    )
+  ) return { state: "conflict" };
   const gitdir = rawGitdir.endsWith("\r\n")
     ? rawGitdir.slice(0, -2)
     : rawGitdir.endsWith("\n")
@@ -701,6 +770,7 @@ export async function inspectOwnedWorktreeCleanupState(
       head: registration.head,
       path: registration.path,
       ownershipToken: expectedOwnershipToken,
+      filesystemReceipt: expectedFilesystemReceipt,
       repositoryIdentity: expectedRepositoryIdentity,
       worktreeId: expectedWorktreeId,
     },

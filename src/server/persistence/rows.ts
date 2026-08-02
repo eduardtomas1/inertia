@@ -122,6 +122,7 @@ export interface PairedLaunchSideRow {
   cleanup_worktree_token: string | null;
   cleanup_worktree_id: string | null;
   cleanup_repository_identity: string | null;
+  cleanup_filesystem_identity_json: string | null;
   cleanup_branch_head: string | null;
   worktree_removal_started: 0 | 1;
   worktree_removal_confirmed: 0 | 1;

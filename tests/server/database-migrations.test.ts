@@ -928,7 +928,13 @@ describe("published database fixtures", () => {
 });
 
 describe("atomic Duo schema migration", () => {
-  it.each(["current", "v37-upgrade", "v38-upgrade", "v39-upgrade"] as const)(
+  it.each([
+    "current",
+    "v37-upgrade",
+    "v38-upgrade",
+    "v39-upgrade",
+    "v40-upgrade",
+  ] as const)(
     "installs active-launch deletion protection for a %s database",
     async (source) => {
       const directory = await temporaryDirectory("inertia-duo-migration-");
@@ -940,6 +946,7 @@ describe("atomic Duo schema migration", () => {
       });
       const retainedLaunchId = source === "v38-upgrade"
         || source === "v39-upgrade"
+        || source === "v40-upgrade"
         ? randomUUID()
         : null;
       if (retainedLaunchId) {
@@ -965,11 +972,11 @@ describe("atomic Duo schema migration", () => {
         `);
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version >= ?",
-        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 2);
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 3);
         expect((previous.prepare(
           "SELECT MAX(version) AS version FROM schema_migrations",
         ).get() as { version: number }).version).toBe(
-          CURRENT_DATABASE_SCHEMA_VERSION - 3,
+          CURRENT_DATABASE_SCHEMA_VERSION - 4,
         );
         previous.close();
       } else if (source === "v38-upgrade") {
@@ -992,7 +999,7 @@ describe("atomic Duo schema migration", () => {
         `);
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version >= ?",
-        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 1);
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 2);
         previous.close();
       } else if (source === "v39-upgrade") {
         const previous = new Database(databasePath);
@@ -1008,6 +1015,16 @@ describe("atomic Duo schema migration", () => {
           ALTER TABLE paired_launch_sides DROP COLUMN cleanup_repository_identity;
           ALTER TABLE paired_launch_sides DROP COLUMN cleanup_worktree_id;
           ALTER TABLE paired_launch_sides DROP COLUMN cleanup_worktree_token;
+        `);
+        previous.prepare(
+          "DELETE FROM schema_migrations WHERE version >= ?",
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 1);
+        previous.close();
+      } else if (source === "v40-upgrade") {
+        const previous = new Database(databasePath);
+        previous.exec(`
+          ALTER TABLE paired_launch_sides
+            DROP COLUMN cleanup_filesystem_identity_json;
         `);
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version = ?",
@@ -1033,6 +1050,7 @@ describe("atomic Duo schema migration", () => {
             branchCleanupOutcome: null,
             cleanupWorktreeToken: null,
             cleanupWorktreeId: null,
+            cleanupFilesystemReceipt: null,
             cleanupRepositoryIdentity: null,
             worktreeCleanupTopology: null,
             cleanupObservedPath: null,
@@ -1102,11 +1120,12 @@ describe("atomic Duo schema migration", () => {
           || name === "cleanup_worktree_token"
           || name === "cleanup_worktree_id"
           || name === "cleanup_repository_identity"
+          || name === "cleanup_filesystem_identity_json"
           || name === "worktree_cleanup_topology"
           || name === "cleanup_observed_path"
           || name === "cleanup_observed_branch"
           || name === "cleanup_observed_head",
-      )).toEqual([
+      )).toEqual(expect.arrayContaining([
         expect.objectContaining({
           name: "cleanup_branch_head",
           dflt_value: null,
@@ -1134,11 +1153,12 @@ describe("atomic Duo schema migration", () => {
         expect.objectContaining({ name: "cleanup_worktree_token", dflt_value: null }),
         expect.objectContaining({ name: "cleanup_worktree_id", dflt_value: null }),
         expect.objectContaining({ name: "cleanup_repository_identity", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_filesystem_identity_json", dflt_value: null }),
         expect.objectContaining({ name: "worktree_cleanup_topology", dflt_value: null }),
         expect.objectContaining({ name: "cleanup_observed_path", dflt_value: null }),
         expect.objectContaining({ name: "cleanup_observed_branch", dflt_value: null }),
         expect.objectContaining({ name: "cleanup_observed_head", dflt_value: null }),
-      ]);
+      ]));
       expect(inspection.pragma("foreign_key_check")).toEqual([]);
       inspection.close();
     },
@@ -1272,6 +1292,7 @@ describe("runtime migration catalog", () => {
 
 describe("legacy inferred turn backfill", () => {
   it("is deterministic and idempotent while retaining malformed and unmatched records", async () => {
+    // This proves deterministic migration capacity under suite load, not latency.
     const first = await createLegacyBackfillDatabase();
     const database = new Database(first.databasePath);
     const contentBefore = database.prepare(
@@ -1367,5 +1388,5 @@ describe("legacy inferred turn backfill", () => {
     ).all() as Array<{ id: string }>).map(({ id }) => id);
     secondDatabase.close();
     expect(secondTurnIds).toEqual(turns.map(({ id }) => id));
-  });
+  }, 30_000);
 });

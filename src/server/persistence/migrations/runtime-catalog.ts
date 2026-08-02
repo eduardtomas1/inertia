@@ -1185,6 +1185,24 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         rebuildPairedLaunchProjectDeletionTrigger(database);
       },
     });
+    migrationExtensions.push({
+      name: "PersistDuoWorktreeFilesystemIdentity",
+      up: (database) => {
+        const columns = database.prepare("PRAGMA table_info(paired_launch_sides)")
+          .all() as Array<{ name: string }>;
+        if (!columns.some(({ name }) =>
+          name === "cleanup_filesystem_identity_json")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_filesystem_identity_json TEXT
+              CHECK (
+                cleanup_filesystem_identity_json IS NULL
+                OR length(cleanup_filesystem_identity_json) BETWEEN 1 AND 1024
+              );
+          `);
+        }
+      },
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

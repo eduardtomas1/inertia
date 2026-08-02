@@ -554,6 +554,25 @@ describe("launch-owned Git cleanup", () => {
     expect(serialized).not.toContain(path);
     const parsed = parseWorktreeFilesystemReceipt(serialized);
     if (!parsed) throw new Error("The filesystem receipt did not round-trip.");
+    const reordered = JSON.stringify({
+      adminDirectory: {
+        timestampNs: parsed.adminDirectory.timestampNs,
+        timestampKind: parsed.adminDirectory.timestampKind,
+        inode: parsed.adminDirectory.inode,
+        device: parsed.adminDirectory.device,
+      },
+      worktreesDirectory: {
+        timestampNs: parsed.worktreesDirectory.timestampNs,
+        timestampKind: parsed.worktreesDirectory.timestampKind,
+        inode: parsed.worktreesDirectory.inode,
+        device: parsed.worktreesDirectory.device,
+      },
+      version: 1,
+    });
+    const canonical = parseWorktreeFilesystemReceipt(reordered);
+    expect(canonical).toEqual(parsed);
+    if (!canonical) throw new Error("The reordered receipt was rejected.");
+    expect(serializeWorktreeFilesystemReceipt(canonical)).toBe(serialized);
     expect(worktreeFilesystemIdentitiesEqual(
       parsed.adminDirectory,
       ownership.filesystemReceipt.adminDirectory,
@@ -593,6 +612,25 @@ describe("launch-owned Git cleanup", () => {
           timestampNs: "01",
         },
       }),
+      JSON.stringify({
+        ...ownership.filesystemReceipt,
+        unexpected: "top-level",
+      }),
+      JSON.stringify({
+        ...ownership.filesystemReceipt,
+        adminDirectory: {
+          ...ownership.filesystemReceipt.adminDirectory,
+          unexpected: "nested",
+        },
+      }),
+      serialized.replace(
+        '{"version":1,',
+        '{"version":1,"__proto__":{"polluted":true},',
+      ),
+      serialized.replace(
+        '"adminDirectory":{',
+        '"adminDirectory":{"constructor":{"prototype":{"polluted":true}},',
+      ),
     ]) expect(parseWorktreeFilesystemReceipt(invalid)).toBeNull();
   });
 

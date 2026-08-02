@@ -283,6 +283,7 @@ export function MultiSpawnDialog({
   const restoreFocusRef = useRef(true);
   const [draft, setDraft] = useState<MultiSpawnDraft | null>(null);
   useNativePreviewSuspension(open);
+  const busy = submitting || cancelling;
 
   const routesForSelection = useMemo(() => (
     selection: ModelSelection,
@@ -483,7 +484,7 @@ export function MultiSpawnDialog({
       className="dialog-backdrop multi-spawn-backdrop"
       role="presentation"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !submitting) onClose();
+        if (event.target === event.currentTarget && !submitting && !cancelling) onClose();
       }}
     >
       <section
@@ -524,7 +525,7 @@ export function MultiSpawnDialog({
             aria-label="Shared prompt"
             value={draft.prompt}
             maxLength={20_000}
-            disabled={submitting}
+            disabled={busy}
             placeholder="Ask both agents to inspect, implement, compare, or review the same work…"
             onChange={(event) => setDraft({
               ...draft,
@@ -539,7 +540,7 @@ export function MultiSpawnDialog({
             side={draft.sides[0]}
             projects={snapshot.projects}
             routeState={routeStates[0]}
-            disabled={submitting}
+            disabled={busy}
             onChange={(next) => updateSide(0, next)}
             onRepair={() => openRepair(0)}
           />
@@ -551,7 +552,7 @@ export function MultiSpawnDialog({
             side={draft.sides[1]}
             projects={snapshot.projects}
             routeState={routeStates[1]}
-            disabled={submitting}
+            disabled={busy}
             onChange={(next) => updateSide(1, next)}
             onRepair={() => openRepair(1)}
           />
@@ -628,7 +629,7 @@ export function MultiSpawnDialog({
             <input
               type="checkbox"
               checked={draft.rememberPreset}
-              disabled={submitting}
+              disabled={busy}
               onChange={(event) => setDraft({
                 ...draft,
                 rememberPreset: event.currentTarget.checked,
@@ -651,7 +652,7 @@ export function MultiSpawnDialog({
             <button
               type="button"
               className="primary-button multi-spawn-launch"
-              disabled={submitting || Boolean(validationError) || !routesReady}
+              disabled={busy || Boolean(validationError) || !routesReady}
               title={validationError ?? (!routesReady
                 ? "Both routes must be ready."
                 : undefined)}

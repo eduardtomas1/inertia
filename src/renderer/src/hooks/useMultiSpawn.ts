@@ -349,14 +349,15 @@ export function useMultiSpawn({
       setActionError(message);
       focusWorkspace();
     } finally {
+      cancellingRef.current = false;
       if (operationGenerationRef.current === generation) {
-        cancellingRef.current = false;
         setCancelling(false);
       }
     }
   }, [focusWorkspace, run, setActionError]);
 
   const closeDialog = useCallback(() => {
+    if (cancellingRef.current) return;
     if (submittingRef.current) {
       void cancelActiveLaunch();
       return;
@@ -368,7 +369,7 @@ export function useMultiSpawn({
   }, [cancelActiveLaunch]);
 
   const submit = useCallback(async (draft: MultiSpawnDraft): Promise<void> => {
-    if (submittingRef.current || !snapshot) return;
+    if (submittingRef.current || cancellingRef.current || !snapshot) return;
     const validationError = validateMultiSpawnDraft(draft);
     if (validationError) {
       setError(validationError);

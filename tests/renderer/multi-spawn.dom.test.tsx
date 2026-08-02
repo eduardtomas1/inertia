@@ -613,6 +613,46 @@ describe("multi-spawn", () => {
     },
   );
 
+  it("keeps every launch and close affordance inert while cancellation is pending", () => {
+    const onClose = vi.fn();
+    const onSubmit = vi.fn(async (_draft: MultiSpawnDraft) => undefined);
+    render(
+      <MultiSpawnDialog
+        open
+        snapshot={snapshot}
+        settings={settings}
+        submitting={false}
+        cancelling
+        error={null}
+        onClose={onClose}
+        onSubmit={onSubmit}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+
+    const close = screen.getByRole("button", { name: "Close multi-spawn" });
+    const cancel = screen.getByRole("button", { name: "Cancelling…" });
+    const launch = screen.getByRole("button", { name: "Launch duo" });
+    expect(close).toBeDisabled();
+    expect(cancel).toBeDisabled();
+    expect(launch).toBeDisabled();
+    expect(screen.getByLabelText("Shared prompt")).toBeDisabled();
+
+    fireEvent.click(close);
+    fireEvent.click(cancel);
+    fireEvent.click(launch);
+    fireEvent.keyDown(document, { key: "Escape" });
+    const backdrop = document.querySelector(".multi-spawn-backdrop");
+    if (!(backdrop instanceof HTMLElement)) {
+      throw new Error("The multi-spawn backdrop was not rendered.");
+    }
+    fireEvent.mouseDown(backdrop);
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("keeps launch completion focused in the resulting workspace", async () => {
     const trigger = document.createElement("button");
     const workspace = document.createElement("section");
@@ -1442,6 +1482,123 @@ describe("multi-spawn", () => {
     expect(hook.result.current.open).toBe(false);
     expect(hook.result.current.submitting).toBe(false);
   });
+
+  it.each(["resolves", "rejects"] as const)(
+    "keeps cancellation busy until duo.cancel %s and then releases the latch",
+    async (outcome) => {
+      let releasePreparation!: () => void;
+      const preparation = new Promise<void>((resolve) => {
+        releasePreparation = resolve;
+      });
+      let resolveCancellation!: () => void;
+      let rejectCancellation!: (error: Error) => void;
+      const cancellation = new Promise<void>((resolve, reject) => {
+        resolveCancellation = resolve;
+        rejectCancellation = reject;
+      });
+      let launchId = "";
+      const run = vi.fn(async (
+        _key: string,
+        command: CommandWithoutId,
+      ): Promise<ServerEvent> => {
+        if (command.type === "duo.pending") {
+          return pendingLaunchesEvent();
+        }
+        if (command.type === "duo.prepare") {
+          launchId = command.payload.launchId;
+          await preparation;
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.prepared",
+              launchId,
+              state: "prepared",
+              sides: [
+                { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+                { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+              ],
+            },
+          };
+        }
+        if (command.type === "duo.cancel") {
+          await cancellation;
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId,
+              state: "cancelled",
+              error: null,
+              sides: [
+                { ordinal: 0, conversationId: null, turnId: null, dispatchState: "cancelled" },
+                { ordinal: 1, conversationId: null, turnId: null, dispatchState: "cancelled" },
+              ],
+            },
+          };
+        }
+        throw new Error(`Unexpected command: ${command.type}`);
+      });
+      const setActionError = vi.fn();
+      const hook = renderHook(() => useMultiSpawn({
+        snapshot,
+        settings,
+        run,
+        splitSelectionTransitionsRef: { current: 0 },
+        updateSplitConversationId: vi.fn(),
+        showWorkspace: vi.fn(),
+        closeSidebar: vi.fn(),
+        focusWorkspace: vi.fn(),
+        discardDraftConversation: vi.fn(),
+        setActionError,
+      }));
+
+      act(() => hook.result.current.openDialog());
+      await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+      let submission!: Promise<void>;
+      act(() => {
+        submission = hook.result.current.submit(multiSpawnDraft());
+      });
+      await waitFor(() => expect(run.mock.calls.some(([, command]) =>
+        command.type === "duo.prepare")).toBe(true));
+
+      act(() => hook.result.current.closeDialog());
+      await waitFor(() => expect(hook.result.current.cancelling).toBe(true));
+      const commandCount = run.mock.calls.length;
+      act(() => hook.result.current.closeDialog());
+      await act(async () => hook.result.current.submit(multiSpawnDraft()));
+      act(() => hook.result.current.openDialog());
+
+      expect(run).toHaveBeenCalledTimes(commandCount);
+      expect(hook.result.current.open).toBe(true);
+      expect(hook.result.current.cancelling).toBe(true);
+      if (outcome === "resolves") {
+        resolveCancellation();
+      } else {
+        rejectCancellation(new RuntimeCommandError(
+          "Cancellation was rejected.",
+          "rejected",
+        ));
+      }
+      await waitFor(() => expect(hook.result.current.cancelling).toBe(false));
+      expect(hook.result.current.open).toBe(false);
+      if (outcome === "rejects") {
+        expect(setActionError).toHaveBeenCalledWith("Cancellation was rejected.");
+      }
+
+      releasePreparation();
+      await act(async () => submission);
+      act(() => hook.result.current.openDialog());
+      await waitFor(() => expect(run.mock.calls.filter(([, command]) =>
+        command.type === "duo.pending")).toHaveLength(3));
+      expect(hook.result.current.open).toBe(true);
+      expect(run.mock.calls.filter(([, command]) =>
+        command.type === "duo.prepare")).toHaveLength(1);
+      expect(run.mock.calls.some(([, command]) =>
+        command.type === "duo.dispatch")).toBe(false);
+    },
+  );
 
   it("retains recovery identity when explicit cancellation still needs cleanup", async () => {
     let releasePreparation!: () => void;

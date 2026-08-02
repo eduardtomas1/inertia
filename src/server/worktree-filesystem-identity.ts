@@ -20,8 +20,20 @@ const DECIMAL_IDENTITY = new RegExp(
   "u",
 );
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+function isPlainRecordWithExactKeys(
+  value: unknown,
+  expectedKeys: readonly string[],
+): value is Record<string, unknown> {
+  if (
+    value === null
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || Object.getPrototypeOf(value) !== Object.prototype
+  ) return false;
+  const keys = Reflect.ownKeys(value);
+  return keys.length === expectedKeys.length
+    && keys.every((key) => typeof key === "string" && expectedKeys.includes(key))
+    && expectedKeys.every((key) => Object.hasOwn(value, key));
 }
 
 function isPositiveDecimal(value: unknown): value is string {
@@ -33,7 +45,12 @@ function isPositiveDecimal(value: unknown): value is string {
 export function isWorktreeFilesystemIdentity(
   value: unknown,
 ): value is WorktreeFilesystemIdentity {
-  return isRecord(value)
+  return isPlainRecordWithExactKeys(value, [
+    "device",
+    "inode",
+    "timestampKind",
+    "timestampNs",
+  ])
     && isPositiveDecimal(value.device)
     && isPositiveDecimal(value.inode)
     && (value.timestampKind === "birthtime" || value.timestampKind === "ctime")
@@ -43,10 +60,34 @@ export function isWorktreeFilesystemIdentity(
 export function isWorktreeFilesystemReceipt(
   value: unknown,
 ): value is WorktreeFilesystemReceipt {
-  return isRecord(value)
+  return isPlainRecordWithExactKeys(value, [
+    "version",
+    "worktreesDirectory",
+    "adminDirectory",
+  ])
     && value.version === 1
     && isWorktreeFilesystemIdentity(value.worktreesDirectory)
     && isWorktreeFilesystemIdentity(value.adminDirectory);
+}
+
+function canonicalWorktreeFilesystemReceipt(
+  value: WorktreeFilesystemReceipt,
+): WorktreeFilesystemReceipt {
+  return {
+    version: 1,
+    worktreesDirectory: {
+      device: value.worktreesDirectory.device,
+      inode: value.worktreesDirectory.inode,
+      timestampKind: value.worktreesDirectory.timestampKind,
+      timestampNs: value.worktreesDirectory.timestampNs,
+    },
+    adminDirectory: {
+      device: value.adminDirectory.device,
+      inode: value.adminDirectory.inode,
+      timestampKind: value.adminDirectory.timestampKind,
+      timestampNs: value.adminDirectory.timestampNs,
+    },
+  };
 }
 
 export function parseWorktreeFilesystemReceipt(
@@ -58,7 +99,8 @@ export function parseWorktreeFilesystemReceipt(
   ) return null;
   try {
     const parsed: unknown = JSON.parse(value);
-    return isWorktreeFilesystemReceipt(parsed) ? parsed : null;
+    if (!isWorktreeFilesystemReceipt(parsed)) return null;
+    return canonicalWorktreeFilesystemReceipt(parsed);
   } catch {
     return null;
   }
@@ -70,7 +112,7 @@ export function serializeWorktreeFilesystemReceipt(
   if (!isWorktreeFilesystemReceipt(value)) {
     throw new Error("The linked-worktree filesystem identity is invalid.");
   }
-  const serialized = JSON.stringify(value);
+  const serialized = JSON.stringify(canonicalWorktreeFilesystemReceipt(value));
   if (Buffer.byteLength(serialized, "utf8") > MAX_WORKTREE_FILESYSTEM_RECEIPT_BYTES) {
     throw new Error("The linked-worktree filesystem identity is too large.");
   }

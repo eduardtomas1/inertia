@@ -663,11 +663,14 @@ describe("Remote Companion browser connection ownership", () => {
       promptResult: vi.fn(),
     });
     const connectionId = crypto.randomUUID();
+    const socket = new FakeBrowserSocket("") as unknown as WebSocket;
     Object.assign(client as unknown as Record<string, unknown>, {
       connectionId,
+      connectionGeneration: 1,
       sessionId,
       recipient: deviceRecipient,
       profile: { deviceLabel: "Retained identity" },
+      socket,
     });
     const frame = await sealSessionData(hostSender, sessionId, {
       type: "session.authority-changed",
@@ -682,7 +685,7 @@ describe("Remote Companion browser connection ownership", () => {
           raw: unknown,
         ): Promise<void>;
       }
-    ).handleMessage(1, new FakeBrowserSocket("") as unknown as WebSocket, JSON.stringify({
+    ).handleMessage(1, socket, JSON.stringify({
       protocolVersion: 2,
       type: "relay.frame",
       connectionId,
@@ -692,6 +695,144 @@ describe("Remote Companion browser connection ownership", () => {
     expect(authorityInvalidated).toHaveBeenCalledOnce();
     expect(identityInvalidated).not.toHaveBeenCalled();
     expect(client.currentProfile()).not.toBeNull();
+  });
+
+  it("ignores a deferred authority change from a replaced session", async () => {
+    const hostKeys = await generateRemoteKeyPair();
+    const deviceKeys = await generateRemoteKeyPair();
+    const hostId = crypto.randomUUID();
+    const deviceId = crypto.randomUUID();
+    const oldSessionId = crypto.randomUUID();
+    const currentSessionId = crypto.randomUUID();
+    const importedHostKeys = await importRemoteKeyPair(hostKeys);
+    const importedDeviceKeys = await importRemoteKeyPair(deviceKeys);
+    const hostPublicKey = await importRemotePublicKey(hostKeys.publicKey);
+    const devicePublicKey = await importRemotePublicKey(deviceKeys.publicKey);
+    const oldSender = await createAuthenticatedSessionSender(
+      hostId,
+      deviceId,
+      oldSessionId,
+      importedHostKeys,
+      devicePublicKey,
+    );
+    const oldRecipient = await createAuthenticatedSessionRecipient(
+      hostId,
+      deviceId,
+      oldSessionId,
+      importedDeviceKeys,
+      hostPublicKey,
+      oldSender.enc,
+    );
+    const currentSender = await createAuthenticatedSessionSender(
+      hostId,
+      deviceId,
+      currentSessionId,
+      importedHostKeys,
+      devicePublicKey,
+    );
+    const currentRecipient = await createAuthenticatedSessionRecipient(
+      hostId,
+      deviceId,
+      currentSessionId,
+      importedDeviceKeys,
+      hostPublicKey,
+      currentSender.enc,
+    );
+    for (const [sender, recipient, sessionId] of [
+      [oldSender, oldRecipient, oldSessionId],
+      [currentSender, currentRecipient, currentSessionId],
+    ] as const) {
+      const handshake = await sealSessionHandshake(
+        sender,
+        "session.accept",
+        sessionId,
+        { type: "session.accept" },
+      );
+      await openSessionHandshake(
+        recipient,
+        "session.accept",
+        sessionId,
+        handshake,
+      );
+    }
+    const oldFrame = await sealSessionData(oldSender, oldSessionId, {
+      type: "session.authority-changed",
+      serverTime: new Date().toISOString(),
+    });
+    const currentFrame = await sealSessionData(currentSender, currentSessionId, {
+      type: "session.authority-changed",
+      serverTime: new Date().toISOString(),
+    });
+    let releaseDecrypt!: () => void;
+    let markDecryptStarted!: () => void;
+    const decryptGate = new Promise<void>((resolve) => {
+      releaseDecrypt = resolve;
+    });
+    const decryptStarted = new Promise<void>((resolve) => {
+      markDecryptStarted = resolve;
+    });
+    const open = oldRecipient.context.open.bind(oldRecipient.context);
+    oldRecipient.context.open = async (...args: Parameters<typeof open>) => {
+      markDecryptStarted();
+      await decryptGate;
+      return await open(...args);
+    };
+
+    const authorizationInvalidated = vi.fn();
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      authorizationInvalidated,
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const oldConnectionId = crypto.randomUUID();
+    const currentConnectionId = crypto.randomUUID();
+    const oldSocket = new FakeBrowserSocket("") as unknown as WebSocket;
+    const currentSocket = new FakeBrowserSocket("") as unknown as WebSocket;
+    const internals = client as unknown as Record<string, unknown>;
+    Object.assign(internals, {
+      connectionId: oldConnectionId,
+      connectionGeneration: 1,
+      sessionId: oldSessionId,
+      recipient: oldRecipient,
+      socket: oldSocket,
+    });
+    const handleMessage = (
+      client as unknown as {
+        handleMessage(
+          generation: number,
+          socket: WebSocket,
+          raw: unknown,
+        ): Promise<void>;
+      }
+    ).handleMessage.bind(client);
+    const staleControl = handleMessage(1, oldSocket, JSON.stringify({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId: oldConnectionId,
+      frame: oldFrame,
+    }));
+    await decryptStarted;
+    Object.assign(internals, {
+      connectionId: currentConnectionId,
+      connectionGeneration: 2,
+      sessionId: currentSessionId,
+      recipient: currentRecipient,
+      socket: currentSocket,
+    });
+    releaseDecrypt();
+    await staleControl;
+    expect(authorizationInvalidated).not.toHaveBeenCalled();
+
+    await handleMessage(2, currentSocket, JSON.stringify({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId: currentConnectionId,
+      frame: currentFrame,
+    }));
+    expect(authorizationInvalidated).toHaveBeenCalledOnce();
   });
 
   it("expires an inactive profile on the local timer while offline", async () => {

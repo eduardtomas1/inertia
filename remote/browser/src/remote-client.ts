@@ -726,7 +726,15 @@ export class RemoteCompanionClient {
       || frame.sessionId !== this.sessionId
       || !this.recipient
     ) return;
-    const plaintext = await openSessionData(this.recipient, frame);
+    const sessionId = this.sessionId;
+    const recipient = this.recipient;
+    const plaintext = await openSessionData(recipient, frame);
+    if (!this.ownsInboundSession(
+      generation,
+      socket,
+      sessionId,
+      recipient,
+    )) return;
     const authorityChange = remoteSessionAuthorityChangedPayloadSchema
       .safeParse(plaintext);
     if (authorityChange.success) {
@@ -739,6 +747,17 @@ export class RemoteCompanionClient {
     clearTimeout(pending.timer);
     this.pending.delete(response.requestId);
     pending.resolve(response);
+  }
+  private ownsInboundSession(
+    generation: number,
+    socket: WebSocket,
+    sessionId: string,
+    recipient: RemoteRecipientState,
+  ): boolean {
+    return generation === this.connectionGeneration
+      && socket === this.socket
+      && sessionId === this.sessionId
+      && recipient === this.recipient;
   }
   private disconnect(message: string): void {
     if (this.supervisor.current().phase === "idle") {

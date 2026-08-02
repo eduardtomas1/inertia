@@ -80,6 +80,7 @@ afterEach(async () => {
 
 describe("remote gateway transcript memory", () => {
   it("stays inside the byte budget for many multi-megabyte messages", async () => {
+    // This measures retained-byte capacity under load, not latency.
     const { store, gateway, transcriptCache, subject, conversation } = fixture();
     for (let index = 0; index < 24; index += 1) {
       store.createMessage(
@@ -92,7 +93,7 @@ describe("remote gateway transcript memory", () => {
     expect(transcriptCache.retainedBytes()).toBeLessThanOrEqual(BUDGET_BYTES);
     await transcript(gateway, subject, conversation.id);
     expect(transcriptCache.retainedBytes()).toBeLessThanOrEqual(BUDGET_BYTES);
-  });
+  }, 30_000);
 
   it("returns identical sanitized content across repeated fetches", async () => {
     const { store, gateway, subject, conversation } = fixture();

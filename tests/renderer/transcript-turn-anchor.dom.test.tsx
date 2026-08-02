@@ -173,6 +173,67 @@ describe("accepted turn viewport anchoring", () => {
     expect(cancelled).not.toHaveBeenCalled();
   });
 
+  it("keeps a clamped short-row anchor pending until the row can settle", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const settled = vi.fn();
+    const cancelled = vi.fn();
+    const { scrollElementRef, timelineElementRef } = renderTimeline(
+      settled,
+      cancelled,
+    );
+    const scroll = scrollElementRef.current!;
+    const acceptedTurn = timelineElementRef.current!
+      .querySelector<HTMLElement>('[data-turn-id="turn-2"]')!;
+    let scrollTop = 0;
+    let maximumScrollTop = 100;
+    Object.defineProperty(scroll, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (next: number) => {
+        scrollTop = Math.max(0, Math.min(next, maximumScrollTop));
+      },
+    });
+    scroll.getBoundingClientRect = () => rect(0, 600);
+    acceptedTurn.getBoundingClientRect = () =>
+      rect(408 - scrollTop, 120);
+
+    await act(async () => {
+      let attempt = 0;
+      while (frames.length > 0 && attempt < 35) {
+        frames.shift()!(attempt * 25);
+        attempt += 1;
+      }
+    });
+
+    expect(scroll.scrollTop).toBe(100);
+    expect(acceptedTurn.getBoundingClientRect().top).toBe(308);
+    expect(settled).not.toHaveBeenCalled();
+    expect(cancelled).not.toHaveBeenCalled();
+    expect(frames).toHaveLength(0);
+
+    maximumScrollTop = 400;
+    await act(async () => {
+      acceptedTurn.append(document.createTextNode("Expanded answer"));
+      await Promise.resolve();
+      let remaining = 4;
+      while (frames.length > 0 && remaining > 0) {
+        frames.shift()!(1_000 + remaining);
+        remaining -= 1;
+      }
+    });
+
+    expect(scroll.scrollTop).toBe(400);
+    expect(acceptedTurn.getBoundingClientRect().top).toBe(8);
+    expect(settled).toHaveBeenCalledOnce();
+    expect(settled).toHaveBeenCalledWith("turn-2");
+    expect(cancelled).not.toHaveBeenCalled();
+  });
+
   it("releases a pending anchor when the reader deliberately scrolls", () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

@@ -551,8 +551,8 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     let frame = 0;
     let attempts = 0;
     let stableFrames = 0;
-    const maximumSettleFrames = 30;
-    const settleUntil = performance.now() + 600;
+    let resizeObserver: ResizeObserver | null = null;
+    let mutationObserver: MutationObserver | null = null;
 
     const removeIntentListeners = (): void => {
       scrollElement.removeEventListener("wheel", cancelForUserIntent);
@@ -565,9 +565,18 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       finished = true;
       turnAnchorActive.current = false;
       window.cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
       removeIntentListeners();
       if (settled) onTurnAnchorSettledRef.current?.(turnId);
       else onTurnAnchorCancelledRef.current?.(turnId);
+    };
+    const scheduleSettle = (): void => {
+      if (finished || frame !== 0) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        settle();
+      });
     };
     const settle = (): void => {
       if (finished) return;
@@ -580,30 +589,26 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
           });
         }
         attempts += 1;
-        if (
-          attempts < maximumSettleFrames
-          && performance.now() < settleUntil
-        ) {
-          frame = window.requestAnimationFrame(settle);
-        } else {
-          finish(false);
-        }
+        if (attempts < 30) scheduleSettle();
         return;
       }
       const currentOffset = row.getBoundingClientRect().top
         - scrollElement.getBoundingClientRect().top;
       const delta = currentOffset - 8;
+      const previousScrollTop = scrollElement.scrollTop;
       if (Math.abs(delta) >= 0.5) scrollElement.scrollTop += delta;
-      stableFrames = Math.abs(delta) < 0.5 ? stableFrames + 1 : 0;
+      const settledOffset = row.getBoundingClientRect().top
+        - scrollElement.getBoundingClientRect().top;
+      stableFrames = Math.abs(settledOffset - 8) < 0.5
+        ? stableFrames + 1
+        : 0;
       attempts += 1;
-      if (
-        stableFrames < 2
-        && attempts < maximumSettleFrames
-        && performance.now() < settleUntil
-      ) {
-        frame = window.requestAnimationFrame(settle);
+      if (stableFrames < 2) {
+        const scrollMoved = Math.abs(scrollElement.scrollTop - previousScrollTop)
+          >= 0.5;
+        if (stableFrames > 0 || scrollMoved) scheduleSettle();
       } else {
-        finish(stableFrames >= 2);
+        finish(true);
       }
     };
     function cancelForUserIntent(event: Event): void {
@@ -619,18 +624,32 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     scrollElement.addEventListener("touchstart", cancelForUserIntent, { passive: true });
     scrollElement.addEventListener("pointerdown", cancelForUserIntent);
     scrollElement.addEventListener("keydown", cancelForUserIntent);
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(scheduleSettle);
+      resizeObserver.observe(root);
+    }
+    if (typeof MutationObserver !== "undefined") {
+      mutationObserver = new MutationObserver(scheduleSettle);
+      mutationObserver.observe(root, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    }
     if (virtualized) {
       virtualizer.scrollToIndex(anchorIndex, {
         align: "start",
         behavior: "auto",
       });
     }
-    frame = window.requestAnimationFrame(settle);
+    scheduleSettle();
     return () => {
       if (finished) return;
       finished = true;
       turnAnchorActive.current = false;
       window.cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
       removeIntentListeners();
     };
   }, [

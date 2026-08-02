@@ -49,6 +49,11 @@ interface AppFixtureOptions {
   initialNewThreadMode?: "local" | "worktree";
   seedAssistantCodeBlock?: boolean;
   seedSecondProject?: boolean;
+  codexAppServerSource?: string;
+  beforeLaunch?: (fixture: {
+    testDirectory: string;
+    workspaceDirectory: string;
+  }) => void | Promise<void>;
 }
 
 export function processExists(pid: number): boolean {
@@ -300,6 +305,32 @@ export async function createAppFixture(
     join(tmpdir(), `inertia-${options.name}-`),
   );
   const workspace = await createWorkspace(testDirectory);
+  if (options.codexAppServerSource) {
+    await Promise.all([
+      writeFile(
+        join(workspace.workspaceDirectory, "app-server"),
+        options.codexAppServerSource,
+        "utf8",
+      ),
+      writeFile(
+        join(workspace.workspaceDirectory, "login"),
+        [
+          'if (process.argv[2] === "status") {',
+          '  process.stdout.write("Logged in using ChatGPT\\n");',
+          "  process.exit(0);",
+          "}",
+          'process.stdout.write("Sign-in complete\\n");',
+          "",
+        ].join("\n"),
+        "utf8",
+      ),
+      writeFile(
+        join(workspace.workspaceDirectory, ".git", "info", "exclude"),
+        "app-server\nlogin\n",
+        { encoding: "utf8", flag: "a" },
+      ),
+    ]);
+  }
   const secondWorkspaceDirectory = options.seedSecondProject
     ? await createSecondWorkspace(testDirectory)
     : null;
@@ -324,6 +355,10 @@ export async function createAppFixture(
     });
     store.close();
   }
+  await options.beforeLaunch?.({
+    testDirectory,
+    workspaceDirectory: workspace.workspaceDirectory,
+  });
   const rendererErrors: string[] = [];
   const electronApp = await electron.launch({
     args: [".", `--user-data-dir=${join(testDirectory, "electron-profile")}`],
@@ -332,6 +367,9 @@ export async function createAppFixture(
       NODE_ENV: "test",
       INERTIA_DATA_DIR: join(testDirectory, "data"),
       INERTIA_WORKSPACE_DIR: workspace.workspaceDirectory,
+      ...(options.codexAppServerSource
+        ? { INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath }
+        : {}),
     },
   });
   const page = await electronApp.firstWindow();

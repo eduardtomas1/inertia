@@ -166,6 +166,22 @@ export function RemoteAccessSettings({
     && current.relayUrl === relayUrl
     && current.companionUrl === companionUrl
     && current.setupMode === setupMode;
+  const testCurrentSetup = async (
+    resetEndpoint = false,
+  ): Promise<RemoteAccessState> => {
+    const next = await window.inertia.setRemoteAccessEnabled({
+      enabled: false,
+      relayUrl,
+      companionUrl,
+      setupMode,
+      testOnly: true,
+      ...(resetEndpoint ? { resetEndpoint: true } : {}),
+    });
+    setRelayUrl(next.relayUrl);
+    setCompanionUrl(next.companionUrl);
+    setSetupMode(next.setupMode);
+    return next;
+  };
 
   return (
     <>
@@ -236,13 +252,7 @@ export function RemoteAccessSettings({
               disabled={busy || current.enabled || !relayUrl || !companionUrl}
               onClick={() => {
                 void mutate(
-                  () => window.inertia.setRemoteAccessEnabled({
-                    enabled: false,
-                    relayUrl,
-                    companionUrl,
-                    setupMode,
-                    testOnly: true,
-                  }),
+                  () => testCurrentSetup(),
                   "Setup test passed. You can enable Remote Companion.",
                 );
               }}
@@ -260,14 +270,7 @@ export function RemoteAccessSettings({
                 disabled={busy}
                 onClick={() => {
                   void mutate(
-                    () => window.inertia.setRemoteAccessEnabled({
-                      enabled: false,
-                      relayUrl,
-                      companionUrl,
-                      setupMode,
-                      testOnly: true,
-                      resetEndpoint: true,
-                    }),
+                    () => testCurrentSetup(true),
                     "Endpoint reset and setup re-tested. Forget the old profile in every browser, then pair again.",
                   );
                 }}

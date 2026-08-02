@@ -135,19 +135,26 @@ async function probeCompanionHeaders(
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), PROBE_TIMEOUT_MS);
   timer.unref?.();
-  let response: Response;
   try {
-    response = await fetchImplementation(companionUrl, {
+    const response = await fetchImplementation(companionUrl, {
       cache: "no-store",
       credentials: "omit",
       redirect: "error",
       signal: abort.signal,
     });
+    return await readCompanionVersion(response, setupMode);
   } catch (error) {
+    if (error instanceof RemoteSetupProbeError) throw error;
     throw probeNetworkError(error, "The companion HTTPS page could not be reached.");
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function readCompanionVersion(
+  response: Response,
+  setupMode: RemoteSetupMode,
+): Promise<string> {
   if (!response.ok) {
     throw new RemoteSetupProbeError(
       "network",

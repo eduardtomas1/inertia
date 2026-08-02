@@ -20,6 +20,9 @@ type RelayChallenge = Extract<
 >;
 type RelayRegistered = Extract<RelayServerMessage, { type: "relay.registered" }>;
 
+// The relay remains the nonce/TTL authority; this bounds implausible peer clocks.
+export const REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS = 30_000;
+
 export interface RegisteredRemoteRelay {
   relayVersion: string;
   desktopVersion: string;
@@ -96,6 +99,10 @@ export class RemoteRelayRegistration {
     const purpose = relayBinding === null ? "claim" : "register";
     const epoch = relayBinding === null ? 1 : relayBinding.epoch + 1;
     const transportNow = Date.now();
+    const minimumExpiry = transportNow
+      - REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS;
+    const maximumExpiry = transportNow + timeoutMs
+      + REMOTE_RELAY_CHALLENGE_CLOCK_SKEW_MS;
     if (
       !hello
       || message.relayIdentity !== hello.relayIdentity
@@ -103,8 +110,8 @@ export class RemoteRelayRegistration {
       || message.endpointPublicKey !== this.options.endpointKeyPair().publicKey
       || message.purpose !== purpose
       || (purpose === "claim" ? message.epoch !== epoch : message.epoch < epoch)
-      || message.expiresAt <= transportNow
-      || message.expiresAt - transportNow > timeoutMs
+      || message.expiresAt < minimumExpiry
+      || message.expiresAt > maximumExpiry
     ) {
       this.options.reject("The relay endpoint challenge was invalid.");
       return;

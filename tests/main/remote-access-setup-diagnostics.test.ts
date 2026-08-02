@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createReferenceRelay,
@@ -56,6 +56,7 @@ async function relayFixture(origin: string): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   for (const relay of relays.splice(0)) await relay.close();
   for (const server of servers.splice(0)) {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -118,6 +119,47 @@ describe("Remote Companion setup diagnostics", () => {
       failureClass: "compatibility",
       message: expect.stringContaining("matching checksummed browser artifact"),
     });
+  });
+
+  it("keeps the setup deadline active while the companion body trickles", async () => {
+    vi.useFakeTimers();
+    const stalledFetch = (async (
+      _input: URL | RequestInfo,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const signal = init?.signal;
+      if (!signal) throw new Error("Missing setup abort signal.");
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("<!doctype html>"));
+          signal.addEventListener("abort", () => {
+            controller.error(new Error("Setup body aborted."));
+          }, { once: true });
+        },
+      });
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "Content-Security-Policy": "default-src 'none'; connect-src ws: wss:; frame-ancestors 'none'",
+          "Content-Type": "text/html; charset=utf-8",
+          "Cross-Origin-Resource-Policy": "same-origin",
+          "Referrer-Policy": "no-referrer",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }) as typeof fetch;
+    const failure = expect(probeRemoteSetup(
+      "ws://127.0.0.1:8787/remote",
+      "http://127.0.0.1:4173/",
+      "local-development",
+      { fetch: stalledFetch },
+    )).rejects.toMatchObject({
+      failureClass: "network",
+      message: "The companion HTTPS page could not be reached.",
+    });
+
+    await vi.advanceTimersByTimeAsync(7_001);
+    await failure;
   });
 
   it("classifies a relay origin rejection and keeps self-hosting on HTTPS", async () => {

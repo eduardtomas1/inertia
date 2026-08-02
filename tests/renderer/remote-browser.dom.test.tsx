@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { REMOTE_BROWSER_HEADERS } from "../../remote/browser/vite.config";
@@ -131,6 +131,72 @@ describe("Remote Companion browser output boundary", () => {
       name: "Remote Companion",
     })).toBeVisible();
     expect(getRemoteAccessState).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses normalized setup URLs returned by the setup test when enabling", async () => {
+    const state = pendingState(new Date().toISOString());
+    state.enabled = false;
+    state.connection = "disabled";
+    state.pendingPairings = [];
+    state.diagnostics = {
+      ...state.diagnostics,
+      status: "untested",
+    };
+    const testedState: RemoteAccessState = {
+      ...state,
+      relayUrl: "wss://relay.example/remote",
+      companionUrl: "https://companion.example/",
+      diagnostics: {
+        ...state.diagnostics,
+        status: "passed",
+      },
+    };
+    let publish = (_state: RemoteAccessState): void => undefined;
+    const setRemoteAccessEnabled = vi.fn(async (request: {
+      enabled: boolean;
+      testOnly?: boolean;
+    }) => {
+      const next = { ...testedState, enabled: request.enabled };
+      publish(next);
+      return next;
+    });
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => state),
+        onRemoteAccessState: vi.fn((listener) => {
+          publish = listener;
+          return vi.fn();
+        }),
+        setRemoteAccessEnabled,
+      },
+    });
+    render(<RemoteAccessSettings projects={[]} conversations={[]} />);
+
+    const companionInput = await screen.findByPlaceholderText(
+      "https://companion.your-tailnet.ts.net/",
+    );
+    const relayInput = screen.getByPlaceholderText(
+      "wss://companion.your-tailnet.ts.net/remote",
+    );
+    fireEvent.change(companionInput, {
+      target: { value: " https://companion.example " },
+    });
+    fireEvent.change(relayInput, {
+      target: { value: " wss://relay.example/remote " },
+    });
+    screen.getByRole("button", { name: "Test setup" }).click();
+
+    const allow = screen.getByRole("switch", { name: "Allow remote access" });
+    await waitFor(() => expect(allow).toBeEnabled());
+    expect(companionInput).toHaveValue(testedState.companionUrl);
+    allow.click();
+    await waitFor(() => expect(setRemoteAccessEnabled).toHaveBeenLastCalledWith({
+      enabled: true,
+      relayUrl: testedState.relayUrl,
+      companionUrl: testedState.companionUrl,
+      setupMode: testedState.setupMode,
+    }));
   });
 
   it.each([

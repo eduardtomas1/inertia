@@ -20,10 +20,12 @@ interface RemoteAccessSetupManagerOptions {
   initializeIdentity(relayUrl: string): Promise<PersistedRemoteAccess>;
   serialize<T>(operation: () => Promise<T>): Promise<T>;
   persist(): Promise<void>;
+  persistAuthorityReduction(mutate: () => void): Promise<void>;
   disableLiveAccess(): void;
   audit(type: RemoteAuditEvent["type"], detail: string): void;
   now(): Date;
   emit(): void;
+  probe?: typeof probeRemoteSetup;
 }
 
 export class RemoteAccessSetupManager {
@@ -67,28 +69,38 @@ export class RemoteAccessSetupManager {
     };
     this.options.emit();
     try {
-      const result = await probeRemoteSetup(relayUrl, companionUrl, setupMode, {
-        now: this.options.now,
-      });
+      const result = await (this.options.probe ?? probeRemoteSetup)(
+        relayUrl,
+        companionUrl,
+        setupMode,
+        { now: this.options.now },
+      );
       await this.options.serialize(async () => {
         const data = this.options.data()
           ?? await this.options.initializeIdentity(result.relayUrl);
-        if (
+        const relayIdentityChanged =
           data.relayBinding
-          && data.relayBinding.relayIdentity !== result.relayIdentity
-        ) {
-          if (!resetEndpoint) {
-            throw new RemoteSetupProbeError(
-              "endpoint-authentication",
-              "This relay has a different durable identity. Reset the endpoint and re-pair every browser.",
-            );
-          }
-          this.resetEndpoint(data);
+          && data.relayBinding.relayIdentity !== result.relayIdentity;
+        if (relayIdentityChanged && !resetEndpoint) {
+          throw new RemoteSetupProbeError(
+            "endpoint-authentication",
+            "This relay has a different durable identity. Reset the endpoint and re-pair every browser.",
+          );
         }
-        data.relayUrl = result.relayUrl;
-        data.setupMode = setupMode;
-        data.companionUrl = result.companionUrl;
-        await this.options.persist();
+        const applySetup = (): void => {
+          data.relayUrl = result.relayUrl;
+          data.setupMode = setupMode;
+          data.companionUrl = result.companionUrl;
+        };
+        if (resetEndpoint) {
+          await this.options.persistAuthorityReduction(() => {
+            this.resetEndpoint(data);
+            applySetup();
+          });
+        } else {
+          applySetup();
+          await this.options.persist();
+        }
       });
       this.diagnostics = result.diagnostics;
       this.successfulFingerprint = setupFingerprint(

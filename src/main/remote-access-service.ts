@@ -154,6 +154,7 @@ export class RemoteAccessService {
       serialize: async (operation) =>
         await this.serializeAuthorityMutation(operation),
       persist: async () => await this.persist(),
+      persistAuthorityReduction: (mutate) => this.persistAuthorityReduction(mutate),
       disableLiveAccess: () => this.disableLiveRemoteAccess(),
       audit: (type, detail) => this.audit(type, null, detail),
       now: () => this.now(),

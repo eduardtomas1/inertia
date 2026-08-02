@@ -22,6 +22,7 @@ export interface StoredPairedLaunchSidePlan extends PairedLaunchSidePlan {
   worktreeCreationState: "pending" | "creating" | "created" | "not-created";
   worktreeRemovalStarted: boolean;
   worktreeRemovalConfirmed: boolean;
+  worktreeCleanupOutcome: "absent" | "retained" | null;
   branchCleanupOutcome: "absent" | "retained" | null;
 }
 
@@ -108,6 +109,7 @@ export class PairedLaunchRepository {
         cleanupBranchHead: side.cleanup_branch_head,
         worktreeRemovalStarted: side.worktree_removal_started === 1,
         worktreeRemovalConfirmed: side.worktree_removal_confirmed === 1,
+        worktreeCleanupOutcome: side.worktree_cleanup_outcome,
         branchCleanupOutcome: side.branch_cleanup_outcome,
       })) as StoredPairedLaunch["plans"],
     };
@@ -350,15 +352,48 @@ export class PairedLaunchRepository {
         AND conversation_id IS NULL
         AND worktree_creation_state = 'created'
         AND cleanup_branch_head IS NOT NULL
-        AND worktree_removal_confirmed = 1
+        AND worktree_cleanup_outcome = 'absent'
         AND (
           branch_cleanup_outcome IS NULL
           OR branch_cleanup_outcome = ?
+          OR (
+            branch_cleanup_outcome = 'retained'
+            AND ? = 'absent'
+          )
         )
-    `).run(outcome, launchId, ordinal, outcome);
+    `).run(outcome, launchId, ordinal, outcome, outcome);
     if (result.changes !== 1) {
       throw new Error(
         "The Duo branch cleanup outcome did not match its durable ownership proof.",
+      );
+    }
+  }
+
+  recordWorktreeCleanupOutcome(
+    launchId: string,
+    ordinal: 0 | 1,
+    outcome: "absent" | "retained",
+  ): void {
+    const result = this.database.prepare(`
+      UPDATE paired_launch_sides
+      SET worktree_cleanup_outcome = ?
+      WHERE launch_id = ? AND ordinal = ?
+        AND owns_worktree = 1
+        AND conversation_id IS NULL
+        AND worktree_creation_state = 'created'
+        AND cleanup_branch_head IS NOT NULL
+        AND (
+          worktree_cleanup_outcome IS NULL
+          OR worktree_cleanup_outcome = ?
+          OR (
+            worktree_cleanup_outcome = 'retained'
+            AND ? = 'absent'
+          )
+        )
+    `).run(outcome, launchId, ordinal, outcome, outcome);
+    if (result.changes !== 1) {
+      throw new Error(
+        "The Duo worktree cleanup outcome did not match its durable ownership proof.",
       );
     }
   }
@@ -454,7 +489,6 @@ export class PairedLaunchRepository {
     launchId: string,
     now: string,
     failure: string | null = null,
-    terminalWarning = false,
   ): StoredPairedLaunch {
     return this.database.transaction(() => {
       this.database.prepare(`
@@ -463,7 +497,7 @@ export class PairedLaunchRepository {
       `).run(launchId);
       this.touch(
         launchId,
-        failure && !terminalWarning ? "recovery-required" : "cancelled",
+        failure ? "recovery-required" : "cancelled",
         failure,
         now,
       );

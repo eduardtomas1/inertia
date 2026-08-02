@@ -18,12 +18,11 @@ import {
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import {
-  confirmWorktreeRemovalIfAbsent,
   createWorktree,
   createWorktreeWithOwnershipReceipt,
   GitError,
+  inspectOwnedWorktreeCleanupState,
   inspectRegisteredWorktreeOwnership,
-  removeWorktreeIfOwnershipUnchanged,
   type GitRepositoryStatus,
 } from "../../src/server/git";
 import type {
@@ -320,14 +319,6 @@ function ownedWorktreeOperations(
   overrides: Partial<DuoWorktreeOperations> = {},
 ): DuoWorktreeOperations {
   return {
-    confirmRemovalIfAbsent: async (
-      _repositoryPath,
-      _worktreePath,
-      _branch,
-      removed,
-    ) => {
-      removed();
-    },
     create: async (_repositoryPath, worktreePath, options, hooks) => {
       hooks.beforeAdd();
       hooks.added({
@@ -356,17 +347,7 @@ function ownedWorktreeOperations(
         truncated: false,
       };
     },
-    remove: async (
-      _repositoryPath,
-      _worktreePath,
-      _branch,
-      _head,
-      _force,
-      hooks,
-    ) => {
-      hooks.beforeRemove();
-      hooks.removed();
-    },
+    inspectWorktree: async () => ({ state: "absent" }),
     inspectBranch: async () => "absent",
     ...overrides,
   };
@@ -806,7 +787,6 @@ describe("atomic Duo launch persistence", () => {
     const createGate = new Promise<void>((resolve) => {
       releaseCreate = resolve;
     });
-    const removed: string[] = [];
     const inspected: string[] = [];
     const successful = ownedWorktreeOperations(runtime);
     let createCount = 0;
@@ -835,28 +815,12 @@ describe("atomic Duo launch persistence", () => {
               hooks,
             );
           },
-          remove: async (
-            repositoryPath,
-            worktreePath,
-            branch,
-            head,
-            force,
-            hooks,
-          ) => {
-            removed.push(worktreePath);
-            return successful.remove(
-              repositoryPath,
-              worktreePath,
-              branch,
-              head,
-              force,
-              hooks,
-            );
-          },
-          inspectBranch: async (repositoryPath, branch, head) => {
-            inspected.push(branch);
-            await successful.inspectBranch(repositoryPath, branch, head);
-            return "retained";
+          inspectWorktree: async (_repositoryPath, worktreePath, branch, head) => {
+            inspected.push(worktreePath);
+            return {
+              state: "owned",
+              ownership: { path: worktreePath, branch, head },
+            };
           },
         }),
       },
@@ -871,16 +835,19 @@ describe("atomic Duo launch persistence", () => {
     releaseCreate();
 
     await expect(preparation).rejects.toThrow(/cancelled/u);
-    const cancelled = runtime.store.pairedLaunch(payload.launchId);
-    expect(cancelled.state).toBe("cancelled");
-    expect(cancelled.error).toContain(cancelled.plans[0].plannedBranch);
-    expect(cancelled.error).toContain(
-      `git branch -d -- '${cancelled.plans[0].plannedBranch}'`,
+    const retained = runtime.store.pairedLaunch(payload.launchId);
+    expect(retained.state).toBe("recovery-required");
+    expect(retained.error).toContain(retained.plans[0].plannedWorktreePath);
+    expect(retained.error).toContain(retained.plans[0].plannedBranch);
+    expect(retained.error).toContain(
+      `git worktree remove -- ${JSON.stringify(retained.plans[0].plannedWorktreePath)}`,
     );
     expect(createCount).toBe(1);
-    expect(removed).toEqual([cancelled.plans[0].plannedWorktreePath]);
-    expect(inspected).toEqual([cancelled.plans[0].plannedBranch]);
-    expect(cancelled.plans[0].branchCleanupOutcome).toBe("retained");
+    expect(inspected).toEqual([retained.plans[0].plannedWorktreePath]);
+    expect(retained.plans[0]).toMatchObject({
+      worktreeCleanupOutcome: "retained",
+      branchCleanupOutcome: null,
+    });
     runtime.store.close();
   });
 
@@ -941,7 +908,7 @@ describe("atomic Duo launch persistence", () => {
               truncated: false,
             } satisfies GitRepositoryStatus;
           },
-          remove: async () => {
+          inspectWorktree: async () => {
             throw new Error("Duplicate preparation must not compensate.");
           },
         }),
@@ -968,8 +935,7 @@ describe("atomic Duo launch persistence", () => {
     const runtime = await createRuntime();
     await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
     const attemptedBranches: string[] = [];
-    let removals = 0;
-    let branchDeletions = 0;
+    let cleanupInspections = 0;
     const launches = new DuoLaunchCoordinator(
       runtime.store,
       { resolveModelRoute: resolveNativeModelRoute },
@@ -991,13 +957,9 @@ describe("atomic Duo launch persistence", () => {
               `A branch named ${options.branch} already exists.`,
             );
           },
-          remove: async () => {
-            removals += 1;
-            throw new Error("A colliding branch must not trigger removal.");
-          },
-          inspectBranch: async () => {
-            branchDeletions += 1;
-            throw new Error("A colliding branch must not be deleted.");
+          inspectWorktree: async () => {
+            cleanupInspections += 1;
+            throw new Error("A collision must not trigger cleanup inspection.");
           },
         }),
       },
@@ -1007,8 +969,7 @@ describe("atomic Duo launch persistence", () => {
     await expect(launches.prepare(payload)).rejects.toThrow(/already exists/u);
 
     expect(attemptedBranches).toHaveLength(1);
-    expect(removals).toBe(0);
-    expect(branchDeletions).toBe(0);
+    expect(cleanupInspections).toBe(0);
     expect(runtime.store.pairedLaunch(payload.launchId)).toMatchObject({
       state: "failed",
       plans: [
@@ -1030,8 +991,7 @@ describe("atomic Duo launch persistence", () => {
   it("retains ambiguous create ownership without adopting matching post-state", async () => {
     const runtime = await createRuntime();
     await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
-    let removals = 0;
-    let branchDeletions = 0;
+    let cleanupInspections = 0;
     const launches = new DuoLaunchCoordinator(
       runtime.store,
       { resolveModelRoute: resolveNativeModelRoute },
@@ -1051,12 +1011,9 @@ describe("atomic Duo launch persistence", () => {
               "worktree add delivery was ambiguous after mutation",
             );
           },
-          remove: async () => {
-            removals += 1;
-          },
-          inspectBranch: async () => {
-            branchDeletions += 1;
-            return "absent";
+          inspectWorktree: async () => {
+            cleanupInspections += 1;
+            return { state: "absent" };
           },
         }),
       },
@@ -1077,18 +1034,15 @@ describe("atomic Duo launch persistence", () => {
     await expect(launches.cancel(payload.launchId)).resolves.toMatchObject({
       state: "recovery-required",
     });
-    expect(removals).toBe(0);
-    expect(branchDeletions).toBe(0);
+    expect(cleanupInspections).toBe(0);
     runtime.store.close();
   });
 
-  it("retains both generated branches when the second post-create status read fails", async () => {
+  it("retains both generated worktrees when the second post-create status read fails", async () => {
     const runtime = await createRuntime();
     await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
     const created: string[] = [];
-    const removed: string[] = [];
-    const deletedBranches: Array<{ branch: string; head: string }> = [];
-    const successful = ownedWorktreeOperations(runtime);
+    const inspectedPaths: string[] = [];
     const launches = new DuoLaunchCoordinator(
       runtime.store,
       { resolveModelRoute: resolveNativeModelRoute },
@@ -1133,22 +1087,12 @@ describe("atomic Duo launch persistence", () => {
               truncated: false,
             } satisfies GitRepositoryStatus;
           },
-          remove: async (
-            _repositoryPath,
-            worktreePath,
-            _branch,
-            _head,
-            _force,
-            hooks,
-          ) => {
-            removed.push(worktreePath);
-            hooks.beforeRemove();
-            hooks.removed();
-          },
-          inspectBranch: async (repositoryPath, branch, head) => {
-            deletedBranches.push({ branch, head });
-            await successful.inspectBranch(repositoryPath, branch, head);
-            return "retained";
+          inspectWorktree: async (_repositoryPath, worktreePath, branch, head) => {
+            inspectedPaths.push(worktreePath);
+            return {
+              state: "owned",
+              ownership: { path: worktreePath, branch, head },
+            };
           },
         }),
       },
@@ -1159,26 +1103,24 @@ describe("atomic Duo launch persistence", () => {
       /second worktree status rejected after add/u,
     );
     expect(created).toHaveLength(2);
-    expect(removed).toEqual([created[1], created[0]]);
+    expect(inspectedPaths).toEqual([created[1], created[0]]);
     expect(runtime.store.snapshot().conversations).toEqual([]);
     const failed = runtime.store.pairedLaunch(payload.launchId);
-    expect(failed.state).toBe("failed");
+    expect(failed.state).toBe("recovery-required");
     expect(failed.plans).toEqual([
       expect.objectContaining({
         cleanupBranchHead: OWNED_WORKTREE_HEAD,
-        worktreeRemovalConfirmed: true,
-        branchCleanupOutcome: "retained",
+        worktreeCleanupOutcome: "retained",
+        branchCleanupOutcome: null,
       }),
       expect.objectContaining({
         cleanupBranchHead: OWNED_WORKTREE_HEAD,
-        worktreeRemovalConfirmed: true,
-        branchCleanupOutcome: "retained",
+        worktreeCleanupOutcome: "retained",
+        branchCleanupOutcome: null,
       }),
     ]);
-    expect(deletedBranches).toEqual([
-      { branch: failed.plans[1].plannedBranch, head: OWNED_WORKTREE_HEAD },
-      { branch: failed.plans[0].plannedBranch, head: OWNED_WORKTREE_HEAD },
-    ]);
+    expect(failed.error).toContain(created[0]);
+    expect(failed.error).toContain(created[1]);
     expect(failed.error).toContain(failed.plans[0].plannedBranch);
     expect(failed.error).toContain(failed.plans[1].plannedBranch);
     runtime.store.close();
@@ -1204,9 +1146,9 @@ describe("atomic Duo launch persistence", () => {
       () => [providerInfo()],
       {
         worktrees: ownedWorktreeOperations(runtime, {
-          remove: async () => {
+          inspectWorktree: async () => {
             cleanupCalls += 1;
-            throw new Error("Adopted worktrees must not be removed.");
+            throw new Error("Adopted worktrees must not be inspected for cleanup.");
           },
           inspectBranch: async () => {
             cleanupCalls += 1;
@@ -1238,10 +1180,9 @@ describe("atomic Duo launch persistence", () => {
     try {
       await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
       const created: string[] = [];
-      let cleanupAttempts = 0;
-      const cleanupPaths: string[] = [];
-      const deletedBranches: string[] = [];
-      const successful = ownedWorktreeOperations(runtime);
+      let manualCleanupComplete = false;
+      const inspectedPaths: string[] = [];
+      const inspectedBranches: string[] = [];
       const launches = new DuoLaunchCoordinator(
         runtime.store,
         { resolveModelRoute: resolveNativeModelRoute },
@@ -1286,28 +1227,18 @@ describe("atomic Duo launch persistence", () => {
                 truncated: false,
               } satisfies GitRepositoryStatus;
             },
-            remove: async (
-              _repositoryPath,
-              worktreePath,
-              _branch,
-              _head,
-              _force,
-              hooks,
-            ) => {
-              cleanupAttempts += 1;
-              cleanupPaths.push(worktreePath);
-              if (cleanupAttempts === 1) {
-                throw new GitError(
-                  "conflict",
-                  `registered replacement no longer matches ${worktreePath}`,
-                );
-              }
-              hooks.beforeRemove();
-              hooks.removed();
+            inspectWorktree: async (_repositoryPath, worktreePath, branch, head) => {
+              inspectedPaths.push(worktreePath);
+              return manualCleanupComplete
+                ? { state: "absent" }
+                : {
+                  state: "owned",
+                  ownership: { path: worktreePath, branch, head },
+                };
             },
-            inspectBranch: async (repositoryPath, branch, head) => {
-              deletedBranches.push(branch);
-              return successful.inspectBranch(repositoryPath, branch, head);
+            inspectBranch: async (_repositoryPath, branch) => {
+              inspectedBranches.push(branch);
+              return "absent";
             },
           }),
         },
@@ -1327,7 +1258,7 @@ describe("atomic Duo launch persistence", () => {
         launchId: payload.launchId,
         state: "recovery-required",
         error: expect.stringContaining(
-          `Owned worktree cleanup needs attention: registered replacement no longer matches ${created[1]}`,
+          `git worktree remove -- ${JSON.stringify(created[1])}`,
         ),
         sides: [
           { ordinal: 0, conversationId: null, turnId: null },
@@ -1340,27 +1271,28 @@ describe("atomic Duo launch persistence", () => {
         ownsWorktree: true,
         worktreeCreationState: "created",
         cleanupBranchHead: OWNED_WORKTREE_HEAD,
-        worktreeRemovalConfirmed: false,
+        worktreeCleanupOutcome: "retained",
       });
       expect(recovery.plans[0]).toMatchObject({
         worktreeCreationState: "created",
         cleanupBranchHead: OWNED_WORKTREE_HEAD,
-        worktreeRemovalConfirmed: true,
-        branchCleanupOutcome: "absent",
+        worktreeCleanupOutcome: "retained",
+        branchCleanupOutcome: null,
       });
       expect(runtime.store.snapshot().conversations).toEqual([]);
+      manualCleanupComplete = true;
       await expect(launches.cancel(payload.launchId)).resolves.toMatchObject({
         launchId: payload.launchId,
         state: "cancelled",
         error: null,
       });
-      expect(cleanupAttempts).toBe(3);
-      expect(cleanupPaths).toEqual([
+      expect(inspectedPaths).toEqual([
         created[1],
+        created[0],
         created[0],
         created[1],
       ]);
-      expect(deletedBranches).toEqual([
+      expect(inspectedBranches).toEqual([
         recovery.plans[0].plannedBranch,
         recovery.plans[1].plannedBranch,
       ]);
@@ -1373,15 +1305,14 @@ describe("atomic Duo launch persistence", () => {
     }
   });
 
-  it("reconciles an interrupted branch inspection after restart without ref mutation", async () => {
+  it("reconciles an interrupted cleanup inspection after restart without Git mutation", async () => {
     const runtime = await createRuntime();
     let originalClosed = false;
     let reopened: RuntimeStore | null = null;
     try {
       await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
       const created: string[] = [];
-      let firstBranchDelete = true;
-      const initialDeletes: string[] = [];
+      const initialInspections: string[] = [];
       const successful = ownedWorktreeOperations(runtime);
       const launches = new DuoLaunchCoordinator(
         runtime.store,
@@ -1397,32 +1328,34 @@ describe("atomic Duo launch persistence", () => {
           worktrees: ownedWorktreeOperations(runtime, {
             create: async (repositoryPath, worktreePath, options, hooks) => {
               created.push(worktreePath);
-              if (created.length === 2) {
-                hooks.beforeAdd();
-                hooks.added({
-                  branch: options.branch,
-                  head: OWNED_WORKTREE_HEAD,
-                  path: worktreePath,
-                });
-                throw new Error("second worktree status rejected after add");
-              }
-              return successful.create(
+              const status = await successful.create(
                 repositoryPath,
                 worktreePath,
                 options,
                 hooks,
               );
+              if (created.length === 2) {
+                throw new Error("second worktree status rejected after add");
+              }
+              return status;
             },
-            inspectBranch: async (repositoryPath, branch, head) => {
-              initialDeletes.push(branch);
-              if (firstBranchDelete) {
-                firstBranchDelete = false;
+            inspectWorktree: async (_repositoryPath, path, branch, head) => {
+              initialInspections.push(path);
+              if (path === created[1]) {
                 throw new GitError(
-                  "conflict",
-                  "branch changed after worktree removal",
+                  "timeout",
+                  "worktree inspection completion was ambiguous",
                 );
               }
-              return successful.inspectBranch(repositoryPath, branch, head);
+              return {
+                state: "owned",
+                ownership: { path, branch, head },
+              };
+            },
+            inspectBranch: async () => {
+              throw new Error(
+                "A retained or ambiguous worktree must prevent branch inspection.",
+              );
             },
           }),
         },
@@ -1434,14 +1367,19 @@ describe("atomic Duo launch persistence", () => {
       );
       const recovery = runtime.store.pairedLaunch(payload.launchId);
       expect(recovery.state).toBe("recovery-required");
-      expect(recovery.error).toContain("branch changed after worktree removal");
-      const interruptedBranch = initialDeletes[0];
-      const interruptedPlan = recovery.plans.find(
-        ({ plannedBranch }) => plannedBranch === interruptedBranch,
+      expect(recovery.error).toContain(
+        "worktree inspection completion was ambiguous",
       );
-      expect(interruptedPlan).toMatchObject({
-        cleanupBranchHead: OWNED_WORKTREE_HEAD,
-        worktreeRemovalConfirmed: true,
+      expect(initialInspections).toEqual([created[1], created[0]]);
+      expect(recovery.plans[0]).toMatchObject({
+        worktreeCleanupOutcome: "retained",
+        worktreeRemovalStarted: false,
+        worktreeRemovalConfirmed: false,
+      });
+      expect(recovery.plans[1]).toMatchObject({
+        worktreeCleanupOutcome: null,
+        worktreeRemovalStarted: false,
+        worktreeRemovalConfirmed: false,
       });
 
       runtime.store.close();
@@ -1451,17 +1389,18 @@ describe("atomic Duo launch persistence", () => {
         runtime.workspace,
         { recoverInterruptedRuns: false },
       );
-      const retryDeletes: string[] = [];
+      const retryPaths: string[] = [];
+      const retryBranches: string[] = [];
       const retryWorktrees = ownedWorktreeOperations(
         { ...runtime, store: reopened },
         {
-          remove: async () => {
-            throw new Error("A removal receipt must suppress repeated removal.");
+          inspectWorktree: async (_repositoryPath, path) => {
+            retryPaths.push(path);
+            return { state: "absent" };
           },
-          inspectBranch: async (repositoryPath, branch, head) => {
-            retryDeletes.push(branch);
-            await successful.inspectBranch(repositoryPath, branch, head);
-            return "retained";
+          inspectBranch: async (_repositoryPath, branch) => {
+            retryBranches.push(branch);
+            return "absent";
           },
         },
       );
@@ -1480,28 +1419,39 @@ describe("atomic Duo launch persistence", () => {
 
       await expect(restarted.cancel(payload.launchId)).resolves.toMatchObject({
         state: "cancelled",
-        error: expect.stringContaining(`git branch -d -- '${interruptedBranch}'`),
+        error: null,
       });
-      expect(retryDeletes).toEqual([interruptedBranch]);
+      expect(retryPaths).toEqual(recovery.plans.map(
+        ({ plannedWorktreePath }) => plannedWorktreePath,
+      ));
+      expect(retryBranches).toEqual(recovery.plans.map(
+        ({ plannedBranch }) => plannedBranch,
+      ));
       const terminal = reopened.pairedLaunch(payload.launchId);
-      expect(terminal.plans.find(({ plannedBranch }) =>
-        plannedBranch === interruptedBranch)?.branchCleanupOutcome).toBe(
-        "retained",
-      );
+      expect(terminal.plans).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          worktreeCleanupOutcome: "absent",
+          branchCleanupOutcome: "absent",
+        }),
+        expect.objectContaining({
+          worktreeCleanupOutcome: "absent",
+          branchCleanupOutcome: "absent",
+        }),
+      ]));
     } finally {
       reopened?.close();
       if (!originalClosed) runtime.store.close();
     }
   });
 
-  it("does not retry an ambiguous removal after restart", async () => {
+  it("retries ambiguous read-only cleanup after restart and resolves only exact absence", async () => {
     const runtime = await createRuntime();
     let originalClosed = false;
     let reopened: RuntimeStore | null = null;
     try {
       await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
-      let removalClaims = 0;
-      let branchDeletions = 0;
+      let initialInspections = 0;
+      let branchInspections = 0;
       const launches = new DuoLaunchCoordinator(
         runtime.store,
         { resolveModelRoute: resolveNativeModelRoute },
@@ -1528,23 +1478,15 @@ describe("atomic Duo launch persistence", () => {
               });
               throw new Error("post-create status inspection failed");
             },
-            remove: async (
-              _repositoryPath,
-              _worktreePath,
-              _branch,
-              _head,
-              _force,
-              hooks,
-            ) => {
-              removalClaims += 1;
-              hooks.beforeRemove();
+            inspectWorktree: async () => {
+              initialInspections += 1;
               throw new GitError(
                 "timeout",
-                "worktree removal completion was ambiguous",
+                "worktree cleanup inspection was ambiguous",
               );
             },
             inspectBranch: async () => {
-              branchDeletions += 1;
+              branchInspections += 1;
               return "absent";
             },
           }),
@@ -1561,11 +1503,12 @@ describe("atomic Duo launch persistence", () => {
       expect(recovery.plans[0]).toMatchObject({
         worktreeCreationState: "created",
         cleanupBranchHead: OWNED_WORKTREE_HEAD,
-        worktreeRemovalStarted: true,
+        worktreeCleanupOutcome: null,
+        worktreeRemovalStarted: false,
         worktreeRemovalConfirmed: false,
       });
-      expect(removalClaims).toBe(1);
-      expect(branchDeletions).toBe(0);
+      expect(initialInspections).toBe(1);
+      expect(branchInspections).toBe(0);
 
       runtime.store.close();
       originalClosed = true;
@@ -1574,8 +1517,9 @@ describe("atomic Duo launch persistence", () => {
         runtime.workspace,
         { recoverInterruptedRuns: false },
       );
-      let retryRemovals = 0;
-      let retryDeletions = 0;
+      let retryInspections = 0;
+      let retryBranchInspections = 0;
+      let manualCleanupComplete = false;
       const restarted = new DuoLaunchCoordinator(
         reopened,
         { resolveModelRoute: resolveNativeModelRoute },
@@ -1590,18 +1534,17 @@ describe("atomic Duo launch persistence", () => {
           worktrees: ownedWorktreeOperations(
             { ...runtime, store: reopened },
             {
-              remove: async () => {
-                retryRemovals += 1;
+              inspectWorktree: async (_repositoryPath, path, branch, head) => {
+                retryInspections += 1;
+                if (manualCleanupComplete) return { state: "absent" };
+                return {
+                  state: "conflict",
+                  ownership: { path, branch, head },
+                } as never;
               },
               inspectBranch: async () => {
-                retryDeletions += 1;
+                retryBranchInspections += 1;
                 return "absent";
-              },
-              confirmRemovalIfAbsent: async () => {
-                throw new GitError(
-                  "conflict",
-                  "the claimed worktree topology is still present",
-                );
               },
             },
           ),
@@ -1611,18 +1554,31 @@ describe("atomic Duo launch persistence", () => {
       await expect(restarted.cancel(payload.launchId)).resolves.toMatchObject({
         state: "recovery-required",
         error: expect.stringContaining(
-          "the claimed worktree topology is still present",
+          "retained Duo worktree topology changed",
         ),
       });
-      expect(retryRemovals).toBe(0);
-      expect(retryDeletions).toBe(0);
+      expect(retryInspections).toBe(1);
+      expect(retryBranchInspections).toBe(0);
+      expect(reopened.pairedLaunch(payload.launchId).plans[0]).toMatchObject({
+        worktreeCleanupOutcome: "retained",
+        worktreeRemovalStarted: false,
+        worktreeRemovalConfirmed: false,
+      });
+
+      manualCleanupComplete = true;
+      await expect(restarted.cancel(payload.launchId)).resolves.toMatchObject({
+        state: "cancelled",
+        error: null,
+      });
+      expect(retryInspections).toBe(2);
+      expect(retryBranchInspections).toBe(1);
     } finally {
       reopened?.close();
       if (!originalClosed) runtime.store.close();
     }
   });
 
-  it("retains the removal claim when ownership changes after its durable receipt", async () => {
+  it("preserves a worktree changed after read-only inspection", async () => {
     const runtime = await createRuntime();
     try {
       await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
@@ -1648,7 +1604,8 @@ describe("atomic Duo launch persistence", () => {
         "-m",
         "Initial",
       ]);
-      const replacementBranch = "user/changed-after-removal-claim";
+      const replacementBranch = "user/changed-after-read-only-inspection";
+      let changedAfterInspection = false;
       const launches = new DuoLaunchCoordinator(
         runtime.store,
         { resolveModelRoute: resolveNativeModelRoute },
@@ -1661,7 +1618,6 @@ describe("atomic Duo launch persistence", () => {
         () => [providerInfo()],
         {
           worktrees: {
-            confirmRemovalIfAbsent: confirmWorktreeRemovalIfAbsent,
             create: async (repositoryPath, worktreePath, options, hooks) => {
               await createWorktreeWithOwnershipReceipt(
                 repositoryPath,
@@ -1671,42 +1627,39 @@ describe("atomic Duo launch persistence", () => {
               );
               throw new Error("force compensation after worktree creation");
             },
-            remove: async (
+            inspectWorktree: async (
               repositoryPath,
               worktreePath,
               branch,
               head,
-              force,
-              hooks,
-            ) => removeWorktreeIfOwnershipUnchanged(
-              repositoryPath,
-              worktreePath,
-              branch,
-              head,
-              force,
-              {
-                beforeRemove: () => {
-                  hooks.beforeRemove();
-                  execFileSync(
-                    "git",
-                    ["switch", "-q", "-c", replacementBranch],
-                    { cwd: worktreePath },
-                  );
-                  execFileSync(
-                    "git",
-                    [
-                      "commit",
-                      "--allow-empty",
-                      "-q",
-                      "-m",
-                      "Change identity after durable removal claim",
-                    ],
-                    { cwd: worktreePath },
-                  );
-                },
-                removed: hooks.removed,
-              },
-            ),
+            ) => {
+              const inspection = await inspectOwnedWorktreeCleanupState(
+                repositoryPath,
+                worktreePath,
+                branch,
+                head,
+              );
+              if (inspection.state === "owned" && !changedAfterInspection) {
+                changedAfterInspection = true;
+                execFileSync(
+                  "git",
+                  ["switch", "-q", "-c", replacementBranch],
+                  { cwd: worktreePath },
+                );
+                execFileSync(
+                  "git",
+                  [
+                    "commit",
+                    "--allow-empty",
+                    "-q",
+                    "-m",
+                    "Change identity after read-only inspection",
+                  ],
+                  { cwd: worktreePath },
+                );
+              }
+              return inspection;
+            },
             inspectBranch: async () => {
               throw new Error("Changed ownership must prevent branch deletion.");
             },
@@ -1724,7 +1677,8 @@ describe("atomic Duo launch persistence", () => {
       expect(recovery).toMatchObject({ state: "recovery-required" });
       expect(recovery.plans[0]).toMatchObject({
         worktreeCreationState: "created",
-        worktreeRemovalStarted: true,
+        worktreeCleanupOutcome: "retained",
+        worktreeRemovalStarted: false,
         worktreeRemovalConfirmed: false,
       });
       const changedOwnership = await inspectRegisteredWorktreeOwnership(
@@ -1739,15 +1693,23 @@ describe("atomic Duo launch persistence", () => {
       await expect(launches.cancel(payload.launchId)).resolves.toMatchObject({
         state: "recovery-required",
         error: expect.stringContaining(
-          "present, moved, or replacement topology",
+          "retained Duo worktree topology changed",
         ),
+      });
+      await expect(inspectRegisteredWorktreeOwnership(
+        runtime.workspace,
+        recovery.plans[0].plannedWorktreePath!,
+        replacementBranch,
+      )).resolves.toMatchObject({
+        branch: replacementBranch,
+        head: changedOwnership.head,
       });
     } finally {
       runtime.store.close();
     }
   });
 
-  it("preserves an exact reattached worktree after a crash before removal confirmation", async () => {
+  it("preserves an exact worktree reattached after a legacy removal claim", async () => {
     const runtime = await createRuntime();
     try {
       await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
@@ -1814,25 +1776,19 @@ describe("atomic Duo launch persistence", () => {
         },
       );
       const created = runtime.store.pairedLaunch(launchId).plans[0];
-      await expect(removeWorktreeIfOwnershipUnchanged(
+      runtime.store.beginPairedLaunchWorktreeRemoval(launchId, 0);
+      await execFileAsync("git", [
+        "-C",
         runtime.workspace,
-        created.plannedWorktreePath!,
-        created.plannedBranch!,
-        created.cleanupBranchHead!,
-        false,
-        {
-          beforeRemove: () => {
-            runtime.store.beginPairedLaunchWorktreeRemoval(launchId, 0);
-          },
-          removed: () => {
-            throw new Error("crash before durable removal confirmation");
-          },
-        },
-      )).rejects.toThrow(/crash before durable removal confirmation/u);
+        "worktree",
+        "remove",
+        "--",
+        worktreePath,
+      ]);
       runtime.store.failPairedLaunch(
         launchId,
         "recovery-required",
-        "Removal completion is ambiguous.",
+        "A legacy removal completed before its durable confirmation.",
       );
       await createWorktree(runtime.workspace, worktreePath, {
         branch,
@@ -1841,8 +1797,13 @@ describe("atomic Duo launch persistence", () => {
       await expect(coordinator(runtime).cancel(launchId)).resolves.toMatchObject({
         state: "recovery-required",
         error: expect.stringContaining(
-          "present, moved, or replacement topology",
+          "owned Duo worktree remains",
         ),
+      });
+      expect(runtime.store.pairedLaunch(launchId).plans[0]).toMatchObject({
+        worktreeCleanupOutcome: "retained",
+        worktreeRemovalStarted: true,
+        worktreeRemovalConfirmed: false,
       });
       await expect(inspectRegisteredWorktreeOwnership(
         runtime.workspace,
@@ -1863,7 +1824,7 @@ describe("atomic Duo launch persistence", () => {
     }
   });
 
-  it("confirms an absent claimed removal with a surviving descendant branch", async () => {
+  it("confirms exact manual absence with a surviving descendant branch", async () => {
     const runtime = await createRuntime();
     let originalClosed = false;
     let reopened: RuntimeStore | null = null;
@@ -1932,25 +1893,19 @@ describe("atomic Duo launch persistence", () => {
         },
       );
       const created = runtime.store.pairedLaunch(launchId).plans[0];
-      await expect(removeWorktreeIfOwnershipUnchanged(
+      runtime.store.beginPairedLaunchWorktreeRemoval(launchId, 0);
+      await execFileAsync("git", [
+        "-C",
         runtime.workspace,
-        created.plannedWorktreePath!,
-        created.plannedBranch!,
-        created.cleanupBranchHead!,
-        false,
-        {
-          beforeRemove: () => {
-            runtime.store.beginPairedLaunchWorktreeRemoval(launchId, 0);
-          },
-          removed: () => {
-            throw new Error("crash before durable removal confirmation");
-          },
-        },
-      )).rejects.toThrow(/crash before durable removal confirmation/u);
+        "worktree",
+        "remove",
+        "--",
+        worktreePath,
+      ]);
       runtime.store.failPairedLaunch(
         launchId,
         "recovery-required",
-        "Removal completion is ambiguous.",
+        "A legacy removal completed before its durable confirmation.",
       );
       const descendantBranch = `${branch}/user-topic`;
       await execFileAsync("git", [
@@ -1987,7 +1942,9 @@ describe("atomic Duo launch persistence", () => {
       });
       expect(reopened.pairedLaunch(launchId).plans[0]).toMatchObject({
         worktreeRemovalStarted: true,
-        worktreeRemovalConfirmed: true,
+        worktreeRemovalConfirmed: false,
+        worktreeCleanupOutcome: "absent",
+        branchCleanupOutcome: "absent",
       });
       await expect(execFileAsync("git", [
         "-C",
@@ -2004,12 +1961,6 @@ describe("atomic Duo launch persistence", () => {
       ])).resolves.toMatchObject({
         stdout: expect.stringContaining(created.cleanupBranchHead!),
       });
-      await expect(confirmWorktreeRemovalIfAbsent(
-        runtime.workspace,
-        worktreePath,
-        branch,
-        () => undefined,
-      )).resolves.toBeUndefined();
     } finally {
       reopened?.close();
       if (!originalClosed) runtime.store.close();

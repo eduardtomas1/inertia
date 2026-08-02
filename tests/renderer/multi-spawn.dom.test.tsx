@@ -1333,7 +1333,7 @@ describe("multi-spawn", () => {
       .toBe(false);
   });
 
-  it("cancels a lost prepared response before clearing its recovery identity", async () => {
+  it("retains a lost-prepared recovery identity until manual worktree cleanup is confirmed", async () => {
     const launchId = "88888888-8888-4888-8888-888888888888";
     window.localStorage.setItem(
       MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
@@ -1343,7 +1343,11 @@ describe("multi-spawn", () => {
       { ordinal: 0 as const, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "pending" as const },
       { ordinal: 1 as const, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "pending" as const },
     ];
-    const retainedBranchMessage = "The generated branch was intentionally retained after worktree removal: inertia/33333333. Inspect it in the corresponding project repository; if it is no longer needed, remove it manually with `git branch -d -- 'inertia/33333333'`.";
+    const worktreePath = "/workspace/.inertia/worktrees/33333333";
+    const branch = "inertia/33333333";
+    const retainedWorktreeMessage = `The owned Duo worktree remains at path ${JSON.stringify(worktreePath)} on branch ${branch}. Automatic cleanup was withheld. Remove it manually with \`git worktree remove -- ${JSON.stringify(worktreePath)}\`, then \`git branch -d -- '${branch}'\`.`;
+    let recoveryRequired = false;
+    let manualCleanupComplete = false;
     const run = vi.fn(async (
       _key: string,
       command: CommandWithoutId,
@@ -1355,24 +1359,25 @@ describe("multi-spawn", () => {
           result: {
             kind: "duo.status",
             launchId,
-            state: "prepared",
-            error: null,
+            state: recoveryRequired ? "recovery-required" : "prepared",
+            error: recoveryRequired ? retainedWorktreeMessage : null,
             sides,
           },
         };
       }
       expect(command).toEqual({ type: "duo.cancel", payload: { launchId } });
+      recoveryRequired = !manualCleanupComplete;
       return {
         type: "request.result",
         requestId: crypto.randomUUID(),
         result: {
           kind: "duo.status",
           launchId,
-          state: "cancelled",
-          error: retainedBranchMessage,
+          state: recoveryRequired ? "recovery-required" : "cancelled",
+          error: recoveryRequired ? retainedWorktreeMessage : null,
           sides: [
-            { ...sides[0], dispatchState: "cancelled" },
-            { ...sides[1], dispatchState: "cancelled" },
+            { ...sides[0], dispatchState: recoveryRequired ? "pending" : "cancelled" },
+            { ...sides[1], dispatchState: recoveryRequired ? "pending" : "cancelled" },
           ],
         },
       };
@@ -1399,9 +1404,27 @@ describe("multi-spawn", () => {
     ]);
     expect(window.localStorage.getItem(
       MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBe(launchId);
+    expect(hook.result.current.error).toBe(
+      retainedWorktreeMessage,
+    );
+
+    manualCleanupComplete = true;
+    act(() => hook.result.current.closeDialog());
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(4));
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.status",
+      "duo.cancel",
+      "duo.status",
+      "duo.cancel",
+    ]);
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
     )).toBeNull();
     expect(hook.result.current.error).toBe(
-      retainedBranchMessage,
+      "The duo launch was cancelled before both providers began.",
     );
   });
 

@@ -453,6 +453,18 @@ export class RuntimeStore {
     );
   }
 
+  recordPairedLaunchWorktreeCleanupOutcome(
+    launchId: string,
+    ordinal: 0 | 1,
+    outcome: "absent" | "retained",
+  ): void {
+    this.pairedLaunchRepository.recordWorktreeCleanupOutcome(
+      launchId,
+      ordinal,
+      outcome,
+    );
+  }
+
   requestPairedLaunchCancellation(
     launchId: string,
     now = new Date().toISOString(),
@@ -484,14 +496,12 @@ export class RuntimeStore {
   finishPairedLaunchCancellation(
     launchId: string,
     failure: string | null = null,
-    terminalWarning = false,
     now = new Date().toISOString(),
   ): StoredPairedLaunch {
     return this.pairedLaunchRepository.finishCancellation(
       launchId,
       now,
       failure,
-      terminalWarning,
     );
   }
 

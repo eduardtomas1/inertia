@@ -33,15 +33,14 @@ export {
   type BranchCleanupOutcome,
 } from "./git/branches";
 export {
-  confirmWorktreeRemovalIfAbsent,
   createWorktree,
   createWorktreeWithOwnershipReceipt,
+  inspectOwnedWorktreeCleanupState,
   inspectRegisteredWorktreeOwnership,
   type OwnedWorktreeCreationHooks,
-  type OwnedWorktreeRemovalHooks,
+  type OwnedWorktreeCleanupInspection,
   type RegisteredWorktreeOwnership,
   removeWorktree,
-  removeWorktreeIfOwnershipUnchanged,
 } from "./git/worktrees";
 export { commitChanges } from "./git/commits";
 export {

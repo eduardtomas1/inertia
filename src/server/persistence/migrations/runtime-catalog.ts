@@ -1075,6 +1075,16 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
               CHECK (worktree_removal_started IN (0, 1));
           `);
         }
+        if (!columns.some(({ name }) => name === "worktree_cleanup_outcome")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN worktree_cleanup_outcome TEXT
+              CHECK (
+                worktree_cleanup_outcome IS NULL
+                OR worktree_cleanup_outcome IN ('absent', 'retained')
+              );
+          `);
+        }
         if (!columns.some(({ name }) => name === "branch_cleanup_outcome")) {
           database.exec(`
             ALTER TABLE paired_launch_sides
@@ -1083,7 +1093,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
                 branch_cleanup_outcome IS NULL
                 OR (
                   branch_cleanup_outcome IN ('absent', 'retained')
-                  AND worktree_removal_confirmed = 1
+                  AND worktree_cleanup_outcome = 'absent'
                   AND cleanup_branch_head IS NOT NULL
                 )
               );

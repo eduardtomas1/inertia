@@ -973,6 +973,7 @@ describe("atomic Duo schema migration", () => {
         const previous = new Database(databasePath);
         previous.exec(`
           ALTER TABLE paired_launch_sides DROP COLUMN branch_cleanup_outcome;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_cleanup_outcome;
           ALTER TABLE paired_launch_sides DROP COLUMN worktree_removal_confirmed;
           ALTER TABLE paired_launch_sides DROP COLUMN worktree_removal_started;
           ALTER TABLE paired_launch_sides DROP COLUMN worktree_creation_state;
@@ -994,6 +995,7 @@ describe("atomic Duo schema migration", () => {
             worktreeCreationState: "pending",
             worktreeRemovalStarted: false,
             worktreeRemovalConfirmed: false,
+            worktreeCleanupOutcome: null,
             branchCleanupOutcome: null,
           }),
           expect.objectContaining({
@@ -1001,6 +1003,7 @@ describe("atomic Duo schema migration", () => {
             worktreeCreationState: "pending",
             worktreeRemovalStarted: false,
             worktreeRemovalConfirmed: false,
+            worktreeCleanupOutcome: null,
             branchCleanupOutcome: null,
           }),
         ]);
@@ -1041,6 +1044,7 @@ describe("atomic Duo schema migration", () => {
           || name === "worktree_creation_state"
           || name === "worktree_removal_started"
           || name === "worktree_removal_confirmed"
+          || name === "worktree_cleanup_outcome"
           || name === "branch_cleanup_outcome",
       )).toEqual([
         expect.objectContaining({
@@ -1058,6 +1062,10 @@ describe("atomic Duo schema migration", () => {
         expect.objectContaining({
           name: "worktree_removal_started",
           dflt_value: "0",
+        }),
+        expect.objectContaining({
+          name: "worktree_cleanup_outcome",
+          dflt_value: null,
         }),
         expect.objectContaining({
           name: "branch_cleanup_outcome",

@@ -11,6 +11,8 @@ const IPC = {
   runtimeReady: "inertia:runtime-ready",
   selectDirectory: "inertia:select-directory",
   selectCodexExecutable: "inertia:select-codex-executable",
+  exportRecoveryData: "inertia:export-recovery-data",
+  importRecoveryData: "inertia:import-recovery-data",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
   copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
   copyText: "inertia:copy-text",
@@ -42,6 +44,14 @@ const bridge: DesktopBridge = Object.freeze({
   },
   selectDirectory: () => ipcRenderer.invoke(IPC.selectDirectory) as Promise<string | null>,
   selectCodexExecutable: () => ipcRenderer.invoke(IPC.selectCodexExecutable) as Promise<string | null>,
+  exportRecoveryData: () =>
+    ipcRenderer.invoke(IPC.exportRecoveryData) as ReturnType<
+      DesktopBridge["exportRecoveryData"]
+    >,
+  importRecoveryData: () =>
+    ipcRenderer.invoke(IPC.importRecoveryData) as ReturnType<
+      DesktopBridge["importRecoveryData"]
+    >,
   revealRuntimeLogs: () => ipcRenderer.invoke(IPC.revealRuntimeLogs) as Promise<string>,
   copyRuntimeDiagnosticReport: () =>
     ipcRenderer.invoke(IPC.copyRuntimeDiagnosticReport) as ReturnType<

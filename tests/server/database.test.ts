@@ -6,8 +6,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
+import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 
 const temporaryDirectories: string[] = [];
+
+function migrateFixtureInPlace(databasePath: string): void {
+  const database = new Database(databasePath);
+  try {
+    database.pragma("foreign_keys = ON");
+    migrateRuntimeDatabase(database);
+  } finally {
+    database.close();
+  }
+}
 
 async function createStore(options: { withProject?: boolean } = {}): Promise<{ directory: string; databasePath: string; workspacePath: string; store: RuntimeStore }> {
   const directory = await mkdtemp(join(tmpdir(), "inertia-store-test-"));
@@ -366,7 +377,8 @@ describe("RuntimeStore conversation lifecycle", () => {
     });
     const reasoning = store.createReasoning(conversation.id, turn.runId, turn.id);
     store.appendReasoningContent(reasoning.id, "First ");
-    expect(store.appendReasoningContent(reasoning.id, "second."))
+    store.appendReasoningContent(reasoning.id, "second.");
+    expect(store.conversationDetail(conversation.id)?.reasonings[0])
       .toMatchObject({ content: "First second.", status: "running" });
     store.upsertAgentPlan({
       conversationId: conversation.id,
@@ -634,6 +646,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     legacy.exec("DROP TABLE agent_turns");
     legacy.prepare("DELETE FROM schema_migrations WHERE version = 16").run();
     legacy.close();
+    migrateFixtureInPlace(databasePath);
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.conversation(conversationId).id).toBe(conversationId);
@@ -806,6 +819,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     previous.exec("ALTER TABLE app_state DROP COLUMN workspace_startup_surface");
     previous.prepare("DELETE FROM schema_migrations WHERE version = 31").run();
     previous.close();
+    migrateFixtureInPlace(databasePath);
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.snapshot().settings).toMatchObject({
@@ -852,6 +866,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     legacy.exec("ALTER TABLE app_state DROP COLUMN usage_display_mode");
     legacy.prepare("DELETE FROM schema_migrations WHERE version = 15").run();
     legacy.close();
+    migrateFixtureInPlace(databasePath);
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.snapshot().settings.usageDisplayMode).toBe("hidden");
@@ -2051,6 +2066,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     legacy.exec("DROP TABLE provider_metadata_cache");
     legacy.prepare("DELETE FROM schema_migrations WHERE version = 5").run();
     legacy.close();
+    migrateFixtureInPlace(databasePath);
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.snapshot().projects[0]?.id).toBe(projectId);
@@ -2086,6 +2102,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     insert.run(claude.id, 222, 888, 200_000, 200, 20, 22, 2, 1, "2026-07-22T10:00:00.000Z");
     legacy.prepare("DELETE FROM schema_migrations WHERE version = 6").run();
     legacy.close();
+    migrateFixtureInPlace(databasePath);
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.snapshot().usage).toEqual(expect.arrayContaining([

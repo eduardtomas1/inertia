@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 
@@ -337,6 +337,49 @@ test("keeps runtime support and application update checks explicit in settings",
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Archive & data", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Local data" })).toBeVisible();
+  const exportPath = join(testDirectory, "settings-recovery-export.json");
+  await electronApp.evaluate(({ dialog }, path) => {
+    Reflect.set(dialog, "showSaveDialog", async () => ({
+      canceled: false,
+      filePath: path,
+    }));
+  }, exportPath);
+  await page.getByRole("button", { name: "Export recovery file" }).click();
+  await expect(page.getByText("Recovery file exported.", { exact: false }))
+    .toBeVisible();
+  const exported = JSON.parse(await readFile(exportPath, "utf8")) as {
+    format: string;
+    projects: Array<{
+      conversations: Array<{ messages: unknown[] }>;
+    }>;
+  };
+  expect(exported.format).toBe("inertia-recovery-export");
+  expect(exported.projects.length).toBeGreaterThan(0);
+  expect(exported.projects[0]?.conversations[0]?.messages.length)
+    .toBeGreaterThan(0);
+  expect(JSON.stringify(exported)).not.toMatch(
+    /attachments|credential|providerSession|secretReference|vault/iu,
+  );
+
+  const emptyImportPath = join(testDirectory, "empty-recovery-import.json");
+  await writeFile(emptyImportPath, JSON.stringify({
+    format: "inertia-recovery-export",
+    version: 1,
+    exportedAt: "2026-08-01T00:00:00.000Z",
+    projects: [],
+  }));
+  await electronApp.evaluate(({ dialog }, paths) => {
+    let request = 0;
+    Reflect.set(dialog, "showOpenDialog", async () => ({
+      canceled: false,
+      filePaths: [request++ === 0 ? paths.importPath : paths.targetDirectory],
+    }));
+  }, { importPath: emptyImportPath, targetDirectory: testDirectory });
+  await page.getByRole("button", { name: "Import recovery file" }).click();
+  await expect(page.getByText(
+    "Imported 0 projects, 0 conversations, and 0 messages under new identities with supervised access.",
+    { exact: true },
+  )).toBeVisible();
   await expect(page.getByText("Local-only lifecycle and failure metadata.", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Copy support summary" }).click();
   await expect(page.getByText("Private support summary copied", { exact: false })).toBeVisible();

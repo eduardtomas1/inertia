@@ -956,6 +956,57 @@ describe("TurnController coalesced streaming", () => {
     await closeRuntime(runtime);
   });
 
+  it("normalizes once at authoritative ingress while preserving surrogate pairs split across provider deltas", async () => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Stream split Unicode.",
+    });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+    runtime.provider.emit({ ...identity, type: "text", text: "a\ud83d" });
+    runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "r\ud83e" });
+    runtime.controller.flushActiveStreamsForHydration();
+    expect(runtime.events.filter(({ type }) => type === "agent.text"))
+      .toEqual([expect.objectContaining({ text: "a" })]);
+    expect(runtime.events.filter(({ type }) => type === "agent.reasoning"))
+      .toEqual([expect.objectContaining({ text: "r" })]);
+    runtime.provider.emit({ ...identity, type: "text", text: "\ude00b\ud800" });
+    runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "\udde0s\udc00" });
+    runtime.provider.resolve({
+      status: "completed",
+      text: "",
+    });
+    await flushPromises();
+
+    const turn = runtime.store.agentTurn(queued.turn.id);
+    expect(runtime.events.filter(({ type }) => type === "agent.text")
+      .map((event) => event.type === "agent.text" ? event.text : "").join(""))
+      .toBe("a😀b\ufffd");
+    expect(runtime.events.filter(({ type }) => type === "agent.reasoning")
+      .map((event) => event.type === "agent.reasoning" ? event.text : "").join(""))
+      .toBe("r🧠s\ufffd");
+    expect(runtime.store.message(turn.terminalAssistantMessageId!).content)
+      .toBe("a😀b\ufffd");
+    expect(runtime.store.snapshot().reasonings.find(
+      ({ turnId }) => turnId === turn.id,
+    )?.content).toBe("r🧠s\ufffd");
+
+    await runtime.controller.dispose();
+    runtime.store.close();
+    const reopened = new RuntimeStore(
+      runtime.databasePath,
+      runtime.workspacePath,
+      { recoverInterruptedRuns: false },
+    );
+    expect(reopened.message(turn.terminalAssistantMessageId!).content)
+      .toBe("a😀b\ufffd");
+    expect(reopened.snapshot().reasonings.find(
+      ({ turnId }) => turn.id === turnId,
+    )?.content).toBe("r🧠s\ufffd");
+    reopened.close();
+  });
+
   it("persists an authoritative terminal correction without appending it as a delta", async () => {
     const runtime = await controllerRuntime();
     const queued = runtime.controller.queue({

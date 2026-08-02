@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 
 import type { AgentTurnRow } from "./rows";
+import {
+  compactMessageContentForTurn,
+  compactReasoningContentForTurn,
+} from "./stream-text-storage";
 
 export class RecoveryRepository {
   constructor(private readonly database: Database.Database) {}
@@ -138,6 +142,8 @@ export class RecoveryRepository {
           markTurnActivities.run(id, turn.id);
           markTurnReasonings.run(id, turn.id);
           markInterruptedTurn.run(now, now, turn.id);
+          compactMessageContentForTurn(this.database, turn.id);
+          compactReasoningContentForTurn(this.database, turn.id);
         } else {
           // Preserve recovery for databases that predate authoritative turn ownership.
           markLegacyActivities.run(id);

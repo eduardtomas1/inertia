@@ -114,16 +114,6 @@ export class TurnController {
       barriers: this.gitArtifactBarriers,
       track: (value) => this.track(value),
     });
-    this.settlement = new TurnSettlementCoordinator({
-      store: this.store,
-      hooks: this.hooks,
-      scheduler: this.scheduler,
-      activities: this.activities,
-      artifacts: this.artifacts,
-      now: () => this.now(),
-      cleanup: (active) => this.cleanup(active),
-      track: (value) => this.track(value),
-    });
     this.streams = new TurnStreamProjection({
       store: this.store,
       hooks: this.hooks,
@@ -138,6 +128,17 @@ export class TurnController {
           this.publicError(error),
         );
       },
+    });
+    this.settlement = new TurnSettlementCoordinator({
+      store: this.store,
+      hooks: this.hooks,
+      scheduler: this.scheduler,
+      activities: this.activities,
+      artifacts: this.artifacts,
+      streams: this.streams,
+      now: () => this.now(),
+      cleanup: (active) => this.cleanup(active),
+      track: (value) => this.track(value),
     });
     this.interactions = new TurnInteractionCoordinator({
       store: this.store,
@@ -176,6 +177,46 @@ export class TurnController {
   }
 
   /**
+   * Recovery must not open its isolated write transaction until downstream
+   * terminal work has stopped using the authoritative store. The admission
+   * fence prevents new turns while this drains the already tracked snapshot.
+   */
+  async drainSettlementTasks(signal?: AbortSignal): Promise<void> {
+    while (this.settlementTasks.size > 0) {
+      if (signal?.aborted) {
+        throw signal.reason instanceof Error
+          ? signal.reason
+          : new Error("The database recovery import was cancelled.");
+      }
+      const pending = Promise.allSettled(this.settlementTasks)
+        .then(() => undefined);
+      if (!signal) {
+        await pending;
+        continue;
+      }
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = (): void => {
+          reject(signal.reason instanceof Error
+            ? signal.reason
+            : new Error("The database recovery import was cancelled."));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        void pending.then(
+          () => {
+            signal.removeEventListener("abort", onAbort);
+            resolve();
+          },
+          (error: unknown) => {
+            signal.removeEventListener("abort", onAbort);
+            reject(error);
+          },
+        );
+        if (signal.aborted) onAbort();
+      });
+    }
+  }
+
+  /**
    * A fresh renderer cannot replay transient projection events. Persist the
    * bounded live suffix and drain its projected delta before hydration so the
    * new renderer receives each character exactly once through its snapshot.
@@ -184,6 +225,9 @@ export class TurnController {
     for (const active of this.activeByConversation.values()) {
       if (active.settled) continue;
       try {
+        // A pending high surrogate is an incomplete provider delta, not text
+        // that can be projected. Keep that single code unit across renderer
+        // hydration so the next delta can complete its astral character.
         active.assistantStream.flush();
         active.reasoningStream.flush();
       } catch (error) {
@@ -707,7 +751,7 @@ export class TurnController {
       );
     }
     await this.providers.disposeAll();
-    await Promise.allSettled(this.settlementTasks);
+    await this.drainSettlementTasks();
   }
 
   /**

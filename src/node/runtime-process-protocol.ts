@@ -47,6 +47,12 @@ export interface RuntimeWorkerOptions {
     inputPath: string;
     resultPath: string;
   };
+  /** Privileged deterministic fault injection used by lifecycle tests only. */
+  recoveryImportFault?: {
+    phase: "after-staging-publish" | "during-message-import";
+    markerPath: string;
+    stallMs: number;
+  };
 }
 
 export interface RuntimeRemotePromptPreparation {
@@ -56,6 +62,25 @@ export interface RuntimeRemotePromptPreparation {
 export type RuntimeRemoteForgetScope =
   | { kind: "all" }
   | { kind: "conversation"; conversationId: string };
+
+export type RuntimeDatabaseRecoveryOperation = "export" | "import";
+
+export interface RuntimeDatabaseRecoverySummary {
+  projects: number;
+  conversations: number;
+  messages: number;
+  alreadyImported: boolean;
+}
+
+export interface RuntimeDatabaseStartupRecoveryReport {
+  checkedAt: string;
+  outcome: "healthy" | "first-launch" | "restored" | "created-empty";
+  trigger: "none" | "primary-missing" | "primary-corrupt";
+  restoredBackup: string | null;
+  preservedCorruptPrimary: boolean;
+  invalidBackupsSkipped: number;
+  unsupportedBackupsSkipped: number;
+}
 
 export type RuntimeWorkerCommand =
   | { type: "runtime.start"; options: RuntimeWorkerOptions }
@@ -81,6 +106,20 @@ export type RuntimeWorkerCommand =
       request: Extract<RemoteRequest, { type: "prompt.send" }>;
     }
   | { type: "runtime.remote-forget"; scope: RuntimeRemoteForgetScope }
+  | {
+      type: "runtime.database-recovery";
+      operationId: string;
+      generation: number;
+      operation: RuntimeDatabaseRecoveryOperation;
+      path: string;
+      targetDirectory?: string;
+    }
+  | {
+      type: "runtime.database-recovery-cancel";
+      operationId: string;
+      generation: number;
+      operation: RuntimeDatabaseRecoveryOperation;
+    }
   | RuntimeCredentialResult
   | RuntimeAttachmentResult
   | RuntimeAttachmentReleaseResult
@@ -175,12 +214,33 @@ export interface RuntimeSecureFileResult {
 }
 
 export type RuntimeWorkerEvent =
-  | { type: "runtime.ready"; websocketUrl: string }
+  | {
+      type: "runtime.ready";
+      websocketUrl: string;
+      databaseRecovery?: RuntimeDatabaseStartupRecoveryReport;
+    }
   | { type: "runtime.startup-failed"; message: string }
   | { type: "runtime.shutdown-unconfirmed" }
   | { type: "runtime.stopped" }
   | { type: "runtime.project-path-resolved"; requestId: string; path: string }
   | { type: "runtime.project-path-rejected"; requestId: string; message: string }
+  | {
+      type: "runtime.database-recovery-result";
+      operationId: string;
+      generation: number;
+      operation: RuntimeDatabaseRecoveryOperation;
+      ok: true;
+      summary: RuntimeDatabaseRecoverySummary | null;
+    }
+  | {
+      type: "runtime.database-recovery-result";
+      operationId: string;
+      generation: number;
+      operation: RuntimeDatabaseRecoveryOperation;
+      ok: false;
+      cancelled: boolean;
+      message: string;
+    }
   | {
       type: "runtime.remote-response";
       requestId: string;
@@ -341,6 +401,54 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     const request = parseOpenProjectPathRequest(value.request);
     return request ? { type: "runtime.resolve-project-path", requestId: value.requestId, request } : null;
   }
+  if (
+    value.type === "runtime.database-recovery-cancel"
+    && Object.keys(value).length === 4
+    && typeof value.operationId === "string"
+    && UUID_PATTERN.test(value.operationId)
+    && typeof value.generation === "number"
+    && Number.isSafeInteger(value.generation)
+    && value.generation > 0
+    && (value.operation === "export" || value.operation === "import")
+  ) {
+    return {
+      type: "runtime.database-recovery-cancel",
+      operationId: value.operationId,
+      generation: value.generation,
+      operation: value.operation,
+    };
+  }
+  if (
+    value.type === "runtime.database-recovery"
+    && typeof value.operationId === "string"
+    && UUID_PATTERN.test(value.operationId)
+    && typeof value.generation === "number"
+    && Number.isSafeInteger(value.generation)
+    && value.generation > 0
+    && (value.operation === "export" || value.operation === "import")
+    && runtimePath(value.path)
+  ) {
+    if (value.operation === "export" && Object.keys(value).length === 5) return {
+      type: "runtime.database-recovery",
+      operationId: value.operationId,
+      generation: value.generation,
+      operation: "export",
+      path: value.path,
+    };
+    if (
+      value.operation === "import"
+      && Object.keys(value).length === 6
+      && runtimePath(value.targetDirectory)
+    ) return {
+      type: "runtime.database-recovery",
+      operationId: value.operationId,
+      generation: value.generation,
+      operation: "import",
+      path: value.path,
+      targetDirectory: value.targetDirectory,
+    };
+    return null;
+  }
   if (value.type !== "runtime.start" || Object.keys(value).length !== 2 || !plainObject(value.options)) return null;
   const options = value.options;
   const optionKeys = Object.keys(options);
@@ -348,12 +456,14 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const hasCodexBinaryPath = Object.hasOwn(options, "codexBinaryPath");
   const hasAttachmentRoot = Object.hasOwn(options, "attachmentRoot");
   const hasPackageSmokePdf = Object.hasOwn(options, "packageSmokePdf");
+  const hasRecoveryImportFault = Object.hasOwn(options, "recoveryImportFault");
   if (
     optionKeys.length !== 3
       + Number(hasKimiProfiles)
       + Number(hasCodexBinaryPath)
       + Number(hasAttachmentRoot)
       + Number(hasPackageSmokePdf)
+      + Number(hasRecoveryImportFault)
     || !runtimePath(options.dataDirectory)
     || !runtimePath(options.defaultWorkspacePath)
     || typeof options.enableProviders !== "boolean"
@@ -366,6 +476,22 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
         || Object.keys(options.packageSmokePdf).length !== 2
         || !runtimePath(options.packageSmokePdf.inputPath)
         || !runtimePath(options.packageSmokePdf.resultPath)
+      )
+    )
+    || (
+      hasRecoveryImportFault
+      && (
+        !plainObject(options.recoveryImportFault)
+        || Object.keys(options.recoveryImportFault).length !== 3
+        || ![
+          "after-staging-publish",
+          "during-message-import",
+        ].includes(String(options.recoveryImportFault.phase))
+        || !runtimePath(options.recoveryImportFault.markerPath)
+        || typeof options.recoveryImportFault.stallMs !== "number"
+        || !Number.isSafeInteger(options.recoveryImportFault.stallMs)
+        || options.recoveryImportFault.stallMs < 1_000
+        || options.recoveryImportFault.stallMs > 30_000
       )
     )
   ) return null;
@@ -395,6 +521,17 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
             packageSmokePdf: {
               inputPath: (options.packageSmokePdf as Record<string, unknown>).inputPath as string,
               resultPath: (options.packageSmokePdf as Record<string, unknown>).resultPath as string,
+            },
+          }
+        : {}),
+      ...(hasRecoveryImportFault
+        ? {
+            recoveryImportFault: {
+              phase: (options.recoveryImportFault as Record<string, unknown>).phase as
+                | "after-staging-publish"
+                | "during-message-import",
+              markerPath: (options.recoveryImportFault as Record<string, unknown>).markerPath as string,
+              stallMs: (options.recoveryImportFault as Record<string, unknown>).stallMs as number,
             },
           }
         : {}),
@@ -535,14 +672,168 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       ? { type: "runtime.project-path-rejected", requestId: value.requestId, message }
       : null;
   }
+  if (
+    value.type === "runtime.database-recovery-result"
+    && typeof value.operationId === "string"
+    && UUID_PATTERN.test(value.operationId)
+    && typeof value.generation === "number"
+    && Number.isSafeInteger(value.generation)
+    && value.generation > 0
+    && (value.operation === "export" || value.operation === "import")
+    && typeof value.ok === "boolean"
+  ) {
+    if (!value.ok) {
+      if (
+        Object.keys(value).length !== 7
+        || typeof value.cancelled !== "boolean"
+        || typeof value.message !== "string"
+      ) {
+        return null;
+      }
+      const message = value.message.trim();
+      return message.length > 0 && message.length <= 1_000
+        ? {
+            type: "runtime.database-recovery-result",
+            operationId: value.operationId,
+            generation: value.generation,
+            operation: value.operation,
+            ok: false,
+            cancelled: value.cancelled,
+            message,
+          }
+        : null;
+    }
+    if (Object.keys(value).length !== 6) return null;
+    if (value.summary === null) {
+      if (value.operation !== "export") return null;
+      return {
+        type: "runtime.database-recovery-result",
+        operationId: value.operationId,
+        generation: value.generation,
+        operation: value.operation,
+        ok: true,
+        summary: null,
+      };
+    }
+    if (!plainObject(value.summary) || Object.keys(value.summary).length !== 4) {
+      return null;
+    }
+    if (value.operation !== "import") return null;
+    const summary = value.summary;
+    if (![
+      summary.projects,
+      summary.conversations,
+      summary.messages,
+    ].every((count) =>
+      typeof count === "number"
+      && Number.isSafeInteger(count)
+      && count >= 0)) return null;
+    if (typeof summary.alreadyImported !== "boolean") return null;
+    return {
+      type: "runtime.database-recovery-result",
+      operationId: value.operationId,
+      generation: value.generation,
+      operation: value.operation,
+      ok: true,
+      summary: {
+        projects: summary.projects as number,
+        conversations: summary.conversations as number,
+        messages: summary.messages as number,
+        alreadyImported: summary.alreadyImported,
+      },
+    };
+  }
   if (value.type === "runtime.startup-failed" && Object.keys(value).length === 2 && typeof value.message === "string") {
     const message = value.message.trim();
     return message && message.length <= 1000 ? { type: "runtime.startup-failed", message } : null;
   }
-  if (value.type === "runtime.ready" && Object.keys(value).length === 2 && isRuntimeWebSocketUrl(value.websocketUrl)) {
-    return { type: "runtime.ready", websocketUrl: value.websocketUrl };
+  if (
+    value.type === "runtime.ready"
+    && (
+      Object.keys(value).length === 2
+      || Object.keys(value).length === 3
+    )
+    && isRuntimeWebSocketUrl(value.websocketUrl)
+  ) {
+    if (!Object.hasOwn(value, "databaseRecovery")) {
+      return { type: "runtime.ready", websocketUrl: value.websocketUrl };
+    }
+    const recovery = parseRuntimeDatabaseStartupRecovery(value.databaseRecovery);
+    return recovery
+      ? {
+          type: "runtime.ready",
+          websocketUrl: value.websocketUrl,
+          databaseRecovery: recovery,
+        }
+      : null;
   }
   return null;
+}
+
+function parseRuntimeDatabaseStartupRecovery(
+  value: unknown,
+): RuntimeDatabaseStartupRecoveryReport | null {
+  if (!plainObject(value) || Object.keys(value).length !== 7) return null;
+  if (
+    typeof value.checkedAt !== "string"
+    || value.checkedAt.length > 64
+    || !Number.isFinite(Date.parse(value.checkedAt))
+    || (
+      value.outcome !== "healthy"
+      && value.outcome !== "first-launch"
+      && value.outcome !== "restored"
+      && value.outcome !== "created-empty"
+    )
+    || (
+      value.trigger !== "none"
+      && value.trigger !== "primary-missing"
+      && value.trigger !== "primary-corrupt"
+    )
+    || (
+      value.restoredBackup !== null
+      && (
+        typeof value.restoredBackup !== "string"
+        || !/^[A-Za-z0-9_.-]{1,200}$/u.test(value.restoredBackup)
+      )
+    )
+    || typeof value.preservedCorruptPrimary !== "boolean"
+    || typeof value.invalidBackupsSkipped !== "number"
+    || !Number.isSafeInteger(value.invalidBackupsSkipped)
+    || value.invalidBackupsSkipped < 0
+    || typeof value.unsupportedBackupsSkipped !== "number"
+    || !Number.isSafeInteger(value.unsupportedBackupsSkipped)
+    || value.unsupportedBackupsSkipped < 0
+  ) return null;
+  if (
+    (
+      (value.outcome === "healthy" || value.outcome === "first-launch")
+      && (
+        value.trigger !== "none"
+        || value.restoredBackup !== null
+        || value.preservedCorruptPrimary
+        || value.invalidBackupsSkipped !== 0
+        || value.unsupportedBackupsSkipped !== 0
+      )
+    )
+    || (
+      value.outcome === "restored"
+      && (value.trigger === "none" || value.restoredBackup === null)
+    )
+    || (
+      value.outcome === "created-empty"
+      && (value.trigger === "none" || value.restoredBackup !== null)
+    )
+    || (value.preservedCorruptPrimary && value.trigger !== "primary-corrupt")
+  ) return null;
+  return {
+    checkedAt: value.checkedAt,
+    outcome: value.outcome,
+    trigger: value.trigger,
+    restoredBackup: value.restoredBackup,
+    preservedCorruptPrimary: value.preservedCorruptPrimary,
+    invalidBackupsSkipped: value.invalidBackupsSkipped,
+    unsupportedBackupsSkipped: value.unsupportedBackupsSkipped,
+  };
 }
 
 function parseRuntimeRemoteForgetScope(

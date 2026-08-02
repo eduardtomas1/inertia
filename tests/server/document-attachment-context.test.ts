@@ -1,10 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatAttachment } from "../../src/shared/contracts";
 import {
+  awaitPdfModuleInitialization,
+  createCachedPdfModuleLoader,
   documentAttachmentContexts,
+  PDF_MODULE_INITIALIZATION_TIMEOUT_MS,
   pdfTextItemsToText,
 } from "../../src/server/runtime/attachments/document-attachment-context";
+import {
+  DocumentExtractionCancelledError,
+  DocumentExtractionInitializationError,
+} from "../../src/server/runtime/attachments/document-extraction-scheduler";
 
 function pdfWithText(text: string): Uint8Array {
   const stream = `BT /F1 22 Tf 72 720 Td (${text}) Tj ET`;
@@ -47,6 +54,10 @@ function attachment(
 }
 
 describe("document attachment execution context", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("preserves PDF.js text-item spacing and punctuation", () => {
     expect(pdfTextItemsToText([
       { str: "exam", hasEOL: false },
@@ -83,6 +94,75 @@ describe("document attachment execution context", () => {
       truncated: false,
     }]);
     expect(JSON.stringify(contexts)).not.toContain(pdf.path);
+  }, PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);
+
+  it("bounds a cold PDF module wait without poisoning the shared cache", async () => {
+    vi.useFakeTimers();
+    let finishInitialization: ((value: string) => void) | undefined;
+    let initializationCount = 0;
+    const load = createCachedPdfModuleLoader(async () => {
+      initializationCount += 1;
+      return await new Promise<string>((resolve) => {
+        finishInitialization = resolve;
+      });
+    });
+    const cold = awaitPdfModuleInitialization({
+      deadlineAt: Date.now() + PDF_MODULE_INITIALIZATION_TIMEOUT_MS,
+      load,
+    });
+    const rejected = expect(cold).rejects.toBeInstanceOf(
+      DocumentExtractionInitializationError,
+    );
+
+    await vi.advanceTimersByTimeAsync(PDF_MODULE_INITIALIZATION_TIMEOUT_MS);
+    await rejected;
+    finishInitialization?.("ready");
+    await vi.runAllTimersAsync();
+    await expect(awaitPdfModuleInitialization({
+      deadlineAt: Date.now() + 1_000,
+      load,
+    })).resolves.toBe("ready");
+    expect(initializationCount).toBe(1);
+  });
+
+  it("cancels only the PDF module waiter and retries rejected initialization", async () => {
+    const controller = new AbortController();
+    let finishInitialization: ((value: string) => void) | undefined;
+    let initializationCount = 0;
+    const load = createCachedPdfModuleLoader(async () => {
+      initializationCount += 1;
+      if (initializationCount === 1) {
+        return await new Promise<string>((resolve) => {
+          finishInitialization = resolve;
+        });
+      }
+      return "retried";
+    });
+    const cancelled = awaitPdfModuleInitialization({
+      deadlineAt: Date.now() + 1_000,
+      load,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(cancelled).rejects.toBeInstanceOf(
+      DocumentExtractionCancelledError,
+    );
+    finishInitialization?.("cached");
+    await expect(awaitPdfModuleInitialization({
+      deadlineAt: Date.now() + 1_000,
+      load,
+    })).resolves.toBe("cached");
+    expect(initializationCount).toBe(1);
+
+    let rejectionCount = 0;
+    const retrying = createCachedPdfModuleLoader(async () => {
+      rejectionCount += 1;
+      if (rejectionCount === 1) throw new Error("cold load failed");
+      return "recovered";
+    });
+    await expect(retrying()).rejects.toThrow("cold load failed");
+    await expect(retrying()).resolves.toBe("recovered");
+    expect(rejectionCount).toBe(2);
   });
 
   it("adds verified UTF-8 documents and ignores images", async () => {
@@ -134,5 +214,42 @@ describe("document attachment execution context", () => {
       attachment: attachment({}),
       bytes: blank,
     }])).rejects.toThrow(/no selectable text/u);
+  });
+
+  it("aborts running and queued sibling PDFs after the first substantive failure", async () => {
+    let started = 0;
+    let destroyedHanging = 0;
+    const pdfModule = {
+      getDocument({ data }: { data: Uint8Array }) {
+        started += 1;
+        if (data[0] === 2) {
+          return {
+            promise: Promise.reject(new Error("invalid fixture")),
+            destroy: async () => undefined,
+          };
+        }
+        let rejectLoad!: (error: Error) => void;
+        return {
+          promise: new Promise((_resolve, reject) => { rejectLoad = reject; }),
+          destroy: async () => {
+            destroyedHanging += 1;
+            rejectLoad(new Error("destroyed by sibling cancellation"));
+          },
+        };
+      },
+    };
+    const documents = Array.from({ length: 8 }, (_, index) => ({
+      attachment: attachment({
+        id: `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`,
+        name: `${index + 1}.pdf`,
+      }),
+      bytes: new Uint8Array([index === 1 ? 2 : 1]),
+    }));
+
+    await expect(documentAttachmentContexts(documents, {
+      pdfModuleLoader: async () => pdfModule as never,
+    })).rejects.toThrow("2.pdf could not be read as a PDF.");
+    expect(started).toBe(2);
+    expect(destroyedHanging).toBeGreaterThan(0);
   });
 });

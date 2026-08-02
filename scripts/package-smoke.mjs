@@ -7,6 +7,9 @@ import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
 
 const STARTUP_TIMEOUT_MS = 30_000;
+// This begins only after runtime readiness. It covers the product's bounded
+// 30s cold module load plus 12s extraction deadline and result-file cleanup.
+const PACKAGED_PDF_TIMEOUT_MS = 47_000;
 const EXIT_TIMEOUT_MS = 15_000;
 const CLEANUP_TIMEOUT_MS = 5_000;
 const POLL_INTERVAL_MS = 50;
@@ -373,7 +376,7 @@ try {
   const runtimeWasObserved = processExists(readiness.runtimePid);
   const pdfResult = await waitUntil(
     () => readJsonIfPresent(packagedPdf.resultPath),
-    2_000,
+    PACKAGED_PDF_TIMEOUT_MS,
     "packaged PDF extraction result",
   );
   if (
@@ -381,7 +384,7 @@ try {
     || typeof pdfResult.content !== "string"
     || !pdfResult.content.includes(packagedPdf.text)
   ) {
-    throw new Error("The packaged PDF stack returned an invalid smoke result.");
+    throw new Error(`The packaged PDF stack failed: ${pdfResult.message || "invalid smoke result"}.`);
   }
   if (packagedCodex) await requirePackagedCodex(readiness.websocketUrl, packagedCodex.command);
 

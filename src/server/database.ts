@@ -43,6 +43,24 @@ import {
   type NativeAgentGoalMergeResult,
 } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
+import {
+  DatabaseBackupManager,
+  type DatabaseBackupResult,
+  type DatabaseRecoveryReport,
+  recoverDatabaseOnStartup,
+} from "./persistence/database-recovery";
+import {
+  reconcileRecoveryImportJournal,
+} from "./persistence/database-recovery-import";
+import {
+  DATABASE_RECOVERY_EXPORT_MAX_BYTES,
+  type DatabaseRecoveryImportResult,
+} from "./persistence/database-export";
+import {
+  exportDatabaseRecoveryData,
+  importDatabaseRecoveryData,
+  type DatabaseRecoveryImportOptions,
+} from "./persistence/database-recovery-store";
 import { RecordNotFoundError } from "./persistence/errors";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
@@ -104,6 +122,8 @@ export type {
 
 export class RuntimeStore {
   private readonly database: Database.Database;
+  private readonly backupManager: DatabaseBackupManager;
+  private readonly recoveryReport: DatabaseRecoveryReport;
   private readonly backendProfileRepository: BackendProfileRepository;
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
   private readonly conversationRepository: ConversationRepository;
@@ -119,13 +139,33 @@ export class RuntimeStore {
   private readonly transcriptRepository: TranscriptRepository;
   private readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
+  private readonly recoveryExportMaxBytes: number;
 
   constructor(
     databasePath: string,
     _defaultWorkspacePath: string,
-    options: { recoverInterruptedRuns?: boolean } = {},
+    options: {
+      recoverInterruptedRuns?: boolean;
+      recoveryExportMaxBytes?: number;
+    } = {},
   ) {
+    this.recoveryExportMaxBytes = Math.min(
+      DATABASE_RECOVERY_EXPORT_MAX_BYTES,
+      Math.max(1, Math.trunc(
+        options.recoveryExportMaxBytes ?? DATABASE_RECOVERY_EXPORT_MAX_BYTES,
+      )),
+    );
+    this.recoveryReport = recoverDatabaseOnStartup(databasePath);
     this.database = new Database(databasePath);
+    this.backupManager = new DatabaseBackupManager(
+      this.database,
+      databasePath,
+      {
+        onError: () => {
+          console.error("The scheduled database backup failed.");
+        },
+      },
+    );
     this.backendProfileRepository = new BackendProfileRepository({
       database: this.database,
       requireProject: (projectId) => this.requireProject(projectId),
@@ -217,6 +257,7 @@ export class RuntimeStore {
       this.database.pragma("mmap_size = 268435456");
       this.database.pragma("temp_store = MEMORY");
       this.migrate();
+      reconcileRecoveryImportJournal(this.database);
       this.initializeState();
       if (options.recoverInterruptedRuns !== false) this.recoverInterruptedRuns();
     } catch (error) {
@@ -226,7 +267,84 @@ export class RuntimeStore {
   }
 
   close(): void {
+    this.backupManager.stop();
     if (this.database.open) this.database.close();
+  }
+
+  startBackups(): void {
+    this.backupManager.start();
+  }
+
+  createBackup(): Promise<DatabaseBackupResult> {
+    return this.backupManager.createBackup();
+  }
+
+  databaseRecoveryReport(): DatabaseRecoveryReport {
+    return this.recoveryReport;
+  }
+
+  exportRecoveryData(): string {
+    return exportDatabaseRecoveryData(
+      this.database,
+      this.recoveryExportMaxBytes,
+    );
+  }
+
+  async importRecoveryData(
+    serialized: string,
+    authorizedRoot: string,
+    options: DatabaseRecoveryImportOptions = {},
+  ): Promise<DatabaseRecoveryImportResult> {
+    return importDatabaseRecoveryData(
+      this.database,
+      serialized,
+      authorizedRoot,
+      {
+        createProject: (project, path) =>
+          this.createProject(project.name, path).id,
+        createConversation: (projectId, conversation) =>
+          this.createConversation(projectId, conversation.title, {
+            providerId: conversation.providerId,
+            model: conversation.model || "provider-default",
+            reasoningEffort: conversation.reasoningEffort,
+            interactionMode: conversation.interactionMode,
+            // Exported authorization is never authoritative on this device.
+            accessMode: "supervised",
+            activate: false,
+          }).id,
+        createMessage: (conversationId, message) => {
+          this.createMessage(
+            conversationId,
+            message.content,
+            message.role,
+            [],
+            null,
+            message.createdAt,
+            { activateConversation: false },
+          );
+        },
+      },
+      options,
+    );
+  }
+
+  reconcileRecoveryImport(): void {
+    reconcileRecoveryImportJournal(this.database);
+  }
+
+  async backupAndClose(): Promise<void> {
+    let backupError: unknown;
+    try {
+      // Shutdown owns a 2.5s process-wide deadline. Do not begin a full online
+      // backup here; cancel any scheduled work and rely on the hourly validated
+      // rotation plus WAL crash recovery.
+      await this.backupManager.cancelAndWait();
+    } catch (error) {
+      backupError = error;
+    } finally {
+      if (this.database.open) this.database.close();
+    }
+    if (backupError !== undefined) throw backupError;
   }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {
@@ -799,8 +917,8 @@ export class RuntimeStore {
     return this.executionLedgerRepository.updateReasoning(id, update);
   }
 
-  appendReasoningContent(id: string, delta: string): AgentReasoning {
-    return this.executionLedgerRepository.appendReasoningContent(id, delta);
+  appendReasoningContent(id: string, delta: string): void {
+    this.executionLedgerRepository.appendReasoningContent(id, delta);
   }
 
   upsertUsage(

@@ -179,6 +179,10 @@ export function SettingsView({
   const [logRevealStatus, setLogRevealStatus] = useState<string | null>(null);
   const [supportReportStatus, setSupportReportStatus] = useState<string | null>(null);
   const [updateCheckStatus, setUpdateCheckStatus] = useState<string | null>(null);
+  const [recoveryOperation, setRecoveryOperation] = useState<
+    "export" | "import" | null
+  >(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<string | null>(null);
   const defaultProvider = providers.find(({ id }) => id === settings.defaultProvider);
   const defaultModel = defaultProvider?.models.find(({ id }) => id === settings.defaultModel)
     ?? defaultProvider?.models.find(({ isDefault }) => isDefault)
@@ -224,6 +228,38 @@ export function SettingsView({
       setUpdateCheckStatus("The update check could not be completed.");
     } finally {
       setCheckingUpdate(false);
+    }
+  };
+  const exportRecoveryData = async (): Promise<void> => {
+    if (recoveryOperation) return;
+    setRecoveryOperation("export");
+    setRecoveryStatus(null);
+    try {
+      const result = await window.inertia.exportRecoveryData();
+      setRecoveryStatus(result.status === "exported"
+        ? "Recovery file exported. Attachments, credentials, provider sessions, and vault data were excluded."
+        : "Recovery export cancelled.");
+    } catch {
+      setRecoveryStatus("The recovery file could not be exported.");
+    } finally {
+      setRecoveryOperation(null);
+    }
+  };
+  const importRecoveryData = async (): Promise<void> => {
+    if (recoveryOperation) return;
+    setRecoveryOperation("import");
+    setRecoveryStatus(null);
+    try {
+      const result = await window.inertia.importRecoveryData();
+      setRecoveryStatus(result.status === "imported"
+        ? result.summary.alreadyImported
+          ? "That recovery file was already imported into the authorized folder; no data was duplicated."
+          : `Imported ${result.summary.projects} projects, ${result.summary.conversations} conversations, and ${result.summary.messages} messages under new identities with supervised access.`
+        : "Recovery import cancelled.");
+    } catch {
+      setRecoveryStatus("The recovery file was rejected or could not be imported.");
+    } finally {
+      setRecoveryOperation(null);
     }
   };
 
@@ -477,6 +513,17 @@ export function SettingsView({
             <section className="settings-card" aria-labelledby="data-heading">
               <div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="data-heading">Local data</h3><p>Projects, sessions, context usage, and preferences are stored locally.</p></span></div>
               <div className="settings-data-note"><ShieldCheck size={17} /><span><strong>Provider credentials stay outside Inertia.</strong><small>Account authentication remains in each provider’s own secure storage.</small></span></div>
+              <div className="codex-binary-path runtime-log-setting">
+                <span>
+                  <strong>Recovery export</strong>
+                  <small>Export project paths and conversation messages without attachment bytes, credentials, provider sessions, secret references, or vault data. Imports always create new identities.</small>
+                </span>
+                <div>
+                  <button type="button" className="secondary-button" disabled={disabled || recoveryOperation !== null} onClick={() => { void exportRecoveryData(); }}><Download size={14} />{recoveryOperation === "export" ? "Exporting…" : "Export recovery file"}</button>
+                  <button type="button" className="secondary-button" disabled={disabled || recoveryOperation !== null} onClick={() => { void importRecoveryData(); }}><ArchiveRestore size={14} />{recoveryOperation === "import" ? "Importing…" : "Import recovery file"}</button>
+                </div>
+              </div>
+              {recoveryStatus && <p className="settings-card-note" role="status">{recoveryStatus}</p>}
               <div className="codex-binary-path runtime-log-setting">
                 <span>
                   <strong>Runtime diagnostics</strong>

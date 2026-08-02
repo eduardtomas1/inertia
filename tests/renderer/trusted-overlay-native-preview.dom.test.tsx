@@ -139,6 +139,7 @@ describe("trusted overlay native preview suspension", () => {
       />,
     );
     await expectRestored();
+
   });
 
   it("owns the provider credential dialog lifecycle", async () => {
@@ -191,6 +192,10 @@ describe("trusted overlay native preview suspension", () => {
         providerQuotaNotices={providerQuotaNotices}
         error={null}
         onDismissError={vi.fn()}
+        databaseRecoveryNotice={null}
+        onDismissDatabaseRecoveryNotice={vi.fn()}
+        onImportRecovery={vi.fn(async () => undefined)}
+        onCopyRecoveryReport={vi.fn(async () => undefined)}
       />,
     );
 
@@ -203,6 +208,46 @@ describe("trusted overlay native preview suspension", () => {
         providerQuotaNotices={providerQuotaNotices}
         error={null}
         onDismissError={vi.fn()}
+        databaseRecoveryNotice={null}
+        onDismissDatabaseRecoveryNotice={vi.fn()}
+        onImportRecovery={vi.fn(async () => undefined)}
+        onCopyRecoveryReport={vi.fn(async () => undefined)}
+      />,
+    );
+    await expectRestored();
+
+    view.rerender(
+      <AppStatusOverlays
+        providerAuth={{ ...providerAuth, provider: null }}
+        appUpdate={appUpdate}
+        providerQuotaNotices={providerQuotaNotices}
+        error={null}
+        onDismissError={vi.fn()}
+        databaseRecoveryNotice={{
+          id: "runtime-1-database-recovery",
+          outcome: "created-empty",
+          trigger: "primary-corrupt",
+          preservedCorruptPrimary: true,
+          invalidBackupsSkipped: 1,
+          unsupportedBackupsSkipped: 0,
+        }}
+        onDismissDatabaseRecoveryNotice={vi.fn()}
+        onImportRecovery={vi.fn(async () => undefined)}
+        onCopyRecoveryReport={vi.fn(async () => undefined)}
+      />,
+    );
+    expect(nativePreviewSuspended()).toBe(true);
+    view.rerender(
+      <AppStatusOverlays
+        providerAuth={{ ...providerAuth, provider: null }}
+        appUpdate={appUpdate}
+        providerQuotaNotices={providerQuotaNotices}
+        error={null}
+        onDismissError={vi.fn()}
+        databaseRecoveryNotice={null}
+        onDismissDatabaseRecoveryNotice={vi.fn()}
+        onImportRecovery={vi.fn(async () => undefined)}
+        onCopyRecoveryReport={vi.fn(async () => undefined)}
       />,
     );
     await expectRestored();

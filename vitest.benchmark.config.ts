@@ -1,7 +1,9 @@
 import { resolve } from "node:path";
+
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       "@": resolve("src/renderer/src"),
@@ -9,8 +11,12 @@ export default defineConfig({
     },
   },
   test: {
+    disableConsoleIntercept: true,
     environment: "node",
-    include: ["tests/performance/**/*.benchmark.test.ts"],
+    include: [
+      "benchmarks/**/*.test.ts",
+      "tests/performance/**/*.benchmark.test.ts",
+    ],
     maxWorkers: 1,
     testTimeout: 120_000,
   },

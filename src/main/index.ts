@@ -1,5 +1,5 @@
 import { constants, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, open, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -78,6 +78,8 @@ const IPC = {
   runtimeReady: "inertia:runtime-ready",
   selectDirectory: "inertia:select-directory",
   selectCodexExecutable: "inertia:select-codex-executable",
+  exportRecoveryData: "inertia:export-recovery-data",
+  importRecoveryData: "inertia:import-recovery-data",
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
   copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
   copyText: "inertia:copy-text",
@@ -124,6 +126,29 @@ let credentialVault: CredentialVault | null = null;
 let trustedRendererUrl = "";
 let stoppingRuntime = false;
 let packageSmokeFilePath: string | null = null;
+const PACKAGE_SMOKE_PDF_RESULT_TIMEOUT_MS = 47_000;
+
+async function waitForPackageSmokePdfResult(path: string): Promise<void> {
+  const deadline = Date.now() + PACKAGE_SMOKE_PDF_RESULT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) {
+      const value = JSON.parse(await readFile(path, "utf8")) as unknown;
+      if (
+        typeof value === "object"
+        && value !== null
+        && "ok" in value
+        && typeof value.ok === "boolean"
+        && (
+          (value.ok && "content" in value && typeof value.content === "string")
+          || (!value.ok && "message" in value && typeof value.message === "string")
+        )
+      ) return;
+      throw new Error("The packaged PDF smoke receipt is invalid.");
+    }
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  throw new Error("The packaged PDF smoke receipt was not published before its deadline.");
+}
 const previewBroker = new PreviewBroker({
   getWindow: () => mainWindow,
   openExternal: async (url) => shell.openExternal(url),
@@ -343,6 +368,60 @@ function registerIpcHandlers(): void {
       properties: ["openFile"],
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle(IPC.exportRecoveryData, async (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    if (!mainWindow || !runtimeSupervisor) {
+      throw new Error("Database recovery export is unavailable.");
+    }
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: "Export Inertia recovery data",
+      defaultPath: join(
+        app.getPath("documents"),
+        `Inertia recovery ${timestamp}.json`,
+      ),
+      buttonLabel: "Export recovery file",
+      filters: [{ name: "JSON", extensions: ["json"] }],
+      properties: ["createDirectory", "showOverwriteConfirmation"],
+    });
+    if (result.canceled || !result.filePath) return { status: "cancelled" };
+    await runtimeSupervisor.databaseRecovery("export", result.filePath);
+    return { status: "exported" };
+  });
+
+  ipcMain.handle(IPC.importRecoveryData, async (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    if (!mainWindow || !runtimeSupervisor) {
+      throw new Error("Database recovery import is unavailable.");
+    }
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Import Inertia recovery data",
+      defaultPath: app.getPath("documents"),
+      buttonLabel: "Import recovery file",
+      filters: [{ name: "JSON", extensions: ["json"] }],
+      properties: ["openFile"],
+    });
+    const path = result.canceled ? undefined : result.filePaths[0];
+    if (!path) return { status: "cancelled" };
+    const destination = await dialog.showOpenDialog(mainWindow, {
+      title: "Choose a folder for recovered projects",
+      defaultPath: app.getPath("documents"),
+      buttonLabel: "Authorize recovery folder",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    const targetDirectory = destination.canceled
+      ? undefined
+      : destination.filePaths[0];
+    if (!targetDirectory) return { status: "cancelled" };
+    const summary = await runtimeSupervisor.databaseRecovery(
+      "import",
+      path,
+      targetDirectory,
+    );
+    if (!summary) throw new Error("The recovery import returned no summary.");
+    return { status: "imported", summary };
   });
 
   ipcMain.handle(IPC.revealRuntimeLogs, async (event, ...args) => {
@@ -892,10 +971,17 @@ async function bootstrap(): Promise<void> {
             timestampMs: Date.now(),
           }),
           { encoding: "utf8", mode: 0o600, flag: "wx" },
-        ).finally(() => setTimeout(
-          () => app.quit(),
-          packageSmokeCodexExecutable ? 10_000 : 100,
-        ));
+        ).then(async () => {
+          await Promise.all([
+            new Promise<void>((resolveWait) => setTimeout(
+              resolveWait,
+              packageSmokeCodexExecutable ? 10_000 : 100,
+            )),
+            packageSmokePdfResult
+              ? waitForPackageSmokePdfResult(packageSmokePdfResult)
+              : Promise.resolve(),
+          ]);
+        }).catch(() => undefined).finally(() => app.quit());
       }
     },
   });

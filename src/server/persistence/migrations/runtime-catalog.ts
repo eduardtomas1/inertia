@@ -21,6 +21,7 @@ import {
   createRuntimeMigrationCatalog,
   type DatabaseMigrationDefinition,
 } from "./catalog";
+import { durableDataMigrationDefinitions } from "./durable-data";
 import { rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
 import { quotedSqlIdentifier } from "./sql-identifiers";
@@ -1203,6 +1204,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         }
       },
     });
+    migrationExtensions.push(...durableDataMigrationDefinitions);
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

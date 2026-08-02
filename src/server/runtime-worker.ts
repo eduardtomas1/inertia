@@ -6,19 +6,50 @@ import { startRuntime, type RunningRuntime } from "./index.js";
 import { RuntimeCredentialBrokerClient } from "./runtime/backends/credential-broker-client.js";
 import { RuntimeAttachmentBrokerClient } from "./runtime/attachments/attachment-broker-client.js";
 import { runPackagedPdfSmoke } from "./runtime/attachments/package-smoke-pdf.js";
+import {
+  BoundedDatabaseRecoveryReceipts,
+  DatabaseRecoveryOperationCancelledError,
+  DatabaseRecoveryOperationQueue,
+} from "./runtime/database-recovery-queue.js";
 import { RuntimeSecureFileBrokerClient } from "./runtime/secure-file-broker-client.js";
 import { completeRuntimeWorkerShutdown } from "./runtime-worker-shutdown.js";
 
 let runtime: RunningRuntime | null = null;
+const databaseRecoveryOperations = new DatabaseRecoveryOperationQueue();
+const databaseRecoveryReceipts = new BoundedDatabaseRecoveryReceipts<Extract<
+  RuntimeWorkerEvent,
+  { type: "runtime.database-recovery-result" }
+>>(32);
+const activeDatabaseRecoveryOperations = new Map<
+  string,
+  "export" | "import"
+>();
 let starting = false;
 let stopping = false;
 let shutdownExitCode = 0;
+let packageSmokePdfController: AbortController | null = null;
+let packageSmokePdfOperation: Promise<void> | null = null;
 const parentPort = process.parentPort;
 
 if (!parentPort) throw new Error("The runtime worker must run as an Electron utility process.");
 
 function post(event: RuntimeWorkerEvent): void {
   parentPort.postMessage(event);
+}
+
+function recoveryOperationKey(
+  generation: number,
+  operationId: string,
+): string {
+  return `${generation}:${operationId}`;
+}
+
+function postDatabaseRecoveryResult(
+  event: Extract<RuntimeWorkerEvent, { type: "runtime.database-recovery-result" }>,
+): void {
+  const key = recoveryOperationKey(event.generation, event.operationId);
+  databaseRecoveryReceipts.record(key, event);
+  post(event);
 }
 
 const credentials = new RuntimeCredentialBrokerClient({ post });
@@ -49,6 +80,11 @@ async function shutdown(exitCode = 0): Promise<void> {
   stopping = true;
   const activeRuntime = runtime;
   runtime = null;
+  packageSmokePdfController?.abort(new Error("The packaged PDF smoke was cancelled during shutdown."));
+  await Promise.all([
+    databaseRecoveryOperations.closeAndDrain(),
+    packageSmokePdfOperation?.catch(() => undefined) ?? Promise.resolve(),
+  ]);
   // startRuntime owns completion if a shutdown request races its startup.
   if (starting && !activeRuntime) return;
   await finishShutdown(activeRuntime, shutdownExitCode);
@@ -102,6 +138,132 @@ parentPort.on("message", (messageEvent) => {
           type: "runtime.project-path-rejected",
           requestId: command.requestId,
           message: detail || "The project path could not be resolved.",
+        });
+      },
+    );
+    return;
+  }
+  if (command.type === "runtime.database-recovery-cancel") {
+    const key = recoveryOperationKey(command.generation, command.operationId);
+    if (!databaseRecoveryOperations.cancel(key)) {
+      const receipt = databaseRecoveryReceipts.find(key, command.operation);
+      if (receipt) {
+        post(receipt);
+      } else if (databaseRecoveryReceipts.has(key)) {
+        post({
+          type: "runtime.database-recovery-result",
+          operationId: command.operationId,
+          generation: command.generation,
+          operation: command.operation,
+          ok: false,
+          cancelled: false,
+          message: "The database recovery operation identity conflicts with a completed operation.",
+        });
+      } else {
+        postDatabaseRecoveryResult({
+          type: "runtime.database-recovery-result",
+          operationId: command.operationId,
+          generation: command.generation,
+          operation: command.operation,
+          ok: false,
+          cancelled: true,
+          message: "The database recovery operation is no longer active.",
+        });
+      }
+    }
+    return;
+  }
+  if (command.type === "runtime.database-recovery") {
+    const key = recoveryOperationKey(command.generation, command.operationId);
+    const receipt = databaseRecoveryReceipts.find(key, command.operation);
+    if (receipt) {
+      post(receipt);
+      return;
+    }
+    if (databaseRecoveryReceipts.has(key)) {
+      post({
+        type: "runtime.database-recovery-result",
+        operationId: command.operationId,
+        generation: command.generation,
+        operation: command.operation,
+        ok: false,
+        cancelled: false,
+        message: "The database recovery operation identity conflicts with a completed operation.",
+      });
+      return;
+    }
+    const activeOperation = activeDatabaseRecoveryOperations.get(key);
+    if (activeOperation) {
+      if (activeOperation !== command.operation) {
+        post({
+          type: "runtime.database-recovery-result",
+          operationId: command.operationId,
+          generation: command.generation,
+          operation: command.operation,
+          ok: false,
+          cancelled: false,
+          message: "The database recovery operation identity is already active.",
+        });
+      }
+      return;
+    }
+    if (!runtime || stopping) {
+      postDatabaseRecoveryResult({
+        type: "runtime.database-recovery-result",
+        operationId: command.operationId,
+        generation: command.generation,
+        operation: command.operation,
+        ok: false,
+        cancelled: false,
+        message: "The local runtime is not ready.",
+      });
+      return;
+    }
+    const currentRuntime = runtime;
+    activeDatabaseRecoveryOperations.set(key, command.operation);
+    const operation = databaseRecoveryOperations.enqueue(
+      key,
+      async (signal) => {
+        if (runtime !== currentRuntime || stopping) {
+          throw new Error("The local runtime is not ready.");
+        }
+        return command.operation === "export"
+          ? currentRuntime.exportRecoveryData(command.path, signal).then(() => null)
+          : currentRuntime.importRecoveryData(
+              command.path,
+              command.targetDirectory!,
+              signal,
+              command.operationId,
+            );
+      },
+    );
+    void operation.then(
+      (summary) => {
+        if (stopping) return;
+        activeDatabaseRecoveryOperations.delete(key);
+        postDatabaseRecoveryResult({
+          type: "runtime.database-recovery-result",
+          operationId: command.operationId,
+          generation: command.generation,
+          operation: command.operation,
+          ok: true,
+          summary,
+        });
+      },
+      (error: unknown) => {
+        if (stopping) return;
+        activeDatabaseRecoveryOperations.delete(key);
+        const detail = error instanceof Error
+          ? error.message.trim().replace(/\s+/gu, " ").slice(0, 1_000)
+          : "";
+        postDatabaseRecoveryResult({
+          type: "runtime.database-recovery-result",
+          operationId: command.operationId,
+          generation: command.generation,
+          operation: command.operation,
+          ok: false,
+          cancelled: error instanceof DatabaseRecoveryOperationCancelledError,
+          message: detail || "The database recovery operation failed.",
         });
       },
     );
@@ -237,27 +399,28 @@ parentPort.on("message", (messageEvent) => {
     attachments,
     secureFiles,
   }).then(async (startedRuntime) => {
-    try {
-      if (command.options.packageSmokePdf) {
-        await runPackagedPdfSmoke(
-          command.options.packageSmokePdf.inputPath,
-          command.options.packageSmokePdf.resultPath,
-        );
-      }
-    } catch (error) {
-      starting = false;
-      const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 800) : "";
-      post({ type: "runtime.startup-failed", message: detail || "The local runtime could not start." });
-      await finishShutdown(startedRuntime, 1);
-      return;
-    }
     starting = false;
     if (stopping) {
       await finishShutdown(startedRuntime, shutdownExitCode);
       return;
     }
     runtime = startedRuntime;
-    post({ type: "runtime.ready", websocketUrl: startedRuntime.websocketUrl });
+    post({
+      type: "runtime.ready",
+      websocketUrl: startedRuntime.websocketUrl,
+      databaseRecovery: startedRuntime.databaseRecovery,
+    });
+    if (command.options.packageSmokePdf) {
+      packageSmokePdfController = new AbortController();
+      packageSmokePdfOperation = runPackagedPdfSmoke(
+        command.options.packageSmokePdf.inputPath,
+        command.options.packageSmokePdf.resultPath,
+        packageSmokePdfController.signal,
+      ).catch(() => undefined).finally(() => {
+        packageSmokePdfController = null;
+        packageSmokePdfOperation = null;
+      });
+    }
   }).catch(async (error: unknown) => {
     starting = false;
     const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 800) : "";

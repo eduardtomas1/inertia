@@ -1,122 +1,88 @@
 # Local database recovery and durability
 
-## Status
+## Implemented behavior
 
-**Not implemented.** This finding was confirmed against the current code but no
-recovery mechanism was built in this pass. This document records the confirmed
-state, the design, and why it was deferred, so the gap is visible rather than
-silently dropped.
+Inertia keeps the live SQLite database in WAL mode with `synchronous = NORMAL`.
+That existing durability policy is unchanged: process crashes remain
+transactionally safe, while a sudden host power loss can still lose the newest
+OS-buffered commits. Recovery is provided by validated rotating backups rather
+than by adding a full filesystem sync to every streamed update.
 
-## Confirmed current state
+At runtime, Inertia creates an online backup every hour. Clean shutdown cancels
+unfinished backup work instead of starting a database-sized operation inside
+the process-wide shutdown deadline. `better-sqlite3`'s online backup API
+includes committed WAL data without racing a file copy. Backups are written
+beside the primary database:
 
-`src/server/database.ts` sets, in this order:
+- `backups/inertia-<UTC timestamp>.sqlite.partial` while in progress;
+- `backups/inertia-<UTC timestamp>.sqlite` only after an off-event-loop
+  `PRAGMA integrity_check`, exact contiguous migration-history check, and
+  required-schema check pass;
+- at most five validated backups and 512 MiB in total, evicting oldest first;
+- at least one current validated backup is retained even if that one file is
+  larger than the byte budget. Backups from a newer schema are protected from
+  downgrade pruning and are never treated as corruption.
 
-```js
-this.database.pragma("foreign_keys = ON");
-this.database.pragma("busy_timeout = 5000");
-this.database.pragma("journal_mode = WAL");
-this.database.pragma("synchronous = NORMAL");
-```
+Interrupted `.partial` backup and restore files are removed on the next startup.
+The data, backup, recovery, and corruption directories are owner-only (`0700`)
+and their artifacts are owner-readable/writable (`0600`) on POSIX systems.
 
-The existing comment is accurate: `NORMAL` in WAL mode keeps committed
-transactions crash-consistent for a process crash, but a host power loss can lose
-the newest OS-buffered commits.
+## Startup recovery
 
-What does **not** exist today:
+Recovery runs before the database is opened for migration:
 
-- no backups of any kind, rotating or otherwise;
-- no integrity check on open, and no recovery path when the main database cannot
-  be opened — `RuntimeStore`'s constructor closes the handle and rethrows, so the
-  runtime fails to start;
-- no user-visible export of projects and conversations;
-- no diagnostics describing a restore.
+1. Open the primary database read-only, run `PRAGMA quick_check`, and require a
+   coherent released migration history and the schema required by that history.
+2. If it fails, move the primary plus any WAL/SHM sidecars to `corrupt/`. The
+   unreadable source is preserved and is never replaced or deleted as cleanup.
+3. Validate backups newest-first with `integrity_check`, exact migration
+   history, and required schema; skip corrupt candidates, preserve unsupported
+   future candidates, and atomically restore the newest compatible one.
+4. Run ordinary append-only migrations on the restored database.
+5. If no compatible backup passes validation, initialize a new empty database
+   while still preserving the corrupt primary. A clean first launch with no
+   primary and no backup is a distinct non-incident outcome.
 
-So corruption, accidental deletion of `inertia.sqlite`, or power loss during a
-write currently has no in-app recovery story beyond whatever the user's own
-filesystem backups provide.
+A restore or empty fallback is recorded in
+`recovery/last-database-recovery.json` and carried through the supervised
+runtime protocol into privacy-filtered lifecycle diagnostics. It contains only
+the outcome, trigger, backup filename, corruption-preservation flag, validation
+and unsupported-backup counts, and timestamp—never paths, transcripts, or
+credentials.
 
-## Design
+## Explicit recovery export
 
-### Rotating backups
+Settings → Archive & data exposes a native save/open-dialog flow for recovery
+JSON. The renderer never supplies a filesystem path. The utility runtime writes
+exports through a private temporary file, `fsync`, and atomic rename; imports
+reject symlinks, oversized files, malformed JSON, unknown keys, and changed
+files.
 
-Use `better-sqlite3`'s online `backup()` API rather than copying files, so WAL
-content is included and no separate WAL handling is needed:
+The versioned strict format contains project names/paths, conversation routing
+preferences, and user/assistant/system message text and timestamps. It
+deliberately excludes:
 
-- write to `backups/inertia-<utc-timestamp>.sqlite.partial` in a directory
-  sibling to the live database, never inside it;
-- on success, run `PRAGMA integrity_check` **and** a schema-version read on the
-  partial file, and only then rename it to `.sqlite`. The rename is the atomic
-  commit point, so an interrupted rotation leaves a `.partial` file that the next
-  run deletes;
-- retain at most 5 backups and at most 512 MiB total, evicting oldest-first, and
-  always keep at least one validated backup even if it exceeds the size bound
-  (a too-large single backup is better than none);
-- schedule on a timer (hourly while the app is running) plus one on clean
-  shutdown; never on the streaming write path.
+- credentials, tokens, secret references, and credential-vault data;
+- provider sessions and continuation identities;
+- attachment metadata and bytes;
+- execution manifests, source context, Git patches, and diagnostics.
 
-Separation is explicit: the live database, its `-wal` and `-shm` files, and the
-`backups/` directory are distinct paths, and backups are never opened read-write
-by the running app.
+Import validates the complete document before a transaction begins and asks the
+user to authorize a destination folder separately from the recovery file.
+Exported absolute paths and access grants are never trusted: projects are
+remapped beneath that folder and every conversation returns to supervised
+access. Imports create new project/conversation/message identities and leave
+the user's current active selection unchanged. A durable content-and-destination
+receipt makes a late retry idempotent, recovery operations are serialized, and
+any failure rolls the import back in full.
 
-### Recovery path
+## Fault coverage
 
-On startup, before `migrate()`:
-
-1. try to open the live database and run `PRAGMA quick_check`;
-2. on failure, move the unreadable database aside to
-   `corrupt/inertia-<timestamp>.sqlite` — never delete it, it may be the only
-   copy of recent work;
-3. walk backups newest-first, validating each with `integrity_check` plus a
-   schema read, and restore the first that passes;
-4. if none pass, start from an empty database;
-5. record which backup was restored, or that none was, in runtime diagnostics so
-   the user can see what happened and how much history was lost.
-
-### Selective durability
-
-Rather than moving everything to `synchronous = FULL`, wrap only the boundaries
-where losing the newest commit is user-visible or authority-relevant:
-
-- finalizing a user-authored message;
-- completing an assistant response;
-- applying a migration;
-- changing remote grants;
-- persisting critical ownership metadata.
-
-Implement as `PRAGMA synchronous = FULL` around that single transaction, then
-back to `NORMAL`, or as an explicit `wal_checkpoint(FULL)` after it. **Measure
-before and after** — streamed token updates are frequent enough that a blanket
-change is the wrong trade, and this proposal is unverified until benchmarked.
-
-### Export
-
-A user-visible JSON export of projects and conversations, deliberately excluding
-credentials, secret references, provider tokens, attachment bytes, and vault
-contents. The export must reuse the same projection discipline as the remote
-transcript path so it cannot become a new exfiltration surface, and import must
-validate against a strict schema and create new identities rather than
-overwriting existing ones.
-
-## Why deferred
-
-This is a feature-sized change with its own failure modes — a backup that
-silently produces corrupt copies, or a recovery path that discards good data, is
-worse than no backups. It needs the measurement work above, fault-injection tests
-that terminate the process mid-write, corrupt-file fixtures, and interrupted
-rotation tests to be trustworthy. Landing it half-done alongside the remote and
-runtime security work in this pass would have added risk to both.
-
-## Required tests when implemented
-
-- process termination during a write leaves a database that opens and passes
-  `integrity_check`;
-- a deliberately corrupted main database triggers restore from the newest valid
-  backup, and the corrupt file is preserved rather than deleted;
-- an invalid backup is skipped and an older valid backup is used;
-- an interrupted rotation (`.partial` present) is cleaned up and does not count
-  toward retention;
-- WAL and shm files present at backup time do not produce a truncated backup;
-- retention respects both the count and the total-size bound, and never leaves
-  zero validated backups;
-- export/import round-trips projects and conversations;
-- no export contains credentials, secret references, or vault material.
+Automated coverage exercises committed WAL backup, corrupt-primary quarantine,
+newest-valid and older-valid restore, no-valid-backup initialization,
+interrupted partial cleanup, count/byte retention, bounded shutdown
+cancellation, future-schema preservation, owner-only permissions, strict and
+idempotent export/import containment, abrupt `SIGKILL` recovery, schema-41
+upgrade, oversized single-delta splitting, durable stream restart, and injected
+terminal-compaction rollback. Platform-independent scheduler and path tests run
+under the repository's Linux, macOS, and Windows CI matrix.

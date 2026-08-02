@@ -62,6 +62,8 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain('frame?.type === "runtime.event" ? frame.event : frame');
     expect(smoke).toContain("INERTIA_PACKAGE_SMOKE_PDF_INPUT");
     expect(smoke).toContain("packaged PDF extraction result");
+    expect(smoke).toContain("const PACKAGED_PDF_TIMEOUT_MS = 47_000;");
+    expect(smoke).toContain("PACKAGED_PDF_TIMEOUT_MS,");
     expect(smoke).toContain("pdfExtraction=true");
     const main = await source("src/main/index.ts");
     expect(main).toContain(
@@ -69,9 +71,16 @@ describe("cross-platform packaged behavior contract", () => {
     );
     expect(main.match(/timestampMs: Date\.now\(\)/gu)).toHaveLength(2);
     expect(main).toContain("packageSmokePdf:");
-    expect(await source("src/server/runtime-worker.ts")).toContain(
-      "await runPackagedPdfSmoke(",
-    );
+    expect(main).toContain("waitForPackageSmokePdfResult(packageSmokePdfResult)");
+    expect(main).toContain("const PACKAGE_SMOKE_PDF_RESULT_TIMEOUT_MS = 47_000;");
+    const worker = await source("src/server/runtime-worker.ts");
+    const readiness = worker.lastIndexOf('type: "runtime.ready"');
+    const pdfSmoke = worker.lastIndexOf("packageSmokePdfOperation = runPackagedPdfSmoke(");
+    expect(readiness).toBeGreaterThanOrEqual(0);
+    expect(pdfSmoke).toBeGreaterThan(readiness);
+    expect(worker).toContain("packageSmokePdfController?.abort(");
+    expect(worker).toContain("packageSmokePdfOperation?.catch(() => undefined)");
+    expect(main).toContain("JSON.parse(await readFile(path, \"utf8\"))");
   });
 
   it("registers runtime socket handlers before sending the first hydration frame", async () => {

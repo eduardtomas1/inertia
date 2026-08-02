@@ -195,11 +195,13 @@ export interface ActiveTurn {
   sessionAfter: string | null;
   lastUsage: AgentTurnUsageSnapshot | null;
   assistantText: string;
+  assistantPendingHighSurrogate: string;
   assistantSegmentText: string;
   assistantMessageId: string | null;
   latestAssistantMessageId: string | null;
   assistantStream: TurnStreamChannel;
   reasoningText: string;
+  reasoningPendingHighSurrogate: string;
   reasoningId: string | null;
   reasoningStream: TurnStreamChannel;
   timeoutTimer: unknown;

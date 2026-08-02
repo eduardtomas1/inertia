@@ -23,7 +23,32 @@ export const REMOTE_ACCESS_IPC = {
 
 export interface RuntimeConnection {
   websocketUrl: string;
+  databaseRecoveryNotice?: DatabaseRecoveryStartupNotice;
 }
+
+export interface DatabaseRecoveryStartupNotice {
+  id: string;
+  outcome: "restored" | "created-empty";
+  trigger: "primary-missing" | "primary-corrupt";
+  preservedCorruptPrimary: boolean;
+  invalidBackupsSkipped: number;
+  unsupportedBackupsSkipped: number;
+}
+
+export interface DatabaseRecoveryImportSummary {
+  projects: number;
+  conversations: number;
+  messages: number;
+  alreadyImported: boolean;
+}
+
+export type DatabaseRecoveryExportResult =
+  | { status: "cancelled" }
+  | { status: "exported" };
+
+export type DatabaseRecoveryImportResult =
+  | { status: "cancelled" }
+  | { status: "imported"; summary: DatabaseRecoveryImportSummary };
 
 export type AppUpdateState = "available" | "current" | "unavailable";
 export type AppUpdateFreshness = "fresh" | "cached" | "unavailable";
@@ -283,6 +308,10 @@ export interface DesktopBridge {
   onRuntimeReady: (listener: () => void) => () => void;
   selectDirectory: () => Promise<string | null>;
   selectCodexExecutable: () => Promise<string | null>;
+  /** Writes a bounded transcript-only recovery export chosen by the user. */
+  exportRecoveryData: () => Promise<DatabaseRecoveryExportResult>;
+  /** Imports a strictly validated recovery export under fresh local identities. */
+  importRecoveryData: () => Promise<DatabaseRecoveryImportResult>;
   /** Reveals Inertia's fixed local diagnostics directory; no caller-supplied path is accepted. */
   revealRuntimeLogs: () => Promise<string>;
   /** Copies a fixed, allowlisted lifecycle summary. Prompts, source, paths, and credentials are excluded. */

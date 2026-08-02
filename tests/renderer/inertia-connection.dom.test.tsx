@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -73,6 +73,52 @@ describe("useInertiaConnection", () => {
 
     await waitFor(() => expect(getRuntimeConnection).toHaveBeenCalledTimes(2));
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("retains one startup recovery notice across reconnects and does not recreate it after dismissal", async () => {
+    let announceReady: (() => void) | undefined;
+    const notice = {
+      id: "runtime-1-database-recovery",
+      outcome: "created-empty" as const,
+      trigger: "primary-corrupt" as const,
+      preservedCorruptPrimary: true,
+      invalidBackupsSkipped: 1,
+      unsupportedBackupsSkipped: 0,
+    };
+    const getRuntimeConnection = vi.fn()
+      .mockResolvedValueOnce({
+        websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+        databaseRecoveryNotice: notice,
+      })
+      .mockResolvedValue({
+        websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+      });
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection,
+        onRuntimeReady: vi.fn((listener: () => void) => {
+          announceReady = listener;
+          return vi.fn();
+        }),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(hook.result.current.databaseRecoveryNotice)
+      .toEqual(notice));
+
+    FakeWebSocket.instances[0]!.close();
+    announceReady?.();
+    await waitFor(() => expect(getRuntimeConnection).toHaveBeenCalledTimes(2));
+    expect(hook.result.current.databaseRecoveryNotice).toEqual(notice);
+    act(() => hook.result.current.dismissDatabaseRecoveryNotice());
+    expect(hook.result.current.databaseRecoveryNotice).toBeNull();
+
+    FakeWebSocket.instances[1]!.close();
+    announceReady?.();
+    await waitFor(() => expect(getRuntimeConnection).toHaveBeenCalledTimes(3));
+    expect(hook.result.current.databaseRecoveryNotice).toBeNull();
   });
 
   it("rejects an escaped oversized command without sending or closing", async () => {

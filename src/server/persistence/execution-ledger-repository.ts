@@ -45,6 +45,11 @@ import type {
   UpsertSubagentTraceResult,
 } from "./types";
 import { sanitizeProviderActivityDetail } from "../provider/activity-detail";
+import {
+  appendReasoningContentChunks,
+  REASONING_PROJECTION_COLUMNS,
+  replaceReasoningContent,
+} from "./stream-text-storage";
 
 interface ExecutionLedgerPersistenceContext {
   assertAgentTurnIdentity(
@@ -419,32 +424,27 @@ export class ExecutionLedgerRepository {
   }
 
   updateReasoning(id: string, update: Partial<Pick<AgentReasoning, "content" | "status">>): AgentReasoning {
-    const row = this.context.database.prepare("SELECT * FROM agent_reasonings WHERE id = ?").get(id) as AgentReasoningRow | undefined;
+    const row = this.context.database.prepare(`
+      SELECT ${REASONING_PROJECTION_COLUMNS}
+      FROM agent_reasonings
+      WHERE agent_reasonings.id = ?
+    `).get(id) as AgentReasoningRow | undefined;
     if (!row) throw new RecordNotFoundError("Reasoning summary not found.");
     const next = { ...reasoningFromRow(row), ...update };
-    this.context.database.prepare("UPDATE agent_reasonings SET content = ?, status = ? WHERE id = ?").run(next.content, next.status, id);
+    replaceReasoningContent(
+      this.context.database,
+      id,
+      next.content,
+      next.status,
+    );
     return next;
   }
 
-  appendReasoningContent(id: string, delta: string): AgentReasoning {
-    if (!delta) return this.reasoning(id);
-    const result = this.context.database.prepare(`
-      UPDATE agent_reasonings
-      SET content = content || ?
-      WHERE id = ?
-    `).run(delta, id);
-    if (result.changes !== 1) {
+  appendReasoningContent(id: string, delta: string): void {
+    if (!delta) return;
+    if (!appendReasoningContentChunks(this.context.database, id, delta)) {
       throw new RecordNotFoundError("Reasoning summary not found.");
     }
-    return this.reasoning(id);
-  }
-
-  private reasoning(id: string): AgentReasoning {
-    const row = this.context.database.prepare(
-      "SELECT * FROM agent_reasonings WHERE id = ?",
-    ).get(id) as AgentReasoningRow | undefined;
-    if (!row) throw new RecordNotFoundError("Reasoning summary not found.");
-    return reasoningFromRow(row);
   }
 
   upsertUsage(

@@ -596,6 +596,8 @@ async function launchRemoteBrowser(): Promise<{
       ],
     });
     const page = await electronApp.firstWindow();
+    await expect(page.getByRole("heading", { name: "Pair this browser" }))
+      .toBeVisible();
     return {
       electronApp,
       page,

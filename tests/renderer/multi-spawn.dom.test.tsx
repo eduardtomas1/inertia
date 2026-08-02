@@ -1343,6 +1343,7 @@ describe("multi-spawn", () => {
       { ordinal: 0 as const, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "pending" as const },
       { ordinal: 1 as const, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "pending" as const },
     ];
+    const retainedBranchMessage = "The generated branch was intentionally retained after worktree removal: inertia/33333333. Inspect it in the corresponding project repository; if it is no longer needed, remove it manually with `git branch -d -- 'inertia/33333333'`.";
     const run = vi.fn(async (
       _key: string,
       command: CommandWithoutId,
@@ -1368,7 +1369,7 @@ describe("multi-spawn", () => {
           kind: "duo.status",
           launchId,
           state: "cancelled",
-          error: null,
+          error: retainedBranchMessage,
           sides: [
             { ...sides[0], dispatchState: "cancelled" },
             { ...sides[1], dispatchState: "cancelled" },
@@ -1400,7 +1401,7 @@ describe("multi-spawn", () => {
       MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
     )).toBeNull();
     expect(hook.result.current.error).toBe(
-      "The duo launch was cancelled before both providers began.",
+      retainedBranchMessage,
     );
   });
 

@@ -16,9 +16,9 @@ import type { RuntimeStore } from "../../database";
 import {
   confirmWorktreeRemovalIfAbsent,
   createWorktreeWithOwnershipReceipt,
-  deleteBranchIfUnchanged,
   getRepositoryStatus,
   GitError,
+  inspectBranchCleanupOutcome,
   removeWorktreeIfOwnershipUnchanged,
   type OwnedWorktreeCreationHooks,
   type OwnedWorktreeRemovalHooks,
@@ -74,11 +74,11 @@ export interface DuoWorktreeOperations {
     force: boolean,
     hooks: OwnedWorktreeRemovalHooks,
   ): ReturnType<typeof removeWorktreeIfOwnershipUnchanged>;
-  deleteBranch(
+  inspectBranch(
     repositoryPath: string,
     branch: string,
     expectedHead: string,
-  ): ReturnType<typeof deleteBranchIfUnchanged>;
+  ): ReturnType<typeof inspectBranchCleanupOutcome>;
 }
 
 class DuoLaunchCancelledError extends Error {
@@ -120,7 +120,7 @@ async function cleanupUnadoptedOwnedWorktree(
   launchId: string,
   ordinal: 0 | 1,
   worktrees: DuoWorktreeOperations,
-): Promise<void> {
+): Promise<string | null> {
   const launch = store.pairedLaunch(launchId);
   const plan = launch.plans[ordinal];
   const side = launch.sides[ordinal];
@@ -128,13 +128,13 @@ async function cleanupUnadoptedOwnedWorktree(
     !plan.ownsWorktree
     || !plan.plannedWorktreePath
     || side.conversationId
-  ) return;
+  ) return null;
   const worktreePath = plan.plannedWorktreePath;
   const branch = expectedLaunchOwnedBranch(plan);
   if (
     plan.worktreeCreationState === "pending"
     || plan.worktreeCreationState === "not-created"
-  ) return;
+  ) return null;
   if (plan.worktreeCreationState === "creating") {
     throw new Error(
       "Worktree creation was interrupted before durable ownership acknowledgement; automatic cleanup was withheld.",
@@ -170,11 +170,33 @@ async function cleanupUnadoptedOwnedWorktree(
       },
     );
   }
-  await worktrees.deleteBranch(
-    store.projectPath(plan.projectId),
-    branch,
-    branchHead,
-  );
+  const afterRemoval = store.pairedLaunch(launchId).plans[ordinal];
+  let outcome = afterRemoval.branchCleanupOutcome;
+  if (!outcome) {
+    outcome = await worktrees.inspectBranch(
+      store.projectPath(plan.projectId),
+      branch,
+      branchHead,
+    );
+    store.recordPairedLaunchBranchCleanupOutcome(
+      launchId,
+      ordinal,
+      outcome,
+    );
+  }
+  return outcome === "retained" ? branch : null;
+}
+
+function retainedBranchMessage(results: readonly PromiseSettledResult<string | null>[]): string | null {
+  const branches = [...new Set(results.flatMap((result) =>
+    result.status === "fulfilled" && result.value ? [result.value] : []))];
+  if (branches.length === 0) return null;
+  const instructions = branches.map((branch) =>
+    `\`git branch -d -- '${branch}'\``).join(", ");
+  const noun = branches.length === 1 ? "branch was" : "branches were";
+  return `The generated ${noun} intentionally retained after worktree removal: `
+    + `${branches.join(", ")}. Inspect it in the corresponding project repository; `
+    + `if it is no longer needed, remove it manually with ${instructions}.`;
 }
 
 export class DuoLaunchCoordinator {
@@ -199,7 +221,7 @@ export class DuoLaunchCoordinator {
       confirmRemovalIfAbsent: confirmWorktreeRemovalIfAbsent,
       create: createWorktreeWithOwnershipReceipt,
       remove: removeWorktreeIfOwnershipUnchanged,
-      deleteBranch: deleteBranchIfUnchanged,
+      inspectBranch: inspectBranchCleanupOutcome,
     };
   }
 
@@ -415,6 +437,7 @@ export class DuoLaunchCoordinator {
     } catch (error) {
       const cancellation = error instanceof DuoLaunchCancelledError;
       let compensationFailure: string | null = null;
+      let retainedBranch: string | null = null;
       if (!conversationsAdopted) {
         const compensation = await Promise.allSettled(
           [...this.store.pairedLaunch(payload.launchId).plans].reverse().map((plan) =>
@@ -429,12 +452,17 @@ export class DuoLaunchCoordinator {
         if (rejected?.status === "rejected") {
           compensationFailure = `Owned worktree cleanup needs attention: ${errorMessage(rejected.reason)}`;
         }
+        retainedBranch = retainedBranchMessage(compensation);
       }
-      const failure = [errorMessage(error), compensationFailure]
+      const failure = [errorMessage(error), compensationFailure, retainedBranch]
         .filter(Boolean)
         .join(" ");
       if (cancellation && !compensationFailure) {
-        this.store.finishPairedLaunchCancellation(payload.launchId);
+        this.store.finishPairedLaunchCancellation(
+          payload.launchId,
+          retainedBranch,
+          retainedBranch !== null,
+        );
       } else {
         this.store.failPairedLaunch(
           payload.launchId,
@@ -464,8 +492,11 @@ export class DuoLaunchCoordinator {
         `Owned worktree cleanup still needs attention: ${errorMessage(rejected.reason)}`,
       ));
     }
+    const retainedBranch = retainedBranchMessage(cleanup);
     return publicStatus(this.store.finishPairedLaunchCancellation(
       launch.launchId,
+      retainedBranch,
+      retainedBranch !== null,
     ));
   }
 
@@ -667,7 +698,7 @@ export async function reconcileInterruptedDuoLaunches(
     confirmRemovalIfAbsent: confirmWorktreeRemovalIfAbsent,
     create: createWorktreeWithOwnershipReceipt,
     remove: removeWorktreeIfOwnershipUnchanged,
-    deleteBranch: deleteBranchIfUnchanged,
+    inspectBranch: inspectBranchCleanupOutcome,
   };
   const recovered = store.recoverInterruptedPairedLaunches();
   for (const launch of recovered) {
@@ -687,10 +718,14 @@ export async function reconcileInterruptedDuoLaunches(
         `Duo restart cleanup needs attention: ${errorMessage(rejected.reason)}`,
       );
     } else {
+      const retainedBranch = retainedBranchMessage(cleanup);
       store.failPairedLaunch(
         launch.launchId,
         "failed",
-        "Duo preparation was interrupted before dispatch. Owned worktrees were compensated and no provider was retried.",
+        [
+          "Duo preparation was interrupted before dispatch. Owned worktrees were compensated and no provider was retried.",
+          retainedBranch,
+        ].filter(Boolean).join(" "),
       );
     }
   }

@@ -27,9 +27,10 @@ export {
 export { getUnifiedDiff } from "./git/diff";
 export {
   createBranch,
-  deleteBranchIfUnchanged,
+  inspectBranchCleanupOutcome,
   listBranches,
   switchBranch,
+  type BranchCleanupOutcome,
 } from "./git/branches";
 export {
   confirmWorktreeRemovalIfAbsent,

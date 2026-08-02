@@ -14,7 +14,7 @@ import {
   confirmWorktreeRemovalIfAbsent,
   createWorktree,
   createWorktreeWithOwnershipReceipt,
-  deleteBranchIfUnchanged,
+  inspectBranchCleanupOutcome,
   inspectRegisteredWorktreeOwnership,
   removeWorktree,
   removeWorktreeIfOwnershipUnchanged,
@@ -115,7 +115,7 @@ describe("launch-owned Git cleanup", () => {
     )).rejects.toMatchObject({ code: "not-found" });
   });
 
-  it("deletes only the exact unchanged branch and is idempotent when absent", async () => {
+  it("retains an exact unchanged branch after worktree removal", async () => {
     const root = repository();
     const path = ownedPath(root, "unchanged owned path");
     const branch = "inertia/unchanged-owned";
@@ -138,15 +138,13 @@ describe("launch-owned Git cleanup", () => {
       { beforeRemove: () => undefined, removed: () => undefined },
     );
 
-    await expect(deleteBranchIfUnchanged(root, branch, ownership.head))
-      .resolves.toBeUndefined();
+    await expect(inspectBranchCleanupOutcome(root, branch, ownership.head))
+      .resolves.toBe("retained");
     expect(git(root, "for-each-ref", "--format=%(refname)", `refs/heads/${branch}`))
-      .toBe("");
-    await expect(deleteBranchIfUnchanged(root, branch, ownership.head))
-      .resolves.toBeUndefined();
+      .toBe(`refs/heads/${branch}`);
   });
 
-  it("treats an absent exact branch as deleted while preserving descendants", async () => {
+  it("treats an absent exact branch as absent while preserving descendants", async () => {
     const root = repository();
     const branch = "inertia/absent-parent";
     const descendant = `${branch}/user-topic`;
@@ -155,8 +153,8 @@ describe("launch-owned Git cleanup", () => {
     git(root, "branch", "-D", branch);
     git(root, "branch", descendant, "main");
 
-    await expect(deleteBranchIfUnchanged(root, branch, expectedHead))
-      .resolves.toBeUndefined();
+    await expect(inspectBranchCleanupOutcome(root, branch, expectedHead))
+      .resolves.toBe("absent");
     expect(git(root, "rev-parse", descendant)).toBe(expectedHead);
     expect(git(
       root,
@@ -382,7 +380,7 @@ describe("launch-owned Git cleanup", () => {
     expect(git(root, "rev-parse", branch)).toBe(ownership.head);
   });
 
-  it("does not delete a launch ref reattached after confirmed removal", async () => {
+  it("retains a launch ref checked out again after confirmed removal", async () => {
     const root = repository();
     const path = ownedPath(root, "reattached launch path");
     const branch = "inertia/reattached-owned";
@@ -406,8 +404,8 @@ describe("launch-owned Git cleanup", () => {
     );
     git(root, "worktree", "add", "--", path, branch);
 
-    await expect(deleteBranchIfUnchanged(root, branch, ownership.head))
-      .rejects.toMatchObject({ code: "conflict" });
+    await expect(inspectBranchCleanupOutcome(root, branch, ownership.head))
+      .resolves.toBe("retained");
     await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
       .resolves.toMatchObject({ head: ownership.head });
   });
@@ -431,8 +429,32 @@ describe("launch-owned Git cleanup", () => {
     const movedHead = git(root, "rev-parse", "HEAD");
     git(root, "branch", "-f", branch, movedHead);
 
-    await expect(deleteBranchIfUnchanged(root, branch, ownership.head))
-      .rejects.toMatchObject({ code: "conflict" });
+    await expect(inspectBranchCleanupOutcome(root, branch, ownership.head))
+      .resolves.toBe("retained");
+    expect(git(root, "rev-parse", branch)).toBe(movedHead);
+  });
+
+  it("retains a ref moved to a commit already merged into the current HEAD", async () => {
+    const root = repository();
+    const path = ownedPath(root, "merged moved owned path");
+    const branch = "inertia/merged-moved-owned";
+    await createWorktree(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    });
+    const ownership = await inspectRegisteredWorktreeOwnership(
+      root,
+      path,
+      branch,
+    );
+    await removeWorktree(root, path, false);
+    git(root, "commit", "--allow-empty", "-q", "-m", "Advance merged main");
+    const movedHead = git(root, "rev-parse", "main");
+    git(root, "branch", "-f", branch, movedHead);
+
+    await expect(inspectBranchCleanupOutcome(root, branch, ownership.head))
+      .resolves.toBe("retained");
     expect(git(root, "rev-parse", branch)).toBe(movedHead);
   });
 });

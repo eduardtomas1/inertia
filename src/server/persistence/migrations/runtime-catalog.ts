@@ -1075,6 +1075,20 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
               CHECK (worktree_removal_started IN (0, 1));
           `);
         }
+        if (!columns.some(({ name }) => name === "branch_cleanup_outcome")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN branch_cleanup_outcome TEXT
+              CHECK (
+                branch_cleanup_outcome IS NULL
+                OR (
+                  branch_cleanup_outcome IN ('absent', 'retained')
+                  AND worktree_removal_confirmed = 1
+                  AND cleanup_branch_head IS NOT NULL
+                )
+              );
+          `);
+        }
         database.exec(`
           UPDATE paired_launch_sides
           SET worktree_removal_started = 1

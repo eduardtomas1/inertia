@@ -122,6 +122,7 @@ export interface PairedLaunchSideRow {
   cleanup_branch_head: string | null;
   worktree_removal_started: 0 | 1;
   worktree_removal_confirmed: 0 | 1;
+  branch_cleanup_outcome: "absent" | "retained" | null;
   dispatch_state: DuoDispatchState;
 }
 

@@ -128,30 +128,13 @@ async function localBranchHead(
   return null;
 }
 
-async function assertBranchNotCheckedOut(
-  root: string,
-  branch: string,
-): Promise<void> {
-  const result = await runGit(
-    root,
-    ["worktree", "list", "--porcelain", "-z"],
-    { failureMessage: "Unable to inspect checked-out branches." },
-  );
-  if (result.stdout.toString("utf8").split("\0").some(
-    (field) => field === `branch refs/heads/${branch}`,
-  )) {
-    throw new GitError(
-      "conflict",
-      "The launch-owned branch is checked out and was not deleted.",
-    );
-  }
-}
+export type BranchCleanupOutcome = "absent" | "retained";
 
-export async function deleteBranchIfUnchanged(
+export async function inspectBranchCleanupOutcome(
   repositoryPath: string,
   branch: string,
   expectedHead: string,
-): Promise<void> {
+): Promise<BranchCleanupOutcome> {
   const root = await repositoryRoot(repositoryPath);
   const name = await validateBranch(root, branch);
   if (!/^[0-9a-f]{40,64}$/u.test(expectedHead)) {
@@ -161,33 +144,5 @@ export async function deleteBranchIfUnchanged(
     );
   }
   const currentHead = await localBranchHead(root, name);
-  if (currentHead === null) {
-    return;
-  }
-  if (currentHead !== expectedHead) {
-    throw new GitError(
-      "conflict",
-      "The launch-owned branch changed after cleanup began and was not deleted.",
-    );
-  }
-  await assertBranchNotCheckedOut(root, name);
-  try {
-    await runGit(
-      root,
-      ["update-ref", "-d", `refs/heads/${name}`, expectedHead],
-      { failureMessage: "Unable to delete the launch-owned branch." },
-    );
-  } catch (error) {
-    const latestHead = await localBranchHead(root, name);
-    if (latestHead === null) {
-      return;
-    }
-    if (latestHead !== expectedHead) {
-      throw new GitError(
-        "conflict",
-        "The launch-owned branch changed after cleanup began and was not deleted.",
-      );
-    }
-    throw error;
-  }
+  return currentHead === null ? "absent" : "retained";
 }

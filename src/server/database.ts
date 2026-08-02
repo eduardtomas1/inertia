@@ -388,20 +388,50 @@ export class RuntimeStore {
     );
   }
 
-  recordPairedLaunchWorktreeCleanupOwnership(
+  beginPairedLaunchWorktreeCreation(
     launchId: string,
     ordinal: 0 | 1,
     worktreePath: string,
+    branch: string,
+  ): void {
+    this.pairedLaunchRepository.beginWorktreeCreation(
+      launchId,
+      ordinal,
+      worktreePath,
+      branch,
+    );
+  }
+
+  rejectPairedLaunchWorktreeCreation(
+    launchId: string,
+    ordinal: 0 | 1,
+  ): void {
+    this.pairedLaunchRepository.rejectWorktreeCreation(launchId, ordinal);
+  }
+
+  recordPairedLaunchWorktreeCleanupOwnership(
+    launchId: string,
+    ordinal: 0 | 1,
+    plannedWorktreePath: string,
+    createdWorktreePath: string,
     branch: string,
     head: string,
   ): void {
     this.pairedLaunchRepository.recordWorktreeCleanupOwnership(
       launchId,
       ordinal,
-      worktreePath,
+      plannedWorktreePath,
+      createdWorktreePath,
       branch,
       head,
     );
+  }
+
+  beginPairedLaunchWorktreeRemoval(
+    launchId: string,
+    ordinal: 0 | 1,
+  ): void {
+    this.pairedLaunchRepository.beginWorktreeRemoval(launchId, ordinal);
   }
 
   confirmPairedLaunchWorktreeRemoval(

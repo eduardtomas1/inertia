@@ -973,6 +973,8 @@ describe("atomic Duo schema migration", () => {
         const previous = new Database(databasePath);
         previous.exec(`
           ALTER TABLE paired_launch_sides DROP COLUMN worktree_removal_confirmed;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_removal_started;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_creation_state;
           ALTER TABLE paired_launch_sides DROP COLUMN cleanup_branch_head;
         `);
         previous.prepare(
@@ -988,10 +990,14 @@ describe("atomic Duo schema migration", () => {
         expect(migrated.pairedLaunch(retainedLaunchId).plans).toEqual([
           expect.objectContaining({
             cleanupBranchHead: null,
+            worktreeCreationState: "pending",
+            worktreeRemovalStarted: false,
             worktreeRemovalConfirmed: false,
           }),
           expect.objectContaining({
             cleanupBranchHead: null,
+            worktreeCreationState: "pending",
+            worktreeRemovalStarted: false,
             worktreeRemovalConfirmed: false,
           }),
         ]);
@@ -1029,6 +1035,8 @@ describe("atomic Duo schema migration", () => {
         "PRAGMA table_info(paired_launch_sides)",
       ).all() as Array<{ dflt_value: string | null; name: string }>).filter(
         ({ name }) => name === "cleanup_branch_head"
+          || name === "worktree_creation_state"
+          || name === "worktree_removal_started"
           || name === "worktree_removal_confirmed",
       )).toEqual([
         expect.objectContaining({
@@ -1036,7 +1044,15 @@ describe("atomic Duo schema migration", () => {
           dflt_value: null,
         }),
         expect.objectContaining({
+          name: "worktree_creation_state",
+          dflt_value: "'pending'",
+        }),
+        expect.objectContaining({
           name: "worktree_removal_confirmed",
+          dflt_value: "0",
+        }),
+        expect.objectContaining({
+          name: "worktree_removal_started",
           dflt_value: "0",
         }),
       ]);

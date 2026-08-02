@@ -118,7 +118,9 @@ export interface PairedLaunchSideRow {
   planned_worktree_path: string | null;
   planned_branch: string | null;
   owns_worktree: 0 | 1;
+  worktree_creation_state: "pending" | "creating" | "created" | "not-created";
   cleanup_branch_head: string | null;
+  worktree_removal_started: 0 | 1;
   worktree_removal_confirmed: 0 | 1;
   dispatch_state: DuoDispatchState;
 }

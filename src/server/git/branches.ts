@@ -125,6 +125,25 @@ async function localBranchHead(
   return head || null;
 }
 
+async function assertBranchNotCheckedOut(
+  root: string,
+  branch: string,
+): Promise<void> {
+  const result = await runGit(
+    root,
+    ["worktree", "list", "--porcelain", "-z"],
+    { failureMessage: "Unable to inspect checked-out branches." },
+  );
+  if (result.stdout.toString("utf8").split("\0").some(
+    (field) => field === `branch refs/heads/${branch}`,
+  )) {
+    throw new GitError(
+      "conflict",
+      "The launch-owned branch is checked out and was not deleted.",
+    );
+  }
+}
+
 export async function deleteBranchIfUnchanged(
   repositoryPath: string,
   branch: string,
@@ -148,6 +167,7 @@ export async function deleteBranchIfUnchanged(
       "The launch-owned branch changed after cleanup began and was not deleted.",
     );
   }
+  await assertBranchNotCheckedOut(root, name);
   try {
     await runGit(
       root,

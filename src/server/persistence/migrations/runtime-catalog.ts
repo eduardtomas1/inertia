@@ -1040,6 +1040,21 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
               );
           `);
         }
+        if (!columns.some(({ name }) => name === "worktree_creation_state")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN worktree_creation_state TEXT NOT NULL DEFAULT 'pending'
+              CHECK (
+                worktree_creation_state IN (
+                  'pending', 'creating', 'created', 'not-created'
+                )
+                AND (
+                  worktree_creation_state = 'created'
+                  OR cleanup_branch_head IS NULL
+                )
+              );
+          `);
+        }
         if (!columns.some(({ name }) => name === "worktree_removal_confirmed")) {
           database.exec(`
             ALTER TABLE paired_launch_sides
@@ -1053,6 +1068,18 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
               );
           `);
         }
+        if (!columns.some(({ name }) => name === "worktree_removal_started")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN worktree_removal_started INTEGER NOT NULL DEFAULT 0
+              CHECK (worktree_removal_started IN (0, 1));
+          `);
+        }
+        database.exec(`
+          UPDATE paired_launch_sides
+          SET worktree_removal_started = 1
+          WHERE worktree_removal_confirmed = 1;
+        `);
       },
     });
     const runtimeMigrations = createRuntimeMigrationCatalog(

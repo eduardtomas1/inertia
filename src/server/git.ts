@@ -32,10 +32,15 @@ export {
   switchBranch,
 } from "./git/branches";
 export {
+  confirmWorktreeRemovalIfAbsent,
   createWorktree,
+  createWorktreeWithOwnershipReceipt,
   inspectRegisteredWorktreeOwnership,
+  type OwnedWorktreeCreationHooks,
+  type OwnedWorktreeRemovalHooks,
   type RegisteredWorktreeOwnership,
   removeWorktree,
+  removeWorktreeIfOwnershipUnchanged,
 } from "./git/worktrees";
 export { commitChanges } from "./git/commits";
 export {

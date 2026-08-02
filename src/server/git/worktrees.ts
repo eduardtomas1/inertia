@@ -32,6 +32,21 @@ export interface RegisteredWorktreeOwnership {
   path: string;
 }
 
+export interface OwnedWorktreeCreationHooks {
+  added(ownership: RegisteredWorktreeOwnership): void;
+  beforeAdd(): void;
+  notAdded(): void;
+}
+
+export interface OwnedWorktreeRemovalHooks {
+  beforeRemove(): void;
+  removed(): void;
+}
+
+function pathsEqual(left: string, right: string): boolean {
+  return relative(resolve(left), resolve(right)) === "";
+}
+
 async function validateNewAbsolutePath(
   path: string,
   repositoryRootPath: string,
@@ -120,6 +135,55 @@ export async function createWorktree(
   return getRepositoryStatus(target);
 }
 
+export async function createWorktreeWithOwnershipReceipt(
+  repositoryPath: string,
+  worktreePath: string,
+  options: { branch: string; createBranch: true; startPoint: string },
+  hooks: OwnedWorktreeCreationHooks,
+): Promise<GitRepositoryStatus> {
+  const root = await repositoryRoot(repositoryPath);
+  const target = await validateNewAbsolutePath(worktreePath, root);
+  const branch = await validateBranch(root, options.branch);
+  const startPoint = validateName(
+    options.startPoint,
+    "The starting revision",
+  );
+  const resolved = await runGit(
+    root,
+    ["rev-parse", "--verify", `${startPoint}^{commit}`],
+    { failureMessage: "Unable to resolve the worktree starting revision." },
+  );
+  const head = resolved.stdout.toString("utf8").trim();
+  if (!/^[0-9a-f]{40,64}$/u.test(head)) {
+    throw new GitError(
+      "operation-failed",
+      "Git returned an invalid worktree starting revision.",
+    );
+  }
+  hooks.beforeAdd();
+  try {
+    await runGit(
+      root,
+      ["worktree", "add", "-b", branch, "--", target, head],
+      { failureMessage: "Unable to create the worktree." },
+    );
+  } catch (error) {
+    try {
+      await inspectRegisteredWorktreeOwnership(root, target, branch);
+    } catch (inspectionError) {
+      if (
+        inspectionError instanceof GitError
+        && inspectionError.code === "not-found"
+      ) {
+        hooks.notAdded();
+      }
+    }
+    throw error;
+  }
+  hooks.added({ branch, head, path: target });
+  return getRepositoryStatus(target);
+}
+
 async function registeredWorktrees(
   root: string,
 ): Promise<Array<{ branch: string | null; head: string; path: string }>> {
@@ -152,6 +216,22 @@ async function registeredWorktrees(
   return worktrees;
 }
 
+async function conflictingRegisteredWorktree(
+  root: string,
+  worktreePath: string,
+  branch: string,
+): Promise<{ branch: string | null; head: string; path: string } | undefined> {
+  const requestedTarget = resolve(worktreePath);
+  const canonicalTarget = await realpath(requestedTarget).catch(() =>
+    requestedTarget);
+  return (await registeredWorktrees(root)).find((registered) => {
+    const registeredPath = resolve(registered.path);
+    return pathsEqual(registeredPath, requestedTarget)
+      || pathsEqual(registeredPath, canonicalTarget)
+      || registered.branch === branch;
+  });
+}
+
 export async function inspectRegisteredWorktreeOwnership(
   repositoryPath: string,
   worktreePath: string,
@@ -178,7 +258,7 @@ export async function inspectRegisteredWorktreeOwnership(
     );
   }
   const registered = (await registeredWorktrees(root)).find(
-    (worktree) => resolve(worktree.path) === target,
+    (worktree) => pathsEqual(worktree.path, target),
   );
   if (!registered) {
     throw new GitError(
@@ -200,6 +280,111 @@ export async function inspectRegisteredWorktreeOwnership(
     head: registered.head,
     path: registered.path,
   };
+}
+
+export async function removeWorktreeIfOwnershipUnchanged(
+  repositoryPath: string,
+  worktreePath: string,
+  expectedBranch: string,
+  expectedHead: string,
+  force: boolean,
+  hooks: OwnedWorktreeRemovalHooks,
+): Promise<void> {
+  if (!/^[0-9a-f]{40,64}$/u.test(expectedHead)) {
+    throw new GitError(
+      "invalid-input",
+      "The expected worktree identity is invalid.",
+    );
+  }
+  const root = await repositoryRoot(repositoryPath);
+  const branch = await validateBranch(root, expectedBranch);
+  let ownership: RegisteredWorktreeOwnership;
+  try {
+    ownership = await inspectRegisteredWorktreeOwnership(
+      root,
+      worktreePath,
+      branch,
+    );
+  } catch (error) {
+    if (!(error instanceof GitError && error.code === "not-found")) throw error;
+    const conflicting = await conflictingRegisteredWorktree(
+      root,
+      worktreePath,
+      branch,
+    );
+    if (conflicting) {
+      throw new GitError(
+        "conflict",
+        "The launch-owned worktree moved or was replaced and was not removed.",
+      );
+    }
+    hooks.beforeRemove();
+    const appeared = await conflictingRegisteredWorktree(
+      root,
+      worktreePath,
+      branch,
+    );
+    if (appeared) {
+      throw new GitError(
+        "conflict",
+        "The launch-owned worktree changed after removal began and was not removed.",
+      );
+    }
+    hooks.removed();
+    return;
+  }
+  if (ownership.head !== expectedHead) {
+    throw new GitError(
+      "conflict",
+      "The launch-owned worktree changed after cleanup began and was not removed.",
+    );
+  }
+  hooks.beforeRemove();
+  const confirmed = await inspectRegisteredWorktreeOwnership(
+    root,
+    worktreePath,
+    branch,
+  );
+  if (confirmed.head !== expectedHead) {
+    throw new GitError(
+      "conflict",
+      "The launch-owned worktree changed after removal began and was not removed.",
+    );
+  }
+  const args = ["worktree", "remove"];
+  if (force) args.push("--force");
+  args.push("--", confirmed.path);
+  await runGit(root, args, {
+    failureMessage: "Unable to remove the worktree.",
+  });
+  hooks.removed();
+}
+
+export async function confirmWorktreeRemovalIfAbsent(
+  repositoryPath: string,
+  worktreePath: string,
+  expectedBranch: string,
+  removed: () => void,
+): Promise<void> {
+  const root = await repositoryRoot(repositoryPath);
+  if (
+    !isAbsolute(worktreePath)
+    || worktreePath.length > MAX_PATH_LENGTH
+    || worktreePath.includes("\0")
+  ) {
+    throw new GitError(
+      "invalid-input",
+      "The worktree path must be an absolute path.",
+    );
+  }
+  const branch = await validateBranch(root, expectedBranch);
+  if (await conflictingRegisteredWorktree(root, worktreePath, branch)) {
+    throw new GitError(
+      "conflict",
+      "The claimed worktree removal has a present, moved, or replacement topology and was not confirmed.",
+    );
+  }
+  removed();
 }
 
 export async function removeWorktree(
@@ -228,7 +413,7 @@ export async function removeWorktree(
   }
   const worktrees = await registeredWorktrees(root);
   const registered = worktrees.find(
-    (worktree) => resolve(worktree.path) === target,
+    (worktree) => pathsEqual(worktree.path, target),
   );
   if (!registered) {
     throw new GitError(

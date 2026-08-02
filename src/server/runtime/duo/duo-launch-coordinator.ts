@@ -14,12 +14,14 @@ import {
 } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import {
-  createWorktree,
+  confirmWorktreeRemovalIfAbsent,
+  createWorktreeWithOwnershipReceipt,
   deleteBranchIfUnchanged,
   getRepositoryStatus,
   GitError,
-  inspectRegisteredWorktreeOwnership,
-  removeWorktree,
+  removeWorktreeIfOwnershipUnchanged,
+  type OwnedWorktreeCreationHooks,
+  type OwnedWorktreeRemovalHooks,
 } from "../../git";
 import type { NewConversationOptions } from "../../persistence/types";
 import type { ProviderManager } from "../../providers";
@@ -52,21 +54,26 @@ interface PreflightSide {
 }
 
 export interface DuoWorktreeOperations {
+  confirmRemovalIfAbsent(
+    repositoryPath: string,
+    worktreePath: string,
+    expectedBranch: string,
+    removed: () => void,
+  ): ReturnType<typeof confirmWorktreeRemovalIfAbsent>;
   create(
     repositoryPath: string,
     worktreePath: string,
     options: { branch: string; createBranch: true; startPoint: string },
-  ): ReturnType<typeof createWorktree>;
+    hooks: OwnedWorktreeCreationHooks,
+  ): ReturnType<typeof createWorktreeWithOwnershipReceipt>;
   remove(
     repositoryPath: string,
     worktreePath: string,
-    force: boolean,
-  ): ReturnType<typeof removeWorktree>;
-  inspectOwnership(
-    repositoryPath: string,
-    worktreePath: string,
     expectedBranch: string,
-  ): ReturnType<typeof inspectRegisteredWorktreeOwnership>;
+    expectedHead: string,
+    force: boolean,
+    hooks: OwnedWorktreeRemovalHooks,
+  ): ReturnType<typeof removeWorktreeIfOwnershipUnchanged>;
   deleteBranch(
     repositoryPath: string,
     branch: string,
@@ -114,8 +121,8 @@ async function cleanupUnadoptedOwnedWorktree(
   ordinal: 0 | 1,
   worktrees: DuoWorktreeOperations,
 ): Promise<void> {
-  let launch = store.pairedLaunch(launchId);
-  let plan = launch.plans[ordinal];
+  const launch = store.pairedLaunch(launchId);
+  const plan = launch.plans[ordinal];
   const side = launch.sides[ordinal];
   if (
     !plan.ownsWorktree
@@ -124,48 +131,44 @@ async function cleanupUnadoptedOwnedWorktree(
   ) return;
   const worktreePath = plan.plannedWorktreePath;
   const branch = expectedLaunchOwnedBranch(plan);
-  let branchHead = plan.cleanupBranchHead;
-  if (!branchHead) {
-    let ownership: Awaited<ReturnType<
-      DuoWorktreeOperations["inspectOwnership"]
-    >>;
-    try {
-      ownership = await worktrees.inspectOwnership(
-        store.projectPath(plan.projectId),
-        worktreePath,
-        branch,
-      );
-    } catch (error) {
-      if (error instanceof GitError && error.code === "not-found") return;
-      throw error;
-    }
-    store.recordPairedLaunchWorktreeCleanupOwnership(
-      launchId,
-      ordinal,
-      worktreePath,
-      branch,
-      ownership.head,
+  if (
+    plan.worktreeCreationState === "pending"
+    || plan.worktreeCreationState === "not-created"
+  ) return;
+  if (plan.worktreeCreationState === "creating") {
+    throw new Error(
+      "Worktree creation was interrupted before durable ownership acknowledgement; automatic cleanup was withheld.",
     );
-    launch = store.pairedLaunch(launchId);
-    plan = launch.plans[ordinal];
-    branchHead = plan.cleanupBranchHead;
   }
+  const branchHead = plan.cleanupBranchHead;
   if (!branchHead) {
     throw new Error("The Duo worktree cleanup ownership receipt was not durable.");
   }
-  if (!plan.worktreeRemovalConfirmed) {
-    try {
-      await worktrees.remove(
-        store.projectPath(plan.projectId),
-        worktreePath,
-        false,
-      );
-    } catch (error) {
-      if (!(error instanceof GitError && error.code === "not-found")) {
-        throw error;
-      }
-    }
-    store.confirmPairedLaunchWorktreeRemoval(launchId, ordinal);
+  if (plan.worktreeRemovalStarted && !plan.worktreeRemovalConfirmed) {
+    await worktrees.confirmRemovalIfAbsent(
+      store.projectPath(plan.projectId),
+      worktreePath,
+      branch,
+      () => {
+        store.confirmPairedLaunchWorktreeRemoval(launchId, ordinal);
+      },
+    );
+  } else if (!plan.worktreeRemovalConfirmed) {
+    await worktrees.remove(
+      store.projectPath(plan.projectId),
+      worktreePath,
+      branch,
+      branchHead,
+      false,
+      {
+        beforeRemove: () => {
+          store.beginPairedLaunchWorktreeRemoval(launchId, ordinal);
+        },
+        removed: () => {
+          store.confirmPairedLaunchWorktreeRemoval(launchId, ordinal);
+        },
+      },
+    );
   }
   await worktrees.deleteBranch(
     store.projectPath(plan.projectId),
@@ -193,9 +196,9 @@ export class DuoLaunchCoordinator {
     options: { worktrees?: DuoWorktreeOperations } = {},
   ) {
     this.worktrees = options.worktrees ?? {
-      create: createWorktree,
-      remove: removeWorktree,
-      inspectOwnership: inspectRegisteredWorktreeOwnership,
+      confirmRemovalIfAbsent: confirmWorktreeRemovalIfAbsent,
+      create: createWorktreeWithOwnershipReceipt,
+      remove: removeWorktreeIfOwnershipUnchanged,
       deleteBranch: deleteBranchIfUnchanged,
     };
   }
@@ -309,7 +312,6 @@ export class DuoLaunchCoordinator {
       this.sidePlan(sides[1]),
     ], now);
 
-    const createdOwned: PreflightSide[] = [];
     let conversationsAdopted = false;
     try {
       this.assertNotCancelled(payload.launchId);
@@ -319,10 +321,8 @@ export class DuoLaunchCoordinator {
           recursive: true,
           mode: 0o700,
         });
-        // createWorktree mutates before its final status read. Treat every
-        // attempted owned path as potentially created until compensation can
-        // prove otherwise with a not-found result.
-        createdOwned.push(side);
+        const plannedWorktreePath = side.worktreePath;
+        const plannedBranch = side.branch;
         const status = await this.worktrees.create(
           side.repositoryPath,
           side.worktreePath,
@@ -331,15 +331,43 @@ export class DuoLaunchCoordinator {
             createBranch: true,
             startPoint: side.startPoint!,
           },
+          {
+            beforeAdd: () => {
+              this.store.beginPairedLaunchWorktreeCreation(
+                payload.launchId,
+                side.ordinal,
+                plannedWorktreePath,
+                plannedBranch,
+              );
+            },
+            notAdded: () => {
+              this.store.rejectPairedLaunchWorktreeCreation(
+                payload.launchId,
+                side.ordinal,
+              );
+            },
+            added: (ownership) => {
+              this.store.recordPairedLaunchWorktreeCleanupOwnership(
+                payload.launchId,
+                side.ordinal,
+                plannedWorktreePath,
+                ownership.path,
+                ownership.branch,
+                ownership.head,
+              );
+              side.worktreePath = ownership.path;
+              side.branch = ownership.branch;
+            },
+          },
         );
-        side.worktreePath = status.root;
-        side.branch = status.branch ?? side.branch;
-        this.store.updatePairedLaunchWorktree(
-          payload.launchId,
-          side.ordinal,
-          side.worktreePath,
-          side.branch,
-        );
+        if (
+          resolve(status.root) !== resolve(side.worktreePath)
+          || status.branch !== side.branch
+        ) {
+          throw new Error(
+            "The created Duo worktree status did not match its durable ownership receipt.",
+          );
+        }
         this.assertNotCancelled(payload.launchId);
       }
 
@@ -389,11 +417,11 @@ export class DuoLaunchCoordinator {
       let compensationFailure: string | null = null;
       if (!conversationsAdopted) {
         const compensation = await Promise.allSettled(
-          [...createdOwned].reverse().map((side) =>
+          [...this.store.pairedLaunch(payload.launchId).plans].reverse().map((plan) =>
             cleanupUnadoptedOwnedWorktree(
               this.store,
               payload.launchId,
-              side.ordinal,
+              plan.ordinal,
               this.worktrees,
             )),
         );
@@ -636,9 +664,9 @@ export async function reconcileInterruptedDuoLaunches(
   options: { worktrees?: DuoWorktreeOperations } = {},
 ): Promise<void> {
   const worktrees = options.worktrees ?? {
-    create: createWorktree,
-    remove: removeWorktree,
-    inspectOwnership: inspectRegisteredWorktreeOwnership,
+    confirmRemovalIfAbsent: confirmWorktreeRemovalIfAbsent,
+    create: createWorktreeWithOwnershipReceipt,
+    remove: removeWorktreeIfOwnershipUnchanged,
     deleteBranch: deleteBranchIfUnchanged,
   };
   const recovered = store.recoverInterruptedPairedLaunches();

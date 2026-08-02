@@ -11,10 +11,13 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  confirmWorktreeRemovalIfAbsent,
   createWorktree,
+  createWorktreeWithOwnershipReceipt,
   deleteBranchIfUnchanged,
   inspectRegisteredWorktreeOwnership,
   removeWorktree,
+  removeWorktreeIfOwnershipUnchanged,
 } from "../../src/server/git";
 
 const roots: string[] = [];
@@ -54,6 +57,36 @@ afterEach(() => {
 });
 
 describe("launch-owned Git cleanup", () => {
+  it("acknowledges add success before post-create status inspection", async () => {
+    const root = repository();
+    const path = ownedPath(root, "receipt owned path");
+    const branch = "inertia/receipt-owned";
+    const phases: string[] = [];
+    let receipt: Awaited<ReturnType<
+      typeof inspectRegisteredWorktreeOwnership
+    >> | null = null;
+
+    await createWorktreeWithOwnershipReceipt(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    }, {
+      beforeAdd: () => phases.push("before-add"),
+      notAdded: () => phases.push("not-added"),
+      added: (ownership) => {
+        phases.push("added");
+        receipt = ownership;
+      },
+    });
+
+    expect(phases).toEqual(["before-add", "added"]);
+    expect(receipt).toEqual({
+      path: realpathSync(path),
+      branch,
+      head: git(root, "rev-parse", branch),
+    });
+  });
+
   it("proves an exact registered worktree path, branch, and HEAD", async () => {
     const root = repository();
     const path = ownedPath(root, "exact owned path");
@@ -96,7 +129,14 @@ describe("launch-owned Git cleanup", () => {
       path,
       branch,
     );
-    await removeWorktree(root, path, false);
+    await removeWorktreeIfOwnershipUnchanged(
+      root,
+      path,
+      branch,
+      ownership.head,
+      false,
+      { beforeRemove: () => undefined, removed: () => undefined },
+    );
 
     await expect(deleteBranchIfUnchanged(root, branch, ownership.head))
       .resolves.toBeUndefined();
@@ -121,6 +161,235 @@ describe("launch-owned Git cleanup", () => {
     await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
       .rejects.toMatchObject({ code: "not-found" });
     expect(git(root, "rev-parse", branch)).toBe(originalHead);
+  });
+
+  it("does not acknowledge or alter a pre-existing registered path and branch", async () => {
+    const root = repository();
+    const path = ownedPath(root, "pre-existing registered path");
+    const branch = "inertia/pre-existing-worktree";
+    await createWorktree(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    });
+    const originalHead = git(root, "rev-parse", branch);
+    const hooks: string[] = [];
+
+    await expect(createWorktreeWithOwnershipReceipt(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    }, {
+      beforeAdd: () => hooks.push("before-add"),
+      notAdded: () => hooks.push("not-added"),
+      added: () => hooks.push("added"),
+    })).rejects.toBeDefined();
+
+    expect(hooks).toEqual([]);
+    await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
+      .resolves.toMatchObject({ head: originalHead });
+    expect(git(root, "rev-parse", branch)).toBe(originalHead);
+  });
+
+  it("does not infer ownership from matching state after an ambiguous add failure", async () => {
+    const root = repository();
+    const path = ownedPath(root, "ambiguous matching path");
+    const branch = "inertia/ambiguous-match";
+    const phases: string[] = [];
+
+    await expect(createWorktreeWithOwnershipReceipt(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    }, {
+      beforeAdd: () => {
+        phases.push("before-add");
+        git(root, "worktree", "add", "-q", "-b", branch, path, "main");
+      },
+      notAdded: () => phases.push("not-added"),
+      added: () => phases.push("added"),
+    })).rejects.toBeDefined();
+
+    expect(phases).toEqual(["before-add"]);
+    await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
+      .resolves.toMatchObject({
+        branch,
+        head: git(root, "rev-parse", branch),
+      });
+  });
+
+  it("refuses to remove a replacement registered at the launch path", async () => {
+    const root = repository();
+    const path = ownedPath(root, "replaced registered path");
+    const branch = "inertia/original-owned";
+    const receipts: Array<{
+      branch: string;
+      head: string;
+      path: string;
+    }> = [];
+    await createWorktreeWithOwnershipReceipt(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    }, {
+      beforeAdd: () => undefined,
+      notAdded: () => undefined,
+      added: (ownership) => {
+        receipts.push(ownership);
+      },
+    });
+    const receipt = receipts[0];
+    if (!receipt) throw new Error("The owned worktree receipt was not recorded.");
+    await removeWorktree(root, path, false);
+    const replacementBranch = "user/replacement";
+    await createWorktree(root, path, {
+      branch: replacementBranch,
+      createBranch: true,
+      startPoint: "main",
+    });
+
+    await expect(removeWorktreeIfOwnershipUnchanged(
+      root,
+      path,
+      branch,
+      receipt.head,
+      false,
+      { beforeRemove: () => undefined, removed: () => undefined },
+    )).rejects.toMatchObject({ code: "conflict" });
+    await expect(inspectRegisteredWorktreeOwnership(
+      root,
+      path,
+      replacementBranch,
+    )).resolves.toBeDefined();
+    expect(git(root, "rev-parse", replacementBranch)).toBe(
+      git(root, "rev-parse", "main"),
+    );
+    expect(git(root, "rev-parse", branch)).toBe(receipt.head);
+  });
+
+  it("preserves an owned branch whose worktree moved to another path", async () => {
+    const root = repository();
+    const path = ownedPath(root, "original move path");
+    const movedPath = ownedPath(root, "user moved path");
+    const branch = "inertia/moved-worktree";
+    await createWorktree(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    });
+    const ownership = await inspectRegisteredWorktreeOwnership(
+      root,
+      path,
+      branch,
+    );
+    git(root, "worktree", "move", path, movedPath);
+    const phases: string[] = [];
+
+    await expect(removeWorktreeIfOwnershipUnchanged(
+      root,
+      path,
+      branch,
+      ownership.head,
+      false,
+      {
+        beforeRemove: () => phases.push("before-remove"),
+        removed: () => phases.push("removed"),
+      },
+    )).rejects.toMatchObject({ code: "conflict" });
+    await expect(confirmWorktreeRemovalIfAbsent(
+      root,
+      path,
+      branch,
+      () => phases.push("confirmed-absent"),
+    )).rejects.toMatchObject({ code: "conflict" });
+    expect(phases).toEqual([]);
+    await expect(inspectRegisteredWorktreeOwnership(root, movedPath, branch))
+      .resolves.toMatchObject({ head: ownership.head });
+    expect(git(root, "rev-parse", branch)).toBe(ownership.head);
+  });
+
+  it("rechecks ownership after the durable removal claim", async () => {
+    const root = repository();
+    const path = ownedPath(root, "changed during removal path");
+    const branch = "inertia/change-after-claim";
+    await createWorktree(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    });
+    const ownership = await inspectRegisteredWorktreeOwnership(
+      root,
+      path,
+      branch,
+    );
+    const replacementBranch = "user/changed-after-claim";
+    const phases: string[] = [];
+    let changedHead = "";
+
+    await expect(removeWorktreeIfOwnershipUnchanged(
+      root,
+      path,
+      branch,
+      ownership.head,
+      false,
+      {
+        beforeRemove: () => {
+          phases.push("before-remove");
+          git(path, "switch", "-q", "-c", replacementBranch);
+          git(
+            path,
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "Change worktree identity after removal claim",
+          );
+          changedHead = git(path, "rev-parse", "HEAD");
+        },
+        removed: () => phases.push("removed"),
+      },
+    )).rejects.toMatchObject({ code: "conflict" });
+    expect(phases).toEqual(["before-remove"]);
+    await expect(inspectRegisteredWorktreeOwnership(
+      root,
+      path,
+      replacementBranch,
+    )).resolves.toMatchObject({
+      branch: replacementBranch,
+      head: changedHead,
+    });
+    expect(changedHead).not.toBe(ownership.head);
+    expect(git(root, "rev-parse", branch)).toBe(ownership.head);
+  });
+
+  it("does not delete a launch ref reattached after confirmed removal", async () => {
+    const root = repository();
+    const path = ownedPath(root, "reattached launch path");
+    const branch = "inertia/reattached-owned";
+    await createWorktree(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    });
+    const ownership = await inspectRegisteredWorktreeOwnership(
+      root,
+      path,
+      branch,
+    );
+    await removeWorktreeIfOwnershipUnchanged(
+      root,
+      path,
+      branch,
+      ownership.head,
+      false,
+      { beforeRemove: () => undefined, removed: () => undefined },
+    );
+    git(root, "worktree", "add", "--", path, branch);
+
+    await expect(deleteBranchIfUnchanged(root, branch, ownership.head))
+      .rejects.toMatchObject({ code: "conflict" });
+    await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
+      .resolves.toMatchObject({ head: ownership.head });
   });
 
   it("preserves a branch whose ref moved after the ownership receipt", async () => {

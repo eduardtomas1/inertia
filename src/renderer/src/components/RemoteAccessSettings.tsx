@@ -257,7 +257,7 @@ export function RemoteAccessSettings({
               <button
                 type="button"
                 className="secondary-button"
-                disabled={busy || current.enabled}
+                disabled={busy}
                 onClick={() => {
                   void mutate(
                     () => window.inertia.setRemoteAccessEnabled({

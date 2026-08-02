@@ -133,6 +133,53 @@ describe("Remote Companion browser output boundary", () => {
     expect(getRemoteAccessState).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    ["missing", "The relay lost this endpoint binding."],
+    ["owned-by-another-key", "The relay endpoint is owned by another signing key."],
+  ] as const)(
+    "offers endpoint reset for %s ownership recovery",
+    async (endpointOwnership, message) => {
+      const state = pendingState(new Date().toISOString());
+      state.connection = "error";
+      state.connectionMessage = message;
+      state.diagnostics = {
+        ...state.diagnostics,
+        status: "failed",
+        endpointOwnership,
+        retryClass: "manual",
+        failureClass: "endpoint-authentication",
+        message,
+      };
+      const setRemoteAccessEnabled = vi.fn(async () => ({
+        ...state,
+        enabled: false,
+      }));
+      Object.defineProperty(window, "inertia", {
+        configurable: true,
+        value: {
+          getRemoteAccessState: vi.fn(async () => state),
+          onRemoteAccessState: vi.fn(() => vi.fn()),
+          setRemoteAccessEnabled,
+        },
+      });
+
+      render(<RemoteAccessSettings projects={[]} conversations={[]} />);
+      const reset = await screen.findByRole("button", {
+        name: "Reset endpoint and re-test",
+      });
+      expect(reset).toBeEnabled();
+      reset.click();
+      await waitFor(() => expect(setRemoteAccessEnabled).toHaveBeenCalledWith({
+        enabled: false,
+        relayUrl: state.relayUrl,
+        companionUrl: state.companionUrl,
+        setupMode: state.setupMode,
+        testOnly: true,
+        resetEndpoint: true,
+      }));
+    },
+  );
+
   it("serializes invitation creation through the busy mutation boundary", async () => {
     const now = new Date().toISOString();
     const state = pendingState(now);

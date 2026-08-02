@@ -151,8 +151,7 @@ export class RemoteAccessService {
       data: () => this.data,
       initializeIdentity: async (relayUrl) =>
         await this.initializeIdentity(relayUrl),
-      serialize: async (operation) =>
-        await this.serializeAuthorityMutation(operation),
+      serialize: async (operation) => await this.serializeAuthorityMutation(operation),
       persist: async () => await this.persist(),
       persistAuthorityReduction: (mutate) => this.persistAuthorityReduction(mutate),
       disableLiveAccess: () => this.disableLiveRemoteAccess(),
@@ -692,6 +691,7 @@ export class RemoteAccessService {
     code: Parameters<typeof remoteRelayErrorMessage>[0],
   ): void {
     this.connectionMessage = remoteRelayErrorMessage(code);
+    this.setup.relayError(code, this.connectionMessage);
     if (code === "capacity" && this.connection === "connecting") {
       terminateRemoteSocket(this.socket);
     }

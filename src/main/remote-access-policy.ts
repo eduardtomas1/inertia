@@ -193,11 +193,15 @@ export function projectRemoteAccessState(input: {
     companionUrl: data?.companionUrl ?? DEFAULT_REMOTE_COMPANION_URL,
     diagnostics: {
       ...diagnostics,
-      endpointOwnership: relayBinding ? "verified" : "unclaimed",
+      endpointOwnership: diagnostics.endpointOwnership === "missing"
+          || diagnostics.endpointOwnership === "owned-by-another-key"
+        ? diagnostics.endpointOwnership
+        : relayBinding ? "verified" : "unclaimed",
       endpointEpoch: relayBinding?.epoch ?? null,
       lastConnectedAt: relayBinding?.connectedAt
         ?? relayBinding?.lastConnectedAt ?? null,
-      retryClass: data?.enabled && input.connection !== "online"
+      retryClass: diagnostics.retryClass !== "manual"
+          && data?.enabled && input.connection !== "online"
         ? "automatic"
         : diagnostics.retryClass,
     },

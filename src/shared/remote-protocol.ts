@@ -691,7 +691,11 @@ export interface RemoteSetupDiagnostics {
   remoteProtocol: number | null;
   endpointAuthentication: "required" | "migration" | null;
   persistence: "durable" | "ephemeral" | null;
-  endpointOwnership: "unclaimed" | "verified";
+  endpointOwnership:
+    | "unclaimed"
+    | "verified"
+    | "missing"
+    | "owned-by-another-key";
   endpointEpoch: number | null;
   lastConnectedAt: string | null;
   retryClass: "none" | "automatic" | "manual";

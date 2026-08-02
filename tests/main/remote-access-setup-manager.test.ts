@@ -71,6 +71,62 @@ describe("Remote Companion setup manager", () => {
     expect(data.endpointId).not.toBe(previousEndpointId);
     expect(data.endpointKeyPair).not.toBeNull();
   });
+
+  it.each([
+    [
+      "endpoint-missing",
+      "missing",
+      "The relay lost this endpoint binding. Create a fresh endpoint and re-pair.",
+    ],
+    [
+      "endpoint-owned",
+      "owned-by-another-key",
+      "The relay endpoint is owned by another signing key.",
+    ],
+  ] as const)(
+    "keeps %s recovery actionable across an ownership-blind setup probe",
+    async (code, endpointOwnership, message) => {
+      const data = await persistedAccess();
+      const previousEndpointId = data.endpointId;
+      const persistAuthorityReduction = vi.fn(async (mutate: () => void) => {
+        mutate();
+      });
+      const manager = setupManager(
+        data,
+        vi.fn(async () => undefined),
+        persistAuthorityReduction,
+      );
+
+      manager.relayError(code, message);
+      await expect(manager.test(
+        "wss://relay.example/remote",
+        "https://companion.example/",
+        "self-hosted",
+      )).rejects.toThrow(message);
+      expect(manager.current()).toMatchObject({
+        status: "failed",
+        endpointOwnership,
+        retryClass: "manual",
+        failureClass: "endpoint-authentication",
+        message,
+      });
+      expect(persistAuthorityReduction).not.toHaveBeenCalled();
+
+      await manager.test(
+        "wss://relay.example/remote",
+        "https://companion.example/",
+        "self-hosted",
+        true,
+      );
+      expect(persistAuthorityReduction).toHaveBeenCalledOnce();
+      expect(data.endpointId).not.toBe(previousEndpointId);
+      expect(manager.current()).toMatchObject({
+        status: "passed",
+        endpointOwnership: "unclaimed",
+        failureClass: "none",
+      });
+    },
+  );
 });
 
 function setupManager(

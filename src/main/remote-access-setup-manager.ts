@@ -1,6 +1,7 @@
 import { remoteRandomSecret } from "../shared/remote-crypto";
 import type {
   RemoteAuditEvent,
+  RelayServerMessage,
   RemoteSetupDiagnostics,
   RemoteSetupMode,
 } from "../shared/remote-protocol";
@@ -30,6 +31,10 @@ interface RemoteAccessSetupManagerOptions {
 
 export class RemoteAccessSetupManager {
   private diagnostics = emptyRemoteSetupDiagnostics();
+  private endpointRecovery: {
+    endpointOwnership: "missing" | "owned-by-another-key";
+    message: string;
+  } | null = null;
   private successfulFingerprint: string | null = null;
 
   constructor(private readonly options: RemoteAccessSetupManagerOptions) {}
@@ -75,6 +80,12 @@ export class RemoteAccessSetupManager {
         setupMode,
         { now: this.options.now },
       );
+      if (this.endpointRecovery && !resetEndpoint) {
+        throw new RemoteSetupProbeError(
+          "endpoint-authentication",
+          this.endpointRecovery.message,
+        );
+      }
       await this.options.serialize(async () => {
         const data = this.options.data()
           ?? await this.options.initializeIdentity(result.relayUrl);
@@ -102,6 +113,7 @@ export class RemoteAccessSetupManager {
           await this.options.persist();
         }
       });
+      this.endpointRecovery = null;
       this.diagnostics = result.diagnostics;
       this.successfulFingerprint = setupFingerprint(
         result.relayUrl,
@@ -125,6 +137,9 @@ export class RemoteAccessSetupManager {
         originPolicy: failure.failureClass === "origin-policy"
           ? "rejected"
           : "unknown",
+        endpointOwnership: failure.failureClass === "endpoint-authentication"
+          ? this.endpointRecovery?.endpointOwnership ?? "unclaimed"
+          : "unclaimed",
         retryClass: failure.failureClass === "network" ? "automatic" : "manual",
         failureClass: failure.failureClass,
         message: failure.message,
@@ -132,6 +147,27 @@ export class RemoteAccessSetupManager {
       this.options.emit();
       throw failure;
     }
+  }
+
+  relayError(
+    code: Extract<RelayServerMessage, { type: "relay.error" }>["code"],
+    message: string,
+  ): void {
+    const endpointOwnership = code === "endpoint-missing"
+      ? "missing"
+      : code === "endpoint-owned" ? "owned-by-another-key" : null;
+    if (!endpointOwnership) return;
+    this.endpointRecovery = { endpointOwnership, message };
+    this.successfulFingerprint = null;
+    this.diagnostics = {
+      ...this.diagnostics,
+      status: "failed",
+      testedAt: this.options.now().toISOString(),
+      endpointOwnership,
+      retryClass: "manual",
+      failureClass: "endpoint-authentication",
+      message,
+    };
   }
 
   registered(input: {
@@ -144,6 +180,7 @@ export class RemoteAccessSetupManager {
     connectedAt: string;
     desktopVersion: string;
   }): void {
+    this.endpointRecovery = null;
     this.diagnostics = {
       ...this.diagnostics,
       relayVersion: input.relayVersion,

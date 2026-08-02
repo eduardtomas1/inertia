@@ -1,13 +1,10 @@
 import {
-  _electron as electron,
   expect,
   test,
   type Page,
 } from "@playwright/test";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { once } from "node:events";
 
 import { WebSocket } from "ws";
@@ -41,6 +38,7 @@ import {
   serveBrowserAsset,
   type SeededBrowserProfile,
 } from "./support/remote-browser-fixtures";
+import { launchRemoteBrowser } from "./support/remote-browser-electron-fixture";
 
 let staticServer: Server;
 let staticUrl: string;
@@ -80,7 +78,7 @@ test.afterAll(async () => {
 });
 
 test("recovers truthful state across browser, desktop, and relay lifecycles", async () => {
-  const browser = await launchRemoteBrowser();
+  const browser = await launchRemoteBrowser({ staticUrl });
   const { electronApp, page } = browser;
   const hostKeys = await generateRemoteKeyPair();
   const hostId = crypto.randomUUID();
@@ -460,35 +458,6 @@ interface SeededSession {
   sessionId: string;
   recipient: SessionRecipient;
   sender: SessionSender;
-}
-
-async function launchRemoteBrowser(): Promise<{
-  electronApp: Awaited<ReturnType<typeof electron.launch>>;
-  page: Page;
-  close(): Promise<void>;
-}> {
-  const userDataDir = await mkdtemp(join(tmpdir(), "inertia-remote-e2e-"));
-  try {
-    const electronApp = await electron.launch({
-      args: [
-        resolve("tests/fixtures/remote-browser-electron.cjs"),
-        staticUrl,
-        `--user-data-dir=${userDataDir}`,
-      ],
-    });
-    const page = await electronApp.firstWindow();
-    return {
-      electronApp,
-      page,
-      close: async () => {
-        await electronApp.close();
-        await rm(userDataDir, { recursive: true, force: true });
-      },
-    };
-  } catch (error) {
-    await rm(userDataDir, { recursive: true, force: true });
-    throw error;
-  }
 }
 
 async function registerDesktop(

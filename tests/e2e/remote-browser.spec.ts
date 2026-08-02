@@ -1,5 +1,4 @@
 import {
-  _electron as electron,
   expect,
   test,
   type Page,
@@ -10,9 +9,8 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { readFile } from "node:fs/promises";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { once } from "node:events";
 
 import { WebSocket, WebSocketServer } from "ws";
@@ -41,6 +39,7 @@ import {
   remoteRequestSchema,
   type RemotePairingInvitation,
 } from "../../src/shared/remote-protocol";
+import { launchRemoteBrowser } from "./support/remote-browser-electron-fixture";
 
 let staticServer: Server;
 let staticUrl: string;
@@ -80,7 +79,13 @@ test.afterAll(async () => {
 });
 
 test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
-  const browser = await launchRemoteBrowser();
+  const browser = await launchRemoteBrowser({
+    staticUrl,
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { name: "Pair this browser" }))
+        .toBeVisible();
+    },
+  });
   const { page } = browser;
   const hostKeys = await generateRemoteKeyPair();
   const invitation: RemotePairingInvitation = {
@@ -514,26 +519,33 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
 
 test("stops automatic retries on a terminal relay protocol mismatch", async () => {
   const mismatchRelay = new WebSocketServer({ host: "127.0.0.1", port: 0 });
-  await once(mismatchRelay, "listening");
-  const address = mismatchRelay.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Mismatch relay did not bind.");
-  }
-  let connections = 0;
-  mismatchRelay.on("connection", (socket) => {
-    connections += 1;
-    socket.once("message", () => {
-      socket.send(JSON.stringify({
-        protocolVersion: 99,
-        type: "relay.connected",
-        connectionId: crypto.randomUUID(),
-      }));
-    });
-  });
-  const hostKeys = await generateRemoteKeyPair();
-  const browser = await launchRemoteBrowser();
-  const { page } = browser;
+  let browser: Awaited<ReturnType<typeof launchRemoteBrowser>> | null = null;
   try {
+    await once(mismatchRelay, "listening");
+    const address = mismatchRelay.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Mismatch relay did not bind.");
+    }
+    let connections = 0;
+    mismatchRelay.on("connection", (socket) => {
+      connections += 1;
+      socket.once("message", () => {
+        socket.send(JSON.stringify({
+          protocolVersion: 99,
+          type: "relay.connected",
+          connectionId: crypto.randomUUID(),
+        }));
+      });
+    });
+    const hostKeys = await generateRemoteKeyPair();
+    browser = await launchRemoteBrowser({
+      staticUrl,
+      ready: async (page) => {
+        await expect(page.getByRole("heading", { name: "Pair this browser" }))
+          .toBeVisible();
+      },
+    });
+    const { page } = browser;
     await seedBrowserProfile(page, {
       hostPublicKey: hostKeys.publicKey,
       relayUrl: `ws://127.0.0.1:${address.port}/remote`,
@@ -549,22 +561,33 @@ test("stops automatic retries on a terminal relay protocol mismatch", async () =
     await page.waitForTimeout(2_000);
     expect(connections).toBe(terminalConnectionCount);
   } finally {
-    await browser.close();
-    await new Promise<void>((resolveClose) => mismatchRelay.close(() => resolveClose()));
+    try {
+      await browser?.close();
+    } finally {
+      await new Promise<void>((resolveClose) =>
+        mismatchRelay.close(() => resolveClose()));
+    }
   }
 });
 
 test("expires a browser grant while a real socket attempt is in flight", async () => {
   const silentRelay = new WebSocketServer({ host: "127.0.0.1", port: 0 });
-  await once(silentRelay, "listening");
-  const address = silentRelay.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Silent relay did not bind.");
-  }
-  const hostKeys = await generateRemoteKeyPair();
-  const browser = await launchRemoteBrowser();
-  const { page } = browser;
+  let browser: Awaited<ReturnType<typeof launchRemoteBrowser>> | null = null;
   try {
+    await once(silentRelay, "listening");
+    const address = silentRelay.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Silent relay did not bind.");
+    }
+    const hostKeys = await generateRemoteKeyPair();
+    browser = await launchRemoteBrowser({
+      staticUrl,
+      ready: async (page) => {
+        await expect(page.getByRole("heading", { name: "Pair this browser" }))
+          .toBeVisible();
+      },
+    });
+    const { page } = browser;
     await seedBrowserProfile(page, {
       hostPublicKey: hostKeys.publicKey,
       relayUrl: `ws://127.0.0.1:${address.port}/remote`,
@@ -576,41 +599,14 @@ test("expires a browser grant while a real socket attempt is in flight", async (
     await expect(page.getByRole("heading", { name: "Pair this browser" }))
       .toBeVisible();
   } finally {
-    await browser.close();
-    await new Promise<void>((resolveClose) => silentRelay.close(() => resolveClose()));
+    try {
+      await browser?.close();
+    } finally {
+      await new Promise<void>((resolveClose) =>
+        silentRelay.close(() => resolveClose()));
+    }
   }
 });
-
-async function launchRemoteBrowser(): Promise<{
-  electronApp: Awaited<ReturnType<typeof electron.launch>>;
-  page: Page;
-  close(): Promise<void>;
-}> {
-  const userDataDir = await mkdtemp(join(tmpdir(), "inertia-remote-e2e-"));
-  try {
-    const electronApp = await electron.launch({
-      args: [
-        resolve("tests/fixtures/remote-browser-electron.cjs"),
-        staticUrl,
-        `--user-data-dir=${userDataDir}`,
-      ],
-    });
-    const page = await electronApp.firstWindow();
-    await expect(page.getByRole("heading", { name: "Pair this browser" }))
-      .toBeVisible();
-    return {
-      electronApp,
-      page,
-      close: async () => {
-        await electronApp.close();
-        await rm(userDataDir, { recursive: true, force: true });
-      },
-    };
-  } catch (error) {
-    await rm(userDataDir, { recursive: true, force: true });
-    throw error;
-  }
-}
 
 async function navigateRemoteBrowser(page: Page, label: string): Promise<void> {
   navigationSequence += 1;

@@ -27,6 +27,7 @@ import {
   remoteSessionResponsePayloadSchema,
   type RemotePairingInvitation,
   type RemoteCipherFrame,
+  type RemoteProjectionValidator,
   type RemoteRequest,
   type RemoteResponse,
   type RemoteSafeConversationDetail,
@@ -75,6 +76,12 @@ export interface RemoteClientCallbacks {
   pairingCode(code: string): void;
   shell(shell: RemoteSafeShell): void;
   detail(detail: RemoteSafeConversationDetail | null): void;
+  freshness?(value: {
+    checkedAt: string;
+    resource:
+      | { kind: "state" }
+      | { kind: "conversation"; conversationId: string };
+  }): void;
   promptResult(
     message: string,
     uncertain: boolean,
@@ -110,6 +117,13 @@ export class RemoteCompanionClient {
   private forgetOperation: Promise<void> | null = null;
   private lastProfileActivityWriteAt = 0;
   private connectionGeneration = 0;
+  private conditionalProjections = false;
+  private shellValidator: RemoteProjectionValidator | null = null;
+  private hasShellProjection = false;
+  private detailValidator: RemoteProjectionValidator | null = null;
+  private detailProjectionId: string | null = null;
+  private stateReadOrdinal = 0;
+  private detailReadOrdinal = 0;
   private readonly supervisor: BrowserConnectionSupervisor;
 
   constructor(private readonly callbacks: RemoteClientCallbacks) {
@@ -185,6 +199,7 @@ export class RemoteCompanionClient {
       throw error;
     }
     this.profile = null;
+    this.clearProjectionValidators();
     this.callbacks.invalidated?.();
     this.callbacks.status("This browser was forgotten.", false);
   }
@@ -457,6 +472,7 @@ export class RemoteCompanionClient {
       }
       const accepted = response;
       if (profileAuthorizationChanged(profile, accepted)) {
+        this.clearProjectionValidators();
         this.callbacks.authorizationInvalidated?.();
       }
       const updatedProfile: SealedBrowserDeviceProfile = {
@@ -518,6 +534,9 @@ export class RemoteCompanionClient {
 
   selectConversation(conversationId: string): void {
     this.selectedConversationId = conversationId;
+    this.detailValidator = null;
+    this.detailProjectionId = null;
+    this.detailReadOrdinal += 1;
     this.callbacks.detail(null);
     this.refreshOrDisconnect(
       this.attemptEpoch,
@@ -583,35 +602,100 @@ export class RemoteCompanionClient {
   private async refresh(epoch: number, generation: number): Promise<void> {
     if (!this.sender || !this.ownsPollingLoop(epoch, generation)) return;
     try {
+      const stateReadOrdinal = ++this.stateReadOrdinal;
+      const conditionalStateRead = this.conditionalProjections;
       const state = await this.request({
         type: "state.get",
         requestId: crypto.randomUUID(),
+        ...(conditionalStateRead
+          ? { ifNoneMatch: this.hasShellProjection ? this.shellValidator : null }
+          : {}),
       });
       if (
         this.ownsPollingLoop(epoch, generation)
+        && stateReadOrdinal === this.stateReadOrdinal
         && state.ok
-        && state.result.kind === "state"
       ) {
-        this.callbacks.shell(state.result.state);
-        void this.persistAuthenticatedActivity(epoch);
+        if (state.result.kind === "state") {
+          this.hasShellProjection = true;
+          this.shellValidator = state.result.validator ?? null;
+          this.conditionalProjections = state.result.validator !== undefined;
+          this.callbacks.shell(state.result.state);
+          void this.persistAuthenticatedActivity(epoch);
+        } else if (
+          state.result.kind === "not-modified"
+          && state.result.resource.kind === "state"
+          && this.hasShellProjection
+          && this.shellValidator === state.result.validator
+        ) {
+          this.callbacks.freshness?.({
+            checkedAt: state.result.checkedAt,
+            resource: state.result.resource,
+          });
+          void this.persistAuthenticatedActivity(epoch);
+        } else if (state.result.kind === "not-modified") {
+          this.shellValidator = null;
+          this.hasShellProjection = false;
+        }
+      } else if (
+        this.ownsPollingLoop(epoch, generation)
+        && stateReadOrdinal === this.stateReadOrdinal
+        && !state.ok
+        && state.code === "invalid"
+        && conditionalStateRead
+      ) {
+        // A previously capable desktop may have been replaced by a compatible
+        // legacy version. Retry legacy-shaped reads without discarding the
+        // last explicitly stale projection.
+        this.conditionalProjections = false;
       }
       if (
         this.selectedConversationId
         && this.ownsPollingLoop(epoch, generation)
       ) {
         const conversationId = this.selectedConversationId;
+        const detailReadOrdinal = ++this.detailReadOrdinal;
         const detail = await this.request({
           type: "conversation.get",
           requestId: crypto.randomUUID(),
           conversationId,
+          ...(this.conditionalProjections
+            ? {
+                ifNoneMatch: this.detailProjectionId === conversationId
+                  ? this.detailValidator
+                  : null,
+              }
+            : {}),
         });
         if (!(
           this.ownsPollingLoop(epoch, generation)
           && this.selectedConversationId === conversationId
+          && detailReadOrdinal === this.detailReadOrdinal
         )) return;
-        if (detail.ok && detail.result.kind === "conversation") {
+        if (
+          detail.ok
+          && detail.result.kind === "conversation"
+          && detail.result.detail.conversation.id === conversationId
+        ) {
+          this.detailProjectionId = conversationId;
+          this.detailValidator = detail.result.validator ?? null;
+          this.conditionalProjections = detail.result.validator !== undefined;
           this.callbacks.detail(detail.result.detail);
+        } else if (
+          detail.ok
+          && detail.result.kind === "not-modified"
+          && detail.result.resource.kind === "conversation"
+          && detail.result.resource.conversationId === conversationId
+          && this.detailProjectionId === conversationId
+          && this.detailValidator === detail.result.validator
+        ) {
+          this.callbacks.freshness?.({
+            checkedAt: detail.result.checkedAt,
+            resource: detail.result.resource,
+          });
         } else {
+          this.detailProjectionId = null;
+          this.detailValidator = null;
           this.callbacks.detail(null);
         }
       }
@@ -761,6 +845,7 @@ export class RemoteCompanionClient {
     const authorityChange = remoteSessionAuthorityChangedPayloadSchema
       .safeParse(plaintext);
     if (authorityChange.success) {
+      this.clearProjectionValidators();
       this.callbacks.authorizationInvalidated?.();
       return;
     }
@@ -933,6 +1018,7 @@ export class RemoteCompanionClient {
     const profile = this.profile;
     this.callbacks.profileClearing?.(true);
     this.profile = null;
+    this.clearProjectionValidators();
     this.callbacks.invalidated?.();
     const clearing = this.profileWriteTail
       .catch(() => undefined)
@@ -989,6 +1075,16 @@ export class RemoteCompanionClient {
       pending.reject(new Error(message));
     }
     this.pending.clear();
+  }
+
+  private clearProjectionValidators(): void {
+    this.conditionalProjections = false;
+    this.shellValidator = null;
+    this.hasShellProjection = false;
+    this.detailValidator = null;
+    this.detailProjectionId = null;
+    this.stateReadOrdinal += 1;
+    this.detailReadOrdinal += 1;
   }
 }
 

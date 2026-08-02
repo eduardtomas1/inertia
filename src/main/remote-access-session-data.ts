@@ -49,6 +49,13 @@ export async function handleRemoteSessionData(input: {
     input.close(session, "replay");
     return;
   }
+  if (
+    session.supportsConditionalProjections
+    && (request.type === "state.get" || request.type === "conversation.get")
+    && request.ifNoneMatch === undefined
+  ) {
+    request = { ...request, ifNoneMatch: null };
+  }
   if (!input.owns(input.connectionId, input.epoch)) return;
   session.lastActivityAt = input.now().getTime();
   if (

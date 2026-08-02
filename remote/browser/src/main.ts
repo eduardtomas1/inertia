@@ -36,6 +36,8 @@ if (initialPairingFragment.startsWith("#pair=")) {
 
 let shell: RemoteSafeShell | null = null;
 let detail: RemoteSafeConversationDetail | null = null;
+let shellCheckedAt: string | null = null;
+let detailCheckedAt: string | null = null;
 let status = "Starting…";
 let online = false;
 let connection: RemoteConnectionSnapshot | null = null;
@@ -119,13 +121,23 @@ const client = new RemoteCompanionClient({
   },
   shell: (value) => {
     shell = value;
+    shellCheckedAt = value.generatedAt;
     render();
   },
   detail: (value) => {
     detail = value;
+    detailCheckedAt = value?.generatedAt ?? null;
     if (value === null) purgeAuthoritativeDetail();
     if (value === null && !promptStatus?.uncertain) promptStatus = null;
     render();
+  },
+  freshness: ({ checkedAt, resource }) => {
+    if (resource.kind === "state" && shell) shellCheckedAt = checkedAt;
+    if (
+      resource.kind === "conversation"
+      && detail?.conversation.id === resource.conversationId
+    ) detailCheckedAt = checkedAt;
+    renderUpdatedLine();
   },
   promptResult: (message, uncertain, conversationId) => {
     if (conversationId && conversationId !== promptConversationId) return;
@@ -162,11 +174,7 @@ function render(): void {
   root.classList.toggle("is-stale", !online && shell !== null);
   statusLine.textContent = status;
   statusLine.className = `status ${online ? "online" : "offline"}`;
-  const lastUpdated = detail?.generatedAt ?? shell?.generatedAt ?? null;
-  updatedLine.textContent = lastUpdated
-    ? `${online ? "Last updated" : "Cached · last updated"} ${new Date(lastUpdated).toLocaleString()}`
-    : "";
-  updatedLine.hidden = lastUpdated === null;
+  renderUpdatedLine();
 
   pairingView.root.hidden = hasProfile;
   profileView.root.hidden = !profile;
@@ -197,6 +205,14 @@ function render(): void {
   if (!shell) return;
   renderNavigation(shell);
   renderDetail(detail, profile.scopes.includes("prompt"));
+}
+
+function renderUpdatedLine(): void {
+  const lastUpdated = detail ? detailCheckedAt : shell ? shellCheckedAt : null;
+  updatedLine.textContent = lastUpdated
+    ? `${online ? "Last updated" : "Cached · last updated"} ${new Date(lastUpdated).toLocaleString()}`
+    : "";
+  updatedLine.hidden = lastUpdated === null;
 }
 
 function createPairingView(): {
@@ -556,6 +572,7 @@ function renderDetail(
 
 function purgeAuthoritativeDetail(): void {
   detail = null;
+  detailCheckedAt = null;
   promptConversationId = null;
   promptStatus = null;
   for (const view of messageViews.values()) view.root.remove();
@@ -586,6 +603,7 @@ function purgeIdentityBoundState(): void {
 
 function purgeAuthorizationBoundState(): void {
   shell = null;
+  shellCheckedAt = null;
   purgeAuthoritativeDetail();
   for (const view of projectViews.values()) {
     view.root.remove();

@@ -2187,6 +2187,7 @@ describe("Remote Companion outbound encrypted service", () => {
     let runtimeCalls = 0;
     let holdStateRequests = false;
     let stateRequestsStarted = 0;
+    const stateValidators: Array<string | null | undefined> = [];
     let releaseStateRequests = (): void => undefined;
     const stateRequestsReleased = new Promise<void>((resolve) => {
       releaseStateRequests = resolve;
@@ -2198,6 +2199,7 @@ describe("Remote Companion outbound encrypted service", () => {
       ): Promise<RemoteResponse> => {
         runtimeCalls += 1;
         if (request.type === "state.get" && holdStateRequests) {
+          stateValidators.push(request.ifNoneMatch);
           stateRequestsStarted += 1;
           await stateRequestsReleased;
         }
@@ -2385,6 +2387,7 @@ describe("Remote Companion outbound encrypted service", () => {
       secondStateFrame,
     );
     await waitFor(() => stateRequestsStarted === 2);
+    expect(stateValidators).toEqual([null, null]);
     expect(service.state().activeSessions).toBe(1);
     releaseStateRequests();
     const concurrentResponses = await stateResponses;

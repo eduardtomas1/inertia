@@ -190,6 +190,118 @@ describe("Remote Companion runtime authority", () => {
     store.close();
   });
 
+  it("returns explicit unchanged projections with restart-stable validators", async () => {
+    let checkedAt = new Date("2030-01-01T00:00:00.000Z");
+    const {
+      store,
+      gateway,
+      subject,
+      firstConversation,
+    } = fixture(() => checkedAt);
+    const first = await gateway.request(subject, {
+      type: "state.get",
+      requestId: crypto.randomUUID(),
+      ifNoneMatch: null,
+    });
+    expect(first).toMatchObject({
+      ok: true,
+      result: { kind: "state", validator: expect.any(String) },
+    });
+    if (!first.ok || first.result.kind !== "state" || !first.result.validator) {
+      throw new Error("Missing conditional state projection.");
+    }
+    const validator = first.result.validator;
+
+    checkedAt = new Date("2030-01-01T00:00:02.000Z");
+    const unchanged = await gateway.request(
+      { ...subject, sessionId: crypto.randomUUID() },
+      {
+        type: "state.get",
+        requestId: crypto.randomUUID(),
+        ifNoneMatch: validator,
+      },
+    );
+    expect(unchanged).toMatchObject({
+      ok: true,
+      result: {
+        kind: "not-modified",
+        validator,
+        checkedAt: checkedAt.toISOString(),
+        resource: { kind: "state" },
+      },
+    });
+
+    const reduced = await gateway.request(
+      { ...subject, grantVersion: subject.grantVersion + 1 },
+      {
+        type: "state.get",
+        requestId: crypto.randomUUID(),
+        ifNoneMatch: validator,
+      },
+    );
+    expect(reduced).toMatchObject({
+      ok: true,
+      result: { kind: "state", validator: expect.not.stringMatching(`^${validator}$`) },
+    });
+
+    store.updateConversation(firstConversation.id, { title: "Changed title" });
+    const changed = await gateway.request(subject, {
+      type: "state.get",
+      requestId: crypto.randomUUID(),
+      ifNoneMatch: validator,
+    });
+    expect(changed).toMatchObject({
+      ok: true,
+      result: {
+        kind: "state",
+        validator: expect.not.stringMatching(`^${validator}$`),
+      },
+    });
+
+    const legacy = await gateway.request(subject, {
+      type: "state.get",
+      requestId: crypto.randomUUID(),
+    });
+    expect(legacy).toMatchObject({ ok: true, result: { kind: "state" } });
+    if (legacy.ok && legacy.result.kind === "state") {
+      expect(legacy.result).not.toHaveProperty("validator");
+    }
+    store.close();
+  });
+
+  it("keys conditional conversation validators to the authorized resource", async () => {
+    const { store, gateway, subject, firstConversation } = fixture();
+    const first = await gateway.request(subject, {
+      type: "conversation.get",
+      requestId: crypto.randomUUID(),
+      conversationId: firstConversation.id,
+      ifNoneMatch: null,
+    });
+    if (
+      !first.ok
+      || first.result.kind !== "conversation"
+      || !first.result.validator
+    ) throw new Error("Missing conditional conversation projection.");
+
+    expect(await gateway.request(subject, {
+      type: "conversation.get",
+      requestId: crypto.randomUUID(),
+      conversationId: firstConversation.id,
+      ifNoneMatch: first.result.validator,
+    })).toMatchObject({
+      ok: true,
+      result: {
+        kind: "not-modified",
+        validator: first.result.validator,
+        resource: {
+          kind: "conversation",
+          conversationId: firstConversation.id,
+        },
+      },
+    });
+    store.close();
+  });
+
   it("redacts transcript output and omits attachments and execution details", async () => {
     const { store, gateway, subject, firstConversation } = fixture();
     store.createMessage(
@@ -208,6 +320,7 @@ describe("Remote Companion runtime authority", () => {
       type: "conversation.get",
       requestId: crypto.randomUUID(),
       conversationId: firstConversation.id,
+      ifNoneMatch: null,
     });
 
     const serialized = JSON.stringify(response);
@@ -807,7 +920,7 @@ describe("Remote Companion runtime authority", () => {
     const messages = Array.from({ length: 200 }, (_, index) => ({
       ...template,
       id: `large-message-${index}`,
-      content: "😀".repeat(32_768),
+      content: "😀".repeat(index === 199 ? 32_768 : 128),
       createdAt: new Date(
         Date.UTC(2030, 0, 1, 0, 0, index),
       ).toISOString(),
@@ -825,16 +938,21 @@ describe("Remote Companion runtime authority", () => {
       type: "conversation.get",
       requestId: crypto.randomUUID(),
       conversationId: firstConversation.id,
+      ifNoneMatch: null,
     });
     expect(new TextEncoder().encode(JSON.stringify(response)).byteLength)
       .toBeLessThanOrEqual(REMOTE_LIMITS.plaintextBytes);
     expect(remoteResponseSchema.parse(response)).toEqual(response);
-    if (response.ok && response.result.kind === "conversation") {
+    if (
+      response.ok
+      && response.result.kind === "conversation"
+      && response.result.validator
+    ) {
       expect(response.result.detail.messages.at(-1)?.id).toBe(
         "large-message-199",
       );
       expect(response.result.detail.messages.length).toBeLessThan(200);
-    }
+    } else throw new Error("Missing bounded conditional conversation.");
 
     const hostKeys = await generateRemoteKeyPair();
     const deviceKeys = await generateRemoteKeyPair();
@@ -860,15 +978,48 @@ describe("Remote Companion runtime authority", () => {
     expect(encodedRemoteFrameBytes(frame)).toBeLessThanOrEqual(
       REMOTE_LIMITS.encryptedFrameBytes,
     );
-    expect(new TextEncoder().encode(JSON.stringify({
+    const connectionId = crypto.randomUUID();
+    const fullEnvelopeBytes = new TextEncoder().encode(JSON.stringify({
       protocolVersion: REMOTE_PROTOCOL_VERSION,
       type: "relay.frame",
-      connectionId: crypto.randomUUID(),
+      connectionId,
       frame,
-    })).byteLength).toBeLessThanOrEqual(REMOTE_LIMITS.relayEnvelopeBytes);
+    })).byteLength;
+    expect(fullEnvelopeBytes).toBeLessThanOrEqual(
+      REMOTE_LIMITS.relayEnvelopeBytes,
+    );
     expect(remoteResponseSchema.parse(
       await openSessionData(recipient, frame),
     )).toEqual(response);
+
+    const unchangedResponse = await gateway.request(subject, {
+      type: "conversation.get",
+      requestId: crypto.randomUUID(),
+      conversationId: firstConversation.id,
+      ifNoneMatch: response.result.validator,
+    });
+    expect(unchangedResponse).toMatchObject({
+      ok: true,
+      result: { kind: "not-modified" },
+    });
+    const unchangedFrame = await sealSessionData(
+      sender,
+      sessionId,
+      unchangedResponse,
+    );
+    const unchangedEnvelopeBytes = new TextEncoder().encode(JSON.stringify({
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      type: "relay.frame",
+      connectionId,
+      frame: unchangedFrame,
+    })).byteLength;
+    expect(remoteResponseSchema.parse(
+      await openSessionData(recipient, unchangedFrame),
+    )).toEqual(unchangedResponse);
+    expect(unchangedEnvelopeBytes).toBeLessThan(1_024);
+    expect(fullEnvelopeBytes - unchangedEnvelopeBytes).toBeGreaterThan(
+      90 * 1_024,
+    );
     store.close();
   }, 30_000);
 });

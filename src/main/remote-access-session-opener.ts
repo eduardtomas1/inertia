@@ -1,6 +1,7 @@
 import type { RemoteImportedKeyPair } from "../shared/remote-crypto";
 import {
   REMOTE_PROTOCOL_VERSION,
+  remoteVersionSupportsConditionalProjections,
   type RemoteCipherFrame,
 } from "../shared/remote-protocol";
 import type { PersistedRemoteAccess } from "./remote-access-store";
@@ -22,6 +23,7 @@ export async function openRemoteSession(input: {
   epoch: RemoteConnectionEpoch;
   frame: Extract<RemoteCipherFrame, { kind: "session.open" }>;
   hostKeys: RemoteImportedKeyPair;
+  browserVersion: string;
   sessions: Map<string, ActiveRemoteSession>;
   sessionByConnection: Map<string, string>;
   now(): Date;
@@ -105,6 +107,8 @@ export async function openRemoteSession(input: {
         subject: authenticated.subject,
         supportsAuthenticatedRejection:
           authenticated.supportsAuthenticatedRejection,
+        supportsConditionalProjections:
+          remoteVersionSupportsConditionalProjections(input.browserVersion),
         createdAt: now,
         lastActivityAt: now,
         requestTimes: [],

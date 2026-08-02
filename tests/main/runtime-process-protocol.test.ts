@@ -48,6 +48,13 @@ describe("runtime process protocol", () => {
       request,
     };
     expect(parseRuntimeWorkerCommand(command)).toEqual(command);
+    const conditionalCommand = {
+      ...command,
+      request: { ...request, ifNoneMatch: "A".repeat(43) },
+    };
+    expect(parseRuntimeWorkerCommand(conditionalCommand)).toEqual(
+      conditionalCommand,
+    );
     expect(parseRuntimeWorkerCommand({
       ...command,
       request: { ...request, requestId: crypto.randomUUID() },

@@ -19,6 +19,7 @@ import type {
   AccessMode,
   AppSettings,
   AppSnapshot,
+  DuoWorktreeRecoveryGuidance,
   ModelSelection,
   ProviderId,
 } from "@shared/contracts";
@@ -51,7 +52,9 @@ export interface MultiSpawnDialogProps {
   snapshot: AppSnapshot | null;
   settings: AppSettings;
   submitting: boolean;
+  cancelling?: boolean;
   error: string | null;
+  recoveryGuidance?: DuoWorktreeRecoveryGuidance[];
   onClose: () => void;
   onSubmit: (draft: MultiSpawnDraft) => Promise<void>;
   onOpenProviderSetup: (providerId: ProviderId) => void;
@@ -266,7 +269,9 @@ export function MultiSpawnDialog({
   snapshot,
   settings,
   submitting,
+  cancelling = false,
   error,
+  recoveryGuidance = [],
   onClose,
   onSubmit,
   onOpenProviderSetup,
@@ -278,6 +283,7 @@ export function MultiSpawnDialog({
   const restoreFocusRef = useRef(true);
   const [draft, setDraft] = useState<MultiSpawnDraft | null>(null);
   useNativePreviewSuspension(open);
+  const busy = submitting || cancelling;
 
   const routesForSelection = useMemo(() => (
     selection: ModelSelection,
@@ -357,7 +363,7 @@ export function MultiSpawnDialog({
         // and unmount the trigger that should receive restored focus.
         event.stopImmediatePropagation();
         event.preventDefault();
-        if (!submitting) onClose();
+        if (!cancelling) onClose();
         return;
       }
       if (event.key !== "Tab" || !dialogRef.current) return;
@@ -375,7 +381,7 @@ export function MultiSpawnDialog({
     };
     document.addEventListener("keydown", handleKeyDown, true);
     return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose, open, submitting]);
+  }, [cancelling, onClose, open]);
 
   if (!open || !snapshot || !draft) return null;
 
@@ -478,7 +484,7 @@ export function MultiSpawnDialog({
       className="dialog-backdrop multi-spawn-backdrop"
       role="presentation"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !submitting) onClose();
+        if (event.target === event.currentTarget && !submitting && !cancelling) onClose();
       }}
     >
       <section
@@ -501,7 +507,7 @@ export function MultiSpawnDialog({
           </span>
           <IconButton
             label="Close multi-spawn"
-            disabled={submitting}
+            disabled={cancelling}
             onClick={onClose}
           >
             <X size={16} />
@@ -519,7 +525,7 @@ export function MultiSpawnDialog({
             aria-label="Shared prompt"
             value={draft.prompt}
             maxLength={20_000}
-            disabled={submitting}
+            disabled={busy}
             placeholder="Ask both agents to inspect, implement, compare, or review the same work…"
             onChange={(event) => setDraft({
               ...draft,
@@ -534,7 +540,7 @@ export function MultiSpawnDialog({
             side={draft.sides[0]}
             projects={snapshot.projects}
             routeState={routeStates[0]}
-            disabled={submitting}
+            disabled={busy}
             onChange={(next) => updateSide(0, next)}
             onRepair={() => openRepair(0)}
           />
@@ -546,7 +552,7 @@ export function MultiSpawnDialog({
             side={draft.sides[1]}
             projects={snapshot.projects}
             routeState={routeStates[1]}
-            disabled={submitting}
+            disabled={busy}
             onChange={(next) => updateSide(1, next)}
             onRepair={() => openRepair(1)}
           />
@@ -567,6 +573,54 @@ export function MultiSpawnDialog({
           >
             {error
               ?? "Choose two ready routes before launching the duo."}
+            {recoveryGuidance.map((guidance) => (
+              <section
+                key={`${guidance.ordinal}:${guidance.worktreeId ?? "unknown"}`}
+                className="multi-spawn-recovery-guidance"
+                aria-label={`Manual Git recovery for route ${guidance.ordinal + 1}`}
+              >
+                <p>
+                  These are literal values, not a shell command. Inspect them
+                  with your platform&apos;s Git client before making a manual change.
+                </p>
+                <dl>
+                  <dt>Repository</dt>
+                  <dd><code>{guidance.repositoryPath}</code></dd>
+                  <dt>Planned path</dt>
+                  <dd><code>{guidance.plannedPath}</code></dd>
+                  <dt>Registered path</dt>
+                  <dd><code>{guidance.observedPath ?? "Not verified"}</code></dd>
+                  <dt>Worktree ID</dt>
+                  <dd><code>{guidance.worktreeId ?? "Not verified"}</code></dd>
+                  <dt>Generated branch</dt>
+                  <dd><code>{guidance.generatedBranch}</code></dd>
+                  <dt>Expected commit</dt>
+                  <dd><code>{guidance.expectedHead ?? "Not verified"}</code></dd>
+                </dl>
+                {guidance.actions.length > 0 && (
+                  <ol>
+                    {guidance.actions.map((action) => (
+                      <li key={`${action.label}:${action.args.join("\0")}`}>
+                        <strong>{action.label}</strong>
+                        <span>Working directory: <code>{action.cwd}</code></span>
+                        <span>Executable: <code>{action.executable}</code></span>
+                        <span className="multi-spawn-recovery-arguments">
+                          Arguments:
+                          {action.args.map((argument, index) => (
+                            <code
+                              key={`${index}:${argument}`}
+                              data-git-argument={index}
+                            >
+                              {argument}
+                            </code>
+                          ))}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </section>
+            ))}
           </div>
         )}
 
@@ -575,7 +629,7 @@ export function MultiSpawnDialog({
             <input
               type="checkbox"
               checked={draft.rememberPreset}
-              disabled={submitting}
+              disabled={busy}
               onChange={(event) => setDraft({
                 ...draft,
                 rememberPreset: event.currentTarget.checked,
@@ -590,15 +644,15 @@ export function MultiSpawnDialog({
             <button
               type="button"
               className="secondary-button"
-              disabled={submitting}
+              disabled={cancelling}
               onClick={onClose}
             >
-              Cancel
+              {cancelling ? "Cancelling…" : submitting ? "Cancel launch" : "Cancel"}
             </button>
             <button
               type="button"
               className="primary-button multi-spawn-launch"
-              disabled={submitting || Boolean(validationError) || !routesReady}
+              disabled={busy || Boolean(validationError) || !routesReady}
               title={validationError ?? (!routesReady
                 ? "Both routes must be ready."
                 : undefined)}

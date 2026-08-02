@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   copyFile,
   mkdir,
@@ -927,6 +927,244 @@ describe("published database fixtures", () => {
   });
 });
 
+describe("atomic Duo schema migration", () => {
+  it.each([
+    "current",
+    "v37-upgrade",
+    "v38-upgrade",
+    "v39-upgrade",
+    "v40-upgrade",
+  ] as const)(
+    "installs active-launch deletion protection for a %s database",
+    async (source) => {
+      const directory = await temporaryDirectory("inertia-duo-migration-");
+      const workspacePath = join(directory, "workspace");
+      await mkdir(workspacePath);
+      const databasePath = join(directory, "inertia.sqlite");
+      const current = new RuntimeStore(databasePath, workspacePath, {
+        recoverInterruptedRuns: false,
+      });
+      const retainedLaunchId = source === "v38-upgrade"
+        || source === "v39-upgrade"
+        || source === "v40-upgrade"
+        ? randomUUID()
+        : null;
+      if (retainedLaunchId) {
+        const project = current.createProject("Retained Duo", workspacePath);
+        current.createPairedLaunch(retainedLaunchId, [0, 1].map((ordinal) => ({
+          ordinal: ordinal as 0 | 1,
+          projectId: project.id,
+          plannedConversationId: randomUUID(),
+          plannedWorktreePath: join(directory, `worktree-${ordinal}`),
+          plannedBranch: `inertia/retained-${ordinal}`,
+          ownsWorktree: true,
+        })) as Parameters<RuntimeStore["createPairedLaunch"]>[1]);
+      }
+      current.close();
+
+      if (source === "v37-upgrade") {
+        const previous = new Database(databasePath);
+        previous.exec(`
+          DROP TRIGGER paired_launches_conversation_delete;
+          DROP TRIGGER paired_launches_project_delete;
+          DROP TABLE paired_launch_sides;
+          DROP TABLE paired_launches;
+        `);
+        previous.prepare(
+          "DELETE FROM schema_migrations WHERE version >= ?",
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 3);
+        expect((previous.prepare(
+          "SELECT MAX(version) AS version FROM schema_migrations",
+        ).get() as { version: number }).version).toBe(
+          CURRENT_DATABASE_SCHEMA_VERSION - 4,
+        );
+        previous.close();
+      } else if (source === "v38-upgrade") {
+        const previous = new Database(databasePath);
+        previous.exec(`
+          DROP TRIGGER paired_launches_project_delete;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_head;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_branch;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_path;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_cleanup_topology;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_repository_identity;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_worktree_id;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_worktree_token;
+          ALTER TABLE paired_launch_sides DROP COLUMN branch_cleanup_outcome;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_cleanup_outcome;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_removal_confirmed;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_removal_started;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_creation_state;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_branch_head;
+        `);
+        previous.prepare(
+          "DELETE FROM schema_migrations WHERE version >= ?",
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 2);
+        previous.close();
+      } else if (source === "v39-upgrade") {
+        const previous = new Database(databasePath);
+        previous.exec(`
+          UPDATE paired_launch_sides
+          SET worktree_creation_state = 'created',
+            cleanup_branch_head = '${"a".repeat(40)}'
+          WHERE owns_worktree = 1;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_head;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_branch;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_observed_path;
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_cleanup_topology;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_repository_identity;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_worktree_id;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_worktree_token;
+        `);
+        previous.prepare(
+          "DELETE FROM schema_migrations WHERE version >= ?",
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 1);
+        previous.close();
+      } else if (source === "v40-upgrade") {
+        const previous = new Database(databasePath);
+        previous.exec(`
+          ALTER TABLE paired_launch_sides
+            DROP COLUMN cleanup_filesystem_identity_json;
+        `);
+        previous.prepare(
+          "DELETE FROM schema_migrations WHERE version = ?",
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION);
+        previous.close();
+      }
+
+      const migrated = new RuntimeStore(databasePath, workspacePath, {
+        recoverInterruptedRuns: false,
+      });
+      if (retainedLaunchId) {
+        const expectedCreationState = source === "v39-upgrade"
+          ? "created"
+          : "pending";
+        const expectedHead = source === "v39-upgrade" ? "a".repeat(40) : null;
+        expect(migrated.pairedLaunch(retainedLaunchId).plans).toEqual([
+          expect.objectContaining({
+            cleanupBranchHead: expectedHead,
+            worktreeCreationState: expectedCreationState,
+            worktreeRemovalStarted: false,
+            worktreeRemovalConfirmed: false,
+            worktreeCleanupOutcome: null,
+            branchCleanupOutcome: null,
+            cleanupWorktreeToken: null,
+            cleanupWorktreeId: null,
+            cleanupFilesystemReceipt: null,
+            cleanupRepositoryIdentity: null,
+            worktreeCleanupTopology: null,
+            cleanupObservedPath: null,
+            cleanupObservedBranch: null,
+            cleanupObservedHead: null,
+          }),
+          expect.objectContaining({
+            cleanupBranchHead: expectedHead,
+            worktreeCreationState: expectedCreationState,
+            worktreeRemovalStarted: false,
+            worktreeRemovalConfirmed: false,
+            worktreeCleanupOutcome: null,
+            branchCleanupOutcome: null,
+            cleanupWorktreeToken: null,
+            cleanupWorktreeId: null,
+            cleanupRepositoryIdentity: null,
+            worktreeCleanupTopology: null,
+            cleanupObservedPath: null,
+            cleanupObservedBranch: null,
+            cleanupObservedHead: null,
+          }),
+        ]);
+        if (source === "v39-upgrade") {
+          expect(() => migrated.removeProject(
+            migrated.pairedLaunch(retainedLaunchId).plans[0].projectId,
+          )).toThrow(/Cancel the active Duo launch/u);
+        }
+      }
+      migrated.close();
+      const inspection = new Database(databasePath, { readonly: true });
+      expect((inspection.prepare(`
+        SELECT COUNT(*) AS count FROM sqlite_master
+        WHERE type = 'table' AND name IN ('paired_launches', 'paired_launch_sides')
+      `).get() as { count: number }).count).toBe(2);
+      const triggers = inspection.prepare(`
+        SELECT name, sql FROM sqlite_master
+        WHERE type = 'trigger' AND name IN (
+          'paired_launches_conversation_delete',
+          'paired_launches_project_delete'
+        )
+        ORDER BY name
+      `).all() as Array<{ name: string; sql: string }>;
+      expect(triggers.map(({ name }) => name)).toEqual([
+        "paired_launches_conversation_delete",
+        "paired_launches_project_delete",
+      ]);
+      for (const trigger of triggers) {
+        expect(trigger.sql).toMatch(/Cancel the active Duo launch/u);
+        expect(trigger.sql).toMatch(/recovery-required/u);
+        expect(trigger.sql).toMatch(/live_turn\.status NOT IN/u);
+        expect(trigger.sql).toMatch(/DELETE FROM paired_launches/u);
+      }
+      expect((inspection.prepare(
+        "SELECT MAX(version) AS version FROM schema_migrations",
+      ).get() as { version: number }).version).toBe(
+        CURRENT_DATABASE_SCHEMA_VERSION,
+      );
+      expect((inspection.prepare(
+        "PRAGMA table_info(paired_launch_sides)",
+      ).all() as Array<{ dflt_value: string | null; name: string }>).filter(
+        ({ name }) => name === "cleanup_branch_head"
+          || name === "worktree_creation_state"
+          || name === "worktree_removal_started"
+          || name === "worktree_removal_confirmed"
+          || name === "worktree_cleanup_outcome"
+          || name === "branch_cleanup_outcome"
+          || name === "cleanup_worktree_token"
+          || name === "cleanup_worktree_id"
+          || name === "cleanup_repository_identity"
+          || name === "cleanup_filesystem_identity_json"
+          || name === "worktree_cleanup_topology"
+          || name === "cleanup_observed_path"
+          || name === "cleanup_observed_branch"
+          || name === "cleanup_observed_head",
+      )).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          name: "cleanup_branch_head",
+          dflt_value: null,
+        }),
+        expect.objectContaining({
+          name: "worktree_creation_state",
+          dflt_value: "'pending'",
+        }),
+        expect.objectContaining({
+          name: "worktree_removal_confirmed",
+          dflt_value: "0",
+        }),
+        expect.objectContaining({
+          name: "worktree_removal_started",
+          dflt_value: "0",
+        }),
+        expect.objectContaining({
+          name: "worktree_cleanup_outcome",
+          dflt_value: null,
+        }),
+        expect.objectContaining({
+          name: "branch_cleanup_outcome",
+          dflt_value: null,
+        }),
+        expect.objectContaining({ name: "cleanup_worktree_token", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_worktree_id", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_repository_identity", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_filesystem_identity_json", dflt_value: null }),
+        expect.objectContaining({ name: "worktree_cleanup_topology", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_observed_path", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_observed_branch", dflt_value: null }),
+        expect.objectContaining({ name: "cleanup_observed_head", dflt_value: null }),
+      ]));
+      expect(inspection.pragma("foreign_key_check")).toEqual([]);
+      inspection.close();
+    },
+  );
+});
+
 describe("transactional database migrations", () => {
   it("rolls back the tracking table and every earlier step when a later step fails", () => {
     const database = new Database(":memory:");
@@ -1054,6 +1292,7 @@ describe("runtime migration catalog", () => {
 
 describe("legacy inferred turn backfill", () => {
   it("is deterministic and idempotent while retaining malformed and unmatched records", async () => {
+    // This proves deterministic migration capacity under suite load, not latency.
     const first = await createLegacyBackfillDatabase();
     const database = new Database(first.databasePath);
     const contentBefore = database.prepare(
@@ -1149,5 +1388,5 @@ describe("legacy inferred turn backfill", () => {
     ).all() as Array<{ id: string }>).map(({ id }) => id);
     secondDatabase.close();
     expect(secondTurnIds).toEqual(turns.map(({ id }) => id));
-  });
+  }, 30_000);
 });

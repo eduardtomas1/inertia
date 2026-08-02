@@ -1,12 +1,14 @@
 import {
-  MAX_PATH_LENGTH,
   NETWORK_TIMEOUT_MS,
 } from "./constants";
-import { listBranches } from "./branches";
 import {
   repositoryRoot,
   validateName,
 } from "./paths";
+import {
+  inspectGitRemoteRouting,
+  type GitRemoteRoutingInspection,
+} from "./remote-routing";
 import { runGit } from "./runner";
 import { getRepositoryStatus } from "./status";
 import {
@@ -30,17 +32,20 @@ export async function pushCurrentBranch(
   remoteName?: string,
 ): Promise<GitMutationResult> {
   const root = await repositoryRoot(repositoryPath);
-  const branches = await listBranches(root);
-  if (!branches.current) {
+  const status = await getRepositoryStatus(root);
+  if (!status.branch) {
     throw new GitError(
       "invalid-input",
       "Check out a local branch before pushing.",
     );
   }
-  const current = branches.local.find((branch) => branch.current);
-  const configuredRemote = current?.upstream?.split("/", 1)[0];
+  const configuredRemote = status.pullRequest.remoteName;
+  const selectedRemote = remoteName ?? configuredRemote;
+  if (!selectedRemote) {
+    throw remoteSelectionError(status.pullRequest.unavailableReason);
+  }
   const remote = validateName(
-    remoteName ?? configuredRemote ?? "origin",
+    selectedRemote,
     "The remote name",
   );
   const remoteResult = await runGit(root, ["remote"], {
@@ -54,7 +59,7 @@ export async function pushCurrentBranch(
   }
   await runGit(
     root,
-    ["push", "--set-upstream", remote, `HEAD:refs/heads/${branches.current}`],
+    ["push", "--set-upstream", remote, `HEAD:refs/heads/${status.branch}`],
     {
       timeoutMs: NETWORK_TIMEOUT_MS,
       failureMessage: "Unable to push the current branch.",
@@ -63,32 +68,49 @@ export async function pushCurrentBranch(
   return { status: await getRepositoryStatus(root) };
 }
 
-function remoteWebBase(remote: string): URL {
-  const trimmed = remote.trim().replace(/\.git$/u, "");
-  const scp = /^git@([^:]+):(.+)$/u.exec(trimmed);
-  const candidate = scp
-    ? `https://${scp[1]}/${scp[2]}`
-    : trimmed.replace(/^ssh:\/\/git@/u, "https://");
-  let url: URL;
-  try {
-    url = new URL(candidate);
-  } catch {
-    throw new GitError(
-      "operation-failed",
-      "The origin remote is not a supported web repository URL.",
+function remoteSelectionError(
+  reason: GitRemoteRoutingInspection["pullRequest"]["unavailableReason"],
+): GitError {
+  if (reason === "no-branch") {
+    return new GitError(
+      "invalid-input",
+      "Check out a branch before selecting a remote.",
     );
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new GitError(
-      "operation-failed",
-      "The origin remote is not a supported web repository URL.",
+  if (reason === "no-remotes") {
+    return new GitError(
+      "not-found",
+      "Add a Git remote before pushing or opening a pull request.",
     );
   }
-  url.username = "";
-  url.password = "";
-  url.search = "";
-  url.hash = "";
-  return url;
+  if (reason === "ambiguous-remote") {
+    return new GitError(
+      "invalid-input",
+      "Configure a push remote for this branch before continuing.",
+    );
+  }
+  if (reason === "missing-remote") {
+    return new GitError(
+      "not-found",
+      "The configured push remote does not exist.",
+    );
+  }
+  if (reason === "ambiguous-url") {
+    return new GitError(
+      "invalid-input",
+      "The selected Git remote has multiple push destinations.",
+    );
+  }
+  if (reason === "unsupported-url") {
+    return new GitError(
+      "operation-failed",
+      "The selected Git remote does not have a supported web repository URL.",
+    );
+  }
+  return new GitError(
+    "operation-failed",
+    "Pull request links are supported for GitHub, GitLab, and Bitbucket remotes.",
+  );
 }
 
 export async function getPullRequestCreateUrl(
@@ -102,28 +124,20 @@ export async function getPullRequestCreateUrl(
       "Check out a branch before opening a pull request.",
     );
   }
-  const remote = await runGit(
-    root,
-    ["remote", "get-url", "origin"],
-    {
-      maxOutputBytes: MAX_PATH_LENGTH,
-      failureMessage: "The repository does not have an origin remote.",
-    },
-  );
-  const base = remoteWebBase(remote.stdout.toString("utf8"));
+  const routing = await inspectGitRemoteRouting(root, status.branch);
+  if (!routing.target) {
+    throw remoteSelectionError(routing.pullRequest.unavailableReason);
+  }
+  const { baseUrl: base, forge } = routing.target;
   const branch = encodeURIComponent(status.branch);
-  const host = base.hostname.toLowerCase();
-  if (host === "github.com" || host.endsWith(".github.com")) {
-    return `${base.toString().replace(/\/$/u, "")}/compare/${branch}?expand=1`;
+  if (forge === "github") {
+    return `${base}/compare/${branch}?expand=1`;
   }
-  if (host.includes("gitlab")) {
-    return `${base.toString().replace(/\/$/u, "")}/-/merge_requests/new?merge_request[source_branch]=${branch}`;
+  if (forge === "gitlab") {
+    return `${base}/-/merge_requests/new?merge_request[source_branch]=${branch}`;
   }
-  if (host.includes("bitbucket")) {
-    return `${base.toString().replace(/\/$/u, "")}/pull-requests/new?source=${branch}`;
+  if (forge === "bitbucket") {
+    return `${base}/pull-requests/new?source=${branch}`;
   }
-  throw new GitError(
-    "operation-failed",
-    "Pull request links are supported for GitHub, GitLab, and Bitbucket remotes.",
-  );
+  throw remoteSelectionError("unsupported-forge");
 }

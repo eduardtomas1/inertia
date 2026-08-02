@@ -21,6 +21,7 @@ import {
   createRuntimeMigrationCatalog,
   type DatabaseMigrationDefinition,
 } from "./catalog";
+import { rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
 import { quotedSqlIdentifier } from "./sql-identifiers";
 
@@ -897,6 +898,311 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         WHERE status IN ('queued', 'spawned', 'running', 'waiting');
       `,
     });
+    migrationExtensions.push({
+      name: "PersistAtomicDuoLaunches",
+      up: `
+        CREATE TABLE IF NOT EXISTS paired_launches (
+          id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 200),
+          status TEXT NOT NULL CHECK (status IN (
+            'preparing', 'prepared', 'dispatching', 'running', 'cancelled',
+            'failed', 'interrupted', 'recovery-required'
+          )),
+          cancel_requested INTEGER NOT NULL DEFAULT 0
+            CHECK (cancel_requested IN (0, 1)),
+          failure_message TEXT
+            CHECK (failure_message IS NULL OR length(failure_message) <= 2000),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (created_at <= updated_at)
+        );
+        CREATE TABLE IF NOT EXISTS paired_launch_sides (
+          launch_id TEXT NOT NULL
+            REFERENCES paired_launches(id) ON DELETE CASCADE,
+          ordinal INTEGER NOT NULL CHECK (ordinal IN (0, 1)),
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+          planned_conversation_id TEXT NOT NULL UNIQUE
+            CHECK (length(planned_conversation_id) BETWEEN 1 AND 200),
+          conversation_id TEXT UNIQUE
+            REFERENCES conversations(id) ON DELETE SET NULL,
+          turn_id TEXT UNIQUE REFERENCES agent_turns(id) ON DELETE SET NULL,
+          planned_worktree_path TEXT
+            CHECK (planned_worktree_path IS NULL OR length(planned_worktree_path) <= 4096),
+          planned_branch TEXT
+            CHECK (planned_branch IS NULL OR length(planned_branch) <= 255),
+          owns_worktree INTEGER NOT NULL DEFAULT 0
+            CHECK (owns_worktree IN (0, 1)),
+          dispatch_state TEXT NOT NULL DEFAULT 'pending' CHECK (dispatch_state IN (
+            'pending', 'claimed', 'started', 'failed', 'cancelled', 'uncertain'
+          )),
+          PRIMARY KEY (launch_id, ordinal)
+        );
+        CREATE INDEX IF NOT EXISTS paired_launches_status_updated_idx
+          ON paired_launches(status, updated_at ASC, id ASC);
+        CREATE TRIGGER IF NOT EXISTS paired_launches_conversation_delete
+        BEFORE DELETE ON conversations
+        BEGIN
+          SELECT RAISE(
+            ABORT,
+            'Cancel the active Duo launch before deleting this thread.'
+          )
+          WHERE EXISTS (
+            SELECT 1
+            FROM paired_launches AS launch
+            JOIN paired_launch_sides AS conversation_side
+              ON conversation_side.launch_id = launch.id
+            WHERE conversation_side.conversation_id = OLD.id
+              AND (
+                launch.status IN (
+                  'preparing', 'prepared', 'dispatching', 'recovery-required'
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM paired_launch_sides AS live_side
+                  JOIN agent_turns AS live_turn ON live_turn.id = live_side.turn_id
+                  WHERE live_side.launch_id = launch.id
+                    AND live_turn.status NOT IN (
+                      'completed', 'failed', 'cancelled', 'interrupted'
+                    )
+                )
+                OR (
+                  launch.status = 'running'
+                  AND EXISTS (
+                    SELECT 1
+                    FROM paired_launch_sides AS missing_turn
+                    WHERE missing_turn.launch_id = launch.id
+                      AND missing_turn.turn_id IS NULL
+                  )
+                )
+              )
+          );
+          DELETE FROM paired_launches
+          WHERE id IN (
+            SELECT launch_id FROM paired_launch_sides
+            WHERE conversation_id = OLD.id
+          );
+        END;
+        CREATE TRIGGER IF NOT EXISTS paired_launches_project_delete
+        BEFORE DELETE ON projects
+        BEGIN
+          SELECT RAISE(
+            ABORT,
+            'Cancel the active Duo launch before removing this project.'
+          )
+          WHERE EXISTS (
+            SELECT 1
+            FROM paired_launches AS launch
+            JOIN paired_launch_sides AS project_side
+              ON project_side.launch_id = launch.id
+            WHERE project_side.project_id = OLD.id
+              AND (
+                launch.status IN (
+                  'preparing', 'prepared', 'dispatching', 'recovery-required'
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM paired_launch_sides AS live_side
+                  JOIN agent_turns AS live_turn ON live_turn.id = live_side.turn_id
+                  WHERE live_side.launch_id = launch.id
+                    AND live_turn.status NOT IN (
+                      'completed', 'failed', 'cancelled', 'interrupted'
+                    )
+                )
+                OR (
+                  launch.status = 'running'
+                  AND EXISTS (
+                    SELECT 1
+                    FROM paired_launch_sides AS missing_turn
+                    WHERE missing_turn.launch_id = launch.id
+                      AND missing_turn.turn_id IS NULL
+                  )
+                )
+              )
+          );
+          DELETE FROM paired_launches
+          WHERE id IN (
+            SELECT launch_id FROM paired_launch_sides
+            WHERE project_id = OLD.id
+          );
+        END;
+      `,
+    });
+    migrationExtensions.push({
+      name: "PersistDuoWorktreeCleanupReceipts",
+      up: (database) => {
+        const columns = database.prepare("PRAGMA table_info(paired_launch_sides)")
+          .all() as Array<{ name: string }>;
+        if (!columns.some(({ name }) => name === "cleanup_branch_head")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_branch_head TEXT
+              CHECK (
+                cleanup_branch_head IS NULL
+                OR length(cleanup_branch_head) BETWEEN 40 AND 64
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "worktree_creation_state")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN worktree_creation_state TEXT NOT NULL DEFAULT 'pending'
+              CHECK (
+                worktree_creation_state IN (
+                  'pending', 'creating', 'created', 'not-created'
+                )
+                AND (
+                  worktree_creation_state = 'created'
+                  OR cleanup_branch_head IS NULL
+                )
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "worktree_removal_confirmed")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN worktree_removal_confirmed INTEGER NOT NULL DEFAULT 0
+              CHECK (
+                worktree_removal_confirmed IN (0, 1)
+                AND (
+                  worktree_removal_confirmed = 0
+                  OR cleanup_branch_head IS NOT NULL
+                )
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "worktree_removal_started")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN worktree_removal_started INTEGER NOT NULL DEFAULT 0
+              CHECK (worktree_removal_started IN (0, 1));
+          `);
+        }
+        if (!columns.some(({ name }) => name === "worktree_cleanup_outcome")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN worktree_cleanup_outcome TEXT
+              CHECK (
+                worktree_cleanup_outcome IS NULL
+                OR worktree_cleanup_outcome IN ('absent', 'retained')
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "branch_cleanup_outcome")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN branch_cleanup_outcome TEXT
+              CHECK (
+                branch_cleanup_outcome IS NULL
+                OR (
+                  branch_cleanup_outcome IN ('absent', 'retained')
+                  AND worktree_cleanup_outcome = 'absent'
+                  AND cleanup_branch_head IS NOT NULL
+                )
+              );
+          `);
+        }
+        database.exec(`
+          UPDATE paired_launch_sides
+          SET worktree_removal_started = 1
+          WHERE worktree_removal_confirmed = 1;
+        `);
+      },
+    });
+    migrationExtensions.push({
+      name: "PersistDuoWorktreeRegistrationIdentity",
+      up: (database) => {
+        const columns = database.prepare("PRAGMA table_info(paired_launch_sides)")
+          .all() as Array<{ name: string }>;
+        if (!columns.some(({ name }) => name === "cleanup_worktree_token")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_worktree_token TEXT
+              CHECK (
+                cleanup_worktree_token IS NULL
+                OR length(cleanup_worktree_token) = 36
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "cleanup_worktree_id")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_worktree_id TEXT
+              CHECK (
+                cleanup_worktree_id IS NULL
+                OR length(cleanup_worktree_id) BETWEEN 1 AND 255
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "cleanup_repository_identity")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_repository_identity TEXT
+              CHECK (
+                cleanup_repository_identity IS NULL
+                OR length(cleanup_repository_identity) = 64
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "worktree_cleanup_topology")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN worktree_cleanup_topology TEXT
+              CHECK (
+                worktree_cleanup_topology IS NULL
+                OR worktree_cleanup_topology IN ('owned', 'conflict')
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "cleanup_observed_path")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_observed_path TEXT
+              CHECK (
+                cleanup_observed_path IS NULL
+                OR length(cleanup_observed_path) <= 4096
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "cleanup_observed_branch")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_observed_branch TEXT
+              CHECK (
+                cleanup_observed_branch IS NULL
+                OR length(cleanup_observed_branch) <= 255
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "cleanup_observed_head")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_observed_head TEXT
+              CHECK (
+                cleanup_observed_head IS NULL
+                OR length(cleanup_observed_head) BETWEEN 40 AND 64
+              );
+          `);
+        }
+        rebuildPairedLaunchProjectDeletionTrigger(database);
+      },
+    });
+    migrationExtensions.push({
+      name: "PersistDuoWorktreeFilesystemIdentity",
+      up: (database) => {
+        const columns = database.prepare("PRAGMA table_info(paired_launch_sides)")
+          .all() as Array<{ name: string }>;
+        if (!columns.some(({ name }) =>
+          name === "cleanup_filesystem_identity_json")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_filesystem_identity_json TEXT
+              CHECK (
+                cleanup_filesystem_identity_json IS NULL
+                OR length(cleanup_filesystem_identity_json) BETWEEN 1 AND 1024
+              );
+          `);
+        }
+      },
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,
@@ -917,7 +1223,6 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
       },
     });
   }
-
 
 function ensureTurnAssociationColumns(database: Database.Database): void {
     const associations = [

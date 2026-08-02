@@ -16,6 +16,7 @@ import {
 } from "vitest";
 import type {
   AppSnapshot,
+  DuoLaunchSideStatus,
   ModelBackendProfileView,
   ModelSelection,
   Project,
@@ -27,13 +28,18 @@ import { MultiSpawnDialog } from "../../src/renderer/src/components/MultiSpawnDi
 import { useMultiSpawn } from "../../src/renderer/src/hooks/useMultiSpawn";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
-import type { MultiSpawnDraft } from "../../src/renderer/src/utils/multiSpawn";
+import {
+  MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+  type MultiSpawnDraft,
+} from "../../src/renderer/src/utils/multiSpawn";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 
 const firstProjectId = "11111111-1111-4111-8111-111111111111";
 const secondProjectId = "22222222-2222-4222-8222-222222222222";
 const firstConversationId = "33333333-3333-4333-8333-333333333333";
 const secondConversationId = "44444444-4444-4444-8444-444444444444";
+const firstTurnId = "55555555-5555-4555-8555-555555555555";
+const secondTurnId = "66666666-6666-4666-8666-666666666666";
 const now = "2026-07-29T14:00:00.000Z";
 const browserLocalStorage = window.localStorage;
 
@@ -253,6 +259,21 @@ function multiSpawnDraft(): MultiSpawnDraft {
         interactionMode: "build",
       },
     ],
+  };
+}
+
+function pendingLaunchesEvent(
+  launchIds: string[] = [],
+  hasMore = false,
+): ServerEvent {
+  return {
+    type: "request.result",
+    requestId: crypto.randomUUID(),
+    result: {
+      kind: "duo.pending",
+      launchIds,
+      hasMore,
+    },
   };
 }
 
@@ -560,6 +581,78 @@ describe("multi-spawn", () => {
     trigger.remove();
   });
 
+  it.each(["Escape", "close button", "Cancel launch"] as const)(
+    "routes %s through the same launch-cancellation callback",
+    (route) => {
+      const onClose = vi.fn();
+      render(
+        <MultiSpawnDialog
+          open
+          snapshot={snapshot}
+          settings={settings}
+          submitting
+          error="Checking these projects for previous duo launches."
+          onClose={onClose}
+          onSubmit={vi.fn(async () => undefined)}
+          onOpenProviderSetup={vi.fn()}
+          onOpenBackendSetup={vi.fn()}
+        />,
+      );
+
+      if (route === "Escape") {
+        fireEvent.keyDown(document, { key: "Escape" });
+      } else if (route === "close button") {
+        fireEvent.click(screen.getByRole("button", {
+          name: "Close multi-spawn",
+        }));
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Cancel launch" }));
+      }
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("keeps every launch and close affordance inert while cancellation is pending", () => {
+    const onClose = vi.fn();
+    const onSubmit = vi.fn(async (_draft: MultiSpawnDraft) => undefined);
+    render(
+      <MultiSpawnDialog
+        open
+        snapshot={snapshot}
+        settings={settings}
+        submitting={false}
+        cancelling
+        error={null}
+        onClose={onClose}
+        onSubmit={onSubmit}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+
+    const close = screen.getByRole("button", { name: "Close multi-spawn" });
+    const cancel = screen.getByRole("button", { name: "Cancelling…" });
+    const launch = screen.getByRole("button", { name: "Launch duo" });
+    expect(close).toBeDisabled();
+    expect(cancel).toBeDisabled();
+    expect(launch).toBeDisabled();
+    expect(screen.getByLabelText("Shared prompt")).toBeDisabled();
+
+    fireEvent.click(close);
+    fireEvent.click(cancel);
+    fireEvent.click(launch);
+    fireEvent.keyDown(document, { key: "Escape" });
+    const backdrop = document.querySelector(".multi-spawn-backdrop");
+    if (!(backdrop instanceof HTMLElement)) {
+      throw new Error("The multi-spawn backdrop was not rendered.");
+    }
+    fireEvent.mouseDown(backdrop);
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("keeps launch completion focused in the resulting workspace", async () => {
     const trigger = document.createElement("button");
     const workspace = document.createElement("section");
@@ -657,6 +750,76 @@ describe("multi-spawn", () => {
     )).toBeVisible();
   });
 
+  it("renders recovery instructions as inert argv on Windows and metacharacter paths", () => {
+    const repositoryPath = "C:\\Users\\Ada $()\\project`name`";
+    const worktreePath = `${repositoryPath}\\.inertia\\worktrees\\route\nnext-line`;
+    const branch = "inertia/33333333";
+    render(
+      <MultiSpawnDialog
+        open
+        snapshot={snapshot}
+        settings={settings}
+        submitting={false}
+        error="Owned worktree cleanup still needs attention."
+        recoveryGuidance={[{
+          kind: "git-worktree",
+          ordinal: 0,
+          topology: "owned",
+          repositoryPath,
+          plannedPath: worktreePath,
+          observedPath: worktreePath,
+          worktreeId: "route",
+          generatedBranch: branch,
+          expectedHead: "a".repeat(40),
+          observedBranch: branch,
+          observedHead: "a".repeat(40),
+          actions: [
+            {
+              label: "Remove retained linked worktree",
+              cwd: repositoryPath,
+              executable: "git",
+              args: ["worktree", "remove", "--", worktreePath],
+            },
+            {
+              label: "Remove generated branch after inspecting it",
+              cwd: repositoryPath,
+              executable: "git",
+              args: ["branch", "-d", "--", branch],
+            },
+          ],
+        }]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn(async () => undefined)}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+
+    const guidance = screen.getByRole("region", {
+      name: "Manual Git recovery for route 1",
+    });
+    expect(guidance).toHaveTextContent(
+      "These are literal values, not a shell command.",
+    );
+    expect(guidance).toHaveTextContent(repositoryPath);
+    expect(guidance).toHaveTextContent(`Expected commit${"a".repeat(40)}`);
+    expect(Array.from(guidance.querySelectorAll("[data-git-argument]"))
+      .map((argument) => argument.textContent)).toEqual([
+      "worktree",
+      "remove",
+      "--",
+      worktreePath,
+      "branch",
+      "-d",
+      "--",
+      branch,
+    ]);
+    expect(guidance.querySelectorAll("code")).not.toHaveLength(0);
+    expect(guidance.textContent).not.toContain(
+      `git worktree remove -- ${JSON.stringify(worktreePath)}`,
+    );
+  });
+
   it("keeps setup available for an exact custom route that needs a probe", () => {
     const onOpenBackendSetup = vi.fn();
     render(
@@ -690,30 +853,63 @@ describe("multi-spawn", () => {
     expect(onOpenBackendSetup).toHaveBeenCalledWith("custom:team");
   });
 
-  it("creates both shells before selecting and starting them", async () => {
+  it("prepares both durable sides when browser recovery storage is unavailable", async () => {
+    const unavailableStorage = localStorageStub();
+    unavailableStorage.setItem = () => {
+      throw new Error("Browser storage is unavailable.");
+    };
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: unavailableStorage,
+    });
     const calls: string[] = [];
     const run = vi.fn(async (
       key: string,
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
       calls.push(key);
-      if (command.type === "conversation.create") {
-        const conversationId = command.payload.title === "First perspective"
-          ? firstConversationId
-          : secondConversationId;
+      if (command.type === "duo.pending") {
+        expect(command.payload.projectIds).toEqual([
+          firstProjectId,
+          secondProjectId,
+        ]);
+        return pendingLaunchesEvent();
+      }
+      if (command.type === "duo.prepare") {
         return {
           type: "request.result",
           requestId: crypto.randomUUID(),
-          result: { kind: "conversation.created", conversationId },
+          result: {
+            kind: "duo.prepared",
+            launchId: command.payload.launchId,
+            state: "prepared",
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+            ],
+          },
+        };
+      }
+      if (command.type === "duo.dispatch") {
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId: command.payload.launchId,
+            state: "running",
+            error: null,
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "started" },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "started" },
+            ],
+          },
         };
       }
       return {
         type: "request.ok",
         requestId: crypto.randomUUID(),
       };
-    });
-    const sendMessage = vi.fn(async (conversationId: string) => {
-      calls.push(`send:${conversationId}`);
     });
     const updateSplitConversationId = vi.fn();
     const focusWorkspace = vi.fn();
@@ -722,7 +918,6 @@ describe("multi-spawn", () => {
       snapshot,
       settings,
       run,
-      sendMessage,
       splitSelectionTransitionsRef: transitionRef,
       updateSplitConversationId,
       showWorkspace: vi.fn(),
@@ -735,149 +930,351 @@ describe("multi-spawn", () => {
 
     await act(async () => hook.result.current.submit(draft));
 
-    expect(calls.slice(0, 2).sort()).toEqual([
-      "multi-spawn:create:0",
-      "multi-spawn:create:1",
+    expect(calls).toEqual([
+      "multi-spawn:pending",
+      "multi-spawn:prepare",
+      "multi-spawn:select",
+      "multi-spawn:dispatch",
     ]);
-    expect(calls[2]).toBe("multi-spawn:select");
     expect(updateSplitConversationId).toHaveBeenCalledWith(
       secondConversationId,
     );
-    const creationPayloads = run.mock.calls.flatMap(([, command]) =>
-      command.type === "conversation.create" ? [command.payload] : []);
-    expect(creationPayloads).toMatchObject([
-      {
-        projectId: firstProjectId,
-        title: "First perspective",
-        activate: false,
-        accessMode: "supervised",
-        interactionMode: "build",
-        modelSelection: {
-          modelId: "gpt-5.6-sol",
-          reasoningEffort: "high",
-        },
+    const prepare = run.mock.calls.find(([, command]) =>
+      command.type === "duo.prepare")?.[1];
+    expect(prepare).toMatchObject({
+      type: "duo.prepare",
+      payload: {
+        prompt: "Compare this change.",
+        sides: [
+          {
+            projectId: firstProjectId,
+            title: "First perspective",
+            accessMode: "supervised",
+            interactionMode: "build",
+            modelSelection: {
+              modelId: "gpt-5.6-sol",
+              reasoningEffort: "high",
+            },
+          },
+          {
+            projectId: secondProjectId,
+            title: "Second perspective",
+            accessMode: "full",
+            interactionMode: "build",
+            modelSelection: {
+              modelId: "gpt-5.6-sol",
+              reasoningEffort: "high",
+            },
+          },
+        ],
       },
-      {
-        projectId: secondProjectId,
-        title: "Second perspective",
-        activate: false,
-        accessMode: "full",
-        interactionMode: "build",
-        modelSelection: {
-          modelId: "gpt-5.6-sol",
-          reasoningEffort: "high",
-        },
-      },
-    ]);
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    });
     expect(focusWorkspace).toHaveBeenCalledTimes(1);
-    expect(sendMessage).toHaveBeenCalledWith(
-      firstConversationId,
-      "Compare this change.",
-      [],
-      undefined,
-      undefined,
-      false,
-    );
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBeNull();
   });
 
-  it("continues a surviving chat and reports a partial creation failure", async () => {
+  it.each([
+    { state: "failed", expectedStored: false },
+    { state: "cancelled", expectedStored: false },
+    { state: "interrupted", expectedStored: false },
+    { state: "recovery-required", expectedStored: true },
+  ] as const)(
+    "retains recovery identity after dispatch: $expectedStored ($state)",
+    async ({ state, expectedStored }) => {
+      let launchId = "";
+      const run = vi.fn(async (
+        _key: string,
+        command: CommandWithoutId,
+      ): Promise<ServerEvent> => {
+        if (command.type === "duo.pending") {
+          return pendingLaunchesEvent();
+        }
+        if (command.type === "duo.prepare") {
+          launchId = command.payload.launchId;
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.prepared",
+              launchId: command.payload.launchId,
+              state: "prepared",
+              sides: [
+                { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+                { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+              ],
+            },
+          };
+        }
+        if (command.type === "duo.dispatch") {
+          expect(window.localStorage.getItem(
+            MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+          )).toBe(command.payload.launchId);
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId: command.payload.launchId,
+              state,
+              error: `Deterministic ${state} result.`,
+              sides: [
+                { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "failed" },
+                { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "failed" },
+              ],
+            },
+          };
+        }
+        return { type: "request.ok", requestId: crypto.randomUUID() };
+      });
+      const hook = renderHook(() => useMultiSpawn({
+        snapshot,
+        settings,
+        run,
+        splitSelectionTransitionsRef: { current: 0 },
+        updateSplitConversationId: vi.fn(),
+        showWorkspace: vi.fn(),
+        closeSidebar: vi.fn(),
+        focusWorkspace: vi.fn(),
+        discardDraftConversation: vi.fn(),
+        setActionError: vi.fn(),
+      }));
+
+      await act(async () => hook.result.current.submit(multiSpawnDraft()));
+
+      expect(window.localStorage.getItem(
+        MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+      )).toBe(expectedStored ? launchId : null);
+    },
+  );
+
+  it("prompts neither side when atomic preparation rejects the second side", async () => {
     const run = vi.fn(async (
-      key: string,
+      _key: string,
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
-      if (key === "multi-spawn:create:1") {
-        throw new Error("Claude route unavailable.");
+      if (command.type === "duo.pending") {
+        return pendingLaunchesEvent();
       }
-      if (command.type === "conversation.create") {
-        return {
-          type: "request.result",
-          requestId: crypto.randomUUID(),
-          result: {
-            kind: "conversation.created",
-            conversationId: firstConversationId,
-          },
-        };
+      if (command.type === "duo.prepare") {
+        throw new RuntimeCommandError(
+          "Chat 2 route is unavailable. Neither chat was launched.",
+          "rejected",
+        );
+      }
+      if (command.type === "duo.status") {
+        throw new RuntimeCommandError("Duo launch not found.", "rejected");
       }
       return { type: "request.ok", requestId: crypto.randomUUID() };
     });
-    const sendMessage = vi.fn(async () => undefined);
     const setActionError = vi.fn();
-    const selection = nativeModelSelection({
-      providerId: "codex",
-      modelId: "gpt-5.6-sol",
-      reasoningEffort: "high",
-    });
+    const updateSplitConversationId = vi.fn();
+    const discardDraftConversation = vi.fn();
     const hook = renderHook(() => useMultiSpawn({
       snapshot,
       settings,
       run,
-      sendMessage,
       splitSelectionTransitionsRef: { current: 0 },
-      updateSplitConversationId: vi.fn(),
+      updateSplitConversationId,
       showWorkspace: vi.fn(),
       closeSidebar: vi.fn(),
       focusWorkspace: vi.fn(),
-      discardDraftConversation: vi.fn(),
+      discardDraftConversation,
       setActionError,
     }));
 
-    await act(async () => hook.result.current.submit({
-      prompt: "Review.",
-      rememberPreset: false,
-      sides: [
-        {
-          projectId: firstProjectId,
-          title: "Survivor",
-          selection,
-          accessMode: "supervised",
-          interactionMode: "build",
-        },
-        {
-          projectId: secondProjectId,
-          title: "Unavailable",
-          selection,
-          accessMode: "supervised",
-          interactionMode: "build",
-        },
-      ],
-    }));
+    await act(async () => hook.result.current.submit(multiSpawnDraft()));
 
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(setActionError).toHaveBeenLastCalledWith(
-      expect.stringContaining("Claude route unavailable."),
-    );
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+      "duo.prepare",
+      "duo.status",
+    ]);
+    expect(updateSplitConversationId).not.toHaveBeenCalled();
+    expect(discardDraftConversation).not.toHaveBeenCalled();
+    expect(hook.result.current.error).toContain("Neither chat was launched");
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBeNull();
   });
 
-  it("ignores duplicate submission while the first duo is being created", async () => {
-    let releaseFirstCreation!: () => void;
-    const firstCreation = new Promise<void>((resolve) => {
-      releaseFirstCreation = resolve;
+  it.each([
+    {
+      recoveredState: "cancelled",
+      recoveredError: null,
+      expectedStored: false,
+      expectedError: "The duo launch was cancelled before both providers began.",
+    },
+    {
+      recoveredState: "recovery-required",
+      recoveredError: "Owned worktree cleanup still needs attention.",
+      expectedStored: true,
+      expectedError: "Owned worktree cleanup still needs attention.",
+    },
+  ] as const)(
+    "recovers a rejected preparation and leaves identity stored: $expectedStored",
+    async ({
+      recoveredState,
+      recoveredError,
+      expectedStored,
+      expectedError,
+    }) => {
+      let launchId = "";
+      const firstRecoveryError = "Owned worktree cleanup needs attention: could not remove /workspace/orphaned-duo.";
+      const run = vi.fn(async (
+        _key: string,
+        command: CommandWithoutId,
+      ): Promise<ServerEvent> => {
+        if (command.type === "duo.pending") {
+          return pendingLaunchesEvent();
+        }
+        if (command.type === "duo.prepare") {
+          launchId = command.payload.launchId;
+          expect(window.localStorage.getItem(
+            MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+          )).toBe(launchId);
+          throw new RuntimeCommandError(
+            "The second worktree could not be created.",
+            "rejected",
+          );
+        }
+        if (command.type === "duo.status") {
+          expect(command.payload.launchId).toBe(launchId);
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId,
+              state: "recovery-required",
+              error: firstRecoveryError,
+              sides: [
+                { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+                { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+              ],
+            },
+          };
+        }
+        if (command.type === "duo.cancel") {
+          expect(command.payload.launchId).toBe(launchId);
+          expect(window.localStorage.getItem(
+            MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+          )).toBe(launchId);
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId,
+              state: recoveredState,
+              error: recoveredError,
+              sides: [
+                {
+                  ordinal: 0,
+                  conversationId: null,
+                  turnId: null,
+                  dispatchState: recoveredState === "cancelled"
+                    ? "cancelled"
+                    : "pending",
+                },
+                {
+                  ordinal: 1,
+                  conversationId: null,
+                  turnId: null,
+                  dispatchState: recoveredState === "cancelled"
+                    ? "cancelled"
+                    : "pending",
+                },
+              ],
+            },
+          };
+        }
+        throw new Error(`Unexpected command: ${command.type}`);
+      });
+      const updateSplitConversationId = vi.fn();
+      const discardDraftConversation = vi.fn();
+      const hook = renderHook(() => useMultiSpawn({
+        snapshot,
+        settings,
+        run,
+        splitSelectionTransitionsRef: { current: 0 },
+        updateSplitConversationId,
+        showWorkspace: vi.fn(),
+        closeSidebar: vi.fn(),
+        focusWorkspace: vi.fn(),
+        discardDraftConversation,
+        setActionError: vi.fn(),
+      }));
+
+      await act(async () => hook.result.current.submit(multiSpawnDraft()));
+
+      expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+        "duo.pending",
+        "duo.prepare",
+        "duo.status",
+        "duo.cancel",
+      ]);
+      expect(window.localStorage.getItem(
+        MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+      )).toBe(expectedStored ? launchId : null);
+      expect(hook.result.current.error).toBe(expectedError);
+      expect(updateSplitConversationId).not.toHaveBeenCalled();
+      expect(discardDraftConversation).not.toHaveBeenCalled();
+    },
+  );
+
+  it("ignores duplicate submission while atomic preparation is pending", async () => {
+    let releasePreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
     });
     const run = vi.fn(async (
       key: string,
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
-      if (key === "multi-spawn:create:0") await firstCreation;
-      if (command.type === "conversation.create") {
+      if (command.type === "duo.pending") {
+        return pendingLaunchesEvent();
+      }
+      if (command.type === "duo.prepare") {
+        await preparation;
         return {
           type: "request.result",
           requestId: crypto.randomUUID(),
           result: {
-            kind: "conversation.created",
-            conversationId: key.endsWith(":0")
-              ? firstConversationId
-              : secondConversationId,
+            kind: "duo.prepared",
+            launchId: command.payload.launchId,
+            state: "prepared",
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+            ],
           },
         };
       }
+      if (command.type === "duo.dispatch") {
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId: command.payload.launchId,
+            state: "running",
+            error: null,
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "started" },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "started" },
+            ],
+          },
+        };
+      }
+      expect(key).toBe("multi-spawn:select");
       return { type: "request.ok", requestId: crypto.randomUUID() };
     });
     const hook = renderHook(() => useMultiSpawn({
       snapshot,
       settings,
       run,
-      sendMessage: vi.fn(async () => undefined),
       splitSelectionTransitionsRef: { current: 0 },
       updateSplitConversationId: vi.fn(),
       showWorkspace: vi.fn(),
@@ -892,26 +1289,840 @@ describe("multi-spawn", () => {
     await act(async () => {
       await duplicateSubmit;
       expect(run).toHaveBeenCalledTimes(1);
-      releaseFirstCreation();
+      releasePreparation();
       await firstSubmit;
     });
 
     expect(run.mock.calls.filter(([, command]) =>
-      command.type === "conversation.create")).toHaveLength(2);
+      command.type === "duo.prepare")).toHaveLength(1);
+    expect(run.mock.calls.filter(([, command]) =>
+      command.type === "duo.dispatch")).toHaveLength(1);
   });
 
-  it("closes for authoritative reconciliation after ambiguous creation", async () => {
+  it("honors cancellation while durable pending-launch lookup is unresolved", async () => {
+    let releaseLookup!: () => void;
+    const lookup = new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    let lookupCount = 0;
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type !== "duo.pending") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      lookupCount += 1;
+      if (lookupCount === 1) await lookup;
+      return pendingLaunchesEvent();
+    });
+    const focusWorkspace = vi.fn();
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace,
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    let submission!: Promise<void>;
+    act(() => {
+      submission = hook.result.current.submit(multiSpawnDraft());
+    });
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect(hook.result.current.submitting).toBe(true);
+
+    act(() => hook.result.current.closeDialog());
+    expect(hook.result.current.open).toBe(false);
+    expect(hook.result.current.submitting).toBe(false);
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    expect(hook.result.current.open).toBe(true);
+    expect(hook.result.current.error).toBeNull();
+    releaseLookup();
+    await act(async () => submission);
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+      "duo.pending",
+    ]);
+    expect(hook.result.current.submitting).toBe(false);
+    expect(hook.result.current.open).toBe(true);
+    expect(hook.result.current.error).toBeNull();
+    expect(focusWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates an unresolved pending lookup when the hook unmounts", async () => {
+    let releaseLookup!: () => void;
+    const lookup = new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type !== "duo.pending") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      await lookup;
+      return pendingLaunchesEvent();
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    let submission!: Promise<void>;
+    act(() => {
+      submission = hook.result.current.submit(multiSpawnDraft());
+    });
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    hook.unmount();
+    releaseLookup();
+    await act(async () => submission);
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+    ]);
+  });
+
+  it("cancels a launch in progress without dispatching either provider", async () => {
+    let releasePreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    let launchId = "";
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        return pendingLaunchesEvent();
+      }
+      if (command.type === "duo.prepare") {
+        launchId = command.payload.launchId;
+        await preparation;
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.prepared",
+            launchId,
+            state: "prepared",
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+            ],
+          },
+        };
+      }
+      if (command.type === "duo.cancel") {
+        expect(command.payload.launchId).toBe(launchId);
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId,
+            state: "cancelled",
+            error: null,
+            sides: [
+              { ordinal: 0, conversationId: null, turnId: null, dispatchState: "cancelled" },
+              { ordinal: 1, conversationId: null, turnId: null, dispatchState: "cancelled" },
+            ],
+          },
+        };
+      }
+      throw new Error(`Unexpected command: ${command.type}`);
+    });
+    const updateSplitConversationId = vi.fn();
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId,
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    let submission!: Promise<void>;
+    act(() => {
+      submission = hook.result.current.submit(multiSpawnDraft());
+    });
+    await waitFor(() => expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.prepare")).toBe(true));
+
+    act(() => hook.result.current.closeDialog());
+    await waitFor(() => expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.cancel")).toBe(true));
+    releasePreparation();
+    await act(async () => submission);
+
+    expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.dispatch")).toBe(false);
+    expect(updateSplitConversationId).not.toHaveBeenCalled();
+    expect(hook.result.current.open).toBe(false);
+    expect(hook.result.current.submitting).toBe(false);
+  });
+
+  it.each(["resolves", "rejects"] as const)(
+    "keeps cancellation busy until duo.cancel %s and then releases the latch",
+    async (outcome) => {
+      let releasePreparation!: () => void;
+      const preparation = new Promise<void>((resolve) => {
+        releasePreparation = resolve;
+      });
+      let resolveCancellation!: () => void;
+      let rejectCancellation!: (error: Error) => void;
+      const cancellation = new Promise<void>((resolve, reject) => {
+        resolveCancellation = resolve;
+        rejectCancellation = reject;
+      });
+      let launchId = "";
+      const run = vi.fn(async (
+        _key: string,
+        command: CommandWithoutId,
+      ): Promise<ServerEvent> => {
+        if (command.type === "duo.pending") {
+          return pendingLaunchesEvent();
+        }
+        if (command.type === "duo.prepare") {
+          launchId = command.payload.launchId;
+          await preparation;
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.prepared",
+              launchId,
+              state: "prepared",
+              sides: [
+                { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+                { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+              ],
+            },
+          };
+        }
+        if (command.type === "duo.cancel") {
+          await cancellation;
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId,
+              state: "cancelled",
+              error: null,
+              sides: [
+                { ordinal: 0, conversationId: null, turnId: null, dispatchState: "cancelled" },
+                { ordinal: 1, conversationId: null, turnId: null, dispatchState: "cancelled" },
+              ],
+            },
+          };
+        }
+        throw new Error(`Unexpected command: ${command.type}`);
+      });
+      const setActionError = vi.fn();
+      const hook = renderHook(() => useMultiSpawn({
+        snapshot,
+        settings,
+        run,
+        splitSelectionTransitionsRef: { current: 0 },
+        updateSplitConversationId: vi.fn(),
+        showWorkspace: vi.fn(),
+        closeSidebar: vi.fn(),
+        focusWorkspace: vi.fn(),
+        discardDraftConversation: vi.fn(),
+        setActionError,
+      }));
+
+      act(() => hook.result.current.openDialog());
+      await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+      let submission!: Promise<void>;
+      act(() => {
+        submission = hook.result.current.submit(multiSpawnDraft());
+      });
+      await waitFor(() => expect(run.mock.calls.some(([, command]) =>
+        command.type === "duo.prepare")).toBe(true));
+
+      act(() => hook.result.current.closeDialog());
+      await waitFor(() => expect(hook.result.current.cancelling).toBe(true));
+      const commandCount = run.mock.calls.length;
+      act(() => hook.result.current.closeDialog());
+      await act(async () => hook.result.current.submit(multiSpawnDraft()));
+      act(() => hook.result.current.openDialog());
+
+      expect(run).toHaveBeenCalledTimes(commandCount);
+      expect(hook.result.current.open).toBe(true);
+      expect(hook.result.current.cancelling).toBe(true);
+      if (outcome === "resolves") {
+        resolveCancellation();
+      } else {
+        rejectCancellation(new RuntimeCommandError(
+          "Cancellation was rejected.",
+          "rejected",
+        ));
+      }
+      await waitFor(() => expect(hook.result.current.cancelling).toBe(false));
+      expect(hook.result.current.open).toBe(false);
+      if (outcome === "rejects") {
+        expect(setActionError).toHaveBeenCalledWith("Cancellation was rejected.");
+      }
+
+      releasePreparation();
+      await act(async () => submission);
+      act(() => hook.result.current.openDialog());
+      await waitFor(() => expect(run.mock.calls.filter(([, command]) =>
+        command.type === "duo.pending")).toHaveLength(3));
+      expect(hook.result.current.open).toBe(true);
+      expect(run.mock.calls.filter(([, command]) =>
+        command.type === "duo.prepare")).toHaveLength(1);
+      expect(run.mock.calls.some(([, command]) =>
+        command.type === "duo.dispatch")).toBe(false);
+    },
+  );
+
+  it("retains recovery identity when explicit cancellation still needs cleanup", async () => {
+    let releasePreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    let launchId = "";
+    const recoveryError = "Owned worktree cleanup still needs attention.";
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        return pendingLaunchesEvent();
+      }
+      if (command.type === "duo.prepare") {
+        launchId = command.payload.launchId;
+        await preparation;
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.prepared",
+            launchId,
+            state: "prepared",
+            sides: [
+              { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
+              { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
+            ],
+          },
+        };
+      }
+      if (command.type === "duo.cancel") {
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId,
+            state: "recovery-required",
+            error: recoveryError,
+            sides: [
+              { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+              { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+            ],
+          },
+        };
+      }
+      throw new Error(`Unexpected command: ${command.type}`);
+    });
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError,
+    }));
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    let submission!: Promise<void>;
+    act(() => {
+      submission = hook.result.current.submit(multiSpawnDraft());
+    });
+    await waitFor(() => expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.prepare")).toBe(true));
+
+    act(() => hook.result.current.closeDialog());
+    await waitFor(() => expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.cancel")).toBe(true));
+    releasePreparation();
+    await act(async () => submission);
+
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBe(launchId);
+    expect(setActionError).toHaveBeenCalledWith(recoveryError);
+    expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.dispatch")).toBe(false);
+  });
+
+  it("retains recovery identity across repeated cleanup failures", async () => {
+    const launchId = "77777777-7777-4777-8777-777777777777";
+    window.localStorage.setItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+      "stale-browser-only-value",
+    );
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        expect(command.payload.projectIds).toEqual([firstProjectId]);
+        return pendingLaunchesEvent([launchId]);
+      }
+      if (command.type !== "duo.status" && command.type !== "duo.cancel") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      expect(command.payload.launchId).toBe(launchId);
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId,
+          state: "recovery-required",
+          error: "Owned worktree cleanup still needs attention.",
+          sides: [
+            { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+            { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+          ],
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(3));
+
+    await waitFor(() => expect(hook.result.current.error).toBe(
+      "Owned worktree cleanup still needs attention.",
+    ));
+    act(() => hook.result.current.closeDialog());
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(6));
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+      "duo.status",
+      "duo.cancel",
+      "duo.pending",
+      "duo.status",
+      "duo.cancel",
+    ]);
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBeNull();
+    expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.prepare" || command.type === "duo.dispatch"))
+      .toBe(false);
+  });
+
+  it.each([
+    { name: "missing", stored: null },
+    { name: "corrupt", stored: "not-a-launch-uuid" },
+    {
+      name: "stale",
+      stored: "99999999-9999-4999-8999-999999999999",
+    },
+  ])(
+    "rediscovers durable recovery with a $name browser key",
+    async ({ stored }) => {
+      const launchId = "77777777-7777-4777-8777-777777777778";
+      if (stored) {
+        window.localStorage.setItem(
+          MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+          stored,
+        );
+      }
+      const run = vi.fn(async (
+        _key: string,
+        command: CommandWithoutId,
+      ): Promise<ServerEvent> => {
+        if (command.type === "duo.pending") {
+          expect(command.payload.projectIds).toEqual([firstProjectId]);
+          return pendingLaunchesEvent([launchId]);
+        }
+        if (command.type !== "duo.status" && command.type !== "duo.cancel") {
+          throw new Error(`Unexpected command: ${command.type}`);
+        }
+        expect(command.payload.launchId).toBe(launchId);
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId,
+            state: "recovery-required",
+            error: "Authoritative recovery is still required.",
+            sides: [
+              { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+              { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+            ],
+          },
+        };
+      });
+      const hook = renderHook(() => useMultiSpawn({
+        snapshot,
+        settings,
+        run,
+        splitSelectionTransitionsRef: { current: 0 },
+        updateSplitConversationId: vi.fn(),
+        showWorkspace: vi.fn(),
+        closeSidebar: vi.fn(),
+        focusWorkspace: vi.fn(),
+        discardDraftConversation: vi.fn(),
+        setActionError: vi.fn(),
+      }));
+
+      act(() => hook.result.current.openDialog());
+      await waitFor(() => expect(run).toHaveBeenCalledTimes(3));
+
+      expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+        "duo.pending",
+        "duo.status",
+        "duo.cancel",
+      ]);
+      expect(hook.result.current.error).toBe(
+        "Authoritative recovery is still required.",
+      );
+      expect(window.localStorage.getItem(
+        MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+      )).toBeNull();
+    },
+  );
+
+  it("reconciles every bounded durable blocker instead of selecting one", async () => {
+    const launchIds = [
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ];
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        expect(command.payload.projectIds).toEqual([firstProjectId]);
+        return pendingLaunchesEvent(launchIds);
+      }
+      if (command.type !== "duo.status" && command.type !== "duo.cancel") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      const launchId = command.payload.launchId;
+      expect(launchIds).toContain(launchId);
+      const ordinal = launchIds.indexOf(launchId) as 0 | 1;
+      const plannedPath = `/workspace/retained duo ${ordinal + 1}`;
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId,
+          state: "recovery-required",
+          error: `Recovery ${ordinal + 1} remains required.`,
+          sides: [
+            { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+            { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+          ],
+          recoveryGuidance: [{
+            kind: "git-worktree",
+            ordinal,
+            topology: "owned",
+            repositoryPath: "/workspace/repository",
+            plannedPath,
+            observedPath: plannedPath,
+            worktreeId: `worktree-${ordinal + 1}`,
+            generatedBranch: `inertia/launch-${ordinal + 1}`,
+            expectedHead: `${ordinal + 1}`.repeat(40),
+            observedBranch: `inertia/launch-${ordinal + 1}`,
+            observedHead: `${ordinal + 1}`.repeat(40),
+            actions: [{
+              label: "Remove retained linked worktree",
+              cwd: "/workspace/repository",
+              executable: "git",
+              args: ["worktree", "remove", "--", plannedPath],
+            }],
+          }],
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(5));
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+      "duo.status",
+      "duo.cancel",
+      "duo.status",
+      "duo.cancel",
+    ]);
+    expect(hook.result.current.error).toContain(
+      "2 previous duo launches still need recovery.",
+    );
+    expect(hook.result.current.recoveryGuidance.map(
+      ({ plannedPath }) => plannedPath,
+    )).toEqual([
+      "/workspace/retained duo 1",
+      "/workspace/retained duo 2",
+    ]);
+    expect(run.mock.calls.some(([, command]) =>
+      command.type === "duo.prepare" || command.type === "duo.dispatch"))
+      .toBe(false);
+  });
+
+  it("continues reconciling later blockers when an earlier status is unavailable", async () => {
+    const launchIds = [
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    ];
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        return pendingLaunchesEvent(launchIds);
+      }
+      if (command.type === "duo.status") {
+        if (command.payload.launchId === launchIds[0]) {
+          throw new RuntimeCommandError("Status temporarily unavailable.", "rejected");
+        }
+        expect(command.payload.launchId).toBe(launchIds[1]);
+      } else if (command.type === "duo.cancel") {
+        expect(command.payload.launchId).toBe(launchIds[1]);
+      } else {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId: launchIds[1]!,
+          state: "recovery-required",
+          error: "The second launch still needs recovery.",
+          sides: [
+            { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+            { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+          ],
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(4));
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+      "duo.status",
+      "duo.status",
+      "duo.cancel",
+    ]);
+    expect(hook.result.current.error).toContain(
+      "One or more previous duo launches could not be reconciled yet.",
+    );
+  });
+
+  it("retains a lost-prepared recovery identity until manual worktree cleanup is confirmed", async () => {
+    const launchId = "88888888-8888-4888-8888-888888888888";
+    const sides: [DuoLaunchSideStatus, DuoLaunchSideStatus] = [
+      { ordinal: 0 as const, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "pending" as const },
+      { ordinal: 1 as const, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "pending" as const },
+    ];
+    const worktreePath = "C:\\workspace $()\\.inertia\\worktrees\\33333333`tick`";
+    const branch = "inertia/33333333";
+    const retainedWorktreeMessage = "Owned worktree cleanup still needs attention. Review the structured recovery details.";
+    const recoveryGuidance = [{
+      kind: "git-worktree" as const,
+      ordinal: 0 as const,
+      topology: "owned" as const,
+      repositoryPath: "C:\\workspace $()",
+      plannedPath: worktreePath,
+      observedPath: worktreePath,
+      worktreeId: "33333333",
+      generatedBranch: branch,
+      expectedHead: "b".repeat(40),
+      observedBranch: branch,
+      observedHead: "b".repeat(40),
+      actions: [{
+        label: "Remove retained linked worktree",
+        cwd: "C:\\workspace $()",
+        executable: "git" as const,
+        args: ["worktree", "remove", "--", worktreePath],
+      }],
+    }];
+    let recoveryRequired = false;
+    let manualCleanupComplete = false;
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        return pendingLaunchesEvent([launchId]);
+      }
+      if (command.type === "duo.status") {
+        return {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "duo.status",
+            launchId,
+            state: recoveryRequired ? "recovery-required" : "prepared",
+            error: recoveryRequired ? retainedWorktreeMessage : null,
+            sides,
+            recoveryGuidance: recoveryRequired ? recoveryGuidance : [],
+          },
+        };
+      }
+      expect(command).toEqual({ type: "duo.cancel", payload: { launchId } });
+      recoveryRequired = !manualCleanupComplete;
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId,
+          state: recoveryRequired ? "recovery-required" : "cancelled",
+          error: recoveryRequired ? retainedWorktreeMessage : null,
+          recoveryGuidance: recoveryRequired ? recoveryGuidance : [],
+          sides: [
+            { ...sides[0], dispatchState: recoveryRequired ? "pending" : "cancelled" },
+            { ...sides[1], dispatchState: recoveryRequired ? "pending" : "cancelled" },
+          ],
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(3));
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+      "duo.status",
+      "duo.cancel",
+    ]);
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBeNull();
+    expect(hook.result.current.error).toBe(
+      retainedWorktreeMessage,
+    );
+    expect(hook.result.current.recoveryGuidance).toEqual(recoveryGuidance);
+
+    manualCleanupComplete = true;
+    act(() => hook.result.current.closeDialog());
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(6));
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+      "duo.status",
+      "duo.cancel",
+      "duo.pending",
+      "duo.status",
+      "duo.cancel",
+    ]);
+    expect(window.localStorage.getItem(
+      MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+    )).toBeNull();
+    expect(hook.result.current.error).toBe(
+      "The duo launch was cancelled before both providers began.",
+    );
+    expect(hook.result.current.recoveryGuidance).toEqual([]);
+  });
+
+  it("closes for authoritative reconciliation after ambiguous preparation", async () => {
     const setActionError = vi.fn();
     const discardDraftConversation = vi.fn();
     const focusWorkspace = vi.fn();
-    const run = vi.fn(async (): Promise<ServerEvent> => {
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        return pendingLaunchesEvent();
+      }
       throw new RuntimeCommandError("Connection interrupted.", "ambiguous");
     });
     const hook = renderHook(() => useMultiSpawn({
       snapshot,
       settings,
       run,
-      sendMessage: vi.fn(async () => undefined),
       splitSelectionTransitionsRef: { current: 0 },
       updateSplitConversationId: vi.fn(),
       showWorkspace: vi.fn(),
@@ -927,7 +2138,7 @@ describe("multi-spawn", () => {
 
     expect(hook.result.current.open).toBe(false);
     expect(setActionError).toHaveBeenLastCalledWith(
-      expect.stringContaining("Refresh before trying again"),
+      expect.stringContaining("will not be retried automatically"),
     );
     expect(discardDraftConversation).not.toHaveBeenCalled();
     expect(focusWorkspace).toHaveBeenCalledTimes(1);

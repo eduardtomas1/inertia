@@ -13,6 +13,28 @@ export interface ChangedFile {
   worktreeStatus: string;
 }
 
+export type GitForge = "github" | "gitlab" | "bitbucket";
+
+export type GitPullRequestUnavailableReason =
+  | "no-branch"
+  | "no-remotes"
+  | "ambiguous-remote"
+  | "missing-remote"
+  | "unsupported-url"
+  | "unsupported-forge"
+  | "ambiguous-url";
+
+/**
+ * Safe renderer-facing projection of privileged Git remote configuration.
+ * Remote URLs are deliberately omitted because they may contain credentials.
+ */
+export interface GitPullRequestCapability {
+  available: boolean;
+  remoteName: string | null;
+  forge: GitForge | null;
+  unavailableReason: GitPullRequestUnavailableReason | null;
+}
+
 export interface GitStatusSnapshot {
   isRepository: boolean;
   /** Ephemeral runtime-owned reference for diffs from this status snapshot. */
@@ -23,7 +45,10 @@ export interface GitStatusSnapshot {
   upstream: string | null;
   ahead: number;
   behind: number;
+  /** True when at least one Git remote is configured, regardless of upstream. */
   hasRemote: boolean;
+  /** Omitted only by snapshots from an older runtime. */
+  pullRequest?: GitPullRequestCapability;
   files: ChangedFile[];
   insertions: number;
   deletions: number;
@@ -52,7 +77,10 @@ export interface WorkspaceGitRepositorySnapshot {
   upstream: string | null;
   ahead: number;
   behind: number;
+  /** True when at least one Git remote is configured, regardless of upstream. */
   hasRemote: boolean;
+  /** Omitted only by snapshots from an older runtime. */
+  pullRequest?: GitPullRequestCapability;
   files: ChangedFile[];
   insertions: number;
   deletions: number;

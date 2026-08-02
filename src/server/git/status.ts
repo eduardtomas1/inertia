@@ -1,5 +1,6 @@
 import { DEFAULT_OUTPUT_BYTES } from "./constants";
 import { repositoryRoot } from "./paths";
+import { inspectGitRemoteRouting } from "./remote-routing";
 import { runGitInspection } from "./runner";
 import {
   GitError,
@@ -185,34 +186,38 @@ export async function getRepositoryStatus(
     },
   );
   const parsed = parsePorcelain(statusResult.stdout);
-  const statsResult = await runGitInspection(
-    root,
-    (await hasHead(root, options))
-      ? [
-          "diff",
-          "--numstat",
-          "-z",
-          "--no-ext-diff",
-          "--no-textconv",
-          "HEAD",
-          "--",
-        ]
-      : [
-          "diff",
-          "--numstat",
-          "-z",
-          "--no-ext-diff",
-          "--no-textconv",
-          "--cached",
-          "--",
-        ],
-    {
-      deadlineAt: options.deadlineAt,
-      maxOutputBytes: DEFAULT_OUTPUT_BYTES,
-      truncateOutput: true,
-      failureMessage: "Unable to calculate repository change totals.",
-    },
-  );
+  const hasCurrentHead = await hasHead(root, options);
+  const [statsResult, remoteRouting] = await Promise.all([
+    runGitInspection(
+      root,
+      hasCurrentHead
+        ? [
+            "diff",
+            "--numstat",
+            "-z",
+            "--no-ext-diff",
+            "--no-textconv",
+            "HEAD",
+            "--",
+          ]
+        : [
+            "diff",
+            "--numstat",
+            "-z",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--cached",
+            "--",
+          ],
+      {
+        deadlineAt: options.deadlineAt,
+        maxOutputBytes: DEFAULT_OUTPUT_BYTES,
+        truncateOutput: true,
+        failureMessage: "Unable to calculate repository change totals.",
+      },
+    ),
+    inspectGitRemoteRouting(root, parsed.branch, options),
+  ]);
   const stats = parseNumstat(statsResult.stdout);
   for (const file of parsed.files) {
     const values = stats.get(file.path);
@@ -225,6 +230,8 @@ export async function getRepositoryStatus(
     upstream: parsed.upstream,
     ahead: parsed.ahead,
     behind: parsed.behind,
+    hasRemote: remoteRouting.hasRemote,
+    pullRequest: remoteRouting.pullRequest,
     files: parsed.files,
     insertions: parsed.files.reduce(
       (total, file) => total + file.insertions,

@@ -22,6 +22,27 @@ import {
   requestBase,
 } from "./common";
 
+const conversationCreatePayloadSchema = z
+  .object({
+    projectId: z.string().uuid(),
+    title: z.string().trim().min(1).max(120),
+    providerId: providerIdSchema.optional(),
+    modelSelection: modelSelectionSchema.optional(),
+    model: z.string().trim().max(160).optional(),
+    reasoningEffort: z.string().trim().max(40).optional(),
+    interactionMode: interactionModeSchema.optional(),
+    accessMode: accessModeSchema.optional(),
+    activate: z.boolean().optional(),
+    useWorktree: z.boolean().optional(),
+    branch: z.string().trim().min(1).max(255).nullable().optional(),
+    worktreePath: z.string().min(1).max(4096).nullable().optional(),
+  })
+  .strict();
+
+const duoSideSchema = conversationCreatePayloadSchema.extend({
+  activate: z.literal(false).optional(),
+}).strict();
+
 export const appCommandSchemas = [
   z.object({ ...requestBase, type: z.literal("app.refresh") }).strict(),
   z
@@ -110,22 +131,38 @@ export const appCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("conversation.create"),
-      payload: z
-        .object({
-          projectId: z.string().uuid(),
-          title: z.string().trim().min(1).max(120),
-          providerId: providerIdSchema.optional(),
-          modelSelection: modelSelectionSchema.optional(),
-          model: z.string().trim().max(160).optional(),
-          reasoningEffort: z.string().trim().max(40).optional(),
-          interactionMode: interactionModeSchema.optional(),
-          accessMode: accessModeSchema.optional(),
-          activate: z.boolean().optional(),
-          useWorktree: z.boolean().optional(),
-          branch: z.string().trim().min(1).max(255).nullable().optional(),
-          worktreePath: z.string().min(1).max(4096).nullable().optional(),
-        })
-        .strict(),
+      payload: conversationCreatePayloadSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("duo.prepare"),
+      payload: z.object({
+        launchId: z.string().uuid(),
+        prompt: z.string().trim().min(1).max(20_000),
+        sides: z.tuple([duoSideSchema, duoSideSchema]),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("duo.pending"),
+      payload: z.object({
+        projectIds: z.array(z.string().uuid()).min(1).max(2),
+      }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.enum([
+        "duo.dispatch",
+        "duo.cancel",
+        "duo.status",
+      ]),
+      payload: z.object({ launchId: z.string().uuid() }).strict(),
     })
     .strict(),
   z

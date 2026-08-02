@@ -266,6 +266,8 @@ export type ProviderEvent =
   | ProviderSubagentEvent;
 
 export interface ProviderRunCallbacks {
+  /** Fires only after the selected harness has synchronously accepted the run. */
+  onStarted?: () => void;
   onEvent?: (event: ProviderEvent) => void;
   onText?: (event: ProviderTextEvent) => void;
   onActivity?: (event: ProviderActivityEvent) => void;

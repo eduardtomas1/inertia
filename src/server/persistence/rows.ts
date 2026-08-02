@@ -21,6 +21,8 @@ import type {
   TurnGitArtifactStatus,
   TurnGitPatchState,
   WorkspaceRun,
+  DuoDispatchState,
+  DuoLaunchState,
 } from "../../shared/contracts";
 import type { ModelBackendDefault } from "../../shared/backend-profile-settings";
 import type { PersistedProviderMetadata } from "../provider/metadata";
@@ -95,6 +97,42 @@ export interface AgentTurnRow {
   association: AgentTurnAssociation;
   created_at: string;
   updated_at: string;
+}
+
+export interface PairedLaunchRow {
+  id: string;
+  status: DuoLaunchState;
+  cancel_requested: 0 | 1;
+  failure_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PairedLaunchSideRow {
+  launch_id: string;
+  ordinal: 0 | 1;
+  project_id: string;
+  planned_conversation_id: string;
+  conversation_id: string | null;
+  turn_id: string | null;
+  planned_worktree_path: string | null;
+  planned_branch: string | null;
+  owns_worktree: 0 | 1;
+  worktree_creation_state: "pending" | "creating" | "created" | "not-created";
+  cleanup_worktree_token: string | null;
+  cleanup_worktree_id: string | null;
+  cleanup_repository_identity: string | null;
+  cleanup_filesystem_identity_json: string | null;
+  cleanup_branch_head: string | null;
+  worktree_removal_started: 0 | 1;
+  worktree_removal_confirmed: 0 | 1;
+  worktree_cleanup_outcome: "absent" | "retained" | null;
+  worktree_cleanup_topology: "owned" | "conflict" | null;
+  cleanup_observed_path: string | null;
+  cleanup_observed_branch: string | null;
+  cleanup_observed_head: string | null;
+  branch_cleanup_outcome: "absent" | "retained" | null;
+  dispatch_state: DuoDispatchState;
 }
 
 export interface TurnGitArtifactRow {

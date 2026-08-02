@@ -43,6 +43,9 @@ import {
   isLiveSubagentTrace,
 } from "../../utils/subagentDisclosure";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
+import type {
+  TranscriptMessageSendAcceptance,
+} from "../../utils/transcriptNavigation";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
@@ -83,7 +86,7 @@ export interface WorkspaceSceneActions {
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
     skillIds?: readonly string[],
-  ) => Promise<void>;
+  ) => Promise<TranscriptMessageSendAcceptance | null>;
   listSkills: (forceReload?: boolean) => Promise<void>;
   toggleSkill: (skill: AgentSkillSummary) => void;
   clearSelectedSkills: () => void;

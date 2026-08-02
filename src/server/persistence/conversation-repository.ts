@@ -51,7 +51,7 @@ export class ConversationRepository {
       throw new Error("The legacy provider and model selection harness do not match.");
     }
     const conversation: Conversation = {
-      id: randomUUID(), projectId, title,
+      id: options.id ?? randomUUID(), projectId, title,
       providerId,
       modelSelection,
       continuationIdentity: null,

@@ -111,6 +111,7 @@ class ControlledProvider implements TurnProviderRuntime {
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks): Promise<ProviderRunResult> {
     this.input = input;
     this.callbacks = callbacks;
+    callbacks.onStarted?.();
     return new Promise((resolve) => {
       this.resolveRun = resolve;
     });

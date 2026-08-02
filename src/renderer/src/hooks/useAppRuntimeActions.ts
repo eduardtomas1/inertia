@@ -8,6 +8,7 @@ import {
 import type {
   ChatAttachment,
   Conversation,
+  MessageSendAcceptance,
   ServerEvent,
   TurnRequestContext,
 } from "@shared/contracts";
@@ -30,7 +31,7 @@ export interface AppRuntimeActions {
     context?: TurnRequestContext,
     skillIds?: readonly string[],
     activate?: boolean,
-  ) => Promise<void>;
+  ) => Promise<MessageSendAcceptance | null>;
   updateConversationById: (
     conversationId: string,
     update: Partial<Pick<
@@ -105,12 +106,12 @@ export function useAppRuntimeActions(options: {
     context?: TurnRequestContext,
     skillIds?: readonly string[],
     activate = true,
-  ): Promise<void> => {
+  ): Promise<MessageSendAcceptance | null> => {
     setSendingConversationIds((current) =>
       new Set(current).add(targetConversationId));
     setActionError(null);
     try {
-      await sendCommand(withRequestId({
+      const event = await sendCommand(withRequestId({
         type: "message.send",
         payload: {
           conversationId: targetConversationId,
@@ -121,6 +122,12 @@ export function useAppRuntimeActions(options: {
           ...(context ? { context } : {}),
         },
       }));
+      if (
+        event.type === "request.result"
+        && event.result.kind === "message.accepted"
+      ) return event.result;
+      if (event.type === "request.ok") return null;
+      throw new Error("The local service returned an unexpected message response.");
     } catch (error) {
       setActionError(
         error instanceof Error

@@ -479,7 +479,9 @@ export function AppLayout({
             snapshot={connection.snapshot}
             settings={settings}
             submitting={multiSpawn.submitting}
+            cancelling={multiSpawn.cancelling}
             error={multiSpawn.error}
+            recoveryGuidance={multiSpawn.recoveryGuidance}
             onClose={multiSpawn.closeDialog}
             onSubmit={multiSpawn.submit}
             onOpenProviderSetup={actions.openProviderSetup}

@@ -452,7 +452,17 @@ describe("Kimi through Claude runtime lifecycle", () => {
         attachments: [],
       },
     });
-    await requestOk(client.events, messageRequestId);
+    const accepted = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === messageRequestId
+        && event.result.kind === "message.accepted",
+    );
+    expect(accepted.result).toMatchObject({
+      kind: "message.accepted",
+      conversationId: conversation.id,
+      disposition: "new-turn",
+    });
     const usageEvent = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "agent.usage" }> =>
         event.type === "agent.usage"

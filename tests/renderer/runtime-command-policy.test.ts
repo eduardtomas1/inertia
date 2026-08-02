@@ -4,6 +4,8 @@ import {
   AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
   BACKEND_PROFILE_PROBE_REQUEST_TIMEOUT_MS,
   CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
+  DUO_CANCEL_REQUEST_TIMEOUT_MS,
+  DUO_DISPATCH_REQUEST_TIMEOUT_MS,
   GIT_MUTATION_REQUEST_TIMEOUT_MS,
   GIT_READ_OPERATION_TIMEOUT_MS,
   GIT_READ_REQUEST_TIMEOUT_MS,
@@ -66,6 +68,26 @@ describe("runtime command delivery policy", () => {
     expect(runtimeCommandPolicy("message.send")).toEqual({
       timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS,
       timeoutDelivery: "ambiguous",
+    });
+    expect(runtimeCommandPolicy("duo.prepare")).toEqual({
+      timeoutMs: GIT_MUTATION_REQUEST_TIMEOUT_MS,
+      timeoutDelivery: "ambiguous",
+    });
+    expect(runtimeCommandPolicy("duo.dispatch")).toEqual({
+      timeoutMs: DUO_DISPATCH_REQUEST_TIMEOUT_MS,
+      timeoutDelivery: "ambiguous",
+    });
+    expect(runtimeCommandPolicy("duo.cancel")).toEqual({
+      timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
+      timeoutDelivery: "ambiguous",
+    });
+    expect(runtimeCommandPolicy("duo.status")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "rejected",
+    });
+    expect(runtimeCommandPolicy("duo.pending")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "rejected",
     });
   });
 

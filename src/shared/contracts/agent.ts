@@ -168,6 +168,19 @@ export interface AgentTurn {
   updatedAt: string;
 }
 
+/**
+ * Definite renderer acknowledgement for one durably accepted message send.
+ * The runtime emits this only after the user message and its authoritative
+ * turn association can be reconciled after refresh or reconnect.
+ */
+export interface MessageSendAcceptance {
+  kind: "message.accepted";
+  conversationId: string;
+  turnId: string;
+  userMessageId: string;
+  disposition: "new-turn" | "follow-up";
+}
+
 export interface AgentReasoning {
   id: string;
   conversationId: string;

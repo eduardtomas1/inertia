@@ -29,6 +29,10 @@ import type {
 import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { recoverInterruptedTurns } from "./runtime/turns/turn-recovery";
+import {
+  DuoLaunchCoordinator,
+  reconcileInterruptedDuoLaunches,
+} from "./runtime/duo/duo-launch-coordinator";
 import { resolveAuthoritativeProjectPath } from "./project-path";
 import { PROVIDER_IDS, ProviderManager, type ProviderDetection } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
@@ -73,6 +77,9 @@ import {
 import {
   createDiffReviewCommandHandler,
 } from "./runtime/commands/diff-review-commands";
+import {
+  createDuoCommandHandler,
+} from "./runtime/commands/duo-commands";
 import {
   createIsolatedReviewCommandHandler,
 } from "./runtime/commands/isolated-review-commands";
@@ -200,6 +207,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   };
   const secureFileAuthorities = new SecureFileAuthorityRegistry(secureFiles);
   const recovery = recoverInterruptedTurns(store);
+  await reconcileInterruptedDuoLaunches(store);
   if (options.attachments && recovery.recoveredAttachmentIds.length > 0) {
     void Promise.allSettled(recovery.recoveredAttachmentIds.map(
       (attachmentId) => options.attachments!.cleanup(attachmentId),
@@ -539,9 +547,22 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       },
     },
   );
+  const duoLaunches = new DuoLaunchCoordinator(
+    store,
+    providers,
+    backendProfileController,
+    turns,
+    dataDirectory,
+    () => providerInfo,
+  );
 
   const dispatchCommand = createRuntimeCommandExecutor({
     handlers: [
+      createDuoCommandHandler({
+        coordinator: duoLaunches,
+        broadcastSnapshot: flushSnapshot,
+        send,
+      }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows,
         broadcast,

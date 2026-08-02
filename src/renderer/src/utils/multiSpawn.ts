@@ -19,6 +19,8 @@ import type { ComposerModelRoute } from "./modelChooserRoutes";
 
 export const MULTI_SPAWN_PRESET_STORAGE_KEY =
   "inertia:multi-spawn:preset:v1";
+export const MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY =
+  "inertia:multi-spawn:pending-launch:v1";
 
 const ACCESS_MODES = new Set<AccessMode>([
   "supervised",
@@ -59,6 +61,42 @@ export interface MultiSpawnDraft {
   prompt: string;
   sides: [MultiSpawnSideDraft, MultiSpawnSideDraft];
   rememberPreset: boolean;
+}
+
+export function readPendingMultiSpawnLaunchId(
+  storage: Pick<Storage, "getItem">,
+): string | null {
+  try {
+    const value = storage.getItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY);
+    return value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writePendingMultiSpawnLaunchId(
+  storage: Pick<Storage, "setItem">,
+  launchId: string,
+): boolean {
+  try {
+    storage.setItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY, launchId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearPendingMultiSpawnLaunchId(
+  storage: Pick<Storage, "removeItem">,
+): boolean {
+  try {
+    storage.removeItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function localCheckoutIdentity(project: Project): string {

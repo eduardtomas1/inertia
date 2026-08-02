@@ -39,6 +39,8 @@ import type { BackendCompatibilityProbeResult } from "../../shared/backend-probe
 import type { PersistedTurnExecutionContext } from "../runtime/turns/request-context";
 
 export interface NewConversationOptions {
+  /** Privileged preallocation used by atomic multi-conversation workflows. */
+  id?: string;
   providerId?: ProviderId;
   modelSelection?: ModelSelection;
   model?: string;

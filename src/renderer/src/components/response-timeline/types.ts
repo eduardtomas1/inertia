@@ -35,8 +35,11 @@ export interface ResponseTimelineProps {
   autoCollapseWorkLog: boolean;
   showChangedFileSummaries: boolean;
   checkpointRestoreDisabled: boolean;
+  turnAnchorId?: string | null;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
   timelineElementRef?: RefObject<HTMLDivElement | null>;
+  onTurnAnchorSettled?: (turnId: string) => void;
+  onTurnAnchorCancelled?: (turnId: string) => void;
   onRespondToApproval: (
     request: AgentApprovalRequest,
     decision: AgentApprovalDecision,

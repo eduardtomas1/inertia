@@ -9,6 +9,7 @@ import type {
   AppSettings,
   AppSnapshot,
   ChatAttachment,
+  MessageSendAcceptance,
   ClientCommand,
   Conversation,
   ModelSelection,
@@ -28,10 +29,14 @@ import {
   forgetPersistedDraftConversation,
   forgetPersistedMaterializedDraftConversation,
   markPersistedDraftConversationMaterialized,
+  markPersistedMaterializedDraftConversationAccepted,
   readPersistedDraftConversation,
   readPersistedMaterializedDraftConversation,
   writePersistedDraftConversation,
 } from "../utils/draftConversationPersistence";
+import type {
+  TranscriptMessageSendAcceptance,
+} from "../utils/transcriptNavigation";
 
 type ConversationCreatePayload = Extract<
   ClientCommand,
@@ -52,9 +57,12 @@ interface DraftConversationState {
   conversation: Conversation;
   payload: ConversationCreatePayload;
   materialized: {
+    acceptedTurnId: string | null;
+    acceptedUserMessageId: string | null;
     draftConversationId: string;
     conversationId: string;
     awaitingReconciliation: boolean;
+    recoveryMode: boolean;
   } | null;
 }
 
@@ -79,7 +87,7 @@ export function useDraftConversation({
     context?: TurnRequestContext,
     skillIds?: readonly string[],
     activate?: boolean,
-  ) => Promise<void>;
+  ) => Promise<MessageSendAcceptance | null>;
   persistedConversationId: string | null;
   updatePersistedConversation: (
     conversationId: string,
@@ -175,14 +183,40 @@ export function useDraftConversation({
 
   useEffect(() => {
     if (!snapshot) return;
-    const materialized = readPersistedMaterializedDraftConversation();
+    const inMemory = draftRef.current;
+    const materialized = inMemory?.materialized
+      ? {
+          acceptedTurnId: inMemory.materialized.acceptedTurnId,
+          acceptedUserMessageId:
+            inMemory.materialized.acceptedUserMessageId,
+          draftConversationId: inMemory.materialized.draftConversationId,
+          materializedConversationId:
+            inMemory.materialized.conversationId,
+          conversation: inMemory.conversation,
+          payload: inMemory.payload,
+        }
+      : readPersistedMaterializedDraftConversation();
     const materializedShell = materialized
       ? snapshot.conversations.find(
           ({ id }) => id === materialized.materializedConversationId,
         )
       : null;
     if (materialized && materializedShell) {
-      const accepted = (
+      const current = draftRef.current;
+      const currentMaterialized = (
+        current?.materialized?.conversationId
+          === materialized.materializedConversationId
+      )
+        ? current.materialized
+        : null;
+      const acceptedTurnId = currentMaterialized?.acceptedTurnId
+        ?? materialized.acceptedTurnId;
+      const exactAcceptedTurn = acceptedTurnId !== null
+        && materializedShell.latestTurn?.id === acceptedTurnId;
+      const crashRecoveryAccepted = acceptedTurnId === null && (
+        currentMaterialized === null
+        || currentMaterialized.recoveryMode
+      ) && (
         materializedShell.latestTurn !== null
         ||
         materializedShell.status !== "idle"
@@ -191,7 +225,9 @@ export function useDraftConversation({
           && materializedShell.title !== "New thread"
         )
       );
-      const current = draftRef.current;
+      const accepted = persistedConversationId
+          === materialized.materializedConversationId
+        && (exactAcceptedTurn || crashRecoveryAccepted);
       if (accepted) {
         forgetPersistedMaterializedDraftConversation(
           materialized.materializedConversationId,
@@ -231,9 +267,12 @@ export function useDraftConversation({
           },
           payload: materialized.payload,
           materialized: {
+            acceptedTurnId: materialized.acceptedTurnId,
+            acceptedUserMessageId: materialized.acceptedUserMessageId,
             draftConversationId: materialized.draftConversationId,
             conversationId: materialized.materializedConversationId,
             awaitingReconciliation: false,
+            recoveryMode: true,
           },
         }, false);
       }
@@ -283,6 +322,7 @@ export function useDraftConversation({
     persistedConversationId,
     replaceDraft,
     snapshot,
+    draft?.materialized?.acceptedTurnId,
   ]);
 
   const chooseModel = (selection: ModelSelection): boolean => {
@@ -354,9 +394,9 @@ export function useDraftConversation({
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
     skillIds?: readonly string[],
-  ): Promise<boolean> => {
+  ): Promise<TranscriptMessageSendAcceptance | null> => {
     const sendingDraft = draftRef.current;
-    if (!sendingDraft) return false;
+    if (!sendingDraft) return null;
     const creation = await run("conversation.create:draft", {
       type: "conversation.create",
       payload: {
@@ -383,12 +423,17 @@ export function useDraftConversation({
       conversation: sendingDraft.conversation,
       payload: sendingDraft.payload,
       materialized: {
+        acceptedTurnId: null,
+        acceptedUserMessageId: null,
         draftConversationId: sendingDraft.conversation.id,
         conversationId,
         awaitingReconciliation: false,
+        recoveryMode: false,
       },
     };
     markPersistedDraftConversationMaterialized({
+      acceptedTurnId: null,
+      acceptedUserMessageId: null,
       draftConversationId: sendingDraft.conversation.id,
       materializedConversationId: conversationId,
       conversation: materializedState.conversation,
@@ -398,7 +443,7 @@ export function useDraftConversation({
     if (stillOwnsDraft) replaceDraft(materializedState, false);
 
     try {
-      await sendMessage(
+      const acceptance = await sendMessage(
         conversationId,
         content,
         attachments,
@@ -406,13 +451,49 @@ export function useDraftConversation({
         skillIds,
         stillOwnsDraft,
       );
-      forgetPersistedMaterializedDraftConversation(conversationId);
+      if (!acceptance || acceptance.conversationId !== conversationId) {
+        if (
+          draftRef.current?.materialized?.conversationId === conversationId
+        ) {
+          replaceDraft({
+            ...materializedState,
+            materialized: {
+              ...materializedState.materialized!,
+              awaitingReconciliation: true,
+              recoveryMode: true,
+            },
+          }, false);
+        }
+        if (acceptance) {
+          throw new Error(
+            "The local service acknowledged a different chat than the one created for this draft.",
+          );
+        }
+        return null;
+      }
+      markPersistedMaterializedDraftConversationAccepted(
+        conversationId,
+        acceptance.turnId,
+        acceptance.userMessageId,
+      );
       if (
         draftRef.current?.materialized?.conversationId === conversationId
       ) {
-        replaceDraft(null, false);
+        replaceDraft({
+          ...materializedState,
+          materialized: {
+            ...materializedState.materialized!,
+            acceptedTurnId: acceptance.turnId,
+            acceptedUserMessageId: acceptance.userMessageId,
+          },
+        }, false);
       }
-      return true;
+      return acceptance
+        ? {
+            ...acceptance,
+            materializedFromConversationId: sendingDraft.conversation.id,
+          }
+        : null;
     } catch (error) {
       if (
         draftRef.current?.materialized?.conversationId === conversationId
@@ -422,6 +503,9 @@ export function useDraftConversation({
           materialized: {
             ...materializedState.materialized!,
             awaitingReconciliation:
+              runtimeCommandDelivery(error) === "ambiguous"
+              || runtimeCommandDelivery(error) === null,
+            recoveryMode:
               runtimeCommandDelivery(error) === "ambiguous"
               || runtimeCommandDelivery(error) === null,
           },
@@ -436,16 +520,21 @@ export function useDraftConversation({
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
     skillIds?: readonly string[],
-  ): Promise<void> => {
+  ): Promise<TranscriptMessageSendAcceptance | null> => {
     const current = draftRef.current;
     if (current?.materialized) {
-      if (current.materialized.awaitingReconciliation) {
+      if (
+        current.materialized.awaitingReconciliation
+        || current.materialized.acceptedTurnId !== null
+      ) {
         throw new Error(
-          "Inertia is reconciling the first message after reconnecting.",
+          current.materialized.acceptedTurnId !== null
+            ? "The first message was accepted and is waiting for the chat snapshot."
+            : "Inertia is reconciling the first message after reconnecting.",
         );
       }
       try {
-        await sendMessage(
+        const acceptance = await sendMessage(
           current.materialized.conversationId,
           content,
           attachments,
@@ -453,15 +542,57 @@ export function useDraftConversation({
           skillIds,
           true,
         );
-        forgetPersistedMaterializedDraftConversation(
+        if (
+          !acceptance
+          || acceptance.conversationId
+            !== current.materialized.conversationId
+        ) {
+          if (
+            draftRef.current?.materialized?.conversationId
+              === current.materialized.conversationId
+          ) {
+            replaceDraft({
+              ...current,
+              materialized: {
+                ...current.materialized,
+                awaitingReconciliation: true,
+                recoveryMode: true,
+              },
+            }, false);
+          }
+          if (acceptance) {
+            throw new Error(
+              "The local service acknowledged a different chat than the materialized draft.",
+            );
+          }
+          return null;
+        }
+        markPersistedMaterializedDraftConversationAccepted(
           current.materialized.conversationId,
+          acceptance.turnId,
+          acceptance.userMessageId,
         );
         if (
           draftRef.current?.materialized?.conversationId
             === current.materialized.conversationId
         ) {
-          replaceDraft(null, false);
+          replaceDraft({
+            ...current,
+            materialized: {
+              ...current.materialized,
+              acceptedTurnId: acceptance.turnId,
+              acceptedUserMessageId: acceptance.userMessageId,
+              recoveryMode: false,
+            },
+          }, false);
         }
+        return acceptance
+          ? {
+              ...acceptance,
+              materializedFromConversationId:
+                current.materialized.draftConversationId,
+            }
+          : null;
       } catch (error) {
         if (
           draftRef.current?.materialized?.conversationId
@@ -474,24 +605,25 @@ export function useDraftConversation({
               awaitingReconciliation:
                 runtimeCommandDelivery(error) === "ambiguous"
                 || runtimeCommandDelivery(error) === null,
+              recoveryMode:
+                runtimeCommandDelivery(error) === "ambiguous"
+                || runtimeCommandDelivery(error) === null,
             },
           }, false);
         }
         throw error;
       }
-      return;
     }
     if (persistedConversationId && !current) {
-      await sendMessage(
+      return await sendMessage(
         persistedConversationId,
         content,
         attachments,
         context,
         skillIds,
       );
-      return;
     }
-    await materializeAndSend(content, attachments, context, skillIds);
+    return await materializeAndSend(content, attachments, context, skillIds);
   };
 
   const updateConversation = async (change: ConversationUpdate): Promise<void> => {

@@ -49,6 +49,11 @@ import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
 import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository";
 import { ProjectRepository } from "./persistence/project-repository";
+import {
+  PairedLaunchRepository,
+  type PairedLaunchSidePlan,
+  type StoredPairedLaunch,
+} from "./persistence/paired-launch-repository";
 import { RecoveryRepository } from "./persistence/recovery-repository";
 import { ReviewRepository } from "./persistence/review-repository";
 import { SettingsRepository } from "./persistence/settings-repository";
@@ -77,6 +82,7 @@ import type {
   UpsertSubagentTraceInput,
   UpsertSubagentTraceResult,
 } from "./persistence/types";
+import type { WorktreeFilesystemReceipt } from "./worktree-filesystem-identity";
 
 export { RecordNotFoundError } from "./persistence/errors";
 export type {
@@ -105,6 +111,7 @@ export class RuntimeStore {
   private readonly gitArtifactRepository: GitArtifactRepository;
   private readonly providerMetadataRepository: ProviderMetadataRepository;
   private readonly projectRepository: ProjectRepository;
+  private readonly pairedLaunchRepository: PairedLaunchRepository;
   private readonly recoveryRepository: RecoveryRepository;
   private readonly reviewRepository: ReviewRepository;
   private readonly settingsRepository: SettingsRepository;
@@ -129,6 +136,7 @@ export class RuntimeStore {
         this.requireConversation(conversationId),
     });
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database);
+    this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
     this.projectRepository = new ProjectRepository({
       database: this.database,
@@ -272,6 +280,29 @@ export class RuntimeStore {
     return this.conversationRepository.create(projectId, title, options);
   }
 
+  createPairedConversations(
+    launchId: string,
+    sides: readonly [
+      { projectId: string; title: string; options: NewConversationOptions },
+      { projectId: string; title: string; options: NewConversationOptions },
+    ],
+    now = new Date().toISOString(),
+  ): [Conversation, Conversation] {
+    return this.database.transaction(() => {
+      const conversations = sides.map((side) => this.conversationRepository.create(
+        side.projectId,
+        side.title,
+        { ...side.options, activate: false },
+      )) as [Conversation, Conversation];
+      this.pairedLaunchRepository.attachConversations(
+        launchId,
+        [conversations[0].id, conversations[1].id],
+        now,
+      );
+      return conversations;
+    })();
+  }
+
   selectConversation(conversationId: string): void {
     this.conversationRepository.select(conversationId);
   }
@@ -294,6 +325,224 @@ export class RuntimeStore {
 
   beginAgentTurn(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
     return this.turnLedgerRepository.begin(input);
+  }
+
+  beginPairedAgentTurns(
+    launchId: string,
+    inputs: readonly [BeginAgentTurnInput, BeginAgentTurnInput],
+    now = new Date().toISOString(),
+  ): [
+    { message: ChatMessage; turn: AgentTurn },
+    { message: ChatMessage; turn: AgentTurn },
+  ] {
+    return this.database.transaction(() => {
+      const queued = inputs.map((input) => this.turnLedgerRepository.begin(input)) as [
+        { message: ChatMessage; turn: AgentTurn },
+        { message: ChatMessage; turn: AgentTurn },
+      ];
+      this.pairedLaunchRepository.attachTurns(
+        launchId,
+        [queued[0].turn.id, queued[1].turn.id],
+        now,
+      );
+      return queued;
+    })();
+  }
+
+  createPairedLaunch(
+    launchId: string,
+    sides: [PairedLaunchSidePlan, PairedLaunchSidePlan],
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.create(launchId, sides, now);
+  }
+
+  pairedLaunch(launchId: string): StoredPairedLaunch {
+    return this.pairedLaunchRepository.get(launchId);
+  }
+
+  findPairedLaunch(launchId: string): StoredPairedLaunch | null {
+    return this.pairedLaunchRepository.find(launchId);
+  }
+
+  pendingPairedLaunchIds(projectIds: readonly string[], limit: number) {
+    return this.pairedLaunchRepository.pendingLaunchIdsForProjects(
+      projectIds,
+      limit,
+    );
+  }
+
+  assertConversationDeletionAllowed(conversationId: string): void {
+    this.pairedLaunchRepository.assertConversationDeletionAllowed(
+      conversationId,
+    );
+  }
+
+  assertProjectDeletionAllowed(projectId: string): void {
+    this.pairedLaunchRepository.assertProjectDeletionAllowed(projectId);
+  }
+
+  updatePairedLaunchWorktree(
+    launchId: string,
+    ordinal: 0 | 1,
+    path: string | null,
+    branch: string | null,
+  ): void {
+    this.pairedLaunchRepository.updateWorktree(
+      launchId,
+      ordinal,
+      path,
+      branch,
+    );
+  }
+
+  beginPairedLaunchWorktreeCreation(
+    launchId: string,
+    ordinal: 0 | 1,
+    worktreePath: string,
+    branch: string,
+    ownershipToken: string,
+  ): void {
+    this.pairedLaunchRepository.beginWorktreeCreation(
+      launchId,
+      ordinal,
+      worktreePath,
+      branch,
+      ownershipToken,
+    );
+  }
+
+  rejectPairedLaunchWorktreeCreation(
+    launchId: string,
+    ordinal: 0 | 1,
+  ): void {
+    this.pairedLaunchRepository.rejectWorktreeCreation(launchId, ordinal);
+  }
+
+  recordPairedLaunchWorktreeCleanupOwnership(
+    launchId: string,
+    ordinal: 0 | 1,
+    plannedWorktreePath: string,
+    createdWorktreePath: string,
+    branch: string,
+    head: string,
+    worktreeId: string,
+    repositoryIdentity: string,
+    ownershipToken: string,
+    filesystemReceipt: WorktreeFilesystemReceipt,
+  ): void {
+    this.pairedLaunchRepository.recordWorktreeCleanupOwnership(
+      launchId,
+      ordinal,
+      plannedWorktreePath,
+      createdWorktreePath,
+      branch,
+      head,
+      worktreeId,
+      repositoryIdentity,
+      ownershipToken,
+      filesystemReceipt,
+    );
+  }
+
+  beginPairedLaunchWorktreeRemoval(
+    launchId: string,
+    ordinal: 0 | 1,
+  ): void {
+    this.pairedLaunchRepository.beginWorktreeRemoval(launchId, ordinal);
+  }
+
+  confirmPairedLaunchWorktreeRemoval(
+    launchId: string,
+    ordinal: 0 | 1,
+  ): void {
+    this.pairedLaunchRepository.confirmWorktreeRemoval(launchId, ordinal);
+  }
+
+  recordPairedLaunchBranchCleanupOutcome(
+    launchId: string,
+    ordinal: 0 | 1,
+    outcome: "absent" | "retained",
+  ): void {
+    this.pairedLaunchRepository.recordBranchCleanupOutcome(
+      launchId,
+      ordinal,
+      outcome,
+    );
+  }
+
+  recordPairedLaunchWorktreeCleanupObservation(
+    launchId: string,
+    ordinal: 0 | 1,
+    outcome: "absent" | "retained",
+    observation: {
+      topology: "owned" | "conflict" | null;
+      path: string | null;
+      branch: string | null;
+      head: string | null;
+    },
+  ): void {
+    this.pairedLaunchRepository.recordWorktreeCleanupObservation(
+      launchId,
+      ordinal,
+      outcome,
+      observation,
+    );
+  }
+
+  requestPairedLaunchCancellation(
+    launchId: string,
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.requestCancel(launchId, now);
+  }
+
+  claimPairedLaunchDispatch(
+    launchId: string,
+    now = new Date().toISOString(),
+  ): boolean {
+    return this.pairedLaunchRepository.claimDispatch(launchId, now);
+  }
+
+  finishPairedLaunchDispatch(
+    launchId: string,
+    started: readonly [boolean, boolean],
+    failure: string | null = null,
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.finishDispatch(
+      launchId,
+      started,
+      now,
+      failure,
+    );
+  }
+
+  finishPairedLaunchCancellation(
+    launchId: string,
+    failure: string | null = null,
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.finishCancellation(
+      launchId,
+      now,
+      failure,
+    );
+  }
+
+  failPairedLaunch(
+    launchId: string,
+    state: "failed" | "interrupted" | "recovery-required",
+    message: string,
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.fail(launchId, state, message, now);
+  }
+
+  recoverInterruptedPairedLaunches(
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch[] {
+    return this.pairedLaunchRepository.recoverInterrupted(now);
   }
 
   turnExecutionManifest(turnId: string): SanitizedTurnExecutionManifest | null {

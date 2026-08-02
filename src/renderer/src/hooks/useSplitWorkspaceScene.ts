@@ -9,6 +9,7 @@ import type {
   ChatAttachment,
   Conversation,
   ModelSelection,
+  MessageSendAcceptance,
   Project,
   ProviderMaintenanceProviderId,
   ServerEvent,
@@ -88,7 +89,7 @@ interface SplitWorkspaceActions
     context?: TurnRequestContext,
     skillIds?: readonly string[],
     activate?: boolean,
-  ) => Promise<void>;
+  ) => Promise<MessageSendAcceptance | null>;
   updateConversationById: (
     conversationId: string,
     update: Parameters<WorkspaceSceneActions["updateConversation"]>[0],
@@ -314,8 +315,8 @@ export function useSplitWorkspaceScene({
       context?: TurnRequestContext,
       skillIds?: readonly string[],
     ) => {
-      if (!splitConversation) return;
-      await actions.sendMessageToConversation(
+      if (!splitConversation) return null;
+      return await actions.sendMessageToConversation(
         splitConversation.id,
         content,
         attachments,

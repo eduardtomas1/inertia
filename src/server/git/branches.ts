@@ -5,10 +5,11 @@ import {
 } from "./paths";
 import { runGit } from "./runner";
 import { getRepositoryStatus } from "./status";
-import type {
-  GitBranch,
-  GitBranches,
-  GitMutationResult,
+import {
+  GitError,
+  type GitBranch,
+  type GitBranches,
+  type GitMutationResult,
 } from "./types";
 
 function parseBranches(buffer: Buffer, kind: GitBranch["kind"]): GitBranch[] {
@@ -104,4 +105,44 @@ export async function createBranch(
     failureMessage: "Unable to create the branch.",
   });
   return { status: await getRepositoryStatus(root) };
+}
+
+async function localBranchHead(
+  root: string,
+  branch: string,
+): Promise<string | null> {
+  const ref = `refs/heads/${branch}`;
+  const result = await runGit(
+    root,
+    [
+      "for-each-ref",
+      "--format=%(refname)%00%(objectname)",
+      ref,
+    ],
+    { failureMessage: "Unable to inspect the local branch." },
+  );
+  for (const line of result.stdout.toString("utf8").split("\n")) {
+    const [candidate = "", head = ""] = line.split("\0");
+    if (candidate === ref) return head || null;
+  }
+  return null;
+}
+
+export type BranchCleanupOutcome = "absent" | "retained";
+
+export async function inspectBranchCleanupOutcome(
+  repositoryPath: string,
+  branch: string,
+  expectedHead: string,
+): Promise<BranchCleanupOutcome> {
+  const root = await repositoryRoot(repositoryPath);
+  const name = await validateBranch(root, branch);
+  if (!/^[0-9a-f]{40,64}$/u.test(expectedHead)) {
+    throw new GitError(
+      "invalid-input",
+      "The expected branch identity is invalid.",
+    );
+  }
+  const currentHead = await localBranchHead(root, name);
+  return currentHead === null ? "absent" : "retained";
 }

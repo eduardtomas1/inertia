@@ -2,6 +2,7 @@ import type { AgentActivity } from "../../../shared/contracts";
 import { resolveContinuationDecision } from "../../../shared/continuation-policy";
 import { modelSelectionSchema } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
+import type { BeginAgentTurnInput } from "../../persistence/types";
 import type { ProviderActivityEvent } from "../../provider/contracts";
 import { assembleTurnRequest } from "./request-context";
 import { boundaryUsage } from "./turn-controller-support";
@@ -32,6 +33,11 @@ export interface PreparedTurnRequest {
   active: PreparedActiveTurn;
 }
 
+export interface ResolvedTurnRequest {
+  input: BeginAgentTurnInput;
+  adopt(queued: QueuedTurn): PreparedTurnRequest;
+}
+
 /**
  * Resolves a route and atomically persists the immutable request/turn pair.
  * Live stream resources are intentionally attached by the controller only
@@ -41,6 +47,19 @@ export function prepareTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
 ): PreparedTurnRequest {
+  const resolved = resolveTurnRequest(dependencies, request);
+  return resolved.adopt(dependencies.store.beginAgentTurn(resolved.input));
+}
+
+/**
+ * Resolves every mutable route and request input without writing persistence.
+ * Batch workflows can resolve both sides first, persist both in one database
+ * transaction, and only then adopt live in-memory ownership.
+ */
+export function resolveTurnRequest(
+  dependencies: PrepareTurnRequestDependencies,
+  request: QueueTurnRequest,
+): ResolvedTurnRequest {
   const conversation = dependencies.store.conversation(request.conversationId);
   const attachments = [...(request.attachments ?? [])];
   const assembled = assembleTurnRequest({
@@ -125,7 +144,7 @@ export function prepareTurnRequest(
     executionManifest: assembled.persistence.manifest,
   });
   const currentUsage = dependencies.store.usageForConversation(conversation.id);
-  const queued = dependencies.store.beginAgentTurn({
+  const input: BeginAgentTurnInput = {
     id: turnId,
     conversationId: conversation.id,
     runId,
@@ -148,43 +167,49 @@ export function prepareTurnRequest(
     usageAtStart: boundaryUsage(currentUsage ?? undefined, requestedAt),
     configurationRevision: modelSelection.backendConfigurationRevision,
     association: "authoritative",
-  });
-  const runningActivities =
-    new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
+  };
   return {
-    queued,
-    active: {
-      turn: queued.turn,
-      conversation,
-      providerInput,
-      attachmentIds: attachments.map(({ id }) => id),
-      checkpointId: request.checkpointId ?? null,
-      rendererOwnerId: request.rendererOwnerId ?? null,
-      structuredContext,
-      gitBeforeCapture: null,
-      runStartedAt: dependencies.clock().getTime(),
-      workspaceRunCreated: false,
-      providerRunStarted: false,
-      attachmentsReleased: false,
-      attachmentRelease: null,
-      acceptingProviderEvents: true,
-      settled: false,
-      sessionAfter: canResume ? conversation.providerSessionId : null,
-      lastUsage: null,
-      assistantText: "",
-      assistantSegmentText: "",
-      assistantMessageId: null,
-      latestAssistantMessageId: null,
-      reasoningText: "",
-      reasoningId: null,
-      timeoutTimer: null,
-      runningActivities,
-      providerActivitiesById: new Map<string, AgentActivity>(),
-      providerActivityDetailChars: 0,
-      providerCommandRuns: new Map<string, string>(),
-      approvalIds: new Set<string>(),
-      inputIds: new Set<string>(),
-      onSettled: request.onSettled,
+    input,
+    adopt: (queued) => {
+      const runningActivities =
+        new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
+      return {
+        queued,
+        active: {
+          turn: queued.turn,
+          conversation,
+          providerInput,
+          attachmentIds: attachments.map(({ id }) => id),
+          checkpointId: request.checkpointId ?? null,
+          rendererOwnerId: request.rendererOwnerId ?? null,
+          structuredContext,
+          gitBeforeCapture: null,
+          runStartedAt: dependencies.clock().getTime(),
+          workspaceRunCreated: false,
+          providerRunStarted: false,
+          providerStartAcknowledgement: null,
+          attachmentsReleased: false,
+          attachmentRelease: null,
+          acceptingProviderEvents: true,
+          settled: false,
+          sessionAfter: canResume ? conversation.providerSessionId : null,
+          lastUsage: null,
+          assistantText: "",
+          assistantSegmentText: "",
+          assistantMessageId: null,
+          latestAssistantMessageId: null,
+          reasoningText: "",
+          reasoningId: null,
+          timeoutTimer: null,
+          runningActivities,
+          providerActivitiesById: new Map<string, AgentActivity>(),
+          providerActivityDetailChars: 0,
+          providerCommandRuns: new Map<string, string>(),
+          approvalIds: new Set<string>(),
+          inputIds: new Set<string>(),
+          onSettled: request.onSettled,
+        },
+      };
     },
   };
 }

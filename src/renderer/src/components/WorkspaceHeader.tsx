@@ -230,7 +230,7 @@ export function WorkspaceHeader({
               <GitCommitHorizontal size={14} /><span>Commit & push</span><ChevronDown size={12} />
             </button>
             {gitStatus?.upstream && <button type="button" className="header-button" onClick={onPull} disabled={busy || gitStatus.files.length > 0}><Download size={14} /><span>{gitStatus.behind > 0 ? `Pull ${gitStatus.behind}` : "Pull"}</span></button>}
-            {gitStatus?.hasRemote && <button type="button" className="header-button" onClick={onOpenPullRequest} disabled={busy}><GitPullRequest size={14} /><span>Pull request</span></button>}
+            {gitStatus?.pullRequest?.available && <button type="button" className="header-button" onClick={onOpenPullRequest} disabled={busy}><GitPullRequest size={14} /><span>Pull request</span></button>}
           </>
         )}
         <div

@@ -5,8 +5,8 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useReducer,
   useRef,
-  useState,
 } from "react";
 import {
   ArrowDown,
@@ -50,6 +50,13 @@ import type {
 } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { shouldFollowTimeline } from "../utils/responseTimeline";
+import {
+  initialTranscriptNavigation,
+  isTranscriptReaderNavigationKey,
+  type TranscriptMessageSendAcceptance,
+  transcriptNavigationFollowsContent,
+  transcriptNavigationReducer,
+} from "../utils/transcriptNavigation";
 import { Composer } from "./Composer";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
@@ -103,7 +110,7 @@ type ChatWorkspaceProps = {
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
     skillIds?: readonly string[],
-  ) => Promise<void>;
+  ) => Promise<TranscriptMessageSendAcceptance | null>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onToggleSkill: (skill: AgentSkillSummary) => void;
   onClearSelectedSkills: () => void;
@@ -221,25 +228,49 @@ export function ChatWorkspace({
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
-  const followingRef = useRef(true);
-  const [showJump, setShowJump] = useState(false);
+  const conversationId = conversation?.id ?? null;
+  const [navigation, dispatchNavigation] = useReducer(
+    transcriptNavigationReducer,
+    conversationId,
+    initialTranscriptNavigation,
+  );
+  const activeNavigation = navigation.conversationId === conversationId
+    ? navigation
+    : initialTranscriptNavigation(conversationId);
+  const navigationRef = useRef(activeNavigation);
+  navigationRef.current = activeNavigation;
+  const readerIntentRef = useRef(false);
+  const showJump = activeNavigation.mode === "reading-history";
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
   const contentSignal = `${turns.length}:${turns.at(-1)?.updatedAt ?? ""}:${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${subagents.length}:${subagents.at(-1)?.updatedAt ?? ""}:${plans.length}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
 
-  const scrollToLatest = useCallback((
+  const performScrollToLatest = useCallback((
     behavior: ScrollBehavior = "smooth",
   ): void => {
     const element = scrollRef.current;
     if (!element) return;
-    followingRef.current = true;
-    setShowJump(false);
     element.scrollTo({ top: element.scrollHeight, behavior });
     onLatestContentVisibilityChange?.(true);
   }, [onLatestContentVisibilityChange]);
 
+  const scrollToLatest = useCallback((
+    behavior: ScrollBehavior = "smooth",
+  ): void => {
+    if (!conversationId) return;
+    dispatchNavigation({
+      type: "latest.requested",
+      conversationId,
+    });
+    performScrollToLatest(behavior);
+  }, [conversationId, performScrollToLatest]);
+
   useLayoutEffect(() => {
-    scrollToLatest("auto");
-  }, [conversation?.id, scrollToLatest]);
+    dispatchNavigation({
+      type: "conversation.changed",
+      conversationId,
+    });
+    performScrollToLatest("auto");
+  }, [conversationId, performScrollToLatest]);
 
   useEffect(
     () => () => onLatestContentVisibilityChange?.(false),
@@ -248,41 +279,104 @@ export function ChatWorkspace({
 
   const followBehavior: ScrollBehavior = streamingText ? "auto" : "smooth";
   useEffect(() => {
-    if (!followingRef.current) return;
+    if (!transcriptNavigationFollowsContent(navigationRef.current)) return;
     const frame = window.requestAnimationFrame(
-      () => scrollToLatest(followBehavior),
+      () => performScrollToLatest(followBehavior),
     );
     return () => window.cancelAnimationFrame(frame);
-  }, [contentSignal, followBehavior, scrollToLatest]);
+  }, [contentSignal, followBehavior, performScrollToLatest]);
 
   useEffect(() => {
     const content = timelineRef.current;
     if (!content || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (followingRef.current) scrollToLatest("auto");
+      if (transcriptNavigationFollowsContent(navigationRef.current)) {
+        performScrollToLatest("auto");
+      }
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [conversation?.id, scrollToLatest]);
+  }, [conversationId, performScrollToLatest]);
 
   useEffect(() => {
     const composer = composerRegionRef.current;
     if (!composer || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (followingRef.current) scrollToLatest("auto");
+      if (transcriptNavigationFollowsContent(navigationRef.current)) {
+        performScrollToLatest("auto");
+      }
     });
     observer.observe(composer);
     return () => observer.disconnect();
-  }, [conversation?.id, scrollToLatest]);
+  }, [conversationId, performScrollToLatest]);
+
+  const noteReaderIntent = (): void => {
+    readerIntentRef.current = true;
+  };
+
+  const noteReaderKeyboardIntent = (
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ): void => {
+    if (isTranscriptReaderNavigationKey(event.key)) noteReaderIntent();
+  };
 
   const onTranscriptScroll = (): void => {
     const element = scrollRef.current;
     if (!element) return;
     const follows = shouldFollowTimeline(element.scrollTop, element.clientHeight, element.scrollHeight);
-    followingRef.current = follows;
-    setShowJump(!follows);
+    const intentional = readerIntentRef.current;
+    readerIntentRef.current = false;
+    dispatchNavigation({
+      type: "reader.scrolled",
+      conversationId: conversationId ?? "",
+      followsLatest: follows,
+      intentional,
+    });
     onLatestContentVisibilityChange?.(follows);
   };
+
+  const sendMessage = useCallback(async (
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+    skillIds?: readonly string[],
+  ): Promise<void> => {
+    const sourceConversationId = conversationId;
+    const acceptance = await onSendMessage(
+      content,
+      attachments,
+      context,
+      skillIds,
+    );
+    if (!acceptance) return;
+    dispatchNavigation({
+      type: "message.accepted",
+      acceptance,
+      sourceConversationId,
+    });
+  }, [conversationId, onSendMessage]);
+
+  const turnAnchorId = activeNavigation.mode === "await-turn"
+    ? activeNavigation.turnId
+    : null;
+  const onTurnAnchorSettled = useCallback((turnId: string): void => {
+    if (!conversationId) return;
+    dispatchNavigation({
+      type: "turn.anchored",
+      conversationId,
+      turnId,
+    });
+    onLatestContentVisibilityChange?.(true);
+  }, [conversationId, onLatestContentVisibilityChange]);
+  const onTurnAnchorCancelled = useCallback((turnId: string): void => {
+    if (!conversationId) return;
+    dispatchNavigation({
+      type: "turn.anchor-cancelled",
+      conversationId,
+      turnId,
+    });
+    onLatestContentVisibilityChange?.(false);
+  }, [conversationId, onLatestContentVisibilityChange]);
 
   if (loading) {
     return (
@@ -333,6 +427,12 @@ export function ChatWorkspace({
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+Home Alt+End Alt+G"
         tabIndex={0}
         onScroll={onTranscriptScroll}
+        onWheelCapture={noteReaderIntent}
+        onTouchStartCapture={noteReaderIntent}
+        onPointerDownCapture={(event) => {
+          if (event.target === event.currentTarget) noteReaderIntent();
+        }}
+        onKeyDownCapture={noteReaderKeyboardIntent}
       >
         <span id={keyboardHelpId} className="visually-hidden">
           Use Alt plus Up or Down to move between turns, Alt plus Home for the request,
@@ -364,6 +464,9 @@ export function ChatWorkspace({
               defaultCodeWrap={defaultCodeWrap}
               autoCollapseWorkLog={autoCollapseWorkLog}
               showChangedFileSummaries={showChangedFileSummaries}
+              turnAnchorId={turnAnchorId}
+              onTurnAnchorSettled={onTurnAnchorSettled}
+              onTurnAnchorCancelled={onTurnAnchorCancelled}
               scrollElementRef={scrollRef}
               timelineElementRef={timelineRef}
               checkpointRestoreDisabled={turns.some(({ status }) =>
@@ -417,7 +520,7 @@ export function ChatWorkspace({
           running={conversation.status === "running" || conversation.status === "needs-input"}
           backendProfiles={backendProfiles}
           latestTurn={turns.at(-1) ?? null}
-          onSend={onSendMessage}
+          onSend={sendMessage}
           onListSkills={onListSkills}
           onToggleSkill={onToggleSkill}
           onClearSelectedSkills={onClearSelectedSkills}

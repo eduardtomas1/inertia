@@ -17,6 +17,7 @@ import type {
   AgentInputRequest,
   AgentPlan,
   ChatMessage,
+  MessageSendAcceptance,
   SubagentTrace,
   ThreadUsageSnapshot,
 } from "./agent";
@@ -27,6 +28,11 @@ import type {
   WorkspaceRun,
 } from "./app";
 import type { ConversationDetailResult } from "./conversation-detail";
+import type {
+  DuoPendingResult,
+  DuoPreparedResult,
+  DuoStatusResult,
+} from "./duo";
 import type {
   DiffReversalOperation,
   DiffReversalPlan,
@@ -137,6 +143,10 @@ export type ServerEvent =
         | { kind: "project.actions"; actions: ProjectAction[] }
         | { kind: "project.created"; projectId: string }
         | { kind: "conversation.created"; conversationId: string }
+        | MessageSendAcceptance
+        | DuoPreparedResult
+        | DuoPendingResult
+        | DuoStatusResult
         | { kind: "backend.profile"; profile: ModelBackendProfileDetail }
         | { kind: "backend.profile.probe"; profile: ModelBackendProfileDetail }
         | { kind: "backend.default"; value: ModelBackendDefault | null }

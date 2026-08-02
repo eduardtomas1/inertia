@@ -1054,10 +1054,17 @@ process.exit(child.status ?? 1);
       requestId: messageRequestId,
       payload: { conversationId, content: "Exercise one command activity." },
     });
-    await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-        event.type === "request.ok" && event.requestId === messageRequestId,
+    const accepted = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result"
+        && event.requestId === messageRequestId
+        && event.result.kind === "message.accepted",
     );
+    expect(accepted.result).toMatchObject({
+      kind: "message.accepted",
+      conversationId,
+      disposition: "new-turn",
+    });
     const started = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "agent.activity" }> =>
         event.type === "agent.activity" && event.activity.kind === "command" && event.activity.status === "running",

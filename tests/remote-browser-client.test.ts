@@ -696,6 +696,7 @@ describe("Remote Companion browser connection ownership", () => {
 
   it("expires an inactive profile on the local timer while offline", async () => {
     vi.useFakeTimers();
+    vi.spyOn(deviceStore, "clearDeviceProfile").mockResolvedValueOnce();
     const now = Date.parse("2026-08-01T00:00:00.000Z");
     vi.setSystemTime(now);
     vi.stubGlobal("navigator", { onLine: false });
@@ -861,6 +862,41 @@ describe("Remote Companion browser connection ownership", () => {
     await clearOperation;
     await expect(pairing).rejects.toThrow();
     expect(clearing).toEqual([true, false]);
+  });
+
+  it("restores a rejected profile when durable clearing fails", async () => {
+    const clear = vi.spyOn(deviceStore, "clearDeviceProfile")
+      .mockRejectedValueOnce(new Error("IndexedDB unavailable"));
+    const statuses: Array<[string, boolean]> = [];
+    const clearing: boolean[] = [];
+    const invalidated = vi.fn();
+    const client = new RemoteCompanionClient({
+      status: (message, online) => statuses.push([message, online]),
+      invalidated,
+      profileClearing: (value) => clearing.push(value),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const profile = {
+      deviceLabel: "Rejected identity",
+    } as SealedBrowserDeviceProfile;
+    (client as unknown as { profile: SealedBrowserDeviceProfile | null }).profile =
+      profile;
+
+    await (client as unknown as {
+      clearExpiredProfile(): Promise<void>;
+    }).clearExpiredProfile();
+
+    expect(clear).toHaveBeenCalledOnce();
+    expect(client.currentProfile()).toBe(profile);
+    expect(invalidated).toHaveBeenCalledOnce();
+    expect(clearing).toEqual([true, false]);
+    expect(statuses.at(-1)).toEqual([
+      "Remote Companion is disconnected, but its saved pairing could not be cleared. Use Forget this browser and try again.",
+      false,
+    ]);
   });
 
   it("reports offline and stops polling when a live refresh is not acknowledged", async () => {

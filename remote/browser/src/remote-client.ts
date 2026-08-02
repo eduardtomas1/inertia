@@ -144,12 +144,11 @@ export class RemoteCompanionClient {
     return this.profile;
   }
   private async forgetExpiredProfile(epoch: number): Promise<void> {
-    this.profile = null;
-    await this.profileWriteTail.catch(() => undefined);
+    await this.clearExpiredProfile();
     if (!this.ownsAttempt(epoch)) return;
-    await clearDeviceProfile().catch(() => undefined);
-    if (!this.ownsAttempt(epoch)) return;
-    this.callbacks.status("This device grant expired. Pair it again.", false);
+    if (!this.profile) {
+      this.callbacks.status("This device grant expired. Pair it again.", false);
+    }
   }
 
   currentProfile(): SealedBrowserDeviceProfile | null {
@@ -881,12 +880,23 @@ export class RemoteCompanionClient {
   private clearExpiredProfile(): Promise<void> {
     if (this.profileClear) return this.profileClear;
     if (!this.profile) return Promise.resolve();
+    const profile = this.profile;
     this.callbacks.profileClearing?.(true);
     this.profile = null;
     this.callbacks.invalidated?.();
     const clearing = this.profileWriteTail
       .catch(() => undefined)
-      .then(async () => await clearDeviceProfile().catch(() => undefined));
+      .then(async () => {
+        try {
+          await clearDeviceProfile();
+        } catch {
+          if (!this.profile) this.profile = profile;
+          this.callbacks.status(
+            "Remote Companion is disconnected, but its saved pairing could not be cleared. Use Forget this browser and try again.",
+            false,
+          );
+        }
+      });
     this.profileWriteTail = clearing;
     const ownedClearing = clearing.finally(() => {
       if (this.profileClear === ownedClearing) this.profileClear = null;

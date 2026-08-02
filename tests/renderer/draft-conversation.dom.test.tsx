@@ -54,18 +54,46 @@ const snapshot: AppSnapshot = {
 function materializedSnapshot(
   status: "idle" | "running" | "completed" = "idle",
   title = "New chat",
+  latestTurnId: string | null = null,
 ): AppSnapshot {
+  const conversation = buildDraftConversation(
+    buildNewConversationPayload(projectId, defaultSettings),
+    { id: conversationId, now },
+  );
+  const selection = conversation.modelSelection;
   return {
     ...snapshot,
     activeConversationId: status === "idle" ? null : conversationId,
     conversations: [{
-      ...buildDraftConversation(
-        buildNewConversationPayload(projectId, defaultSettings),
-        { id: conversationId, now },
-      ),
+      ...conversation,
       title,
       status,
-      latestTurn: null,
+      latestTurn: latestTurnId
+        ? {
+            id: latestTurnId,
+            runId: `${latestTurnId}-run`,
+            status: "running",
+            providerId: conversation.providerId,
+            harnessId: selection.harnessId,
+            backendProfileId: selection.backendProfileId,
+            modelSelection: selection,
+            continuationIdentity: {
+              harnessId: selection.harnessId,
+              backendProfileId: selection.backendProfileId,
+              backendConfigurationRevision:
+                selection.backendConfigurationRevision,
+              modelIdentity: selection.modelId,
+              endpointIdentity: null,
+            },
+            model: selection.modelId,
+            reasoningEffort: selection.reasoningEffort ?? "medium",
+            requestedAt: now,
+            startedAt: now,
+            completedAt: null,
+            terminalReason: null,
+            updatedAt: now,
+          }
+        : null,
       pendingApproval: false,
       pendingInput: false,
     }],
@@ -88,6 +116,20 @@ describe("useDraftConversation", () => {
   });
 
   it("keeps a new-project chat local until its first message is sent", async () => {
+    const values = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        clear: vi.fn(() => values.clear()),
+        getItem: vi.fn((key: string) => values.get(key) ?? null),
+        key: vi.fn((index: number) => [...values.keys()][index] ?? null),
+        get length() {
+          return values.size;
+        },
+        removeItem: vi.fn((key: string) => values.delete(key)),
+        setItem: vi.fn((key: string, value: string) => values.set(key, value)),
+      } satisfies Storage,
+    });
     const run = vi.fn(async (
       _key: string,
       command: CommandWithoutId,
@@ -108,12 +150,14 @@ describe("useDraftConversation", () => {
       userMessageId: "message-1",
       disposition: "new-turn" as const,
     }));
+    let currentSnapshot: AppSnapshot | null = null;
+    let persistedId: string | null = null;
     const hook = renderHook(() => useDraftConversation({
-      snapshot: null,
+      snapshot: currentSnapshot,
       settings: defaultSettings,
       run,
       sendMessage,
-      persistedConversationId: null,
+      persistedConversationId: persistedId,
       updatePersistedConversation: vi.fn(),
     }));
 
@@ -157,6 +201,205 @@ describe("useDraftConversation", () => {
       materializedFromConversationId: draftId,
       turnId: "turn-1",
     });
+    expect(hook.result.current.conversation?.id).toBe(draftId);
+    expect(readPersistedMaterializedDraftConversation()).toMatchObject({
+      acceptedTurnId: "turn-1",
+      acceptedUserMessageId: "message-1",
+      draftConversationId: draftId,
+      materializedConversationId: conversationId,
+    });
+
+    await expect(hook.result.current.sendFromComposer(
+      "Do not send this twice.",
+      [],
+    )).rejects.toThrow("was accepted");
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+
+    currentSnapshot = materializedSnapshot(
+      "running",
+      "Start with the current implementation.",
+      "turn-1",
+    );
+    hook.rerender();
+    expect(hook.result.current.conversation?.id).toBe(draftId);
+    expect(readPersistedMaterializedDraftConversation()).not.toBeNull();
+
+    persistedId = conversationId;
+    hook.rerender();
+    expect(hook.result.current.conversation).toBeNull();
+    expect(readPersistedMaterializedDraftConversation()).toBeNull();
+  });
+
+  it("rejects a mismatched materialized acceptance and blocks a duplicate", async () => {
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result",
+      requestId: crypto.randomUUID(),
+      result: { kind: "conversation.created", conversationId },
+    }));
+    const sendMessage = vi.fn(async () => ({
+      kind: "message.accepted" as const,
+      conversationId: "33333333-3333-4333-8333-333333333333",
+      turnId: "wrong-turn",
+      userMessageId: "wrong-message",
+      disposition: "new-turn" as const,
+    }));
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: null,
+      settings: defaultSettings,
+      run,
+      sendMessage,
+      persistedConversationId: null,
+      updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId));
+    const draftId = hook.result.current.conversation?.id;
+
+    await act(async () => {
+      await expect(hook.result.current.sendFromComposer(
+        "Acknowledge only this chat.",
+        [],
+      )).rejects.toThrow("different chat");
+    });
+
+    expect(hook.result.current.conversation?.id).toBe(draftId);
+    await expect(hook.result.current.sendFromComposer(
+      "Do not retry an uncertain acceptance.",
+      [],
+    )).rejects.toThrow("reconciling");
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the draft visible when the accepted snapshot precedes the response", async () => {
+    const values = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        clear: vi.fn(() => values.clear()),
+        getItem: vi.fn((key: string) => values.get(key) ?? null),
+        key: vi.fn((index: number) => [...values.keys()][index] ?? null),
+        get length() {
+          return values.size;
+        },
+        removeItem: vi.fn((key: string) => values.delete(key)),
+        setItem: vi.fn((key: string, value: string) => values.set(key, value)),
+      } satisfies Storage,
+    });
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result",
+      requestId: crypto.randomUUID(),
+      result: { kind: "conversation.created", conversationId },
+    }));
+    let settleAcceptance!: (value: TranscriptMessageSendAcceptance) => void;
+    const sendMessage = vi.fn(() => (
+      new Promise<TranscriptMessageSendAcceptance>((resolve) => {
+        settleAcceptance = resolve;
+      })
+    ));
+    let currentSnapshot: AppSnapshot | null = null;
+    let persistedId: string | null = null;
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: currentSnapshot,
+      settings: defaultSettings,
+      run,
+      sendMessage,
+      persistedConversationId: persistedId,
+      updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId));
+    const draftId = hook.result.current.conversation?.id;
+    let sending!: Promise<TranscriptMessageSendAcceptance | null>;
+    act(() => {
+      sending = hook.result.current.sendFromComposer(
+        "Snapshot this request before replying.",
+        [],
+      );
+    });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+
+    currentSnapshot = materializedSnapshot(
+      "running",
+      "Snapshot this request before replying.",
+      "turn-snapshot-first",
+    );
+    persistedId = conversationId;
+    hook.rerender();
+    expect(hook.result.current.conversation?.id).toBe(draftId);
+
+    let acceptance: TranscriptMessageSendAcceptance | null = null;
+    await act(async () => {
+      settleAcceptance({
+        kind: "message.accepted",
+        conversationId,
+        turnId: "turn-snapshot-first",
+        userMessageId: "message-snapshot-first",
+        disposition: "new-turn",
+      });
+      acceptance = await sending;
+    });
+    expect(acceptance).toMatchObject({
+      materializedFromConversationId: draftId,
+      turnId: "turn-snapshot-first",
+    });
+    expect(hook.result.current.conversation).toBeNull();
+    expect(readPersistedMaterializedDraftConversation()).toBeNull();
+  });
+
+  it("reconciles an accepted in-memory draft when localStorage is unavailable", async () => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        clear: vi.fn(() => {
+          throw new Error("storage unavailable");
+        }),
+        getItem: vi.fn(() => {
+          throw new Error("storage unavailable");
+        }),
+        key: vi.fn(() => null),
+        length: 0,
+        removeItem: vi.fn(() => {
+          throw new Error("storage unavailable");
+        }),
+        setItem: vi.fn(() => {
+          throw new Error("storage unavailable");
+        }),
+      } satisfies Storage,
+    });
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result",
+      requestId: crypto.randomUUID(),
+      result: { kind: "conversation.created", conversationId },
+    }));
+    const sendMessage = vi.fn(async () => ({
+      kind: "message.accepted" as const,
+      conversationId,
+      turnId: "turn-memory-only",
+      userMessageId: "message-memory-only",
+      disposition: "new-turn" as const,
+    }));
+    let currentSnapshot: AppSnapshot | null = null;
+    let persistedId: string | null = null;
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: currentSnapshot,
+      settings: defaultSettings,
+      run,
+      sendMessage,
+      persistedConversationId: persistedId,
+      updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId));
+    const draftId = hook.result.current.conversation?.id;
+    await act(async () => {
+      await hook.result.current.sendFromComposer("Keep this in memory.", []);
+    });
+    expect(hook.result.current.conversation?.id).toBe(draftId);
+
+    currentSnapshot = materializedSnapshot(
+      "running",
+      "Keep this in memory.",
+      "turn-memory-only",
+    );
+    persistedId = conversationId;
+    hook.rerender();
     expect(hook.result.current.conversation).toBeNull();
   });
 
@@ -234,6 +477,7 @@ describe("useDraftConversation", () => {
     expect(sendError).toMatchObject({ message: expect.stringContaining("disconnected") });
     expect(hook.result.current.conversation?.id).toBe(draftId);
     expect(readPersistedMaterializedDraftConversation()).toMatchObject({
+      acceptedTurnId: null,
       draftConversationId: draftId,
       materializedConversationId: conversationId,
       conversation: { id: draftId, projectId },
@@ -283,7 +527,13 @@ describe("useDraftConversation", () => {
         "The local service is reconnecting. Try again in a moment.",
         "not-sent",
       ))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({
+        kind: "message.accepted" as const,
+        conversationId,
+        turnId: "turn-retry",
+        userMessageId: "message-retry",
+        disposition: "new-turn" as const,
+      });
     const hook = renderHook(() => useDraftConversation({
       snapshot: null,
       settings: defaultSettings,
@@ -310,14 +560,16 @@ describe("useDraftConversation", () => {
     expect(values.get(promptStorageKey)).toBe(persistedPrompt);
     hook.unmount();
 
+    let reconciledSnapshot = materializedSnapshot();
+    let reconciledId: string | null = conversationId;
     const restored = renderHook(() => useDraftConversation({
-      snapshot: materializedSnapshot(),
+      snapshot: reconciledSnapshot,
       settings: defaultSettings,
       run,
       sendMessage,
       // The empty server-owned shell is now active, but that alone does not
       // prove the first message arrived.
-      persistedConversationId: conversationId,
+      persistedConversationId: reconciledId,
       updatePersistedConversation: vi.fn(),
     }));
     expect(restored.result.current.conversation?.id).toBe(draftId);
@@ -333,6 +585,20 @@ describe("useDraftConversation", () => {
     expect(sendMessage).toHaveBeenCalledTimes(2);
     expect(sendMessage.mock.calls[0]?.[0]).toBe(conversationId);
     expect(sendMessage.mock.calls[1]?.[0]).toBe(conversationId);
+    expect(restored.result.current.conversation?.id).toBe(draftId);
+    expect(readPersistedMaterializedDraftConversation()).toMatchObject({
+      acceptedTurnId: "turn-retry",
+      draftConversationId: draftId,
+      materializedConversationId: conversationId,
+    });
+
+    reconciledSnapshot = materializedSnapshot(
+      "running",
+      "Send once the socket returns.",
+      "turn-retry",
+    );
+    reconciledId = conversationId;
+    restored.rerender();
     expect(restored.result.current.conversation).toBeNull();
     expect(readPersistedMaterializedDraftConversation()).toBeNull();
     expect(values.has(promptStorageKey)).toBe(false);

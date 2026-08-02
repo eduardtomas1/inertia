@@ -17,6 +17,8 @@ export interface PersistedDraftConversation {
 }
 
 export interface PersistedMaterializedDraftConversation {
+  acceptedTurnId: string | null;
+  acceptedUserMessageId: string | null;
   draftConversationId: string;
   materializedConversationId: string;
   conversation: Conversation;
@@ -28,6 +30,14 @@ const MATERIALIZED_STORAGE_KEY =
   "inertia:new-project-conversation-materialized:v1";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu;
+const MAX_ACCEPTED_ID_LENGTH = 200;
+
+function isAcceptedId(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= MAX_ACCEPTED_ID_LENGTH
+    && !value.includes("\0");
+}
 
 function readPersistedDraftRecord(): PersistedDraftConversation | null {
   const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -94,6 +104,8 @@ export function readPersistedMaterializedDraftConversation():
     if (!raw) return null;
     const candidate = JSON.parse(raw) as {
       version?: unknown;
+      acceptedTurnId?: unknown;
+      acceptedUserMessageId?: unknown;
       draftConversationId?: unknown;
       conversationId?: unknown;
       projectId?: unknown;
@@ -102,6 +114,27 @@ export function readPersistedMaterializedDraftConversation():
     };
     if (
       candidate.version !== 1
+      && candidate.version !== 2
+    ) {
+      window.localStorage.removeItem(MATERIALIZED_STORAGE_KEY);
+      return null;
+    }
+    const acceptedTurnId = candidate.version === 2
+      ? candidate.acceptedTurnId
+      : null;
+    const acceptedUserMessageId = candidate.version === 2
+      ? candidate.acceptedUserMessageId
+      : null;
+    if (
+      (
+        acceptedTurnId !== null
+        && !isAcceptedId(acceptedTurnId)
+      )
+      || (
+        acceptedUserMessageId !== null
+        && !isAcceptedId(acceptedUserMessageId)
+      )
+      || (acceptedTurnId === null) !== (acceptedUserMessageId === null)
       || typeof candidate.draftConversationId !== "string"
       || !UUID_PATTERN.test(candidate.draftConversationId)
       || typeof candidate.conversationId !== "string"
@@ -128,6 +161,8 @@ export function readPersistedMaterializedDraftConversation():
       return null;
     }
     return {
+      acceptedTurnId,
+      acceptedUserMessageId,
       draftConversationId: candidate.draftConversationId,
       materializedConversationId: candidate.conversationId,
       payload: parsed.data.payload,
@@ -167,7 +202,9 @@ export function markPersistedDraftConversationMaterialized(
     window.localStorage.setItem(
       MATERIALIZED_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: 2,
+        acceptedTurnId: materialized.acceptedTurnId,
+        acceptedUserMessageId: materialized.acceptedUserMessageId,
         draftConversationId: materialized.draftConversationId,
         conversationId: materialized.materializedConversationId,
         projectId: materialized.conversation.projectId,
@@ -177,6 +214,28 @@ export function markPersistedDraftConversationMaterialized(
     );
   } catch {
     // The server-owned conversation remains authoritative without storage.
+  }
+}
+
+export function markPersistedMaterializedDraftConversationAccepted(
+  conversationId: string,
+  turnId: string,
+  userMessageId: string,
+): void {
+  try {
+    const stored = readPersistedMaterializedDraftConversation();
+    if (
+      stored?.materializedConversationId !== conversationId
+      || !isAcceptedId(turnId)
+      || !isAcceptedId(userMessageId)
+    ) return;
+    markPersistedDraftConversationMaterialized({
+      ...stored,
+      acceptedTurnId: turnId,
+      acceptedUserMessageId: userMessageId,
+    });
+  } catch {
+    // The in-memory acceptance still prevents a duplicate first send.
   }
 }
 

@@ -188,6 +188,9 @@ describe("draft turn anchoring", () => {
       await Promise.resolve();
     });
     expect(onSendMessage).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("turn-anchor-projection")).toHaveTextContent(
+      "none",
+    );
 
     view.rerender(
       <ChatWorkspace {...workspaceProps(persisted, onSendMessage)} />,
@@ -198,5 +201,57 @@ describe("draft turn anchoring", () => {
       );
     });
     expect(scrollTo).toHaveBeenCalled();
+  });
+
+  it("does not carry a materialized draft anchor into an unrelated chat", async () => {
+    const draft = conversation("draft-conversation");
+    const persisted = conversation("conversation-1");
+    const unrelated = conversation("conversation-unrelated");
+    const acceptance: TranscriptMessageSendAcceptance = {
+      kind: "message.accepted",
+      conversationId: persisted.id,
+      turnId: "turn-draft",
+      userMessageId: "message-draft",
+      disposition: "new-turn",
+      materializedFromConversationId: draft.id,
+    };
+    let settleAcceptance!: (
+      value: TranscriptMessageSendAcceptance,
+    ) => void;
+    const onSendMessage = vi.fn(() => (
+      new Promise<TranscriptMessageSendAcceptance>((resolve) => {
+        settleAcceptance = resolve;
+      })
+    ));
+    const view = render(
+      <ChatWorkspace {...workspaceProps(draft, onSendMessage)} />,
+    );
+
+    act(() => {
+      fireEvent.click(screen.getByRole("button", {
+        name: "Send materialized draft",
+      }));
+    });
+    expect(onSendMessage).toHaveBeenCalledOnce();
+
+    view.rerender(
+      <ChatWorkspace {...workspaceProps(unrelated, onSendMessage)} />,
+    );
+    await act(async () => {
+      settleAcceptance(acceptance);
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("turn-anchor-projection")).toHaveTextContent(
+      "none",
+    );
+
+    view.rerender(
+      <ChatWorkspace {...workspaceProps(persisted, onSendMessage)} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("turn-anchor-projection")).toHaveTextContent(
+        "none",
+      );
+    });
   });
 });

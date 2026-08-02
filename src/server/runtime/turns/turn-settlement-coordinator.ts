@@ -9,6 +9,7 @@ import type {
 } from "../../provider/contracts";
 import type { TurnActivityProjection } from "./turn-activity-projection";
 import type { TurnArtifactSequencer } from "./turn-artifact-sequencer";
+import type { TurnStreamProjection } from "./turn-stream-projection";
 import { publicTurnError } from "./turn-controller-support";
 import type {
   ActiveTurn,
@@ -23,6 +24,7 @@ export interface TurnSettlementCoordinatorOptions {
   scheduler: TurnTimerScheduler;
   activities: TurnActivityProjection;
   artifacts: TurnArtifactSequencer;
+  streams: TurnStreamProjection;
   now(): string;
   cleanup(active: ActiveTurn): void;
   track(value: void | Promise<void> | undefined): void;
@@ -57,12 +59,12 @@ export class TurnSettlementCoordinator {
         : detail;
     };
     try {
-      active.assistantStream.flush();
+      this.options.streams.flush(active, "assistant");
     } catch (error) {
       notePersistenceError(error);
     }
     try {
-      active.reasoningStream.flush();
+      this.options.streams.flush(active, "reasoning");
     } catch (error) {
       notePersistenceError(error);
     }

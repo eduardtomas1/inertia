@@ -47,6 +47,12 @@ export interface RuntimeWorkerOptions {
     inputPath: string;
     resultPath: string;
   };
+  /** Privileged deterministic fault injection used by lifecycle tests only. */
+  recoveryImportFault?: {
+    phase: "after-staging-publish";
+    markerPath: string;
+    stallMs: number;
+  };
 }
 
 export interface RuntimeRemotePromptPreparation {
@@ -102,10 +108,17 @@ export type RuntimeWorkerCommand =
   | { type: "runtime.remote-forget"; scope: RuntimeRemoteForgetScope }
   | {
       type: "runtime.database-recovery";
-      requestId: string;
+      operationId: string;
+      generation: number;
       operation: RuntimeDatabaseRecoveryOperation;
       path: string;
       targetDirectory?: string;
+    }
+  | {
+      type: "runtime.database-recovery-cancel";
+      operationId: string;
+      generation: number;
+      operation: RuntimeDatabaseRecoveryOperation;
     }
   | RuntimeCredentialResult
   | RuntimeAttachmentResult
@@ -213,16 +226,19 @@ export type RuntimeWorkerEvent =
   | { type: "runtime.project-path-rejected"; requestId: string; message: string }
   | {
       type: "runtime.database-recovery-result";
-      requestId: string;
+      operationId: string;
+      generation: number;
       operation: RuntimeDatabaseRecoveryOperation;
       ok: true;
       summary: RuntimeDatabaseRecoverySummary | null;
     }
   | {
       type: "runtime.database-recovery-result";
-      requestId: string;
+      operationId: string;
+      generation: number;
       operation: RuntimeDatabaseRecoveryOperation;
       ok: false;
+      cancelled: boolean;
       message: string;
     }
   | {
@@ -386,25 +402,47 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     return request ? { type: "runtime.resolve-project-path", requestId: value.requestId, request } : null;
   }
   if (
+    value.type === "runtime.database-recovery-cancel"
+    && Object.keys(value).length === 4
+    && typeof value.operationId === "string"
+    && UUID_PATTERN.test(value.operationId)
+    && typeof value.generation === "number"
+    && Number.isSafeInteger(value.generation)
+    && value.generation > 0
+    && (value.operation === "export" || value.operation === "import")
+  ) {
+    return {
+      type: "runtime.database-recovery-cancel",
+      operationId: value.operationId,
+      generation: value.generation,
+      operation: value.operation,
+    };
+  }
+  if (
     value.type === "runtime.database-recovery"
-    && typeof value.requestId === "string"
-    && UUID_PATTERN.test(value.requestId)
+    && typeof value.operationId === "string"
+    && UUID_PATTERN.test(value.operationId)
+    && typeof value.generation === "number"
+    && Number.isSafeInteger(value.generation)
+    && value.generation > 0
     && (value.operation === "export" || value.operation === "import")
     && runtimePath(value.path)
   ) {
-    if (value.operation === "export" && Object.keys(value).length === 4) return {
+    if (value.operation === "export" && Object.keys(value).length === 5) return {
       type: "runtime.database-recovery",
-      requestId: value.requestId,
+      operationId: value.operationId,
+      generation: value.generation,
       operation: "export",
       path: value.path,
     };
     if (
       value.operation === "import"
-      && Object.keys(value).length === 5
+      && Object.keys(value).length === 6
       && runtimePath(value.targetDirectory)
     ) return {
       type: "runtime.database-recovery",
-      requestId: value.requestId,
+      operationId: value.operationId,
+      generation: value.generation,
       operation: "import",
       path: value.path,
       targetDirectory: value.targetDirectory,
@@ -418,12 +456,14 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const hasCodexBinaryPath = Object.hasOwn(options, "codexBinaryPath");
   const hasAttachmentRoot = Object.hasOwn(options, "attachmentRoot");
   const hasPackageSmokePdf = Object.hasOwn(options, "packageSmokePdf");
+  const hasRecoveryImportFault = Object.hasOwn(options, "recoveryImportFault");
   if (
     optionKeys.length !== 3
       + Number(hasKimiProfiles)
       + Number(hasCodexBinaryPath)
       + Number(hasAttachmentRoot)
       + Number(hasPackageSmokePdf)
+      + Number(hasRecoveryImportFault)
     || !runtimePath(options.dataDirectory)
     || !runtimePath(options.defaultWorkspacePath)
     || typeof options.enableProviders !== "boolean"
@@ -436,6 +476,19 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
         || Object.keys(options.packageSmokePdf).length !== 2
         || !runtimePath(options.packageSmokePdf.inputPath)
         || !runtimePath(options.packageSmokePdf.resultPath)
+      )
+    )
+    || (
+      hasRecoveryImportFault
+      && (
+        !plainObject(options.recoveryImportFault)
+        || Object.keys(options.recoveryImportFault).length !== 3
+        || options.recoveryImportFault.phase !== "after-staging-publish"
+        || !runtimePath(options.recoveryImportFault.markerPath)
+        || typeof options.recoveryImportFault.stallMs !== "number"
+        || !Number.isSafeInteger(options.recoveryImportFault.stallMs)
+        || options.recoveryImportFault.stallMs < 1_000
+        || options.recoveryImportFault.stallMs > 30_000
       )
     )
   ) return null;
@@ -465,6 +518,15 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
             packageSmokePdf: {
               inputPath: (options.packageSmokePdf as Record<string, unknown>).inputPath as string,
               resultPath: (options.packageSmokePdf as Record<string, unknown>).resultPath as string,
+            },
+          }
+        : {}),
+      ...(hasRecoveryImportFault
+        ? {
+            recoveryImportFault: {
+              phase: "after-staging-publish" as const,
+              markerPath: (options.recoveryImportFault as Record<string, unknown>).markerPath as string,
+              stallMs: (options.recoveryImportFault as Record<string, unknown>).stallMs as number,
             },
           }
         : {}),
@@ -607,32 +669,42 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   }
   if (
     value.type === "runtime.database-recovery-result"
-    && typeof value.requestId === "string"
-    && UUID_PATTERN.test(value.requestId)
+    && typeof value.operationId === "string"
+    && UUID_PATTERN.test(value.operationId)
+    && typeof value.generation === "number"
+    && Number.isSafeInteger(value.generation)
+    && value.generation > 0
     && (value.operation === "export" || value.operation === "import")
     && typeof value.ok === "boolean"
   ) {
     if (!value.ok) {
-      if (Object.keys(value).length !== 5 || typeof value.message !== "string") {
+      if (
+        Object.keys(value).length !== 7
+        || typeof value.cancelled !== "boolean"
+        || typeof value.message !== "string"
+      ) {
         return null;
       }
       const message = value.message.trim();
       return message.length > 0 && message.length <= 1_000
         ? {
             type: "runtime.database-recovery-result",
-            requestId: value.requestId,
+            operationId: value.operationId,
+            generation: value.generation,
             operation: value.operation,
             ok: false,
+            cancelled: value.cancelled,
             message,
           }
         : null;
     }
-    if (Object.keys(value).length !== 5) return null;
+    if (Object.keys(value).length !== 6) return null;
     if (value.summary === null) {
       if (value.operation !== "export") return null;
       return {
         type: "runtime.database-recovery-result",
-        requestId: value.requestId,
+        operationId: value.operationId,
+        generation: value.generation,
         operation: value.operation,
         ok: true,
         summary: null,
@@ -654,7 +726,8 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     if (typeof summary.alreadyImported !== "boolean") return null;
     return {
       type: "runtime.database-recovery-result",
-      requestId: value.requestId,
+      operationId: value.operationId,
+      generation: value.generation,
       operation: value.operation,
       ok: true,
       summary: {

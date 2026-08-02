@@ -7,7 +7,11 @@ import type {
   RemoteResponse,
 } from "../shared/remote-protocol";
 
-import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
+import type {
+  DatabaseRecoveryStartupNotice,
+  OpenProjectPathRequest,
+  RuntimeConnection,
+} from "../shared/desktop.js";
 import {
   parseRuntimeWorkerEvent,
   type RuntimeDatabaseRecoveryOperation,
@@ -38,6 +42,7 @@ const DEFAULT_SHUTDOWN_GRACE_MS = 3_000;
 const DEFAULT_FORCE_KILL_WAIT_MS = 1_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_DATABASE_RECOVERY_TIMEOUT_MS = 120_000;
+const DEFAULT_DATABASE_RECOVERY_CANCEL_TIMEOUT_MS = 5_000;
 const DEFAULT_CREDENTIAL_REQUEST_TIMEOUT_MS = 10_000;
 const INITIAL_RESTART_DELAY_MS = 500;
 const MAX_RESTART_DELAY_MS = 8_000;
@@ -88,6 +93,7 @@ interface PendingDatabaseRecoveryRequest {
   record: RuntimeProcessRecord;
   operation: RuntimeDatabaseRecoveryOperation;
   timer: Timer;
+  timedOut: boolean;
   resolve: (summary: RuntimeDatabaseRecoverySummary | null) => void;
   reject: (error: Error) => void;
 }
@@ -151,6 +157,8 @@ export interface RuntimeSupervisorOptions {
   secureFileBroker?: RuntimeSecureFileBroker;
   attachmentBroker?: RuntimeAttachmentBroker;
   attachmentRequestTimeoutMs?: number;
+  databaseRecoveryRequestTimeoutMs?: number;
+  databaseRecoveryCancelTimeoutMs?: number;
   onStateChange?: (snapshot: RuntimeSupervisorSnapshot) => void;
 }
 
@@ -175,6 +183,8 @@ export class RuntimeSupervisor {
   private readonly credentialBroker?: RuntimeCredentialBroker;
   private readonly credentialRequestTimeoutMs: number;
   private readonly attachmentRequests: RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
+  private readonly databaseRecoveryRequestTimeoutMs: number;
+  private readonly databaseRecoveryCancelTimeoutMs: number;
   private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
   private phase: RuntimeSupervisorPhase = "idle";
@@ -183,6 +193,7 @@ export class RuntimeSupervisor {
   private restartAttempt = 0;
   private lastError: string | null = null;
   private databaseRecoveryReport: RuntimeDatabaseStartupRecoveryReport | null = null;
+  private databaseRecoveryNoticePending = false;
   private desiredRunning = false;
   private restartTimer: Timer | null = null;
   private startupTimer: Timer | null = null;
@@ -237,6 +248,14 @@ export class RuntimeSupervisor {
       accepts: (record) => this.acceptsBrokerRequests(record),
       post: (record, result) => this.post(record.child, result),
     });
+    this.databaseRecoveryRequestTimeoutMs = boundedDuration(
+      options.databaseRecoveryRequestTimeoutMs,
+      DEFAULT_DATABASE_RECOVERY_TIMEOUT_MS,
+    );
+    this.databaseRecoveryCancelTimeoutMs = boundedDuration(
+      options.databaseRecoveryCancelTimeoutMs,
+      DEFAULT_DATABASE_RECOVERY_CANCEL_TIMEOUT_MS,
+    );
     this.onStateChange = options.onStateChange;
   }
 
@@ -248,7 +267,30 @@ export class RuntimeSupervisor {
   }
 
   connection(): RuntimeConnection {
-    if (this.phase === "ready" && this.websocketUrl) return { websocketUrl: this.websocketUrl };
+    if (this.phase === "ready" && this.websocketUrl) {
+      const report = this.databaseRecoveryReport;
+      let databaseRecoveryNotice: DatabaseRecoveryStartupNotice | undefined;
+      if (
+        this.databaseRecoveryNoticePending
+        && report
+        && (report.outcome === "restored" || report.outcome === "created-empty")
+        && report.trigger !== "none"
+      ) {
+        databaseRecoveryNotice = {
+          id: `runtime-${this.generation}-database-recovery`,
+          outcome: report.outcome,
+          trigger: report.trigger,
+          preservedCorruptPrimary: report.preservedCorruptPrimary,
+          invalidBackupsSkipped: report.invalidBackupsSkipped,
+          unsupportedBackupsSkipped: report.unsupportedBackupsSkipped,
+        };
+        this.databaseRecoveryNoticePending = false;
+      }
+      return {
+        websocketUrl: this.websocketUrl,
+        ...(databaseRecoveryNotice ? { databaseRecoveryNotice } : {}),
+      };
+    }
     if (this.lastError) throw new Error(`The local service is restarting. ${this.lastError}`);
     throw new Error("The local service is starting. Try again in a moment.");
   }
@@ -287,22 +329,42 @@ export class RuntimeSupervisor {
         ? `The local service is restarting. ${this.lastError}`
         : "The local service is starting. Try again in a moment."));
     }
-    const requestId = randomUUID();
+    if (this.pendingDatabaseRecoveryRequests.size > 0) {
+      return Promise.reject(new Error(
+        "A database recovery operation is already in progress.",
+      ));
+    }
+    const operationId = randomUUID();
     return new Promise((resolve, reject) => {
-      const timer = this.setTimer(() => {
-        this.pendingDatabaseRecoveryRequests.delete(requestId);
-        reject(new Error("The database recovery request timed out."));
-      }, DEFAULT_DATABASE_RECOVERY_TIMEOUT_MS);
-      this.pendingDatabaseRecoveryRequests.set(requestId, {
+      const pending: PendingDatabaseRecoveryRequest = {
         record,
         operation,
-        timer,
+        timer: undefined as unknown as Timer,
+        timedOut: false,
         resolve,
         reject,
-      });
+      };
+      pending.timer = this.setTimer(() => {
+        if (this.pendingDatabaseRecoveryRequests.get(operationId) !== pending) return;
+        pending.timedOut = true;
+        this.post(record.child, {
+          type: "runtime.database-recovery-cancel",
+          operationId,
+          generation: record.generation,
+          operation,
+        });
+        pending.timer = this.setTimer(() => {
+          if (this.pendingDatabaseRecoveryRequests.get(operationId) !== pending) return;
+          this.lastError = "The runtime did not confirm database recovery cancellation.";
+          this.forceTerminate(record.child);
+          this.emitState();
+        }, this.databaseRecoveryCancelTimeoutMs);
+      }, this.databaseRecoveryRequestTimeoutMs);
+      this.pendingDatabaseRecoveryRequests.set(operationId, pending);
       this.post(record.child, {
         type: "runtime.database-recovery",
-        requestId,
+        operationId,
+        generation: record.generation,
         operation,
         path,
         ...(operation === "import" && targetDirectory
@@ -588,16 +650,21 @@ export class RuntimeSupervisor {
       return;
     }
     if (event.type === "runtime.database-recovery-result") {
-      const pending = this.pendingDatabaseRecoveryRequests.get(event.requestId);
+      const pending = this.pendingDatabaseRecoveryRequests.get(event.operationId);
       if (
         !pending
         || pending.record !== record
+        || event.generation !== record.generation
         || pending.operation !== event.operation
       ) return;
-      this.pendingDatabaseRecoveryRequests.delete(event.requestId);
+      this.pendingDatabaseRecoveryRequests.delete(event.operationId);
       this.clearTimer(pending.timer);
       if (event.ok) pending.resolve(event.summary);
-      else pending.reject(new Error(event.message));
+      else if (pending.timedOut && event.cancelled) {
+        pending.reject(new Error("The database recovery request timed out and was cancelled."));
+      } else {
+        pending.reject(new Error(event.message));
+      }
       return;
     }
     if (event.type === "runtime.remote-prompt-result") {
@@ -637,6 +704,9 @@ export class RuntimeSupervisor {
     record.ready = true;
     this.websocketUrl = event.websocketUrl;
     this.databaseRecoveryReport = event.databaseRecovery ?? null;
+    this.databaseRecoveryNoticePending =
+      event.databaseRecovery?.outcome === "restored"
+      || event.databaseRecovery?.outcome === "created-empty";
     this.lastError = null;
     this.phase = "ready";
     this.clearTimerValue("startupTimer");
@@ -675,6 +745,7 @@ export class RuntimeSupervisor {
     this.current = null;
     this.websocketUrl = null;
     this.databaseRecoveryReport = null;
+    this.databaseRecoveryNoticePending = false;
     this.clearShutdownTimers();
     this.lastError = record.reportedFailure
       ?? this.lastError
@@ -779,7 +850,11 @@ export class RuntimeSupervisor {
       if (pending.record !== record) continue;
       this.pendingDatabaseRecoveryRequests.delete(requestId);
       this.clearTimer(pending.timer);
-      pending.reject(new Error(message));
+      pending.reject(new Error(
+        pending.timedOut
+          ? "The database recovery request timed out and the runtime stopped before cancellation was confirmed."
+          : message,
+      ));
     }
   }
 

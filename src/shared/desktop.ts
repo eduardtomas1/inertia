@@ -23,6 +23,16 @@ export const REMOTE_ACCESS_IPC = {
 
 export interface RuntimeConnection {
   websocketUrl: string;
+  databaseRecoveryNotice?: DatabaseRecoveryStartupNotice;
+}
+
+export interface DatabaseRecoveryStartupNotice {
+  id: string;
+  outcome: "restored" | "created-empty";
+  trigger: "primary-missing" | "primary-corrupt";
+  preservedCorruptPrimary: boolean;
+  invalidBackupsSkipped: number;
+  unsupportedBackupsSkipped: number;
 }
 
 export interface DatabaseRecoveryImportSummary {

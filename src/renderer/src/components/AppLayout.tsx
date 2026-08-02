@@ -521,6 +521,18 @@ export function AppLayout({
           setActionError(null);
           connection.clearError();
         }}
+        databaseRecoveryNotice={connection.databaseRecoveryNotice}
+        onDismissDatabaseRecoveryNotice={connection.dismissDatabaseRecoveryNotice}
+        onImportRecovery={async () => {
+          const result = await window.inertia.importRecoveryData();
+          if (result.status === "imported") {
+            connection.dismissDatabaseRecoveryNotice();
+          }
+        }}
+        onCopyRecoveryReport={async () => {
+          const result = await window.inertia.copyRuntimeDiagnosticReport();
+          if (!result.copied) throw new Error("The recovery report could not be copied.");
+        }}
       />
     </div>
   );

@@ -128,7 +128,7 @@ export class TurnInteractionCoordinator {
     request: Extract<ProviderEvent, { type: "approval" }>["request"],
   ): void {
     this.options.streams.closeAssistantSegment(active);
-    active.reasoningStream.flush();
+    this.options.streams.flush(active, "reasoning");
     const pending: AgentApprovalRequest = {
       id: request.requestId,
       providerId: active.turn.providerId,
@@ -195,7 +195,7 @@ export class TurnInteractionCoordinator {
     request: Extract<ProviderEvent, { type: "input" }>["request"],
   ): void {
     this.options.streams.closeAssistantSegment(active);
-    active.reasoningStream.flush();
+    this.options.streams.flush(active, "reasoning");
     const pending: AgentInputRequest = {
       id: request.requestId,
       providerId: active.turn.providerId,

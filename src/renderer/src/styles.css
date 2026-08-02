@@ -7925,6 +7925,70 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 /* App notices and errors */
+.database-recovery-notice {
+  position: fixed;
+  top: 22px;
+  right: 22px;
+  z-index: 101;
+  display: grid;
+  width: min(620px, calc(100vw - 44px));
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 48%, var(--border));
+  border-radius: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-strong) 96%, transparent);
+  box-shadow: var(--shadow), var(--glass-inset);
+  grid-template-columns: 19px minmax(0, 1fr) auto auto 28px;
+}
+
+.database-recovery-notice.is-critical {
+  border-color: color-mix(in srgb, var(--danger) 58%, var(--border));
+}
+
+.database-recovery-notice > svg {
+  color: var(--warning);
+}
+
+.database-recovery-notice.is-critical > svg {
+  color: var(--danger);
+}
+
+.database-recovery-notice > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.database-recovery-notice strong {
+  font-size: var(--ui-font-secondary);
+}
+
+.database-recovery-notice small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.database-recovery-notice > button:not(.icon-button) {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface-hover);
+  font-size: var(--ui-font-micro);
+  font-weight: 650;
+}
+
+.database-recovery-notice > button:disabled {
+  opacity: 0.55;
+}
+
 .app-update-notice {
   position: fixed;
   right: 22px;
@@ -8475,6 +8539,17 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 @media (max-width: 560px) {
+  .database-recovery-notice {
+    top: 12px;
+    right: 12px;
+    width: calc(100vw - 24px);
+    grid-template-columns: 19px minmax(0, 1fr) 28px;
+  }
+
+  .database-recovery-notice > button:not(.icon-button) {
+    grid-column: 2;
+  }
+
   .app-update-notice {
     right: 12px;
     bottom: 12px;

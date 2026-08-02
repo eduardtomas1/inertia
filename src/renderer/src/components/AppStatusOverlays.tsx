@@ -1,10 +1,12 @@
 import { lazy, Suspense, type ComponentProps } from "react";
 import { AlertCircle, X } from "lucide-react";
+import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
 
 import type { useAppUpdate } from "../hooks/useAppUpdate";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
 import { AppUpdateNotice } from "./AppUpdateNotice";
+import { DatabaseRecoveryNotice } from "./DatabaseRecoveryNotice";
 import { ProviderQuotaNotices } from "./ProviderQuotaNotices";
 import { IconButton } from "./ui";
 
@@ -18,6 +20,10 @@ interface AppStatusOverlaysProps {
   providerQuotaNotices: ProviderQuotaNoticeController;
   error: string | null;
   onDismissError: () => void;
+  databaseRecoveryNotice: DatabaseRecoveryStartupNotice | null;
+  onDismissDatabaseRecoveryNotice: () => void;
+  onImportRecovery: () => Promise<void>;
+  onCopyRecoveryReport: () => Promise<void>;
 }
 
 export function AppStatusOverlays({
@@ -26,17 +32,31 @@ export function AppStatusOverlays({
   providerQuotaNotices,
   error,
   onDismissError,
+  databaseRecoveryNotice,
+  onDismissDatabaseRecoveryNotice,
+  onImportRecovery,
+  onCopyRecoveryReport,
 }: AppStatusOverlaysProps): React.JSX.Element {
   // Own preview suspension from this always-loaded boundary. The credential
   // dialog itself remains lazy, so waiting for its chunk would briefly leave
   // native preview content above the trusted authentication flow.
-  useNativePreviewSuspension(Boolean(providerAuth.provider));
+  useNativePreviewSuspension(Boolean(
+    providerAuth.provider || databaseRecoveryNotice,
+  ));
   return (
     <>
       {providerAuth.provider && (
         <Suspense fallback={null}>
           <ProviderAuthDialog {...providerAuth} />
         </Suspense>
+      )}
+      {databaseRecoveryNotice && (
+        <DatabaseRecoveryNotice
+          notice={databaseRecoveryNotice}
+          onDismiss={onDismissDatabaseRecoveryNotice}
+          onImportRecovery={onImportRecovery}
+          onCopyReport={onCopyRecoveryReport}
+        />
       )}
       {appUpdate.visible && appUpdate.status && (
         <AppUpdateNotice

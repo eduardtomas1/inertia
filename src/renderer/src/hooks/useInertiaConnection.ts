@@ -21,6 +21,7 @@ import {
 } from "../utils/connectionMessages";
 import { applyConversationShellEvent } from "../utils/runtimeSnapshotProjection";
 import { runtimeCommandPolicy } from "../utils/runtimeCommandPolicy";
+import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
 
 export type ConnectionStatus = "connecting" | "online" | "offline";
 
@@ -31,6 +32,8 @@ export interface InertiaConnection {
   runtimeGeneration: string | null;
   status: ConnectionStatus;
   error: string | null;
+  databaseRecoveryNotice: DatabaseRecoveryStartupNotice | null;
+  dismissDatabaseRecoveryNotice: () => void;
   clearError: () => void;
   sendCommand: (command: ClientCommand) => Promise<ServerEvent>;
   subscribe: (listener: EventListener) => () => void;
@@ -46,6 +49,8 @@ export function useInertiaConnection(): InertiaConnection {
   const [runtimeGeneration, setRuntimeGeneration] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
+  const [databaseRecoveryNotice, setDatabaseRecoveryNotice] =
+    useState<DatabaseRecoveryStartupNotice | null>(null);
 
   const rejectPending = useCallback((message: string) => {
     for (const pending of pendingRef.current.values()) {
@@ -80,8 +85,10 @@ export function useInertiaConnection(): InertiaConnection {
           throw new Error("The desktop bridge is unavailable. Open Inertia through the desktop app.");
         }
 
-        const { websocketUrl } = await window.inertia.getRuntimeConnection();
+        const { websocketUrl, databaseRecoveryNotice: startupNotice } =
+          await window.inertia.getRuntimeConnection();
         if (disposed) return;
+        if (startupNotice) setDatabaseRecoveryNotice(startupNotice);
 
         const projection = projectionRef.current.current();
         const resumeCursor: RuntimeSyncCursor | null = forceSnapshot || !projection
@@ -303,6 +310,11 @@ export function useInertiaConnection(): InertiaConnection {
     runtimeGeneration,
     status,
     error,
+    databaseRecoveryNotice,
+    dismissDatabaseRecoveryNotice: useCallback(
+      () => setDatabaseRecoveryNotice(null),
+      [],
+    ),
     clearError: useCallback(() => setError(null), []),
     sendCommand,
     subscribe,

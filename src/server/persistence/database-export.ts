@@ -1,5 +1,3 @@
-import { isAbsolute } from "node:path";
-
 import { z } from "zod";
 
 export const DATABASE_RECOVERY_EXPORT_FORMAT = "inertia-recovery-export";
@@ -30,8 +28,8 @@ const recoveryConversationSchema = z.object({
 const recoveryProjectSchema = z.object({
   name: z.string().max(1_000),
   path: z.string().min(1).max(4_096).refine(
-    (value) => !value.includes("\0") && isAbsolute(value),
-    "Expected a local absolute project path.",
+    (value) => !value.includes("\0"),
+    "Expected a bounded project path identity without NUL bytes.",
   ),
   conversations: z.array(recoveryConversationSchema)
     .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),

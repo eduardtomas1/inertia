@@ -74,6 +74,8 @@ function createHarness(options: {
   secureFileBroker?: RuntimeSecureFileBroker;
   attachmentBroker?: RuntimeAttachmentBroker;
   attachmentRequestTimeoutMs?: number;
+  databaseRecoveryRequestTimeoutMs?: number;
+  databaseRecoveryCancelTimeoutMs?: number;
 } = {}) {
   const children: FakeUtilityProcess[] = [];
   const forceKill = vi.fn((
@@ -101,6 +103,8 @@ function createHarness(options: {
     secureFileBroker: options.secureFileBroker,
     attachmentBroker: options.attachmentBroker,
     attachmentRequestTimeoutMs: options.attachmentRequestTimeoutMs,
+    databaseRecoveryRequestTimeoutMs: options.databaseRecoveryRequestTimeoutMs,
+    databaseRecoveryCancelTimeoutMs: options.databaseRecoveryCancelTimeoutMs,
   });
   return { children, forceKill, supervisor };
 }
@@ -133,6 +137,63 @@ describe("RuntimeSupervisor", () => {
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 1, pid: 10_000 });
   });
 
+  it.each(["restored", "created-empty"] as const)(
+    "delivers a %s startup recovery warning exactly once per runtime start",
+    (outcome) => {
+      const { children, supervisor } = createHarness();
+      supervisor.start();
+      children[0].spawn();
+      children[0].message({
+        type: "runtime.ready",
+        websocketUrl: firstUrl,
+        databaseRecovery: {
+          checkedAt: "2026-01-01T00:00:00.000Z",
+          outcome,
+          trigger: "primary-corrupt",
+          restoredBackup: outcome === "restored" ? "backup.sqlite" : null,
+          preservedCorruptPrimary: true,
+          invalidBackupsSkipped: 2,
+          unsupportedBackupsSkipped: 1,
+        },
+      });
+
+      expect(supervisor.connection()).toEqual({
+        websocketUrl: firstUrl,
+        databaseRecoveryNotice: {
+          id: "runtime-1-database-recovery",
+          outcome,
+          trigger: "primary-corrupt",
+          preservedCorruptPrimary: true,
+          invalidBackupsSkipped: 2,
+          unsupportedBackupsSkipped: 1,
+        },
+      });
+      expect(supervisor.connection()).toEqual({ websocketUrl: firstUrl });
+      expect(supervisor.connection()).toEqual({ websocketUrl: firstUrl });
+    },
+  );
+
+  it("does not surface a recovery warning for a clean first launch", () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({
+      type: "runtime.ready",
+      websocketUrl: firstUrl,
+      databaseRecovery: {
+        checkedAt: "2026-01-01T00:00:00.000Z",
+        outcome: "first-launch",
+        trigger: "none",
+        restoredBackup: null,
+        preservedCorruptPrimary: false,
+        invalidBackupsSkipped: 0,
+        unsupportedBackupsSkipped: 0,
+      },
+    });
+
+    expect(supervisor.connection()).toEqual({ websocketUrl: firstUrl });
+  });
+
   it("correlates bounded database recovery operations with the ready runtime", async () => {
     const { children, supervisor } = createHarness();
     supervisor.start();
@@ -144,26 +205,43 @@ describe("RuntimeSupervisor", () => {
     const pending = supervisor.databaseRecovery("import", path, targetDirectory);
     const request = children[0].messages.at(-1) as {
       type: string;
-      requestId: string;
+      operationId: string;
+      generation: number;
       operation: string;
       path: string;
     };
     expect(request).toMatchObject({
       type: "runtime.database-recovery",
+      generation: 1,
       operation: "import",
       path,
       targetDirectory,
     });
     children[0].message({
       type: "runtime.database-recovery-result",
-      requestId: request.requestId,
+      operationId: request.operationId,
+      generation: request.generation,
       operation: "export",
       ok: true,
       summary: null,
     });
     children[0].message({
       type: "runtime.database-recovery-result",
-      requestId: request.requestId,
+      operationId: request.operationId,
+      generation: request.generation + 1,
+      operation: "import",
+      ok: true,
+      summary: {
+        projects: 99,
+        conversations: 99,
+        messages: 99,
+        alreadyImported: false,
+      },
+    });
+    children[0].message({
+      type: "runtime.database-recovery-result",
+      operationId: request.operationId,
+      generation: request.generation,
       operation: "import",
       ok: true,
       summary: {
@@ -177,6 +255,177 @@ describe("RuntimeSupervisor", () => {
       projects: 1,
       conversations: 2,
       messages: 3,
+      alreadyImported: false,
+    });
+  });
+
+  it("keeps recovery busy until timed-out cancellation is acknowledged", async () => {
+    const { children, supervisor } = createHarness({
+      databaseRecoveryRequestTimeoutMs: 100,
+      databaseRecoveryCancelTimeoutMs: 50,
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    const pending = supervisor.databaseRecovery(
+      "export",
+      resolve(dataDirectory, "recovery.json"),
+    );
+    const request = children[0].messages.at(-1) as Extract<
+      RuntimeWorkerCommand,
+      { type: "runtime.database-recovery" }
+    >;
+    const settled = vi.fn();
+    void pending.then(settled, settled);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(children[0].messages.at(-1)).toEqual({
+      type: "runtime.database-recovery-cancel",
+      operationId: request.operationId,
+      generation: request.generation,
+      operation: "export",
+    });
+    expect(settled).not.toHaveBeenCalled();
+    await expect(supervisor.databaseRecovery(
+      "export",
+      resolve(dataDirectory, "retry.json"),
+    )).rejects.toThrow(/already in progress/u);
+
+    children[0].message({
+      type: "runtime.database-recovery-result",
+      operationId: request.operationId,
+      generation: request.generation,
+      operation: "export",
+      ok: false,
+      cancelled: true,
+      message: "The database recovery operation was cancelled.",
+    });
+    await expect(pending).rejects.toThrow(/timed out and was cancelled/u);
+
+    const retry = supervisor.databaseRecovery(
+      "export",
+      resolve(dataDirectory, "retry.json"),
+    );
+    const retryRequest = children[0].messages.at(-1) as Extract<
+      RuntimeWorkerCommand,
+      { type: "runtime.database-recovery" }
+    >;
+    expect(retryRequest.operationId).not.toBe(request.operationId);
+    children[0].message({
+      type: "runtime.database-recovery-result",
+      operationId: retryRequest.operationId,
+      generation: retryRequest.generation,
+      operation: "export",
+      ok: true,
+      summary: null,
+    });
+    await expect(retry).resolves.toBeNull();
+  });
+
+  it("reports a completed timed-out operation truthfully instead of replaying it", async () => {
+    const { children, supervisor } = createHarness({
+      databaseRecoveryRequestTimeoutMs: 100,
+      databaseRecoveryCancelTimeoutMs: 50,
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const pending = supervisor.databaseRecovery(
+      "import",
+      resolve(dataDirectory, "recovery.json"),
+      resolve(workspaceDirectory, "recovered"),
+    );
+    const request = children[0].messages.at(-1) as Extract<
+      RuntimeWorkerCommand,
+      { type: "runtime.database-recovery" }
+    >;
+    await vi.advanceTimersByTimeAsync(100);
+    children[0].message({
+      type: "runtime.database-recovery-result",
+      operationId: request.operationId,
+      generation: request.generation,
+      operation: "import",
+      ok: true,
+      summary: {
+        projects: 1,
+        conversations: 1,
+        messages: 1,
+        alreadyImported: false,
+      },
+    });
+    await expect(pending).resolves.toMatchObject({ alreadyImported: false });
+    expect(children[0].messages.filter(
+      ({ type }) => type === "runtime.database-recovery",
+    )).toHaveLength(1);
+  });
+
+  it("terminates an unconfirmed cancellation and ignores late old-generation success after restart", async () => {
+    const { children, forceKill, supervisor } = createHarness({
+      databaseRecoveryRequestTimeoutMs: 100,
+      databaseRecoveryCancelTimeoutMs: 50,
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const pending = supervisor.databaseRecovery(
+      "import",
+      resolve(dataDirectory, "recovery.json"),
+      resolve(workspaceDirectory, "recovered"),
+    );
+    const request = children[0].messages.at(-1) as Extract<
+      RuntimeWorkerCommand,
+      { type: "runtime.database-recovery" }
+    >;
+    await vi.advanceTimersByTimeAsync(150);
+    expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
+    children[0].exit(1);
+    await expect(pending).rejects.toThrow(/cancellation was confirmed/u);
+    await vi.advanceTimersByTimeAsync(500);
+    children[1].spawn();
+    children[1].message({ type: "runtime.ready", websocketUrl: secondUrl });
+    expect(supervisor.connection()).toEqual({ websocketUrl: secondUrl });
+
+    children[0].message({
+      type: "runtime.database-recovery-result",
+      operationId: request.operationId,
+      generation: request.generation,
+      operation: "import",
+      ok: true,
+      summary: {
+        projects: 1,
+        conversations: 0,
+        messages: 0,
+        alreadyImported: false,
+      },
+    });
+    const retry = supervisor.databaseRecovery(
+      "import",
+      resolve(dataDirectory, "retry.json"),
+      resolve(workspaceDirectory, "recovered-retry"),
+    );
+    const retryRequest = children[1].messages.at(-1) as Extract<
+      RuntimeWorkerCommand,
+      { type: "runtime.database-recovery" }
+    >;
+    expect(retryRequest.generation).toBe(2);
+    expect(children[1].messages.filter(
+      ({ type }) => type === "runtime.database-recovery",
+    )).toHaveLength(1);
+    children[1].message({
+      type: "runtime.database-recovery-result",
+      operationId: retryRequest.operationId,
+      generation: retryRequest.generation,
+      operation: "import",
+      ok: true,
+      summary: {
+        projects: 1,
+        conversations: 0,
+        messages: 0,
+        alreadyImported: false,
+      },
+    });
+    await expect(retry).resolves.toMatchObject({
+      projects: 1,
       alreadyImported: false,
     });
   });

@@ -25,6 +25,29 @@ export const DATABASE_BACKUP_VALIDATION_TIMEOUT_MS = 120_000;
 
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
+const REQUIRED_TABLES_BY_SCHEMA_VERSION = [
+  [1, ["projects", "conversations", "messages", "app_state"]],
+  [2, ["activities", "checkpoints"]],
+  [3, ["agent_plans"]],
+  [4, ["agent_reasonings", "thread_usage"]],
+  [5, ["provider_metadata_cache"]],
+  [7, ["diff_review_summaries", "workspace_runs"]],
+  [9, ["diff_review_states", "diff_review_notes"]],
+  [16, ["agent_turns"]],
+  [22, [
+    "turn_execution_context_blobs",
+    "turn_execution_manifests",
+    "turn_execution_context_refs",
+  ]],
+  [23, ["turn_git_artifacts"]],
+  [25, ["model_backend_profiles", "model_backend_defaults"]],
+  [26, ["provider_metadata_scoped_cache"]],
+  [28, ["subagent_traces"]],
+  [32, ["agent_goals"]],
+  [38, ["paired_launches", "paired_launch_sides"]],
+  [42, ["message_content_chunks", "reasoning_content_chunks"]],
+  [43, ["recovery_import_receipts", "recovery_import_journals"]],
+] as const;
 
 export interface DatabaseRecoveryReport {
   readonly checkedAt: string;
@@ -134,6 +157,9 @@ function validateOpenDatabase(
   database: Database.Database,
   check: "quick_check" | "integrity_check",
   currentSchemaVersion: number,
+  requiredTablesBySchemaVersion: readonly (
+    readonly [number, readonly string[]]
+  )[],
 ): DatabaseValidation {
   if (database.pragma(check, { simple: true }) !== "ok") return "corrupt";
   const tables = new Set(
@@ -154,13 +180,12 @@ function validateOpenDatabase(
   ) return "corrupt";
   const version = versions.length;
   if (version > currentSchemaVersion) return "unsupported-future";
-  for (const table of [
-    "projects",
-    "conversations",
-    "messages",
-    "app_state",
-  ]) {
-    if (!tables.has(table)) return "corrupt";
+  if (database.prepare("PRAGMA foreign_key_check").get()) return "corrupt";
+  for (const [introducedAt, requiredTables] of requiredTablesBySchemaVersion) {
+    if (
+      version >= introducedAt
+      && requiredTables.some((table) => !tables.has(table))
+    ) return "corrupt";
   }
   const requiredColumns: Record<string, readonly string[]> = {
     projects: ["id", "name", "path"],
@@ -175,7 +200,7 @@ function validateOpenDatabase(
     );
     if (columns.some((column) => !existing.has(column))) return "corrupt";
   }
-  if (version >= 38) {
+  if (version >= 42) {
     if (!tables.has("agent_reasonings")) return "corrupt";
     const reasoningColumns = new Set(
       (database.prepare("PRAGMA table_info(agent_reasonings)").all() as Array<{ name: string }>)
@@ -205,8 +230,11 @@ function validateOpenDatabase(
       || !indexes.has("reasoning_content_chunks_reasoning_sequence_idx")
     ) return "corrupt";
   }
-  if (version >= 39) {
-    if (!tables.has("recovery_import_receipts")) return "corrupt";
+  if (version >= 43) {
+    if (
+      !tables.has("recovery_import_receipts")
+      || !tables.has("recovery_import_journals")
+    ) return "corrupt";
     const receiptColumns = new Set(
       (database.prepare("PRAGMA table_info(recovery_import_receipts)").all() as Array<{ name: string }>)
         .map(({ name }) => name),
@@ -218,8 +246,20 @@ function validateOpenDatabase(
       "messages",
       "imported_at",
     ].some((column) => !receiptColumns.has(column))) return "corrupt";
+    const journalColumns = new Set(
+      (database.prepare("PRAGMA table_info(recovery_import_journals)").all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
+    if ([
+      "singleton",
+      "operation_id",
+      "digest",
+      "authorized_root",
+      "projects",
+      "created_at",
+    ].some((column) => !journalColumns.has(column))) return "corrupt";
   }
-  if (version >= 40) {
+  if (version >= 44) {
     for (const table of [
       "message_content_chunks",
       "reasoning_content_chunks",
@@ -250,6 +290,7 @@ function validateDatabase(
       database,
       check,
       CURRENT_DATABASE_SCHEMA_VERSION,
+      REQUIRED_TABLES_BY_SCHEMA_VERSION,
     );
   } catch {
     return "corrupt";
@@ -276,6 +317,7 @@ function validateDatabaseOffThread(
         database,
         "integrity_check",
         workerData.currentSchemaVersion,
+        workerData.requiredTablesBySchemaVersion,
       );
     } catch {
       result = "corrupt";
@@ -294,6 +336,7 @@ function validateDatabaseOffThread(
         currentSchemaVersion: CURRENT_DATABASE_SCHEMA_VERSION,
         modulePath: betterSqlite3ModulePath,
         path,
+        requiredTablesBySchemaVersion: REQUIRED_TABLES_BY_SCHEMA_VERSION,
       },
     });
     let receivedResult: DatabaseValidation | undefined;

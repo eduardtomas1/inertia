@@ -193,6 +193,36 @@ describe("database backup and startup recovery", () => {
     recovered.close();
   });
 
+  it("skips a newest backup with orphaned foreign keys and restores the older valid copy", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "older-relationally-valid");
+    const older = await store.createBackup();
+    store.createMessage(conversationId, "newer-orphaned", "assistant");
+    const newer = await store.createBackup();
+    store.close();
+    const backupsDirectory = databaseRecoveryPaths(databasePath).backupsDirectory;
+    const tampered = new Database(join(backupsDirectory, newer.filename));
+    tampered.pragma("foreign_keys = OFF");
+    tampered.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
+    expect(tampered.pragma("quick_check", { simple: true })).toBe("ok");
+    expect(tampered.prepare("PRAGMA foreign_key_check").get()).toBeDefined();
+    tampered.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: older.filename,
+      invalidBackupsSkipped: 1,
+    });
+    expect(recovered.conversationDetail(conversationId)?.messages
+      .map(({ content }) => content)).toEqual(["older-relationally-valid"]);
+    recovered.close();
+  });
+
   it("preserves a corrupt primary and initializes cleanly when no backup is valid", () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -298,6 +328,75 @@ describe("database backup and startup recovery", () => {
     expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
       .toBe("recover me");
     recovered.close();
+  });
+
+  it.each(["agent_turns", "workspace_runs"] as const)(
+    "restores a valid backup when a current-schema primary lost %s",
+    async (missingTable) => {
+      const directory = temporaryDirectory();
+      const databasePath = join(directory, "inertia.sqlite");
+      const { conversationId, store } = seed(databasePath, "required table backup");
+      const backup = await store.createBackup();
+      store.close();
+      const incomplete = new Database(databasePath);
+      incomplete.pragma("foreign_keys = OFF");
+      incomplete.exec(`DROP TABLE ${missingTable}`);
+      expect(incomplete.pragma("quick_check", { simple: true })).toBe("ok");
+      incomplete.close();
+
+      const recovered = new RuntimeStore(databasePath, directory, {
+        recoverInterruptedRuns: false,
+      });
+      expect(recovered.databaseRecoveryReport()).toMatchObject({
+        outcome: "restored",
+        restoredBackup: backup.filename,
+        trigger: "primary-corrupt",
+      });
+      expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
+        .toBe("required table backup");
+      recovered.close();
+    },
+  );
+
+  it("restores and upgrades a valid backup from released schema 41", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "released schema backup");
+    const backup = await store.createBackup();
+    store.close();
+    const backupPath = join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      backup.filename,
+    );
+    const released = new Database(backupPath);
+    released.exec(`
+      DROP TABLE recovery_import_journals;
+      DROP TABLE recovery_import_receipts;
+      DROP TABLE message_content_chunks;
+      DROP TABLE reasoning_content_chunks;
+      DELETE FROM schema_migrations WHERE version >= 42;
+    `);
+    released.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: backup.filename,
+      trigger: "primary-corrupt",
+    });
+    expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
+      .toBe("released schema backup");
+    recovered.close();
+    const upgraded = new Database(databasePath, { readonly: true });
+    expect((upgraded.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(
+      CURRENT_DATABASE_SCHEMA_VERSION,
+    );
+    upgraded.close();
   });
 
   it("skips incomplete migration history and restores the next coherent backup", async () => {
@@ -494,6 +593,42 @@ describe("database backup and startup recovery", () => {
     expect((database.prepare("SELECT COUNT(*) AS count FROM entries").get() as {
       count: number;
     }).count).toBe(10_000);
+    database.close();
+  });
+
+  it("rolls back an uncommitted recovery mutation when the supervised worker is terminated", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "recovery-cancel.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const script = `
+      const Database = require('better-sqlite3');
+      const database = new Database(process.argv[1]);
+      database.exec('BEGIN IMMEDIATE');
+      database.prepare(\`
+        INSERT INTO recovery_import_receipts (
+          digest, projects, conversations, messages, imported_at
+        ) VALUES (?, 1, 1, 1, ?)
+      \`).run('a'.repeat(64), new Date().toISOString());
+      process.stdout.write('mutation-open\\n');
+      setInterval(() => {}, 1000);
+    `;
+    const child = spawn(process.execPath, ["-e", script, databasePath], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    await new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.stdout!.once("data", () => resolve());
+    });
+    child.kill("SIGKILL");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+
+    const database = new Database(databasePath, { readonly: true });
+    expect(database.pragma("quick_check", { simple: true })).toBe("ok");
+    expect((database.prepare(
+      "SELECT COUNT(*) AS count FROM recovery_import_receipts",
+    ).get() as { count: number }).count).toBe(0);
     database.close();
   });
 

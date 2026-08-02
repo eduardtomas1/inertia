@@ -82,7 +82,7 @@ Automated coverage exercises committed WAL backup, corrupt-primary quarantine,
 newest-valid and older-valid restore, no-valid-backup initialization,
 interrupted partial cleanup, count/byte retention, bounded shutdown
 cancellation, future-schema preservation, owner-only permissions, strict and
-idempotent export/import containment, abrupt `SIGKILL` recovery, schema-37
+idempotent export/import containment, abrupt `SIGKILL` recovery, schema-41
 upgrade, oversized single-delta splitting, durable stream restart, and injected
 terminal-compaction rollback. Platform-independent scheduler and path tests run
 under the repository's Linux, macOS, and Windows CI matrix.

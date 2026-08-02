@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import {
+  normalizeStreamText,
   splitStreamTextChunks,
   STREAM_TEXT_CHUNK_MAX_CHARACTERS,
 } from "../../src/server/persistence/stream-text-storage";
@@ -41,13 +42,81 @@ afterEach(() => {
 });
 
 describe("append-oriented stream text persistence", () => {
-  it("counts UTF-8 boundaries without changing lone surrogates or NUL text", () => {
+  it("counts UTF-8 boundaries after explicitly normalizing lone surrogates", () => {
     const value = "\0A\u007f\u0080\u07ff\u0800\ud800😀";
-    const chunks = splitStreamTextChunks(value);
+    const normalized = "\0A\u007f\u0080\u07ff\u0800\ufffd😀";
+    const chunks = splitStreamTextChunks(normalized);
 
-    expect(chunks).toEqual([value]);
-    expect(chunks.join("")).toBe(value);
+    expect(normalizeStreamText(value)).toBe(normalized);
+    expect(chunks).toEqual([normalized]);
+    expect(chunks.join("")).toBe(normalized);
     expect(Buffer.byteLength(chunks[0]!, "utf8")).toBe(17);
+  });
+
+  it("keeps NUL and normalized surrogate text exact through live reads, restart, and compaction", () => {
+    const current = runtime();
+    const project = current.store.createProject("Unicode", current.directory);
+    const conversation = current.store.createConversation(project.id, "Unicode");
+    const user = current.store.createMessage(conversation.id, "Start", "user");
+    const turn = current.store.createAgentTurn({
+      id: "turn-unicode-storage",
+      conversationId: conversation.id,
+      runId: "run-unicode-storage",
+      userMessageId: user.id,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "legacy:codex:codex-app-server",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    current.store.updateAgentTurnLifecycle(turn.id, { status: "running" });
+    const assistant = current.store.createMessage(
+      conversation.id,
+      // Simulate a pre-invariant cumulative row written through SQLite.
+      "prefix:\ud800",
+      "assistant",
+      [],
+      turn.id,
+    );
+    const reasoning = current.store.createReasoning(
+      conversation.id,
+      turn.runId,
+      turn.id,
+    );
+    current.store.appendMessageContent(assistant.id, "\0x\ufffdy😀");
+    current.store.appendReasoningContent(reasoning.id, "\ufffdreason\0");
+    expect(current.store.message(assistant.id).content).toBe("prefix:\ufffd\0x\ufffdy😀");
+    expect(current.store.conversationDetail(conversation.id)?.reasonings[0]?.content)
+      .toBe("\ufffdreason\0");
+    current.store.close();
+
+    const reopened = new RuntimeStore(
+      current.databasePath,
+      current.directory,
+      { recoverInterruptedRuns: false },
+    );
+    expect(reopened.message(assistant.id).content).toBe("prefix:\ufffd\0x\ufffdy😀");
+    expect(reopened.conversationDetail(conversation.id)?.reasonings[0]?.content)
+      .toBe("\ufffdreason\0");
+    reopened.settleAgentTurn(turn.id, {
+      status: "completed",
+      terminalAssistantMessageId: assistant.id,
+      terminalReason: "completed",
+    });
+    reopened.close();
+
+    const compacted = new Database(current.databasePath, { readonly: true });
+    expect((compacted.prepare(
+      "SELECT content FROM messages WHERE id = ?",
+    ).get(assistant.id) as { content: string }).content).toBe("prefix:\ufffd\0x\ufffdy😀");
+    expect((compacted.prepare(
+      "SELECT content FROM agent_reasonings WHERE id = ?",
+    ).get(reasoning.id) as { content: string }).content).toBe("\ufffdreason\0");
+    compacted.close();
   });
 
   it("writes linear chunks, reconstructs exact ordering after restart, and compacts at settlement", () => {
@@ -353,23 +422,24 @@ describe("append-oriented stream text persistence", () => {
     database.close();
   });
 
-  it("upgrades a schema-37 database without rewriting existing message values", () => {
+  it("upgrades a schema-41 database without rewriting existing message values", () => {
     const current = runtime();
     const project = current.store.createProject("Upgrade", current.directory);
     const conversation = current.store.createConversation(project.id, "Upgrade");
     const message = current.store.createMessage(
       conversation.id,
-      "schema-37 content",
+      "schema-41 content",
       "assistant",
     );
     current.store.close();
 
     const old = new Database(current.databasePath);
     old.exec(`
+      DROP TABLE recovery_import_journals;
       DROP TABLE recovery_import_receipts;
       DROP TABLE message_content_chunks;
       DROP TABLE reasoning_content_chunks;
-      DELETE FROM schema_migrations WHERE version >= 38;
+      DELETE FROM schema_migrations WHERE version >= 42;
     `);
     old.close();
 
@@ -378,10 +448,10 @@ describe("append-oriented stream text persistence", () => {
       current.directory,
       { recoverInterruptedRuns: false },
     );
-    expect(upgraded.message(message.id).content).toBe("schema-37 content");
+    expect(upgraded.message(message.id).content).toBe("schema-41 content");
     upgraded.appendMessageContent(message.id, " plus chunk");
     expect(upgraded.message(message.id).content)
-      .toBe("schema-37 content plus chunk");
+      .toBe("schema-41 content plus chunk");
     upgraded.close();
 
     const database = new Database(current.databasePath, { readonly: true });
@@ -399,10 +469,10 @@ describe("append-oriented stream text persistence", () => {
     database.close();
   });
 
-  it("upgrades schema-39 chunk rows before accepting NUL-safe appends", () => {
+  it("upgrades schema-43 chunk rows before accepting NUL-safe appends", () => {
     const current = runtime();
-    const project = current.store.createProject("Schema 39", current.directory);
-    const conversation = current.store.createConversation(project.id, "Schema 39");
+    const project = current.store.createProject("Schema 43", current.directory);
+    const conversation = current.store.createConversation(project.id, "Schema 43");
     const message = current.store.createMessage(
       conversation.id,
       "base:",
@@ -414,31 +484,31 @@ describe("append-oriented stream text persistence", () => {
     const old = new Database(current.databasePath);
     old.exec(`
       DROP INDEX message_content_chunks_message_sequence_idx;
-      ALTER TABLE message_content_chunks RENAME TO message_content_chunks_v40_source;
+      ALTER TABLE message_content_chunks RENAME TO message_content_chunks_v44_source;
       CREATE TABLE message_content_chunks (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
         content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 1048576)
       );
       INSERT INTO message_content_chunks (sequence, message_id, content)
-      SELECT sequence, message_id, content FROM message_content_chunks_v40_source;
-      DROP TABLE message_content_chunks_v40_source;
+      SELECT sequence, message_id, content FROM message_content_chunks_v44_source;
+      DROP TABLE message_content_chunks_v44_source;
       CREATE INDEX message_content_chunks_message_sequence_idx
         ON message_content_chunks(message_id, sequence ASC);
 
       DROP INDEX reasoning_content_chunks_reasoning_sequence_idx;
-      ALTER TABLE reasoning_content_chunks RENAME TO reasoning_content_chunks_v40_source;
+      ALTER TABLE reasoning_content_chunks RENAME TO reasoning_content_chunks_v44_source;
       CREATE TABLE reasoning_content_chunks (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         reasoning_id TEXT NOT NULL REFERENCES agent_reasonings(id) ON DELETE CASCADE,
         content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 1048576)
       );
       INSERT INTO reasoning_content_chunks (sequence, reasoning_id, content)
-      SELECT sequence, reasoning_id, content FROM reasoning_content_chunks_v40_source;
-      DROP TABLE reasoning_content_chunks_v40_source;
+      SELECT sequence, reasoning_id, content FROM reasoning_content_chunks_v44_source;
+      DROP TABLE reasoning_content_chunks_v44_source;
       CREATE INDEX reasoning_content_chunks_reasoning_sequence_idx
         ON reasoning_content_chunks(reasoning_id, sequence ASC);
-      DELETE FROM schema_migrations WHERE version = 40;
+      DELETE FROM schema_migrations WHERE version = 44;
     `);
     old.close();
 

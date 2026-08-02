@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 
@@ -146,6 +146,12 @@ export interface RuntimeOptions {
   agentHarnessRegistry?: AgentHarnessRegistry;
   /** Main-owned root-relative file broker for untrusted workspace paths. */
   secureFiles?: RuntimeSecureFileBroker;
+  /** Privileged deterministic lifecycle fault; never renderer-controlled. */
+  recoveryImportFault?: {
+    phase: "after-staging-publish";
+    markerPath: string;
+    stallMs: number;
+  };
 }
 
 export interface RuntimeBackendCredentialBroker {
@@ -178,6 +184,8 @@ export interface RunningRuntime {
   importRecoveryData: (
     path: string,
     targetDirectory: string,
+    signal?: AbortSignal,
+    operationId?: string,
   ) => Promise<DatabaseRecoveryImportResult>;
   close: (cause?: "runtime-shutdown" | "runtime-crash") => Promise<void>;
 }
@@ -190,6 +198,34 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     options.defaultWorkspacePath,
     { recoverInterruptedRuns: false },
   );
+  const recoveryImportFault = process.env.NODE_ENV === "test"
+    ? options.recoveryImportFault
+    : undefined;
+  const afterStagingPublish = recoveryImportFault
+    ? () => {
+        try {
+          writeFileSync(
+            recoveryImportFault.markerPath,
+            "staging-published\n",
+            { encoding: "utf8", flag: "wx", mode: 0o600 },
+          );
+        } catch (error) {
+          if (
+            typeof error === "object"
+            && error !== null
+            && "code" in error
+            && error.code === "EEXIST"
+          ) return;
+          throw error;
+        }
+        Atomics.wait(
+          new Int32Array(new SharedArrayBuffer(4)),
+          0,
+          0,
+          recoveryImportFault.stallMs,
+        );
+      }
+    : undefined;
   store.startBackups();
   const secureFiles: RuntimeSecureFileBroker = options.secureFiles ?? {
     authorizeRoot: async () => {
@@ -820,10 +856,17 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         { signal },
       );
     },
-    importRecoveryData: async (path, targetDirectory) => {
-      const result = store.importRecoveryData(
-        await readDatabaseRecoveryExportFile(path),
+    importRecoveryData: async (path, targetDirectory, signal, operationId) => {
+      const result = await store.importRecoveryData(
+        await readDatabaseRecoveryExportFile(path, { signal }),
         targetDirectory,
+        {
+          signal,
+          operationId,
+          ...(afterStagingPublish
+            ? { operations: { afterStagingPublish } }
+            : {}),
+        },
       );
       broadcastSnapshot();
       return result;

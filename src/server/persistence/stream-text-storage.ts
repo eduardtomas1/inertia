@@ -5,7 +5,52 @@ import type Database from "better-sqlite3";
 export const STREAM_TEXT_CHUNK_MAX_CHARACTERS = 1_048_576;
 export const STREAM_TEXT_CHUNK_MAX_BYTES = 4 * 1_048_576;
 
+/**
+ * SQLite stores TEXT as Unicode encoded through UTF-8. JavaScript strings can
+ * additionally contain unpaired UTF-16 surrogates, which SQLite replaces on
+ * insertion. Normalize that unrepresentable input before both projection and
+ * persistence so live, restart, and terminal-compaction views stay identical.
+ */
+export function normalizeStreamText(value: string): string {
+  let normalized = "";
+  let copyFrom = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        index += 1;
+        continue;
+      }
+    } else if (unit < 0xdc00 || unit > 0xdfff) {
+      continue;
+    }
+    normalized += value.slice(copyFrom, index);
+    normalized += "\ufffd";
+    copyFrom = index + 1;
+  }
+  return copyFrom === 0 ? value : normalized + value.slice(copyFrom);
+}
+
+function assertNormalizedStreamText(value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        index += 1;
+        continue;
+      }
+      throw new Error("Stream text must be normalized before durable storage.");
+    }
+    if (unit >= 0xdc00 && unit <= 0xdfff) {
+      throw new Error("Stream text must be normalized before durable storage.");
+    }
+  }
+}
+
 export function splitStreamTextChunks(value: string): string[] {
+  assertNormalizedStreamText(value);
   if (!value) return [];
   const chunks: string[] = [];
   let start = 0;
@@ -122,6 +167,7 @@ export function replaceMessageContent(
   messageId: string,
   content: string,
 ): number {
+  assertNormalizedStreamText(content);
   return database.transaction(() => {
     const result = database.prepare(
       "UPDATE messages SET content = ? WHERE id = ?",
@@ -171,6 +217,7 @@ export function replaceReasoningContent(
   content: string,
   status: string,
 ): number {
+  assertNormalizedStreamText(content);
   return database.transaction(() => {
     const result = database.prepare(
       "UPDATE agent_reasonings SET content = ?, status = ? WHERE id = ?",

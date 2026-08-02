@@ -1,13 +1,3 @@
-import { createHash } from "node:crypto";
-import {
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  realpathSync,
-  rmdirSync,
-} from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
-
 import Database from "better-sqlite3";
 
 import {
@@ -54,28 +44,23 @@ import {
 } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import {
-  conversationFromRow,
-  messageFromRow,
-  projectFromRow,
-} from "./persistence/codecs";
-import {
   DatabaseBackupManager,
   type DatabaseBackupResult,
   type DatabaseRecoveryReport,
   recoverDatabaseOnStartup,
 } from "./persistence/database-recovery";
 import {
-  DATABASE_RECOVERY_EXPORT_FORMAT,
+  reconcileRecoveryImportJournal,
+} from "./persistence/database-recovery-import";
+import {
   DATABASE_RECOVERY_EXPORT_MAX_BYTES,
-  DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS,
-  DATABASE_RECOVERY_EXPORT_MAX_MESSAGES,
-  DATABASE_RECOVERY_EXPORT_MAX_PROJECTS,
-  DATABASE_RECOVERY_EXPORT_VERSION,
-  type DatabaseRecoveryExport,
   type DatabaseRecoveryImportResult,
-  parseDatabaseRecoveryExport,
-  serializeDatabaseRecoveryExport,
 } from "./persistence/database-export";
+import {
+  exportDatabaseRecoveryData,
+  importDatabaseRecoveryData,
+  type DatabaseRecoveryImportOptions,
+} from "./persistence/database-recovery-store";
 import { RecordNotFoundError } from "./persistence/errors";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
@@ -97,10 +82,8 @@ import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
 import type {
   AgentTurnRow,
   ConversationRow,
-  MessageRow,
   ProjectRow,
 } from "./persistence/rows";
-import { MESSAGE_PROJECTION_COLUMNS } from "./persistence/stream-text-storage";
 import type {
   AgentTurnLifecycleUpdate,
   AgentTurnSettlementResult,
@@ -136,35 +119,6 @@ export type {
   UpsertSubagentTraceInput,
   UpsertSubagentTraceResult,
 } from "./persistence/types";
-
-function verifyRecoveredProjectDirectory(path: string, root: string): string {
-  const metadata = lstatSync(path);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-    throw new Error("The recovered project destination is not a local directory.");
-  }
-  const canonical = resolve(realpathSync(path));
-  const child = relative(root, canonical);
-  if (
-    !child
-    || child === ".."
-    || child.startsWith(`..${sep}`)
-    || isAbsolute(child)
-  ) {
-    throw new Error("The recovered project destination escaped its authorized folder.");
-  }
-  return canonical;
-}
-
-function removeEmptyOwnedDirectories(paths: readonly string[]): void {
-  for (const path of [...paths].reverse()) {
-    try {
-      const metadata = lstatSync(path);
-      if (metadata.isDirectory() && !metadata.isSymbolicLink()) rmdirSync(path);
-    } catch {
-      // Never recursively remove a directory that gained external contents.
-    }
-  }
-}
 
 export class RuntimeStore {
   private readonly database: Database.Database;
@@ -303,6 +257,7 @@ export class RuntimeStore {
       this.database.pragma("mmap_size = 268435456");
       this.database.pragma("temp_store = MEMORY");
       this.migrate();
+      reconcileRecoveryImportJournal(this.database);
       this.initializeState();
       if (options.recoverInterruptedRuns !== false) this.recoverInterruptedRuns();
     } catch (error) {
@@ -329,302 +284,48 @@ export class RuntimeStore {
   }
 
   exportRecoveryData(): string {
-    const counts = this.database.prepare(`
-      SELECT
-        (SELECT COUNT(*) FROM projects) AS projects,
-        (SELECT COUNT(*) FROM conversations) AS conversations,
-        (SELECT COUNT(*) FROM messages) AS messages
-    `).get() as {
-      projects: number;
-      conversations: number;
-      messages: number;
-    };
-    if (
-      counts.projects > DATABASE_RECOVERY_EXPORT_MAX_PROJECTS
-      || counts.conversations > DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS
-      || counts.messages > DATABASE_RECOVERY_EXPORT_MAX_MESSAGES
-    ) {
-      throw new Error("The recovery export contains too many records.");
-    }
-    // Any UTF-8 source byte expands to at most six JSON bytes (for example a
-    // NUL becomes "\\u0000"). Include a conservative per-record allowance
-    // for keys, punctuation, and pretty-print indentation before fetching any
-    // reconstructed message projections into the JS heap.
-    let sourceBytes = 1_024
-      + counts.projects * 256
-      + counts.conversations * 384
-      + counts.messages * 160;
-    const sourceByteTotal = this.database.prepare(`
-      SELECT COALESCE(SUM(bytes), 0) AS bytes FROM (
-        SELECT
-          length(CAST(name AS BLOB))
-            + length(CAST(path AS BLOB))
-            + 64 AS bytes
-        FROM projects
-        UNION ALL
-        SELECT
-          length(CAST(title AS BLOB))
-            + length(CAST(provider_id AS BLOB))
-            + length(CAST(model AS BLOB))
-            + length(CAST(reasoning_effort AS BLOB))
-            + length(CAST(interaction_mode AS BLOB))
-            + length(CAST(access_mode AS BLOB))
-            + 64 AS bytes
-        FROM conversations
-        UNION ALL
-        SELECT
-          length(CAST(role AS BLOB))
-            + length(CAST(content AS BLOB))
-            + length(CAST(created_at AS BLOB))
-            + 64 AS bytes
-        FROM messages
-        UNION ALL
-        SELECT length(CAST(content AS BLOB)) AS bytes
-        FROM message_content_chunks
-      )
-    `).get() as { bytes: unknown };
-    if (
-      typeof sourceByteTotal.bytes !== "number"
-      || !Number.isSafeInteger(sourceByteTotal.bytes)
-      || sourceByteTotal.bytes < 0
-    ) {
-      throw new Error("The recovery export size could not be bounded safely.");
-    }
-    sourceBytes += sourceByteTotal.bytes * 6;
-    if (!Number.isSafeInteger(sourceBytes)) {
-      throw new Error("The recovery export size could not be bounded safely.");
-    }
-    if (sourceBytes > this.recoveryExportMaxBytes) {
-      throw new Error("The recovery export exceeds its safe size limit.");
-    }
-    const rows = this.database.transaction(() => ({
-      projects: this.database.prepare(
-        "SELECT * FROM projects ORDER BY updated_at DESC, id ASC",
-      ).all() as ProjectRow[],
-      conversations: this.database.prepare(
-        "SELECT * FROM conversations ORDER BY updated_at DESC, id ASC",
-      ).all() as ConversationRow[],
-      messages: this.database.prepare(`
-        SELECT ${MESSAGE_PROJECTION_COLUMNS}
-        FROM messages
-        ORDER BY messages.created_at ASC, messages.id ASC
-      `).all() as MessageRow[],
-    }))();
-    const projects = rows.projects.map(projectFromRow);
-    const conversations = rows.conversations.map(conversationFromRow);
-    const messages = rows.messages.map(messageFromRow);
-    const conversationsByProject = new Map<string, typeof conversations>();
-    for (const conversation of conversations) {
-      const grouped = conversationsByProject.get(conversation.projectId);
-      if (grouped) grouped.push(conversation);
-      else conversationsByProject.set(conversation.projectId, [conversation]);
-    }
-    const messagesByConversation = new Map<string, typeof messages>();
-    for (const message of messages) {
-      const grouped = messagesByConversation.get(message.conversationId);
-      if (grouped) grouped.push(message);
-      else messagesByConversation.set(message.conversationId, [message]);
-    }
-    let estimatedBytes = 1_024;
-    const account = (value: unknown): void => {
-      estimatedBytes += Buffer.byteLength(JSON.stringify(value), "utf8") + 64;
-      if (estimatedBytes > this.recoveryExportMaxBytes) {
-        throw new Error("The recovery export exceeds its safe size limit.");
-      }
-    };
-    const value: DatabaseRecoveryExport = {
-      format: DATABASE_RECOVERY_EXPORT_FORMAT,
-      version: DATABASE_RECOVERY_EXPORT_VERSION,
-      exportedAt: new Date().toISOString(),
-      projects: projects.map((project) => {
-        account({ name: project.name, path: project.path });
-        return {
-          name: project.name,
-          path: project.path,
-          conversations: (conversationsByProject.get(project.id) ?? [])
-            .map((conversation) => {
-              account({
-                title: conversation.title,
-                providerId: conversation.providerId,
-                model: conversation.model,
-                reasoningEffort: conversation.reasoningEffort,
-                interactionMode: conversation.interactionMode,
-                accessMode: conversation.accessMode,
-              });
-              return {
-                title: conversation.title,
-                providerId: conversation.providerId,
-                model: conversation.model,
-                reasoningEffort: conversation.reasoningEffort,
-                interactionMode: conversation.interactionMode,
-                accessMode: conversation.accessMode,
-                messages: (messagesByConversation.get(conversation.id) ?? [])
-                  .map((message) => {
-                  const exportedMessage = {
-                    role: message.role,
-                    content: message.content,
-                    createdAt: message.createdAt,
-                  };
-                  account(exportedMessage);
-                  return exportedMessage;
-                }),
-              };
-            }),
-        };
-      }),
-    };
-    return serializeDatabaseRecoveryExport(value);
+    return exportDatabaseRecoveryData(
+      this.database,
+      this.recoveryExportMaxBytes,
+    );
   }
 
-  importRecoveryData(
+  async importRecoveryData(
     serialized: string,
     authorizedRoot: string,
-  ): DatabaseRecoveryImportResult {
-    if (!isAbsolute(authorizedRoot) || authorizedRoot.includes("\0")) {
-      throw new Error("The recovery import destination is invalid.");
-    }
-    const rootMetadata = lstatSync(authorizedRoot);
-    if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
-      throw new Error("The recovery import destination is not a local directory.");
-    }
-    const resolvedRoot = resolve(realpathSync(authorizedRoot));
-    const recovery = parseDatabaseRecoveryExport(serialized);
-    const digest = createHash("sha256")
-      .update(serialized, "utf8")
-      .update("\0", "utf8")
-      .update(resolvedRoot, "utf8")
-      .digest("hex");
-    const existingReceipt = this.database.prepare(`
-      SELECT projects, conversations, messages
-      FROM recovery_import_receipts WHERE digest = ?
-    `).get(digest) as {
-      projects: number;
-      conversations: number;
-      messages: number;
-    } | undefined;
-    if (existingReceipt) return { ...existingReceipt, alreadyImported: true };
-
-    const createdDirectories: string[] = [];
-    const remappedPaths: string[] = [];
-    try {
-      for (const projectIndex of recovery.projects.keys()) {
-        const remappedPath = join(
-          resolvedRoot,
-          `recovered-${digest.slice(0, 12)}-${projectIndex + 1}`,
-        );
-        if (remappedPath.length > 4_096) {
-          throw new Error("The recovery import destination path is too long.");
-        }
-        try {
-          mkdirSync(remappedPath, { mode: 0o700 });
-          createdDirectories.push(remappedPath);
-        } catch (error) {
-          if (
-            typeof error !== "object"
-            || error === null
-            || !("code" in error)
-            || error.code !== "EEXIST"
-          ) throw error;
-          if (readdirSync(remappedPath).length > 0) {
-            throw new Error("The recovered project destination is not empty.");
-          }
-        }
-        remappedPaths.push(verifyRecoveredProjectDirectory(
-          remappedPath,
-          resolvedRoot,
-        ));
-      }
-    } catch (error) {
-      removeEmptyOwnedDirectories(createdDirectories);
-      throw error;
-    }
-
-    try {
-      return this.database.transaction(() => {
-        const receipt = this.database.prepare(`
-          SELECT projects, conversations, messages
-          FROM recovery_import_receipts WHERE digest = ?
-        `).get(digest) as {
-          projects: number;
-          conversations: number;
-          messages: number;
-        } | undefined;
-        if (receipt) return { ...receipt, alreadyImported: true };
-        const active = this.database.prepare(`
-          SELECT active_project_id, active_conversation_id
-          FROM app_state WHERE id = 1
-        `).get() as {
-          active_project_id: string | null;
-          active_conversation_id: string | null;
-        };
-        let conversationCount = 0;
-        let messageCount = 0;
-        for (const [projectIndex, importedProject] of recovery.projects.entries()) {
-          const remappedPath = verifyRecoveredProjectDirectory(
-            remappedPaths[projectIndex]!,
-            resolvedRoot,
+    options: DatabaseRecoveryImportOptions = {},
+  ): Promise<DatabaseRecoveryImportResult> {
+    return importDatabaseRecoveryData(
+      this.database,
+      serialized,
+      authorizedRoot,
+      {
+        createProject: (project, path) =>
+          this.createProject(project.name, path).id,
+        createConversation: (projectId, conversation) =>
+          this.createConversation(projectId, conversation.title, {
+            providerId: conversation.providerId,
+            model: conversation.model || "provider-default",
+            reasoningEffort: conversation.reasoningEffort,
+            interactionMode: conversation.interactionMode,
+            // Exported authorization is never authoritative on this device.
+            accessMode: "supervised",
+            activate: false,
+          }).id,
+        createMessage: (conversationId, message) => {
+          this.createMessage(
+            conversationId,
+            message.content,
+            message.role,
+            [],
+            null,
+            message.createdAt,
+            { activateConversation: false },
           );
-          const project = this.createProject(
-            importedProject.name,
-            remappedPath,
-          );
-          for (const importedConversation of importedProject.conversations) {
-            const conversation = this.createConversation(
-              project.id,
-              importedConversation.title,
-              {
-                providerId: importedConversation.providerId,
-                model: importedConversation.model || "provider-default",
-                reasoningEffort: importedConversation.reasoningEffort,
-                interactionMode: importedConversation.interactionMode,
-                // Exported authorization is never authoritative on this device.
-                accessMode: "supervised",
-                activate: false,
-              },
-            );
-            conversationCount += 1;
-            for (const importedMessage of importedConversation.messages) {
-              this.createMessage(
-                conversation.id,
-                importedMessage.content,
-                importedMessage.role,
-                [],
-                null,
-                importedMessage.createdAt,
-                { activateConversation: false },
-              );
-              messageCount += 1;
-            }
-          }
-        }
-        this.database.prepare(`
-          UPDATE app_state
-          SET active_project_id = ?, active_conversation_id = ?
-          WHERE id = 1
-        `).run(active.active_project_id, active.active_conversation_id);
-        const summary = {
-          projects: recovery.projects.length,
-          conversations: conversationCount,
-          messages: messageCount,
-          alreadyImported: false,
-        };
-        this.database.prepare(`
-          INSERT INTO recovery_import_receipts (
-            digest, projects, conversations, messages, imported_at
-          ) VALUES (?, ?, ?, ?, ?)
-        `).run(
-          digest,
-          summary.projects,
-          summary.conversations,
-          summary.messages,
-          new Date().toISOString(),
-        );
-        return summary;
-      })();
-    } catch (error) {
-      removeEmptyOwnedDirectories(createdDirectories);
-      throw error;
-    }
+        },
+      },
+      options,
+    );
   }
 
   async backupAndClose(): Promise<void> {

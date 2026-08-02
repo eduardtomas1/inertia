@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import {
   existsSync,
   mkdtempSync,
@@ -8,7 +9,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { open } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -71,7 +72,7 @@ describe("safe database recovery exports", () => {
     reopened.close();
   });
 
-  it("round-trips projects and messages under fresh identities", () => {
+  it("round-trips projects and messages under fresh identities", async () => {
     const sourceDirectory = temporaryDirectory();
     const source = new RuntimeStore(
       join(sourceDirectory, "inertia.sqlite"),
@@ -134,7 +135,7 @@ describe("safe database recovery exports", () => {
       "Existing chat",
     );
     const authorizedRoot = temporaryDirectory();
-    const result = destination.importRecoveryData(serialized, authorizedRoot);
+    const result = await destination.importRecoveryData(serialized, authorizedRoot);
     expect(result).toEqual({
       projects: 1,
       conversations: 1,
@@ -151,7 +152,7 @@ describe("safe database recovery exports", () => {
       ({ title }) => title === "Exported chat",
     );
     expect(importedProject?.id).not.toBe(project.id);
-    expect(dirname(importedProject!.path)).toBe(realpathSync(authorizedRoot));
+    expect(dirname(dirname(importedProject!.path))).toBe(realpathSync(authorizedRoot));
     expect(realpathSync(importedProject!.path)).toBe(importedProject!.path);
     expect(importedProject?.path).not.toBe(sourceDirectory);
     expect(importedConversation?.id).not.toBe(conversation.id);
@@ -178,7 +179,7 @@ describe("safe database recovery exports", () => {
           createdAt: "2026-01-02T03:04:06.000Z",
         },
       ]);
-    const duplicate = destination.importRecoveryData(serialized, authorizedRoot);
+    const duplicate = await destination.importRecoveryData(serialized, authorizedRoot);
     expect(duplicate).toEqual({
       projects: 1,
       conversations: 1,
@@ -189,7 +190,7 @@ describe("safe database recovery exports", () => {
     destination.close();
   });
 
-  it("rejects malformed or extended exports before changing the database", () => {
+  it("rejects malformed or extended exports before changing the database", async () => {
     const directory = temporaryDirectory();
     const store = new RuntimeStore(
       join(directory, "inertia.sqlite"),
@@ -203,27 +204,114 @@ describe("safe database recovery exports", () => {
       exportedAt: new Date().toISOString(),
       projects: [],
     };
-    expect(() => store.importRecoveryData(JSON.stringify({
+    await expect(store.importRecoveryData(JSON.stringify({
       ...valid,
       unexpected: "must be rejected",
-    }), directory)).toThrow(/supported format/u);
-    expect(() => store.importRecoveryData(JSON.stringify({
+    }), directory)).rejects.toThrow(/supported format/u);
+    await expect(store.importRecoveryData(JSON.stringify({
       ...valid,
       exportedAt: "not-an-iso-timestamp",
-    }), directory)).toThrow(/supported format/u);
-    expect(() => store.importRecoveryData(JSON.stringify({
+    }), directory)).rejects.toThrow(/supported format/u);
+    await expect(store.importRecoveryData(JSON.stringify({
       ...valid,
       projects: [{
-        name: "unsafe path",
-        path: "relative/project",
+        name: "unsafe path identity",
+        path: "relative/\0project",
         conversations: [],
       }],
-    }), directory)).toThrow(/supported format/u);
+    }), directory)).rejects.toThrow(/supported format/u);
     expect(store.shellSnapshot()).toEqual(before);
     store.close();
   });
 
-  it("removes newly created project directories when the database import rolls back", () => {
+  it.each([
+    ["Windows", "C:\\Users\\Alice\\portable-project"],
+    ["POSIX", "/home/alice/portable-project"],
+  ])("imports %s source paths as unused informational identity", async (_sourceOs, sourcePath) => {
+    const dataDirectory = temporaryDirectory();
+    const authorizedRoot = temporaryDirectory();
+    const store = new RuntimeStore(
+      join(dataDirectory, "inertia.sqlite"),
+      dataDirectory,
+      { recoverInterruptedRuns: false },
+    );
+    const serialized = JSON.stringify({
+      format: "inertia-recovery-export",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      projects: [{
+        name: "Portable source",
+        path: sourcePath,
+        conversations: [],
+      }],
+    });
+
+    await store.importRecoveryData(serialized, authorizedRoot);
+    const importedPath = store.shellSnapshot().projects[0]!.path;
+    expect(dirname(dirname(importedPath))).toBe(realpathSync(authorizedRoot));
+    expect(importedPath).not.toBe(sourcePath);
+    expect(existsSync(importedPath)).toBe(true);
+    store.close();
+  });
+
+  it("rejects imports into an FK-invalid database and rolls back created records and folders", async () => {
+    const dataDirectory = temporaryDirectory();
+    const authorizedRoot = temporaryDirectory();
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Existing", dataDirectory);
+    const conversation = store.createConversation(project.id, "Existing");
+    store.createMessage(conversation.id, "orphaned", "user");
+    const tamper = new Database(databasePath);
+    tamper.pragma("foreign_keys = OFF");
+    tamper.prepare(
+      "UPDATE messages SET conversation_id = 'missing-conversation'",
+    ).run();
+    tamper.close();
+    const serialized = JSON.stringify({
+      format: "inertia-recovery-export",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      projects: [{
+        name: "Must roll back",
+        path: "C:\\informational\\source",
+        conversations: [],
+      }],
+    });
+
+    await expect(store.importRecoveryData(serialized, authorizedRoot))
+      .rejects.toThrow(/invalid relationships/u);
+    expect(store.shellSnapshot().projects.map(({ name }) => name))
+      .toEqual(["Existing"]);
+    expect(readdirSync(authorizedRoot)).toEqual([]);
+    store.close();
+  });
+
+  it.each([
+    ["project", "DELETE FROM projects"],
+    ["conversation", "DELETE FROM conversations"],
+    ["message", "UPDATE messages SET conversation_id = 'missing-conversation'"],
+  ])("rejects exports containing an orphaned %s relationship", (_kind, statement) => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Orphan source", directory);
+    const conversation = store.createConversation(project.id, "Orphan source");
+    store.createMessage(conversation.id, "must not disappear", "user");
+    const tamper = new Database(databasePath);
+    tamper.pragma("foreign_keys = OFF");
+    tamper.exec(statement);
+    tamper.close();
+
+    expect(() => store.exportRecoveryData()).toThrow(/invalid relationships/u);
+    store.close();
+  });
+
+  it("removes newly created project directories when the database import rolls back", async () => {
     const dataDirectory = temporaryDirectory();
     const authorizedRoot = temporaryDirectory();
     const databasePath = join(dataDirectory, "inertia.sqlite");
@@ -250,14 +338,150 @@ describe("safe database recovery exports", () => {
       }],
     });
 
-    expect(() => store.importRecoveryData(serialized, authorizedRoot))
-      .toThrow("injected recovery import failure");
+    await expect(store.importRecoveryData(serialized, authorizedRoot))
+      .rejects.toThrow("injected recovery import failure");
     expect(store.shellSnapshot().projects).toHaveLength(0);
     expect(readdirSync(authorizedRoot)).toEqual([]);
     store.close();
   });
 
-  it("ignores hostile exported paths and full-access grants after folder authorization", () => {
+  it("reconciles staged directories after forced worker death before retrying", async () => {
+    const dataDirectory = temporaryDirectory();
+    const authorizedRoot = temporaryDirectory();
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const initialized = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    initialized.close();
+    const operationId = "11111111-1111-4111-8111-111111111111";
+    const digest = "a".repeat(64);
+    const script = `
+      const Database = require("better-sqlite3");
+      const { mkdirSync } = require("node:fs");
+      const { join } = require("node:path");
+      const [databasePath, authorizedRoot, operationId, digest] = process.argv.slice(1);
+      const database = new Database(databasePath);
+      database.prepare(\`
+        INSERT INTO recovery_import_journals (
+          singleton, operation_id, digest, authorized_root, projects, created_at
+        ) VALUES (1, ?, ?, ?, 3, ?)
+      \`).run(operationId, digest, authorizedRoot, new Date().toISOString());
+      const staging = join(authorizedRoot, \`.inertia-recovery-\${operationId}.partial\`);
+      mkdirSync(staging, { mode: 0o700 });
+      for (let ordinal = 1; ordinal <= 3; ordinal += 1) {
+        mkdirSync(join(staging, \`project-\${String(ordinal).padStart(5, "0")}\`), {
+          mode: 0o700,
+        });
+      }
+      process.stdout.write("staged\\n");
+      setInterval(() => {}, 1000);
+    `;
+    const child = spawn(
+      process.execPath,
+      ["-e", script, databasePath, realpathSync(authorizedRoot), operationId, digest],
+      { cwd: process.cwd(), stdio: ["ignore", "pipe", "inherit"] },
+    );
+    await new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.stdout!.once("data", () => resolve());
+    });
+    child.kill("SIGKILL");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    expect(readdirSync(authorizedRoot)).toEqual([
+      `.inertia-recovery-${operationId}.partial`,
+    ]);
+
+    const restarted = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(readdirSync(authorizedRoot)).toEqual([]);
+    const serialized = JSON.stringify({
+      format: "inertia-recovery-export",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      projects: Array.from({ length: 3 }, (_unused, index) => ({
+        name: `Recovered ${index + 1}`,
+        path: `/informational/project-${index + 1}`,
+        conversations: [],
+      })),
+    });
+    const result = await restarted.importRecoveryData(
+      serialized,
+      authorizedRoot,
+      { operationId: "22222222-2222-4222-8222-222222222222" },
+    );
+    expect(result).toMatchObject({ projects: 3, alreadyImported: false });
+    expect(restarted.shellSnapshot().projects.every(
+      ({ path }) => existsSync(path),
+    )).toBe(true);
+    expect(readdirSync(authorizedRoot)).toEqual([
+      "recovered-22222222-2222-4222-8222-222222222222",
+    ]);
+    restarted.close();
+    const database = new Database(databasePath, { readonly: true });
+    expect((database.prepare(
+      "SELECT COUNT(*) AS count FROM recovery_import_journals",
+    ).get() as { count: number }).count).toBe(0);
+    database.close();
+  });
+
+  it("cancels asynchronous directory staging and removes the durable journal", async () => {
+    const dataDirectory = temporaryDirectory();
+    const authorizedRoot = temporaryDirectory();
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    const controller = new AbortController();
+    let stagingStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      stagingStarted = resolve;
+    });
+    const injectedMkdir = (async (
+      path: Parameters<typeof mkdir>[0],
+      options: Parameters<typeof mkdir>[1],
+    ) => {
+      const result = await mkdir(path, options);
+      if (String(path).endsWith("project-00001")) {
+        stagingStarted();
+        await new Promise<void>((_resolve, reject) => {
+          const cancel = () => reject(controller.signal.reason);
+          if (controller.signal.aborted) cancel();
+          else controller.signal.addEventListener("abort", cancel, { once: true });
+        });
+      }
+      return result;
+    }) as typeof mkdir;
+    const serialized = JSON.stringify({
+      format: "inertia-recovery-export",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      projects: Array.from({ length: 20 }, (_unused, index) => ({
+        name: `Cancelled ${index + 1}`,
+        path: `/informational/cancelled-${index + 1}`,
+        conversations: [],
+      })),
+    });
+    const pending = store.importRecoveryData(serialized, authorizedRoot, {
+      signal: controller.signal,
+      operationId: "33333333-3333-4333-8333-333333333333",
+      operations: { mkdir: injectedMkdir },
+    });
+    await started;
+    controller.abort(new Error("cancel staged import"));
+
+    await expect(pending).rejects.toThrow("cancel staged import");
+    expect(store.shellSnapshot().projects).toHaveLength(0);
+    expect(readdirSync(authorizedRoot)).toEqual([]);
+    store.close();
+    const database = new Database(databasePath, { readonly: true });
+    expect((database.prepare(
+      "SELECT COUNT(*) AS count FROM recovery_import_journals",
+    ).get() as { count: number }).count).toBe(0);
+    database.close();
+  });
+
+  it("ignores hostile exported paths and full-access grants after folder authorization", async () => {
     const dataDirectory = temporaryDirectory();
     const authorizedRoot = temporaryDirectory();
     const store = new RuntimeStore(
@@ -292,11 +516,11 @@ describe("safe database recovery exports", () => {
       ],
     });
 
-    store.importRecoveryData(serialized, authorizedRoot);
+    await store.importRecoveryData(serialized, authorizedRoot);
     const snapshot = store.shellSnapshot();
     expect(snapshot.projects).toHaveLength(2);
     for (const project of snapshot.projects) {
-      expect(dirname(project.path)).toBe(realpathSync(authorizedRoot));
+      expect(dirname(dirname(project.path))).toBe(realpathSync(authorizedRoot));
       expect(project.path).not.toBe(dataDirectory);
       expect(project.path).not.toBe(process.platform === "win32" ? "C:\\" : "/");
     }
@@ -322,6 +546,32 @@ describe("safe database recovery exports", () => {
       .rejects.toThrow(/unavailable/u);
     await expect(writeDatabaseRecoveryExportFile(link, content))
       .rejects.toThrow(/not a local file/u);
+  });
+
+  it("cancels an in-flight recovery import read before any database mutation", async () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "recovery.json");
+    writeFileSync(path, "{\"projects\":[]}");
+    const controller = new AbortController();
+    let reading = false;
+    const injectedReadFile = ((_path: unknown, options: { signal?: AbortSignal }) => {
+      reading = true;
+      return new Promise<string>((_resolve, reject) => {
+        options.signal?.addEventListener(
+          "abort",
+          () => reject(options.signal!.reason),
+          { once: true },
+        );
+      });
+    }) as typeof readFile;
+    const readingFile = readDatabaseRecoveryExportFile(path, {
+      signal: controller.signal,
+      operations: { readFile: injectedReadFile },
+    });
+    await vi.waitFor(() => expect(reading).toBe(true));
+    controller.abort(new Error("cancel import read"));
+
+    await expect(readingFile).rejects.toThrow("cancel import read");
   });
 
   it.each(["writeFile", "sync", "close"] as const)(

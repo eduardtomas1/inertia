@@ -114,16 +114,6 @@ export class TurnController {
       barriers: this.gitArtifactBarriers,
       track: (value) => this.track(value),
     });
-    this.settlement = new TurnSettlementCoordinator({
-      store: this.store,
-      hooks: this.hooks,
-      scheduler: this.scheduler,
-      activities: this.activities,
-      artifacts: this.artifacts,
-      now: () => this.now(),
-      cleanup: (active) => this.cleanup(active),
-      track: (value) => this.track(value),
-    });
     this.streams = new TurnStreamProjection({
       store: this.store,
       hooks: this.hooks,
@@ -138,6 +128,17 @@ export class TurnController {
           this.publicError(error),
         );
       },
+    });
+    this.settlement = new TurnSettlementCoordinator({
+      store: this.store,
+      hooks: this.hooks,
+      scheduler: this.scheduler,
+      activities: this.activities,
+      artifacts: this.artifacts,
+      streams: this.streams,
+      now: () => this.now(),
+      cleanup: (active) => this.cleanup(active),
+      track: (value) => this.track(value),
     });
     this.interactions = new TurnInteractionCoordinator({
       store: this.store,
@@ -184,6 +185,9 @@ export class TurnController {
     for (const active of this.activeByConversation.values()) {
       if (active.settled) continue;
       try {
+        // A pending high surrogate is an incomplete provider delta, not text
+        // that can be projected. Keep that single code unit across renderer
+        // hydration so the next delta can complete its astral character.
         active.assistantStream.flush();
         active.reasoningStream.flush();
       } catch (error) {

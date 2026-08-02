@@ -948,6 +948,7 @@ describe("atomic Duo schema migration", () => {
     "v38-upgrade",
     "v39-upgrade",
     "v40-upgrade",
+    "v41-upgrade",
   ] as const)(
     "installs active-launch deletion protection for a %s database",
     async (source) => {
@@ -961,6 +962,7 @@ describe("atomic Duo schema migration", () => {
       const retainedLaunchId = source === "v38-upgrade"
         || source === "v39-upgrade"
         || source === "v40-upgrade"
+        || source === "v41-upgrade"
         ? randomUUID()
         : null;
       if (retainedLaunchId) {
@@ -986,11 +988,11 @@ describe("atomic Duo schema migration", () => {
         `);
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version >= ?",
-        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 3);
+        ).run(38);
         expect((previous.prepare(
           "SELECT MAX(version) AS version FROM schema_migrations",
         ).get() as { version: number }).version).toBe(
-          CURRENT_DATABASE_SCHEMA_VERSION - 4,
+          37,
         );
         previous.close();
       } else if (source === "v38-upgrade") {
@@ -1013,7 +1015,7 @@ describe("atomic Duo schema migration", () => {
         `);
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version >= ?",
-        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 2);
+        ).run(39);
         previous.close();
       } else if (source === "v39-upgrade") {
         const previous = new Database(databasePath);
@@ -1032,7 +1034,7 @@ describe("atomic Duo schema migration", () => {
         `);
         previous.prepare(
           "DELETE FROM schema_migrations WHERE version >= ?",
-        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 1);
+        ).run(40);
         previous.close();
       } else if (source === "v40-upgrade") {
         const previous = new Database(databasePath);
@@ -1041,8 +1043,18 @@ describe("atomic Duo schema migration", () => {
             DROP COLUMN cleanup_filesystem_identity_json;
         `);
         previous.prepare(
-          "DELETE FROM schema_migrations WHERE version = ?",
-        ).run(CURRENT_DATABASE_SCHEMA_VERSION);
+          "DELETE FROM schema_migrations WHERE version >= ?",
+        ).run(41);
+        previous.close();
+      } else if (source === "v41-upgrade") {
+        const previous = new Database(databasePath);
+        previous.exec(`
+          DROP TABLE recovery_import_journals;
+          DROP TABLE recovery_import_receipts;
+          DROP TABLE message_content_chunks;
+          DROP TABLE reasoning_content_chunks;
+          DELETE FROM schema_migrations WHERE version >= 42;
+        `);
         previous.close();
       }
 

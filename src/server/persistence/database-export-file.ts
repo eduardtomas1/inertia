@@ -26,6 +26,11 @@ interface WriteDatabaseRecoveryExportFileOptions {
   operations?: Partial<RecoveryExportFileOperations>;
 }
 
+interface ReadDatabaseRecoveryExportFileOptions {
+  signal?: AbortSignal;
+  operations?: { readFile?: typeof readFile };
+}
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
     throw signal.reason instanceof Error
@@ -109,8 +114,11 @@ export async function writeDatabaseRecoveryExportFile(
 
 export async function readDatabaseRecoveryExportFile(
   path: string,
+  options: ReadDatabaseRecoveryExportFileOptions = {},
 ): Promise<string> {
+  throwIfAborted(options.signal);
   const metadata = await lstat(path);
+  throwIfAborted(options.signal);
   if (
     !metadata.isFile()
     || metadata.isSymbolicLink()
@@ -126,7 +134,11 @@ export async function readDatabaseRecoveryExportFile(
     if (!before.isFile() || before.size !== metadata.size) {
       throw new Error("The recovery export file changed while opening.");
     }
-    const content = await readFile(file, { encoding: "utf8" });
+    const content = await (options.operations?.readFile ?? readFile)(file, {
+      encoding: "utf8",
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+    throwIfAborted(options.signal);
     const after = await file.stat();
     if (
       after.size !== before.size

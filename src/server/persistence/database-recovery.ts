@@ -219,6 +219,22 @@ function validateOpenDatabase(
       "imported_at",
     ].some((column) => !receiptColumns.has(column))) return "corrupt";
   }
+  if (version >= 40) {
+    for (const table of [
+      "message_content_chunks",
+      "reasoning_content_chunks",
+    ]) {
+      const definition = database.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+      ).get(table) as { sql: unknown } | undefined;
+      const normalized = typeof definition?.sql === "string"
+        ? definition.sql.replace(/\s+/gu, "").toLowerCase()
+        : "";
+      if (!normalized.includes(
+        "check(length(cast(contentasblob))between1and4194304)",
+      )) return "corrupt";
+    }
+  }
   return "valid-current";
 }
 
@@ -253,18 +269,23 @@ function validateDatabaseOffThread(
     const Database = require(workerData.modulePath);
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
+    let result = "corrupt";
     try {
       database = new Database(workerData.path, { readonly: true, fileMustExist: true });
-      parentPort.postMessage({ result: validate(
+      result = validate(
         database,
         "integrity_check",
         workerData.currentSchemaVersion,
-      ) });
+      );
     } catch {
-      parentPort.postMessage({ result: "corrupt" });
+      result = "corrupt";
     } finally {
       if (database && database.open) database.close();
     }
+    // Receipt follows handle closure: Windows cannot publish the validated
+    // partial while any worker still holds the SQLite file open.
+    parentPort.postMessage({ result });
+    parentPort.close();
   `;
   return new Promise<DatabaseValidation>((resolveValidation, rejectValidation) => {
     const worker = new Worker(workerSource, {
@@ -275,23 +296,37 @@ function validateDatabaseOffThread(
         path,
       },
     });
+    let receivedResult: DatabaseValidation | undefined;
     let settled = false;
+    let stopping = false;
     const finish = (error: unknown, result?: DatabaseValidation): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal.removeEventListener("abort", cancel);
-      void worker.terminate();
       if (error !== undefined) rejectValidation(error);
       else resolveValidation(result ?? "corrupt");
     };
-    const cancel = (): void => finish(new DatabaseBackupCancelledError());
+    const stop = (error: unknown): void => {
+      if (settled || stopping) return;
+      stopping = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", cancel);
+      // Worker.terminate() resolves only after the thread has exited. Do not
+      // release the backup operation while Windows may still hold SQLite open.
+      void worker.terminate().then(
+        () => finish(error),
+        (terminationError: unknown) => finish(terminationError),
+      );
+    };
+    const cancel = (): void => stop(new DatabaseBackupCancelledError());
     const timer = setTimeout(
-      () => finish(new Error("The database backup validation timed out.")),
+      () => stop(new Error("The database backup validation timed out.")),
       DATABASE_BACKUP_VALIDATION_TIMEOUT_MS,
     );
     timer.unref();
     signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) cancel();
     worker.once("message", (message: unknown) => {
       const result = (
         message
@@ -303,11 +338,16 @@ function validateDatabaseOffThread(
           || message.result === "corrupt"
         )
       ) ? message.result : "corrupt";
-      finish(undefined, result);
+      receivedResult = result;
     });
-    worker.once("error", (error) => finish(error));
+    worker.once("error", (error) => stop(error));
     worker.once("exit", (code) => {
-      if (code !== 0) finish(new Error("The database backup validator stopped unexpectedly."));
+      if (stopping) return;
+      if (code !== 0 || receivedResult === undefined) {
+        finish(new Error("The database backup validator stopped unexpectedly."));
+        return;
+      }
+      finish(undefined, receivedResult);
     });
   });
 }

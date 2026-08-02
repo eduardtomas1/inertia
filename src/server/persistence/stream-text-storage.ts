@@ -1,25 +1,41 @@
 import type Database from "better-sqlite3";
 
-// SQLite length(TEXT) counts Unicode code points. Keep the storage invariant
-// in the same unit so astral characters are never split between rows and every
-// inserted chunk satisfies migration 38's CHECK exactly.
+// Keep chunks below both the released code-point bound and migration 40's
+// NUL-safe UTF-8 byte bound. Iterating code points preserves surrogate pairs.
 export const STREAM_TEXT_CHUNK_MAX_CHARACTERS = 1_048_576;
+export const STREAM_TEXT_CHUNK_MAX_BYTES = 4 * 1_048_576;
 
 export function splitStreamTextChunks(value: string): string[] {
   if (!value) return [];
   const chunks: string[] = [];
   let start = 0;
   let characters = 0;
+  let bytes = 0;
   for (let index = 0; index < value.length;) {
     const codePoint = value.codePointAt(index)!;
     const width = codePoint > 0xffff ? 2 : 1;
-    index += width;
-    characters += 1;
-    if (characters === STREAM_TEXT_CHUNK_MAX_CHARACTERS) {
+    const characterBytes = codePoint <= 0x7f
+      ? 1
+      : codePoint <= 0x7ff
+        ? 2
+        : codePoint <= 0xffff
+          ? 3
+          : 4;
+    if (
+      characters > 0
+      && (
+        characters + 1 > STREAM_TEXT_CHUNK_MAX_CHARACTERS
+        || bytes + characterBytes > STREAM_TEXT_CHUNK_MAX_BYTES
+      )
+    ) {
       chunks.push(value.slice(start, index));
       start = index;
       characters = 0;
+      bytes = 0;
     }
+    index += width;
+    characters += 1;
+    bytes += characterBytes;
   }
   if (start < value.length) chunks.push(value.slice(start));
   return chunks;

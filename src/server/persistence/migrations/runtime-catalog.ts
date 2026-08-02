@@ -1239,6 +1239,38 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         );
       `,
     });
+    migrationExtensions.push({
+      name: "MakeStreamChunksNulSafe",
+      up: `
+        CREATE TABLE message_content_chunks_v44 (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          message_id TEXT NOT NULL
+            REFERENCES messages(id) ON DELETE CASCADE,
+          content TEXT NOT NULL
+            CHECK (length(CAST(content AS BLOB)) BETWEEN 1 AND 4194304)
+        );
+        INSERT INTO message_content_chunks_v44 (sequence, message_id, content)
+        SELECT sequence, message_id, content FROM message_content_chunks;
+        DROP TABLE message_content_chunks;
+        ALTER TABLE message_content_chunks_v44 RENAME TO message_content_chunks;
+        CREATE INDEX message_content_chunks_message_sequence_idx
+          ON message_content_chunks(message_id, sequence ASC);
+
+        CREATE TABLE reasoning_content_chunks_v44 (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          reasoning_id TEXT NOT NULL
+            REFERENCES agent_reasonings(id) ON DELETE CASCADE,
+          content TEXT NOT NULL
+            CHECK (length(CAST(content AS BLOB)) BETWEEN 1 AND 4194304)
+        );
+        INSERT INTO reasoning_content_chunks_v44 (sequence, reasoning_id, content)
+        SELECT sequence, reasoning_id, content FROM reasoning_content_chunks;
+        DROP TABLE reasoning_content_chunks;
+        ALTER TABLE reasoning_content_chunks_v44 RENAME TO reasoning_content_chunks;
+        CREATE INDEX reasoning_content_chunks_reasoning_sequence_idx
+          ON reasoning_content_chunks(reasoning_id, sequence ASC);
+      `,
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

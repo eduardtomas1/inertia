@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -106,6 +107,30 @@ describe("database backup and startup recovery", () => {
     }).count).toBe(201);
     copy.close();
     store.close();
+  });
+
+  it("releases every validation worker before backup publication and concurrent teardown", async () => {
+    const directory = temporaryDirectory();
+    const operations = Array.from({ length: 4 }, async (_value, index) => {
+      const databasePath = join(directory, `inertia-${index}.sqlite`);
+      const { store } = seed(databasePath, `worker-${index}`);
+      const backup = await store.createBackup();
+      store.close();
+      const backupPath = join(
+        databaseRecoveryPaths(databasePath).backupsDirectory,
+        backup.filename,
+      );
+      const movedBackup = `${backupPath}.moved`;
+      const movedPrimary = `${databasePath}.moved`;
+      // Windows rename succeeds only after the worker/native SQLite handles
+      // have actually exited; a posted validation receipt is insufficient.
+      renameSync(backupPath, movedBackup);
+      renameSync(movedBackup, backupPath);
+      renameSync(databasePath, movedPrimary);
+      renameSync(movedPrimary, databasePath);
+    });
+
+    await Promise.all(operations);
   });
 
   it("preserves a corrupt primary and restores the newest valid backup", async () => {

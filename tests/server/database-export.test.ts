@@ -1,14 +1,18 @@
 import {
+  existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -32,6 +36,41 @@ afterEach(() => {
 });
 
 describe("safe database recovery exports", () => {
+  it("rejects reconstructed stream chunks in the bounded preflight", () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const source = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+      recoveryExportMaxBytes: 8_000,
+    });
+    const project = source.createProject("Chunked export", directory);
+    const conversation = source.createConversation(project.id, "Chunked export");
+    const message = source.createMessage(
+      conversation.id,
+      "prefix:",
+      "assistant",
+    );
+    source.appendMessageContent(message.id, "a".repeat(1_200));
+    source.appendMessageContent(message.id, "😀".repeat(400));
+
+    expect(() => source.exportRecoveryData()).toThrow(/safe size limit/u);
+    source.close();
+
+    const reopened = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    const exported = JSON.parse(reopened.exportRecoveryData()) as {
+      projects: Array<{
+        conversations: Array<{
+          messages: Array<{ content: string }>;
+        }>;
+      }>;
+    };
+    expect(exported.projects[0]?.conversations[0]?.messages[0]?.content)
+      .toBe(`prefix:${"a".repeat(1_200)}${"😀".repeat(400)}`);
+    reopened.close();
+  });
+
   it("round-trips projects and messages under fresh identities", () => {
     const sourceDirectory = temporaryDirectory();
     const source = new RuntimeStore(
@@ -113,6 +152,7 @@ describe("safe database recovery exports", () => {
     );
     expect(importedProject?.id).not.toBe(project.id);
     expect(dirname(importedProject!.path)).toBe(realpathSync(authorizedRoot));
+    expect(realpathSync(importedProject!.path)).toBe(importedProject!.path);
     expect(importedProject?.path).not.toBe(sourceDirectory);
     expect(importedConversation?.id).not.toBe(conversation.id);
     expect(importedConversation).toMatchObject({
@@ -183,6 +223,40 @@ describe("safe database recovery exports", () => {
     store.close();
   });
 
+  it("removes newly created project directories when the database import rolls back", () => {
+    const dataDirectory = temporaryDirectory();
+    const authorizedRoot = temporaryDirectory();
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    const injected = new Database(databasePath);
+    injected.exec(`
+      CREATE TRIGGER fail_recovery_project_insert
+      BEFORE INSERT ON projects
+      BEGIN
+        SELECT RAISE(ABORT, 'injected recovery import failure');
+      END;
+    `);
+    injected.close();
+    const serialized = JSON.stringify({
+      format: "inertia-recovery-export",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      projects: [{
+        name: "Rollback project",
+        path: process.platform === "win32" ? "C:\\source" : "/source",
+        conversations: [],
+      }],
+    });
+
+    expect(() => store.importRecoveryData(serialized, authorizedRoot))
+      .toThrow("injected recovery import failure");
+    expect(store.shellSnapshot().projects).toHaveLength(0);
+    expect(readdirSync(authorizedRoot)).toEqual([]);
+    store.close();
+  });
+
   it("ignores hostile exported paths and full-access grants after folder authorization", () => {
     const dataDirectory = temporaryDirectory();
     const authorizedRoot = temporaryDirectory();
@@ -248,5 +322,77 @@ describe("safe database recovery exports", () => {
       .rejects.toThrow(/unavailable/u);
     await expect(writeDatabaseRecoveryExportFile(link, content))
       .rejects.toThrow(/not a local file/u);
+  });
+
+  it.each(["writeFile", "sync", "close"] as const)(
+    "removes transcript partials after an injected %s failure",
+    async (phase) => {
+      const directory = temporaryDirectory();
+      const path = join(directory, "recovery.json");
+      const injectedOpen = (async (...args: Parameters<typeof open>) => {
+        const handle = await open(...args);
+        return new Proxy(handle, {
+          get(target, property, receiver) {
+            if (property !== phase) {
+              const value = Reflect.get(target, property, receiver);
+              return typeof value === "function" ? value.bind(target) : value;
+            }
+            if (phase === "close") {
+              return async () => {
+                await target.close();
+                throw new Error(`injected ${phase} failure`);
+              };
+            }
+            return async () => {
+              throw new Error(`injected ${phase} failure`);
+            };
+          },
+        });
+      }) as typeof open;
+
+      await expect(writeDatabaseRecoveryExportFile(path, "secret transcript", {
+        operations: { open: injectedOpen },
+      })).rejects.toThrow(`injected ${phase} failure`);
+      expect(existsSync(path)).toBe(false);
+      expect(readdirSync(directory).filter((entry) => entry.endsWith(".partial")))
+        .toEqual([]);
+    },
+  );
+
+  it("removes a partial when an active export is cancelled", async () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "recovery.json");
+    const cancellation = new AbortController();
+    const injectedOpen = (async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args);
+      return new Proxy(handle, {
+        get(target, property, receiver) {
+          if (property !== "writeFile") {
+            const value = Reflect.get(target, property, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+          return async () => new Promise<void>((_resolve, reject) => {
+            cancellation.signal.addEventListener(
+              "abort",
+              () => reject(cancellation.signal.reason),
+              { once: true },
+            );
+          });
+        },
+      });
+    }) as typeof open;
+    const writing = writeDatabaseRecoveryExportFile(path, "secret transcript", {
+      signal: cancellation.signal,
+      operations: { open: injectedOpen },
+    });
+    await vi.waitFor(() => expect(
+      readdirSync(directory).some((entry) => entry.endsWith(".partial")),
+    ).toBe(true));
+    cancellation.abort(new Error("injected shutdown cancellation"));
+
+    await expect(writing).rejects.toThrow("injected shutdown cancellation");
+    expect(existsSync(path)).toBe(false);
+    expect(readdirSync(directory).filter((entry) => entry.endsWith(".partial")))
+      .toEqual([]);
   });
 });

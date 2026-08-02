@@ -1,15 +1,89 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import {
+  open,
+  readFile,
+  rename,
+  unlink,
+  type FileHandle,
+} from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import { documentAttachmentContexts } from "./document-attachment-context.js";
 
 const PACKAGE_SMOKE_ATTACHMENT_ID = "00000000-0000-4000-8000-000000000017";
 const PACKAGE_SMOKE_TEXT = "Packaged PDF extraction works";
 
+export type PackagedPdfSmokeResult =
+  | { ok: true; content: string }
+  | { ok: false; message: string };
+
+interface PackagedPdfSmokeFileOperations {
+  open: typeof open;
+  rename: typeof rename;
+}
+
+interface PackagedPdfSmokeWriteOptions {
+  readonly signal?: AbortSignal;
+  readonly operations?: Partial<PackagedPdfSmokeFileOperations>;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw signal.reason;
+}
+
+export async function writePackagedPdfSmokeResult(
+  resultPath: string,
+  result: PackagedPdfSmokeResult,
+  options: PackagedPdfSmokeWriteOptions = {},
+): Promise<void> {
+  const partialPath = join(
+    dirname(resultPath),
+    `.inertia-package-smoke-${randomUUID()}.partial`,
+  );
+  const openFile = options.operations?.open ?? open;
+  const renameFile = options.operations?.rename ?? rename;
+  let file: FileHandle | null = null;
+  let published = false;
+  let primaryError: unknown;
+  try {
+    throwIfAborted(options.signal);
+    file = await openFile(
+      partialPath,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+      0o600,
+    );
+    await file.writeFile(JSON.stringify(result), {
+      encoding: "utf8",
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+    await file.sync();
+    await file.close();
+    file = null;
+    throwIfAborted(options.signal);
+    await renameFile(partialPath, resultPath);
+    published = true;
+  } catch (error) {
+    primaryError = error;
+  } finally {
+    if (file) {
+      try {
+        await file.close();
+      } catch (closeError) {
+        primaryError ??= closeError;
+      }
+    }
+    if (!published) await unlink(partialPath).catch(() => undefined);
+  }
+  if (primaryError !== undefined) throw primaryError;
+}
+
 export async function runPackagedPdfSmoke(
   inputPath: string,
   resultPath: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  let result: { ok: true; content: string } | { ok: false; message: string };
+  let result: PackagedPdfSmokeResult;
   let failure: unknown;
   try {
     const bytes = await readFile(inputPath);
@@ -22,7 +96,7 @@ export async function runPackagedPdfSmoke(
         size: bytes.byteLength,
       },
       bytes,
-    }]);
+    }], { signal });
     if (
       !context
       || context.label !== "PDF · package-smoke.pdf"
@@ -41,10 +115,10 @@ export async function runPackagedPdfSmoke(
       message: detail || "The packaged PDF stack failed.",
     };
   }
-  await writeFile(
+  await writePackagedPdfSmokeResult(
     resultPath,
-    JSON.stringify(result),
-    { encoding: "utf8", mode: 0o600, flag: "wx" },
+    result,
+    { signal },
   );
   if (failure !== undefined) throw failure;
 }

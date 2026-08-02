@@ -174,7 +174,7 @@ export interface RunningRuntime {
     preparationId: string,
   ) => RemoteResponse;
   forgetRemoteTranscripts: (scope: RuntimeRemoteForgetScope) => void;
-  exportRecoveryData: (path: string) => Promise<void>;
+  exportRecoveryData: (path: string, signal?: AbortSignal) => Promise<void>;
   importRecoveryData: (
     path: string,
     targetDirectory: string,
@@ -813,8 +813,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       if (scope.kind === "all") remoteGateway.reset();
       else remoteGateway.forgetConversation(scope.conversationId);
     },
-    exportRecoveryData: async (path) => {
-      await writeDatabaseRecoveryExportFile(path, store.exportRecoveryData());
+    exportRecoveryData: async (path, signal) => {
+      await writeDatabaseRecoveryExportFile(
+        path,
+        store.exportRecoveryData(),
+        { signal },
+      );
     },
     importRecoveryData: async (path, targetDirectory) => {
       const result = store.importRecoveryData(

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   chmod,
+  type FileHandle,
   lstat,
   open,
   readFile,
@@ -14,6 +15,25 @@ import { DATABASE_RECOVERY_EXPORT_MAX_BYTES } from "./database-export";
 
 const FILE_MODE = 0o600;
 
+interface RecoveryExportFileOperations {
+  open: typeof open;
+  rename: typeof rename;
+  chmod: typeof chmod;
+}
+
+interface WriteDatabaseRecoveryExportFileOptions {
+  signal?: AbortSignal;
+  operations?: Partial<RecoveryExportFileOperations>;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new Error("The database recovery export was cancelled.");
+  }
+}
+
 async function removeRegularFile(path: string): Promise<void> {
   try {
     const metadata = await lstat(path);
@@ -26,6 +46,7 @@ async function removeRegularFile(path: string): Promise<void> {
 export async function writeDatabaseRecoveryExportFile(
   path: string,
   content: string,
+  options: WriteDatabaseRecoveryExportFileOptions = {},
 ): Promise<void> {
   if (Buffer.byteLength(content, "utf8") > DATABASE_RECOVERY_EXPORT_MAX_BYTES) {
     throw new Error("The recovery export exceeds its safe size limit.");
@@ -47,24 +68,43 @@ export async function writeDatabaseRecoveryExportFile(
     dirname(path),
     `.inertia-recovery-${randomUUID()}.partial`,
   );
-  const file = await open(
-    partialPath,
-    constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-    FILE_MODE,
-  );
+  const openFile = options.operations?.open ?? open;
+  const renameFile = options.operations?.rename ?? rename;
+  const chmodFile = options.operations?.chmod ?? chmod;
+  let file: FileHandle | null = null;
+  let published = false;
+  let primaryError: unknown;
   try {
-    await file.writeFile(content, "utf8");
+    throwIfAborted(options.signal);
+    file = await openFile(
+      partialPath,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+      FILE_MODE,
+    );
+    await file.writeFile(content, {
+      encoding: "utf8",
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
     await file.sync();
-  } finally {
     await file.close();
-  }
-  try {
-    await rename(partialPath, path);
-    await chmod(path, FILE_MODE);
+    file = null;
+    throwIfAborted(options.signal);
+    await renameFile(partialPath, path);
+    published = true;
+    await chmodFile(path, FILE_MODE);
   } catch (error) {
-    await removeRegularFile(partialPath);
-    throw error;
+    primaryError = error;
+  } finally {
+    if (file) {
+      try {
+        await file.close();
+      } catch (closeError) {
+        primaryError ??= closeError;
+      }
+    }
+    if (!published) await removeRegularFile(partialPath);
   }
+  if (primaryError !== undefined) throw primaryError;
 }
 
 export async function readDatabaseRecoveryExportFile(

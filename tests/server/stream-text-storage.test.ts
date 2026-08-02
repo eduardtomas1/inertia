@@ -10,7 +10,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
-import { STREAM_TEXT_CHUNK_MAX_CHARACTERS } from "../../src/server/persistence/stream-text-storage";
+import {
+  splitStreamTextChunks,
+  STREAM_TEXT_CHUNK_MAX_CHARACTERS,
+} from "../../src/server/persistence/stream-text-storage";
 
 const directories: string[] = [];
 
@@ -38,6 +41,15 @@ afterEach(() => {
 });
 
 describe("append-oriented stream text persistence", () => {
+  it("counts UTF-8 boundaries without changing lone surrogates or NUL text", () => {
+    const value = "\0A\u007f\u0080\u07ff\u0800\ud800😀";
+    const chunks = splitStreamTextChunks(value);
+
+    expect(chunks).toEqual([value]);
+    expect(chunks.join("")).toBe(value);
+    expect(Buffer.byteLength(chunks[0]!, "utf8")).toBe(17);
+  });
+
   it("writes linear chunks, reconstructs exact ordering after restart, and compacts at settlement", () => {
     const current = runtime();
     const project = current.store.createProject("Stream", current.directory);
@@ -225,6 +237,83 @@ describe("append-oriented stream text persistence", () => {
     compacted.close();
   });
 
+  it("preserves leading NUL chunks through live reads, restart, and terminal compaction", () => {
+    const current = runtime();
+    const project = current.store.createProject("NUL stream", current.directory);
+    const conversation = current.store.createConversation(project.id, "NUL stream");
+    const user = current.store.createMessage(conversation.id, "Start", "user");
+    const turn = current.store.createAgentTurn({
+      id: "turn-leading-nul",
+      conversationId: conversation.id,
+      runId: "run-leading-nul",
+      userMessageId: user.id,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "legacy:codex:codex-app-server",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    current.store.updateAgentTurnLifecycle(turn.id, { status: "running" });
+    const assistant = current.store.createMessage(
+      conversation.id,
+      "message:",
+      "assistant",
+      [],
+      turn.id,
+    );
+    const reasoning = current.store.createReasoning(
+      conversation.id,
+      turn.runId,
+      turn.id,
+    );
+    const messageDelta = "\0message😀tail";
+    const reasoningDelta = "\0reasoning🧠tail";
+    current.store.appendMessageContent(assistant.id, messageDelta);
+    current.store.appendReasoningContent(reasoning.id, reasoningDelta);
+    expect(current.store.message(assistant.id).content)
+      .toBe(`message:${messageDelta}`);
+    expect(current.store.conversationDetail(conversation.id)?.reasonings[0]?.content)
+      .toBe(reasoningDelta);
+    current.store.close();
+
+    const reopened = new RuntimeStore(
+      current.databasePath,
+      current.directory,
+      { recoverInterruptedRuns: false },
+    );
+    expect(reopened.message(assistant.id).content)
+      .toBe(`message:${messageDelta}`);
+    expect(reopened.conversationDetail(conversation.id)?.reasonings[0]?.content)
+      .toBe(reasoningDelta);
+    reopened.settleAgentTurn(turn.id, {
+      status: "completed",
+      terminalAssistantMessageId: assistant.id,
+      terminalReason: "completed",
+    });
+    reopened.close();
+
+    const compacted = new Database(current.databasePath, { readonly: true });
+    expect((compacted.prepare(
+      "SELECT content FROM messages WHERE id = ?",
+    ).get(assistant.id) as { content: string }).content)
+      .toBe(`message:${messageDelta}`);
+    expect((compacted.prepare(
+      "SELECT content FROM agent_reasonings WHERE id = ?",
+    ).get(reasoning.id) as { content: string }).content)
+      .toBe(reasoningDelta);
+    expect((compacted.prepare(
+      "SELECT COUNT(*) AS count FROM message_content_chunks",
+    ).get() as { count: number }).count).toBe(0);
+    expect((compacted.prepare(
+      "SELECT COUNT(*) AS count FROM reasoning_content_chunks",
+    ).get() as { count: number }).count).toBe(0);
+    compacted.close();
+  });
+
   it("replacements and terminal reasoning updates atomically discard obsolete chunks", () => {
     const current = runtime();
     const project = current.store.createProject("Replace", current.directory);
@@ -303,6 +392,76 @@ describe("append-oriented stream text persistence", () => {
     expect((database.prepare(
       "SELECT COUNT(*) AS count FROM message_content_chunks",
     ).get() as { count: number }).count).toBe(1);
+    expect((database.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'table' AND name = 'message_content_chunks'
+    `).get() as { sql: string }).sql).toContain("CAST(content AS BLOB)");
+    database.close();
+  });
+
+  it("upgrades schema-39 chunk rows before accepting NUL-safe appends", () => {
+    const current = runtime();
+    const project = current.store.createProject("Schema 39", current.directory);
+    const conversation = current.store.createConversation(project.id, "Schema 39");
+    const message = current.store.createMessage(
+      conversation.id,
+      "base:",
+      "assistant",
+    );
+    current.store.appendMessageContent(message.id, "existing chunk");
+    current.store.close();
+
+    const old = new Database(current.databasePath);
+    old.exec(`
+      DROP INDEX message_content_chunks_message_sequence_idx;
+      ALTER TABLE message_content_chunks RENAME TO message_content_chunks_v40_source;
+      CREATE TABLE message_content_chunks (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 1048576)
+      );
+      INSERT INTO message_content_chunks (sequence, message_id, content)
+      SELECT sequence, message_id, content FROM message_content_chunks_v40_source;
+      DROP TABLE message_content_chunks_v40_source;
+      CREATE INDEX message_content_chunks_message_sequence_idx
+        ON message_content_chunks(message_id, sequence ASC);
+
+      DROP INDEX reasoning_content_chunks_reasoning_sequence_idx;
+      ALTER TABLE reasoning_content_chunks RENAME TO reasoning_content_chunks_v40_source;
+      CREATE TABLE reasoning_content_chunks (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        reasoning_id TEXT NOT NULL REFERENCES agent_reasonings(id) ON DELETE CASCADE,
+        content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 1048576)
+      );
+      INSERT INTO reasoning_content_chunks (sequence, reasoning_id, content)
+      SELECT sequence, reasoning_id, content FROM reasoning_content_chunks_v40_source;
+      DROP TABLE reasoning_content_chunks_v40_source;
+      CREATE INDEX reasoning_content_chunks_reasoning_sequence_idx
+        ON reasoning_content_chunks(reasoning_id, sequence ASC);
+      DELETE FROM schema_migrations WHERE version = 40;
+    `);
+    old.close();
+
+    const upgraded = new RuntimeStore(
+      current.databasePath,
+      current.directory,
+      { recoverInterruptedRuns: false },
+    );
+    expect(upgraded.message(message.id).content).toBe("base:existing chunk");
+    upgraded.appendMessageContent(message.id, "\0new chunk");
+    expect(upgraded.message(message.id).content)
+      .toBe("base:existing chunk\0new chunk");
+    upgraded.close();
+
+    const database = new Database(current.databasePath, { readonly: true });
+    expect((database.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version)
+      .toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+    expect((database.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'table' AND name = 'message_content_chunks'
+    `).get() as { sql: string }).sql).toContain("CAST(content AS BLOB)");
     database.close();
   });
 

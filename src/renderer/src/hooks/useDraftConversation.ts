@@ -213,7 +213,7 @@ export function useDraftConversation({
         ?? materialized.acceptedTurnId;
       const exactAcceptedTurn = acceptedTurnId !== null
         && materializedShell.latestTurn?.id === acceptedTurnId;
-      const crashRecoveryAccepted = (
+      const crashRecoveryAccepted = acceptedTurnId === null && (
         currentMaterialized === null
         || currentMaterialized.recoveryMode
       ) && (

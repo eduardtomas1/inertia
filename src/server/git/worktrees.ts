@@ -948,7 +948,7 @@ export async function inspectOwnedWorktreeCleanupState(
     }
     const verifiedParent = await captureDirectoryIdentity(
       worktreesDirectory,
-      dependencies.filesystemIdentity,
+      scanIdentityDependencies,
     );
     if (!worktreeFilesystemIdentitiesEqual(
       verifiedParent,

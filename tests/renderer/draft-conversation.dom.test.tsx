@@ -403,6 +403,84 @@ describe("useDraftConversation", () => {
     expect(hook.result.current.conversation).toBeNull();
   });
 
+  it("requires the exact durable accepted turn after remount", async () => {
+    const values = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        clear: vi.fn(() => values.clear()),
+        getItem: vi.fn((key: string) => values.get(key) ?? null),
+        key: vi.fn((index: number) => [...values.keys()][index] ?? null),
+        get length() {
+          return values.size;
+        },
+        removeItem: vi.fn((key: string) => values.delete(key)),
+        setItem: vi.fn((key: string, value: string) => values.set(key, value)),
+      } satisfies Storage,
+    });
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result",
+      requestId: crypto.randomUUID(),
+      result: { kind: "conversation.created", conversationId },
+    }));
+    const sendMessage = vi.fn(async () => ({
+      kind: "message.accepted" as const,
+      conversationId,
+      turnId: "turn-durable-exact",
+      userMessageId: "message-durable-exact",
+      disposition: "new-turn" as const,
+    }));
+    const first = renderHook(() => useDraftConversation({
+      snapshot: null,
+      settings: defaultSettings,
+      run,
+      sendMessage,
+      persistedConversationId: null,
+      updatePersistedConversation: vi.fn(),
+    }));
+    act(() => first.result.current.start(projectId));
+    const draftId = first.result.current.conversation?.id;
+    await act(async () => {
+      await first.result.current.sendFromComposer("Persist the exact turn.", []);
+    });
+    expect(readPersistedMaterializedDraftConversation()).toMatchObject({
+      acceptedTurnId: "turn-durable-exact",
+      draftConversationId: draftId,
+    });
+    first.unmount();
+
+    let currentSnapshot = materializedSnapshot(
+      "running",
+      "Persist the exact turn.",
+    );
+    const restored = renderHook(() => useDraftConversation({
+      snapshot: currentSnapshot,
+      settings: defaultSettings,
+      run,
+      sendMessage,
+      persistedConversationId: conversationId,
+      updatePersistedConversation: vi.fn(),
+    }));
+    expect(restored.result.current.conversation?.id).toBe(draftId);
+
+    currentSnapshot = materializedSnapshot(
+      "running",
+      "Persist the exact turn.",
+      "turn-unrelated",
+    );
+    restored.rerender();
+    expect(restored.result.current.conversation?.id).toBe(draftId);
+
+    currentSnapshot = materializedSnapshot(
+      "running",
+      "Persist the exact turn.",
+      "turn-durable-exact",
+    );
+    restored.rerender();
+    expect(restored.result.current.conversation).toBeNull();
+    expect(readPersistedMaterializedDraftConversation()).toBeNull();
+  });
+
   it("keeps isolated-worktree tools unavailable until the draft materializes", () => {
     const hook = renderHook(() => useDraftConversation({
       snapshot: null,

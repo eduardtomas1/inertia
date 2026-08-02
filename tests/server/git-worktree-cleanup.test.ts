@@ -961,6 +961,51 @@ describe("launch-owned Git cleanup", () => {
     expect(git(root, "rev-parse", branch)).toBe(ownership.head);
   });
 
+  it("bounds the final Linux parent revalidation by the aggregate deadline", async () => {
+    const root = repository();
+    const path = ownedPath(root, "final parent deadline path");
+    const branch = "inertia/final-parent-deadline";
+    const ownership = await createOwnedWorktree(
+      root,
+      path,
+      branch,
+      linuxBirthtimeProbe("valid"),
+    );
+    const worktreesDirectory = dirname(adminDirectory(path));
+    mkdirSync(join(worktreesDirectory, "scan-keeper"));
+    await removeWorktree(root, path, true);
+    let parentProbeCount = 0;
+    const startedAt = Date.now();
+
+    await expect(inspectOwnedWorktreeCleanupState(
+      root,
+      path,
+      branch,
+      ownership.head,
+      ownership.worktreeId,
+      ownership.repositoryIdentity,
+      ownership.ownershipToken,
+      ownership.filesystemReceipt,
+      {
+        administrativeScanTimeoutMs: 80,
+        filesystemIdentity: {
+          ...linuxBirthtimeProbe("valid"),
+          beforeLinuxStatProbe: async (identityPath) => {
+            if (basename(identityPath) !== "worktrees") return;
+            parentProbeCount += 1;
+            if (parentProbeCount === 2) {
+              await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+            }
+          },
+        },
+      },
+    )).rejects.toMatchObject({ code: "timeout" });
+
+    expect(Date.now() - startedAt).toBeLessThan(1_500);
+    expect(parentProbeCount).toBe(2);
+    expect(git(root, "rev-parse", branch)).toBe(ownership.head);
+  });
+
   it("rejects replacement of the canonical worktrees parent", async () => {
     const root = repository();
     const path = ownedPath(root, "parent replacement path");

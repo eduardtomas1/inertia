@@ -1,12 +1,16 @@
 import { spawn } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { mkdir, open, readFile } from "node:fs/promises";
@@ -35,6 +39,54 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+function seedInterruptedRecoveryImport(options: {
+  authorizedRoot: string;
+  databasePath: string;
+  digest: string;
+  operationId: string;
+  phase: "staging" | "final";
+  projects?: number;
+}): string {
+  const projects = options.projects ?? 2;
+  const canonicalRoot = realpathSync(options.authorizedRoot);
+  const rootMetadata = lstatSync(canonicalRoot, { bigint: true });
+  const database = new Database(options.databasePath);
+  database.prepare(`
+    INSERT INTO recovery_import_journals (
+      singleton, operation_id, digest, authorized_root,
+      authorized_root_device, authorized_root_inode, projects, created_at
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    options.operationId,
+    options.digest,
+    canonicalRoot,
+    rootMetadata.dev.toString(),
+    rootMetadata.ino.toString(),
+    projects,
+    new Date().toISOString(),
+  );
+  database.close();
+  const root = options.phase === "staging"
+    ? join(options.authorizedRoot, `.inertia-recovery-${options.operationId}.partial`)
+    : join(options.authorizedRoot, `recovered-${options.operationId}`);
+  mkdirSync(root, { mode: 0o700 });
+  for (let ordinal = 1; ordinal <= projects; ordinal += 1) {
+    mkdirSync(join(root, `project-${String(ordinal).padStart(5, "0")}`), {
+      mode: 0o700,
+    });
+  }
+  return root;
+}
+
+function recoveryImportJournalCount(databasePath: string): number {
+  const database = new Database(databasePath, { readonly: true });
+  const result = (database.prepare(
+    "SELECT COUNT(*) AS count FROM recovery_import_journals",
+  ).get() as { count: number }).count;
+  database.close();
+  return result;
+}
 
 describe("safe database recovery exports", () => {
   it("rejects reconstructed stream chunks in the bounded preflight", () => {
@@ -357,15 +409,24 @@ describe("safe database recovery exports", () => {
     const digest = "a".repeat(64);
     const script = `
       const Database = require("better-sqlite3");
-      const { mkdirSync } = require("node:fs");
+      const { lstatSync, mkdirSync } = require("node:fs");
       const { join } = require("node:path");
       const [databasePath, authorizedRoot, operationId, digest] = process.argv.slice(1);
       const database = new Database(databasePath);
+      const rootMetadata = lstatSync(authorizedRoot, { bigint: true });
       database.prepare(\`
         INSERT INTO recovery_import_journals (
-          singleton, operation_id, digest, authorized_root, projects, created_at
-        ) VALUES (1, ?, ?, ?, 3, ?)
-      \`).run(operationId, digest, authorizedRoot, new Date().toISOString());
+          singleton, operation_id, digest, authorized_root,
+          authorized_root_device, authorized_root_inode, projects, created_at
+        ) VALUES (1, ?, ?, ?, ?, ?, 3, ?)
+      \`).run(
+        operationId,
+        digest,
+        authorizedRoot,
+        rootMetadata.dev.toString(),
+        rootMetadata.ino.toString(),
+        new Date().toISOString(),
+      );
       const staging = join(authorizedRoot, \`.inertia-recovery-\${operationId}.partial\`);
       mkdirSync(staging, { mode: 0o700 });
       for (let ordinal = 1; ordinal <= 3; ordinal += 1) {
@@ -423,6 +484,136 @@ describe("safe database recovery exports", () => {
       "SELECT COUNT(*) AS count FROM recovery_import_journals",
     ).get() as { count: number }).count).toBe(0);
     database.close();
+  });
+
+  it("retains an interrupted import journal while its canonical root is missing", () => {
+    const dataDirectory = temporaryDirectory();
+    const destinationContainer = temporaryDirectory();
+    const authorizedRoot = join(destinationContainer, "authorized");
+    const unavailableRoot = join(destinationContainer, "authorized-unavailable");
+    mkdirSync(authorizedRoot, { mode: 0o700 });
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const initialized = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    initialized.close();
+    const operationId = "44444444-4444-4444-8444-444444444444";
+    const interruptedRoot = seedInterruptedRecoveryImport({
+      authorizedRoot,
+      databasePath,
+      digest: "b".repeat(64),
+      operationId,
+      phase: "staging",
+    });
+    renameSync(authorizedRoot, unavailableRoot);
+
+    expect(() => new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    })).toThrow(/destination is unavailable.*remains pending/u);
+    expect(recoveryImportJournalCount(databasePath)).toBe(1);
+    expect(existsSync(interruptedRoot)).toBe(false);
+    expect(existsSync(join(
+      unavailableRoot,
+      `.inertia-recovery-${operationId}.partial`,
+    ))).toBe(true);
+
+    renameSync(unavailableRoot, authorizedRoot);
+    const restarted = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(readdirSync(authorizedRoot)).toEqual([]);
+    expect(recoveryImportJournalCount(databasePath)).toBe(0);
+    restarted.close();
+  });
+
+  it("retains an interrupted import journal for a same-path root replacement", () => {
+    const dataDirectory = temporaryDirectory();
+    const destinationContainer = temporaryDirectory();
+    const authorizedRoot = join(destinationContainer, "authorized");
+    const originalRoot = join(destinationContainer, "authorized-original");
+    mkdirSync(authorizedRoot, { mode: 0o700 });
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const initialized = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    initialized.close();
+    const operationId = "66666666-6666-4666-8666-666666666666";
+    seedInterruptedRecoveryImport({
+      authorizedRoot,
+      databasePath,
+      digest: "d".repeat(64),
+      operationId,
+      phase: "staging",
+    });
+    renameSync(authorizedRoot, originalRoot);
+    mkdirSync(authorizedRoot, { mode: 0o700 });
+    writeFileSync(join(authorizedRoot, "underlying-mount-marker"), "external\n");
+
+    expect(() => new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    })).toThrow(/destination changed.*remains pending/u);
+    expect(recoveryImportJournalCount(databasePath)).toBe(1);
+    expect(readdirSync(authorizedRoot)).toEqual(["underlying-mount-marker"]);
+    expect(existsSync(join(
+      originalRoot,
+      `.inertia-recovery-${operationId}.partial`,
+    ))).toBe(true);
+
+    rmSync(authorizedRoot, { recursive: true });
+    renameSync(originalRoot, authorizedRoot);
+    const restarted = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(readdirSync(authorizedRoot)).toEqual([]);
+    expect(recoveryImportJournalCount(databasePath)).toBe(0);
+    restarted.close();
+  });
+
+  it("retains an interrupted import journal across a symlink replacement", () => {
+    const dataDirectory = temporaryDirectory();
+    const destinationContainer = temporaryDirectory();
+    const authorizedRoot = join(destinationContainer, "authorized");
+    const originalRoot = join(destinationContainer, "authorized-original");
+    const replacementRoot = join(destinationContainer, "replacement");
+    mkdirSync(authorizedRoot, { mode: 0o700 });
+    mkdirSync(replacementRoot, { mode: 0o700 });
+    writeFileSync(join(replacementRoot, "must-not-be-touched"), "external\n");
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const initialized = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    initialized.close();
+    const operationId = "55555555-5555-4555-8555-555555555555";
+    seedInterruptedRecoveryImport({
+      authorizedRoot,
+      databasePath,
+      digest: "c".repeat(64),
+      operationId,
+      phase: "final",
+    });
+    renameSync(authorizedRoot, originalRoot);
+    symlinkSync(
+      replacementRoot,
+      authorizedRoot,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    expect(() => new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    })).toThrow(/destination changed.*remains pending/u);
+    expect(recoveryImportJournalCount(databasePath)).toBe(1);
+    expect(readdirSync(replacementRoot)).toEqual(["must-not-be-touched"]);
+    expect(existsSync(join(originalRoot, `recovered-${operationId}`))).toBe(true);
+
+    unlinkSync(authorizedRoot);
+    renameSync(originalRoot, authorizedRoot);
+    const restarted = new RuntimeStore(databasePath, dataDirectory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(readdirSync(authorizedRoot)).toEqual([]);
+    expect(recoveryImportJournalCount(databasePath)).toBe(0);
+    expect(readdirSync(replacementRoot)).toEqual(["must-not-be-touched"]);
+    restarted.close();
   });
 
   it("cancels asynchronous directory staging and removes the durable journal", async () => {

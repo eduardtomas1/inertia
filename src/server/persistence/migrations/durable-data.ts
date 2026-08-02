@@ -42,6 +42,10 @@ export const durableDataMigrationDefinitions = [
         digest TEXT NOT NULL CHECK (length(digest) = 64),
         authorized_root TEXT NOT NULL
           CHECK (length(CAST(authorized_root AS BLOB)) BETWEEN 1 AND 4096),
+        authorized_root_device TEXT NOT NULL
+          CHECK (length(authorized_root_device) BETWEEN 1 AND 40),
+        authorized_root_inode TEXT NOT NULL
+          CHECK (length(authorized_root_inode) BETWEEN 1 AND 40),
         projects INTEGER NOT NULL CHECK (projects BETWEEN 0 AND 10000),
         created_at TEXT NOT NULL
       );

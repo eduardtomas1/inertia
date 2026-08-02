@@ -21,7 +21,14 @@ interface RecoveryImportJournalRow {
   operation_id: string;
   digest: string;
   authorized_root: string;
+  authorized_root_device: string;
+  authorized_root_inode: string;
   projects: number;
+}
+
+interface RecoveryImportRootIdentity {
+  device: string;
+  inode: string;
 }
 
 export interface PrepareRecoveryImportOptions {
@@ -79,7 +86,11 @@ function removeIncompleteRoot(
     if (errorCode(error) === "ENOENT") return;
     throw error;
   }
-  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) return;
+  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+    throw new Error(
+      "The interrupted recovery import path cannot be reconciled safely.",
+    );
+  }
   const canonical = resolve(realpathSync(path));
   const relativeRoot = relative(authorizedRoot, canonical);
   if (
@@ -87,7 +98,11 @@ function removeIncompleteRoot(
     || !relativeRoot
     || relativeRoot.includes(sep)
     || isAbsolute(relativeRoot)
-  ) return;
+  ) {
+    throw new Error(
+      "The interrupted recovery import path cannot be reconciled safely.",
+    );
+  }
 
   for (const entry of readdirSync(path, { withFileTypes: true })) {
     const match = /^project-([0-9]{5})$/u.exec(entry.name);
@@ -140,11 +155,56 @@ function removeIncompleteRoot(
   }
 }
 
+function readAuthorizedRootIdentity(
+  authorizedRoot: string,
+): RecoveryImportRootIdentity {
+  try {
+    const rootMetadata = lstatSync(authorizedRoot, { bigint: true });
+    if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+      throw new Error(
+        "The recovery import destination changed; reconciliation remains pending.",
+      );
+    }
+    if (resolve(realpathSync(authorizedRoot)) !== authorizedRoot) {
+      throw new Error(
+        "The recovery import destination changed; reconciliation remains pending.",
+      );
+    }
+    return {
+      device: rootMetadata.dev.toString(),
+      inode: rootMetadata.ino.toString(),
+    };
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") {
+      throw new Error(
+        "The recovery import destination is unavailable; reconciliation remains pending.",
+      );
+    }
+    throw error;
+  }
+}
+
+function assertAuthorizedRootAvailable(
+  authorizedRoot: string,
+  expectedIdentity: RecoveryImportRootIdentity,
+): void {
+  const identity = readAuthorizedRootIdentity(authorizedRoot);
+  if (
+    identity.device !== expectedIdentity.device
+    || identity.inode !== expectedIdentity.inode
+  ) {
+    throw new Error(
+      "The recovery import destination changed; reconciliation remains pending.",
+    );
+  }
+}
+
 export function reconcileRecoveryImportJournal(
   database: Database.Database,
 ): void {
   const journal = database.prepare(`
-    SELECT operation_id, digest, authorized_root, projects
+    SELECT operation_id, digest, authorized_root,
+      authorized_root_device, authorized_root_inode, projects
     FROM recovery_import_journals WHERE singleton = 1
   `).get() as RecoveryImportJournalRow | undefined;
   if (!journal) return;
@@ -153,6 +213,8 @@ export function reconcileRecoveryImportJournal(
     || !/^[0-9a-f]{64}$/u.test(journal.digest)
     || !isAbsolute(journal.authorized_root)
     || journal.authorized_root.includes("\0")
+    || !/^[0-9]{1,40}$/u.test(journal.authorized_root_device)
+    || !/^[0-9]{1,40}$/u.test(journal.authorized_root_inode)
     || !Number.isSafeInteger(journal.projects)
     || journal.projects < 0
     || journal.projects > DATABASE_RECOVERY_EXPORT_MAX_PROJECTS
@@ -164,29 +226,26 @@ export function reconcileRecoveryImportJournal(
   ).get(journal.digest)) {
     throw new Error("The recovery import journal conflicts with a completed import.");
   }
-  let rootMetadata: ReturnType<typeof lstatSync> | undefined;
-  try {
-    rootMetadata = lstatSync(journal.authorized_root);
-  } catch (error) {
-    if (errorCode(error) !== "ENOENT") throw error;
-  }
-  if (
-    rootMetadata?.isDirectory()
-    && !rootMetadata.isSymbolicLink()
-    && resolve(realpathSync(journal.authorized_root)) === journal.authorized_root
-  ) {
-    const journalRoots = roots(journal.authorized_root, journal.operation_id);
-    removeIncompleteRoot(
-      journalRoots.staging,
-      journal.authorized_root,
-      journal.projects,
-    );
-    removeIncompleteRoot(
-      journalRoots.final,
-      journal.authorized_root,
-      journal.projects,
-    );
-  }
+  const expectedIdentity = {
+    device: journal.authorized_root_device,
+    inode: journal.authorized_root_inode,
+  };
+  assertAuthorizedRootAvailable(journal.authorized_root, expectedIdentity);
+  const journalRoots = roots(journal.authorized_root, journal.operation_id);
+  removeIncompleteRoot(
+    journalRoots.staging,
+    journal.authorized_root,
+    journal.projects,
+  );
+  removeIncompleteRoot(
+    journalRoots.final,
+    journal.authorized_root,
+    journal.projects,
+  );
+  // A mount or directory identity can disappear while the children are being
+  // reconciled. Confirm the canonical destination again before forgetting the
+  // only durable record of the interrupted import.
+  assertAuthorizedRootAvailable(journal.authorized_root, expectedIdentity);
   database.prepare(
     "DELETE FROM recovery_import_journals WHERE singleton = 1",
   ).run();
@@ -257,14 +316,18 @@ export async function prepareRecoveryImport(
       if (errorCode(error) !== "ENOENT") throw error;
     }
   }
+  const authorizedRootIdentity = readAuthorizedRootIdentity(options.authorizedRoot);
   options.database.prepare(`
     INSERT INTO recovery_import_journals (
-      singleton, operation_id, digest, authorized_root, projects, created_at
-    ) VALUES (1, ?, ?, ?, ?, ?)
+      singleton, operation_id, digest, authorized_root,
+      authorized_root_device, authorized_root_inode, projects, created_at
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     operationId,
     options.digest,
     options.authorizedRoot,
+    authorizedRootIdentity.device,
+    authorizedRootIdentity.inode,
     options.projectCount,
     new Date().toISOString(),
   );

@@ -255,6 +255,8 @@ function validateOpenDatabase(
       "operation_id",
       "digest",
       "authorized_root",
+      "authorized_root_device",
+      "authorized_root_inode",
       "projects",
       "created_at",
     ].some((column) => !journalColumns.has(column))) return "corrupt";

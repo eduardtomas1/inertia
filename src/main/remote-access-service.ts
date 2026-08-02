@@ -35,13 +35,14 @@ import {
   REMOTE_PRIVACY_UNVERIFIED_MESSAGE,
   REMOTE_SHUTDOWN_TIMEOUT_MS,
   RemoteSessionAuthenticationBudget,
+  sendRemoteAuthorityInvalidation,
   sendSequencedRemoteResponse,
   terminateRemoteSocket,
 } from "./remote-access-lifecycle";
 import {
   DEFAULT_REMOTE_GRANT_MS, DEFAULT_REMOTE_RELAY_URL, projectRemoteAccessState,
   remoteDeviceIsCurrent, remotePairingComparisonCode,
-  remoteRelayErrorMessage, takeRemoteRate, trimRemoteArray, trimRemoteSet,
+  remoteRelayErrorMessage, takeRemoteRate, trimRemoteSet,
   validateRemoteRelayUrl,
 } from "./remote-access-policy";
 import {
@@ -61,7 +62,7 @@ import {
   remoteSessionRetainsAuthority,
   type RemoteSessionAuthorityInput,
 } from "./remote-access-session-admission";
-import { authenticateRemoteSession } from "./remote-access-session-handshake";
+import { authenticateRemoteSession, authenticatedRemoteRejectionIsCurrent, authenticatedRemoteSessionDecisionFrame, rememberRemoteSession } from "./remote-access-session-handshake";
 import type {
   ActiveRemoteSession, PendingRemotePairing, RemoteAccessServiceOptions,
   RemotePrivacySuspension,
@@ -102,7 +103,6 @@ export class RemoteAccessService {
   private storeError: string | null = null;
   private identityInitialization: Promise<void> | null = null;
   private readonly persistence: RemoteAccessPersistenceQueue;
-
   private constructor(
     private readonly options: RemoteAccessServiceOptions,
     data: PersistedRemoteAccess | null,
@@ -310,7 +310,6 @@ export class RemoteAccessService {
             ({ id, revokedAt }) => id === pending.payload.deviceId && !revokedAt,
           );
           if (replacing) {
-            this.closeDeviceSessions(pending.payload.deviceId, "revoked", false);
             return await this.persistAuthorityReduction(
               () => {
                 const applied = applyRemotePairingGrant({
@@ -352,7 +351,7 @@ export class RemoteAccessService {
           return applied;
         },
       );
-      if (replaced) this.closeDeviceSessions(device.id, "revoked", false);
+      if (replaced) await this.invalidateDeviceSessions(device.id);
       const frame = await sealPairingResponse(
         this.requireHostKeyPair(), devicePublicKey, requestId, {
           type: "pair.accepted",
@@ -402,16 +401,13 @@ export class RemoteAccessService {
     if (current.revokedAt) return;
     const releaseAdmissionBlock = this.sessionAdmissions.blockDevice(current.id);
     try {
-      this.closeDeviceSessions(current.id, "revoked", false);
-      await this.serializeAuthorityMutation(async () => {
+      const revoked = await this.serializeAuthorityMutation(async () => {
         const durableDevice = this.requireData().devices.find(
           ({ id }) => id === deviceId,
         );
         if (!durableDevice) throw new Error("That paired device was not found.");
         if (durableDevice.revokedAt) return;
-        this.closeDeviceSessions(durableDevice.id, "revoked", false);
-        await this.persistAuthorityReduction(() => {
-          this.closeDeviceSessions(durableDevice.id, "revoked", false);
+        return await this.persistAuthorityReduction(() => {
           const revoked = revokeRemoteDevice(
             this.requireData(),
             deviceId,
@@ -419,9 +415,11 @@ export class RemoteAccessService {
           );
           if (!revoked) throw new Error("That paired device is already revoked.");
           this.audit("device.revoked", revoked.id, "A paired device was revoked.");
+          return revoked;
         });
-        this.emitState();
       });
+      if (revoked) await this.invalidateDeviceSessions(revoked.id);
+      this.emitState();
     } finally {
       releaseAdmissionBlock();
     }
@@ -448,8 +446,7 @@ export class RemoteAccessService {
     }
     const releaseAdmissionBlock = this.sessionAdmissions.blockDevice(validated.id);
     try {
-      this.closeDeviceSessions(validated.id, "permissions-changed", false);
-      await this.serializeAuthorityMutation(async () => {
+      const updated = await this.serializeAuthorityMutation(async () => {
         const current = updateRemoteDeviceGrant({
           data: structuredClone(this.requireData()),
           deviceId,
@@ -462,9 +459,7 @@ export class RemoteAccessService {
         if (current.revokedAt) {
           throw new Error("That paired device is already revoked.");
         }
-        this.closeDeviceSessions(current.id, "permissions-changed", false);
-        await this.persistAuthorityReduction(() => {
-          this.closeDeviceSessions(current.id, "permissions-changed", false);
+        return await this.persistAuthorityReduction(() => {
           const device = updateRemoteDeviceGrant({
             data: this.requireData(),
             deviceId,
@@ -475,9 +470,11 @@ export class RemoteAccessService {
             now: this.now(),
           });
           this.audit("device.scope-changed", device.id, "Device permissions changed.");
+          return device;
         });
-        this.emitState();
       });
+      await this.invalidateDeviceSessions(updated.id, "shutdown");
+      this.emitState();
     } finally {
       releaseAdmissionBlock();
     }
@@ -495,7 +492,6 @@ export class RemoteAccessService {
     else if (this.data?.enabled) this.connect();
     this.emitState();
   }
-
   private privacySuspensionMessage(): string | null {
     if (!this.privacyLocked) return null;
     return this.privacySuspension === "unverified"
@@ -519,7 +515,6 @@ export class RemoteAccessService {
     await this.authorityMutationTail;
     await this.persistence.drain();
   }
-
   private connect(): void {
     const data = this.data;
     if (!data?.enabled || this.stopped || this.socket) return;
@@ -588,7 +583,6 @@ export class RemoteAccessService {
       this.emitState();
     });
   }
-
   private relayRegistered(): void {
     this.clearRegistrationDeadline();
     this.connection = "online";
@@ -596,7 +590,6 @@ export class RemoteAccessService {
     this.reconnectAttempt = 0;
     this.emitState();
   }
-
   private relayError(
     code: Parameters<typeof remoteRelayErrorMessage>[0],
   ): void {
@@ -606,7 +599,6 @@ export class RemoteAccessService {
     }
     this.emitState();
   }
-
   private async handleFrame(
     connectionId: string,
     epoch: RemoteConnectionEpoch,
@@ -626,7 +618,6 @@ export class RemoteAccessService {
       this.dropConnection(connectionId, epoch);
     }
   }
-
   private async handlePairingRequest(
     connectionId: string,
     epoch: RemoteConnectionEpoch,
@@ -675,7 +666,6 @@ export class RemoteAccessService {
     if (!this.relayMessages.owns(connectionId, epoch)) return;
     this.emitState();
   }
-
   private async handleSessionOpen(
     connectionId: string,
     epoch: RemoteConnectionEpoch,
@@ -691,10 +681,7 @@ export class RemoteAccessService {
     try {
       const hostKeys = this.requireHostKeyPair();
       for (const device of data.devices) {
-        if (
-          this.sessionAdmissions.isDeviceBlocked(device.id)
-          || !remoteDeviceIsCurrent(device, this.now().getTime())
-        ) continue;
+        if (this.sessionAdmissions.isDeviceBlocked(device.id)) continue;
         const authenticated = await authenticateRemoteSession({
           data,
           device,
@@ -709,16 +696,24 @@ export class RemoteAccessService {
         if (
           !data.devices.includes(device)
           || this.sessionAdmissions.isDeviceBlocked(device.id)
-          || !remoteDeviceIsCurrent(device, this.now().getTime())
           || authenticated.subject.grantVersion !== device.grantVersion
-          || !this.sessionAdmissions.bindDevice(admission, device.id)
         ) return;
+        if (!this.sessionAdmissions.bindDevice(admission, device.id)) return;
+        if (authenticated.disposition !== "accepted") {
+          rememberRemoteSession(data, frame.sessionId, this.now().toISOString());
+          await this.persist();
+          if (!authenticatedRemoteRejectionIsCurrent({
+            data,
+            device,
+            authenticated,
+            now: this.now(),
+            current: () => this.sessionAdmissions.owns(admission)
+              && !this.sessionAdmissions.isDeviceBlocked(device.id),
+          })) return;
+          this.sendFrame(connectionId, authenticatedRemoteSessionDecisionFrame(frame.sessionId, authenticated)); return;
+        }
         const now = this.now().getTime();
-        data.usedSessions.push({
-          id: frame.sessionId,
-          createdAt: this.now().toISOString(),
-        });
-        trimRemoteArray(data.usedSessions, REMOTE_LIMITS.deliveryReceipts);
+        rememberRemoteSession(data, frame.sessionId, this.now().toISOString());
         const session: ActiveRemoteSession = {
           connectionId,
           connectionEpoch: epoch,
@@ -727,6 +722,8 @@ export class RemoteAccessService {
           recipient: authenticated.recipient,
           sender: authenticated.sender,
           subject: authenticated.subject,
+          supportsAuthenticatedRejection:
+            authenticated.supportsAuthenticatedRejection,
           createdAt: now,
           lastActivityAt: now,
           requestTimes: [],
@@ -759,7 +756,6 @@ export class RemoteAccessService {
       this.sessionAdmissions.release(admission);
     }
   }
-
   private async handleSessionData(
     connectionId: string,
     epoch: RemoteConnectionEpoch,
@@ -833,7 +829,6 @@ export class RemoteAccessService {
       this.dropConnection(session.connectionId, session.connectionEpoch);
     });
   }
-
   private async respond(
     session: ActiveRemoteSession,
     response: RemoteResponse,
@@ -845,7 +840,6 @@ export class RemoteAccessService {
       (connectionId, frame) => this.sendFrame(connectionId, frame),
     );
   }
-
   private sessionAuthority(
     session: ActiveRemoteSession,
   ): RemoteSessionAuthorityInput {
@@ -863,12 +857,10 @@ export class RemoteAccessService {
       now: this.now().getTime(),
     };
   }
-
   private sessionRetainsAuthority(session: ActiveRemoteSession): boolean {
     return !this.sessionAdmissions.isDeviceBlocked(session.device.id)
       && remoteSessionRetainsAuthority(this.sessionAuthority(session));
   }
-
   private sendFrame(connectionId: string, frame: RemoteCipherFrame): void {
     if (
       !remoteCipherFrameSchema.safeParse(frame).success
@@ -881,7 +873,6 @@ export class RemoteAccessService {
       frame,
     });
   }
-
   private sendRelay(message: RelayClientMessage): void {
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -896,20 +887,36 @@ export class RemoteAccessService {
     }
     socket.send(serialized);
   }
-
   private closeDeviceSessions(
     deviceId: string,
     reason: Extract<RemoteCipherFrame, { kind: "session.close" }>["reason"],
     persistChanges = true,
+    legacyReason = reason,
   ): void {
     this.sessionAdmissions.dropDevice(deviceId);
     for (const session of this.sessions.values()) {
       if (session.device.id === deviceId) {
-        this.closeSession(session, reason, persistChanges);
+        this.closeSession(
+          session,
+          session.supportsAuthenticatedRejection ? reason : legacyReason,
+          persistChanges,
+        );
       }
     }
   }
-
+  private async invalidateDeviceSessions(
+    deviceId: string,
+    legacyReason: Extract<RemoteCipherFrame, { kind: "session.close" }>["reason"] =
+      "revoked",
+  ): Promise<void> {
+    await sendRemoteAuthorityInvalidation(
+      this.sessions.values(), deviceId, this.now().toISOString(),
+      (session) => this.sessions.get(session.sessionId) === session
+        && this.relayMessages.owns(session.connectionId, session.connectionEpoch),
+      (connectionId, frame) => this.sendFrame(connectionId, frame),
+    ).catch(() => undefined);
+    this.closeDeviceSessions(deviceId, "revoked", true, legacyReason);
+  }
   private closeSession(
     session: ActiveRemoteSession,
     reason: Extract<RemoteCipherFrame, { kind: "session.close" }>["reason"],
@@ -931,7 +938,6 @@ export class RemoteAccessService {
       persistChanges,
     );
   }
-
   private dropConnection(
     connectionId: string,
     epoch?: RemoteConnectionEpoch,
@@ -982,7 +988,6 @@ export class RemoteAccessService {
     }
     this.emitState();
   }
-
   private dropAllSessions(persistChanges = true): void {
     this.relayMessages.reset();
     this.sessionAdmissions.clear();
@@ -991,7 +996,6 @@ export class RemoteAccessService {
     }
     this.pendingPairings.clear();
   }
-
   private disconnect(
     reason: Extract<RemoteCipherFrame, { kind: "session.close" }>["reason"],
     reconnect: boolean,
@@ -1021,7 +1025,6 @@ export class RemoteAccessService {
     if (reconnect) this.scheduleReconnect();
     return socket;
   }
-
   private scheduleReconnect(): void {
     if (
       this.stopped
@@ -1038,19 +1041,16 @@ export class RemoteAccessService {
       this.connect();
     }, delay);
   }
-
   private clearRegistrationDeadline(): void {
     if (!this.registrationTimer) return;
     this.clearTimer(this.registrationTimer);
     this.registrationTimer = null;
   }
-
   private clearReconnect(): void {
     if (!this.reconnectTimer) return;
     this.clearTimer(this.reconnectTimer);
     this.reconnectTimer = null;
   }
-
   private scheduleSweep(): void {
     if (this.stopped || this.sweepTimer) return;
     this.sweepTimer = this.setTimer(() => {
@@ -1059,7 +1059,6 @@ export class RemoteAccessService {
       this.scheduleSweep();
     }, SESSION_SWEEP_MS);
   }
-
   private sweep(): void {
     const now = this.now().getTime();
     if (this.invitation && Date.parse(this.invitation.expiresAt) <= now) {
@@ -1081,7 +1080,6 @@ export class RemoteAccessService {
     }
     this.emitState();
   }
-
   private takePairingAttempt(): boolean {
     return takeRemoteRate(
       this.pairingAttemptTimes,
@@ -1089,7 +1087,6 @@ export class RemoteAccessService {
       this.now().getTime(),
     );
   }
-
   private async initializeIdentity(
     relayUrl: string,
   ): Promise<PersistedRemoteAccess> {
@@ -1113,14 +1110,12 @@ export class RemoteAccessService {
     await this.identityInitialization;
     return this.requireData();
   }
-
   private disableLiveRemoteAccess(): void {
     this.invitation = null;
     const socket = this.disconnect("disabled", false, false);
     terminateRemoteSocket(socket);
     this.forgetRemoteTranscripts();
   }
-
   private forgetRemoteTranscripts(): void {
     try {
       this.options.runtime.forgetRemoteTranscripts?.({ kind: "all" });
@@ -1128,7 +1123,6 @@ export class RemoteAccessService {
       return;
     }
   }
-
   private pairingIsCurrent(requestId: string, pending: PendingRemotePairing): boolean {
     return this.pendingPairings.get(requestId) === pending
       && this.relayMessages.owns(pending.connectionId, pending.connectionEpoch)
@@ -1142,18 +1136,15 @@ export class RemoteAccessService {
     }
     return this.data;
   }
-
   private requireHostKeyPair(): RemoteImportedKeyPair {
     if (!this.hostKeyPair) {
       throw new Error("The Remote Companion identity is unavailable.");
     }
     return this.hostKeyPair;
   }
-
   private persist(): Promise<void> {
     return this.persistence.save(this.requireData());
   }
-
   private async serializeAuthorityMutation<T>(operation: () => Promise<T>): Promise<T> {
     if (this.stopped) throw new Error("Remote Companion is shutting down.");
     const pending = this.authorityMutationTail.then(operation);
@@ -1163,7 +1154,6 @@ export class RemoteAccessService {
     );
     return await pending;
   }
-
   private async persistAuthorityReduction<T>(mutate: () => T,
     remainsCurrent?: () => boolean): Promise<T> {
     await this.beginAuthorityReduction();
@@ -1182,7 +1172,6 @@ export class RemoteAccessService {
     await this.completeAuthorityReduction();
     return result;
   }
-
   private async beginAuthorityReduction(): Promise<void> {
     try {
       await this.options.store.beginAuthorityReduction();
@@ -1191,7 +1180,6 @@ export class RemoteAccessService {
       throw error;
     }
   }
-
   private async completeAuthorityReduction(): Promise<void> {
     try {
       await this.options.store.completeAuthorityReduction();
@@ -1200,7 +1188,6 @@ export class RemoteAccessService {
       throw error;
     }
   }
-
   private failClosedStore(message: string): void {
     if (this.storeError) return;
     this.storeError = message;
@@ -1227,7 +1214,6 @@ export class RemoteAccessService {
     this.connectionMessage = null;
     this.emitState();
   }
-
   private audit(
     type: RemoteAuditEvent["type"],
     deviceId: string | null,
@@ -1241,7 +1227,6 @@ export class RemoteAccessService {
       this.now(),
     );
   }
-
   private emitState(): void {
     this.options.onStateChange?.(this.state());
   }

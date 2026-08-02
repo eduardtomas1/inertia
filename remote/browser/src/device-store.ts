@@ -45,6 +45,21 @@ export interface SealedBrowserDeviceProfile {
   lastUsedAt: string;
 }
 
+export function profileAuthorizationChanged(
+  current: Pick<
+    SealedBrowserDeviceProfile,
+    "grantVersion" | "scopes" | "projectIds"
+  >,
+  next: Pick<
+    SealedBrowserDeviceProfile,
+    "grantVersion" | "scopes" | "projectIds"
+  >,
+): boolean {
+  return next.grantVersion !== current.grantVersion
+    || next.scopes.join("\u0000") !== current.scopes.join("\u0000")
+    || next.projectIds.join("\u0000") !== current.projectIds.join("\u0000");
+}
+
 const DATABASE_NAME = "inertia-remote-companion";
 const STORE_NAME = "device";
 const PROFILE_KEY = "active";

@@ -9,7 +9,9 @@ import {
   type RemoteSenderState,
 } from "../shared/remote-crypto";
 import {
+  REMOTE_BROWSER_SESSION_VERSION,
   REMOTE_LIMITS,
+  REMOTE_PROTOCOL_VERSION,
   remoteSessionOpenPayloadSchema,
   type RemoteAuthorizationSubject,
   type RemoteCipherFrame,
@@ -23,6 +25,8 @@ export interface AuthenticatedRemoteSession {
   recipient: RemoteRecipientState;
   sender: RemoteSenderState & { enc: string };
   subject: RemoteAuthorizationSubject;
+  disposition: "accepted" | "revoked" | "expired";
+  supportsAuthenticatedRejection: boolean;
   ciphertext: string;
 }
 
@@ -84,22 +88,102 @@ export async function authenticateRemoteSession(input: {
     grantVersion: input.device.grantVersion,
     expiresAt: input.device.expiresAt,
   };
+  const responseTime = input.now();
+  const supportsAuthenticatedRejection =
+    payload.browserVersion === REMOTE_BROWSER_SESSION_VERSION;
+  const disposition = input.device.revokedAt !== null
+    ? "revoked"
+    : Date.parse(input.device.expiresAt) <= responseTime.getTime()
+      ? "expired"
+      : "accepted";
   const ciphertext = await sealSessionHandshake(
     sender,
     "session.accept",
     input.frame.sessionId,
-    {
-      type: "session.accept",
-      sessionId: input.frame.sessionId,
-      hostId: input.data.hostId,
-      grantVersion: input.device.grantVersion,
-      scopes: input.device.scopes,
-      projectIds: input.device.projectIds,
-      expiresAt: input.device.expiresAt,
-      serverTime: input.now().toISOString(),
-    },
+    disposition === "accepted"
+      ? {
+        type: "session.accept",
+        sessionId: input.frame.sessionId,
+        hostId: input.data.hostId,
+        grantVersion: input.device.grantVersion,
+        scopes: input.device.scopes,
+        projectIds: input.device.projectIds,
+        expiresAt: input.device.expiresAt,
+        serverTime: responseTime.toISOString(),
+      }
+      : {
+        type: "session.reject",
+        sessionId: input.frame.sessionId,
+        hostId: input.data.hostId,
+        reason: disposition,
+        serverTime: responseTime.toISOString(),
+      },
   );
   return input.current()
-    ? { recipient, sender, subject, ciphertext }
+    ? {
+      recipient,
+      sender,
+      subject,
+      disposition,
+      supportsAuthenticatedRejection,
+      ciphertext,
+    }
     : "stale";
+}
+
+export function rememberRemoteSession(
+  data: PersistedRemoteAccess,
+  sessionId: string,
+  createdAt: string,
+): void {
+  data.usedSessions.push({ id: sessionId, createdAt });
+  if (data.usedSessions.length > REMOTE_LIMITS.deliveryReceipts) {
+    data.usedSessions.splice(
+      0,
+      data.usedSessions.length - REMOTE_LIMITS.deliveryReceipts,
+    );
+  }
+}
+
+export function authenticatedRemoteSessionDecisionFrame(
+  sessionId: string,
+  authenticated: AuthenticatedRemoteSession,
+): RemoteCipherFrame {
+  if (!authenticated.supportsAuthenticatedRejection) {
+    return {
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      kind: "session.close",
+      sessionId,
+      reason: "shutdown",
+    };
+  }
+  return {
+    protocolVersion: REMOTE_PROTOCOL_VERSION,
+    kind: "session.accept",
+    sessionId,
+    enc: authenticated.sender.enc,
+    ciphertext: authenticated.ciphertext,
+  };
+}
+
+export function authenticatedRemoteRejectionIsCurrent(input: {
+  data: PersistedRemoteAccess;
+  device: PersistedRemoteDevice;
+  authenticated: Pick<
+    AuthenticatedRemoteSession,
+    "disposition" | "subject"
+  >;
+  now: Date;
+  current(): boolean;
+}): boolean {
+  const { authenticated, device } = input;
+  const disposition = device.revokedAt !== null
+    ? "revoked"
+    : Date.parse(device.expiresAt) <= input.now.getTime()
+      ? "expired"
+      : "accepted";
+  return input.current()
+    && input.data.devices.includes(device)
+    && authenticated.subject.grantVersion === device.grantVersion
+    && authenticated.disposition === disposition;
 }

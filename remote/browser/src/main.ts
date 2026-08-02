@@ -24,7 +24,12 @@ let promptStatus: { message: string; uncertain: boolean } | null = null;
 let pairing = false;
 let hadProfile = false;
 let sending = false;
+let sendOperation = 0;
+let sendingConversationId: string | null = null;
 let promptConversationId: string | null = null;
+let browserOnline = navigator.onLine !== false;
+let forgetting = false;
+let profileClearing = false;
 
 const header = document.createElement("header");
 const title = document.createElement("h1");
@@ -72,10 +77,19 @@ const client = new RemoteCompanionClient({
     render();
   },
   invalidated: () => {
-    shell = null;
-    detail = null;
-    promptConversationId = null;
-    promptStatus = null;
+    purgeIdentityBoundState();
+    render();
+  },
+  authorizationInvalidated: () => {
+    purgeAuthorizationBoundState();
+    render();
+  },
+  forgetting: (value) => {
+    forgetting = value;
+    render();
+  },
+  profileClearing: (value) => {
+    profileClearing = value;
     render();
   },
   pairingCode: (code) => {
@@ -89,14 +103,23 @@ const client = new RemoteCompanionClient({
   },
   detail: (value) => {
     detail = value;
+    if (value === null) purgeAuthoritativeDetail();
     if (value === null && !promptStatus?.uncertain) promptStatus = null;
     render();
   },
-  promptResult: (message, uncertain) => {
+  promptResult: (message, uncertain, conversationId) => {
+    if (conversationId && conversationId !== promptConversationId) return;
     promptStatus = { message, uncertain };
     render();
   },
 });
+
+const renderConnectivity = (): void => {
+  browserOnline = navigator.onLine !== false;
+  render();
+};
+window.addEventListener("online", renderConnectivity);
+window.addEventListener("offline", renderConnectivity);
 
 void client.initialize().then(
   () => render(),
@@ -137,13 +160,17 @@ function render(): void {
   profileView.heading.textContent = profile.deviceLabel;
   profileView.permissions.textContent =
     `Permissions: ${profile.scopes.join(", ")} · expires ${new Date(profile.expiresAt).toLocaleString()}`;
-  profileView.reconnect.disabled = navigator.onLine === false
+  profileView.reconnect.disabled = forgetting || !browserOnline
     || connection?.phase === "connecting";
   profileView.reconnect.textContent = connection?.phase === "terminal"
     ? "Retry connection"
     : connection?.phase === "connecting"
       ? "Connecting…"
       : "Reconnect";
+  profileView.forget.disabled = forgetting;
+  profileView.forget.textContent = forgetting
+    ? "Forgetting…"
+    : "Forget this browser";
 
   empty.hidden = shell !== null;
   layout.hidden = shell === null;
@@ -186,7 +213,7 @@ function createPairingView(): {
   invitation.spellcheck = false;
   invitationLabel.append(invitation);
   const submit = button("Pair", () => {
-    if (pairing || navigator.onLine === false) return;
+    if (pairing || !browserOnline) return;
     pairing = true;
     render();
     void client.pair(invitation.value, name.value).then(() => {
@@ -207,7 +234,10 @@ function createPairingView(): {
 }
 
 function renderPairing(): void {
-  pairingView.submit.disabled = pairing || navigator.onLine === false;
+  pairingView.submit.disabled = profileClearing
+    || forgetting
+    || pairing
+    || !browserOnline;
   pairingView.submit.textContent = pairing ? "Waiting for desktop…" : "Pair";
   pairingView.code.textContent = pairingCode
     ? `Comparison code: ${pairingCode}`
@@ -220,6 +250,7 @@ function createProfileView(): {
   heading: HTMLHeadingElement;
   permissions: HTMLElement;
   reconnect: HTMLButtonElement;
+  forget: HTMLButtonElement;
 } {
   const section = document.createElement("section");
   section.className = "card";
@@ -227,11 +258,11 @@ function createProfileView(): {
   const permissions = appendRemoteText(section, "", "muted");
   const reconnect = button("Reconnect", () => void client.connect());
   const forget = button("Forget this browser", () => {
-    void client.forget().then(() => location.reload());
+    void client.forget().catch(() => undefined);
   }, "secondary");
   section.prepend(heading);
   section.append(reconnect, forget);
-  return { root: section, heading, permissions, reconnect };
+  return { root: section, heading, permissions, reconnect, forget };
 }
 
 function createConversationView(): {
@@ -293,18 +324,24 @@ function createConversationView(): {
     const target = promptConversationId;
     const content = prompt.value;
     if (!target || !content.trim() || sending || !online) return;
+    const operation = ++sendOperation;
     sending = true;
+    sendingConversationId = target;
     promptStatus = null;
     render();
     void client.sendPrompt(target, content).then((accepted) => {
       if (accepted && promptConversationId === target) prompt.value = "";
     }, () => {
-      promptStatus = {
-        message: "Delivery is uncertain. The prompt was not retried.",
-        uncertain: true,
-      };
+      if (promptConversationId === target) {
+        promptStatus = {
+          message: "Delivery is uncertain. The prompt was not retried.",
+          uncertain: true,
+        };
+      }
     }).finally(() => {
+      if (sendOperation !== operation) return;
       sending = false;
+      sendingConversationId = null;
       render();
     });
   });
@@ -351,6 +388,7 @@ function renderNavigation(value: RemoteSafeShell): void {
     view.root.remove();
     projectViews.delete(id);
   }
+  let projectCursor = navigation.firstChild;
   for (const project of value.projects) {
     let view = projectViews.get(project.id);
     if (!view) {
@@ -371,6 +409,7 @@ function renderNavigation(value: RemoteSafeShell): void {
       node.remove();
       view.conversations.delete(id);
     }
+    let conversationCursor = view.heading.nextSibling;
     for (const item of items) {
       let node = view.conversations.get(item.id);
       if (!node) {
@@ -380,9 +419,15 @@ function renderNavigation(value: RemoteSafeShell): void {
       }
       node.textContent = `${item.title} · ${item.status}`;
       node.className = detail?.conversation.id === item.id ? "selected" : "";
-      view.root.append(node);
+      if (node !== conversationCursor) {
+        view.root.insertBefore(node, conversationCursor);
+      }
+      conversationCursor = node.nextSibling;
     }
-    navigation.append(view.root);
+    if (view.root !== projectCursor) {
+      navigation.insertBefore(view.root, projectCursor);
+    }
+    projectCursor = view.root.nextSibling;
   }
 }
 
@@ -458,7 +503,9 @@ function renderDetail(
     conversation.submit.disabled = sending || !online;
     conversation.prompt.disabled = !online;
     conversation.submit.textContent = sending
-      ? "Sending…"
+      ? sendingConversationId === value.conversation.id
+        ? "Sending…"
+        : "Another prompt is sending…"
       : online
         ? "Send to desktop"
         : "Offline";
@@ -469,6 +516,47 @@ function renderDetail(
       ? "warning"
       : "status";
   }
+}
+
+function purgeAuthoritativeDetail(): void {
+  detail = null;
+  promptConversationId = null;
+  promptStatus = null;
+  for (const view of messageViews.values()) view.root.remove();
+  messageViews.clear();
+  for (const node of activityViews.values()) node.remove();
+  activityViews.clear();
+  for (const node of subagentViews.values()) node.remove();
+  subagentViews.clear();
+  conversation.transcript.replaceChildren();
+  conversation.activityList.replaceChildren();
+  conversation.subagentList.replaceChildren();
+  conversation.heading.textContent = "";
+  conversation.meta.textContent = "";
+  conversation.waiting.textContent = "";
+  conversation.activitySummary.textContent = "";
+  conversation.subagentSummary.textContent = "";
+  conversation.promptInfo.textContent = "";
+  conversation.safety.textContent = "";
+  conversation.prompt.value = "";
+  conversation.result.textContent = "";
+}
+
+function purgeIdentityBoundState(): void {
+  purgeAuthorizationBoundState();
+  profileView.heading.textContent = "";
+  profileView.permissions.textContent = "";
+}
+
+function purgeAuthorizationBoundState(): void {
+  shell = null;
+  purgeAuthoritativeDetail();
+  for (const view of projectViews.values()) {
+    view.root.remove();
+    view.conversations.clear();
+  }
+  projectViews.clear();
+  navigation.replaceChildren();
 }
 
 function updateTranscript(messages: RemoteSafeMessage[]): void {
@@ -482,6 +570,7 @@ function updateTranscript(messages: RemoteSafeMessage[]): void {
     view.root.remove();
     messageViews.delete(id);
   }
+  let cursor = conversation.transcript.firstChild;
   for (const message of messages) {
     let view = messageViews.get(message.id);
     if (!view) {
@@ -493,9 +582,15 @@ function updateTranscript(messages: RemoteSafeMessage[]): void {
       messageViews.set(message.id, view);
     }
     view.root.className = `message ${message.role}`;
-    view.role.textContent = message.role === "user" ? "You" : "Agent";
-    view.content.textContent = message.content;
-    conversation.transcript.append(view.root);
+    const role = message.role === "user" ? "You" : "Agent";
+    if (view.role.textContent !== role) view.role.textContent = role;
+    if (view.content.textContent !== message.content) {
+      view.content.textContent = message.content;
+    }
+    if (view.root !== cursor) {
+      conversation.transcript.insertBefore(view.root, cursor);
+    }
+    cursor = view.root.nextSibling;
   }
   conversation.transcript.scrollTop = followedLatest
     ? Math.max(0, conversation.transcript.scrollHeight
@@ -516,6 +611,7 @@ function reconcileTextItems<T extends RemoteSafeActivity | RemoteSafeSubagent>(
     node.remove();
     views.delete(id);
   }
+  let cursor = parent.firstChild;
   for (const value of values) {
     const id = key(value);
     let node = views.get(id);
@@ -525,7 +621,9 @@ function reconcileTextItems<T extends RemoteSafeActivity | RemoteSafeSubagent>(
       node.dataset.remoteKey = id;
       views.set(id, node);
     }
-    node.textContent = text(value);
-    parent.append(node);
+    const nextText = text(value);
+    if (node.textContent !== nextText) node.textContent = nextText;
+    if (node !== cursor) parent.insertBefore(node, cursor);
+    cursor = node.nextSibling;
   }
 }

@@ -30,7 +30,6 @@ const CLOSE_REASONS = new Set([
   "disabled",
   "expired",
   "revoked",
-  "permissions-changed",
   "replay",
   "rate-limited",
   "protocol-error",

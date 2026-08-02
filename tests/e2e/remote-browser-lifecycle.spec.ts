@@ -4,15 +4,10 @@ import {
   test,
   type Page,
 } from "@playwright/test";
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { once } from "node:events";
 
 import { WebSocket } from "ws";
@@ -37,16 +32,22 @@ import {
   remoteCipherFrameSchema,
   remoteRequestSchema,
   type RemoteRequest,
-  type RemoteSafeConversation,
   type RemoteSafeConversationDetail,
   type RemoteSafeShell,
 } from "../../src/shared/remote-protocol";
+import {
+  lifecycleDetail,
+  seedBrowserProfile,
+  serveBrowserAsset,
+  type SeededBrowserProfile,
+} from "./support/remote-browser-fixtures";
 
 let staticServer: Server;
 let staticUrl: string;
 let relay: ReferenceRelay;
 let relayUrl: string;
 let desktop: WebSocket;
+let navigationSequence = 0;
 
 test.beforeAll(async () => {
   const root = resolve("remote/browser/dist");
@@ -112,6 +113,8 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
   desktop?.terminate();
   desktop = await registerDesktop(endpointId, relayUrl);
   try {
+    await expect(page.getByRole("heading", { name: "Pair this browser" }))
+      .toBeVisible();
     const profile = await seedBrowserProfile(page, {
       hostPublicKey: hostKeys.publicKey,
       relayUrl,
@@ -128,7 +131,7 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
       undefined,
       "initial session",
     );
-    await page.reload();
+    await navigateRemoteBrowser(page, "initial-profile");
     let session = await initialSession;
     await expect(page.getByText("Lifecycle project")).toBeVisible();
 
@@ -215,6 +218,53 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
       open: true,
       scrollTop: 120,
     });
+
+    const conversationButton = page.getByRole("button", {
+      name: "Lifecycle conversation · idle",
+    });
+    await conversationButton.focus();
+    await page.evaluate(() => {
+      const text = document.querySelector(
+        '[data-remote-key="message:message-0"] .message-content',
+      )?.firstChild;
+      if (!text) throw new Error("Transcript text is missing.");
+      const range = document.createRange();
+      range.setStart(text, 0);
+      range.setEnd(text, 5);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      (window as unknown as Record<string, unknown>).__remoteSelectedText = text;
+    });
+    const focusedNavigationState = nextRequestOfType(
+      session,
+      "state.get",
+      shell,
+      lifecycleDetail(shell.conversations[0]!, 41, now),
+    );
+    await page.evaluate(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    const focusedState = await focusedNavigationState;
+    await sendSessionResponse(session, focusedState.requestId, {
+      kind: "state",
+      state: { ...shell, generatedAt: new Date().toISOString() },
+    });
+    const focusedDetail = await nextSessionRequest(session);
+    await sendSessionResponse(session, focusedDetail.requestId, {
+      kind: "conversation",
+      detail: lifecycleDetail(shell.conversations[0]!, 41, now),
+    });
+    await expect(conversationButton).toBeFocused();
+    await expect.poll(async () => await page.evaluate(() => {
+      const selection = window.getSelection();
+      return {
+        text: selection?.toString(),
+        identity: selection?.anchorNode === (
+          window as unknown as Record<string, unknown>
+        ).__remoteSelectedText,
+      };
+    })).toEqual({ text: "Lifec", identity: true });
 
     const promptRequest = nextRequestOfType(
       session,
@@ -305,6 +355,65 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
     await expect(page.getByText("Connected. The desktop remains authoritative."))
       .toBeVisible();
 
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.hide();
+    });
+    const idleOpeningPromise = nextDesktopMessage((message) =>
+      message.type === "relay.frame"
+      && typeof message.frame === "object"
+      && message.frame !== null
+      && "kind" in message.frame
+      && message.frame.kind === "session.open");
+    desktop.send(JSON.stringify({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId: session.connectionId,
+      frame: {
+        protocolVersion: 2,
+        kind: "session.close",
+        sessionId: session.sessionId,
+        // The desktop uses this existing v2 reason for both grant expiry and
+        // the >15 minute idle sweep. The still-valid grant must survive.
+        reason: "expired",
+      },
+    }));
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.show();
+    });
+    await expect(page.getByText(/fresh authenticated session/u)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Lifecycle browser" }))
+      .toBeVisible();
+    await expect(page.getByText("Lifecycle project")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Pair this browser" }))
+      .toHaveCount(0);
+    session = await acceptSeededSession(
+      profile,
+      hostKeys,
+      shell,
+      lifecycleDetail(shell.conversations[0]!, 41, now),
+      "idle session resume",
+      await idleOpeningPromise,
+    );
+    await expect(page.getByText("Connected. The desktop remains authoritative."))
+      .toBeVisible();
+
+    const revokedOpeningPromise = nextDesktopMessage((message) =>
+      message.type === "relay.frame"
+      && typeof message.frame === "object"
+      && message.frame !== null
+      && "kind" in message.frame
+      && message.frame.kind === "session.open");
+    desktop.send(JSON.stringify({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId: session.connectionId,
+      frame: await sealSessionData(session.sender, session.sessionId, {
+        type: "session.authority-changed",
+        serverTime: new Date().toISOString(),
+      }),
+    }));
+    await expect(page.getByText("Lifecycle project")).toHaveCount(0);
+    await expect(page.locator("[data-remote-key]")).toHaveCount(0);
     desktop.send(JSON.stringify({
       protocolVersion: 2,
       type: "relay.frame",
@@ -316,16 +425,28 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
         reason: "revoked",
       },
     }));
+    await expect(page.getByText(/fresh authenticated session/u)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Lifecycle browser" }))
+      .toBeVisible();
+    await expect(page.getByRole("heading", { name: "Pair this browser" }))
+      .toHaveCount(0);
+    await rejectSeededOpening(
+      await revokedOpeningPromise,
+      profile,
+      hostKeys,
+      "revoked",
+    );
     await expect(page.getByText(/revoked on the desktop/u)).toBeVisible();
     await expect(page.getByRole("heading", { name: "Pair this browser" }))
       .toBeVisible();
+    await expect(page.getByText("Lifecycle browser")).toHaveCount(0);
+    await expect(page.locator("[data-remote-key]")).toHaveCount(0);
   } finally {
     await page.context().setOffline(false).catch(() => undefined);
     await browser.close();
   }
 });
 
-type SeededBrowserProfile = Awaited<ReturnType<typeof seedBrowserProfile>>;
 type SeededHostKeys = Awaited<ReturnType<typeof generateRemoteKeyPair>>;
 type SessionRecipient = Awaited<
   ReturnType<typeof createAuthenticatedSessionRecipient>
@@ -394,8 +515,9 @@ async function acceptSeededSession(
   shell: RemoteSafeShell,
   detail?: RemoteSafeConversationDetail,
   label = "seeded session",
+  initialOpening?: Record<string, unknown>,
 ): Promise<SeededSession> {
-  let opening = await nextDesktopMessage((message) =>
+  let opening = initialOpening ?? await nextDesktopMessage((message) =>
     message.type === "relay.frame"
     && typeof message.frame === "object"
     && message.frame !== null
@@ -498,6 +620,61 @@ async function acceptSeededSession(
   throw new Error(`${label} exceeded the reconnect attempt limit.`);
 }
 
+async function rejectSeededOpening(
+  opening: Record<string, unknown>,
+  profile: SeededBrowserProfile,
+  hostKeys: SeededHostKeys,
+  reason: "revoked" | "expired",
+): Promise<void> {
+  if (
+    typeof opening.connectionId !== "string"
+    || typeof opening.frame !== "object"
+    || opening.frame === null
+  ) throw new Error("Missing rejected session opening.");
+  const frame = remoteCipherFrameSchema.parse(opening.frame);
+  if (frame.kind !== "session.open") {
+    throw new Error("Invalid rejected session opening.");
+  }
+  const sender = await createAuthenticatedSessionSender(
+    profile.hostId,
+    profile.deviceId,
+    frame.sessionId,
+    await importRemoteKeyPair(hostKeys),
+    await importRemotePublicKey(profile.publicKey),
+  );
+  desktop.send(JSON.stringify({
+    protocolVersion: 2,
+    type: "relay.frame",
+    connectionId: opening.connectionId,
+    frame: {
+      protocolVersion: 2,
+      kind: "session.accept",
+      sessionId: frame.sessionId,
+      enc: sender.enc,
+      ciphertext: await sealSessionHandshake(
+        sender,
+        "session.accept",
+        frame.sessionId,
+        {
+          type: "session.reject",
+          sessionId: frame.sessionId,
+          hostId: profile.hostId,
+          reason,
+          serverTime: new Date().toISOString(),
+        },
+      ),
+    },
+  }));
+}
+
+async function navigateRemoteBrowser(page: Page, label: string): Promise<void> {
+  navigationSequence += 1;
+  await page.goto(
+    `${staticUrl}/?fixture=${encodeURIComponent(label)}-${navigationSequence}`,
+    { waitUntil: "load" },
+  );
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -595,113 +772,6 @@ async function sendSessionResponse(
   }));
 }
 
-function lifecycleDetail(
-  conversation: RemoteSafeConversation,
-  messageCount: number,
-  createdAt: string,
-): RemoteSafeConversationDetail {
-  return {
-    generatedAt: new Date().toISOString(),
-    conversation,
-    messages: Array.from({ length: messageCount }, (_value, index) => ({
-      id: `message-${index}`,
-      turnId: null,
-      role: "assistant" as const,
-      content: `Lifecycle message ${index} ${"content ".repeat(8)}`,
-      createdAt,
-    })),
-    activities: [{
-      id: "activity-1",
-      turnId: null,
-      kind: "status",
-      title: "Lifecycle activity",
-      status: "running",
-      createdAt,
-    }],
-    subagents: [],
-    waitingForLocalAction: false,
-  };
-}
-
-async function seedBrowserProfile(
-  page: Page,
-  input: {
-    hostPublicKey: string;
-    relayUrl: string;
-    expiresAt: string;
-    hostId?: string;
-    deviceId?: string;
-    endpointId?: string;
-    scopes?: Array<"view" | "prompt">;
-  },
-): Promise<{
-  hostId: string;
-  deviceId: string;
-  endpointId: string;
-  publicKey: string;
-  expiresAt: string;
-}> {
-  return await page.evaluate(async ({
-    hostPublicKey,
-    relayUrl: url,
-    expiresAt,
-    hostId: requestedHostId,
-    deviceId: requestedDeviceId,
-    endpointId: requestedEndpointId,
-    scopes,
-  }) => {
-    const keys = await crypto.subtle.generateKey(
-      { name: "ECDH", namedCurve: "P-256" },
-      false,
-      ["deriveBits"],
-    ) as CryptoKeyPair;
-    const raw = new Uint8Array(
-      await crypto.subtle.exportKey("raw", keys.publicKey),
-    );
-    let binary = "";
-    for (const byte of raw) binary += String.fromCharCode(byte);
-    const publicKey = btoa(binary)
-      .replaceAll("+", "-")
-      .replaceAll("/", "_")
-      .replace(/=+$/u, "");
-    const hostId = requestedHostId ?? crypto.randomUUID();
-    const deviceId = requestedDeviceId ?? crypto.randomUUID();
-    const endpointId = requestedEndpointId ?? "lifecycle_endpoint";
-    const db = await new Promise<IDBDatabase>((resolveDatabase, reject) => {
-      const opening = indexedDB.open("inertia-remote-companion", 1);
-      opening.onupgradeneeded = () => {
-        opening.result.createObjectStore("device");
-      };
-      opening.onsuccess = () => resolveDatabase(opening.result);
-      opening.onerror = () => reject(opening.error);
-    });
-    await new Promise<void>((resolveWrite, reject) => {
-      const transaction = db.transaction("device", "readwrite");
-      transaction.objectStore("device").put({
-        version: 2,
-        deviceId,
-        deviceLabel: "Lifecycle browser",
-        publicKey,
-        privateKey: keys.privateKey,
-        lastUsedAt: new Date().toISOString(),
-        hostId,
-        hostPublicKey,
-        relayUrl: url,
-        endpointId,
-        scopes: scopes ?? ["view"],
-        projectIds: ["safe-project"],
-        grantVersion: 1,
-        expiresAt,
-      }, "active-sealed");
-      transaction.oncomplete = () => resolveWrite();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-    db.close();
-    return { hostId, deviceId, endpointId, publicKey, expiresAt };
-  }, input);
-}
-
 async function nextDesktopMessage(
   accept: (message: Record<string, unknown>) => boolean,
 ): Promise<Record<string, unknown>> {
@@ -726,51 +796,4 @@ async function nextSocketMessage(
     };
     socket.on("message", onMessage);
   });
-}
-
-async function serveBrowserAsset(
-  root: string,
-  request: IncomingMessage,
-  response: ServerResponse,
-): Promise<void> {
-  try {
-    const requestPath = new URL(
-      request.url ?? "/missing",
-      "http://remote-companion.invalid",
-    ).pathname;
-    const path = requestPath === "/"
-      ? resolve(root, "index.html")
-      : resolve(root, requestPath.replace(/^\/+/u, ""));
-    const nested = relative(root, path);
-    if (
-      nested === ".."
-      || nested.startsWith(`..${sep}`)
-      || isAbsolute(nested)
-    ) {
-      throw new Error("outside root");
-    }
-    const bytes = await readFile(path);
-    const contentType = extname(path) === ".html"
-      ? "text/html; charset=utf-8"
-      : extname(path) === ".css"
-        ? "text/css; charset=utf-8"
-        : "text/javascript; charset=utf-8";
-    response.writeHead(200, {
-      "Content-Type": contentType,
-      "Cache-Control": "no-store",
-      "Content-Security-Policy": [
-        "default-src 'none'",
-        "script-src 'self'",
-        "style-src 'self'",
-        "connect-src ws: wss:",
-        "img-src 'none'",
-        "object-src 'none'",
-        "base-uri 'none'",
-        "frame-ancestors 'none'",
-      ].join("; "),
-    });
-    response.end(bytes);
-  } catch {
-    response.writeHead(404).end();
-  }
 }

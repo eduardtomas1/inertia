@@ -47,6 +47,7 @@ let staticUrl: string;
 let relay: ReferenceRelay;
 let relayUrl: string;
 let desktop: WebSocket;
+let navigationSequence = 0;
 
 test.beforeAll(async () => {
   const root = resolve("remote/browser/dist");
@@ -105,6 +106,12 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
 
   try {
     await expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible();
+    await page.context().setOffline(true);
+    await expect(page.getByRole("button", { name: "Pair", exact: true }))
+      .toBeDisabled();
+    await page.context().setOffline(false);
+    await expect(page.getByRole("button", { name: "Pair", exact: true }))
+      .toBeEnabled();
     await page.getByLabel("Browser name").fill("Playwright browser");
     await page.getByLabel("Invitation").fill(JSON.stringify(invitation));
     const pairingRequestPromise = nextDesktopMessage(
@@ -294,7 +301,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         protocolVersion: 2,
         kind: "session.close",
         sessionId,
-        reason: "permissions-changed",
+        reason: "revoked",
       },
     }));
     const reducedMessage = await reducedSessionPromise;
@@ -329,6 +336,21 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
       await importRemoteKeyPair(hostKeys),
       devicePublicKey,
     );
+    await expect(page.getByText("Safe project")).toBeVisible();
+    await expect(page.locator("[data-remote-key]")).not.toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Playwright browser" }))
+      .toBeVisible();
+    await expect(page.getByRole("heading", { name: "Pair this browser" }))
+      .toHaveCount(0);
+    const reducedRequestPromise = nextDesktopMessage(
+      (message) =>
+        message.type === "relay.frame"
+        && message.connectionId === reducedMessage.connectionId
+        && typeof message.frame === "object"
+        && message.frame !== null
+        && "kind" in message.frame
+        && message.frame.kind === "session.data",
+    );
     desktop.send(JSON.stringify({
       protocolVersion: 2,
       type: "relay.frame",
@@ -357,6 +379,38 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         ),
       },
     }));
+    const reducedRequestMessage = await reducedRequestPromise;
+    await expect(page.getByText("Safe project")).toHaveCount(0);
+    await expect(page.locator("[data-remote-key]")).toHaveCount(0);
+    const reducedRequestFrame = remoteCipherFrameSchema.parse(
+      reducedRequestMessage.frame,
+    );
+    if (reducedRequestFrame.kind !== "session.data") {
+      throw new Error("Missing reduced state request.");
+    }
+    const reducedRequest = remoteRequestSchema.parse(
+      await openSessionData(reducedRecipient, reducedRequestFrame),
+    );
+    desktop.send(JSON.stringify({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId: reducedMessage.connectionId,
+      frame: await sealSessionData(reducedSender, reducedOpen.sessionId, {
+        type: "response",
+        requestId: reducedRequest.requestId,
+        ok: true,
+        result: {
+          kind: "state",
+          state: {
+            generatedAt: new Date().toISOString(),
+            projects: [{ id: "safe-project", name: "Safe project" }],
+            conversations: [],
+            runs: [],
+          },
+        },
+      }),
+    }));
+    await expect(page.getByText("Safe project")).toBeVisible();
     await expect.poll(async () => await page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((resolveDatabase, reject) => {
         const opening = indexedDB.open("inertia-remote-companion", 1);
@@ -379,6 +433,14 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
       return profile;
     })).toMatchObject({ grantVersion: 2, scopes: ["view"] });
 
+    const revokedSessionPromise = nextDesktopMessage(
+      (message) =>
+        message.type === "relay.frame"
+        && typeof message.frame === "object"
+        && message.frame !== null
+        && "kind" in message.frame
+        && message.frame.kind === "session.open",
+    );
     desktop.send(JSON.stringify({
       protocolVersion: 2,
       type: "relay.frame",
@@ -390,11 +452,62 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         reason: "revoked",
       },
     }));
+    await expect(page.getByText(/fresh authenticated session/u)).toBeVisible();
+    await expect(page.getByText("Safe project")).toBeVisible();
+    await expect(page.locator("[data-remote-key]")).not.toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Playwright browser" }))
+      .toBeVisible();
+    await expect(page.getByRole("heading", { name: "Pair this browser" }))
+      .toHaveCount(0);
+
+    const revokedMessage = await revokedSessionPromise;
+    if (
+      typeof revokedMessage.connectionId !== "string"
+      || typeof revokedMessage.frame !== "object"
+      || revokedMessage.frame === null
+    ) throw new Error("Missing revoked session opening.");
+    const revokedOpen = remoteCipherFrameSchema.parse(revokedMessage.frame);
+    if (revokedOpen.kind !== "session.open") {
+      throw new Error("Invalid revoked session opening.");
+    }
+    const revokedSender = await createAuthenticatedSessionSender(
+      invitation.hostId,
+      payload.deviceId,
+      revokedOpen.sessionId,
+      await importRemoteKeyPair(hostKeys),
+      devicePublicKey,
+    );
+    desktop.send(JSON.stringify({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId: revokedMessage.connectionId,
+      frame: {
+        protocolVersion: 2,
+        kind: "session.accept",
+        sessionId: revokedOpen.sessionId,
+        enc: revokedSender.enc,
+        ciphertext: await sealSessionHandshake(
+          revokedSender,
+          "session.accept",
+          revokedOpen.sessionId,
+          {
+            type: "session.reject",
+            sessionId: revokedOpen.sessionId,
+            hostId: invitation.hostId,
+            reason: "revoked",
+            serverTime: new Date().toISOString(),
+          },
+        ),
+      },
+    }));
     await expect(page.getByText(/revoked on the desktop/u)).toBeVisible();
-    await expect(page.getByRole("heading", {
-      name: "Pair this browser",
-    })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Pair this browser" }))
+      .toBeVisible();
+    await expect(page.getByText("Safe project")).toHaveCount(0);
+    await expect(page.getByText("Playwright browser")).toHaveCount(0);
+    await expect(page.locator("[data-remote-key]")).toHaveCount(0);
   } finally {
+    await page.context().setOffline(false).catch(() => undefined);
     await browser.close();
   }
 });
@@ -427,7 +540,7 @@ test("stops automatic retries on a terminal relay protocol mismatch", async () =
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
     connections = 0;
-    await page.reload();
+    await navigateRemoteBrowser(page, "terminal-protocol-mismatch");
     await expect(page.getByText(/incompatible Remote Companion protocol/u))
       .toBeVisible();
     await expect(page.getByRole("button", { name: "Retry connection" }))
@@ -457,7 +570,7 @@ test("expires a browser grant while a real socket attempt is in flight", async (
       relayUrl: `ws://127.0.0.1:${address.port}/remote`,
       expiresAt: new Date(Date.now() + 1_000).toISOString(),
     });
-    await page.reload();
+    await navigateRemoteBrowser(page, "grant-expiry");
     await expect(page.getByText("This device grant expired. Pair it again."))
       .toBeVisible();
     await expect(page.getByRole("heading", { name: "Pair this browser" }))
@@ -495,6 +608,14 @@ async function launchRemoteBrowser(): Promise<{
     await rm(userDataDir, { recursive: true, force: true });
     throw error;
   }
+}
+
+async function navigateRemoteBrowser(page: Page, label: string): Promise<void> {
+  navigationSequence += 1;
+  await page.goto(
+    `${staticUrl}/?fixture=${encodeURIComponent(label)}-${navigationSequence}`,
+    { waitUntil: "load" },
+  );
 }
 
 async function seedBrowserProfile(

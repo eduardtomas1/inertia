@@ -62,6 +62,45 @@ describe("Remote Companion browser connection supervisor", () => {
     expect(states.at(-1)?.phase).toBe("online");
   });
 
+  it("resets backoff after recovery before a later transport drop", async () => {
+    vi.useFakeTimers();
+    const transient = () => new RemoteConnectionFailure(
+      "relay unavailable",
+      "transient",
+      "relay",
+    );
+    const attempt = vi.fn()
+      .mockRejectedValueOnce(transient())
+      .mockRejectedValueOnce(transient())
+      .mockResolvedValueOnce(undefined);
+    const supervisor = new BrowserConnectionSupervisor({
+      attempt,
+      invalidate: vi.fn(),
+      foreground: vi.fn(),
+      expired: vi.fn(async () => undefined),
+      expiresAt: () => null,
+      state: vi.fn(),
+      now: () => Date.now(),
+      random: () => 0.5,
+    });
+
+    await supervisor.start();
+    expect(supervisor.current().retryAt).toBe(Date.now() + 1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(supervisor.current().retryAt).toBe(Date.now() + 2_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(supervisor.current().phase).toBe("online");
+
+    supervisor.transportClosed(
+      supervisor.current().generation,
+      transient(),
+    );
+    expect(supervisor.current()).toMatchObject({
+      phase: "backoff",
+      retryAt: Date.now() + 1_000,
+    });
+  });
+
   it("suppresses stale attempts across offline and online generations", async () => {
     let online = true;
     let release = (): void => undefined;
@@ -97,6 +136,7 @@ describe("Remote Companion browser connection supervisor", () => {
 
   it("does not auto-retry terminal failures, including on foreground", async () => {
     vi.useFakeTimers();
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
     const attempt = vi.fn(async () => {
       throw new RemoteConnectionFailure(
         "protocol mismatch",
@@ -110,15 +150,47 @@ describe("Remote Companion browser connection supervisor", () => {
       invalidate: vi.fn(),
       foreground: vi.fn(),
       expired: vi.fn(async () => undefined),
-      expiresAt: () => new Date(Date.now() + 60_000).toISOString(),
+      expiresAt: () => expiresAt,
       state: (value) => states.push(value),
     });
 
     await supervisor.start();
     expect(states.at(-1)?.phase).toBe("terminal");
     (supervisor as unknown as { onForeground(): void }).onForeground();
-    await vi.runAllTimersAsync();
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(attempt).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps trusted local expiry active after a terminal transport failure", async () => {
+    vi.useFakeTimers();
+    const expiresAt = new Date(Date.now() + 1_000).toISOString();
+    const expired = vi.fn(async () => undefined);
+    const supervisor = new BrowserConnectionSupervisor({
+      attempt: vi.fn(async () => {
+        throw new RemoteConnectionFailure(
+          "protocol mismatch",
+          "terminal",
+          "protocol-mismatch",
+        );
+      }),
+      invalidate: vi.fn(),
+      foreground: vi.fn(),
+      expired,
+      expiresAt: () => expiresAt,
+      state: vi.fn(),
+    });
+
+    await supervisor.start();
+    expect(supervisor.current()).toMatchObject({
+      phase: "terminal",
+      failure: { code: "protocol-mismatch" },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(supervisor.current()).toMatchObject({
+      phase: "terminal",
+      failure: { code: "grant-expired" },
+    });
+    expect(expired).toHaveBeenCalledOnce();
   });
 
   it("wakes transient backoff immediately when the browser resumes", async () => {
@@ -151,12 +223,13 @@ describe("Remote Companion browser connection supervisor", () => {
   it("expires an active grant without waiting for transport activity", async () => {
     vi.useFakeTimers();
     const expired = vi.fn(async () => undefined);
+    const expiresAt = new Date(Date.now() + 1_000).toISOString();
     const supervisor = new BrowserConnectionSupervisor({
       attempt: vi.fn(async () => undefined),
       invalidate: vi.fn(),
       foreground: vi.fn(),
       expired,
-      expiresAt: () => new Date(Date.now() + 1_000).toISOString(),
+      expiresAt: () => expiresAt,
       state: vi.fn(),
     });
 
@@ -192,5 +265,61 @@ describe("Remote Companion browser connection supervisor", () => {
       failure: { code: "grant-expired" },
     });
     expect(expired).toHaveBeenCalledOnce();
+  });
+
+  it("rechecks long grants after the platform timer cap", async () => {
+    vi.useFakeTimers();
+    const maximumTimer = 2_147_483_647;
+    const expired = vi.fn(async () => undefined);
+    const expiresAt = new Date(Date.now() + maximumTimer + 5_000).toISOString();
+    const supervisor = new BrowserConnectionSupervisor({
+      attempt: vi.fn(async () => undefined),
+      invalidate: vi.fn(),
+      foreground: vi.fn(),
+      expired,
+      expiresAt: () => expiresAt,
+      state: vi.fn(),
+    });
+
+    await supervisor.start();
+    await vi.advanceTimersByTimeAsync(maximumTimer);
+    expect(supervisor.current().phase).toBe("online");
+    expect(expired).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(supervisor.current().phase).toBe("terminal");
+    expect(expired).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a terminal failure across offline and online signals", async () => {
+    let online = true;
+    const attempt = vi.fn(async () => {
+      throw new RemoteConnectionFailure(
+        "protocol mismatch",
+        "terminal",
+        "protocol-mismatch",
+      );
+    });
+    const states: RemoteConnectionSnapshot[] = [];
+    const supervisor = new BrowserConnectionSupervisor({
+      attempt,
+      invalidate: vi.fn(),
+      foreground: vi.fn(),
+      expired: vi.fn(async () => undefined),
+      expiresAt: () => new Date(Date.now() + 60_000).toISOString(),
+      state: (value) => states.push(value),
+      online: () => online,
+    });
+
+    await supervisor.start();
+    const terminal = supervisor.current();
+    online = false;
+    (supervisor as unknown as { onOffline(): void }).onOffline();
+    online = true;
+    (supervisor as unknown as { onOnline(): void }).onOnline();
+
+    expect(supervisor.current()).toEqual(terminal);
+    expect(states.at(-1)).toEqual(terminal);
+    expect(attempt).toHaveBeenCalledOnce();
   });
 });

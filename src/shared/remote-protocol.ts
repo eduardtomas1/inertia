@@ -8,6 +8,9 @@ import {
 export const REMOTE_PROTOCOL_VERSION = 2 as const;
 export const REMOTE_BROWSER_VERSION = "0.2.0";
 export const REMOTE_RELAY_VERSION = "0.2.0";
+export const REMOTE_AUTHENTICATED_REJECTION_CAPABILITY = "auth-reject-v1";
+export const REMOTE_BROWSER_SESSION_VERSION =
+  `${REMOTE_BROWSER_VERSION}+${REMOTE_AUTHENTICATED_REJECTION_CAPABILITY}`;
 
 export const REMOTE_LIMITS = Object.freeze({
   relayEnvelopeBytes: 132 * 1024,
@@ -124,7 +127,9 @@ export const remoteSessionOpenPayloadSchema = z.object({
   deviceId: uuid,
   grantVersion: z.number().int().positive(),
   createdAt: timestamp,
-  browserVersion: z.string().trim().min(1).max(40),
+  browserVersion: z.string().min(1).max(40).regex(
+    /^\d+\.\d+\.\d+(?:\+[a-z0-9]+(?:-[a-z0-9]+)*)?$/u,
+  ),
 }).strict();
 export type RemoteSessionOpenPayload = z.infer<
   typeof remoteSessionOpenPayloadSchema
@@ -142,6 +147,33 @@ export const remoteSessionAcceptPayloadSchema = z.object({
 }).strict();
 export type RemoteSessionAcceptPayload = z.infer<
   typeof remoteSessionAcceptPayloadSchema
+>;
+
+export const remoteSessionRejectPayloadSchema = z.object({
+  type: z.literal("session.reject"),
+  sessionId: uuid,
+  hostId: uuid,
+  reason: z.enum(["revoked", "expired"]),
+  serverTime: timestamp,
+}).strict();
+export type RemoteSessionRejectPayload = z.infer<
+  typeof remoteSessionRejectPayloadSchema
+>;
+
+export const remoteSessionAuthorityChangedPayloadSchema = z.object({
+  type: z.literal("session.authority-changed"),
+  serverTime: timestamp,
+}).strict();
+export type RemoteSessionAuthorityChangedPayload = z.infer<
+  typeof remoteSessionAuthorityChangedPayloadSchema
+>;
+
+export const remoteSessionResponsePayloadSchema = z.discriminatedUnion(
+  "type",
+  [remoteSessionAcceptPayloadSchema, remoteSessionRejectPayloadSchema],
+);
+export type RemoteSessionResponsePayload = z.infer<
+  typeof remoteSessionResponsePayloadSchema
 >;
 
 const pairingRequestFrameSchema = z.object({
@@ -192,7 +224,6 @@ const sessionCloseFrameSchema = z.object({
     "disabled",
     "expired",
     "revoked",
-    "permissions-changed",
     "replay",
     "rate-limited",
     "protocol-error",

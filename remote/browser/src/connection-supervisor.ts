@@ -189,6 +189,7 @@ export class BrowserConnectionSupervisor {
       await this.options.attempt(generation);
       if (!this.owns(generation)) return;
       this.connected = true;
+      this.failureCount = 0;
       this.publish("online", null, null, attempt);
     } catch (error) {
       if (!this.owns(generation)) return;
@@ -240,7 +241,7 @@ export class BrowserConnectionSupervisor {
     }
     this.expiryTimer = setTimeout(() => {
       this.expiryTimer = null;
-      this.expire();
+      this.scheduleExpiry();
     }, Math.min(remaining, 2_147_483_647));
   }
 
@@ -273,7 +274,7 @@ export class BrowserConnectionSupervisor {
   };
 
   private readonly onOffline = (): void => {
-    if (!this.desired) return;
+    if (!this.desired || this.terminalBlocked) return;
     this.connected = false;
     this.generation += 1;
     this.clearRetry();

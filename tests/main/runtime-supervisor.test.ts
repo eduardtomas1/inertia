@@ -140,7 +140,8 @@ describe("RuntimeSupervisor", () => {
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
 
     const path = resolve(dataDirectory, "recovery.json");
-    const pending = supervisor.databaseRecovery("import", path);
+    const targetDirectory = resolve(workspaceDirectory, "recovered");
+    const pending = supervisor.databaseRecovery("import", path, targetDirectory);
     const request = children[0].messages.at(-1) as {
       type: string;
       requestId: string;
@@ -151,6 +152,7 @@ describe("RuntimeSupervisor", () => {
       type: "runtime.database-recovery",
       operation: "import",
       path,
+      targetDirectory,
     });
     children[0].message({
       type: "runtime.database-recovery-result",
@@ -164,12 +166,18 @@ describe("RuntimeSupervisor", () => {
       requestId: request.requestId,
       operation: "import",
       ok: true,
-      summary: { projects: 1, conversations: 2, messages: 3 },
+      summary: {
+        projects: 1,
+        conversations: 2,
+        messages: 3,
+        alreadyImported: false,
+      },
     });
     await expect(pending).resolves.toEqual({
       projects: 1,
       conversations: 2,
       messages: 3,
+      alreadyImported: false,
     });
   });
 

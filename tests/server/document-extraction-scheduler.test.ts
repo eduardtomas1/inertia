@@ -164,6 +164,38 @@ describe("document extraction scheduling", () => {
     await blocker;
   });
 
+  it("unlinks cancelled and expired queued buffers while occupied work never settles", async () => {
+    const scheduler = new DocumentExtractionScheduler({ concurrency: 1 });
+    void scheduler.schedule({
+      groupId: "never-settles",
+      weight: 1,
+      deadlineAt: Date.now() + 60_000,
+      operation: () => new Promise<string>(() => undefined),
+    }).catch(() => undefined);
+    const controllers = Array.from({ length: 64 }, () => new AbortController());
+    const cancelled = controllers.map((controller, index) => scheduler.schedule({
+      groupId: `cancelled-${index}`,
+      weight: 1,
+      deadlineAt: Date.now() + 60_000,
+      signal: controller.signal,
+      operation: async () => "must-not-run",
+    }));
+    controllers.forEach((controller) => controller.abort());
+    await Promise.all(cancelled.map((operation) =>
+      expect(operation).rejects.toBeInstanceOf(DocumentExtractionCancelledError)));
+    expect(scheduler.queuedJobCount()).toBe(0);
+
+    const expired = Array.from({ length: 64 }, (_, index) => scheduler.schedule({
+      groupId: `expired-${index}`,
+      weight: 1,
+      deadlineAt: Date.now() + 1,
+      operation: async () => "must-not-run",
+    }));
+    await Promise.all(expired.map((operation) =>
+      expect(operation).rejects.toBeInstanceOf(DocumentExtractionDeadlineError)));
+    expect(scheduler.queuedJobCount()).toBe(0);
+  });
+
   it("holds capacity until a timed-out extractor has actually stopped", async () => {
     const starts: string[] = [];
     let stopTimedOut: (() => void) | undefined;

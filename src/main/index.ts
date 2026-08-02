@@ -126,6 +126,14 @@ let credentialVault: CredentialVault | null = null;
 let trustedRendererUrl = "";
 let stoppingRuntime = false;
 let packageSmokeFilePath: string | null = null;
+const PACKAGE_SMOKE_PDF_RESULT_TIMEOUT_MS = 47_000;
+
+async function waitForPackageSmokePdfResult(path: string): Promise<void> {
+  const deadline = Date.now() + PACKAGE_SMOKE_PDF_RESULT_TIMEOUT_MS;
+  while (!existsSync(path) && Date.now() < deadline) {
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 50));
+  }
+}
 const previewBroker = new PreviewBroker({
   getWindow: () => mainWindow,
   openExternal: async (url) => shell.openExternal(url),
@@ -382,7 +390,21 @@ function registerIpcHandlers(): void {
     });
     const path = result.canceled ? undefined : result.filePaths[0];
     if (!path) return { status: "cancelled" };
-    const summary = await runtimeSupervisor.databaseRecovery("import", path);
+    const destination = await dialog.showOpenDialog(mainWindow, {
+      title: "Choose a folder for recovered projects",
+      defaultPath: app.getPath("documents"),
+      buttonLabel: "Authorize recovery folder",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    const targetDirectory = destination.canceled
+      ? undefined
+      : destination.filePaths[0];
+    if (!targetDirectory) return { status: "cancelled" };
+    const summary = await runtimeSupervisor.databaseRecovery(
+      "import",
+      path,
+      targetDirectory,
+    );
     if (!summary) throw new Error("The recovery import returned no summary.");
     return { status: "imported", summary };
   });
@@ -934,10 +956,17 @@ async function bootstrap(): Promise<void> {
             timestampMs: Date.now(),
           }),
           { encoding: "utf8", mode: 0o600, flag: "wx" },
-        ).finally(() => setTimeout(
-          () => app.quit(),
-          packageSmokeCodexExecutable ? 10_000 : 100,
-        ));
+        ).then(async () => {
+          await Promise.all([
+            new Promise<void>((resolveWait) => setTimeout(
+              resolveWait,
+              packageSmokeCodexExecutable ? 10_000 : 100,
+            )),
+            packageSmokePdfResult
+              ? waitForPackageSmokePdfResult(packageSmokePdfResult)
+              : Promise.resolve(),
+          ]);
+        }).catch(() => undefined).finally(() => app.quit());
       }
     },
   });

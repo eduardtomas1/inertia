@@ -15,6 +15,7 @@ function runtimeWithClose(
       restoredBackup: null,
       preservedCorruptPrimary: false,
       invalidBackupsSkipped: 0,
+      unsupportedBackupsSkipped: 0,
     },
     resolveProjectPath: vi.fn(),
     remoteRequest: vi.fn(async () => {
@@ -32,6 +33,7 @@ function runtimeWithClose(
       projects: 0,
       conversations: 0,
       messages: 0,
+      alreadyImported: false,
     })),
     close,
   };

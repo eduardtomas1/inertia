@@ -168,9 +168,9 @@ export class RuntimeDiagnostics {
   recordState(snapshot: RuntimeSupervisorSnapshot): void {
     const recovery = snapshot.databaseRecovery;
     const recoveryMessage = recovery?.outcome === "restored"
-      ? `Database restored from validated backup ${recovery.restoredBackup ?? "unknown"}; corrupt primary preserved: ${recovery.preservedCorruptPrimary ? "yes" : "no"}; invalid backups skipped: ${recovery.invalidBackupsSkipped}.`
+      ? `Database restored from validated backup ${recovery.restoredBackup ?? "unknown"}; corrupt primary preserved: ${recovery.preservedCorruptPrimary ? "yes" : "no"}; invalid backups skipped: ${recovery.invalidBackupsSkipped}; newer backups preserved: ${recovery.unsupportedBackupsSkipped}.`
       : recovery?.outcome === "created-empty"
-        ? `Database started empty after ${recovery.trigger}; corrupt primary preserved: ${recovery.preservedCorruptPrimary ? "yes" : "no"}; invalid backups skipped: ${recovery.invalidBackupsSkipped}.`
+        ? `Database started empty after ${recovery.trigger}; corrupt primary preserved: ${recovery.preservedCorruptPrimary ? "yes" : "no"}; invalid backups skipped: ${recovery.invalidBackupsSkipped}; newer backups preserved: ${recovery.unsupportedBackupsSkipped}.`
         : undefined;
     this.record(snapshot.lastError ? "runtime.failure" : "runtime.state", {
       phase: snapshot.phase,

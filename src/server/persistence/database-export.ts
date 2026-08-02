@@ -74,6 +74,7 @@ export interface DatabaseRecoveryImportResult {
   readonly projects: number;
   readonly conversations: number;
   readonly messages: number;
+  readonly alreadyImported: boolean;
 }
 
 export function serializeDatabaseRecoveryExport(

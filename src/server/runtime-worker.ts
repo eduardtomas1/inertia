@@ -6,10 +6,12 @@ import { startRuntime, type RunningRuntime } from "./index.js";
 import { RuntimeCredentialBrokerClient } from "./runtime/backends/credential-broker-client.js";
 import { RuntimeAttachmentBrokerClient } from "./runtime/attachments/attachment-broker-client.js";
 import { runPackagedPdfSmoke } from "./runtime/attachments/package-smoke-pdf.js";
+import { DatabaseRecoveryOperationQueue } from "./runtime/database-recovery-queue.js";
 import { RuntimeSecureFileBrokerClient } from "./runtime/secure-file-broker-client.js";
 import { completeRuntimeWorkerShutdown } from "./runtime-worker-shutdown.js";
 
 let runtime: RunningRuntime | null = null;
+const databaseRecoveryOperations = new DatabaseRecoveryOperationQueue();
 let starting = false;
 let stopping = false;
 let shutdownExitCode = 0;
@@ -118,9 +120,18 @@ parentPort.on("message", (messageEvent) => {
       });
       return;
     }
-    const operation = command.operation === "export"
-      ? runtime.exportRecoveryData(command.path).then(() => null)
-      : runtime.importRecoveryData(command.path);
+    const currentRuntime = runtime;
+    const operation = databaseRecoveryOperations.enqueue(async () => {
+      if (runtime !== currentRuntime || stopping) {
+        throw new Error("The local runtime is not ready.");
+      }
+      return command.operation === "export"
+        ? currentRuntime.exportRecoveryData(command.path).then(() => null)
+        : currentRuntime.importRecoveryData(
+            command.path,
+            command.targetDirectory!,
+          );
+    });
     void operation.then(
       (summary) => post({
         type: "runtime.database-recovery-result",
@@ -274,20 +285,6 @@ parentPort.on("message", (messageEvent) => {
     attachments,
     secureFiles,
   }).then(async (startedRuntime) => {
-    try {
-      if (command.options.packageSmokePdf) {
-        await runPackagedPdfSmoke(
-          command.options.packageSmokePdf.inputPath,
-          command.options.packageSmokePdf.resultPath,
-        );
-      }
-    } catch (error) {
-      starting = false;
-      const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 800) : "";
-      post({ type: "runtime.startup-failed", message: detail || "The local runtime could not start." });
-      await finishShutdown(startedRuntime, 1);
-      return;
-    }
     starting = false;
     if (stopping) {
       await finishShutdown(startedRuntime, shutdownExitCode);
@@ -299,6 +296,12 @@ parentPort.on("message", (messageEvent) => {
       websocketUrl: startedRuntime.websocketUrl,
       databaseRecovery: startedRuntime.databaseRecovery,
     });
+    if (command.options.packageSmokePdf) {
+      void runPackagedPdfSmoke(
+        command.options.packageSmokePdf.inputPath,
+        command.options.packageSmokePdf.resultPath,
+      ).catch(() => undefined);
+    }
   }).catch(async (error: unknown) => {
     starting = false;
     const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 800) : "";

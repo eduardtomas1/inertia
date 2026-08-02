@@ -215,4 +215,41 @@ describe("document attachment execution context", () => {
       bytes: blank,
     }])).rejects.toThrow(/no selectable text/u);
   });
+
+  it("aborts running and queued sibling PDFs after the first substantive failure", async () => {
+    let started = 0;
+    let destroyedHanging = 0;
+    const pdfModule = {
+      getDocument({ data }: { data: Uint8Array }) {
+        started += 1;
+        if (data[0] === 2) {
+          return {
+            promise: Promise.reject(new Error("invalid fixture")),
+            destroy: async () => undefined,
+          };
+        }
+        let rejectLoad!: (error: Error) => void;
+        return {
+          promise: new Promise((_resolve, reject) => { rejectLoad = reject; }),
+          destroy: async () => {
+            destroyedHanging += 1;
+            rejectLoad(new Error("destroyed by sibling cancellation"));
+          },
+        };
+      },
+    };
+    const documents = Array.from({ length: 8 }, (_, index) => ({
+      attachment: attachment({
+        id: `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`,
+        name: `${index + 1}.pdf`,
+      }),
+      bytes: new Uint8Array([index === 1 ? 2 : 1]),
+    }));
+
+    await expect(documentAttachmentContexts(documents, {
+      pdfModuleLoader: async () => pdfModule as never,
+    })).rejects.toThrow("2.pdf could not be read as a PDF.");
+    expect(started).toBe(2);
+    expect(destroyedHanging).toBeGreaterThan(0);
+  });
 });

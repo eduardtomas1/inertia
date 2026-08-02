@@ -13,6 +13,7 @@ import type { PersistenceContext } from "./context";
 import { RecordNotFoundError } from "./errors";
 import type { MessageRow } from "./rows";
 import {
+  appendMessageContentChunks,
   MESSAGE_PROJECTION_COLUMNS,
   replaceMessageContent,
 } from "./stream-text-storage";
@@ -153,11 +154,9 @@ export class TranscriptRepository {
 
   appendMessageContent(messageId: string, delta: string): void {
     if (!delta) return;
-    const result = this.context.database.prepare(`
-      INSERT INTO message_content_chunks (message_id, content)
-      SELECT id, ? FROM messages WHERE id = ?
-    `).run(delta, messageId);
-    if (result.changes === 0) throw new RecordNotFoundError("Message not found.");
+    if (!appendMessageContentChunks(this.context.database, messageId, delta)) {
+      throw new RecordNotFoundError("Message not found.");
+    }
   }
 
   message(messageId: string): ChatMessage {

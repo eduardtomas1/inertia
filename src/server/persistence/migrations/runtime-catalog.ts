@@ -1227,6 +1227,18 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
           ON reasoning_content_chunks(reasoning_id, sequence ASC);
       `,
     });
+    migrationExtensions.push({
+      name: "RecordIdempotentRecoveryImports",
+      up: `
+        CREATE TABLE IF NOT EXISTS recovery_import_receipts (
+          digest TEXT PRIMARY KEY CHECK (length(digest) = 64),
+          projects INTEGER NOT NULL CHECK (projects >= 0),
+          conversations INTEGER NOT NULL CHECK (conversations >= 0),
+          messages INTEGER NOT NULL CHECK (messages >= 0),
+          imported_at TEXT NOT NULL
+        );
+      `,
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

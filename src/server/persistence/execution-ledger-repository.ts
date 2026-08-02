@@ -46,6 +46,7 @@ import type {
 } from "./types";
 import { sanitizeProviderActivityDetail } from "../provider/activity-detail";
 import {
+  appendReasoningContentChunks,
   REASONING_PROJECTION_COLUMNS,
   replaceReasoningContent,
 } from "./stream-text-storage";
@@ -441,11 +442,7 @@ export class ExecutionLedgerRepository {
 
   appendReasoningContent(id: string, delta: string): void {
     if (!delta) return;
-    const result = this.context.database.prepare(`
-      INSERT INTO reasoning_content_chunks (reasoning_id, content)
-      SELECT id, ? FROM agent_reasonings WHERE id = ?
-    `).run(delta, id);
-    if (result.changes !== 1) {
+    if (!appendReasoningContentChunks(this.context.database, id, delta)) {
       throw new RecordNotFoundError("Reasoning summary not found.");
     }
   }

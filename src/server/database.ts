@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { lstatSync, realpathSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
+
 import Database from "better-sqlite3";
 
 import {
@@ -44,6 +48,11 @@ import {
 } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import {
+  conversationFromRow,
+  messageFromRow,
+  projectFromRow,
+} from "./persistence/codecs";
+import {
   DatabaseBackupManager,
   type DatabaseBackupResult,
   type DatabaseRecoveryReport,
@@ -79,8 +88,10 @@ import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
 import type {
   AgentTurnRow,
   ConversationRow,
+  MessageRow,
   ProjectRow,
 } from "./persistence/rows";
+import { MESSAGE_PROJECTION_COLUMNS } from "./persistence/stream-text-storage";
 import type {
   AgentTurnLifecycleUpdate,
   AgentTurnSettlementResult,
@@ -270,7 +281,34 @@ export class RuntimeStore {
   }
 
   exportRecoveryData(): string {
-    const shell = this.shellSnapshot();
+    const rows = this.database.transaction(() => ({
+      projects: this.database.prepare(
+        "SELECT * FROM projects ORDER BY updated_at DESC, id ASC",
+      ).all() as ProjectRow[],
+      conversations: this.database.prepare(
+        "SELECT * FROM conversations ORDER BY updated_at DESC, id ASC",
+      ).all() as ConversationRow[],
+      messages: this.database.prepare(`
+        SELECT ${MESSAGE_PROJECTION_COLUMNS}
+        FROM messages
+        ORDER BY messages.created_at ASC, messages.id ASC
+      `).all() as MessageRow[],
+    }))();
+    const projects = rows.projects.map(projectFromRow);
+    const conversations = rows.conversations.map(conversationFromRow);
+    const messages = rows.messages.map(messageFromRow);
+    const conversationsByProject = new Map<string, typeof conversations>();
+    for (const conversation of conversations) {
+      const grouped = conversationsByProject.get(conversation.projectId);
+      if (grouped) grouped.push(conversation);
+      else conversationsByProject.set(conversation.projectId, [conversation]);
+    }
+    const messagesByConversation = new Map<string, typeof messages>();
+    for (const message of messages) {
+      const grouped = messagesByConversation.get(message.conversationId);
+      if (grouped) grouped.push(message);
+      else messagesByConversation.set(message.conversationId, [message]);
+    }
     let estimatedBytes = 1_024;
     const account = (value: unknown): void => {
       estimatedBytes += Buffer.byteLength(JSON.stringify(value), "utf8") + 64;
@@ -282,13 +320,12 @@ export class RuntimeStore {
       format: DATABASE_RECOVERY_EXPORT_FORMAT,
       version: DATABASE_RECOVERY_EXPORT_VERSION,
       exportedAt: new Date().toISOString(),
-      projects: shell.projects.map((project) => {
+      projects: projects.map((project) => {
         account({ name: project.name, path: project.path });
         return {
           name: project.name,
           path: project.path,
-          conversations: shell.conversations
-            .filter((conversation) => conversation.projectId === project.id)
+          conversations: (conversationsByProject.get(project.id) ?? [])
             .map((conversation) => {
               account({
                 title: conversation.title,
@@ -298,20 +335,15 @@ export class RuntimeStore {
                 interactionMode: conversation.interactionMode,
                 accessMode: conversation.accessMode,
               });
-              const detail = this.conversationDetail(conversation.id);
-              if (!detail) {
-                throw new Error(
-                  "A conversation disappeared during recovery export.",
-                );
-              }
               return {
-                title: detail.conversation.title,
-                providerId: detail.conversation.providerId,
-                model: detail.conversation.model,
-                reasoningEffort: detail.conversation.reasoningEffort,
-                interactionMode: detail.conversation.interactionMode,
-                accessMode: detail.conversation.accessMode,
-                messages: detail.messages.map((message) => {
+                title: conversation.title,
+                providerId: conversation.providerId,
+                model: conversation.model,
+                reasoningEffort: conversation.reasoningEffort,
+                interactionMode: conversation.interactionMode,
+                accessMode: conversation.accessMode,
+                messages: (messagesByConversation.get(conversation.id) ?? [])
+                  .map((message) => {
                   const exportedMessage = {
                     role: message.role,
                     content: message.content,
@@ -328,9 +360,34 @@ export class RuntimeStore {
     return serializeDatabaseRecoveryExport(value);
   }
 
-  importRecoveryData(serialized: string): DatabaseRecoveryImportResult {
+  importRecoveryData(
+    serialized: string,
+    authorizedRoot: string,
+  ): DatabaseRecoveryImportResult {
+    if (!isAbsolute(authorizedRoot) || authorizedRoot.includes("\0")) {
+      throw new Error("The recovery import destination is invalid.");
+    }
+    const rootMetadata = lstatSync(authorizedRoot);
+    if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+      throw new Error("The recovery import destination is not a local directory.");
+    }
+    const resolvedRoot = resolve(realpathSync(authorizedRoot));
     const recovery = parseDatabaseRecoveryExport(serialized);
+    const digest = createHash("sha256")
+      .update(serialized, "utf8")
+      .update("\0", "utf8")
+      .update(resolvedRoot, "utf8")
+      .digest("hex");
     return this.database.transaction(() => {
+      const receipt = this.database.prepare(`
+        SELECT projects, conversations, messages
+        FROM recovery_import_receipts WHERE digest = ?
+      `).get(digest) as {
+        projects: number;
+        conversations: number;
+        messages: number;
+      } | undefined;
+      if (receipt) return { ...receipt, alreadyImported: true };
       const active = this.database.prepare(`
         SELECT active_project_id, active_conversation_id
         FROM app_state WHERE id = 1
@@ -340,10 +397,17 @@ export class RuntimeStore {
       };
       let conversationCount = 0;
       let messageCount = 0;
-      for (const importedProject of recovery.projects) {
+      for (const [projectIndex, importedProject] of recovery.projects.entries()) {
+        const remappedPath = join(
+          resolvedRoot,
+          `recovered-${digest.slice(0, 12)}-${projectIndex + 1}`,
+        );
+        if (remappedPath.length > 4_096) {
+          throw new Error("The recovery import destination path is too long.");
+        }
         const project = this.createProject(
           importedProject.name,
-          importedProject.path,
+          remappedPath,
         );
         for (const importedConversation of importedProject.conversations) {
           const conversation = this.createConversation(
@@ -354,7 +418,8 @@ export class RuntimeStore {
               model: importedConversation.model || "provider-default",
               reasoningEffort: importedConversation.reasoningEffort,
               interactionMode: importedConversation.interactionMode,
-              accessMode: importedConversation.accessMode,
+              // Exported authorization is never authoritative on this device.
+              accessMode: "supervised",
               activate: false,
             },
           );
@@ -378,19 +443,34 @@ export class RuntimeStore {
         SET active_project_id = ?, active_conversation_id = ?
         WHERE id = 1
       `).run(active.active_project_id, active.active_conversation_id);
-      return {
+      const summary = {
         projects: recovery.projects.length,
         conversations: conversationCount,
         messages: messageCount,
+        alreadyImported: false,
       };
+      this.database.prepare(`
+        INSERT INTO recovery_import_receipts (
+          digest, projects, conversations, messages, imported_at
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(
+        digest,
+        summary.projects,
+        summary.conversations,
+        summary.messages,
+        new Date().toISOString(),
+      );
+      return summary;
     })();
   }
 
   async backupAndClose(): Promise<void> {
-    this.backupManager.stop();
     let backupError: unknown;
     try {
-      await this.backupManager.createBackup();
+      // Shutdown owns a 2.5s process-wide deadline. Do not begin a full online
+      // backup here; cancel any scheduled work and rely on the hourly validated
+      // rotation plus WAL crash recovery.
+      await this.backupManager.cancelAndWait();
     } catch (error) {
       backupError = error;
     } finally {

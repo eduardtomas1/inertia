@@ -33,6 +33,7 @@ interface ScheduledExtraction {
   readonly groupId: string;
   readonly weight: number;
   readonly operation: (signal: AbortSignal) => Promise<unknown>;
+  readonly onOperationFailure: ((error: unknown) => void) | undefined;
   readonly controller: AbortController;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: unknown) => void;
@@ -86,6 +87,7 @@ export class DocumentExtractionScheduler {
     readonly deadlineAt: number;
     readonly signal?: AbortSignal;
     readonly operation: (signal: AbortSignal) => Promise<T>;
+    readonly onOperationFailure?: (error: unknown) => void;
   }): Promise<T> {
     if (input.signal?.aborted) {
       return Promise.reject(new DocumentExtractionCancelledError());
@@ -101,6 +103,7 @@ export class DocumentExtractionScheduler {
         groupId: input.groupId,
         weight: Math.max(1, Math.trunc(input.weight)),
         operation: input.operation,
+        onOperationFailure: input.onOperationFailure,
         controller: new AbortController(),
         resolve: (value) => resolve(value as T),
         reject,
@@ -130,6 +133,12 @@ export class DocumentExtractionScheduler {
       }
       this.pump();
     });
+  }
+
+  queuedJobCount(): number {
+    let count = 0;
+    for (const group of this.groups.values()) count += group.length;
+    return count;
   }
 
   private pump(): void {
@@ -218,6 +227,11 @@ export class DocumentExtractionScheduler {
     } catch (error) {
       operation = Promise.reject(error);
     }
+    if (job.onOperationFailure) {
+      void operation.catch((error: unknown) => {
+        job.onOperationFailure?.(error);
+      });
+    }
     const result = Promise.race([
       operation,
       deadline,
@@ -239,6 +253,14 @@ export class DocumentExtractionScheduler {
   }
 
   private settleQueued(job: ScheduledExtraction, error: Error): void {
+    const group = this.groups.get(job.groupId);
+    const index = group?.indexOf(job) ?? -1;
+    if (group && index >= 0) group.splice(index, 1);
+    if (group?.length === 0) {
+      this.groups.delete(job.groupId);
+      const groupIndex = this.groupOrder.indexOf(job.groupId);
+      if (groupIndex >= 0) this.groupOrder.splice(groupIndex, 1);
+    }
     if (job.queuedTimer) clearTimeout(job.queuedTimer);
     job.queuedTimer = undefined;
     if (job.queuedAbort) {

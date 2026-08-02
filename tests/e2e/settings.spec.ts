@@ -368,15 +368,16 @@ test("keeps runtime support and application update checks explicit in settings",
     exportedAt: "2026-08-01T00:00:00.000Z",
     projects: [],
   }));
-  await electronApp.evaluate(({ dialog }, path) => {
+  await electronApp.evaluate(({ dialog }, paths) => {
+    let request = 0;
     Reflect.set(dialog, "showOpenDialog", async () => ({
       canceled: false,
-      filePaths: [path],
+      filePaths: [request++ === 0 ? paths.importPath : paths.targetDirectory],
     }));
-  }, emptyImportPath);
+  }, { importPath: emptyImportPath, targetDirectory: testDirectory });
   await page.getByRole("button", { name: "Import recovery file" }).click();
   await expect(page.getByText(
-    "Imported 0 projects, 0 conversations, and 0 messages under new identities.",
+    "Imported 0 projects, 0 conversations, and 0 messages under new identities with supervised access.",
     { exact: true },
   )).toBeVisible();
   await expect(page.getByText("Local-only lifecycle and failure metadata.", { exact: false })).toBeVisible();

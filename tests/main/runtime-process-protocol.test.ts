@@ -297,6 +297,7 @@ describe("runtime process protocol", () => {
         restoredBackup: "inertia-20260101T000000000Z.sqlite",
         preservedCorruptPrimary: true,
         invalidBackupsSkipped: 1,
+        unsupportedBackupsSkipped: 0,
       },
     } as const;
     expect(parseRuntimeWorkerEvent(recoveredReady)).toEqual(recoveredReady);
@@ -365,12 +366,25 @@ describe("runtime process protocol", () => {
       .toBeNull();
     expect(parseRuntimeWorkerCommand({ ...command, operation: "delete" }))
       .toBeNull();
+    const importCommand = {
+      ...command,
+      operation: "import",
+      targetDirectory: resolve(workspaceDirectory, "authorized recovery"),
+    } as const;
+    expect(parseRuntimeWorkerCommand(importCommand)).toEqual(importCommand);
+    expect(parseRuntimeWorkerCommand({ ...command, operation: "import" }))
+      .toBeNull();
     const imported = {
       type: "runtime.database-recovery-result",
       requestId,
       operation: "import",
       ok: true,
-      summary: { projects: 2, conversations: 3, messages: 4 },
+      summary: {
+        projects: 2,
+        conversations: 3,
+        messages: 4,
+        alreadyImported: false,
+      },
     } as const;
     expect(parseRuntimeWorkerEvent(imported)).toEqual(imported);
     expect(parseRuntimeWorkerEvent({

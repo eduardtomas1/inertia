@@ -11,6 +11,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { Worker } from "node:worker_threads";
 
 import Database from "better-sqlite3";
 
@@ -19,17 +21,19 @@ import { CURRENT_DATABASE_SCHEMA_VERSION } from "./migrations/catalog";
 export const DATABASE_BACKUP_INTERVAL_MS = 60 * 60 * 1_000;
 export const DATABASE_BACKUP_MAX_COUNT = 5;
 export const DATABASE_BACKUP_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
+export const DATABASE_BACKUP_VALIDATION_TIMEOUT_MS = 120_000;
 
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 
 export interface DatabaseRecoveryReport {
   readonly checkedAt: string;
-  readonly outcome: "healthy" | "restored" | "created-empty";
+  readonly outcome: "healthy" | "first-launch" | "restored" | "created-empty";
   readonly trigger: "none" | "primary-missing" | "primary-corrupt";
   readonly restoredBackup: string | null;
   readonly preservedCorruptPrimary: boolean;
   readonly invalidBackupsSkipped: number;
+  readonly unsupportedBackupsSkipped: number;
 }
 
 export interface DatabaseRecoveryPaths {
@@ -50,6 +54,10 @@ export interface DatabaseBackupOptions {
   readonly maxTotalBytes?: number;
   readonly now?: () => Date;
   readonly onError?: (error: unknown) => void;
+  readonly validateBackup?: (
+    path: string,
+    signal: AbortSignal,
+  ) => Promise<DatabaseValidation>;
 }
 
 export interface DatabaseBackupResult {
@@ -64,6 +72,21 @@ interface ValidatedBackup {
   readonly path: string;
   readonly size: number;
 }
+
+export type DatabaseValidation =
+  | "valid-current"
+  | "unsupported-future"
+  | "corrupt";
+
+export class DatabaseBackupCancelledError extends Error {
+  constructor() {
+    super("The database backup was cancelled.");
+    this.name = "DatabaseBackupCancelledError";
+  }
+}
+
+const betterSqlite3ModulePath = createRequire(import.meta.url)
+  .resolve("better-sqlite3");
 
 function safeDatabaseStem(databasePath: string): string {
   const raw = basename(databasePath, extname(databasePath));
@@ -107,55 +130,210 @@ function removeIfRegularFile(path: string): void {
   if (regularOwnedFile(path)) unlinkSync(path);
 }
 
-function schemaVersion(database: Database.Database): number | null {
-  const table = database.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
-  ).get();
-  if (!table) return null;
-  const row = database.prepare(
-    "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations",
-  ).get() as { version?: unknown } | undefined;
-  return typeof row?.version === "number" && Number.isSafeInteger(row.version)
-    ? row.version
-    : null;
+function validateOpenDatabase(
+  database: Database.Database,
+  check: "quick_check" | "integrity_check",
+  currentSchemaVersion: number,
+): DatabaseValidation {
+  if (database.pragma(check, { simple: true }) !== "ok") return "corrupt";
+  const tables = new Set(
+    (database.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    ).all() as Array<{ name: string }>).map(({ name }) => name),
+  );
+  if (!tables.has("schema_migrations")) return "corrupt";
+  const versions = database.prepare(
+    "SELECT version FROM schema_migrations ORDER BY version ASC",
+  ).all() as Array<{ version: unknown }>;
+  if (
+    versions.length < 1
+    || versions.some(({ version }, index) =>
+      typeof version !== "number"
+      || !Number.isSafeInteger(version)
+      || version !== index + 1)
+  ) return "corrupt";
+  const version = versions.length;
+  if (version > currentSchemaVersion) return "unsupported-future";
+  for (const table of [
+    "projects",
+    "conversations",
+    "messages",
+    "app_state",
+  ]) {
+    if (!tables.has(table)) return "corrupt";
+  }
+  const requiredColumns: Record<string, readonly string[]> = {
+    projects: ["id", "name", "path"],
+    conversations: ["id", "project_id"],
+    messages: ["id", "conversation_id", "content"],
+    app_state: ["id"],
+  };
+  for (const [table, columns] of Object.entries(requiredColumns)) {
+    const existing = new Set(
+      (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
+    if (columns.some((column) => !existing.has(column))) return "corrupt";
+  }
+  if (version >= 38) {
+    if (!tables.has("agent_reasonings")) return "corrupt";
+    const reasoningColumns = new Set(
+      (database.prepare("PRAGMA table_info(agent_reasonings)").all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
+    if (["id", "conversation_id", "content"].some(
+      (column) => !reasoningColumns.has(column),
+    )) return "corrupt";
+    for (const [table, columns] of [
+      ["message_content_chunks", ["sequence", "message_id", "content"]],
+      ["reasoning_content_chunks", ["sequence", "reasoning_id", "content"]],
+    ] as const) {
+      if (!tables.has(table)) return "corrupt";
+      const existing = new Set(
+        (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+          .map(({ name }) => name),
+      );
+      if (columns.some((column) => !existing.has(column))) return "corrupt";
+    }
+    const indexes = new Set(
+      (database.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index'",
+      ).all() as Array<{ name: string }>).map(({ name }) => name),
+    );
+    if (
+      !indexes.has("message_content_chunks_message_sequence_idx")
+      || !indexes.has("reasoning_content_chunks_reasoning_sequence_idx")
+    ) return "corrupt";
+  }
+  if (version >= 39) {
+    if (!tables.has("recovery_import_receipts")) return "corrupt";
+    const receiptColumns = new Set(
+      (database.prepare("PRAGMA table_info(recovery_import_receipts)").all() as Array<{ name: string }>)
+        .map(({ name }) => name),
+    );
+    if ([
+      "digest",
+      "projects",
+      "conversations",
+      "messages",
+      "imported_at",
+    ].some((column) => !receiptColumns.has(column))) return "corrupt";
+  }
+  return "valid-current";
 }
 
-function validatesDatabase(
+function validateDatabase(
   path: string,
   check: "quick_check" | "integrity_check",
-  requireKnownSchema: boolean,
-): boolean {
-  if (!regularOwnedFile(path)) return false;
+): DatabaseValidation {
+  if (!regularOwnedFile(path)) return "corrupt";
   let database: Database.Database | null = null;
   try {
     database = new Database(path, { readonly: true, fileMustExist: true });
-    const result = database.pragma(check, { simple: true });
-    if (result !== "ok") return false;
-    if (!requireKnownSchema) return true;
-    const version = schemaVersion(database);
-    return version !== null
-      && version >= 1
-      && version <= CURRENT_DATABASE_SCHEMA_VERSION;
+    return validateOpenDatabase(
+      database,
+      check,
+      CURRENT_DATABASE_SCHEMA_VERSION,
+    );
   } catch {
-    return false;
+    return "corrupt";
   } finally {
     if (database?.open) database.close();
   }
 }
 
+function validateDatabaseOffThread(
+  path: string,
+  signal: AbortSignal,
+): Promise<DatabaseValidation> {
+  if (!regularOwnedFile(path)) return Promise.resolve("corrupt");
+  if (signal.aborted) return Promise.reject(new DatabaseBackupCancelledError());
+  const workerSource = `
+    const { parentPort, workerData } = require("node:worker_threads");
+    const Database = require(workerData.modulePath);
+    const validate = ${validateOpenDatabase.toString()};
+    let database = null;
+    try {
+      database = new Database(workerData.path, { readonly: true, fileMustExist: true });
+      parentPort.postMessage({ result: validate(
+        database,
+        "integrity_check",
+        workerData.currentSchemaVersion,
+      ) });
+    } catch {
+      parentPort.postMessage({ result: "corrupt" });
+    } finally {
+      if (database && database.open) database.close();
+    }
+  `;
+  return new Promise<DatabaseValidation>((resolveValidation, rejectValidation) => {
+    const worker = new Worker(workerSource, {
+      eval: true,
+      workerData: {
+        currentSchemaVersion: CURRENT_DATABASE_SCHEMA_VERSION,
+        modulePath: betterSqlite3ModulePath,
+        path,
+      },
+    });
+    let settled = false;
+    const finish = (error: unknown, result?: DatabaseValidation): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", cancel);
+      void worker.terminate();
+      if (error !== undefined) rejectValidation(error);
+      else resolveValidation(result ?? "corrupt");
+    };
+    const cancel = (): void => finish(new DatabaseBackupCancelledError());
+    const timer = setTimeout(
+      () => finish(new Error("The database backup validation timed out.")),
+      DATABASE_BACKUP_VALIDATION_TIMEOUT_MS,
+    );
+    timer.unref();
+    signal.addEventListener("abort", cancel, { once: true });
+    worker.once("message", (message: unknown) => {
+      const result = (
+        message
+        && typeof message === "object"
+        && "result" in message
+        && (
+          message.result === "valid-current"
+          || message.result === "unsupported-future"
+          || message.result === "corrupt"
+        )
+      ) ? message.result : "corrupt";
+      finish(undefined, result);
+    });
+    worker.once("error", (error) => finish(error));
+    worker.once("exit", (code) => {
+      if (code !== 0) finish(new Error("The database backup validator stopped unexpectedly."));
+    });
+  });
+}
+
 function listValidatedBackups(databasePath: string): {
   invalid: string[];
+  unsupported: string[];
   valid: ValidatedBackup[];
 } {
   const { backupsDirectory } = databaseRecoveryPaths(databasePath);
-  if (!existsSync(backupsDirectory)) return { invalid: [], valid: [] };
+  if (!existsSync(backupsDirectory)) {
+    return { invalid: [], unsupported: [], valid: [] };
+  }
   const pattern = backupPattern(databasePath);
   const invalid: string[] = [];
+  const unsupported: string[] = [];
   const valid: ValidatedBackup[] = [];
   for (const filename of readdirSync(backupsDirectory)) {
     if (!pattern.test(filename)) continue;
     const path = join(backupsDirectory, filename);
-    if (!validatesDatabase(path, "integrity_check", true)) {
+    const validation = validateDatabase(path, "integrity_check");
+    if (validation === "unsupported-future") {
+      unsupported.push(path);
+      continue;
+    }
+    if (validation !== "valid-current") {
       invalid.push(path);
       continue;
     }
@@ -170,7 +348,58 @@ function listValidatedBackups(databasePath: string): {
   valid.sort((left, right) =>
     right.modifiedAt - left.modifiedAt
     || right.filename.localeCompare(left.filename));
-  return { invalid, valid };
+  return { invalid, unsupported, valid };
+}
+
+function listBackupMetadata(databasePath: string): ValidatedBackup[] {
+  const { backupsDirectory } = databaseRecoveryPaths(databasePath);
+  if (!existsSync(backupsDirectory)) return [];
+  const pattern = backupPattern(databasePath);
+  const backups: ValidatedBackup[] = [];
+  for (const filename of readdirSync(backupsDirectory)) {
+    if (!pattern.test(filename)) continue;
+    const path = join(backupsDirectory, filename);
+    if (!regularOwnedFile(path)) continue;
+    try {
+      const metadata = statSync(path);
+      backups.push({
+        filename,
+        modifiedAt: metadata.mtimeMs,
+        path,
+        size: metadata.size,
+      });
+    } catch {
+      // A concurrently removed backup is no longer part of retention.
+    }
+  }
+  backups.sort((left, right) =>
+    right.modifiedAt - left.modifiedAt
+    || right.filename.localeCompare(left.filename));
+  return backups;
+}
+
+function isUnsupportedFutureDatabase(path: string): boolean {
+  if (!regularOwnedFile(path)) return false;
+  let database: Database.Database | null = null;
+  try {
+    database = new Database(path, { readonly: true, fileMustExist: true });
+    const hasMigrations = database.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
+    ).get();
+    if (!hasMigrations) return false;
+    const versions = database.prepare(
+      "SELECT version FROM schema_migrations ORDER BY version ASC",
+    ).all() as Array<{ version: unknown }>;
+    return versions.length > CURRENT_DATABASE_SCHEMA_VERSION
+      && versions.every(({ version }, index) =>
+        typeof version === "number"
+        && Number.isSafeInteger(version)
+        && version === index + 1);
+  } catch {
+    return false;
+  } finally {
+    if (database?.open) database.close();
+  }
 }
 
 function compactTimestamp(now: Date): string {
@@ -229,7 +458,7 @@ function restoreBackup(databasePath: string, backup: ValidatedBackup): void {
   removeIfRegularFile(restorePartialPath);
   copyFileSync(backup.path, restorePartialPath);
   chmodSync(restorePartialPath, FILE_MODE);
-  if (!validatesDatabase(restorePartialPath, "integrity_check", true)) {
+  if (validateDatabase(restorePartialPath, "integrity_check") !== "valid-current") {
     removeIfRegularFile(restorePartialPath);
     throw new Error("The selected database backup failed restore validation.");
   }
@@ -241,7 +470,7 @@ function persistRecoveryReport(
   databasePath: string,
   report: DatabaseRecoveryReport,
 ): void {
-  if (report.outcome === "healthy") return;
+  if (report.outcome === "healthy" || report.outcome === "first-launch") return;
   const { recoveryDirectory } = databaseRecoveryPaths(databasePath);
   ensureOwnedDirectory(recoveryDirectory);
   const finalPath = join(recoveryDirectory, "last-database-recovery.json");
@@ -279,10 +508,26 @@ export function recoverDatabaseOnStartup(
   if (primaryExists && !regularOwnedFile(paths.databasePath)) {
     throw new Error("The database path is not a local file.");
   }
-  if (
-    primaryExists
-    && validatesDatabase(paths.databasePath, "quick_check", false)
-  ) {
+  if (!primaryExists && listBackupMetadata(paths.databasePath).length === 0) {
+    return {
+      checkedAt: now.toISOString(),
+      outcome: "first-launch",
+      trigger: "none",
+      restoredBackup: null,
+      preservedCorruptPrimary: false,
+      invalidBackupsSkipped: 0,
+      unsupportedBackupsSkipped: 0,
+    };
+  }
+  const primaryValidation = primaryExists
+    ? validateDatabase(paths.databasePath, "quick_check")
+    : "corrupt";
+  if (primaryValidation === "unsupported-future") {
+    throw new Error(
+      "The database was created by a newer version of Inertia and was left unchanged.",
+    );
+  }
+  if (primaryValidation === "valid-current") {
     return {
       checkedAt: now.toISOString(),
       outcome: "healthy",
@@ -290,6 +535,7 @@ export function recoverDatabaseOnStartup(
       restoredBackup: null,
       preservedCorruptPrimary: false,
       invalidBackupsSkipped: 0,
+      unsupportedBackupsSkipped: 0,
     };
   }
 
@@ -306,6 +552,7 @@ export function recoverDatabaseOnStartup(
     restoredBackup: selected?.filename ?? null,
     preservedCorruptPrimary,
     invalidBackupsSkipped: backups.invalid.length,
+    unsupportedBackupsSkipped: backups.unsupported.length,
   };
   persistRecoveryReport(paths.databasePath, report);
   return report;
@@ -314,6 +561,7 @@ export function recoverDatabaseOnStartup(
 export class DatabaseBackupManager {
   private timer: NodeJS.Timeout | null = null;
   private inFlight: Promise<DatabaseBackupResult> | null = null;
+  private inFlightAbort: AbortController | null = null;
 
   constructor(
     private readonly database: Database.Database,
@@ -343,15 +591,32 @@ export class DatabaseBackupManager {
 
   createBackup(): Promise<DatabaseBackupResult> {
     if (this.inFlight) return this.inFlight;
-    const operation = this.createBackupOnce();
+    const controller = new AbortController();
+    const operation = this.createBackupOnce(controller.signal);
     this.inFlight = operation;
+    this.inFlightAbort = controller;
     void operation.finally(() => {
-      if (this.inFlight === operation) this.inFlight = null;
+      if (this.inFlight === operation) {
+        this.inFlight = null;
+        this.inFlightAbort = null;
+      }
     }).catch(() => undefined);
     return operation;
   }
 
-  private async createBackupOnce(): Promise<DatabaseBackupResult> {
+  async cancelAndWait(): Promise<void> {
+    this.stop();
+    const operation = this.inFlight;
+    this.inFlightAbort?.abort();
+    if (!operation) return;
+    try {
+      await operation;
+    } catch (error) {
+      if (!(error instanceof DatabaseBackupCancelledError)) throw error;
+    }
+  }
+
+  private async createBackupOnce(signal: AbortSignal): Promise<DatabaseBackupResult> {
     if (!this.database.open) throw new Error("The database is closed.");
     const paths = databaseRecoveryPaths(this.databasePath);
     ensureOwnedDirectory(paths.backupsDirectory);
@@ -365,14 +630,24 @@ export class DatabaseBackupManager {
     const finalPath = join(paths.backupsDirectory, filename);
     const partialPath = `${finalPath}.partial`;
     try {
-      await this.database.backup(partialPath);
+      await this.database.backup(partialPath, {
+        progress: () => {
+          if (signal.aborted) throw new DatabaseBackupCancelledError();
+          return 100;
+        },
+      });
+      if (signal.aborted) throw new DatabaseBackupCancelledError();
       chmodSync(partialPath, FILE_MODE);
-      if (!validatesDatabase(partialPath, "integrity_check", true)) {
+      const validation = await (
+        this.options.validateBackup ?? validateDatabaseOffThread
+      )(partialPath, signal);
+      if (validation !== "valid-current") {
         throw new Error("The database backup failed validation.");
       }
+      if (signal.aborted) throw new DatabaseBackupCancelledError();
       renameSync(partialPath, finalPath);
       chmodSync(finalPath, FILE_MODE);
-      this.prune();
+      this.prune(finalPath);
       return {
         createdAt: createdAt.toISOString(),
         filename,
@@ -384,10 +659,8 @@ export class DatabaseBackupManager {
     }
   }
 
-  private prune(): void {
+  private prune(protectedPath: string): void {
     const paths = databaseRecoveryPaths(this.databasePath);
-    const backups = listValidatedBackups(paths.databasePath);
-    for (const invalid of backups.invalid) removeIfRegularFile(invalid);
     const maxBackups = Math.max(
       1,
       Math.trunc(this.options.maxBackups ?? DATABASE_BACKUP_MAX_COUNT),
@@ -398,7 +671,13 @@ export class DatabaseBackupManager {
         this.options.maxTotalBytes ?? DATABASE_BACKUP_MAX_TOTAL_BYTES,
       ),
     );
-    const retained = [...backups.valid];
+    // The just-created file was already integrity-checked off-thread. Existing
+    // files only need a small schema-history read here so downgrade runs never
+    // delete future-version backups; full validation remains a startup task.
+    const retained = listBackupMetadata(paths.databasePath)
+      .filter((backup) =>
+        backup.path === protectedPath
+        || !isUnsupportedFutureDatabase(backup.path));
     let totalBytes = retained.reduce((sum, backup) => sum + backup.size, 0);
     while (
       retained.length > 1
@@ -407,7 +686,13 @@ export class DatabaseBackupManager {
         || totalBytes > maxTotalBytes
       )
     ) {
-      const oldest = retained.pop();
+      let oldestIndex = retained.length - 1;
+      while (
+        oldestIndex >= 0
+        && retained[oldestIndex]?.path === protectedPath
+      ) oldestIndex -= 1;
+      if (oldestIndex < 0) break;
+      const [oldest] = retained.splice(oldestIndex, 1);
       if (!oldest) break;
       removeIfRegularFile(oldest.path);
       totalBytes -= oldest.size;

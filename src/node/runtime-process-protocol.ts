@@ -63,15 +63,17 @@ export interface RuntimeDatabaseRecoverySummary {
   projects: number;
   conversations: number;
   messages: number;
+  alreadyImported: boolean;
 }
 
 export interface RuntimeDatabaseStartupRecoveryReport {
   checkedAt: string;
-  outcome: "healthy" | "restored" | "created-empty";
+  outcome: "healthy" | "first-launch" | "restored" | "created-empty";
   trigger: "none" | "primary-missing" | "primary-corrupt";
   restoredBackup: string | null;
   preservedCorruptPrimary: boolean;
   invalidBackupsSkipped: number;
+  unsupportedBackupsSkipped: number;
 }
 
 export type RuntimeWorkerCommand =
@@ -103,6 +105,7 @@ export type RuntimeWorkerCommand =
       requestId: string;
       operation: RuntimeDatabaseRecoveryOperation;
       path: string;
+      targetDirectory?: string;
     }
   | RuntimeCredentialResult
   | RuntimeAttachmentResult
@@ -384,18 +387,29 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   }
   if (
     value.type === "runtime.database-recovery"
-    && Object.keys(value).length === 4
     && typeof value.requestId === "string"
     && UUID_PATTERN.test(value.requestId)
     && (value.operation === "export" || value.operation === "import")
     && runtimePath(value.path)
   ) {
-    return {
+    if (value.operation === "export" && Object.keys(value).length === 4) return {
       type: "runtime.database-recovery",
       requestId: value.requestId,
-      operation: value.operation,
+      operation: "export",
       path: value.path,
     };
+    if (
+      value.operation === "import"
+      && Object.keys(value).length === 5
+      && runtimePath(value.targetDirectory)
+    ) return {
+      type: "runtime.database-recovery",
+      requestId: value.requestId,
+      operation: "import",
+      path: value.path,
+      targetDirectory: value.targetDirectory,
+    };
+    return null;
   }
   if (value.type !== "runtime.start" || Object.keys(value).length !== 2 || !plainObject(value.options)) return null;
   const options = value.options;
@@ -624,7 +638,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
         summary: null,
       };
     }
-    if (!plainObject(value.summary) || Object.keys(value.summary).length !== 3) {
+    if (!plainObject(value.summary) || Object.keys(value.summary).length !== 4) {
       return null;
     }
     if (value.operation !== "import") return null;
@@ -637,6 +651,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       typeof count === "number"
       && Number.isSafeInteger(count)
       && count >= 0)) return null;
+    if (typeof summary.alreadyImported !== "boolean") return null;
     return {
       type: "runtime.database-recovery-result",
       requestId: value.requestId,
@@ -646,6 +661,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
         projects: summary.projects as number,
         conversations: summary.conversations as number,
         messages: summary.messages as number,
+        alreadyImported: summary.alreadyImported,
       },
     };
   }
@@ -679,13 +695,14 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
 function parseRuntimeDatabaseStartupRecovery(
   value: unknown,
 ): RuntimeDatabaseStartupRecoveryReport | null {
-  if (!plainObject(value) || Object.keys(value).length !== 6) return null;
+  if (!plainObject(value) || Object.keys(value).length !== 7) return null;
   if (
     typeof value.checkedAt !== "string"
     || value.checkedAt.length > 64
     || !Number.isFinite(Date.parse(value.checkedAt))
     || (
       value.outcome !== "healthy"
+      && value.outcome !== "first-launch"
       && value.outcome !== "restored"
       && value.outcome !== "created-empty"
     )
@@ -705,15 +722,19 @@ function parseRuntimeDatabaseStartupRecovery(
     || typeof value.invalidBackupsSkipped !== "number"
     || !Number.isSafeInteger(value.invalidBackupsSkipped)
     || value.invalidBackupsSkipped < 0
+    || typeof value.unsupportedBackupsSkipped !== "number"
+    || !Number.isSafeInteger(value.unsupportedBackupsSkipped)
+    || value.unsupportedBackupsSkipped < 0
   ) return null;
   if (
     (
-      value.outcome === "healthy"
+      (value.outcome === "healthy" || value.outcome === "first-launch")
       && (
         value.trigger !== "none"
         || value.restoredBackup !== null
         || value.preservedCorruptPrimary
         || value.invalidBackupsSkipped !== 0
+        || value.unsupportedBackupsSkipped !== 0
       )
     )
     || (
@@ -733,6 +754,7 @@ function parseRuntimeDatabaseStartupRecovery(
     restoredBackup: value.restoredBackup,
     preservedCorruptPrimary: value.preservedCorruptPrimary,
     invalidBackupsSkipped: value.invalidBackupsSkipped,
+    unsupportedBackupsSkipped: value.unsupportedBackupsSkipped,
   };
 }
 

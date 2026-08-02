@@ -26,6 +26,7 @@ import {
   createRuntimeMigrationCatalog,
   type DatabaseMigrationDefinition,
 } from "../../src/server/persistence/migrations/catalog";
+import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const fixtureDirectory = join(repositoryRoot, "tests", "fixtures", "database");
@@ -57,6 +58,16 @@ async function fixtureManifest(): Promise<FixtureManifest> {
   return JSON.parse(
     await readFile(join(fixtureDirectory, "manifest.json"), "utf8"),
   ) as FixtureManifest;
+}
+
+function migrateFixtureInPlace(databasePath: string): void {
+  const database = new Database(databasePath);
+  try {
+    database.pragma("foreign_keys = ON");
+    migrateRuntimeDatabase(database);
+  } finally {
+    database.close();
+  }
 }
 
 async function createLegacyBackfillDatabase(): Promise<{
@@ -324,6 +335,7 @@ describe("published database fixtures", () => {
     legacy.exec("ALTER TABLE turn_git_artifacts DROP COLUMN absence_reason");
     legacy.prepare("DELETE FROM schema_migrations WHERE version = 27").run();
     legacy.close();
+    migrateFixtureInPlace(databasePath);
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.turnGitArtifact(turn.id)).toMatchObject({
@@ -485,6 +497,7 @@ describe("published database fixtures", () => {
       DELETE FROM schema_migrations WHERE version = 21;
     `);
     database.close();
+    migrateFixtureInPlace(databasePath);
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.snapshot().plans).toContainEqual({
@@ -698,6 +711,7 @@ describe("published database fixtures", () => {
       DELETE FROM schema_migrations WHERE version = 35;
     `);
     legacy.close();
+    migrateFixtureInPlace(databasePath);
 
     const migrated = new RuntimeStore(databasePath, workspacePath);
     expect(migrated.turnExecutionManifest(legacyTurn.id)?.references).toEqual([

@@ -274,7 +274,13 @@ export class RuntimeSupervisor {
   databaseRecovery(
     operation: RuntimeDatabaseRecoveryOperation,
     path: string,
+    targetDirectory?: string,
   ): Promise<RuntimeDatabaseRecoverySummary | null> {
+    if (operation === "import" && !targetDirectory) {
+      return Promise.reject(new Error(
+        "The recovery import needs an explicitly authorized destination folder.",
+      ));
+    }
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
       return Promise.reject(new Error(this.lastError
@@ -299,6 +305,9 @@ export class RuntimeSupervisor {
         requestId,
         operation,
         path,
+        ...(operation === "import" && targetDirectory
+          ? { targetDirectory }
+          : {}),
       });
     });
   }

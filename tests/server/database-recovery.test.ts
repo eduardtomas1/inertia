@@ -17,9 +17,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import {
+  DatabaseBackupCancelledError,
   DatabaseBackupManager,
   databaseRecoveryPaths,
 } from "../../src/server/persistence/database-recovery";
+import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 
 const directories: string[] = [];
 
@@ -56,6 +58,28 @@ afterEach(() => {
 });
 
 describe("database backup and startup recovery", () => {
+  it("distinguishes a clean first launch from a recovery incident", () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+
+    const store = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+
+    expect(store.databaseRecoveryReport()).toMatchObject({
+      outcome: "first-launch",
+      trigger: "none",
+      preservedCorruptPrimary: false,
+      invalidBackupsSkipped: 0,
+      unsupportedBackupsSkipped: 0,
+    });
+    expect(existsSync(join(
+      databaseRecoveryPaths(databasePath).recoveryDirectory,
+      "last-database-recovery.json",
+    ))).toBe(false);
+    store.close();
+  });
+
   it("creates an online validated backup that includes committed WAL data", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -179,24 +203,193 @@ describe("database backup and startup recovery", () => {
     expect(statSync(join(corruptDirectory, preservedShm!)).size).toBeGreaterThan(0);
   });
 
-  it("creates a validated final backup during clean store shutdown", async () => {
+  it("closes cleanly without beginning a full backup inside the shutdown deadline", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
     const { store } = seed(databasePath, "clean shutdown");
 
     await store.backupAndClose();
 
-    const names = backupNames(databasePath);
-    expect(names).toHaveLength(1);
-    const backup = new Database(join(
-      databaseRecoveryPaths(databasePath).backupsDirectory,
-      names[0]!,
-    ), { readonly: true });
-    expect(backup.pragma("integrity_check", { simple: true })).toBe("ok");
-    expect((backup.prepare("SELECT content FROM messages").get() as {
+    expect(backupNames(databasePath)).toEqual([]);
+    const closed = new Database(databasePath, { readonly: true });
+    expect(closed.pragma("quick_check", { simple: true })).toBe("ok");
+    expect((closed.prepare("SELECT content FROM messages").get() as {
       content: string;
     }).content).toBe("clean shutdown");
-    backup.close();
+    closed.close();
+  });
+
+  it("cancels off-thread validation and removes the partial before shutdown continues", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const database = new Database(databasePath);
+    let validationStarted!: () => void;
+    const started = new Promise<void>((resolve) => { validationStarted = resolve; });
+    const manager = new DatabaseBackupManager(database, databasePath, {
+      validateBackup: (_path, signal) => new Promise((_resolve, reject) => {
+        validationStarted();
+        signal.addEventListener("abort", () => {
+          reject(new DatabaseBackupCancelledError());
+        }, { once: true });
+      }),
+    });
+    const backup = manager.createBackup();
+    const rejected = expect(backup).rejects.toBeInstanceOf(
+      DatabaseBackupCancelledError,
+    );
+    await started;
+
+    const before = Date.now();
+    await manager.cancelAndWait();
+    expect(Date.now() - before).toBeLessThan(500);
+    await rejected;
+    expect(readdirSync(databaseRecoveryPaths(databasePath).backupsDirectory))
+      .toEqual([]);
+    database.close();
+  });
+
+  it("restores a valid backup when a quick-checkable primary has no released schema", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "recover me");
+    const backup = await store.createBackup();
+    store.close();
+    writeFileSync(databasePath, Buffer.alloc(0));
+    const schemaLess = new Database(databasePath);
+    schemaLess.exec("CREATE TABLE unrelated (value TEXT)");
+    expect(schemaLess.pragma("quick_check", { simple: true })).toBe("ok");
+    schemaLess.close();
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: backup.filename,
+      trigger: "primary-corrupt",
+    });
+    expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
+      .toBe("recover me");
+    recovered.close();
+  });
+
+  it("skips incomplete migration history and restores the next coherent backup", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "coherent");
+    const older = await store.createBackup();
+    store.createMessage(conversationId, "tampered", "assistant");
+    const newer = await store.createBackup();
+    store.close();
+    const newestDatabase = new Database(join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      newer.filename,
+    ));
+    newestDatabase.prepare(
+      "DELETE FROM schema_migrations WHERE version = ?",
+    ).run(CURRENT_DATABASE_SCHEMA_VERSION - 1);
+    newestDatabase.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: older.filename,
+      invalidBackupsSkipped: 1,
+    });
+    expect(recovered.conversationDetail(conversationId)?.messages
+      .map(({ content }) => content)).toEqual(["coherent"]);
+    recovered.close();
+  });
+
+  it("preserves an unsupported future backup instead of restoring or deleting it", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "future");
+    const future = await store.createBackup();
+    store.close();
+    const futurePath = join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      future.filename,
+    );
+    const futureDatabase = new Database(futurePath);
+    futureDatabase.prepare(
+      "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+    ).run(CURRENT_DATABASE_SCHEMA_VERSION + 1, new Date().toISOString());
+    futureDatabase.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "created-empty",
+      trigger: "primary-corrupt",
+      invalidBackupsSkipped: 0,
+      unsupportedBackupsSkipped: 1,
+    });
+    expect(existsSync(futurePath)).toBe(true);
+    expect(recovered.shellSnapshot().projects).toEqual([]);
+    recovered.close();
+  });
+
+  it("does not count or delete a future backup while pruning current backups", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "future retention");
+    const future = await store.createBackup();
+    store.close();
+    const futurePath = join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      future.filename,
+    );
+    const futureDatabase = new Database(futurePath);
+    futureDatabase.prepare(
+      "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+    ).run(CURRENT_DATABASE_SCHEMA_VERSION + 1, new Date().toISOString());
+    futureDatabase.close();
+
+    const primary = new Database(databasePath);
+    const manager = new DatabaseBackupManager(primary, databasePath, {
+      maxBackups: 1,
+      maxTotalBytes: Number.MAX_SAFE_INTEGER,
+    });
+    await manager.createBackup();
+    expect(existsSync(futurePath)).toBe(true);
+    expect(backupNames(databasePath)).toHaveLength(2);
+    primary.close();
+  });
+
+  it("rejects a backup whose current migration receipt lacks required tables", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "required structure");
+    const older = await store.createBackup();
+    store.createMessage(conversationId, "broken structure", "assistant");
+    const newer = await store.createBackup();
+    store.close();
+    const newerPath = join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      newer.filename,
+    );
+    const broken = new Database(newerPath);
+    broken.exec("DROP TABLE recovery_import_receipts");
+    broken.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: older.filename,
+      invalidBackupsSkipped: 1,
+    });
+    recovered.close();
   });
 
   it("cleans interrupted partials and bounds count and bytes without deleting the last valid backup", async () => {

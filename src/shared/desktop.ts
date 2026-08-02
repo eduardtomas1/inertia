@@ -29,6 +29,7 @@ export interface DatabaseRecoveryImportSummary {
   projects: number;
   conversations: number;
   messages: number;
+  alreadyImported: boolean;
 }
 
 export type DatabaseRecoveryExportResult =

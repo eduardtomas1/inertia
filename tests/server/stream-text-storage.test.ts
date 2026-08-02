@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
+import { STREAM_TEXT_CHUNK_MAX_CHARACTERS } from "../../src/server/persistence/stream-text-storage";
 
 const directories: string[] = [];
 
@@ -133,6 +134,97 @@ describe("append-oriented stream text persistence", () => {
     compacted.close();
   });
 
+  it("transactionally splits one oversized Unicode delta and reconstructs it through restart and settlement", () => {
+    const current = runtime();
+    const project = current.store.createProject("Large delta", current.directory);
+    const conversation = current.store.createConversation(project.id, "Large delta");
+    const user = current.store.createMessage(conversation.id, "Start", "user");
+    const turn = current.store.createAgentTurn({
+      id: "turn-large-single-delta",
+      conversationId: conversation.id,
+      runId: "run-large-single-delta",
+      userMessageId: user.id,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "legacy:codex:codex-app-server",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    current.store.updateAgentTurnLifecycle(turn.id, { status: "running" });
+    const assistant = current.store.createMessage(
+      conversation.id,
+      "message-prefix:",
+      "assistant",
+      [],
+      turn.id,
+    );
+    const reasoning = current.store.createReasoning(
+      conversation.id,
+      turn.runId,
+      turn.id,
+    );
+    const messageDelta = `${"m".repeat(STREAM_TEXT_CHUNK_MAX_CHARACTERS - 1)}😀tail`;
+    const reasoningDelta = `${"r".repeat(STREAM_TEXT_CHUNK_MAX_CHARACTERS)}🧠尾`;
+
+    current.store.appendMessageContent(assistant.id, messageDelta);
+    current.store.appendReasoningContent(reasoning.id, reasoningDelta);
+    expect(current.store.message(assistant.id).content)
+      .toBe(`message-prefix:${messageDelta}`);
+    expect(current.store.conversationDetail(conversation.id)?.reasonings[0]?.content)
+      .toBe(reasoningDelta);
+    current.store.close();
+
+    const raw = new Database(current.databasePath, { readonly: true });
+    expect((raw.prepare(`
+      SELECT COUNT(*) AS count, MAX(length(content)) AS maximum
+      FROM message_content_chunks WHERE message_id = ?
+    `).get(assistant.id) as { count: number; maximum: number }))
+      .toEqual({ count: 2, maximum: STREAM_TEXT_CHUNK_MAX_CHARACTERS });
+    expect((raw.prepare(`
+      SELECT COUNT(*) AS count, MAX(length(content)) AS maximum
+      FROM reasoning_content_chunks WHERE reasoning_id = ?
+    `).get(reasoning.id) as { count: number; maximum: number }))
+      .toEqual({ count: 2, maximum: STREAM_TEXT_CHUNK_MAX_CHARACTERS });
+    raw.close();
+
+    const reopened = new RuntimeStore(
+      current.databasePath,
+      current.directory,
+      { recoverInterruptedRuns: false },
+    );
+    expect(reopened.message(assistant.id).content)
+      .toBe(`message-prefix:${messageDelta}`);
+    expect(reopened.conversationDetail(conversation.id)?.reasonings[0]?.content)
+      .toBe(reasoningDelta);
+    reopened.settleAgentTurn(turn.id, {
+      status: "completed",
+      terminalAssistantMessageId: assistant.id,
+      terminalReason: "completed",
+    });
+    reopened.close();
+
+    const compacted = new Database(current.databasePath, { readonly: true });
+    expect((compacted.prepare(
+      "SELECT content FROM messages WHERE id = ?",
+    ).get(assistant.id) as { content: string }).content)
+      .toBe(`message-prefix:${messageDelta}`);
+    expect((compacted.prepare(
+      "SELECT content FROM agent_reasonings WHERE id = ?",
+    ).get(reasoning.id) as { content: string }).content)
+      .toBe(reasoningDelta);
+    expect((compacted.prepare(
+      "SELECT COUNT(*) AS count FROM message_content_chunks",
+    ).get() as { count: number }).count).toBe(0);
+    expect((compacted.prepare(
+      "SELECT COUNT(*) AS count FROM reasoning_content_chunks",
+    ).get() as { count: number }).count).toBe(0);
+    compacted.close();
+  });
+
   it("replacements and terminal reasoning updates atomically discard obsolete chunks", () => {
     const current = runtime();
     const project = current.store.createProject("Replace", current.directory);
@@ -185,9 +277,10 @@ describe("append-oriented stream text persistence", () => {
 
     const old = new Database(current.databasePath);
     old.exec(`
+      DROP TABLE recovery_import_receipts;
       DROP TABLE message_content_chunks;
       DROP TABLE reasoning_content_chunks;
-      DELETE FROM schema_migrations WHERE version = 38;
+      DELETE FROM schema_migrations WHERE version >= 38;
     `);
     old.close();
 

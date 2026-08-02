@@ -301,6 +301,7 @@ async function extractPdfText(
     }
     return { content, truncated };
   } catch (error) {
+    if (signal.aborted) throw new DocumentExtractionCancelledError();
     if (
       error instanceof Error
       && (
@@ -378,40 +379,64 @@ export async function documentAttachmentContexts(
   const maximumJsonBytes = Math.floor(
     MAX_DOCUMENT_CONTEXT_TOTAL_BYTES / documents.length,
   );
+  const batchAbort = new AbortController();
+  const cancelBatch = (): void => batchAbort.abort();
+  options.signal?.addEventListener("abort", cancelBatch, { once: true });
   const extractions = documents.map(async ({ attachment, bytes }) => {
-    const extracted = attachment.mimeType === "application/pdf"
-      ? await scheduler.schedule({
-          groupId,
-          weight: bytes.byteLength,
-          deadlineAt,
-          signal: options.signal,
-          operation: (signal) => extractPdfText(
-            pdfModule!,
-            attachment,
-            bytes,
-            maximumJsonBytes,
-            signal,
+    try {
+      if (batchAbort.signal.aborted) {
+        throw new DocumentExtractionCancelledError();
+      }
+      const extracted = attachment.mimeType === "application/pdf"
+        ? await scheduler.schedule({
+            groupId,
+            weight: bytes.byteLength,
             deadlineAt,
-          ),
-        })
-      : extractTextDocument(attachment, bytes, maximumJsonBytes);
-    return {
-      attachmentId: attachment.id,
-      label: `${attachment.mimeType === "application/pdf" ? "PDF" : "Document"} · ${attachment.name}`,
-      content: extracted.content,
-      truncated: extracted.truncated,
-    };
+            signal: batchAbort.signal,
+            onOperationFailure: (error) => {
+              if (!(error instanceof DocumentExtractionCancelledError)) {
+                batchAbort.abort();
+              }
+            },
+            operation: (signal) => extractPdfText(
+              pdfModule!,
+              attachment,
+              bytes,
+              maximumJsonBytes,
+              signal,
+              deadlineAt,
+            ),
+          })
+        : extractTextDocument(attachment, bytes, maximumJsonBytes);
+      return {
+        attachmentId: attachment.id,
+        label: `${attachment.mimeType === "application/pdf" ? "PDF" : "Document"} · ${attachment.name}`,
+        content: extracted.content,
+        truncated: extracted.truncated,
+      };
+    } catch (error) {
+      if (!(error instanceof DocumentExtractionCancelledError)) {
+        batchAbort.abort();
+      }
+      throw error;
+    }
   });
-  const settled = await Promise.allSettled(extractions);
-  const failed = settled.find(
-    (result): result is PromiseRejectedResult => result.status === "rejected",
-  );
+  const settled = await Promise.allSettled(extractions).finally(() => {
+    options.signal?.removeEventListener("abort", cancelBatch);
+  });
+  const failed = settled.find((result): result is PromiseRejectedResult =>
+    result.status === "rejected"
+    && !(result.reason instanceof DocumentExtractionCancelledError));
   if (failed) {
     if (failed.reason instanceof DocumentExtractionDeadlineError) {
       throw new Error("PDF text extraction timed out.");
     }
     throw failed.reason;
   }
+  const cancelled = settled.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (cancelled) throw cancelled.reason;
   return settled.map((result) => {
     if (result.status === "rejected") throw result.reason;
     return result.value;

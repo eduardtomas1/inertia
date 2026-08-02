@@ -175,7 +175,10 @@ export interface RunningRuntime {
   ) => RemoteResponse;
   forgetRemoteTranscripts: (scope: RuntimeRemoteForgetScope) => void;
   exportRecoveryData: (path: string) => Promise<void>;
-  importRecoveryData: (path: string) => Promise<DatabaseRecoveryImportResult>;
+  importRecoveryData: (
+    path: string,
+    targetDirectory: string,
+  ) => Promise<DatabaseRecoveryImportResult>;
   close: (cause?: "runtime-shutdown" | "runtime-crash") => Promise<void>;
 }
 
@@ -813,9 +816,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     exportRecoveryData: async (path) => {
       await writeDatabaseRecoveryExportFile(path, store.exportRecoveryData());
     },
-    importRecoveryData: async (path) => {
+    importRecoveryData: async (path, targetDirectory) => {
       const result = store.importRecoveryData(
         await readDatabaseRecoveryExportFile(path),
+        targetDirectory,
       );
       broadcastSnapshot();
       return result;

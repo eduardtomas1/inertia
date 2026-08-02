@@ -21,6 +21,7 @@ import {
   GitError,
   inspectBranchCleanupOutcome,
   inspectOwnedWorktreeCleanupState,
+  inspectUnacknowledgedWorktreeCreation,
   preflightWorktreeFilesystemIdentity,
   type OwnedWorktreeCreationHooks,
 } from "../../git";
@@ -74,6 +75,11 @@ export interface DuoWorktreeOperations {
     expectedOwnershipToken: string,
     expectedFilesystemReceipt: WorktreeFilesystemReceipt,
   ): ReturnType<typeof inspectOwnedWorktreeCleanupState>;
+  inspectCreatingWorktree(
+    repositoryPath: string,
+    worktreePath: string,
+    expectedBranch: string,
+  ): ReturnType<typeof inspectUnacknowledgedWorktreeCreation>;
   inspectBranch(
     repositoryPath: string,
     branch: string,
@@ -208,14 +214,24 @@ async function cleanupUnadoptedOwnedWorktree(
   ) return;
   const worktreePath = plan.plannedWorktreePath;
   const branch = expectedLaunchOwnedBranch(plan);
+  const repositoryPath = store.projectPath(plan.projectId);
   if (
     plan.worktreeCreationState === "pending"
     || plan.worktreeCreationState === "not-created"
   ) return;
   if (plan.worktreeCreationState === "creating") {
-    throw new Error(
-      "Worktree creation was interrupted before durable ownership acknowledgement; automatic cleanup was withheld.",
+    const inspection = await worktrees.inspectCreatingWorktree(
+      repositoryPath,
+      worktreePath,
+      branch,
     );
+    if (inspection === "retained") {
+      throw new RetainedWorktreeError(
+        "Worktree creation was interrupted before durable ownership acknowledgement and planned artifacts may remain. Automatic cleanup was withheld.",
+      );
+    }
+    store.rejectPairedLaunchWorktreeCreation(launchId, ordinal);
+    return;
   }
   const branchHead = plan.cleanupBranchHead;
   const worktreeId = plan.cleanupWorktreeId;
@@ -233,7 +249,6 @@ async function cleanupUnadoptedOwnedWorktree(
       "The durable linked-worktree identity is incomplete. Automatic cleanup was withheld and absence cannot be inferred.",
     );
   }
-  const repositoryPath = store.projectPath(plan.projectId);
   const inspection = await worktrees.inspectWorktree(
     repositoryPath,
     worktreePath,
@@ -325,6 +340,7 @@ export class DuoLaunchCoordinator {
     this.worktrees = options.worktrees ?? {
       preflightFilesystem: preflightWorktreeFilesystemIdentity,
       create: createWorktreeWithOwnershipReceipt,
+      inspectCreatingWorktree: inspectUnacknowledgedWorktreeCreation,
       inspectWorktree: inspectOwnedWorktreeCleanupState,
       inspectBranch: inspectBranchCleanupOutcome,
     };
@@ -822,6 +838,7 @@ export async function reconcileInterruptedDuoLaunches(
   const worktrees = options.worktrees ?? {
     preflightFilesystem: preflightWorktreeFilesystemIdentity,
     create: createWorktreeWithOwnershipReceipt,
+    inspectCreatingWorktree: inspectUnacknowledgedWorktreeCreation,
     inspectWorktree: inspectOwnedWorktreeCleanupState,
     inspectBranch: inspectBranchCleanupOutcome,
   };

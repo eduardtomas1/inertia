@@ -94,6 +94,8 @@ export type OwnedWorktreeCleanupInspection =
   | { state: "conflict" }
   | { state: "registered"; identity: RegisteredWorktreeRegistration };
 
+export type UnacknowledgedWorktreeCreationInspection = "absent" | "retained";
+
 const MAX_GIT_IDENTITY_FILE_BYTES = 16 * 1024;
 const MAX_LINUX_BIRTHTIME_OUTPUT_BYTES = 256;
 const LINUX_BIRTHTIME_TIMEOUT_MS = 2_000;
@@ -759,6 +761,73 @@ async function registeredWorktrees(
   }
   if (current) worktrees.push(current);
   return worktrees;
+}
+
+async function exactLocalBranchExists(
+  root: string,
+  branch: string,
+): Promise<boolean> {
+  const ref = `refs/heads/${branch}`;
+  const result = await runGit(
+    root,
+    ["for-each-ref", "--format=%(refname)", ref],
+    { failureMessage: "Unable to inspect the local worktree branch." },
+  );
+  return result.stdout.toString("utf8").split("\n").some(
+    (candidate) => candidate === ref,
+  );
+}
+
+export async function inspectUnacknowledgedWorktreeCreation(
+  repositoryPath: string,
+  worktreePath: string,
+  expectedBranch: string,
+): Promise<UnacknowledgedWorktreeCreationInspection> {
+  const root = await repositoryRoot(repositoryPath);
+  if (
+    !isAbsolute(worktreePath)
+    || worktreePath.length > MAX_PATH_LENGTH
+    || worktreePath.includes("\0")
+  ) {
+    throw new GitError(
+      "invalid-input",
+      "The worktree path must be an absolute path.",
+    );
+  }
+  const branch = await validateBranch(root, expectedBranch);
+  const requestedTarget = resolve(worktreePath);
+  const canonicalTarget = await canonicalizeThroughExistingParent(
+    requestedTarget,
+  );
+  if (
+    canonicalTarget === root
+    || canonicalTarget === parse(canonicalTarget).root
+  ) {
+    throw new GitError(
+      "invalid-input",
+      "The main repository cannot be treated as an owned worktree.",
+    );
+  }
+
+  const artifactsRemain = async (): Promise<boolean> => {
+    try {
+      await lstat(requestedTarget);
+      return true;
+    } catch (error) {
+      if (nodeErrorCode(error) !== "ENOENT") throw error;
+    }
+    const worktrees = await registeredWorktrees(root);
+    if (worktrees.some(({ branch: registeredBranch, path }) =>
+      pathsEqual(path, requestedTarget)
+      || pathsEqual(path, canonicalTarget)
+      || registeredBranch === branch)) return true;
+    return exactLocalBranchExists(root, branch);
+  };
+
+  // Read twice before releasing durable recovery. This operation never mutates
+  // Git; any present or changing artifact remains a manual-recovery outcome.
+  if (await artifactsRemain()) return "retained";
+  return await artifactsRemain() ? "retained" : "absent";
 }
 
 export async function inspectRegisteredWorktreeOwnership(

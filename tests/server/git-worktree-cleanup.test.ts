@@ -22,6 +22,7 @@ import {
   inspectBranchCleanupOutcome,
   inspectOwnedWorktreeCleanupState,
   inspectRegisteredWorktreeOwnership,
+  inspectUnacknowledgedWorktreeCreation,
   parseWorktreeFilesystemReceipt,
   removeWorktree,
   serializeWorktreeFilesystemReceipt,
@@ -405,6 +406,37 @@ describe("launch-owned Git cleanup", () => {
       join(root, "nested worktrees", "unregistered path"),
       branch,
     )).rejects.toMatchObject({ code: "not-found" });
+  });
+
+  it("confirms unacknowledged creation absent only after both artifacts are gone", async () => {
+    const root = repository();
+    const path = ownedPath(root, "unacknowledged creation path");
+    const branch = "inertia/unacknowledged-creation";
+
+    await expect(inspectUnacknowledgedWorktreeCreation(root, path, branch))
+      .resolves.toBe("absent");
+    await createWorktree(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    });
+    await expect(inspectUnacknowledgedWorktreeCreation(root, path, branch))
+      .resolves.toBe("retained");
+
+    git(root, "worktree", "remove", "--", path);
+    await expect(inspectUnacknowledgedWorktreeCreation(root, path, branch))
+      .resolves.toBe("retained");
+    git(root, "branch", "-D", "--", branch);
+    mkdirSync(path, { recursive: true });
+    await expect(inspectUnacknowledgedWorktreeCreation(root, path, branch))
+      .resolves.toBe("retained");
+    rmSync(path, { recursive: true, force: true });
+    git(root, "branch", `${branch}/user-topic`, "main");
+
+    await expect(inspectUnacknowledgedWorktreeCreation(root, path, branch))
+      .resolves.toBe("absent");
+    expect(git(root, "rev-parse", `${branch}/user-topic`))
+      .toBe(git(root, "rev-parse", "main"));
   });
 
   it("retains an exact unchanged owned worktree without mutation", async () => {

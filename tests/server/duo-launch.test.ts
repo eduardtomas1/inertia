@@ -411,12 +411,12 @@ function ownedWorktreeOperations(
         truncated: false,
       };
     },
+    inspectCreatingWorktree: async () => "retained",
     inspectWorktree: async () => ({ state: "absent" }),
     inspectBranch: async () => "absent",
     ...overrides,
   };
 }
-
 function preparePayload(
   runtime: DuoTestRuntime,
   useWorktree = false,
@@ -1926,6 +1926,7 @@ describe("atomic Duo launch persistence", () => {
               );
               throw new Error("force compensation after worktree creation");
             },
+            inspectCreatingWorktree: async () => "retained",
             inspectWorktree: async (
               repositoryPath,
               worktreePath,

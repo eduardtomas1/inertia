@@ -26,6 +26,12 @@ import {
   type GitRepositoryStatus,
 } from "./types";
 
+export interface RegisteredWorktreeOwnership {
+  branch: string;
+  head: string;
+  path: string;
+}
+
 async function validateNewAbsolutePath(
   path: string,
   repositoryRootPath: string,
@@ -114,17 +120,86 @@ export async function createWorktree(
   return getRepositoryStatus(target);
 }
 
-async function registeredWorktrees(root: string): Promise<string[]> {
+async function registeredWorktrees(
+  root: string,
+): Promise<Array<{ branch: string | null; head: string; path: string }>> {
   const result = await runGit(
     root,
     ["worktree", "list", "--porcelain", "-z"],
     { failureMessage: "Unable to inspect repository worktrees." },
   );
-  return result.stdout
-    .toString("utf8")
-    .split("\0")
-    .filter((record) => record.startsWith("worktree "))
-    .map((record) => record.slice(9));
+  const worktrees: Array<{
+    branch: string | null;
+    head: string;
+    path: string;
+  }> = [];
+  let current: {
+    branch: string | null;
+    head: string;
+    path: string;
+  } | null = null;
+  for (const field of result.stdout.toString("utf8").split("\0")) {
+    if (field.startsWith("worktree ")) {
+      if (current) worktrees.push(current);
+      current = { branch: null, head: "", path: field.slice(9) };
+    } else if (current && field.startsWith("HEAD ")) {
+      current.head = field.slice(5);
+    } else if (current && field.startsWith("branch refs/heads/")) {
+      current.branch = field.slice("branch refs/heads/".length);
+    }
+  }
+  if (current) worktrees.push(current);
+  return worktrees;
+}
+
+export async function inspectRegisteredWorktreeOwnership(
+  repositoryPath: string,
+  worktreePath: string,
+  expectedBranch: string,
+): Promise<RegisteredWorktreeOwnership> {
+  const root = await repositoryRoot(repositoryPath);
+  if (
+    !isAbsolute(worktreePath)
+    || worktreePath.length > MAX_PATH_LENGTH
+    || worktreePath.includes("\0")
+  ) {
+    throw new GitError(
+      "invalid-input",
+      "The worktree path must be an absolute path.",
+    );
+  }
+  const branch = await validateBranch(root, expectedBranch);
+  const requestedTarget = resolve(worktreePath);
+  const target = await realpath(requestedTarget).catch(() => requestedTarget);
+  if (target === root || target === parse(target).root) {
+    throw new GitError(
+      "invalid-input",
+      "The main repository cannot be treated as an owned worktree.",
+    );
+  }
+  const registered = (await registeredWorktrees(root)).find(
+    (worktree) => resolve(worktree.path) === target,
+  );
+  if (!registered) {
+    throw new GitError(
+      "not-found",
+      "The requested worktree is not registered with this repository.",
+    );
+  }
+  if (
+    registered.branch !== branch
+    || !/^[0-9a-f]{40,64}$/u.test(registered.head)
+  ) {
+    throw new GitError(
+      "conflict",
+      "The registered worktree does not match the launch-owned branch identity.",
+    );
+  }
+  return {
+    branch,
+    head: registered.head,
+    path: registered.path,
+  };
 }
 
 export async function removeWorktree(
@@ -152,7 +227,9 @@ export async function removeWorktree(
     );
   }
   const worktrees = await registeredWorktrees(root);
-  const registered = worktrees.find((path) => resolve(path) === target);
+  const registered = worktrees.find(
+    (worktree) => resolve(worktree.path) === target,
+  );
   if (!registered) {
     throw new GitError(
       "not-found",
@@ -161,7 +238,7 @@ export async function removeWorktree(
   }
   const args = ["worktree", "remove"];
   if (force) args.push("--force");
-  args.push("--", registered);
+  args.push("--", registered.path);
   await runGit(root, args, {
     failureMessage: "Unable to remove the worktree.",
   });

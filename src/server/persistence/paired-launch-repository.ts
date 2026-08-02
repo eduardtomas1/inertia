@@ -17,11 +17,16 @@ export interface PairedLaunchSidePlan {
   ownsWorktree: boolean;
 }
 
+export interface StoredPairedLaunchSidePlan extends PairedLaunchSidePlan {
+  cleanupBranchHead: string | null;
+  worktreeRemovalConfirmed: boolean;
+}
+
 export interface StoredPairedLaunch extends DuoLaunchStatus {
   cancelRequested: boolean;
   createdAt: string;
   updatedAt: string;
-  plans: [PairedLaunchSidePlan, PairedLaunchSidePlan];
+  plans: [StoredPairedLaunchSidePlan, StoredPairedLaunchSidePlan];
 }
 
 function boundedFailure(message: string | null): string | null {
@@ -96,6 +101,8 @@ export class PairedLaunchRepository {
         plannedWorktreePath: side.planned_worktree_path,
         plannedBranch: side.planned_branch,
         ownsWorktree: side.owns_worktree === 1,
+        cleanupBranchHead: side.cleanup_branch_head,
+        worktreeRemovalConfirmed: side.worktree_removal_confirmed === 1,
       })) as StoredPairedLaunch["plans"],
     };
   }
@@ -196,6 +203,53 @@ export class PairedLaunchRepository {
       WHERE launch_id = ? AND ordinal = ?
     `).run(worktreePath, branch, launchId, ordinal);
     if (result.changes !== 1) throw new RecordNotFoundError("Duo launch side not found.");
+  }
+
+  recordWorktreeCleanupOwnership(
+    launchId: string,
+    ordinal: 0 | 1,
+    worktreePath: string,
+    branch: string,
+    head: string,
+  ): void {
+    if (!/^[0-9a-f]{40,64}$/u.test(head)) {
+      throw new Error("The Duo worktree cleanup commit identity is invalid.");
+    }
+    const result = this.database.prepare(`
+      UPDATE paired_launch_sides
+      SET cleanup_branch_head = ?
+      WHERE launch_id = ? AND ordinal = ?
+        AND owns_worktree = 1
+        AND conversation_id IS NULL
+        AND planned_worktree_path = ?
+        AND planned_branch = ?
+        AND worktree_removal_confirmed = 0
+        AND (cleanup_branch_head IS NULL OR cleanup_branch_head = ?)
+    `).run(head, launchId, ordinal, worktreePath, branch, head);
+    if (result.changes !== 1) {
+      throw new Error(
+        "The Duo worktree cleanup ownership receipt did not match its durable plan.",
+      );
+    }
+  }
+
+  confirmWorktreeRemoval(
+    launchId: string,
+    ordinal: 0 | 1,
+  ): void {
+    const result = this.database.prepare(`
+      UPDATE paired_launch_sides
+      SET worktree_removal_confirmed = 1
+      WHERE launch_id = ? AND ordinal = ?
+        AND owns_worktree = 1
+        AND conversation_id IS NULL
+        AND cleanup_branch_head IS NOT NULL
+    `).run(launchId, ordinal);
+    if (result.changes !== 1) {
+      throw new Error(
+        "The Duo worktree removal receipt did not match its durable ownership proof.",
+      );
+    }
   }
 
   attachConversations(

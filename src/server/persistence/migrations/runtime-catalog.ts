@@ -1025,6 +1025,36 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
         END;
       `,
     });
+    migrationExtensions.push({
+      name: "PersistDuoWorktreeCleanupReceipts",
+      up: (database) => {
+        const columns = database.prepare("PRAGMA table_info(paired_launch_sides)")
+          .all() as Array<{ name: string }>;
+        if (!columns.some(({ name }) => name === "cleanup_branch_head")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN cleanup_branch_head TEXT
+              CHECK (
+                cleanup_branch_head IS NULL
+                OR length(cleanup_branch_head) BETWEEN 40 AND 64
+              );
+          `);
+        }
+        if (!columns.some(({ name }) => name === "worktree_removal_confirmed")) {
+          database.exec(`
+            ALTER TABLE paired_launch_sides
+              ADD COLUMN worktree_removal_confirmed INTEGER NOT NULL DEFAULT 0
+              CHECK (
+                worktree_removal_confirmed IN (0, 1)
+                AND (
+                  worktree_removal_confirmed = 0
+                  OR cleanup_branch_head IS NOT NULL
+                )
+              );
+          `);
+        }
+      },
+    });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   copyFile,
   mkdir,
@@ -928,7 +928,7 @@ describe("published database fixtures", () => {
 });
 
 describe("atomic Duo schema migration", () => {
-  it.each(["current", "v37-upgrade"] as const)(
+  it.each(["current", "v37-upgrade", "v38-upgrade"] as const)(
     "installs active-launch deletion protection for a %s database",
     async (source) => {
       const directory = await temporaryDirectory("inertia-duo-migration-");
@@ -938,6 +938,18 @@ describe("atomic Duo schema migration", () => {
       const current = new RuntimeStore(databasePath, workspacePath, {
         recoverInterruptedRuns: false,
       });
+      const retainedLaunchId = source === "v38-upgrade" ? randomUUID() : null;
+      if (retainedLaunchId) {
+        const project = current.createProject("Retained Duo", workspacePath);
+        current.createPairedLaunch(retainedLaunchId, [0, 1].map((ordinal) => ({
+          ordinal: ordinal as 0 | 1,
+          projectId: project.id,
+          plannedConversationId: randomUUID(),
+          plannedWorktreePath: join(directory, `worktree-${ordinal}`),
+          plannedBranch: `inertia/retained-${ordinal}`,
+          ownsWorktree: true,
+        })) as Parameters<RuntimeStore["createPairedLaunch"]>[1]);
+      }
       current.close();
 
       if (source === "v37-upgrade") {
@@ -949,19 +961,41 @@ describe("atomic Duo schema migration", () => {
           DROP TABLE paired_launches;
         `);
         previous.prepare(
-          "DELETE FROM schema_migrations WHERE version = ?",
-        ).run(CURRENT_DATABASE_SCHEMA_VERSION);
+          "DELETE FROM schema_migrations WHERE version >= ?",
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION - 1);
         expect((previous.prepare(
           "SELECT MAX(version) AS version FROM schema_migrations",
         ).get() as { version: number }).version).toBe(
-          CURRENT_DATABASE_SCHEMA_VERSION - 1,
+          CURRENT_DATABASE_SCHEMA_VERSION - 2,
         );
+        previous.close();
+      } else if (source === "v38-upgrade") {
+        const previous = new Database(databasePath);
+        previous.exec(`
+          ALTER TABLE paired_launch_sides DROP COLUMN worktree_removal_confirmed;
+          ALTER TABLE paired_launch_sides DROP COLUMN cleanup_branch_head;
+        `);
+        previous.prepare(
+          "DELETE FROM schema_migrations WHERE version = ?",
+        ).run(CURRENT_DATABASE_SCHEMA_VERSION);
         previous.close();
       }
 
       const migrated = new RuntimeStore(databasePath, workspacePath, {
         recoverInterruptedRuns: false,
       });
+      if (retainedLaunchId) {
+        expect(migrated.pairedLaunch(retainedLaunchId).plans).toEqual([
+          expect.objectContaining({
+            cleanupBranchHead: null,
+            worktreeRemovalConfirmed: false,
+          }),
+          expect.objectContaining({
+            cleanupBranchHead: null,
+            worktreeRemovalConfirmed: false,
+          }),
+        ]);
+      }
       migrated.close();
       const inspection = new Database(databasePath, { readonly: true });
       expect((inspection.prepare(`
@@ -991,6 +1025,21 @@ describe("atomic Duo schema migration", () => {
       ).get() as { version: number }).version).toBe(
         CURRENT_DATABASE_SCHEMA_VERSION,
       );
+      expect((inspection.prepare(
+        "PRAGMA table_info(paired_launch_sides)",
+      ).all() as Array<{ dflt_value: string | null; name: string }>).filter(
+        ({ name }) => name === "cleanup_branch_head"
+          || name === "worktree_removal_confirmed",
+      )).toEqual([
+        expect.objectContaining({
+          name: "cleanup_branch_head",
+          dflt_value: null,
+        }),
+        expect.objectContaining({
+          name: "worktree_removal_confirmed",
+          dflt_value: "0",
+        }),
+      ]);
       expect(inspection.pragma("foreign_key_check")).toEqual([]);
       inspection.close();
     },

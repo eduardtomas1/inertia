@@ -15,8 +15,10 @@ import {
 import type { RuntimeStore } from "../../database";
 import {
   createWorktree,
+  deleteBranchIfUnchanged,
   getRepositoryStatus,
   GitError,
+  inspectRegisteredWorktreeOwnership,
   removeWorktree,
 } from "../../git";
 import type { NewConversationOptions } from "../../persistence/types";
@@ -49,7 +51,7 @@ interface PreflightSide {
   ownsWorktree: boolean;
 }
 
-interface WorktreeOperations {
+export interface DuoWorktreeOperations {
   create(
     repositoryPath: string,
     worktreePath: string,
@@ -60,6 +62,16 @@ interface WorktreeOperations {
     worktreePath: string,
     force: boolean,
   ): ReturnType<typeof removeWorktree>;
+  inspectOwnership(
+    repositoryPath: string,
+    worktreePath: string,
+    expectedBranch: string,
+  ): ReturnType<typeof inspectRegisteredWorktreeOwnership>;
+  deleteBranch(
+    repositoryPath: string,
+    branch: string,
+    expectedHead: string,
+  ): ReturnType<typeof deleteBranchIfUnchanged>;
 }
 
 class DuoLaunchCancelledError extends Error {
@@ -84,6 +96,84 @@ function publicStatus(status: ReturnType<RuntimeStore["pairedLaunch"]>): DuoLaun
   };
 }
 
+function expectedLaunchOwnedBranch(
+  plan: ReturnType<RuntimeStore["pairedLaunch"]>["plans"][number],
+): string {
+  const expected = `inertia/${plan.plannedConversationId.slice(0, 8)}`;
+  if (plan.plannedBranch !== expected) {
+    throw new Error(
+      "The Duo cleanup branch does not match its generated launch identity.",
+    );
+  }
+  return expected;
+}
+
+async function cleanupUnadoptedOwnedWorktree(
+  store: RuntimeStore,
+  launchId: string,
+  ordinal: 0 | 1,
+  worktrees: DuoWorktreeOperations,
+): Promise<void> {
+  let launch = store.pairedLaunch(launchId);
+  let plan = launch.plans[ordinal];
+  const side = launch.sides[ordinal];
+  if (
+    !plan.ownsWorktree
+    || !plan.plannedWorktreePath
+    || side.conversationId
+  ) return;
+  const worktreePath = plan.plannedWorktreePath;
+  const branch = expectedLaunchOwnedBranch(plan);
+  let branchHead = plan.cleanupBranchHead;
+  if (!branchHead) {
+    let ownership: Awaited<ReturnType<
+      DuoWorktreeOperations["inspectOwnership"]
+    >>;
+    try {
+      ownership = await worktrees.inspectOwnership(
+        store.projectPath(plan.projectId),
+        worktreePath,
+        branch,
+      );
+    } catch (error) {
+      if (error instanceof GitError && error.code === "not-found") return;
+      throw error;
+    }
+    store.recordPairedLaunchWorktreeCleanupOwnership(
+      launchId,
+      ordinal,
+      worktreePath,
+      branch,
+      ownership.head,
+    );
+    launch = store.pairedLaunch(launchId);
+    plan = launch.plans[ordinal];
+    branchHead = plan.cleanupBranchHead;
+  }
+  if (!branchHead) {
+    throw new Error("The Duo worktree cleanup ownership receipt was not durable.");
+  }
+  if (!plan.worktreeRemovalConfirmed) {
+    try {
+      await worktrees.remove(
+        store.projectPath(plan.projectId),
+        worktreePath,
+        false,
+      );
+    } catch (error) {
+      if (!(error instanceof GitError && error.code === "not-found")) {
+        throw error;
+      }
+    }
+    store.confirmPairedLaunchWorktreeRemoval(launchId, ordinal);
+  }
+  await worktrees.deleteBranch(
+    store.projectPath(plan.projectId),
+    branch,
+    branchHead,
+  );
+}
+
 export class DuoLaunchCoordinator {
   private readonly prepareTasks = new Map<string, Promise<PreparedDuoLaunch>>();
   private readonly recoveryCleanupTasks = new Map<
@@ -91,7 +181,7 @@ export class DuoLaunchCoordinator {
     Promise<DuoLaunchStatus>
   >();
   private readonly cancellationRequests = new Set<string>();
-  private readonly worktrees: WorktreeOperations;
+  private readonly worktrees: DuoWorktreeOperations;
 
   constructor(
     private readonly store: RuntimeStore,
@@ -100,11 +190,13 @@ export class DuoLaunchCoordinator {
     private readonly turns: TurnController,
     private readonly dataDirectory: string,
     private readonly providerInfo: () => readonly ProviderInfo[],
-    options: { worktrees?: WorktreeOperations } = {},
+    options: { worktrees?: DuoWorktreeOperations } = {},
   ) {
     this.worktrees = options.worktrees ?? {
       create: createWorktree,
       remove: removeWorktree,
+      inspectOwnership: inspectRegisteredWorktreeOwnership,
+      deleteBranch: deleteBranchIfUnchanged,
     };
   }
 
@@ -297,17 +389,13 @@ export class DuoLaunchCoordinator {
       let compensationFailure: string | null = null;
       if (!conversationsAdopted) {
         const compensation = await Promise.allSettled(
-          [...createdOwned].reverse().map((side) => this.worktrees.remove(
-            side.repositoryPath,
-            side.worktreePath!,
-            false,
-          ).catch((cleanupError: unknown) => {
-            if (
-              cleanupError instanceof GitError
-              && cleanupError.code === "not-found"
-            ) return;
-            throw cleanupError;
-          })),
+          [...createdOwned].reverse().map((side) =>
+            cleanupUnadoptedOwnedWorktree(
+              this.store,
+              payload.launchId,
+              side.ordinal,
+              this.worktrees,
+            )),
         );
         const rejected = compensation.find((result) => result.status === "rejected");
         if (rejected?.status === "rejected") {
@@ -333,22 +421,13 @@ export class DuoLaunchCoordinator {
   private async retryRecoveryCleanup(
     launch: ReturnType<RuntimeStore["pairedLaunch"]>,
   ): Promise<DuoLaunchStatus> {
-    const cleanup = await Promise.allSettled(launch.plans.flatMap((plan) => {
-      const side = launch.sides[plan.ordinal];
-      if (
-        !plan.ownsWorktree
-        || !plan.plannedWorktreePath
-        || side.conversationId
-      ) return [];
-      return [this.worktrees.remove(
-        this.store.projectPath(plan.projectId),
-        plan.plannedWorktreePath,
-        false,
-      ).catch((error: unknown) => {
-        if (error instanceof GitError && error.code === "not-found") return;
-        throw error;
-      })];
-    }));
+    const cleanup = await Promise.allSettled(launch.plans.map((plan) =>
+      cleanupUnadoptedOwnedWorktree(
+        this.store,
+        launch.launchId,
+        plan.ordinal,
+        this.worktrees,
+      )));
     const rejected = cleanup.find((result) => result.status === "rejected");
     if (rejected?.status === "rejected") {
       return publicStatus(this.store.failPairedLaunch(
@@ -554,26 +633,24 @@ export class DuoLaunchCoordinator {
  */
 export async function reconcileInterruptedDuoLaunches(
   store: RuntimeStore,
+  options: { worktrees?: DuoWorktreeOperations } = {},
 ): Promise<void> {
+  const worktrees = options.worktrees ?? {
+    create: createWorktree,
+    remove: removeWorktree,
+    inspectOwnership: inspectRegisteredWorktreeOwnership,
+    deleteBranch: deleteBranchIfUnchanged,
+  };
   const recovered = store.recoverInterruptedPairedLaunches();
   for (const launch of recovered) {
     if (launch.state === "interrupted") continue;
-    const cleanup = await Promise.allSettled(launch.plans.flatMap((plan) => {
-      const side = launch.sides[plan.ordinal];
-      if (
-        !plan.ownsWorktree
-        || !plan.plannedWorktreePath
-        || side.conversationId
-      ) return [];
-      return [removeWorktree(
-        store.projectPath(plan.projectId),
-        plan.plannedWorktreePath,
-        false,
-      ).catch((error: unknown) => {
-        if (error instanceof GitError && error.code === "not-found") return;
-        throw error;
-      })];
-    }));
+    const cleanup = await Promise.allSettled(launch.plans.map((plan) =>
+      cleanupUnadoptedOwnedWorktree(
+        store,
+        launch.launchId,
+        plan.ordinal,
+        worktrees,
+      )));
     const rejected = cleanup.find((result) => result.status === "rejected");
     if (rejected?.status === "rejected") {
       store.failPairedLaunch(

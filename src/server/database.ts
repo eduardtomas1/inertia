@@ -388,6 +388,29 @@ export class RuntimeStore {
     );
   }
 
+  recordPairedLaunchWorktreeCleanupOwnership(
+    launchId: string,
+    ordinal: 0 | 1,
+    worktreePath: string,
+    branch: string,
+    head: string,
+  ): void {
+    this.pairedLaunchRepository.recordWorktreeCleanupOwnership(
+      launchId,
+      ordinal,
+      worktreePath,
+      branch,
+      head,
+    );
+  }
+
+  confirmPairedLaunchWorktreeRemoval(
+    launchId: string,
+    ordinal: 0 | 1,
+  ): void {
+    this.pairedLaunchRepository.confirmWorktreeRemoval(launchId, ordinal);
+  }
+
   requestPairedLaunchCancellation(
     launchId: string,
     now = new Date().toISOString(),

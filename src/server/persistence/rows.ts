@@ -118,6 +118,8 @@ export interface PairedLaunchSideRow {
   planned_worktree_path: string | null;
   planned_branch: string | null;
   owns_worktree: 0 | 1;
+  cleanup_branch_head: string | null;
+  worktree_removal_confirmed: 0 | 1;
   dispatch_state: DuoDispatchState;
 }
 

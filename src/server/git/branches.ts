@@ -5,10 +5,11 @@ import {
 } from "./paths";
 import { runGit } from "./runner";
 import { getRepositoryStatus } from "./status";
-import type {
-  GitBranch,
-  GitBranches,
-  GitMutationResult,
+import {
+  GitError,
+  type GitBranch,
+  type GitBranches,
+  type GitMutationResult,
 } from "./types";
 
 function parseBranches(buffer: Buffer, kind: GitBranch["kind"]): GitBranch[] {
@@ -104,4 +105,66 @@ export async function createBranch(
     failureMessage: "Unable to create the branch.",
   });
   return { status: await getRepositoryStatus(root) };
+}
+
+async function localBranchHead(
+  root: string,
+  branch: string,
+): Promise<string | null> {
+  const result = await runGit(
+    root,
+    [
+      "for-each-ref",
+      "--format=%(objectname)",
+      "--count=1",
+      `refs/heads/${branch}`,
+    ],
+    { failureMessage: "Unable to inspect the local branch." },
+  );
+  const head = result.stdout.toString("utf8").trim();
+  return head || null;
+}
+
+export async function deleteBranchIfUnchanged(
+  repositoryPath: string,
+  branch: string,
+  expectedHead: string,
+): Promise<void> {
+  const root = await repositoryRoot(repositoryPath);
+  const name = await validateBranch(root, branch);
+  if (!/^[0-9a-f]{40,64}$/u.test(expectedHead)) {
+    throw new GitError(
+      "invalid-input",
+      "The expected branch identity is invalid.",
+    );
+  }
+  const currentHead = await localBranchHead(root, name);
+  if (currentHead === null) {
+    return;
+  }
+  if (currentHead !== expectedHead) {
+    throw new GitError(
+      "conflict",
+      "The launch-owned branch changed after cleanup began and was not deleted.",
+    );
+  }
+  try {
+    await runGit(
+      root,
+      ["update-ref", "-d", `refs/heads/${name}`, expectedHead],
+      { failureMessage: "Unable to delete the launch-owned branch." },
+    );
+  } catch (error) {
+    const latestHead = await localBranchHead(root, name);
+    if (latestHead === null) {
+      return;
+    }
+    if (latestHead !== expectedHead) {
+      throw new GitError(
+        "conflict",
+        "The launch-owned branch changed after cleanup began and was not deleted.",
+      );
+    }
+    throw error;
+  }
 }

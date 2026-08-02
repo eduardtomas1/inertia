@@ -17,7 +17,10 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
-import type { GitRepositoryStatus } from "../../src/server/git";
+import {
+  GitError,
+  type GitRepositoryStatus,
+} from "../../src/server/git";
 import type {
   ProviderRunCallbacks,
   ProviderRunInput,
@@ -26,6 +29,7 @@ import type {
 import {
   DuoLaunchCoordinator,
   reconcileInterruptedDuoLaunches,
+  type DuoWorktreeOperations,
 } from "../../src/server/runtime/duo/duo-launch-coordinator";
 import {
   TurnController,
@@ -37,6 +41,7 @@ import { resolveNativeModelRoute } from "./model-route-fixture";
 
 const temporaryDirectories: string[] = [];
 const execFileAsync = promisify(execFile);
+const OWNED_WORKTREE_HEAD = "a".repeat(40);
 
 function providerInfo(): ProviderInfo {
   const field = {
@@ -303,6 +308,63 @@ function coordinator(
     join(runtime.workspace, ".inertia"),
     () => [providerInfo()],
   );
+}
+
+function ownedWorktreeOperations(
+  runtime: DuoTestRuntime,
+  overrides: Partial<DuoWorktreeOperations> = {},
+): DuoWorktreeOperations {
+  return {
+    create: async (_repositoryPath, worktreePath, options) => ({
+      root: worktreePath,
+      branch: options.branch,
+      detached: false,
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+      hasRemote: false,
+      pullRequest: {
+        available: false,
+        remoteName: null,
+        forge: null,
+        unavailableReason: "no-remotes",
+      },
+      files: [],
+      insertions: 0,
+      deletions: 0,
+      clean: true,
+      truncated: false,
+    }),
+    inspectOwnership: async (_repositoryPath, worktreePath, branch) => ({
+      branch,
+      head: OWNED_WORKTREE_HEAD,
+      path: worktreePath,
+    }),
+    remove: async () => ({
+      status: {
+        root: runtime.workspace,
+        branch: "main",
+        detached: false,
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        hasRemote: false,
+        pullRequest: {
+          available: false,
+          remoteName: null,
+          forge: null,
+          unavailableReason: "no-remotes",
+        },
+        files: [],
+        insertions: 0,
+        deletions: 0,
+        clean: true,
+        truncated: false,
+      },
+    }),
+    deleteBranch: async () => undefined,
+    ...overrides,
+  };
 }
 
 function preparePayload(
@@ -728,6 +790,70 @@ describe("atomic Duo launch persistence", () => {
     runtime.store.close();
   });
 
+  it("removes the launch branch when cancellation follows worktree creation", async () => {
+    const runtime = await createRuntime();
+    await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
+    let announceCreated!: () => void;
+    let releaseCreate!: () => void;
+    const created = new Promise<void>((resolve) => {
+      announceCreated = resolve;
+    });
+    const createGate = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const removed: string[] = [];
+    const deleted: string[] = [];
+    const successful = ownedWorktreeOperations(runtime);
+    let createCount = 0;
+    const launches = new DuoLaunchCoordinator(
+      runtime.store,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {
+        validateSelection: (selection: unknown) => selection,
+        readiness: async () => null,
+      } as never,
+      runtime.controller,
+      join(runtime.workspace, ".inertia"),
+      () => [providerInfo()],
+      {
+        worktrees: ownedWorktreeOperations(runtime, {
+          create: async (repositoryPath, worktreePath, options) => {
+            createCount += 1;
+            if (createCount === 1) {
+              announceCreated();
+              await createGate;
+            }
+            return successful.create(repositoryPath, worktreePath, options);
+          },
+          remove: async (repositoryPath, worktreePath, force) => {
+            removed.push(worktreePath);
+            return successful.remove(repositoryPath, worktreePath, force);
+          },
+          deleteBranch: async (repositoryPath, branch, head) => {
+            deleted.push(branch);
+            return successful.deleteBranch(repositoryPath, branch, head);
+          },
+        }),
+      },
+    );
+    const payload = preparePayload(runtime, true);
+    const preparation = launches.prepare(payload);
+    await created;
+
+    await expect(launches.cancel(payload.launchId)).resolves.toMatchObject({
+      state: "preparing",
+    });
+    releaseCreate();
+
+    await expect(preparation).rejects.toThrow(/cancelled/u);
+    const cancelled = runtime.store.pairedLaunch(payload.launchId);
+    expect(cancelled.state).toBe("cancelled");
+    expect(createCount).toBe(1);
+    expect(removed).toEqual([cancelled.plans[0].plannedWorktreePath]);
+    expect(deleted).toEqual([cancelled.plans[0].plannedBranch]);
+    runtime.store.close();
+  });
+
   it("joins a concurrent duplicate after durable preparation has begun", async () => {
     const runtime = await createRuntime();
     await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
@@ -751,7 +877,7 @@ describe("atomic Duo launch persistence", () => {
       join(runtime.workspace, ".inertia"),
       () => [providerInfo()],
       {
-        worktrees: {
+        worktrees: ownedWorktreeOperations(runtime, {
           create: async (_repositoryPath, worktreePath, options) => {
             createCount += 1;
             if (createCount === 1) {
@@ -782,7 +908,7 @@ describe("atomic Duo launch persistence", () => {
           remove: async () => {
             throw new Error("Duplicate preparation must not compensate.");
           },
-        },
+        }),
       },
     );
     const payload = preparePayload(runtime, true);
@@ -802,11 +928,12 @@ describe("atomic Duo launch persistence", () => {
     runtime.store.close();
   });
 
-  it("compensates both owned paths when the second post-create status read fails", async () => {
+  it("does not delete a colliding pre-existing branch when worktree creation fails", async () => {
     const runtime = await createRuntime();
     await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
-    const created: string[] = [];
-    const removed: string[] = [];
+    const attemptedBranches: string[] = [];
+    let removals = 0;
+    let branchDeletions = 0;
     const launches = new DuoLaunchCoordinator(
       runtime.store,
       { resolveModelRoute: resolveNativeModelRoute },
@@ -818,7 +945,73 @@ describe("atomic Duo launch persistence", () => {
       join(runtime.workspace, ".inertia"),
       () => [providerInfo()],
       {
-        worktrees: {
+        worktrees: ownedWorktreeOperations(runtime, {
+          create: async (_repositoryPath, _worktreePath, options) => {
+            attemptedBranches.push(options.branch);
+            throw new GitError(
+              "conflict",
+              `A branch named ${options.branch} already exists.`,
+            );
+          },
+          inspectOwnership: async () => {
+            throw new GitError(
+              "not-found",
+              "No launch-owned worktree was registered.",
+            );
+          },
+          remove: async () => {
+            removals += 1;
+            throw new Error("A colliding branch must not trigger removal.");
+          },
+          deleteBranch: async () => {
+            branchDeletions += 1;
+            throw new Error("A colliding branch must not be deleted.");
+          },
+        }),
+      },
+    );
+    const payload = preparePayload(runtime, true);
+
+    await expect(launches.prepare(payload)).rejects.toThrow(/already exists/u);
+
+    expect(attemptedBranches).toHaveLength(1);
+    expect(removals).toBe(0);
+    expect(branchDeletions).toBe(0);
+    expect(runtime.store.pairedLaunch(payload.launchId)).toMatchObject({
+      state: "failed",
+      plans: [
+        {
+          cleanupBranchHead: null,
+          worktreeRemovalConfirmed: false,
+        },
+        {
+          cleanupBranchHead: null,
+          worktreeRemovalConfirmed: false,
+        },
+      ],
+    });
+    runtime.store.close();
+  });
+
+  it("compensates both owned paths when the second post-create status read fails", async () => {
+    const runtime = await createRuntime();
+    await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
+    const created: string[] = [];
+    const removed: string[] = [];
+    const deletedBranches: Array<{ branch: string; head: string }> = [];
+    const successful = ownedWorktreeOperations(runtime);
+    const launches = new DuoLaunchCoordinator(
+      runtime.store,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {
+        validateSelection: (selection: unknown) => selection,
+        readiness: async () => null,
+      } as never,
+      runtime.controller,
+      join(runtime.workspace, ".inertia"),
+      () => [providerInfo()],
+      {
+        worktrees: ownedWorktreeOperations(runtime, {
           create: async (_repositoryPath, worktreePath, options) => {
             created.push(worktreePath);
             if (created.length === 2) {
@@ -870,7 +1063,11 @@ describe("atomic Duo launch persistence", () => {
               },
             };
           },
-        },
+          deleteBranch: async (repositoryPath, branch, head) => {
+            deletedBranches.push({ branch, head });
+            return successful.deleteBranch(repositoryPath, branch, head);
+          },
+        }),
       },
     );
     const payload = preparePayload(runtime, true);
@@ -881,7 +1078,75 @@ describe("atomic Duo launch persistence", () => {
     expect(created).toHaveLength(2);
     expect(removed).toEqual([created[1], created[0]]);
     expect(runtime.store.snapshot().conversations).toEqual([]);
-    expect(runtime.store.pairedLaunch(payload.launchId).state).toBe("failed");
+    const failed = runtime.store.pairedLaunch(payload.launchId);
+    expect(failed.state).toBe("failed");
+    expect(failed.plans).toEqual([
+      expect.objectContaining({
+        cleanupBranchHead: OWNED_WORKTREE_HEAD,
+        worktreeRemovalConfirmed: true,
+      }),
+      expect.objectContaining({
+        cleanupBranchHead: OWNED_WORKTREE_HEAD,
+        worktreeRemovalConfirmed: true,
+      }),
+    ]);
+    expect(deletedBranches).toEqual([
+      { branch: failed.plans[1].plannedBranch, head: OWNED_WORKTREE_HEAD },
+      { branch: failed.plans[0].plannedBranch, head: OWNED_WORKTREE_HEAD },
+    ]);
+    runtime.store.close();
+  });
+
+  it("never cleans launch branches after conversations adopt both worktrees", async () => {
+    const runtime = await createRuntime();
+    await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
+    let cleanupCalls = 0;
+    const launches = new DuoLaunchCoordinator(
+      runtime.store,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {
+        validateSelection: (selection: unknown) => selection,
+        readiness: async () => null,
+      } as never,
+      {
+        queuePair: () => {
+          throw new Error("second queue write rejected");
+        },
+      } as unknown as TurnController,
+      join(runtime.workspace, ".inertia"),
+      () => [providerInfo()],
+      {
+        worktrees: ownedWorktreeOperations(runtime, {
+          inspectOwnership: async () => {
+            cleanupCalls += 1;
+            throw new Error("Adopted worktrees must not be inspected for cleanup.");
+          },
+          remove: async () => {
+            cleanupCalls += 1;
+            throw new Error("Adopted worktrees must not be removed.");
+          },
+          deleteBranch: async () => {
+            cleanupCalls += 1;
+            throw new Error("Adopted branches must not be deleted.");
+          },
+        }),
+      },
+    );
+    const payload = preparePayload(runtime, true);
+
+    await expect(launches.prepare(payload)).rejects.toThrow(
+      /second queue write rejected/u,
+    );
+
+    expect(cleanupCalls).toBe(0);
+    expect(runtime.store.snapshot().conversations).toHaveLength(2);
+    expect(runtime.store.pairedLaunch(payload.launchId)).toMatchObject({
+      state: "failed",
+      sides: [
+        { conversationId: expect.any(String) },
+        { conversationId: expect.any(String) },
+      ],
+    });
     runtime.store.close();
   });
 
@@ -892,6 +1157,8 @@ describe("atomic Duo launch persistence", () => {
       const created: string[] = [];
       let cleanupAttempts = 0;
       const cleanupPaths: string[] = [];
+      const deletedBranches: string[] = [];
+      const successful = ownedWorktreeOperations(runtime);
       const launches = new DuoLaunchCoordinator(
         runtime.store,
         { resolveModelRoute: resolveNativeModelRoute },
@@ -903,7 +1170,7 @@ describe("atomic Duo launch persistence", () => {
         join(runtime.workspace, ".inertia"),
         () => [providerInfo()],
         {
-          worktrees: {
+          worktrees: ownedWorktreeOperations(runtime, {
             create: async (_repositoryPath, worktreePath, options) => {
               created.push(worktreePath);
               if (created.length === 2) {
@@ -959,7 +1226,11 @@ describe("atomic Duo launch persistence", () => {
                 },
               };
             },
-          },
+            deleteBranch: async (repositoryPath, branch, head) => {
+              deletedBranches.push(branch);
+              return successful.deleteBranch(repositoryPath, branch, head);
+            },
+          }),
         },
       );
       const payload = preparePayload(runtime, true);
@@ -984,20 +1255,33 @@ describe("atomic Duo launch persistence", () => {
           { ordinal: 1, conversationId: null, turnId: null },
         ],
       });
-      expect(runtime.store.pairedLaunch(payload.launchId).plans[1])
-        .toMatchObject({ plannedWorktreePath: created[1], ownsWorktree: true });
+      const recovery = runtime.store.pairedLaunch(payload.launchId);
+      expect(recovery.plans[1]).toMatchObject({
+        plannedWorktreePath: created[1],
+        ownsWorktree: true,
+        cleanupBranchHead: OWNED_WORKTREE_HEAD,
+        worktreeRemovalConfirmed: false,
+      });
+      expect(recovery.plans[0]).toMatchObject({
+        cleanupBranchHead: OWNED_WORKTREE_HEAD,
+        worktreeRemovalConfirmed: true,
+      });
       expect(runtime.store.snapshot().conversations).toEqual([]);
       await expect(launches.cancel(payload.launchId)).resolves.toMatchObject({
         launchId: payload.launchId,
         state: "cancelled",
         error: null,
       });
-      expect(cleanupAttempts).toBe(4);
+      expect(cleanupAttempts).toBe(3);
       expect(cleanupPaths).toEqual([
         created[1],
         created[0],
-        created[0],
         created[1],
+      ]);
+      expect(deletedBranches).toEqual([
+        recovery.plans[0].plannedBranch,
+        recovery.plans[0].plannedBranch,
+        recovery.plans[1].plannedBranch,
       ]);
       expect(() => runtime.store.assertProjectDeletionAllowed(runtime.projectId))
         .not.toThrow();
@@ -1005,6 +1289,112 @@ describe("atomic Duo launch persistence", () => {
       expect(runtime.store.findPairedLaunch(payload.launchId)).toBeNull();
     } finally {
       runtime.store.close();
+    }
+  });
+
+  it("retries branch cleanup after restart without re-removing the worktree", async () => {
+    const runtime = await createRuntime();
+    let originalClosed = false;
+    let reopened: RuntimeStore | null = null;
+    try {
+      await execFileAsync("git", ["init", "-b", "main", runtime.workspace]);
+      const created: string[] = [];
+      let firstBranchDelete = true;
+      const initialDeletes: string[] = [];
+      const successful = ownedWorktreeOperations(runtime);
+      const launches = new DuoLaunchCoordinator(
+        runtime.store,
+        { resolveModelRoute: resolveNativeModelRoute },
+        {
+          validateSelection: (selection: unknown) => selection,
+          readiness: async () => null,
+        } as never,
+        runtime.controller,
+        join(runtime.workspace, ".inertia"),
+        () => [providerInfo()],
+        {
+          worktrees: ownedWorktreeOperations(runtime, {
+            create: async (repositoryPath, worktreePath, options) => {
+              created.push(worktreePath);
+              if (created.length === 2) {
+                throw new Error("second worktree status rejected after add");
+              }
+              return successful.create(repositoryPath, worktreePath, options);
+            },
+            deleteBranch: async (repositoryPath, branch, head) => {
+              initialDeletes.push(branch);
+              if (firstBranchDelete) {
+                firstBranchDelete = false;
+                throw new GitError(
+                  "conflict",
+                  "branch changed after worktree removal",
+                );
+              }
+              return successful.deleteBranch(repositoryPath, branch, head);
+            },
+          }),
+        },
+      );
+      const payload = preparePayload(runtime, true);
+
+      await expect(launches.prepare(payload)).rejects.toThrow(
+        /second worktree status rejected after add/u,
+      );
+      const recovery = runtime.store.pairedLaunch(payload.launchId);
+      expect(recovery.state).toBe("recovery-required");
+      expect(recovery.error).toContain("branch changed after worktree removal");
+      const interruptedBranch = initialDeletes[0];
+      const interruptedPlan = recovery.plans.find(
+        ({ plannedBranch }) => plannedBranch === interruptedBranch,
+      );
+      expect(interruptedPlan).toMatchObject({
+        cleanupBranchHead: OWNED_WORKTREE_HEAD,
+        worktreeRemovalConfirmed: true,
+      });
+
+      runtime.store.close();
+      originalClosed = true;
+      reopened = new RuntimeStore(
+        runtime.databasePath,
+        runtime.workspace,
+        { recoverInterruptedRuns: false },
+      );
+      const retryDeletes: string[] = [];
+      const retryWorktrees = ownedWorktreeOperations(
+        { ...runtime, store: reopened },
+        {
+          remove: async () => {
+            throw new Error("A removal receipt must suppress repeated removal.");
+          },
+          deleteBranch: async (repositoryPath, branch, head) => {
+            retryDeletes.push(branch);
+            return successful.deleteBranch(repositoryPath, branch, head);
+          },
+        },
+      );
+      const restarted = new DuoLaunchCoordinator(
+        reopened,
+        { resolveModelRoute: resolveNativeModelRoute },
+        {} as never,
+        {
+          startPair: async () => [false, false],
+          cancel: () => false,
+        } as unknown as TurnController,
+        join(runtime.workspace, ".inertia"),
+        () => [providerInfo()],
+        { worktrees: retryWorktrees },
+      );
+
+      await expect(restarted.cancel(payload.launchId)).resolves.toMatchObject({
+        state: "cancelled",
+        error: null,
+      });
+      expect(retryDeletes).toEqual(
+        recovery.plans.map(({ plannedBranch }) => plannedBranch),
+      );
+    } finally {
+      reopened?.close();
+      if (!originalClosed) runtime.store.close();
     }
   });
 });

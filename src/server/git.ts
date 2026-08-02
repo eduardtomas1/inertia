@@ -27,11 +27,14 @@ export {
 export { getUnifiedDiff } from "./git/diff";
 export {
   createBranch,
+  deleteBranchIfUnchanged,
   listBranches,
   switchBranch,
 } from "./git/branches";
 export {
   createWorktree,
+  inspectRegisteredWorktreeOwnership,
+  type RegisteredWorktreeOwnership,
   removeWorktree,
 } from "./git/worktrees";
 export { commitChanges } from "./git/commits";

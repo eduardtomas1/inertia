@@ -7,11 +7,12 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -67,13 +68,15 @@ function adminDirectory(path: string): string {
   ));
 }
 
-function canonicalTestPath(path: string): string {
-  const canonical = resolve(realpathSync(path)).replaceAll("\\", "/");
-  return process.platform === "win32" ? canonical.toLocaleLowerCase("en-US") : canonical;
-}
-
 function expectSamePath(actual: string, expected: string): void {
-  expect(canonicalTestPath(actual)).toBe(canonicalTestPath(expected));
+  const actualIdentity = statSync(actual, { bigint: true });
+  const expectedIdentity = statSync(expected, { bigint: true });
+  expect(actualIdentity.isDirectory()).toBe(true);
+  expect(expectedIdentity.isDirectory()).toBe(true);
+  expect({ device: actualIdentity.dev, inode: actualIdentity.ino }).toEqual({
+    device: expectedIdentity.dev,
+    inode: expectedIdentity.ino,
+  });
 }
 
 async function createOwnedWorktree(

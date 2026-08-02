@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -138,9 +138,15 @@ function providerInfo(): ProviderInfo {
   };
 }
 
-function canonicalTestPath(path: string): string {
-  const canonical = realpathSync(path).replaceAll("\\", "/");
-  return process.platform === "win32" ? canonical.toLocaleLowerCase("en-US") : canonical;
+function expectSameExistingPath(actual: string, expected: string): void {
+  const actualIdentity = statSync(actual, { bigint: true });
+  const expectedIdentity = statSync(expected, { bigint: true });
+  expect(actualIdentity.isDirectory()).toBe(true);
+  expect(expectedIdentity.isDirectory()).toBe(true);
+  expect({ device: actualIdentity.dev, inode: actualIdentity.ino }).toEqual({
+    device: expectedIdentity.dev,
+    inode: expectedIdentity.ino,
+  });
 }
 
 class PairProvider implements TurnProviderRuntime {
@@ -1997,7 +2003,7 @@ describe("atomic Duo launch persistence", () => {
       });
       const observedPath = cancelled.recoveryGuidance?.[0]?.observedPath;
       if (!observedPath) throw new Error("The conflicting worktree path was omitted.");
-      expect(canonicalTestPath(observedPath)).toBe(canonicalTestPath(movedPath));
+      expectSameExistingPath(observedPath, movedPath);
       expect(() => restartedStore.removeProject(runtime.projectId))
         .toThrow(/Cancel the active Duo launch/u);
       await expect(inspectRegisteredWorktreeOwnership(

@@ -39,7 +39,10 @@ import {
   remoteRequestSchema,
   type RemotePairingInvitation,
 } from "../../src/shared/remote-protocol";
-import { launchRemoteBrowser } from "./support/remote-browser-electron-fixture";
+import {
+  closeRemoteBrowserRelayResources,
+  launchRemoteBrowser,
+} from "./support/remote-browser-electron-fixture";
 
 let staticServer: Server;
 let staticUrl: string;
@@ -561,12 +564,7 @@ test("stops automatic retries on a terminal relay protocol mismatch", async () =
     await page.waitForTimeout(2_000);
     expect(connections).toBe(terminalConnectionCount);
   } finally {
-    try {
-      await browser?.close();
-    } finally {
-      await new Promise<void>((resolveClose) =>
-        mismatchRelay.close(() => resolveClose()));
-    }
+    await closeRemoteBrowserRelayResources(browser, mismatchRelay);
   }
 });
 
@@ -599,12 +597,7 @@ test("expires a browser grant while a real socket attempt is in flight", async (
     await expect(page.getByRole("heading", { name: "Pair this browser" }))
       .toBeVisible();
   } finally {
-    try {
-      await browser?.close();
-    } finally {
-      await new Promise<void>((resolveClose) =>
-        silentRelay.close(() => resolveClose()));
-    }
+    await closeRemoteBrowserRelayResources(browser, silentRelay);
   }
 });
 

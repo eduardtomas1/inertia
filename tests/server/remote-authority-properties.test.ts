@@ -15,10 +15,13 @@ import {
 } from "../../src/shared/remote-prompt-safety";
 import {
   remoteCipherFrameSchema,
+  remoteProjectionValidatorSchema,
   remoteRequestSchema,
+  remoteVersionSupportsConditionalProjections,
   remoteAuthorizationSubjectSchema,
   remoteConversationGrantsSchema,
   REMOTE_BROWSER_VERSION,
+  REMOTE_DESKTOP_VERSION,
   REMOTE_LIMITS,
   REMOTE_PROTOCOL_VERSION,
   REMOTE_RELAY_VERSION,
@@ -76,8 +79,39 @@ function fuzzJson(random: () => number, depth = 0): unknown {
 describe("remote frame and request parsing never yields authority", () => {
   it("versions the prompt-safety projection protocol coherently", () => {
     expect(REMOTE_PROTOCOL_VERSION).toBe(2);
-    expect(REMOTE_BROWSER_VERSION).toBe("0.2.0");
+    expect(REMOTE_BROWSER_VERSION).toBe("0.3.0");
+    expect(REMOTE_DESKTOP_VERSION).toBe("0.2.0");
     expect(REMOTE_RELAY_VERSION).toBe("0.2.0");
+  });
+
+  it("accepts only fixed-size conditional projection validators", () => {
+    const validator = "A".repeat(43);
+    expect(remoteProjectionValidatorSchema.parse(validator)).toBe(validator);
+    expect(remoteRequestSchema.parse({
+      type: "state.get",
+      requestId: crypto.randomUUID(),
+      ifNoneMatch: null,
+    })).toMatchObject({ type: "state.get", ifNoneMatch: null });
+    expect(remoteRequestSchema.safeParse({
+      type: "conversation.get",
+      requestId: crypto.randomUUID(),
+      conversationId: crypto.randomUUID(),
+      ifNoneMatch: validator,
+    }).success).toBe(true);
+    for (const invalid of ["A".repeat(42), "A".repeat(44), "!".repeat(43)]) {
+      expect(remoteRequestSchema.safeParse({
+        type: "state.get",
+        requestId: crypto.randomUUID(),
+        ifNoneMatch: invalid,
+      }).success).toBe(false);
+    }
+  });
+
+  it("advertises conditional reads only for compatible browsers", () => {
+    expect(remoteVersionSupportsConditionalProjections("0.2.9")).toBe(false);
+    expect(remoteVersionSupportsConditionalProjections("0.3.0")).toBe(true);
+    expect(remoteVersionSupportsConditionalProjections("1.0.0")).toBe(true);
+    expect(remoteVersionSupportsConditionalProjections("invalid")).toBe(false);
   });
 
   it("rejects malformed frames without throwing", () => {

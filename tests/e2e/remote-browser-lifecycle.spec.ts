@@ -43,19 +43,19 @@ import {
 } from "./support/remote-browser-fixtures";
 import { launchRemoteBrowser } from "./support/remote-browser-electron-fixture";
 import { registerRelayDesktop } from "./support/remote-relay-v2";
-
 let staticServer: Server;
 let staticUrl: string;
 let relay: ReferenceRelay;
 let relayUrl: string;
 let desktop: WebSocket;
 let navigationSequence = 0;
+const STATE_VALIDATOR = "A".repeat(43);
+const DETAIL_VALIDATOR = "B".repeat(43);
 let relayStateDirectory: string;
 let endpointKeyPair: Awaited<
   ReturnType<typeof registerRelayDesktop>
 >["endpointKeyPair"] | undefined;
 let relayIdentity: string | undefined;
-
 test.beforeAll(async () => {
   relayStateDirectory = await mkdtemp(join(
     tmpdir(),
@@ -193,15 +193,21 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
     });
     const stateRequest = await resumedState;
     expect(stateRequest.type).toBe("state.get");
+    expect(stateRequest).toMatchObject({ ifNoneMatch: STATE_VALIDATOR });
     await sendSessionResponse(session, stateRequest.requestId, {
-      kind: "state",
-      state: { ...shell, generatedAt: new Date().toISOString() },
+      kind: "not-modified",
+      validator: STATE_VALIDATOR,
+      checkedAt: new Date().toISOString(),
+      resource: { kind: "state" },
     });
     const resumedDetail = await nextSessionRequest(session);
     expect(resumedDetail.type).toBe("conversation.get");
+    expect(resumedDetail).toMatchObject({ ifNoneMatch: DETAIL_VALIDATOR });
     await sendSessionResponse(session, resumedDetail.requestId, {
-      kind: "conversation",
-      detail: lifecycleDetail(shell.conversations[0]!, 41, now),
+      kind: "not-modified",
+      validator: DETAIL_VALIDATOR,
+      checkedAt: new Date().toISOString(),
+      resource: { kind: "conversation", conversationId },
     });
     await expect.poll(async () => await page.evaluate(() => {
       const retained = (window as unknown as {
@@ -589,6 +595,7 @@ async function acceptSeededSession(
     }
     const request = outcome.request;
     expect(request.type).toBe("state.get");
+    if (label === "relay restart") expect(request).toHaveProperty("ifNoneMatch", STATE_VALIDATOR);
     await sendSessionResponse(session, request.requestId, {
       kind: "state",
       state: shell,
@@ -596,6 +603,7 @@ async function acceptSeededSession(
     if (detail) {
       const detailRequest = await nextSessionRequest(session);
       expect(detailRequest.type).toBe("conversation.get");
+      if (label === "relay restart") expect(detailRequest).toHaveProperty("ifNoneMatch", DETAIL_VALIDATOR);
       await sendSessionResponse(session, detailRequest.requestId, {
         kind: "conversation",
         detail,
@@ -745,6 +753,12 @@ async function sendSessionResponse(
   requestId: string,
   result: unknown,
 ): Promise<void> {
+  const candidate = result as { kind?: string; validator?: string };
+  const versionedResult = candidate.kind === "state" && !candidate.validator
+    ? { ...candidate, validator: STATE_VALIDATOR }
+    : candidate.kind === "conversation" && !candidate.validator
+      ? { ...candidate, validator: DETAIL_VALIDATOR }
+      : result;
   desktop.send(JSON.stringify({
     relayProtocolVersion: RELAY_PROTOCOL_VERSION,
     type: "relay.frame",
@@ -753,7 +767,7 @@ async function sendSessionResponse(
       type: "response",
       requestId,
       ok: true,
-      result,
+      result: versionedResult,
     }),
   }));
 }

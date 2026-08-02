@@ -267,5 +267,37 @@ describe("Remote Companion bounded protocol", () => {
         },
       },
     }).success).toBe(false);
+    const conversationId = crypto.randomUUID();
+    expect(remoteResponseSchema.parse({
+      type: "response",
+      requestId: crypto.randomUUID(),
+      ok: true,
+      result: {
+        kind: "not-modified",
+        validator: "A".repeat(43),
+        checkedAt: new Date().toISOString(),
+        resource: { kind: "conversation", conversationId },
+      },
+    })).toMatchObject({
+      result: {
+        kind: "not-modified",
+        resource: { kind: "conversation", conversationId },
+      },
+    });
+    expect(remoteResponseSchema.safeParse({
+      type: "response",
+      requestId: crypto.randomUUID(),
+      ok: true,
+      result: {
+        kind: "not-modified",
+        validator: "A".repeat(43),
+        checkedAt: new Date().toISOString(),
+        resource: {
+          kind: "conversation",
+          conversationId,
+          projectPath: "/secret",
+        },
+      },
+    }).success).toBe(false);
   });
 });

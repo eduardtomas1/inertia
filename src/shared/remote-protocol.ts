@@ -7,12 +7,18 @@ import {
 
 export const REMOTE_PROTOCOL_VERSION = 2 as const;
 export const RELAY_PROTOCOL_VERSION = 2 as const;
-export const REMOTE_BROWSER_VERSION = "0.2.0";
+export const REMOTE_BROWSER_VERSION = "0.3.0";
 export const REMOTE_RELAY_VERSION = "0.2.0";
 export const REMOTE_DESKTOP_VERSION = "0.2.0";
 export const REMOTE_AUTHENTICATED_REJECTION_CAPABILITY = "auth-reject-v1";
+export const REMOTE_CONDITIONAL_PROJECTIONS_CAPABILITY =
+  "conditional-projections-v1";
+export const REMOTE_CONDITIONAL_PROJECTIONS_BROWSER_VERSION = "0.3.0";
+// Keep the authenticated-rejection marker stable for mixed desktop/browser
+// versions. Conditional reads are negotiated separately through the relay's
+// authenticated component-version projection.
 export const REMOTE_BROWSER_SESSION_VERSION =
-  `${REMOTE_BROWSER_VERSION}+${REMOTE_AUTHENTICATED_REJECTION_CAPABILITY}`;
+  `0.2.0+${REMOTE_AUTHENTICATED_REJECTION_CAPABILITY}`;
 export const RELAY_PROTOCOL_RANGE = Object.freeze({ minimum: 2, maximum: 2 });
 export const REMOTE_PROTOCOL_RANGE = Object.freeze({ minimum: 2, maximum: 2 });
 
@@ -560,15 +566,26 @@ export type RemoteSafeConversationDetail = z.infer<
   typeof remoteSafeConversationDetailSchema
 >;
 
+export const remoteProjectionValidatorSchema = boundedBase64Url(43).length(43);
+export type RemoteProjectionValidator = z.infer<
+  typeof remoteProjectionValidatorSchema
+>;
+
+const conditionalProjectionRead = {
+  ifNoneMatch: remoteProjectionValidatorSchema.nullable().optional(),
+};
+
 export const remoteRequestSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("state.get"),
     requestId: uuid,
+    ...conditionalProjectionRead,
   }).strict(),
   z.object({
     type: z.literal("conversation.get"),
     requestId: uuid,
     conversationId: uuid,
+    ...conditionalProjectionRead,
   }).strict(),
   z.object({
     type: z.literal("prompt.send"),
@@ -588,11 +605,25 @@ export const remoteResponseSchema = z.discriminatedUnion("ok", [
     result: z.discriminatedUnion("kind", [
       z.object({
         kind: z.literal("state"),
+        validator: remoteProjectionValidatorSchema.optional(),
         state: remoteSafeShellSchema,
       }).strict(),
       z.object({
         kind: z.literal("conversation"),
+        validator: remoteProjectionValidatorSchema.optional(),
         detail: remoteSafeConversationDetailSchema,
+      }).strict(),
+      z.object({
+        kind: z.literal("not-modified"),
+        validator: remoteProjectionValidatorSchema,
+        checkedAt: timestamp,
+        resource: z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("state") }).strict(),
+          z.object({
+            kind: z.literal("conversation"),
+            conversationId: uuid,
+          }).strict(),
+        ]),
       }).strict(),
       z.object({
         kind: z.literal("prompt.accepted"),
@@ -619,6 +650,23 @@ export const remoteResponseSchema = z.discriminatedUnion("ok", [
   }).strict(),
 ]);
 export type RemoteResponse = z.infer<typeof remoteResponseSchema>;
+
+export function remoteVersionSupportsConditionalProjections(
+  version: string,
+): boolean {
+  const current = componentVersion.safeParse(version);
+  const required = componentVersion.parse(
+    REMOTE_CONDITIONAL_PROJECTIONS_BROWSER_VERSION,
+  );
+  if (!current.success) return false;
+  const left = current.data.split(".").map(Number);
+  const right = required.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index]! > right[index]!) return true;
+    if (left[index]! < right[index]!) return false;
+  }
+  return true;
+}
 
 export const remoteAuthorizationSubjectSchema = z.object({
   deviceId: uuid,

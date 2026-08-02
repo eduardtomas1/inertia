@@ -1358,6 +1358,207 @@ describe("Remote Companion browser connection ownership", () => {
     ).disconnect("cleanup");
   });
 
+  it("reuses validated browser projections on explicit unchanged responses", async () => {
+    vi.useFakeTimers();
+    const now = new Date().toISOString();
+    const projectId = crypto.randomUUID();
+    const conversationId = crypto.randomUUID();
+    const stateValidator = "A".repeat(43);
+    const detailValidator = "B".repeat(43);
+    const shell = vi.fn();
+    const detail = vi.fn();
+    let stateReads = 0;
+    let detailReads = 0;
+    const request = vi.fn(async (
+      value: RemoteRequest,
+    ): Promise<RemoteResponse> => {
+      if (value.type === "state.get") {
+        stateReads += 1;
+        if (stateReads > 1) {
+          return {
+            type: "response",
+            requestId: value.requestId,
+            ok: true,
+            result: {
+              kind: "not-modified",
+              validator: stateValidator,
+              checkedAt: now,
+              resource: { kind: "state" },
+            },
+          };
+        }
+        return {
+          type: "response",
+          requestId: value.requestId,
+          ok: true,
+          result: {
+            kind: "state",
+            validator: stateValidator,
+            state: {
+              generatedAt: now,
+              projects: [{ id: projectId, name: "Project" }],
+              conversations: [],
+              runs: [],
+            },
+          },
+        };
+      }
+      if (value.type !== "conversation.get") {
+        throw new Error("Unexpected prompt request.");
+      }
+      detailReads += 1;
+      if (detailReads > 1) {
+        return {
+          type: "response",
+          requestId: value.requestId,
+          ok: true,
+          result: {
+            kind: "not-modified",
+            validator: detailValidator,
+            checkedAt: now,
+            resource: { kind: "conversation", conversationId },
+          },
+        };
+      }
+      return {
+        type: "response",
+        requestId: value.requestId,
+        ok: true,
+        result: {
+          kind: "conversation",
+          validator: detailValidator,
+          detail: {
+            generatedAt: now,
+            conversation: {
+              id: conversationId,
+              projectId,
+              title: "Conversation",
+              providerLabel: "Provider",
+              status: "idle",
+              pendingLocalApproval: false,
+              promptSafety: {
+                supported: true,
+                headline: "Local approval required",
+                explanation: "Desktop approval remains authoritative.",
+              },
+              updatedAt: now,
+            },
+            messages: [],
+            activities: [],
+            subagents: [],
+            waitingForLocalAction: false,
+          },
+        },
+      };
+    });
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell,
+      detail,
+      promptResult: vi.fn(),
+    });
+    Object.assign(client as unknown as Record<string, unknown>, {
+      sender: {},
+      request,
+    });
+
+    client.selectConversation(conversationId);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls[0]?.[0]).toMatchObject({ type: "state.get" });
+    expect(request.mock.calls[0]?.[0]).not.toHaveProperty("ifNoneMatch");
+    expect(request.mock.calls[1]?.[0]).toMatchObject({
+      type: "conversation.get",
+      ifNoneMatch: null,
+    });
+    expect(shell).toHaveBeenCalledTimes(1);
+    expect(detail).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(4));
+    expect(request.mock.calls[2]?.[0]).toMatchObject({
+      type: "state.get",
+      ifNoneMatch: stateValidator,
+    });
+    expect(request.mock.calls[3]?.[0]).toMatchObject({
+      type: "conversation.get",
+      ifNoneMatch: detailValidator,
+    });
+    expect(shell).toHaveBeenCalledTimes(1);
+    expect(detail).toHaveBeenCalledTimes(2);
+    (
+      client as unknown as { disconnect(message: string): void }
+    ).disconnect("cleanup");
+  });
+
+  it("falls back to legacy reads after a conditional reconnect is rejected", async () => {
+    vi.useFakeTimers();
+    const validator = "A".repeat(43);
+    const shell = vi.fn();
+    const request = vi.fn(async (
+      value: RemoteRequest,
+    ): Promise<RemoteResponse> => {
+      if (value.type !== "state.get") {
+        throw new Error("Unexpected remote request.");
+      }
+      if (value.ifNoneMatch !== undefined) {
+        return {
+          type: "response",
+          requestId: value.requestId,
+          ok: false,
+          code: "invalid",
+          message: "The remote request was invalid.",
+        };
+      }
+      return {
+        type: "response",
+        requestId: value.requestId,
+        ok: true,
+        result: {
+          kind: "state",
+          state: {
+            generatedAt: new Date().toISOString(),
+            projects: [],
+            conversations: [],
+            runs: [],
+          },
+        },
+      };
+    });
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell,
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    Object.assign(client as unknown as Record<string, unknown>, {
+      sender: {},
+      request,
+      conditionalProjections: true,
+      hasShellProjection: true,
+      shellValidator: validator,
+    });
+    const internals = client as unknown as {
+      refresh(epoch: number, generation: number): Promise<void>;
+      disconnect(message: string): void;
+    };
+
+    await internals.refresh(0, 0);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      type: "state.get",
+      ifNoneMatch: validator,
+    });
+    expect(shell).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls[1]?.[0]).not.toHaveProperty("ifNoneMatch");
+    expect(shell).toHaveBeenCalledTimes(1);
+    internals.disconnect("cleanup");
+  });
+
   it("does not let an old not-found response clear a newer selection", async () => {
     const now = new Date().toISOString();
     const projectId = crypto.randomUUID();

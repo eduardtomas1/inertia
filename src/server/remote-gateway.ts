@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   AppSnapshot,
   Conversation,
@@ -9,6 +9,7 @@ import {
   REMOTE_LIMITS,
   remoteRequestSchema,
   type RemoteAuthorizationSubject,
+  type RemoteProjectionValidator,
   type RemoteRequest,
   type RemoteResponse,
   type RemoteSafeConversation,
@@ -62,6 +63,7 @@ interface PendingRemotePromptPreparation {
 const PREPARED_PROMPT_TTL_MS = 15_000;
 const PREPARED_PROMPT_LIMIT =
   REMOTE_LIMITS.sessions * REMOTE_LIMITS.inFlightRequestsPerSession;
+const PROJECTION_VALIDATOR_PLACEHOLDER = "A".repeat(43) as RemoteProjectionValidator;
 
 export class RemoteRuntimeGateway {
   private readonly receipts = new Map<string, DeliveryReceipt>();
@@ -111,12 +113,16 @@ export class RemoteRuntimeGateway {
     if (rejection) return rejection;
 
     if (request.type === "state.get") {
-      return boundRemoteProjection({
+      const conditional = request.ifNoneMatch !== undefined;
+      const response = boundRemoteProjection({
         type: "response",
         requestId: request.requestId,
         ok: true,
         result: {
           kind: "state",
+          ...(conditional
+            ? { validator: PROJECTION_VALIDATOR_PLACEHOLDER }
+            : {}),
           state: projectShell(
             this.dependencies.shell(),
             subject,
@@ -125,6 +131,7 @@ export class RemoteRuntimeGateway {
           ),
         },
       });
+      return conditionalProjectionResponse(subject, request, response);
     }
     if (request.type === "conversation.get") {
       return this.conversation(subject, request);
@@ -154,12 +161,16 @@ export class RemoteRuntimeGateway {
         ?? { ...detail.conversation, latestTurn: null, pendingApproval: false, pendingInput: false },
       this.promptSafety(detail.conversation),
     );
-    return boundRemoteProjection({
+    const conditional = request.ifNoneMatch !== undefined;
+    const response = boundRemoteProjection({
       type: "response",
       requestId: request.requestId,
       ok: true,
       result: {
         kind: "conversation",
+        ...(conditional
+          ? { validator: PROJECTION_VALIDATOR_PLACEHOLDER }
+          : {}),
         detail: {
           generatedAt: this.now().toISOString(),
           conversation: projectedConversation,
@@ -207,6 +218,7 @@ export class RemoteRuntimeGateway {
         },
       },
     });
+    return conditionalProjectionResponse(subject, request, response);
   }
 
   async preparePrompt(
@@ -704,6 +716,72 @@ export function boundRemoteProjection(
     newestMessage.content = content.slice(0, low);
   }
   return response;
+}
+
+function conditionalProjectionResponse(
+  subject: RemoteAuthorizationSubject,
+  request: Extract<RemoteRequest, { type: "state.get" | "conversation.get" }>,
+  response: RemoteResponse,
+): RemoteResponse {
+  if (request.ifNoneMatch === undefined || !response.ok) return response;
+  const { result } = response;
+  if (result.kind !== "state" && result.kind !== "conversation") {
+    return response;
+  }
+  const projection = result.kind === "state" ? result.state : result.detail;
+  const { generatedAt, ...content } = projection;
+  const validator = projectionValidator(subject, request, content);
+  result.validator = validator;
+  if (request.ifNoneMatch !== validator) return response;
+  return {
+    type: "response",
+    requestId: request.requestId,
+    ok: true,
+    result: {
+      kind: "not-modified",
+      validator,
+      checkedAt: generatedAt,
+      resource: request.type === "state.get"
+        ? { kind: "state" }
+        : {
+            kind: "conversation",
+            conversationId: request.conversationId,
+          },
+    },
+  };
+}
+
+function projectionValidator(
+  subject: RemoteAuthorizationSubject,
+  request: Extract<RemoteRequest, { type: "state.get" | "conversation.get" }>,
+  content: object,
+): RemoteProjectionValidator {
+  const authority = {
+    deviceId: subject.deviceId,
+    scopes: [...subject.scopes].sort(),
+    projectIds: [...subject.projectIds].sort(),
+    grants: [...subject.grants]
+      .map((grant) => ({
+        ...grant,
+        conversationIds: [...grant.conversationIds].sort(),
+      }))
+      .sort((left, right) => left.projectId.localeCompare(right.projectId)),
+    grantVersion: subject.grantVersion,
+    expiresAt: subject.expiresAt,
+  };
+  return createHash("sha256")
+    .update("inertia-remote-projection-v1\0", "utf8")
+    .update(JSON.stringify({
+      resource: request.type === "state.get"
+        ? { kind: "state" }
+        : {
+            kind: "conversation",
+            conversationId: request.conversationId,
+          },
+      authority,
+      content,
+    }), "utf8")
+    .digest("base64url") as RemoteProjectionValidator;
 }
 
 function keepNewestWithinBudget<T>(

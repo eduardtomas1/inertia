@@ -1,8 +1,8 @@
 # Remote Companion protocol and architecture
 
-Status: experimental protocol version 2, browser version 0.2.0, reference
-relay version 0.2.0. Remote Companion is disabled by default. This repository
-does not deploy or operate a public relay or browser origin.
+Status: experimental protocol version 2, browser version 0.3.0, desktop and
+reference relay version 0.2.0. Remote Companion is disabled by default. This
+repository does not deploy or operate a public relay or browser origin.
 
 ## Current architecture seams
 
@@ -194,6 +194,17 @@ The only version 2 application requests are:
   project material under its own supervised policy, and sanitized answers may
   contain project-derived prose. It is not a source-confidentiality boundary.
 
+Browser component version 0.3.0 advertises `conditional-projections-v1`
+through the authenticated relay route's component-version projection. The
+desktop adds a validator to that browser's first legacy-shaped read; subsequent
+capable `state.get` and `conversation.get` requests carry `ifNoneMatch`. A
+matching strong validator returns an explicit encrypted `not-modified` result
+instead of the full projection. Validators bind the final sanitized,
+byte-bounded resource to the effective device grant, omit only the generated
+check timestamp, and are never persisted. Legacy compatible browsers retain
+the version 2 full-response shape, while a new browser safely stays on legacy
+reads when connected to an older desktop that never supplies a validator.
+
 For prompts, Electron main persists a bounded delivery receipt as `dispatched`
 before runtime preparation. Preparation cannot queue a turn. Immediately
 before commit, main synchronously checks that Remote Companion remains enabled
@@ -229,6 +240,11 @@ synchronously, and the client rejects any prompt whose target is no longer the
 selected conversation. If the local user archives that conversation, detail
 and prompt preparation/commit return `not-found`; the still-current browser
 selection clears its transcript and prompt form on the next response.
+Projection-key and latest-issued-read ownership additionally prevent a delayed
+full or `not-modified` result from overwriting a newer browser projection.
+Authenticated authority invalidation clears cached validators before purging
+the corresponding DOM; prompt acknowledgements and lifecycle controls are
+never conditional.
 
 ## Authorization matrix
 

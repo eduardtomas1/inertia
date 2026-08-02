@@ -43,6 +43,7 @@ export {
   type OwnedWorktreeCreationDependencies,
   type OwnedWorktreeInspectionDependencies,
   type OwnedWorktreeCleanupInspection,
+  type WorktreeFilesystemIdentityDependencies,
   type RegisteredWorktreeIdentity,
   type RegisteredWorktreeOwnership,
   type RegisteredWorktreeRegistration,

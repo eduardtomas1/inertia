@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { constants as fsConstants, type BigIntStats } from "node:fs";
 import {
   access,
@@ -69,10 +70,19 @@ export interface OwnedWorktreeCreationHooks {
 
 export interface OwnedWorktreeCreationDependencies {
   beforeFilesystemIdentityCapture?(adminDirectory: string): Promise<void> | void;
+  filesystemIdentity?: WorktreeFilesystemIdentityDependencies;
 }
 
 export interface OwnedWorktreeInspectionDependencies {
   afterIdentityFileStat?(path: string): Promise<void> | void;
+  filesystemIdentity?: WorktreeFilesystemIdentityDependencies;
+}
+
+export interface WorktreeFilesystemIdentityDependencies {
+  platform?: NodeJS.Platform;
+  linuxStatExecutable?: string;
+  linuxStatArguments?(path: string): string[];
+  linuxStatTimeoutMs?: number;
 }
 
 export type OwnedWorktreeCleanupInspection =
@@ -81,6 +91,8 @@ export type OwnedWorktreeCleanupInspection =
   | { state: "registered"; identity: RegisteredWorktreeRegistration };
 
 const MAX_GIT_IDENTITY_FILE_BYTES = 16 * 1024;
+const MAX_LINUX_BIRTHTIME_OUTPUT_BYTES = 64;
+const LINUX_BIRTHTIME_TIMEOUT_MS = 2_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 function pathsEqual(left: string, right: string): boolean {
@@ -195,8 +207,70 @@ function sameCaptureObservation(left: BigIntStats, right: BigIntStats): boolean 
   ) && left.ctimeNs === right.ctimeNs;
 }
 
+function linuxStatEnvironment(): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    LANG: "C",
+    LC_ALL: "C",
+    PATH: "/usr/bin:/bin",
+  };
+  for (const name of ["SystemRoot", "WINDIR", "PATHEXT"] as const) {
+    if (process.env[name]) environment[name] = process.env[name];
+  }
+  return environment;
+}
+
+async function verifyLinuxDirectoryBirthtime(
+  path: string,
+  birthtimeNs: bigint,
+  dependencies: WorktreeFilesystemIdentityDependencies,
+): Promise<void> {
+  const executable = dependencies.linuxStatExecutable ?? "/usr/bin/stat";
+  const args = dependencies.linuxStatArguments?.(path)
+    ?? ["--format=%W", "--", path];
+  const timeoutMs = Math.max(
+    1,
+    Math.min(
+      dependencies.linuxStatTimeoutMs ?? LINUX_BIRTHTIME_TIMEOUT_MS,
+      LINUX_BIRTHTIME_TIMEOUT_MS,
+    ),
+  );
+  let stdout: string;
+  try {
+    stdout = await new Promise<string>((resolveProbe, rejectProbe) => {
+      execFile(executable, args, {
+        encoding: "utf8",
+        env: linuxStatEnvironment(),
+        killSignal: "SIGKILL",
+        maxBuffer: MAX_LINUX_BIRTHTIME_OUTPUT_BYTES,
+        shell: false,
+        timeout: timeoutMs,
+        windowsHide: true,
+      }, (error, result) => {
+        if (error) rejectProbe(error);
+        else resolveProbe(result);
+      });
+    });
+  } catch {
+    throw new GitError(
+      "operation-failed",
+      "The Linux filesystem birth time could not be verified safely; isolated Duo worktrees are unsupported on this filesystem.",
+    );
+  }
+  const match = /^([1-9][0-9]{0,19})\n?$/u.exec(stdout);
+  if (
+    !match?.[1]
+    || BigInt(match[1]) !== birthtimeNs / 1_000_000_000n
+  ) {
+    throw new GitError(
+      "operation-failed",
+      "The Linux filesystem does not expose a trustworthy directory birth time; isolated Duo worktrees are unsupported on this filesystem.",
+    );
+  }
+}
+
 async function captureDirectoryIdentity(
   path: string,
+  dependencies: WorktreeFilesystemIdentityDependencies = {},
 ): Promise<WorktreeFilesystemIdentity> {
   const before = await lstat(path, { bigint: true });
   if (before.isSymbolicLink() || !before.isDirectory()) {
@@ -224,14 +298,35 @@ async function captureDirectoryIdentity(
         "The linked-worktree administrative identity changed during inspection.",
       );
     }
+    if ((dependencies.platform ?? process.platform) === "linux") {
+      await verifyLinuxDirectoryBirthtime(
+        path,
+        opened.birthtimeNs,
+        dependencies,
+      );
+      const verifiedOpened = await handle.stat({ bigint: true });
+      const verifiedPath = await lstat(path, { bigint: true });
+      if (
+        !sameCaptureObservation(opened, verifiedOpened)
+        || !sameCaptureObservation(verifiedOpened, verifiedPath)
+      ) {
+        throw new GitError(
+          "conflict",
+          "The linked-worktree administrative identity changed during birth-time verification.",
+        );
+      }
+    }
     return openedIdentity;
   } finally {
     await handle.close();
   }
 }
 
-async function repositoryIdentity(commonDirectory: string): Promise<string> {
-  const info = await captureDirectoryIdentity(commonDirectory);
+async function repositoryIdentity(
+  commonDirectory: string,
+  dependencies: WorktreeFilesystemIdentityDependencies = {},
+): Promise<string> {
+  const info = await captureDirectoryIdentity(commonDirectory, dependencies);
   return createHash("sha256").update([
     commonDirectory,
     info.device,
@@ -242,10 +337,11 @@ async function repositoryIdentity(commonDirectory: string): Promise<string> {
 
 export async function preflightWorktreeFilesystemIdentity(
   repositoryPath: string,
+  dependencies: WorktreeFilesystemIdentityDependencies = {},
 ): Promise<void> {
   const root = await repositoryRoot(repositoryPath);
   const commonDirectory = await canonicalGitDirectory(root, "--git-common-dir");
-  await captureDirectoryIdentity(commonDirectory);
+  await captureDirectoryIdentity(commonDirectory, dependencies);
 }
 
 async function readBoundedIdentityFile(
@@ -309,6 +405,7 @@ async function linkedWorktreeIdentity(
   root: string,
   worktreePath: string,
   beforeFilesystemIdentityCapture?: OwnedWorktreeCreationDependencies["beforeFilesystemIdentityCapture"],
+  filesystemIdentityDependencies: WorktreeFilesystemIdentityDependencies = {},
 ): Promise<{
   filesystemReceipt: WorktreeFilesystemReceipt;
   repositoryIdentity: string;
@@ -364,9 +461,9 @@ async function linkedWorktreeIdentity(
   let identity: string;
   try {
     [worktreesIdentity, adminIdentity, identity] = await Promise.all([
-      captureDirectoryIdentity(worktreeDirectory),
-      captureDirectoryIdentity(gitDirectory),
-      repositoryIdentity(commonDirectory),
+      captureDirectoryIdentity(worktreeDirectory, filesystemIdentityDependencies),
+      captureDirectoryIdentity(gitDirectory, filesystemIdentityDependencies),
+      repositoryIdentity(commonDirectory, filesystemIdentityDependencies),
     ]);
   } catch (error) {
     if (error instanceof GitError) throw error;
@@ -500,7 +597,7 @@ export async function createWorktreeWithOwnershipReceipt(
       "Git returned an invalid worktree starting revision.",
     );
   }
-  await preflightWorktreeFilesystemIdentity(root);
+  await preflightWorktreeFilesystemIdentity(root, dependencies.filesystemIdentity);
   const ownershipToken = randomUUID();
   hooks.beforeAdd(ownershipToken);
   try {
@@ -526,6 +623,7 @@ export async function createWorktreeWithOwnershipReceipt(
     root,
     target,
     dependencies.beforeFilesystemIdentityCapture,
+    dependencies.filesystemIdentity,
   );
   hooks.added({
     branch,
@@ -674,7 +772,10 @@ export async function inspectOwnedWorktreeCleanupState(
     );
   }
   const commonDirectory = await canonicalGitDirectory(root, "--git-common-dir");
-  if (await repositoryIdentity(commonDirectory) !== expectedRepositoryIdentity) {
+  if (
+    await repositoryIdentity(commonDirectory, dependencies.filesystemIdentity)
+      !== expectedRepositoryIdentity
+  ) {
     return { state: "conflict" };
   }
   const worktreesDirectory = resolve(commonDirectory, "worktrees");
@@ -688,7 +789,10 @@ export async function inspectOwnedWorktreeCleanupState(
   const worktrees = await registeredWorktrees(root);
   let currentWorktreesIdentity: WorktreeFilesystemIdentity;
   try {
-    currentWorktreesIdentity = await captureDirectoryIdentity(worktreesDirectory);
+    currentWorktreesIdentity = await captureDirectoryIdentity(
+      worktreesDirectory,
+      dependencies.filesystemIdentity,
+    );
   } catch (error) {
     if (nodeErrorCode(error) !== "ENOENT") throw error;
     const replacement = worktrees.some(({ branch: registeredBranch, path }) =>
@@ -703,7 +807,10 @@ export async function inspectOwnedWorktreeCleanupState(
   )) return { state: "conflict" };
   let currentAdminIdentity: WorktreeFilesystemIdentity;
   try {
-    currentAdminIdentity = await captureDirectoryIdentity(adminDirectory);
+    currentAdminIdentity = await captureDirectoryIdentity(
+      adminDirectory,
+      dependencies.filesystemIdentity,
+    );
   } catch (error) {
     if (nodeErrorCode(error) !== "ENOENT") throw error;
     const entries = await readdir(worktreesDirectory, { withFileTypes: true });
@@ -713,6 +820,7 @@ export async function inspectOwnedWorktreeCleanupState(
       try {
         const identity = await captureDirectoryIdentity(
           resolve(worktreesDirectory, entry.name),
+          dependencies.filesystemIdentity,
         );
         if (worktreeFilesystemIdentitiesEqual(
           identity,
@@ -722,7 +830,10 @@ export async function inspectOwnedWorktreeCleanupState(
         return { state: "conflict" };
       }
     }
-    const verifiedParent = await captureDirectoryIdentity(worktreesDirectory);
+    const verifiedParent = await captureDirectoryIdentity(
+      worktreesDirectory,
+      dependencies.filesystemIdentity,
+    );
     if (!worktreeFilesystemIdentitiesEqual(
       verifiedParent,
       expectedFilesystemReceipt.worktreesDirectory,
@@ -742,8 +853,11 @@ export async function inspectOwnedWorktreeCleanupState(
     dependencies,
   );
   const [verifiedAdmin, verifiedParent] = await Promise.all([
-    captureDirectoryIdentity(adminDirectory),
-    captureDirectoryIdentity(worktreesDirectory),
+    captureDirectoryIdentity(adminDirectory, dependencies.filesystemIdentity),
+    captureDirectoryIdentity(
+      worktreesDirectory,
+      dependencies.filesystemIdentity,
+    ),
   ]);
   if (
     !worktreeFilesystemIdentitiesEqual(

@@ -26,6 +26,7 @@ import {
   removeWorktree,
   serializeWorktreeFilesystemReceipt,
   type RegisteredWorktreeIdentity,
+  type WorktreeFilesystemIdentityDependencies,
   worktreeFilesystemIdentitiesEqual,
 } from "../../src/server/git";
 
@@ -79,6 +80,28 @@ function expectSamePath(actual: string, expected: string): void {
   });
 }
 
+function linuxBirthtimeProbe(
+  mode: "valid" | "zero" | "mismatch" | "overflow" | "timeout" | "missing",
+): WorktreeFilesystemIdentityDependencies {
+  const script = mode === "valid"
+    ? "const {statSync}=require('node:fs');const s=statSync(process.argv[1],{bigint:true});process.stdout.write(String(s.birthtimeNs/1000000000n));"
+    : mode === "zero"
+      ? "process.stdout.write('0')"
+      : mode === "mismatch"
+        ? "process.stdout.write('1')"
+        : mode === "overflow"
+          ? "process.stdout.write('x'.repeat(1024))"
+          : "setInterval(() => undefined, 1000)";
+  return {
+    platform: "linux",
+    linuxStatExecutable: mode === "missing"
+      ? join(tmpdir(), "inertia-missing-stat-executable")
+      : process.execPath,
+    linuxStatArguments: (path) => ["-e", script, path],
+    linuxStatTimeoutMs: mode === "timeout" ? 25 : 2_000,
+  };
+}
+
 async function createOwnedWorktree(
   root: string,
   path: string,
@@ -107,6 +130,64 @@ afterEach(() => {
 });
 
 describe("launch-owned Git cleanup", () => {
+  it.each(["zero", "mismatch", "missing", "overflow", "timeout"] as const)(
+    "rejects a Linux %s birth-time probe before worktree mutation",
+    async (mode) => {
+      const root = repository();
+      const path = ownedPath(root, `linux ${mode} birthtime`);
+      const branch = `inertia/linux-birthtime-${mode}`;
+      const phases: string[] = [];
+
+      await expect(createWorktreeWithOwnershipReceipt(root, path, {
+        branch,
+        createBranch: true,
+        startPoint: "main",
+      }, {
+        beforeAdd: () => phases.push("before-add"),
+        notAdded: () => phases.push("not-added"),
+        added: () => phases.push("added"),
+      }, {
+        filesystemIdentity: linuxBirthtimeProbe(mode),
+      })).rejects.toThrow(/birth time.*isolated Duo worktrees are unsupported/iu);
+
+      expect(phases).toEqual([]);
+      expect(existsSync(path)).toBe(false);
+      expect(git(
+        root,
+        "for-each-ref",
+        "--format=%(refname)",
+        `refs/heads/${branch}`,
+      )).toBe("");
+      expect(git(root, "worktree", "list", "--porcelain").match(
+        /^worktree /gmu,
+      )).toHaveLength(1);
+    },
+  );
+
+  it("accepts a Linux birth-time probe that agrees with Node", async () => {
+    const root = repository();
+    const path = ownedPath(root, "linux verified birthtime");
+    const branch = "inertia/linux-birthtime-valid";
+    let ownership: RegisteredWorktreeIdentity | null = null;
+
+    await createWorktreeWithOwnershipReceipt(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    }, {
+      beforeAdd: () => undefined,
+      notAdded: () => undefined,
+      added: (value) => {
+        ownership = value;
+      },
+    }, {
+      filesystemIdentity: linuxBirthtimeProbe("valid"),
+    });
+
+    expect(ownership).toMatchObject({ branch });
+    expect(existsSync(path)).toBe(true);
+  });
+
   it("acknowledges add success before post-create status inspection", async () => {
     const root = repository();
     const path = ownedPath(root, "receipt owned path");

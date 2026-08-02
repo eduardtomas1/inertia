@@ -592,7 +592,7 @@ async function launchRemoteBrowser(): Promise<{
       args: [
         resolve("tests/fixtures/remote-browser-electron.cjs"),
         staticUrl,
-        userDataDir,
+        `--user-data-dir=${userDataDir}`,
       ],
     });
     const page = await electronApp.firstWindow();

@@ -1,7 +1,5 @@
 const { app, BrowserWindow } = require("electron");
 
-if (process.argv[3]) app.setPath("userData", process.argv[3]);
-
 void app.whenReady().then(async () => {
   const window = new BrowserWindow({
     show: false,

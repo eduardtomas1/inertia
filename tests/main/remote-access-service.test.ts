@@ -24,12 +24,14 @@ import {
   type RemoteSerializedKeyPair,
 } from "../../src/shared/remote-crypto";
 import {
+  REMOTE_BROWSER_SESSION_VERSION,
   REMOTE_LIMITS,
   REMOTE_PROTOCOL_VERSION,
   encodedRemoteFrameBytes,
   remotePairingResponsePayloadSchema,
   remoteResponseSchema,
-  remoteSessionAcceptPayloadSchema,
+  remoteSessionAuthorityChangedPayloadSchema,
+  remoteSessionResponsePayloadSchema,
   type RemoteCipherFrame,
   type RemotePairingInvitation,
   type RemoteRequest,
@@ -176,9 +178,34 @@ async function nextFrame(
   }
 }
 
+async function nextSessionLifecycleFrame(
+  socket: WebSocket,
+): Promise<Extract<
+  RemoteCipherFrame,
+  { kind: "session.accept" | "session.close" }
+>> {
+  for (;;) {
+    const message = await nextMessage(socket);
+    if (
+      message.type !== "relay.frame"
+      || typeof message.frame !== "object"
+      || message.frame === null
+      || !("kind" in message.frame)
+      || (
+        message.frame.kind !== "session.accept"
+        && message.frame.kind !== "session.close"
+      )
+    ) continue;
+    return message.frame as Extract<
+      RemoteCipherFrame,
+      { kind: "session.accept" | "session.close" }
+    >;
+  }
+}
+
 function nextFrames(
   socket: WebSocket,
-  kind: RemoteCipherFrame["kind"],
+  kind: RemoteCipherFrame["kind"] | RemoteCipherFrame["kind"][],
   count: number,
 ): Promise<RemoteCipherFrame[]> {
   return new Promise((resolve, reject) => {
@@ -194,7 +221,9 @@ function nextFrames(
         || typeof message.frame !== "object"
         || message.frame === null
         || !("kind" in message.frame)
-        || message.frame.kind !== kind
+        || !(Array.isArray(kind)
+          ? kind.includes(message.frame.kind as RemoteCipherFrame["kind"])
+          : message.frame.kind === kind)
       ) return;
       frames.push(message.frame as RemoteCipherFrame);
       if (frames.length !== count) return;
@@ -225,6 +254,9 @@ async function openAuthenticatedSession(input: {
   deviceId: string;
   deviceKeys: RemoteSerializedKeyPair;
   grantVersion: number;
+  createdAt?: string;
+  browserVersion?: string;
+  sessionId?: string;
 }): Promise<{
   tunnel: Awaited<ReturnType<typeof browserTunnel>>;
   sender: Awaited<ReturnType<typeof createAuthenticatedSessionSender>>;
@@ -236,7 +268,7 @@ async function openAuthenticatedSession(input: {
     input.relayUrl,
     input.invitation.endpointId,
   );
-  const sessionId = crypto.randomUUID();
+  const sessionId = input.sessionId ?? crypto.randomUUID();
   const deviceKeyPair = await importRemoteKeyPair(input.deviceKeys);
   const hostPublicKey = await importRemotePublicKey(
     input.invitation.hostPublicKey,
@@ -248,7 +280,7 @@ async function openAuthenticatedSession(input: {
     deviceKeyPair,
     hostPublicKey,
   );
-  const acceptPromise = nextFrame(tunnel.socket, "session.accept");
+  const acceptPromise = nextSessionLifecycleFrame(tunnel.socket);
   sendFrame(tunnel.socket, tunnel.connectionId, {
     protocolVersion: 2,
     kind: "session.open",
@@ -263,14 +295,15 @@ async function openAuthenticatedSession(input: {
         sessionId,
         deviceId: input.deviceId,
         grantVersion: input.grantVersion,
-        createdAt: new Date().toISOString(),
-        browserVersion: "0.1.0",
+        createdAt: input.createdAt ?? new Date().toISOString(),
+        browserVersion: input.browserVersion
+          ?? REMOTE_BROWSER_SESSION_VERSION,
       },
     ),
   });
   const acceptFrame = await acceptPromise;
-  if (acceptFrame.kind !== "session.accept") {
-    throw new Error("Missing session response.");
+  if (acceptFrame.kind === "session.close") {
+    throw new Error(`Session closed: ${acceptFrame.reason}.`);
   }
   const recipient = await createAuthenticatedSessionRecipient(
     input.invitation.hostId,
@@ -280,7 +313,7 @@ async function openAuthenticatedSession(input: {
     hostPublicKey,
     acceptFrame.enc,
   );
-  const accepted = remoteSessionAcceptPayloadSchema.parse(
+  const response = remoteSessionResponsePayloadSchema.parse(
     await openSessionHandshake(
       recipient,
       "session.accept",
@@ -288,6 +321,10 @@ async function openAuthenticatedSession(input: {
       acceptFrame.ciphertext,
     ),
   );
+  if (response.type === "session.reject") {
+    throw new Error(`Authenticated session rejected: ${response.reason}.`);
+  }
+  const accepted = response;
   return { tunnel, sender, recipient, accepted, sessionId };
 }
 
@@ -436,6 +473,76 @@ async function createSessionOpenFrame(input: {
 }
 
 describe("Remote Companion outbound encrypted service", () => {
+  it.each(["revoked", "expired"] as const)(
+    "authenticates an offline %s device after restart and returns a sealed rejection",
+    async (disposition) => {
+      const pairing = await pairedDeviceFixture();
+      if (disposition === "revoked") {
+        await pairing.service.revokeDevice(pairing.deviceId);
+      }
+      await pairing.service.shutdown();
+
+      const restartNow = disposition === "expired"
+        ? new Date(Date.now() + 31 * 24 * 60 * 60 * 1_000)
+        : new Date();
+      const restarted = await RemoteAccessService.create({
+        initialPrivacy: null,
+        autoConnect: true,
+        store: pairing.store,
+        now: () => restartNow,
+        runtime: {
+          remoteRequest: async () => {
+            throw new Error("unused");
+          },
+        },
+      });
+      await waitFor(() => restarted.state().connection === "online");
+
+      const rejectedSessionId = crypto.randomUUID();
+      await expect(openAuthenticatedSession({
+        relayUrl: pairing.relayUrl,
+        invitation: pairing.invitation,
+        deviceId: pairing.deviceId,
+        deviceKeys: pairing.deviceKeys,
+        grantVersion: 1,
+        createdAt: restartNow.toISOString(),
+        browserVersion: "0.2.0+auth-reject-v1",
+        sessionId: rejectedSessionId,
+      })).rejects.toThrow(`Authenticated session rejected: ${disposition}.`);
+      await expect(openAuthenticatedSession({
+        relayUrl: pairing.relayUrl,
+        invitation: pairing.invitation,
+        deviceId: pairing.deviceId,
+        deviceKeys: pairing.deviceKeys,
+        grantVersion: 1,
+        createdAt: restartNow.toISOString(),
+        browserVersion: "0.2.0",
+      })).rejects.toThrow("Session closed: shutdown.");
+      expect(restarted.state().activeSessions).toBe(0);
+      await restarted.shutdown();
+
+      const replayed = await RemoteAccessService.create({
+        initialPrivacy: null,
+        autoConnect: true,
+        store: pairing.store,
+        now: () => restartNow,
+        runtime: { remoteRequest: async () => { throw new Error("unused"); } },
+      });
+      await waitFor(() => replayed.state().connection === "online");
+      await expect(openAuthenticatedSession({
+        relayUrl: pairing.relayUrl,
+        invitation: pairing.invitation,
+        deviceId: pairing.deviceId,
+        deviceKeys: pairing.deviceKeys,
+        grantVersion: 1,
+        createdAt: restartNow.toISOString(),
+        browserVersion: "0.2.0+auth-reject-v1",
+        sessionId: rejectedSessionId,
+      })).rejects.toThrow("Message timed out.");
+      await replayed.shutdown();
+    },
+  );
+
   it("connects to the reference relay with the product default URL", async () => {
     const value = await createReferenceRelay();
     relays.push(value);
@@ -1417,6 +1524,55 @@ describe("Remote Companion outbound encrypted service", () => {
     },
   );
 
+  it("persists a reduction before a stalled active invalidation", async () => {
+    const paired = await pairedServiceFixture({ scopes: ["view", "prompt"] });
+    const originalComplete = paired.store.completeAuthorityReduction.bind(paired.store);
+    let markDurable = (): void => undefined;
+    const durable = new Promise<void>((resolve) => { markDurable = resolve; });
+    vi.spyOn(paired.store, "completeAuthorityReduction")
+      .mockImplementationOnce(async () => {
+        await originalComplete();
+        markDurable();
+      });
+    let releaseNotification = (): void => undefined;
+    const stalled = new Promise<void>((resolve) => {
+      releaseNotification = resolve;
+    });
+    const active = [...(
+      paired.service as unknown as {
+        sessions: Map<string, { outboundTail: Promise<void> }>;
+      }
+    ).sessions.values()][0]!;
+    active.outboundTail = stalled;
+    let settled = false;
+    const reduction = paired.service.updateDevice(
+      paired.deviceId,
+      ["view"],
+      [paired.projectId],
+      new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(),
+    ).finally(() => {
+      settled = true;
+    });
+    await durable;
+    await vi.waitFor(() => expect(active.outboundTail).not.toBe(stalled));
+    expect(await paired.store.load()).toMatchObject({
+      devices: [{ scopes: ["view"], grantVersion: 2 }],
+    });
+    expect(settled).toBe(false);
+    await paired.service.shutdown();
+    const restarted = await RemoteAccessService.create({
+      initialPrivacy: null,
+      store: paired.store,
+      runtime: { remoteRequest: async () => { throw new Error("unused"); } },
+    });
+    expect(restarted.state().devices).toEqual([
+      expect.objectContaining({ scopes: ["view"] }),
+    ]);
+    releaseNotification();
+    await reduction;
+    await restarted.shutdown();
+  });
+
   it("waits for each authority marker before mutating queued generations", async () => {
     const pairing = await pairedDeviceFixture({ scopes: ["view", "prompt"] });
     const originalBegin = pairing.store.beginAuthorityReduction.bind(
@@ -1858,14 +2014,6 @@ describe("Remote Companion outbound encrypted service", () => {
         enterMarker();
         await markerReleased;
       });
-    const closeFrame = nextFrame(
-      paired.session.tunnel.socket,
-      "session.close",
-    );
-    let sessionClosed = false;
-    void closeFrame.then(() => {
-      sessionClosed = true;
-    });
     const approval = paired.service.approvePairing(
       requestId,
       ["view"],
@@ -1873,8 +2021,7 @@ describe("Remote Companion outbound encrypted service", () => {
     );
 
     await markerEntered;
-    await waitFor(() => sessionClosed);
-    expect(paired.service.state().activeSessions).toBe(0);
+    expect(paired.service.state().activeSessions).toBe(1);
     releasePrepare();
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(commitRemotePrompt).not.toHaveBeenCalled();
@@ -1890,6 +2037,11 @@ describe("Remote Companion outbound encrypted service", () => {
       (error: unknown) => ({ accepted: false as const, error }),
     );
     const staleAdmissionResult = await staleAdmission;
+    const replacementLifecycle = nextFrames(
+      paired.session.tunnel.socket,
+      ["session.data", "session.close"],
+      2,
+    );
     const pairingResponse = nextFrame(pairingTunnel.socket, "pair.response");
     releaseMarker();
     await approval;
@@ -1899,7 +2051,7 @@ describe("Remote Companion outbound encrypted service", () => {
     });
     expect(paired.service.state().activeSessions).toBe(0);
     begin.mockRestore();
-    expect(await closeFrame).toMatchObject({
+    expect((await replacementLifecycle)[1]).toMatchObject({
       kind: "session.close",
       reason: "revoked",
     });
@@ -2276,14 +2428,28 @@ describe("Remote Companion outbound encrypted service", () => {
       secondStateRequest.requestId,
     ]));
 
-    const reducedClose = nextFrame(sessionTunnel.socket, "session.close");
+    const reducedLifecycle = nextFrames(
+      sessionTunnel.socket,
+      ["session.data", "session.close"],
+      2,
+    );
     await service.updateDevice(
       deviceId,
       ["view"],
       [projectId],
       new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(),
     );
-    expect(await reducedClose).toMatchObject({
+    const [authorityFrame, reducedClose] = await reducedLifecycle;
+    if (authorityFrame?.kind !== "session.data") {
+      throw new Error("Missing authenticated authority invalidation.");
+    }
+    expect(remoteSessionAuthorityChangedPayloadSchema.parse(
+      await openSessionData(recipient, authorityFrame),
+    )).toEqual({
+      type: "session.authority-changed",
+      serverTime: expect.any(String),
+    });
+    expect(reducedClose).toMatchObject({
       kind: "session.close",
       reason: "revoked",
     });
@@ -2300,9 +2466,20 @@ describe("Remote Companion outbound encrypted service", () => {
       grantVersion: 2,
     });
 
-    const closePromise = nextFrame(reduced.tunnel.socket, "session.close");
+    const revokeLifecycle = nextFrames(
+      reduced.tunnel.socket,
+      ["session.data", "session.close"],
+      2,
+    );
     await service.revokeDevice(deviceId);
-    expect(await closePromise).toMatchObject({
+    const [revokeAuthority, revokeClose] = await revokeLifecycle;
+    if (revokeAuthority?.kind !== "session.data") {
+      throw new Error("Missing authenticated revocation invalidation.");
+    }
+    expect(remoteSessionAuthorityChangedPayloadSchema.parse(
+      await openSessionData(reduced.recipient, revokeAuthority),
+    ).type).toBe("session.authority-changed");
+    expect(revokeClose).toMatchObject({
       kind: "session.close",
       reason: "revoked",
     });
@@ -2316,7 +2493,7 @@ describe("Remote Companion outbound encrypted service", () => {
       deviceId,
       deviceKeys,
       grantVersion: 2,
-    })).rejects.toThrow("Message timed out.");
+    })).rejects.toThrow("Authenticated session rejected: revoked.");
     await service.shutdown();
   });
 });

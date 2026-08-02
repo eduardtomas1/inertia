@@ -62,6 +62,7 @@ interface AppLayoutActions {
   closeConversationSplit: () => void;
   openProviderSetup: (providerId: Conversation["providerId"]) => void;
   openBackendSetup: (profileId: string) => void;
+  openRemoteSettings: () => void;
   createConversation: (
     project?: Project | null,
     location?: NewConversationLocation,
@@ -382,6 +383,7 @@ export function AppLayout({
             onSetEnvironmentOpen={setEnvironmentOpen}
             onCycleTheme={actions.cycleTheme}
             onOpenSettings={() => setView("settings")}
+            onOpenRemoteSettings={actions.openRemoteSettings}
             onToggleActivity={() => setActivityOpen((open) => !open)}
             onOpenProject={() => {
               if (project) {

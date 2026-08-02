@@ -13,6 +13,7 @@ import {
   type RemoteSenderState,
 } from "../../../src/shared/remote-crypto";
 import {
+  REMOTE_BROWSER_SESSION_VERSION,
   REMOTE_BROWSER_VERSION,
   REMOTE_LIMITS,
   REMOTE_PROTOCOL_VERSION,
@@ -20,8 +21,10 @@ import {
   remotePairingInvitationSchema,
   remotePairingResponsePayloadSchema,
   remoteResponseSchema,
-  remoteSessionAcceptPayloadSchema,
+  remoteSessionAuthorityChangedPayloadSchema,
+  remoteSessionResponsePayloadSchema,
   type RemotePairingInvitation,
+  type RemoteCipherFrame,
   type RemoteRequest,
   type RemoteResponse,
   type RemoteSafeConversationDetail,
@@ -34,11 +37,18 @@ import {
 import {
   clearDeviceProfile,
   loadSealedDeviceProfile,
+  profileAuthorizationChanged,
+  REMOTE_INACTIVITY_EXPIRY_MS,
   sealedProfileHasExpired,
   saveSealedDeviceProfile,
   validateBrowserRelayUrl,
   type SealedBrowserDeviceProfile,
 } from "./device-store";
+import {
+  BrowserConnectionSupervisor,
+  RemoteConnectionFailure,
+  type RemoteConnectionSnapshot,
+} from "./connection-supervisor";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const PROFILE_ACTIVITY_WRITE_INTERVAL_MS = 60 * 60 * 1_000;
@@ -55,10 +65,19 @@ type BoundedRemoteRelayText =
 
 export interface RemoteClientCallbacks {
   status(message: string, online: boolean): void;
+  connection?(state: RemoteConnectionSnapshot): void;
+  invalidated?(): void;
+  authorizationInvalidated?(): void;
+  forgetting?(value: boolean): void;
+  profileClearing?(value: boolean): void;
   pairingCode(code: string): void;
   shell(shell: RemoteSafeShell): void;
   detail(detail: RemoteSafeConversationDetail | null): void;
-  promptResult(message: string, uncertain: boolean): void;
+  promptResult(
+    message: string,
+    uncertain: boolean,
+    conversationId?: string,
+  ): void;
 }
 
 interface PendingRequest {
@@ -84,9 +103,31 @@ export class RemoteCompanionClient {
   private selectedConversationId: string | null = null;
   private attemptEpoch = 0;
   private profileWriteTail: Promise<void> = Promise.resolve();
+  private profileClear: Promise<void> | null = null;
+  private forgetOperation: Promise<void> | null = null;
   private lastProfileActivityWriteAt = 0;
+  private connectionGeneration = 0;
+  private readonly supervisor: BrowserConnectionSupervisor;
 
-  constructor(private readonly callbacks: RemoteClientCallbacks) {}
+  constructor(private readonly callbacks: RemoteClientCallbacks) {
+    this.supervisor = new BrowserConnectionSupervisor({
+      attempt: async (generation) => await this.connectOnce(generation),
+      invalidate: (message) => {
+        this.attemptEpoch += 1;
+        this.disconnectTransport(message);
+      },
+      foreground: (generation) => {
+        if (generation !== this.connectionGeneration || !this.sender) return;
+        this.refreshOrDisconnect(
+          this.attemptEpoch,
+          this.replacePollingLoop(),
+        );
+      },
+      expiresAt: () => this.effectiveProfileExpiry(),
+      expired: async () => await this.clearExpiredProfile(),
+      state: (state) => this.publishConnectionState(state),
+    });
+  }
 
   async initialize(): Promise<SealedBrowserDeviceProfile | null> {
     const epoch = ++this.attemptEpoch;
@@ -94,7 +135,7 @@ export class RemoteCompanionClient {
     if (!this.ownsAttempt(epoch)) return this.profile;
     this.profile = profile;
     if (this.profile && Date.parse(this.profile.expiresAt) > Date.now()) {
-      void this.connect();
+      void this.supervisor.start();
     } else if (this.profile) {
       await this.forgetExpiredProfile(epoch);
     } else {
@@ -102,30 +143,56 @@ export class RemoteCompanionClient {
     }
     return this.profile;
   }
-
   private async forgetExpiredProfile(epoch: number): Promise<void> {
-    this.profile = null;
-    await this.profileWriteTail.catch(() => undefined);
+    await this.clearExpiredProfile();
     if (!this.ownsAttempt(epoch)) return;
-    await clearDeviceProfile().catch(() => undefined);
-    if (!this.ownsAttempt(epoch)) return;
-    this.callbacks.status("This device grant expired. Pair it again.", false);
+    if (!this.profile) {
+      this.callbacks.status("This device grant expired. Pair it again.", false);
+    }
   }
 
   currentProfile(): SealedBrowserDeviceProfile | null {
     return this.profile;
   }
 
-  async forget(): Promise<void> {
-    this.attemptEpoch += 1;
-    this.disconnectTransport("This browser was forgotten.");
+  forget(): Promise<void> {
+    if (this.forgetOperation) return this.forgetOperation;
+    this.callbacks.forgetting?.(true);
+    this.supervisor.stop("This browser was forgotten.");
+    this.callbacks.status("Disconnecting and forgetting this browser…", false);
+    const operation = this.performForget().finally(() => {
+      if (this.forgetOperation === operation) this.forgetOperation = null;
+      this.callbacks.forgetting?.(false);
+    });
+    this.forgetOperation = operation;
+    return operation;
+  }
+  private async performForget(): Promise<void> {
     await this.profileWriteTail.catch(() => undefined);
-    await clearDeviceProfile();
+    // Revoke every attempt/lease again at the durable identity boundary. A
+    // profile write that started before Forget cannot restore a live session.
+    this.supervisor.stop("This browser was forgotten.");
+    try {
+      await clearDeviceProfile();
+    } catch (error) {
+      this.callbacks.status(
+        "Remote Companion is disconnected, but this browser could not be forgotten. Try again.",
+        false,
+      );
+      throw error;
+    }
     this.profile = null;
+    this.callbacks.invalidated?.();
+    this.callbacks.status("This browser was forgotten.", false);
   }
 
   async pair(invitationText: string, deviceLabel: string): Promise<void> {
+    if (this.forgetOperation) {
+      throw new Error("Wait for this browser to finish being forgotten.");
+    }
+    if (this.profileClear) await this.profileClear;
     const epoch = this.beginAttempt("Starting pairing.");
+    let pairingSocket: WebSocket | null = null;
     try {
       const invitation = remotePairingInvitationSchema.parse(
         JSON.parse(invitationText) as unknown,
@@ -146,6 +213,7 @@ export class RemoteCompanionClient {
         invitation.endpointId,
       );
       if (!tunnel) return;
+      pairingSocket = tunnel.socket;
       this.socket = tunnel.socket;
       this.connectionId = tunnel.connectionId;
       const code = await remotePairingComparisonCode(
@@ -224,18 +292,35 @@ export class RemoteCompanionClient {
       await this.connect();
     } catch (error) {
       if (this.ownsAttempt(epoch)) throw error;
+    } finally {
+      if (
+        pairingSocket
+        && this.ownsAttempt(epoch)
+        && this.socket === pairingSocket
+      ) {
+        pairingSocket.close(1000, "pairing attempt ended");
+        this.socket = null;
+        this.connectionId = null;
+      }
     }
   }
 
   async connect(): Promise<void> {
+    if (this.forgetOperation) return;
+    await this.supervisor.retryNow();
+  }
+  private async connectOnce(generation: number): Promise<void> {
     const profile = this.profile;
     if (!profile) return;
-    const epoch = this.beginAttempt("Connecting.");
+    const epoch = ++this.attemptEpoch;
+    this.disconnectTransport("Connecting.");
     if (sealedProfileHasExpired(profile)) {
-      await this.forgetExpiredProfile(epoch);
-      return;
+      throw new RemoteConnectionFailure(
+        "This device grant expired. Pair it again.",
+        "terminal",
+        "grant-expired",
+      );
     }
-    this.callbacks.status("Connecting to the desktop…", false);
     try {
       const tunnel = await this.openOwnedTunnel(
         epoch,
@@ -246,18 +331,31 @@ export class RemoteCompanionClient {
       this.socket = tunnel.socket;
       this.connectionId = tunnel.connectionId;
       const sessionId = crypto.randomUUID();
-      const deviceKeys = {
-        privateKey: profile.privateKey,
-        publicKey: await importDevicePublicKey(profile.publicKey),
+      let deviceKeys: {
+        privateKey: CryptoKey;
+        publicKey: CryptoKey;
       };
-      const hostPublicKey = await importRemotePublicKey(profile.hostPublicKey);
-      const sender = await createAuthenticatedSessionSender(
-        profile.hostId,
-        profile.deviceId,
-        sessionId,
-        deviceKeys,
-        hostPublicKey,
-      );
+      let hostPublicKey: CryptoKey;
+      let sender: RemoteSenderState & { enc: string };
+      try {
+        deviceKeys = {
+          privateKey: profile.privateKey,
+          publicKey: await importDevicePublicKey(profile.publicKey),
+        };
+        hostPublicKey = await importRemotePublicKey(profile.hostPublicKey);
+        sender = await createAuthenticatedSessionSender(
+          profile.hostId,
+          profile.deviceId,
+          sessionId,
+          deviceKeys,
+          hostPublicKey,
+        );
+      } catch {
+        throw terminalProtocolFailure(
+          "This browser's sealed device identity is invalid. Pair it again.",
+          "device-identity-invalid",
+        );
+      }
       if (!this.ownsAttempt(epoch)) return;
       const ciphertext = await sealSessionHandshake(
         sender,
@@ -269,7 +367,7 @@ export class RemoteCompanionClient {
           deviceId: profile.deviceId,
           grantVersion: profile.grantVersion,
           createdAt: new Date().toISOString(),
-          browserVersion: REMOTE_BROWSER_VERSION,
+          browserVersion: REMOTE_BROWSER_SESSION_VERSION,
         },
       );
       sendFrame(tunnel.socket, tunnel.connectionId, {
@@ -282,35 +380,65 @@ export class RemoteCompanionClient {
       const acceptFrame = await waitForRelayFrame(
         tunnel.socket,
         (candidate) =>
-          candidate.kind === "session.accept"
+          (candidate.kind === "session.accept"
+            || candidate.kind === "session.close")
           && candidate.sessionId === sessionId,
         REMOTE_LIMITS.sessionHandshakeTtlMs,
       );
       if (!this.ownsAttempt(epoch)) return;
-      if (acceptFrame.kind !== "session.accept") {
-        throw new Error("The session response was invalid.");
+      if (acceptFrame.kind === "session.close") {
+        throw transientFailureForSessionCloseHint(acceptFrame.reason);
       }
-      const recipient = await createAuthenticatedSessionRecipient(
-        profile.hostId,
-        profile.deviceId,
-        sessionId,
-        deviceKeys,
-        hostPublicKey,
-        acceptFrame.enc,
-      );
-      const accepted = remoteSessionAcceptPayloadSchema.parse(
-        await openSessionHandshake(
-          recipient,
-          "session.accept",
+      if (acceptFrame.kind !== "session.accept") {
+        throw terminalProtocolFailure("The session response was invalid.");
+      }
+      let recipient: RemoteRecipientState;
+      let response: ReturnType<typeof remoteSessionResponsePayloadSchema.parse>;
+      try {
+        recipient = await createAuthenticatedSessionRecipient(
+          profile.hostId,
+          profile.deviceId,
           sessionId,
-          acceptFrame.ciphertext,
-        ),
-      );
+          deviceKeys,
+          hostPublicKey,
+          acceptFrame.enc,
+        );
+        response = remoteSessionResponsePayloadSchema.parse(
+          await openSessionHandshake(
+            recipient,
+            "session.accept",
+            sessionId,
+            acceptFrame.ciphertext,
+          ),
+        );
+      } catch {
+        throw terminalProtocolFailure(
+          "The desktop sent an incompatible authenticated session.",
+          "session-auth-invalid",
+        );
+      }
       if (!this.ownsAttempt(epoch)) return;
       if (
-        accepted.sessionId !== sessionId
-        || accepted.hostId !== profile.hostId
-      ) throw new Error("The authenticated session did not match this device.");
+        response.sessionId !== sessionId
+        || response.hostId !== profile.hostId
+      ) {
+        throw terminalProtocolFailure(
+          "The authenticated session did not match this device.",
+        );
+      }
+      if (response.type === "session.reject") {
+        throw new RemoteConnectionFailure(
+          response.reason === "revoked"
+            ? "This browser was revoked on the desktop. Pair it again to continue."
+            : "This device grant expired. Pair it again.",
+          "terminal",
+          response.reason === "revoked" ? "grant-revoked" : "grant-expired",
+        );
+      }
+      const accepted = response;
+      if (profileAuthorizationChanged(profile, accepted)) {
+        this.callbacks.authorizationInvalidated?.();
+      }
       const updatedProfile: SealedBrowserDeviceProfile = {
         ...profile,
         scopes: accepted.scopes,
@@ -321,6 +449,7 @@ export class RemoteCompanionClient {
       };
       if (!await this.saveOwnedProfile(epoch, updatedProfile)) return;
       this.profile = updatedProfile;
+      this.supervisor.grantUpdated();
       this.lastProfileActivityWriteAt = Date.parse(
         updatedProfile.lastUsedAt,
       );
@@ -329,31 +458,40 @@ export class RemoteCompanionClient {
       this.sessionId = sessionId;
       this.sender = sender;
       this.recipient = recipient;
+      this.connectionGeneration = generation;
       tunnel.socket.addEventListener("message", (event) => {
         if (!this.ownsAttempt(epoch)) return;
         this.inboundTail = this.inboundTail
           .then(async () => {
             if (this.ownsAttempt(epoch)) {
-              await this.handleMessage(tunnel.socket, event.data);
+              await this.handleMessage(
+                generation,
+                tunnel.socket,
+                event.data,
+              );
             }
           })
           .catch(() => {
             if (this.ownsAttempt(epoch)) {
-              this.disconnect("The encrypted session failed.");
+              this.supervisor.transportClosed(
+                generation,
+                terminalProtocolFailure("The encrypted session failed."),
+              );
             }
           });
       });
       tunnel.socket.addEventListener("close", () => {
         if (this.socket === tunnel.socket) {
-          this.disconnect("The desktop is offline.");
+          this.supervisor.transportClosed(
+            generation,
+            transientConnectionFailure("The desktop is offline."),
+          );
         }
       });
-      this.callbacks.status("Connected. The desktop remains authoritative.", true);
       await this.refresh(epoch, this.replacePollingLoop());
     } catch (error) {
-      if (this.ownsAttempt(epoch)) {
-        this.disconnect(publicError(error, "The desktop is offline."));
-      }
+      if (!this.ownsAttempt(epoch)) return;
+      throw classifyConnectionFailure(error);
     }
   }
 
@@ -372,13 +510,18 @@ export class RemoteCompanionClient {
   ): Promise<boolean> {
     const text = content.trim();
     if (!text) {
-      this.callbacks.promptResult("Enter a prompt before sending.", false);
+      this.callbacks.promptResult(
+        "Enter a prompt before sending.",
+        false,
+        conversationId,
+      );
       return false;
     }
     if (conversationId !== this.selectedConversationId) {
       this.callbacks.promptResult(
         "The selected conversation changed. The prompt was not sent.",
         false,
+        conversationId,
       );
       return false;
     }
@@ -392,13 +535,18 @@ export class RemoteCompanionClient {
     try {
       const response = await this.request(request);
       if (response.ok && response.result.kind === "prompt.accepted") {
-        this.callbacks.promptResult("Prompt accepted by the desktop.", false);
+        this.callbacks.promptResult(
+          "Prompt accepted by the desktop.",
+          false,
+          conversationId,
+        );
         return true;
       }
       if (!response.ok) {
         this.callbacks.promptResult(
           response.message,
           response.code === "uncertain",
+          conversationId,
         );
       }
       return false;
@@ -406,11 +554,11 @@ export class RemoteCompanionClient {
       this.callbacks.promptResult(
         "Delivery is uncertain. The prompt was not retried.",
         true,
+        conversationId,
       );
       return false;
     }
   }
-
   private async refresh(epoch: number, generation: number): Promise<void> {
     if (!this.sender || !this.ownsPollingLoop(epoch, generation)) return;
     try {
@@ -455,7 +603,6 @@ export class RemoteCompanionClient {
       }
     }
   }
-
   private refreshOrDisconnect(epoch: number, generation: number): void {
     void this.refresh(epoch, generation).catch(() => {
       if (this.ownsPollingLoop(epoch, generation)) {
@@ -463,18 +610,15 @@ export class RemoteCompanionClient {
       }
     });
   }
-
   private replacePollingLoop(): number {
     if (this.pollTimer) clearTimeout(this.pollTimer);
     this.pollTimer = null;
     this.pollGeneration += 1;
     return this.pollGeneration;
   }
-
   private ownsPollingLoop(epoch: number, generation: number): boolean {
     return this.ownsAttempt(epoch) && generation === this.pollGeneration;
   }
-
   private ownsQueuedSend(
     epoch: number,
     sender: RemoteSenderState,
@@ -486,7 +630,6 @@ export class RemoteCompanionClient {
       && this.connectionId !== null
       && this.socket !== null;
   }
-
   private request(request: RemoteRequest): Promise<RemoteResponse> {
     const epoch = this.attemptEpoch;
     const sender = this.sender;
@@ -520,13 +663,17 @@ export class RemoteCompanionClient {
     });
     return promise;
   }
-
   private async handleMessage(
+    generation: number,
     socket: WebSocket,
     raw: unknown,
   ): Promise<void> {
     const bounded = boundedRemoteRelayText(raw);
     if (!bounded.ok) {
+      this.supervisor.transportClosed(
+        generation,
+        terminalProtocolFailure(bounded.message, "relay-envelope-invalid"),
+      );
       socket.close(bounded.closeCode, bounded.closeReason);
       return;
     }
@@ -537,15 +684,29 @@ export class RemoteCompanionClient {
       return;
     }
     const message = relayServerMessageSchema.safeParse(value);
-    if (!message.success) return;
-    if (
-      message.data.type === "relay.peer-disconnected"
-      || (
-        message.data.type === "relay.error"
-        && message.data.code === "desktop-offline"
-      )
-    ) {
-      this.disconnect("The desktop is offline.");
+    if (!message.success) {
+      if (hasUnsupportedProtocolVersion(value)) {
+        this.supervisor.transportClosed(
+          generation,
+          terminalProtocolFailure(
+            "The relay uses an incompatible Remote Companion protocol.",
+          ),
+        );
+      }
+      return;
+    }
+    if (message.data.type === "relay.peer-disconnected") {
+      this.supervisor.transportClosed(
+        generation,
+        transientConnectionFailure("The desktop is offline."),
+      );
+      return;
+    }
+    if (message.data.type === "relay.error") {
+      this.supervisor.transportClosed(
+        generation,
+        failureForRelayError(message.data.code),
+      );
       return;
     }
     if (
@@ -554,7 +715,10 @@ export class RemoteCompanionClient {
     ) return;
     const frame = message.data.frame;
     if (frame.kind === "session.close") {
-      this.disconnect(`The desktop closed the session (${frame.reason}).`);
+      this.supervisor.transportClosed(
+        generation,
+        transientFailureForSessionCloseHint(frame.reason),
+      );
       return;
     }
     if (
@@ -562,31 +726,59 @@ export class RemoteCompanionClient {
       || frame.sessionId !== this.sessionId
       || !this.recipient
     ) return;
-    const response = remoteResponseSchema.parse(
-      await openSessionData(this.recipient, frame),
-    );
+    const sessionId = this.sessionId;
+    const recipient = this.recipient;
+    const plaintext = await openSessionData(recipient, frame);
+    if (!this.ownsInboundSession(
+      generation,
+      socket,
+      sessionId,
+      recipient,
+    )) return;
+    const authorityChange = remoteSessionAuthorityChangedPayloadSchema
+      .safeParse(plaintext);
+    if (authorityChange.success) {
+      this.callbacks.authorizationInvalidated?.();
+      return;
+    }
+    const response = remoteResponseSchema.parse(plaintext);
     const pending = this.pending.get(response.requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
     this.pending.delete(response.requestId);
     pending.resolve(response);
   }
-
-  private disconnect(message: string): void {
-    this.attemptEpoch += 1;
-    this.disconnectTransport(message);
+  private ownsInboundSession(
+    generation: number,
+    socket: WebSocket,
+    sessionId: string,
+    recipient: RemoteRecipientState,
+  ): boolean {
+    return generation === this.connectionGeneration
+      && socket === this.socket
+      && sessionId === this.sessionId
+      && recipient === this.recipient;
   }
-
+  private disconnect(message: string): void {
+    if (this.supervisor.current().phase === "idle") {
+      this.attemptEpoch += 1;
+      this.disconnectTransport(message);
+      this.callbacks.status(message, false);
+      return;
+    }
+    this.supervisor.transportClosed(
+      this.connectionGeneration,
+      transientConnectionFailure(message),
+    );
+  }
   private beginAttempt(message: string): number {
-    this.attemptEpoch += 1;
-    this.disconnectTransport(message);
+    this.supervisor.stop(message);
+    this.callbacks.status(message, false);
     return this.attemptEpoch;
   }
-
   private ownsAttempt(epoch: number): boolean {
     return epoch === this.attemptEpoch;
   }
-
   private async openOwnedTunnel(
     epoch: number,
     relayUrl: string,
@@ -611,7 +803,6 @@ export class RemoteCompanionClient {
       if (opening) this.openingSockets.delete(opening);
     }
   }
-
   private async saveOwnedProfile(
     epoch: number,
     profile: SealedBrowserDeviceProfile,
@@ -634,7 +825,6 @@ export class RemoteCompanionClient {
     await write;
     return saved;
   }
-
   private async persistAuthenticatedActivity(epoch: number): Promise<void> {
     const profile = this.profile;
     if (!profile || !this.ownsAttempt(epoch)) return;
@@ -653,6 +843,7 @@ export class RemoteCompanionClient {
     try {
       if (await this.saveOwnedProfile(epoch, next)) {
         this.profile = next;
+        this.supervisor.grantUpdated();
         return;
       }
     } catch {
@@ -664,7 +855,88 @@ export class RemoteCompanionClient {
         : 0;
     }
   }
-
+  private publishConnectionState(state: RemoteConnectionSnapshot): void {
+    this.callbacks.connection?.(state);
+    switch (state.phase) {
+      case "connecting":
+        this.callbacks.status("Connecting to the desktop…", false);
+        break;
+      case "online":
+        this.callbacks.status(
+          "Connected. The desktop remains authoritative.",
+          true,
+        );
+        break;
+      case "offline":
+        this.callbacks.status(
+          state.failure?.message
+            ?? "This browser is offline. Cached data may be stale.",
+          false,
+        );
+        break;
+      case "backoff":
+        this.callbacks.status(
+          `${state.failure?.message ?? "The desktop is offline."} Retrying automatically…`,
+          false,
+        );
+        break;
+      case "terminal":
+        this.callbacks.status(
+          state.failure?.message ?? "Remote Companion needs attention.",
+          false,
+        );
+        if (
+          state.failure?.code === "grant-revoked"
+          || state.failure?.code === "grant-expired"
+        ) {
+          void this.clearExpiredProfile();
+        }
+        break;
+      case "idle":
+        break;
+    }
+  }
+  private clearExpiredProfile(): Promise<void> {
+    if (this.profileClear) return this.profileClear;
+    if (!this.profile) return Promise.resolve();
+    const profile = this.profile;
+    this.callbacks.profileClearing?.(true);
+    this.profile = null;
+    this.callbacks.invalidated?.();
+    const clearing = this.profileWriteTail
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await clearDeviceProfile();
+        } catch {
+          if (!this.profile) this.profile = profile;
+          this.callbacks.status(
+            "Remote Companion is disconnected, but its saved pairing could not be cleared. Use Forget this browser and try again.",
+            false,
+          );
+        }
+      });
+    this.profileWriteTail = clearing;
+    const ownedClearing = clearing.finally(() => {
+      if (this.profileClear === ownedClearing) this.profileClear = null;
+      this.callbacks.profileClearing?.(false);
+    });
+    this.profileClear = ownedClearing;
+    return ownedClearing;
+  }
+  private effectiveProfileExpiry(): string | null {
+    const profile = this.profile;
+    if (!profile) return null;
+    const grantExpiry = Date.parse(profile.expiresAt);
+    const lastUsedAt = Date.parse(profile.lastUsedAt);
+    if (!Number.isFinite(grantExpiry) || !Number.isFinite(lastUsedAt)) {
+      return new Date(0).toISOString();
+    }
+    return new Date(Math.min(
+      grantExpiry,
+      lastUsedAt + REMOTE_INACTIVITY_EXPIRY_MS + 1,
+    )).toISOString();
+  }
   private disconnectTransport(message: string): void {
     this.replacePollingLoop();
     const socket = this.socket;
@@ -685,8 +957,6 @@ export class RemoteCompanionClient {
       pending.reject(new Error(message));
     }
     this.pending.clear();
-    this.callbacks.detail(null);
-    this.callbacks.status(message, false);
   }
 }
 
@@ -712,11 +982,10 @@ async function openTunnel(
       REQUEST_TIMEOUT_MS,
     );
     if (response.type !== "relay.connected") {
-      throw new Error(
-        response.type === "relay.error" && response.code === "desktop-offline"
-          ? "The desktop is offline."
-          : "The relay refused the connection.",
-      );
+      if (response.type !== "relay.error") {
+        throw terminalProtocolFailure("The relay response was invalid.");
+      }
+      throw failureForRelayError(response.code);
     }
     return { socket, connectionId: response.connectionId };
   } catch (error) {
@@ -780,7 +1049,10 @@ export function waitForRemoteRelayMessage(
       if (!bounded.ok) {
         cleanup();
         socket.close(bounded.closeCode, bounded.closeReason);
-        reject(new Error(bounded.message));
+        reject(terminalProtocolFailure(
+          bounded.message,
+          "relay-envelope-invalid",
+        ));
         return;
       }
       let value: unknown;
@@ -790,7 +1062,17 @@ export function waitForRemoteRelayMessage(
         return;
       }
       const parsed = relayServerMessageSchema.safeParse(value);
-      if (!parsed.success || !accept(parsed.data)) return;
+      if (!parsed.success) {
+        if (hasUnsupportedProtocolVersion(value)) {
+          cleanup();
+          reject(terminalProtocolFailure(
+            "The relay uses an incompatible Remote Companion protocol.",
+            "protocol-mismatch",
+          ));
+        }
+        return;
+      }
+      if (!accept(parsed.data)) return;
       cleanup();
       resolve(parsed.data);
     };
@@ -848,9 +1130,17 @@ async function waitForRelayFrame(
   const message = await waitForRemoteRelayMessage(
     socket,
     (candidate) =>
-      candidate.type === "relay.frame" && accept(candidate.frame),
+      candidate.type === "relay.error"
+      || candidate.type === "relay.peer-disconnected"
+      || (candidate.type === "relay.frame" && accept(candidate.frame)),
     timeoutMs,
   );
+  if (message.type === "relay.error") {
+    throw failureForRelayError(message.code);
+  }
+  if (message.type === "relay.peer-disconnected") {
+    throw transientConnectionFailure("The desktop is offline.");
+  }
   if (message.type !== "relay.frame") throw new Error("Missing relay frame.");
   return message.frame;
 }
@@ -868,10 +1158,104 @@ function sendFrame(
   }));
 }
 
-function publicError(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message.trim()
+function transientConnectionFailure(
+  message: string,
+  code = "transport",
+): RemoteConnectionFailure {
+  return new RemoteConnectionFailure(message, "transient", code);
+}
+
+function terminalProtocolFailure(
+  message: string,
+  code = "protocol-error",
+): RemoteConnectionFailure {
+  return new RemoteConnectionFailure(message, "terminal", code);
+}
+
+function classifyConnectionFailure(error: unknown): RemoteConnectionFailure {
+  if (error instanceof RemoteConnectionFailure) return error;
+  const message = error instanceof Error && error.message.trim()
     ? error.message.trim().slice(0, 240)
-    : fallback;
+    : "The desktop is offline.";
+  if (
+    error instanceof Error
+    && (
+      error.name === "ZodError"
+      || /invalid|incompatible|did not match|unsupported|decrypt/iu.test(message)
+    )
+  ) {
+    return terminalProtocolFailure(
+      "The desktop uses an incompatible Remote Companion protocol.",
+    );
+  }
+  return transientConnectionFailure(message);
+}
+
+function transientFailureForSessionCloseHint(
+  reason: Extract<RemoteCipherFrame, { kind: "session.close" }>["reason"],
+): RemoteConnectionFailure {
+  switch (reason) {
+    case "expired":
+    case "revoked":
+      return transientConnectionFailure(
+        "The desktop requested a fresh authenticated session.",
+        reason,
+      );
+    case "protocol-error":
+    case "replay":
+      return transientConnectionFailure(
+        "The desktop closed the unauthenticated relay session.",
+        reason,
+      );
+    case "rate-limited":
+      return transientConnectionFailure(
+        "Remote Companion is temporarily rate limited.",
+        reason,
+      );
+    case "disabled":
+      return transientConnectionFailure(
+        "Remote Companion is disabled on the desktop.",
+        reason,
+      );
+    case "shutdown":
+      return transientConnectionFailure(
+        "The desktop is unavailable.",
+        reason,
+      );
+  }
+}
+
+function failureForRelayError(
+  code: Extract<
+    ReturnType<typeof relayServerMessageSchema.parse>,
+    { type: "relay.error" }
+  >["code"],
+): RemoteConnectionFailure {
+  if (
+    code === "desktop-offline"
+    || code === "connection-missing"
+    || code === "capacity"
+    || code === "rate-limited"
+  ) {
+    return transientConnectionFailure(
+      code === "desktop-offline"
+        ? "The desktop is offline."
+        : "The relay is temporarily unavailable.",
+      code,
+    );
+  }
+  return terminalProtocolFailure(
+    "The relay refused this Remote Companion protocol.",
+    code,
+  );
+}
+
+function hasUnsupportedProtocolVersion(value: unknown): boolean {
+  return typeof value === "object"
+    && value !== null
+    && "protocolVersion" in value
+    && typeof value.protocolVersion === "number"
+    && value.protocolVersion !== REMOTE_PROTOCOL_VERSION;
 }
 
 export function parseRemoteInvitation(value: string): RemotePairingInvitation {

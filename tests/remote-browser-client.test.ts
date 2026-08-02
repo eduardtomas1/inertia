@@ -5,21 +5,36 @@ import {
   waitForRemoteRelayMessage,
   waitForRemoteWebSocketOpen,
 } from "../remote/browser/src/remote-client";
-import type { SealedBrowserDeviceProfile } from "../remote/browser/src/device-store";
+import * as deviceStore from "../remote/browser/src/device-store";
+import {
+  REMOTE_INACTIVITY_EXPIRY_MS,
+  type SealedBrowserDeviceProfile,
+} from "../remote/browser/src/device-store";
 import {
   generateNonExtractableDeviceKeys,
 } from "../remote/browser/src/device-keys";
 import {
+  createAuthenticatedSessionRecipient,
   createAuthenticatedSessionSender,
   generateRemoteKeyPair,
   importRemoteKeyPair,
   importRemotePublicKey,
+  openPairingRequest,
+  openSessionHandshake,
+  remoteRandomSecret,
+  sealPairingResponse,
+  sealSessionData,
+  sealSessionHandshake,
 } from "../src/shared/remote-crypto";
 import {
   REMOTE_LIMITS,
+  remoteCipherFrameSchema,
+  remotePairingRequestPayloadSchema,
+  type RemotePairingInvitation,
   type RemoteRequest,
   type RemoteResponse,
 } from "../src/shared/remote-protocol";
+import type { RemoteConnectionFailure } from "../remote/browser/src/connection-supervisor";
 
 class FakeBrowserSocket extends EventTarget {
   static instances: FakeBrowserSocket[] = [];
@@ -92,8 +107,57 @@ afterEach(() => {
   FakeBrowserSocket.instances = [];
 });
 
+async function beginFakePairing(expiresAt: string): Promise<{
+  client: RemoteCompanionClient;
+  connectionId: string;
+  invitation: RemotePairingInvitation;
+  hostKeys: Awaited<ReturnType<typeof generateRemoteKeyPair>>;
+  pairing: Promise<void>;
+  payload: ReturnType<typeof remotePairingRequestPayloadSchema.parse>;
+  socket: FakeBrowserSocket;
+}> {
+  vi.stubGlobal("WebSocket", FakeBrowserSocket);
+  const hostKeys = await generateRemoteKeyPair();
+  const invitation: RemotePairingInvitation = {
+    protocolVersion: 2,
+    relayUrl: "wss://relay.example/remote",
+    endpointId: remoteRandomSecret(24),
+    hostId: crypto.randomUUID(),
+    hostPublicKey: hostKeys.publicKey,
+    invitationId: crypto.randomUUID(),
+    pairingSecret: remoteRandomSecret(),
+    expiresAt,
+  };
+  const client = new RemoteCompanionClient({
+    status: vi.fn(),
+    pairingCode: vi.fn(),
+    shell: vi.fn(),
+    detail: vi.fn(),
+    promptResult: vi.fn(),
+  });
+  const pairing = client.pair(JSON.stringify(invitation), "Test browser");
+  await vi.waitFor(() => expect(FakeBrowserSocket.instances).toHaveLength(1));
+  const socket = FakeBrowserSocket.instances[0]!;
+  socket.open();
+  await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+  const connectionId = crypto.randomUUID();
+  socket.message({ protocolVersion: 2, type: "relay.connected", connectionId });
+  await vi.waitFor(() => expect(socket.sent).toHaveLength(2));
+  const envelope = JSON.parse(socket.sent[1]!) as { frame: unknown };
+  const frame = remoteCipherFrameSchema.parse(envelope.frame);
+  if (frame.kind !== "pair.request") throw new Error("Missing pairing request.");
+  const payload = remotePairingRequestPayloadSchema.parse(
+    await openPairingRequest(
+      invitation,
+      await importRemoteKeyPair(hostKeys),
+      frame,
+    ),
+  );
+  return { client, connectionId, invitation, hostKeys, pairing, payload, socket };
+}
+
 describe("Remote Companion browser connection ownership", () => {
-  it("lets only the newest overlapping connect attempt own the session", async () => {
+  it("coalesces overlapping connect requests into one owned attempt", async () => {
     vi.stubGlobal("WebSocket", FakeBrowserSocket);
     const deviceKeys = await generateNonExtractableDeviceKeys();
     const hostKeys = await generateRemoteKeyPair();
@@ -127,31 +191,25 @@ describe("Remote Companion browser connection ownership", () => {
     const firstAttempt = client.connect();
     const first = FakeBrowserSocket.instances[0]!;
     const secondAttempt = client.connect();
-    const second = FakeBrowserSocket.instances[1]!;
-    expect(first.closeCalls).toHaveLength(1);
+    expect(FakeBrowserSocket.instances).toHaveLength(1);
+    expect(first.closeCalls).toHaveLength(0);
 
     first.open();
-    second.open();
-    await vi.waitFor(() => expect(second.sent).toHaveLength(1));
-    second.message({
+    await vi.waitFor(() => expect(first.sent).toHaveLength(1));
+    first.message({
       protocolVersion: 2,
       type: "relay.connected",
       connectionId: crypto.randomUUID(),
     });
-    await vi.waitFor(() => expect(second.sent).toHaveLength(2));
-    expect(
-      (client as unknown as { socket: WebSocket | null }).socket,
-    ).toBe(second);
-
-    const thirdAttempt = client.connect();
-    const third = FakeBrowserSocket.instances[2]!;
-    expect(second.closeCalls).toHaveLength(1);
+    await vi.waitFor(() => expect(first.sent).toHaveLength(2));
     (
-      client as unknown as { disconnect(message: string): void }
-    ).disconnect("cleanup");
-    expect(third.closeCalls).toHaveLength(1);
-    await Promise.all([firstAttempt, secondAttempt, thirdAttempt]);
-    expect(statuses.at(-1)).toBe("cleanup");
+      client as unknown as {
+        supervisor: { stop(message: string): void };
+      }
+    ).supervisor.stop("cleanup");
+    expect(first.closeCalls).toHaveLength(1);
+    await Promise.all([firstAttempt, secondAttempt]);
+    expect(statuses).toContain("Connecting to the desktop…");
   });
 
   it("drops queued sends instead of sealing them onto a newer session", async () => {
@@ -278,6 +336,51 @@ describe("Remote Companion browser connection ownership", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("closes and releases the owned tunnel after pairing is denied", async () => {
+    const attempt = await beginFakePairing(
+      new Date(Date.now() + 60_000).toISOString(),
+    );
+    attempt.socket.message({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId: attempt.connectionId,
+      frame: await sealPairingResponse(
+        await importRemoteKeyPair(attempt.hostKeys),
+        await importRemotePublicKey(attempt.payload.devicePublicKey),
+        attempt.payload.requestId,
+        {
+          type: "pair.rejected",
+          requestId: attempt.payload.requestId,
+          reason: "denied",
+        },
+      ),
+    });
+
+    await expect(attempt.pairing).rejects.toThrow("did not approve");
+    expect(attempt.socket.closeCalls).toContainEqual([
+      1000,
+      "pairing attempt ended",
+    ]);
+    expect((attempt.client as unknown as { socket: unknown }).socket).toBeNull();
+  });
+
+  it("closes and releases the owned tunnel after pairing times out", async () => {
+    vi.useFakeTimers();
+    const now = Date.parse("2026-08-01T00:00:00.000Z");
+    vi.setSystemTime(now);
+    const attempt = await beginFakePairing(
+      new Date(now + 60_000).toISOString(),
+    );
+    const rejected = expect(attempt.pairing).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejected;
+    expect(attempt.socket.closeCalls).toContainEqual([
+      1000,
+      "pairing attempt ended",
+    ]);
+    expect((attempt.client as unknown as { socket: unknown }).socket).toBeNull();
+  });
+
   it("closes oversized relay envelopes before parsing handshake JSON", async () => {
     const parse = vi.spyOn(JSON, "parse");
     const oversized = new FakeBrowserSocket("wss://relay.example/remote");
@@ -290,7 +393,11 @@ describe("Remote Companion browser connection ownership", () => {
     oversized.rawMessage("x".repeat(
       REMOTE_LIMITS.relayEnvelopeBytes + 1,
     ));
-    await expect(oversizedResult).rejects.toThrow("protocol limit");
+    await expect(oversizedResult).rejects.toMatchObject({
+      message: expect.stringContaining("protocol limit"),
+      kind: "terminal",
+      code: "relay-envelope-invalid",
+    });
     expect(performance.now() - startedAt).toBeLessThan(2_000);
     expect(parse).not.toHaveBeenCalled();
     expect(oversized.closeCalls).toEqual([
@@ -322,7 +429,11 @@ describe("Remote Companion browser connection ownership", () => {
       1_000,
     );
     unsupported.rawMessage(new Uint8Array([1, 2, 3]));
-    await expect(unsupportedResult).rejects.toThrow("unsupported");
+    await expect(unsupportedResult).rejects.toMatchObject({
+      message: expect.stringContaining("unsupported"),
+      kind: "terminal",
+      code: "relay-envelope-invalid",
+    });
     expect(unsupported.closeCalls).toEqual([
       [1003, "relay messages must be text"],
     ]);
@@ -356,12 +467,26 @@ describe("Remote Companion browser connection ownership", () => {
       detail: vi.fn(),
       promptResult: vi.fn(),
     });
+    const transportClosed = vi.spyOn(
+      (client as unknown as {
+        supervisor: { transportClosed(
+          generation: number,
+          failure: RemoteConnectionFailure,
+        ): void };
+      }).supervisor,
+      "transportClosed",
+    );
 
     await (
       client as unknown as {
-        handleMessage(socket: WebSocket, raw: unknown): Promise<void>;
+        handleMessage(
+          generation: number,
+          socket: WebSocket,
+          raw: unknown,
+        ): Promise<void>;
       }
     ).handleMessage(
+      0,
       socket as unknown as WebSocket,
       "x".repeat(REMOTE_LIMITS.relayEnvelopeBytes + 1),
     );
@@ -369,6 +494,549 @@ describe("Remote Companion browser connection ownership", () => {
     expect(parse).not.toHaveBeenCalled();
     expect(socket.closeCalls).toEqual([
       [1009, "relay message too large"],
+    ]);
+    expect(transportClosed).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({
+        kind: "terminal",
+        code: "relay-envelope-invalid",
+      }),
+    );
+  });
+
+  it.each([
+    ["invalid-message", "terminal"],
+    ["not-registered", "terminal"],
+    ["desktop-offline", "transient"],
+    ["connection-missing", "transient"],
+    ["capacity", "transient"],
+    ["rate-limited", "transient"],
+  ] as const)(
+    "classifies active relay error %s as %s",
+    async (code, kind) => {
+      const client = new RemoteCompanionClient({
+        status: vi.fn(),
+        pairingCode: vi.fn(),
+        shell: vi.fn(),
+        detail: vi.fn(),
+        promptResult: vi.fn(),
+      });
+      const transportClosed = vi.spyOn(
+        (client as unknown as {
+          supervisor: { transportClosed(
+            generation: number,
+            failure: RemoteConnectionFailure,
+          ): void };
+        }).supervisor,
+        "transportClosed",
+      );
+
+      await (
+        client as unknown as {
+          handleMessage(
+            generation: number,
+            socket: WebSocket,
+            raw: unknown,
+          ): Promise<void>;
+        }
+      ).handleMessage(17, new FakeBrowserSocket("") as unknown as WebSocket, JSON.stringify({
+        protocolVersion: 2,
+        type: "relay.error",
+        code,
+      }));
+
+      expect(transportClosed).toHaveBeenCalledWith(
+        17,
+        expect.objectContaining({ code, kind }),
+      );
+    },
+  );
+
+  it.each([
+    "revoked",
+    "expired",
+    "protocol-error",
+    "replay",
+  ] as const)(
+    "treats plaintext %s close as a non-destructive transient hint",
+    async (reason) => {
+      const invalidated = vi.fn();
+      const authorizationInvalidated = vi.fn();
+      const client = new RemoteCompanionClient({
+        status: vi.fn(),
+        invalidated,
+        authorizationInvalidated,
+        pairingCode: vi.fn(),
+        shell: vi.fn(),
+        detail: vi.fn(),
+        promptResult: vi.fn(),
+      });
+      const profile = { deviceLabel: "Retained identity" } as SealedBrowserDeviceProfile;
+      const connectionId = crypto.randomUUID();
+      const sessionId = crypto.randomUUID();
+      const internals = client as unknown as {
+        profile: SealedBrowserDeviceProfile | null;
+        connectionId: string | null;
+        sessionId: string | null;
+        supervisor: { transportClosed(
+          generation: number,
+          failure: RemoteConnectionFailure,
+        ): void };
+        handleMessage(
+          generation: number,
+          socket: WebSocket,
+          raw: unknown,
+        ): Promise<void>;
+      };
+      internals.profile = profile;
+      internals.connectionId = connectionId;
+      internals.sessionId = sessionId;
+      const transportClosed = vi.spyOn(
+        internals.supervisor,
+        "transportClosed",
+      );
+
+      await internals.handleMessage(9, new FakeBrowserSocket("") as unknown as WebSocket, JSON.stringify({
+        protocolVersion: 2,
+        type: "relay.frame",
+        connectionId,
+        frame: {
+          protocolVersion: 2,
+          kind: "session.close",
+          sessionId,
+          reason,
+        },
+      }));
+
+      expect(transportClosed).toHaveBeenCalledWith(
+        9,
+        expect.objectContaining({ kind: "transient", code: reason }),
+      );
+      expect(client.currentProfile()).toBe(profile);
+      expect(invalidated).not.toHaveBeenCalled();
+      expect(authorizationInvalidated).not.toHaveBeenCalled();
+    },
+  );
+
+  it("purges authorization cache only from a sealed active invalidation", async () => {
+    const hostKeys = await generateRemoteKeyPair();
+    const deviceKeys = await generateRemoteKeyPair();
+    const hostId = crypto.randomUUID();
+    const deviceId = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+    const hostSender = await createAuthenticatedSessionSender(
+      hostId,
+      deviceId,
+      sessionId,
+      await importRemoteKeyPair(hostKeys),
+      await importRemotePublicKey(deviceKeys.publicKey),
+    );
+    const deviceRecipient = await createAuthenticatedSessionRecipient(
+      hostId,
+      deviceId,
+      sessionId,
+      await importRemoteKeyPair(deviceKeys),
+      await importRemotePublicKey(hostKeys.publicKey),
+      hostSender.enc,
+    );
+    const accept = await sealSessionHandshake(
+      hostSender,
+      "session.accept",
+      sessionId,
+      { type: "session.accept" },
+    );
+    await openSessionHandshake(
+      deviceRecipient,
+      "session.accept",
+      sessionId,
+      accept,
+    );
+    const authorityInvalidated = vi.fn();
+    const identityInvalidated = vi.fn();
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      invalidated: identityInvalidated,
+      authorizationInvalidated: authorityInvalidated,
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const connectionId = crypto.randomUUID();
+    const socket = new FakeBrowserSocket("") as unknown as WebSocket;
+    Object.assign(client as unknown as Record<string, unknown>, {
+      connectionId,
+      connectionGeneration: 1,
+      sessionId,
+      recipient: deviceRecipient,
+      profile: { deviceLabel: "Retained identity" },
+      socket,
+    });
+    const frame = await sealSessionData(hostSender, sessionId, {
+      type: "session.authority-changed",
+      serverTime: new Date().toISOString(),
+    });
+
+    await (
+      client as unknown as {
+        handleMessage(
+          generation: number,
+          socket: WebSocket,
+          raw: unknown,
+        ): Promise<void>;
+      }
+    ).handleMessage(1, socket, JSON.stringify({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId,
+      frame,
+    }));
+
+    expect(authorityInvalidated).toHaveBeenCalledOnce();
+    expect(identityInvalidated).not.toHaveBeenCalled();
+    expect(client.currentProfile()).not.toBeNull();
+  });
+
+  it("ignores a deferred authority change from a replaced session", async () => {
+    const hostKeys = await generateRemoteKeyPair();
+    const deviceKeys = await generateRemoteKeyPair();
+    const hostId = crypto.randomUUID();
+    const deviceId = crypto.randomUUID();
+    const oldSessionId = crypto.randomUUID();
+    const currentSessionId = crypto.randomUUID();
+    const importedHostKeys = await importRemoteKeyPair(hostKeys);
+    const importedDeviceKeys = await importRemoteKeyPair(deviceKeys);
+    const hostPublicKey = await importRemotePublicKey(hostKeys.publicKey);
+    const devicePublicKey = await importRemotePublicKey(deviceKeys.publicKey);
+    const oldSender = await createAuthenticatedSessionSender(
+      hostId,
+      deviceId,
+      oldSessionId,
+      importedHostKeys,
+      devicePublicKey,
+    );
+    const oldRecipient = await createAuthenticatedSessionRecipient(
+      hostId,
+      deviceId,
+      oldSessionId,
+      importedDeviceKeys,
+      hostPublicKey,
+      oldSender.enc,
+    );
+    const currentSender = await createAuthenticatedSessionSender(
+      hostId,
+      deviceId,
+      currentSessionId,
+      importedHostKeys,
+      devicePublicKey,
+    );
+    const currentRecipient = await createAuthenticatedSessionRecipient(
+      hostId,
+      deviceId,
+      currentSessionId,
+      importedDeviceKeys,
+      hostPublicKey,
+      currentSender.enc,
+    );
+    for (const [sender, recipient, sessionId] of [
+      [oldSender, oldRecipient, oldSessionId],
+      [currentSender, currentRecipient, currentSessionId],
+    ] as const) {
+      const handshake = await sealSessionHandshake(
+        sender,
+        "session.accept",
+        sessionId,
+        { type: "session.accept" },
+      );
+      await openSessionHandshake(
+        recipient,
+        "session.accept",
+        sessionId,
+        handshake,
+      );
+    }
+    const oldFrame = await sealSessionData(oldSender, oldSessionId, {
+      type: "session.authority-changed",
+      serverTime: new Date().toISOString(),
+    });
+    const currentFrame = await sealSessionData(currentSender, currentSessionId, {
+      type: "session.authority-changed",
+      serverTime: new Date().toISOString(),
+    });
+    let releaseDecrypt!: () => void;
+    let markDecryptStarted!: () => void;
+    const decryptGate = new Promise<void>((resolve) => {
+      releaseDecrypt = resolve;
+    });
+    const decryptStarted = new Promise<void>((resolve) => {
+      markDecryptStarted = resolve;
+    });
+    const open = oldRecipient.context.open.bind(oldRecipient.context);
+    oldRecipient.context.open = async (...args: Parameters<typeof open>) => {
+      markDecryptStarted();
+      await decryptGate;
+      return await open(...args);
+    };
+
+    const authorizationInvalidated = vi.fn();
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      authorizationInvalidated,
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const oldConnectionId = crypto.randomUUID();
+    const currentConnectionId = crypto.randomUUID();
+    const oldSocket = new FakeBrowserSocket("") as unknown as WebSocket;
+    const currentSocket = new FakeBrowserSocket("") as unknown as WebSocket;
+    const internals = client as unknown as Record<string, unknown>;
+    Object.assign(internals, {
+      connectionId: oldConnectionId,
+      connectionGeneration: 1,
+      sessionId: oldSessionId,
+      recipient: oldRecipient,
+      socket: oldSocket,
+    });
+    const handleMessage = (
+      client as unknown as {
+        handleMessage(
+          generation: number,
+          socket: WebSocket,
+          raw: unknown,
+        ): Promise<void>;
+      }
+    ).handleMessage.bind(client);
+    const staleControl = handleMessage(1, oldSocket, JSON.stringify({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId: oldConnectionId,
+      frame: oldFrame,
+    }));
+    await decryptStarted;
+    Object.assign(internals, {
+      connectionId: currentConnectionId,
+      connectionGeneration: 2,
+      sessionId: currentSessionId,
+      recipient: currentRecipient,
+      socket: currentSocket,
+    });
+    releaseDecrypt();
+    await staleControl;
+    expect(authorizationInvalidated).not.toHaveBeenCalled();
+
+    await handleMessage(2, currentSocket, JSON.stringify({
+      protocolVersion: 2,
+      type: "relay.frame",
+      connectionId: currentConnectionId,
+      frame: currentFrame,
+    }));
+    expect(authorizationInvalidated).toHaveBeenCalledOnce();
+  });
+
+  it("expires an inactive profile on the local timer while offline", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(deviceStore, "clearDeviceProfile").mockResolvedValueOnce();
+    const now = Date.parse("2026-08-01T00:00:00.000Z");
+    vi.setSystemTime(now);
+    vi.stubGlobal("navigator", { onLine: false });
+    const invalidated = vi.fn();
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      invalidated,
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const profile = {
+      expiresAt: new Date(now + 30 * 24 * 60 * 60 * 1_000).toISOString(),
+      lastUsedAt: new Date(now).toISOString(),
+    } as SealedBrowserDeviceProfile;
+    (client as unknown as { profile: SealedBrowserDeviceProfile | null }).profile =
+      profile;
+
+    await client.connect();
+    await vi.advanceTimersByTimeAsync(REMOTE_INACTIVITY_EXPIRY_MS + 1);
+
+    expect(client.currentProfile()).toBeNull();
+    expect(invalidated).toHaveBeenCalledOnce();
+    expect(
+      (client as unknown as { supervisor: { current(): unknown } })
+        .supervisor.current(),
+    ).toMatchObject({
+      phase: "terminal",
+      failure: { code: "grant-expired" },
+    });
+  });
+
+  it("blocks reconnect and stale writes until a deferred forget is durable", async () => {
+    vi.stubGlobal("WebSocket", FakeBrowserSocket);
+    let releaseWrite = (): void => undefined;
+    const profileWrite = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let releaseClear = (): void => undefined;
+    const clearing = new Promise<void>((resolve) => {
+      releaseClear = resolve;
+    });
+    const clear = vi.spyOn(deviceStore, "clearDeviceProfile")
+      .mockImplementationOnce(async () => await clearing);
+    const invalidated = vi.fn();
+    const forgetting: boolean[] = [];
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      invalidated,
+      forgetting: (value) => forgetting.push(value),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const profile = { deviceLabel: "Forgotten identity" } as SealedBrowserDeviceProfile;
+    Object.assign(client as unknown as Record<string, unknown>, {
+      profile,
+      profileWriteTail: profileWrite,
+    });
+
+    const operation = client.forget();
+    expect(client.forget()).toBe(operation);
+    await client.connect();
+    await expect(client.pair("{}", "Browser")).rejects.toThrow(
+      "finish being forgotten",
+    );
+    expect(FakeBrowserSocket.instances).toHaveLength(0);
+    expect(clear).not.toHaveBeenCalled();
+    expect(forgetting).toEqual([true]);
+
+    releaseWrite();
+    await vi.waitFor(() => expect(clear).toHaveBeenCalledOnce());
+    await client.connect();
+    expect(FakeBrowserSocket.instances).toHaveLength(0);
+    expect(client.currentProfile()).toBe(profile);
+
+    releaseClear();
+    await operation;
+    expect(client.currentProfile()).toBeNull();
+    expect(invalidated).toHaveBeenCalledOnce();
+    expect(forgetting).toEqual([true, false]);
+  });
+
+  it("releases a failed forget barrier without purging or pretending online", async () => {
+    let rejectClear = (_error: Error): void => undefined;
+    const clearing = new Promise<void>((_resolve, reject) => {
+      rejectClear = reject;
+    });
+    const clear = vi.spyOn(deviceStore, "clearDeviceProfile")
+      .mockImplementationOnce(async () => await clearing);
+    const statuses: Array<[string, boolean]> = [];
+    const invalidated = vi.fn();
+    const forgetting: boolean[] = [];
+    const client = new RemoteCompanionClient({
+      status: (message, online) => statuses.push([message, online]),
+      invalidated,
+      forgetting: (value) => forgetting.push(value),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const profile = { deviceLabel: "Retained identity" } as SealedBrowserDeviceProfile;
+    (client as unknown as { profile: SealedBrowserDeviceProfile | null }).profile =
+      profile;
+
+    const operation = client.forget();
+    await client.connect();
+    expect(forgetting).toEqual([true]);
+    rejectClear(new Error("vault unavailable"));
+    await expect(operation).rejects.toThrow("vault unavailable");
+
+    expect(clear).toHaveBeenCalledOnce();
+    expect(client.currentProfile()).toBe(profile);
+    expect(invalidated).not.toHaveBeenCalled();
+    expect(statuses.at(-1)).toEqual([
+      "Remote Companion is disconnected, but this browser could not be forgotten. Try again.",
+      false,
+    ]);
+    expect(forgetting).toEqual([true, false]);
+    expect(
+      (client as unknown as { forgetOperation: Promise<void> | null })
+        .forgetOperation,
+    ).toBeNull();
+  });
+
+  it("serializes terminal profile clearing before a new pairing owner", async () => {
+    let releaseClear = (): void => undefined;
+    const deferredClear = new Promise<void>((resolve) => {
+      releaseClear = resolve;
+    });
+    const clear = vi.spyOn(deviceStore, "clearDeviceProfile")
+      .mockImplementationOnce(async () => await deferredClear);
+    const clearing: boolean[] = [];
+    const invalidated = vi.fn();
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      invalidated,
+      profileClearing: (value) => clearing.push(value),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    (client as unknown as { profile: SealedBrowserDeviceProfile | null }).profile =
+      { deviceLabel: "Expired identity" } as SealedBrowserDeviceProfile;
+    const clearOperation = (
+      client as unknown as { clearExpiredProfile(): Promise<void> }
+    ).clearExpiredProfile();
+    const pairing = client.pair("not-json-yet", "Replacement browser");
+    let pairingSettled = false;
+    void pairing.finally(() => {
+      pairingSettled = true;
+    }).catch(() => undefined);
+    await vi.waitFor(() => expect(clear).toHaveBeenCalledOnce());
+    expect(pairingSettled).toBe(false);
+    expect(invalidated).toHaveBeenCalledOnce();
+    expect(clearing).toEqual([true]);
+
+    releaseClear();
+    await clearOperation;
+    await expect(pairing).rejects.toThrow();
+    expect(clearing).toEqual([true, false]);
+  });
+
+  it("restores a rejected profile when durable clearing fails", async () => {
+    const clear = vi.spyOn(deviceStore, "clearDeviceProfile")
+      .mockRejectedValueOnce(new Error("IndexedDB unavailable"));
+    const statuses: Array<[string, boolean]> = [];
+    const clearing: boolean[] = [];
+    const invalidated = vi.fn();
+    const client = new RemoteCompanionClient({
+      status: (message, online) => statuses.push([message, online]),
+      invalidated,
+      profileClearing: (value) => clearing.push(value),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+    const profile = {
+      deviceLabel: "Rejected identity",
+    } as SealedBrowserDeviceProfile;
+    (client as unknown as { profile: SealedBrowserDeviceProfile | null }).profile =
+      profile;
+
+    await (client as unknown as {
+      clearExpiredProfile(): Promise<void>;
+    }).clearExpiredProfile();
+
+    expect(clear).toHaveBeenCalledOnce();
+    expect(client.currentProfile()).toBe(profile);
+    expect(invalidated).toHaveBeenCalledOnce();
+    expect(clearing).toEqual([true, false]);
+    expect(statuses.at(-1)).toEqual([
+      "Remote Companion is disconnected, but its saved pairing could not be cleared. Use Forget this browser and try again.",
+      false,
     ]);
   });
 
@@ -437,6 +1105,7 @@ describe("Remote Companion browser connection ownership", () => {
     const internals = client as unknown as {
       attemptEpoch: number;
       profile: SealedBrowserDeviceProfile | null;
+      supervisor: { grantUpdated(): void };
       persistAuthenticatedActivity(epoch: number): Promise<void>;
       saveOwnedProfile(
         epoch: number,
@@ -445,18 +1114,21 @@ describe("Remote Companion browser connection ownership", () => {
     };
     internals.profile = profile;
     internals.saveOwnedProfile = saveOwnedProfile;
+    const grantUpdated = vi.spyOn(internals.supervisor, "grantUpdated");
 
     await internals.persistAuthenticatedActivity(internals.attemptEpoch);
     expect(saveOwnedProfile).toHaveBeenCalledTimes(1);
     expect(saveOwnedProfile.mock.calls[0]?.[1].lastUsedAt).toBe(
       new Date(now).toISOString(),
     );
+    expect(grantUpdated).toHaveBeenCalledOnce();
     await internals.persistAuthenticatedActivity(internals.attemptEpoch);
     expect(saveOwnedProfile).toHaveBeenCalledTimes(1);
 
     vi.setSystemTime(now + 60 * 60 * 1_000 + 1);
     await internals.persistAuthenticatedActivity(internals.attemptEpoch);
     expect(saveOwnedProfile).toHaveBeenCalledTimes(2);
+    expect(grantUpdated).toHaveBeenCalledTimes(2);
   });
 
   it("clears stale detail and rejects prompts for the previous selection", async () => {
@@ -503,6 +1175,7 @@ describe("Remote Companion browser connection ownership", () => {
     expect(promptResult).toHaveBeenLastCalledWith(
       "The selected conversation changed. The prompt was not sent.",
       false,
+      previousId,
     );
     expect(request.mock.calls.filter(
       ([value]) => value.type === "prompt.send",
@@ -516,6 +1189,40 @@ describe("Remote Companion browser connection ownership", () => {
       conversationId: selectedId,
       content: "current target",
     });
+  });
+
+  it("never replays a prompt after uncertain transport delivery", async () => {
+    const promptResult = vi.fn();
+    const request = vi.fn(async (_value: RemoteRequest) => {
+      throw new Error("socket closed after send");
+    });
+    const client = new RemoteCompanionClient({
+      status: vi.fn(),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult,
+    });
+    const conversationId = crypto.randomUUID();
+    Object.assign(client as unknown as Record<string, unknown>, {
+      sender: {},
+      request,
+      selectedConversationId: conversationId,
+    });
+
+    await expect(client.sendPrompt(conversationId, "One shot")).resolves
+      .toBe(false);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      type: "prompt.send",
+      conversationId,
+      content: "One shot",
+    });
+    expect(promptResult).toHaveBeenLastCalledWith(
+      "Delivery is uncertain. The prompt was not retried.",
+      true,
+      conversationId,
+    );
   });
 
   it("clears current detail when the conversation is archived", async () => {

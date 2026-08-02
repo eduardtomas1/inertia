@@ -8,6 +8,7 @@ import {
   REMOTE_LIMITS,
   type RemoteCipherFrame,
   type RemoteResponse,
+  type RemoteSessionAuthorityChangedPayload,
 } from "../shared/remote-protocol";
 import { takeRemoteRate } from "./remote-access-policy";
 import type { RemotePrivacySuspension } from "./remote-access-service-types";
@@ -143,9 +144,15 @@ interface RemoteOutboundSession {
   outboundAbandoned: boolean;
 }
 
+interface RemoteAuthoritySession extends RemoteOutboundSession {
+  connectionEpoch: number;
+  device: { id: string };
+  supportsAuthenticatedRejection: boolean;
+}
+
 export async function sendSequencedRemoteResponse(
   session: RemoteOutboundSession,
-  response: RemoteResponse,
+  response: RemoteResponse | RemoteSessionAuthorityChangedPayload,
   isCurrent: () => boolean,
   send: (
     connectionId: string,
@@ -167,6 +174,30 @@ export async function sendSequencedRemoteResponse(
   });
   session.outboundTail = sending;
   await sending;
+}
+
+export async function sendRemoteAuthorityInvalidation(
+  sessions: Iterable<RemoteAuthoritySession>,
+  deviceId: string,
+  serverTime: string,
+  isCurrent: (session: RemoteAuthoritySession) => boolean,
+  send: (
+    connectionId: string,
+    frame: Extract<RemoteCipherFrame, { kind: "session.data" }>,
+  ) => void,
+): Promise<void> {
+  await Promise.all([...sessions].map(async (session) => {
+    if (
+      session.device.id !== deviceId
+      || !session.supportsAuthenticatedRejection
+    ) return;
+    await sendSequencedRemoteResponse(
+      session,
+      { type: "session.authority-changed", serverTime },
+      () => isCurrent(session),
+      send,
+    );
+  }));
 }
 
 export class RemoteSessionAuthenticationBudget {

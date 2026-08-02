@@ -32,6 +32,7 @@ export interface ActiveRemoteSession {
   recipient: RemoteRecipientState;
   sender: RemoteSenderState;
   subject: RemoteAuthorizationSubject;
+  supportsAuthenticatedRejection: boolean;
   createdAt: number;
   lastActivityAt: number;
   requestTimes: number[];

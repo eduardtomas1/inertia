@@ -10,6 +10,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
 }
@@ -115,6 +119,12 @@ textarea {
   font-size: 0.85rem;
 }
 
+.updated {
+  color: #aab3ac;
+  font-size: 0.75rem;
+  text-align: right;
+}
+
 .online {
   color: #95d6a7;
 }
@@ -144,6 +154,25 @@ textarea {
   display: grid;
   gap: 0.75rem;
   margin-block: 1rem;
+  max-height: min(60vh, 42rem);
+  overflow: auto;
+  overflow-anchor: auto;
+}
+
+.is-stale .conversation,
+.is-stale nav {
+  border-color: #735b38;
+}
+
+.stale-notice {
+  margin-block: 0.75rem;
+}
+
+button:disabled,
+textarea:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .message {

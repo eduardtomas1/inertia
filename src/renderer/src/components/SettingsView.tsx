@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArchiveRestore,
   Bot,
@@ -54,7 +54,7 @@ import { RemoteAccessSettings } from "./RemoteAccessSettings";
 
 type SettingsViewProps = {
   target?: {
-    section: "providers" | "backends";
+    section: "providers" | "backends" | "remote";
     profileId?: string;
   } | null;
   settings: AppSettings;
@@ -168,6 +168,11 @@ export function SettingsView({
   const [section, setSection] = useState<SettingsSection>(
     target?.section ?? "general",
   );
+  const previousTarget = useRef(target);
+  useEffect(() => {
+    if (target && target !== previousTarget.current) setSection(target.section);
+    previousTarget.current = target;
+  }, [target]);
   const [revealingLogs, setRevealingLogs] = useState(false);
   const [copyingSupportReport, setCopyingSupportReport] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);

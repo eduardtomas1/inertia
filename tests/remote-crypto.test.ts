@@ -23,6 +23,7 @@ import {
   remoteCipherFrameSchema,
   remotePairingRequestPayloadSchema,
   remoteResponseSchema,
+  remoteSessionOpenPayloadSchema,
   type RemotePairingInvitation,
 } from "../src/shared/remote-protocol";
 
@@ -160,6 +161,32 @@ describe("Remote Companion HPKE channel", () => {
 });
 
 describe("Remote Companion bounded protocol", () => {
+  it("negotiates authenticated rejection only for the canonical capability", () => {
+    const base = {
+      type: "session.open",
+      sessionId: crypto.randomUUID(),
+      deviceId: crypto.randomUUID(),
+      grantVersion: 1,
+      createdAt: new Date().toISOString(),
+    };
+    expect(remoteSessionOpenPayloadSchema.parse({
+      ...base,
+      browserVersion: "0.2.0+auth-reject-v1",
+    }).browserVersion).toBe("0.2.0+auth-reject-v1");
+    for (const browserVersion of [
+      " 0.2.0+auth-reject-v1",
+      "0.2.0+auth-reject-v1 ",
+      "0.2.0++auth-reject-v1",
+      "0.2.0+auth-reject-v1+auth-reject-v1",
+      "0.2.0+AUTH-REJECT-V1",
+    ]) {
+      expect(remoteSessionOpenPayloadSchema.safeParse({
+        ...base,
+        browserVersion,
+      }).success).toBe(false);
+    }
+  });
+
   it("fits the maximum plaintext inside its encrypted relay envelope", async () => {
     const hostKeys = await generateRemoteKeyPair();
     const deviceKeys = await generateRemoteKeyPair();

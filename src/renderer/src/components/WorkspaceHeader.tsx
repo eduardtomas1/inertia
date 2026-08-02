@@ -31,6 +31,7 @@ type WorkspaceHeaderProps = {
   onSetEnvironmentOpen: (open: boolean) => void;
   onCycleTheme: () => void;
   onOpenSettings: () => void;
+  onOpenRemoteSettings: () => void;
   onOpenProject: () => void;
   onRefreshBranches: () => void;
   onSwitchBranch: (name: string) => void;
@@ -67,6 +68,7 @@ export function WorkspaceHeader({
   onSetEnvironmentOpen,
   onCycleTheme,
   onOpenSettings,
+  onOpenRemoteSettings,
   onOpenProject,
   onRefreshBranches,
   onSwitchBranch,
@@ -81,7 +83,8 @@ export function WorkspaceHeader({
   onToggleActivity,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | null>(null);
-  const remoteAccess = useRemoteAccessState();
+  const remoteLoad = useRemoteAccessState();
+  const remoteAccess = remoteLoad.status === "ready" ? remoteLoad.state : null;
   useNativePreviewSuspension(menu !== null);
   const environmentAnchorRef = useRef<HTMLDivElement>(null);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
@@ -137,7 +140,7 @@ export function WorkspaceHeader({
             aria-label={remoteAccess.activeSessions > 0
               ? `Remote Companion, ${remoteAccess.activeSessions} active sessions`
               : `Remote Companion ${remoteAccess.connection}`}
-            onClick={onOpenSettings}
+            onClick={onOpenRemoteSettings}
           >
             <RadioTower size={14} />
             <span>

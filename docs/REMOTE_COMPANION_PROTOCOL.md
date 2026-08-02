@@ -129,16 +129,29 @@ Sessions:
    cannot reuse an opening ID or over-admit while crypto or persistence awaits.
    Once a device key authenticates, its grant owns the reservation so a local
    update or revocation invalidates the in-progress opening before acceptance.
-   The desktop tries at most the bounded set of current device public keys
-   without revealing which key matched.
+   The desktop tries at most the bounded 16 retained device public keys without
+   revealing which key matched. Revoked and expired keys are checked only so an
+   authenticated opener can converge to a sealed rejection; they never regain
+   application/session authority.
 3. The desktop rejects used session IDs across process restarts and requires a
    fresh timestamp. The device key authenticates identity; the desktop's
    current grant is authoritative. An old browser grant version cannot widen
    permissions.
-4. The encrypted accept returns current scopes, projects, expiry, and grant
-   version. The browser atomically validates and persists them before sending
-   a request.
-5. Each direction uses a separate authenticated HPKE context and exact
+4. The canonical browser session version
+   `0.2.0+auth-reject-v1` negotiates authenticated rejection inside the existing
+   opaque `session.accept` outer frame. The capability is carried inside the
+   authenticated `session.open`; malformed, duplicate, unknown, or ambiguous
+   suffixes do not negotiate it. A released `0.2.0` browser instead receives a
+   legacy-safe plaintext `session.close` with reason `shutdown`. Rejected
+   session IDs enter the same durable replay ledger before a response is sent.
+5. An encrypted accept returns current scopes, projects, expiry, and grant
+   version. The browser synchronously purges authorization-bound cached state
+   when those authenticated values differ, then persists them before sending a
+   request. A capable active session may first receive a sealed generic
+   `session.authority-changed` control after the desktop grant mutation is
+   durable; it contains no scope, project, or expiry values and forces the same
+   purge before reconnect.
+6. Each direction uses a separate authenticated HPKE context and exact
    monotonically increasing sequence. A duplicate, skipped, or reordered
    sequence closes the session.
 
@@ -264,6 +277,12 @@ outbound bytes plus the next message exceed the configured buffer budget. It
 heartbeats clients and has bounded shutdown. If registration finds a duplicate
 desktop endpoint, the rejected desktop closes its socket and retries with
 bounded backoff rather than remaining indefinitely connected but offline.
+Every plaintext `session.close`, including `revoked` and `expired`, is
+non-authoritative transport guidance: the browser may reconnect, but it does
+not delete its sealed identity or purge authorization-bound DOM/drafts from
+that hint. Destructive identity invalidation requires a locally verified
+expiry deadline or a negotiated sealed rejection; grant-cache invalidation
+requires authenticated session data or an authenticated changed accept.
 
 ## Lifecycle bounds
 

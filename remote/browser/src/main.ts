@@ -1,9 +1,13 @@
 import "./styles.css";
 
 import type {
+  RemoteSafeActivity,
   RemoteSafeConversationDetail,
+  RemoteSafeMessage,
   RemoteSafeShell,
+  RemoteSafeSubagent,
 } from "../../../src/shared/remote-protocol";
+import type { RemoteConnectionSnapshot } from "./connection-supervisor";
 import { RemoteCompanionClient } from "./remote-client";
 import { appendRemoteText, button } from "./safe-dom";
 
@@ -14,68 +18,78 @@ let shell: RemoteSafeShell | null = null;
 let detail: RemoteSafeConversationDetail | null = null;
 let status = "Starting…";
 let online = false;
+let connection: RemoteConnectionSnapshot | null = null;
 let pairingCode: string | null = null;
 let promptStatus: { message: string; uncertain: boolean } | null = null;
 let pairing = false;
 let hadProfile = false;
 let sending = false;
-let promptDraft: { conversationId: string; value: string } | null = null;
-let invitationDraft = "";
-let deviceNameDraft = "";
+let sendOperation = 0;
+let sendingConversationId: string | null = null;
 let promptConversationId: string | null = null;
+let browserOnline = navigator.onLine !== false;
+let forgetting = false;
+let profileClearing = false;
 
-function captureDrafts(): void {
-  const prompt = document.getElementById("remote-prompt-input");
-  if (prompt instanceof HTMLTextAreaElement && promptConversationId) {
-    promptDraft = {
-      conversationId: promptConversationId,
-      value: prompt.value,
-    };
-  }
-  const invitation = document.getElementById("remote-invitation-input");
-  if (invitation instanceof HTMLTextAreaElement) {
-    invitationDraft = invitation.value;
-  }
-  const name = document.getElementById("remote-device-name");
-  if (name instanceof HTMLInputElement) deviceNameDraft = name.value;
-}
+const header = document.createElement("header");
+const title = document.createElement("h1");
+title.textContent = "Inertia Remote Companion";
+const headerStatus = document.createElement("div");
+const statusLine = appendRemoteText(headerStatus, status, "status offline");
+statusLine.setAttribute("role", "status");
+statusLine.setAttribute("aria-live", "polite");
+const updatedLine = appendRemoteText(headerStatus, "", "updated");
+header.append(title, headerStatus);
 
-interface RemoteFieldFocus {
-  id: string;
-  selectionStart: number | null;
-  selectionEnd: number | null;
-}
+const pairingView = createPairingView();
+const profileView = createProfileView();
+const empty = appendRemoteText(root, "No live desktop state is available.", "empty");
+const layout = document.createElement("div");
+layout.className = "layout";
+const navigation = document.createElement("nav");
+navigation.setAttribute("aria-label", "Conversations");
+const conversation = createConversationView();
+layout.append(navigation, conversation.root);
+root.prepend(header, pairingView.root, profileView.root);
+root.append(layout);
 
-function activeFieldFocus(): RemoteFieldFocus | null {
-  const active = document.activeElement;
-  if (
-    !(active instanceof HTMLTextAreaElement
-      || active instanceof HTMLInputElement)
-    || !active.id
-  ) return null;
-  return {
-    id: active.id,
-    selectionStart: active.selectionStart,
-    selectionEnd: active.selectionEnd,
-  };
-}
-
-function restoreFieldFocus(focus: RemoteFieldFocus | null): void {
-  if (!focus) return;
-  const field = document.getElementById(focus.id);
-  if (
-    !(field instanceof HTMLTextAreaElement
-      || field instanceof HTMLInputElement)
-  ) return;
-  field.focus();
-  if (focus.selectionStart === null || focus.selectionEnd === null) return;
-  field.setSelectionRange(focus.selectionStart, focus.selectionEnd);
-}
+const projectViews = new Map<string, {
+  root: HTMLElement;
+  heading: HTMLHeadingElement;
+  conversations: Map<string, HTMLButtonElement>;
+}>();
+const messageViews = new Map<string, {
+  root: HTMLElement;
+  role: HTMLElement;
+  content: HTMLElement;
+}>();
+const activityViews = new Map<string, HTMLElement>();
+const subagentViews = new Map<string, HTMLElement>();
 
 const client = new RemoteCompanionClient({
   status: (message, isOnline) => {
     status = message;
     online = isOnline;
+    render();
+  },
+  connection: (value) => {
+    connection = value;
+    render();
+  },
+  invalidated: () => {
+    purgeIdentityBoundState();
+    render();
+  },
+  authorizationInvalidated: () => {
+    purgeAuthorizationBoundState();
+    render();
+  },
+  forgetting: (value) => {
+    forgetting = value;
+    render();
+  },
+  profileClearing: (value) => {
+    profileClearing = value;
     render();
   },
   pairingCode: (code) => {
@@ -89,14 +103,23 @@ const client = new RemoteCompanionClient({
   },
   detail: (value) => {
     detail = value;
+    if (value === null) purgeAuthoritativeDetail();
     if (value === null && !promptStatus?.uncertain) promptStatus = null;
     render();
   },
-  promptResult: (message, uncertain) => {
+  promptResult: (message, uncertain, conversationId) => {
+    if (conversationId && conversationId !== promptConversationId) return;
     promptStatus = { message, uncertain };
     render();
   },
 });
+
+const renderConnectivity = (): void => {
+  browserOnline = navigator.onLine !== false;
+  render();
+};
+window.addEventListener("online", renderConnectivity);
+window.addEventListener("offline", renderConnectivity);
 
 void client.initialize().then(
   () => render(),
@@ -109,90 +132,60 @@ void client.initialize().then(
 );
 
 function render(): void {
-  const hasProfile = client.currentProfile() !== null;
+  const profile = client.currentProfile();
+  const hasProfile = profile !== null;
   if (hadProfile && !hasProfile) {
     pairing = false;
     pairingCode = null;
   }
   hadProfile = hasProfile;
-  const focus = activeFieldFocus();
-  captureDrafts();
-  root.replaceChildren();
-  promptConversationId = null;
-  renderInto();
-  restoreFieldFocus(focus);
-}
+  root.classList.toggle("is-stale", !online && shell !== null);
+  statusLine.textContent = status;
+  statusLine.className = `status ${online ? "online" : "offline"}`;
+  const lastUpdated = detail?.generatedAt ?? shell?.generatedAt ?? null;
+  updatedLine.textContent = lastUpdated
+    ? `${online ? "Last updated" : "Cached · last updated"} ${new Date(lastUpdated).toLocaleString()}`
+    : "";
+  updatedLine.hidden = lastUpdated === null;
 
-function renderInto(): void {
-  const header = document.createElement("header");
-  const title = document.createElement("h1");
-  title.textContent = "Inertia Remote Companion";
-  header.append(title);
-  const statusLine = appendRemoteText(
-    header,
-    status,
-    `status ${online ? "online" : "offline"}`,
-  );
-  statusLine.setAttribute("role", "status");
-  statusLine.setAttribute("aria-live", "polite");
-  root.append(header);
-
-  const profile = client.currentProfile();
+  pairingView.root.hidden = hasProfile;
+  profileView.root.hidden = !profile;
   if (!profile) {
     renderPairing();
+    empty.hidden = true;
+    layout.hidden = true;
     return;
   }
 
-  const device = document.createElement("section");
-  device.className = "card";
-  const heading = document.createElement("h2");
-  heading.textContent = profile.deviceLabel;
-  device.append(heading);
-  appendRemoteText(
-    device,
-    `Permissions: ${profile.scopes.join(", ")} · expires ${new Date(profile.expiresAt).toLocaleString()}`,
-    "muted",
-  );
-  device.append(
-    button("Reconnect", () => void client.connect()),
-    button("Forget this browser", () => {
-      void client.forget().then(() => location.reload());
-    }, "secondary"),
-  );
-  root.append(device);
+  profileView.heading.textContent = profile.deviceLabel;
+  profileView.permissions.textContent =
+    `Permissions: ${profile.scopes.join(", ")} · expires ${new Date(profile.expiresAt).toLocaleString()}`;
+  profileView.reconnect.disabled = forgetting || !browserOnline
+    || connection?.phase === "connecting";
+  profileView.reconnect.textContent = connection?.phase === "terminal"
+    ? "Retry connection"
+    : connection?.phase === "connecting"
+      ? "Connecting…"
+      : "Reconnect";
+  profileView.forget.disabled = forgetting;
+  profileView.forget.textContent = forgetting
+    ? "Forgetting…"
+    : "Forget this browser";
 
-  if (!shell) {
-    appendRemoteText(root, "No live desktop state is available.", "empty");
-    return;
-  }
-  const layout = document.createElement("div");
-  layout.className = "layout";
-  const navigation = document.createElement("nav");
-  navigation.setAttribute("aria-label", "Conversations");
-  for (const project of shell.projects) {
-    const projectTitle = document.createElement("h2");
-    projectTitle.textContent = project.name;
-    navigation.append(projectTitle);
-    for (const conversation of shell.conversations.filter(
-      ({ projectId }) => projectId === project.id,
-    )) {
-      navigation.append(button(
-        `${conversation.title} · ${conversation.status}`,
-        () => client.selectConversation(conversation.id),
-        detail?.conversation.id === conversation.id ? "selected" : undefined,
-      ));
-    }
-  }
-  layout.append(navigation);
-  const content = document.createElement("section");
-  content.className = "conversation";
-  if (detail) renderDetail(content, detail, profile.scopes.includes("prompt"));
-  else appendRemoteText(content, "Choose a conversation.", "empty");
-  layout.append(content);
-  root.append(layout);
+  empty.hidden = shell !== null;
+  layout.hidden = shell === null;
+  if (!shell) return;
+  renderNavigation(shell);
+  renderDetail(detail, profile.scopes.includes("prompt"));
 }
 
-function renderPairing(): void {
+function createPairingView(): {
+  root: HTMLElement;
+  name: HTMLInputElement;
+  invitation: HTMLTextAreaElement;
+  submit: HTMLButtonElement;
+  code: HTMLElement;
+} {
   const section = document.createElement("section");
   section.className = "card pair";
   const heading = document.createElement("h2");
@@ -203,126 +196,118 @@ function renderPairing(): void {
     "On the desktop, enable Remote Companion and create a five-minute invitation. Compare the six-digit code before approving.",
     "muted",
   );
-  const label = document.createElement("label");
-  label.textContent = "Browser name";
+  const nameLabel = document.createElement("label");
+  nameLabel.textContent = "Browser name";
   const name = document.createElement("input");
   name.id = "remote-device-name";
   name.maxLength = 80;
-  deviceNameDraft ||= navigator.userAgent.includes("Mobile")
+  name.value = navigator.userAgent.includes("Mobile")
     ? "Mobile browser"
     : "Web browser";
-  name.value = deviceNameDraft;
-  label.append(name);
+  nameLabel.append(name);
   const invitationLabel = document.createElement("label");
   invitationLabel.textContent = "Invitation";
   const invitation = document.createElement("textarea");
   invitation.id = "remote-invitation-input";
   invitation.rows = 8;
   invitation.spellcheck = false;
-  invitation.value = invitationDraft;
   invitationLabel.append(invitation);
-  section.append(label, invitationLabel);
-  section.append(button(pairing ? "Waiting for desktop…" : "Pair", () => {
-    if (pairing) return;
+  const submit = button("Pair", () => {
+    if (pairing || !browserOnline) return;
     pairing = true;
+    render();
     void client.pair(invitation.value, name.value).then(() => {
-      invitationDraft = "";
+      invitation.value = "";
       pairing = false;
       pairingCode = null;
+      render();
     }, (error: unknown) => {
       status = error instanceof Error ? error.message : "Pairing failed.";
       pairing = false;
       render();
     });
-  }));
-  if (pairingCode) {
-    appendRemoteText(section, `Comparison code: ${pairingCode}`, "pairing-code");
-  }
-  root.append(section);
+  });
+  const code = appendRemoteText(section, "", "pairing-code");
+  code.setAttribute("role", "status");
+  section.append(nameLabel, invitationLabel, submit);
+  return { root: section, name, invitation, submit, code };
 }
 
-function renderDetail(
-  parent: HTMLElement,
-  value: RemoteSafeConversationDetail,
-  canPrompt: boolean,
-): void {
+function renderPairing(): void {
+  pairingView.submit.disabled = profileClearing
+    || forgetting
+    || pairing
+    || !browserOnline;
+  pairingView.submit.textContent = pairing ? "Waiting for desktop…" : "Pair";
+  pairingView.code.textContent = pairingCode
+    ? `Comparison code: ${pairingCode}`
+    : "";
+  pairingView.code.hidden = pairingCode === null;
+}
+
+function createProfileView(): {
+  root: HTMLElement;
+  heading: HTMLHeadingElement;
+  permissions: HTMLElement;
+  reconnect: HTMLButtonElement;
+  forget: HTMLButtonElement;
+} {
+  const section = document.createElement("section");
+  section.className = "card";
   const heading = document.createElement("h2");
-  heading.textContent = value.conversation.title;
-  parent.append(heading);
-  appendRemoteText(
-    parent,
-    `${value.conversation.providerLabel} · ${value.conversation.status}`,
-    "muted",
+  const permissions = appendRemoteText(section, "", "muted");
+  const reconnect = button("Reconnect", () => void client.connect());
+  const forget = button("Forget this browser", () => {
+    void client.forget().catch(() => undefined);
+  }, "secondary");
+  section.prepend(heading);
+  section.append(reconnect, forget);
+  return { root: section, heading, permissions, reconnect, forget };
+}
+
+function createConversationView(): {
+  root: HTMLElement;
+  heading: HTMLHeadingElement;
+  meta: HTMLElement;
+  stale: HTMLElement;
+  waiting: HTMLElement;
+  transcript: HTMLElement;
+  activities: HTMLDetailsElement;
+  activitySummary: HTMLElement;
+  activityList: HTMLElement;
+  subagents: HTMLDetailsElement;
+  subagentSummary: HTMLElement;
+  subagentList: HTMLElement;
+  promptInfo: HTMLElement;
+  safety: HTMLElement;
+  form: HTMLFormElement;
+  prompt: HTMLTextAreaElement;
+  submit: HTMLButtonElement;
+  result: HTMLElement;
+  empty: HTMLElement;
+} {
+  const section = document.createElement("section");
+  section.className = "conversation";
+  const heading = document.createElement("h2");
+  const meta = appendRemoteText(section, "", "muted");
+  const stale = appendRemoteText(
+    section,
+    "Showing cached desktop data. Remote actions are disabled until the connection recovers.",
+    "warning stale-notice",
   );
-  if (value.waitingForLocalAction) {
-    appendRemoteText(
-      parent,
-      "This run is waiting for an action on the desktop. Remote approvals and secret answers are unavailable.",
-      "warning",
-    );
-  }
+  const waiting = appendRemoteText(section, "", "warning");
   const transcript = document.createElement("div");
   transcript.className = "transcript";
-  for (const message of value.messages) {
-    const article = document.createElement("article");
-    article.className = `message ${message.role}`;
-    appendRemoteText(article, message.role === "user" ? "You" : "Agent", "role");
-    appendRemoteText(article, message.content, "message-content");
-    transcript.append(article);
-  }
-  parent.append(transcript);
-  if (value.activities.length > 0) {
-    const activities = document.createElement("details");
-    const summary = document.createElement("summary");
-    summary.textContent = `Safe workstream (${value.activities.length})`;
-    activities.append(summary);
-    for (const activity of value.activities) {
-      appendRemoteText(
-        activities,
-        `${activity.title} · ${activity.status}`,
-        "activity",
-      );
-    }
-    parent.append(activities);
-  }
-  if (value.subagents.length > 0) {
-    const subagents = document.createElement("details");
-    const summary = document.createElement("summary");
-    summary.textContent = `Delegated agents (${value.subagents.length})`;
-    subagents.append(summary);
-    for (const subagent of value.subagents) {
-      appendRemoteText(
-        subagents,
-        `${subagent.name ?? "Agent"} · ${subagent.providerLabel} · ${subagent.status}`,
-        "activity",
-      );
-    }
-    parent.append(subagents);
-  }
-  if (!canPrompt) {
-    appendRemoteText(
-      parent,
-      "This device is view-only. Prompting must be enabled on the desktop.",
-      "muted",
-    );
-    return;
-  }
-  const safety = value.conversation.promptSafety;
-  if (!safety.supported) {
-    appendRemoteText(
-      parent,
-      `${value.conversation.providerLabel} remote prompt unavailable`,
-      "muted",
-    );
-    appendRemoteText(parent, safety.explanation, "muted");
-    return;
-  }
-  appendRemoteText(
-    parent,
-    `${value.conversation.providerLabel} remote prompt`,
-    "muted",
-  );
-  appendRemoteText(parent, safety.headline, "muted");
+  const activities = document.createElement("details");
+  const activitySummary = document.createElement("summary");
+  const activityList = document.createElement("div");
+  activities.append(activitySummary, activityList);
+  const subagents = document.createElement("details");
+  const subagentSummary = document.createElement("summary");
+  const subagentList = document.createElement("div");
+  subagents.append(subagentSummary, subagentList);
+  const promptInfo = appendRemoteText(section, "", "muted");
+  const safety = appendRemoteText(section, "", "muted");
   const form = document.createElement("form");
   const label = document.createElement("label");
   label.textContent = "Text prompt";
@@ -330,47 +315,315 @@ function renderDetail(
   prompt.id = "remote-prompt-input";
   prompt.rows = 4;
   prompt.maxLength = 8_000;
-  prompt.value = promptDraft?.conversationId === value.conversation.id
-    ? promptDraft.value
-    : "";
-  promptConversationId = value.conversation.id;
   label.append(prompt);
   const submit = document.createElement("button");
   submit.type = "submit";
-  submit.disabled = sending;
-  submit.textContent = sending ? "Sending…" : "Send to desktop";
   form.append(label, submit);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+    const target = promptConversationId;
     const content = prompt.value;
-    if (!content.trim() || sending) return;
+    if (!target || !content.trim() || sending || !online) return;
+    const operation = ++sendOperation;
     sending = true;
-    submit.disabled = true;
+    sendingConversationId = target;
     promptStatus = null;
-    void client.sendPrompt(value.conversation.id, content).then((accepted) => {
-      if (accepted) {
-        promptDraft = null;
-        const field = document.getElementById("remote-prompt-input");
-        if (field instanceof HTMLTextAreaElement) field.value = "";
-      }
+    render();
+    void client.sendPrompt(target, content).then((accepted) => {
+      if (accepted && promptConversationId === target) prompt.value = "";
     }, () => {
-      promptStatus = {
-        message: "Delivery is uncertain. The prompt was not retried.",
-        uncertain: true,
-      };
+      if (promptConversationId === target) {
+        promptStatus = {
+          message: "Delivery is uncertain. The prompt was not retried.",
+          uncertain: true,
+        };
+      }
     }).finally(() => {
+      if (sendOperation !== operation) return;
       sending = false;
+      sendingConversationId = null;
       render();
     });
   });
-  parent.append(form);
-  if (promptStatus) {
-    const result = appendRemoteText(
-      parent,
-      promptStatus.message,
-      promptStatus.uncertain ? "warning" : "status",
+  const result = appendRemoteText(section, "", "status");
+  result.setAttribute("role", "status");
+  result.setAttribute("aria-live", "polite");
+  const emptyState = appendRemoteText(section, "Choose a conversation.", "empty");
+  section.prepend(heading);
+  section.append(
+    transcript,
+    activities,
+    subagents,
+    form,
+    result,
+    emptyState,
+  );
+  return {
+    root: section,
+    heading,
+    meta,
+    stale,
+    waiting,
+    transcript,
+    activities,
+    activitySummary,
+    activityList,
+    subagents,
+    subagentSummary,
+    subagentList,
+    promptInfo,
+    safety,
+    form,
+    prompt,
+    submit,
+    result,
+    empty: emptyState,
+  };
+}
+
+function renderNavigation(value: RemoteSafeShell): void {
+  const liveProjects = new Set(value.projects.map(({ id }) => id));
+  for (const [id, view] of projectViews) {
+    if (liveProjects.has(id)) continue;
+    view.root.remove();
+    projectViews.delete(id);
+  }
+  let projectCursor = navigation.firstChild;
+  for (const project of value.projects) {
+    let view = projectViews.get(project.id);
+    if (!view) {
+      const projectRoot = document.createElement("section");
+      projectRoot.dataset.remoteKey = `project:${project.id}`;
+      const heading = document.createElement("h2");
+      projectRoot.append(heading);
+      view = { root: projectRoot, heading, conversations: new Map() };
+      projectViews.set(project.id, view);
+    }
+    view.heading.textContent = project.name;
+    const items = value.conversations.filter(
+      ({ projectId }) => projectId === project.id,
     );
-    result.setAttribute("role", "status");
-    result.setAttribute("aria-live", "polite");
+    const liveConversations = new Set(items.map(({ id }) => id));
+    for (const [id, node] of view.conversations) {
+      if (liveConversations.has(id)) continue;
+      node.remove();
+      view.conversations.delete(id);
+    }
+    let conversationCursor = view.heading.nextSibling;
+    for (const item of items) {
+      let node = view.conversations.get(item.id);
+      if (!node) {
+        node = button("", () => client.selectConversation(item.id));
+        node.dataset.remoteKey = `conversation:${item.id}`;
+        view.conversations.set(item.id, node);
+      }
+      node.textContent = `${item.title} · ${item.status}`;
+      node.className = detail?.conversation.id === item.id ? "selected" : "";
+      if (node !== conversationCursor) {
+        view.root.insertBefore(node, conversationCursor);
+      }
+      conversationCursor = node.nextSibling;
+    }
+    if (view.root !== projectCursor) {
+      navigation.insertBefore(view.root, projectCursor);
+    }
+    projectCursor = view.root.nextSibling;
+  }
+}
+
+function renderDetail(
+  value: RemoteSafeConversationDetail | null,
+  canPrompt: boolean,
+): void {
+  conversation.empty.hidden = value !== null;
+  conversation.heading.hidden = value === null;
+  conversation.meta.hidden = value === null;
+  conversation.stale.hidden = value === null || online;
+  conversation.waiting.hidden = value === null || !value.waitingForLocalAction;
+  conversation.transcript.hidden = value === null;
+  conversation.activities.hidden = !value || value.activities.length === 0;
+  conversation.subagents.hidden = !value || value.subagents.length === 0;
+  conversation.form.hidden = true;
+  conversation.promptInfo.hidden = true;
+  conversation.safety.hidden = true;
+  conversation.result.hidden = !promptStatus || value === null;
+  if (!value) {
+    promptConversationId = null;
+    return;
+  }
+
+  const changedConversation = promptConversationId !== value.conversation.id;
+  conversation.heading.textContent = value.conversation.title;
+  conversation.meta.textContent =
+    `${value.conversation.providerLabel} · ${value.conversation.status}`;
+  conversation.waiting.textContent = value.waitingForLocalAction
+    ? "This run is waiting for an action on the desktop. Remote approvals and secret answers are unavailable."
+    : "";
+  updateTranscript(value.messages);
+  reconcileTextItems(
+    conversation.activityList,
+    activityViews,
+    value.activities,
+    (activity) => activity.id,
+    (activity) => `${activity.title} · ${activity.status}`,
+  );
+  conversation.activitySummary.textContent =
+    `Safe workstream (${value.activities.length})`;
+  reconcileTextItems(
+    conversation.subagentList,
+    subagentViews,
+    value.subagents,
+    (subagent) => subagent.id,
+    (subagent) =>
+      `${subagent.name ?? "Agent"} · ${subagent.providerLabel} · ${subagent.status}`,
+  );
+  conversation.subagentSummary.textContent =
+    `Delegated agents (${value.subagents.length})`;
+
+  promptConversationId = value.conversation.id;
+  if (changedConversation) conversation.prompt.value = "";
+  const safety = value.conversation.promptSafety;
+  if (!canPrompt) {
+    conversation.promptInfo.hidden = false;
+    conversation.promptInfo.textContent =
+      "This device is view-only. Prompting must be enabled on the desktop.";
+  } else if (!safety.supported) {
+    conversation.promptInfo.hidden = false;
+    conversation.safety.hidden = false;
+    conversation.promptInfo.textContent =
+      `${value.conversation.providerLabel} remote prompt unavailable`;
+    conversation.safety.textContent = safety.explanation;
+  } else {
+    conversation.promptInfo.hidden = false;
+    conversation.safety.hidden = false;
+    conversation.form.hidden = false;
+    conversation.promptInfo.textContent =
+      `${value.conversation.providerLabel} remote prompt`;
+    conversation.safety.textContent = safety.headline;
+    conversation.submit.disabled = sending || !online;
+    conversation.prompt.disabled = !online;
+    conversation.submit.textContent = sending
+      ? sendingConversationId === value.conversation.id
+        ? "Sending…"
+        : "Another prompt is sending…"
+      : online
+        ? "Send to desktop"
+        : "Offline";
+  }
+  if (promptStatus) {
+    conversation.result.textContent = promptStatus.message;
+    conversation.result.className = promptStatus.uncertain
+      ? "warning"
+      : "status";
+  }
+}
+
+function purgeAuthoritativeDetail(): void {
+  detail = null;
+  promptConversationId = null;
+  promptStatus = null;
+  for (const view of messageViews.values()) view.root.remove();
+  messageViews.clear();
+  for (const node of activityViews.values()) node.remove();
+  activityViews.clear();
+  for (const node of subagentViews.values()) node.remove();
+  subagentViews.clear();
+  conversation.transcript.replaceChildren();
+  conversation.activityList.replaceChildren();
+  conversation.subagentList.replaceChildren();
+  conversation.heading.textContent = "";
+  conversation.meta.textContent = "";
+  conversation.waiting.textContent = "";
+  conversation.activitySummary.textContent = "";
+  conversation.subagentSummary.textContent = "";
+  conversation.promptInfo.textContent = "";
+  conversation.safety.textContent = "";
+  conversation.prompt.value = "";
+  conversation.result.textContent = "";
+}
+
+function purgeIdentityBoundState(): void {
+  purgeAuthorizationBoundState();
+  profileView.heading.textContent = "";
+  profileView.permissions.textContent = "";
+}
+
+function purgeAuthorizationBoundState(): void {
+  shell = null;
+  purgeAuthoritativeDetail();
+  for (const view of projectViews.values()) {
+    view.root.remove();
+    view.conversations.clear();
+  }
+  projectViews.clear();
+  navigation.replaceChildren();
+}
+
+function updateTranscript(messages: RemoteSafeMessage[]): void {
+  const previousTop = conversation.transcript.scrollTop;
+  const followedLatest = conversation.transcript.scrollHeight
+    - conversation.transcript.clientHeight
+    - previousTop <= 8;
+  const live = new Set(messages.map(({ id }) => id));
+  for (const [id, view] of messageViews) {
+    if (live.has(id)) continue;
+    view.root.remove();
+    messageViews.delete(id);
+  }
+  let cursor = conversation.transcript.firstChild;
+  for (const message of messages) {
+    let view = messageViews.get(message.id);
+    if (!view) {
+      const article = document.createElement("article");
+      article.dataset.remoteKey = `message:${message.id}`;
+      const role = appendRemoteText(article, "", "role");
+      const content = appendRemoteText(article, "", "message-content");
+      view = { root: article, role, content };
+      messageViews.set(message.id, view);
+    }
+    view.root.className = `message ${message.role}`;
+    const role = message.role === "user" ? "You" : "Agent";
+    if (view.role.textContent !== role) view.role.textContent = role;
+    if (view.content.textContent !== message.content) {
+      view.content.textContent = message.content;
+    }
+    if (view.root !== cursor) {
+      conversation.transcript.insertBefore(view.root, cursor);
+    }
+    cursor = view.root.nextSibling;
+  }
+  conversation.transcript.scrollTop = followedLatest
+    ? Math.max(0, conversation.transcript.scrollHeight
+      - conversation.transcript.clientHeight)
+    : previousTop;
+}
+
+function reconcileTextItems<T extends RemoteSafeActivity | RemoteSafeSubagent>(
+  parent: HTMLElement,
+  views: Map<string, HTMLElement>,
+  values: T[],
+  key: (value: T) => string,
+  text: (value: T) => string,
+): void {
+  const live = new Set(values.map(key));
+  for (const [id, node] of views) {
+    if (live.has(id)) continue;
+    node.remove();
+    views.delete(id);
+  }
+  let cursor = parent.firstChild;
+  for (const value of values) {
+    const id = key(value);
+    let node = views.get(id);
+    if (!node) {
+      node = document.createElement("div");
+      node.className = "activity";
+      node.dataset.remoteKey = id;
+      views.set(id, node);
+    }
+    const nextText = text(value);
+    if (node.textContent !== nextText) node.textContent = nextText;
+    if (node !== cursor) parent.insertBefore(node, cursor);
+    cursor = node.nextSibling;
   }
 }

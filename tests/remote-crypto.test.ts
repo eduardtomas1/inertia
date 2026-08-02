@@ -17,6 +17,7 @@ import {
   sealSessionHandshake,
 } from "../src/shared/remote-crypto";
 import {
+  REMOTE_DESKTOP_COMPATIBILITY,
   REMOTE_LIMITS,
   REMOTE_PROTOCOL_VERSION,
   encodedRemoteFrameBytes,
@@ -30,6 +31,8 @@ import {
 const invitation: RemotePairingInvitation = {
   protocolVersion: REMOTE_PROTOCOL_VERSION,
   relayUrl: "wss://relay.invalid/remote",
+  relayIdentity: "a669bb38-857d-4b8d-a0aa-3a592197d2c8",
+  desktop: REMOTE_DESKTOP_COMPATIBILITY,
   endpointId: "endpoint_123",
   hostId: "91f064bc-f7ae-4d2d-91ef-8bc0c91310a0",
   hostPublicKey: "",

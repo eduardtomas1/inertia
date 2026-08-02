@@ -1,24 +1,26 @@
 import WebSocket from "ws";
 import {
   importRemotePublicKey,
-  openPairingRequest, openSessionData,
+  openPairingRequest,
   sealPairingResponse,
   type RemoteImportedKeyPair,
 } from "../shared/remote-crypto";
 import {
   REMOTE_LIMITS,
+  RELAY_PROTOCOL_VERSION,
+  REMOTE_DESKTOP_COMPATIBILITY,
   REMOTE_PROTOCOL_VERSION,
-  REMOTE_RELAY_VERSION,
   encodedRemoteFrameBytes,
   remoteCipherFrameSchema,
-  remotePairingRequestPayloadSchema, remoteRequestSchema,
+  remotePairingRequestPayloadSchema,
   type RelayClientMessage,
+  type RelayServerMessage,
   type RemoteAccessState,
   type RemoteAuditEvent,
   type RemoteCipherFrame,
   type RemotePairingInvitation,
-  type RemoteRequest,
   type RemoteResponse,
+  type RemoteSetupMode,
   type RemoteScope,
 } from "../shared/remote-protocol";
 import type { RemoteConversationGrant } from "../shared/remote-grants";
@@ -40,13 +42,17 @@ import {
   terminateRemoteSocket,
 } from "./remote-access-lifecycle";
 import {
-  DEFAULT_REMOTE_GRANT_MS, DEFAULT_REMOTE_RELAY_URL, projectRemoteAccessState,
+  DEFAULT_REMOTE_COMPANION_URL, DEFAULT_REMOTE_GRANT_MS,
+  DEFAULT_REMOTE_RELAY_URL,
+  projectRemoteAccessState,
   remoteDeviceIsCurrent, remotePairingComparisonCode,
   remoteRelayErrorMessage, takeRemoteRate, trimRemoteSet,
   validateRemoteRelayUrl,
 } from "./remote-access-policy";
+import { validateRemoteCompanionUrl } from "./remote-access-setup-diagnostics";
 import {
   applyRemotePairingGrant,
+  pruneRemoteDeviceTombstones,
   revokeRemoteDevice,
   updateRemoteDeviceGrant,
 } from "./remote-access-devices";
@@ -62,7 +68,13 @@ import {
   remoteSessionRetainsAuthority,
   type RemoteSessionAuthorityInput,
 } from "./remote-access-session-admission";
-import { authenticateRemoteSession, authenticatedRemoteRejectionIsCurrent, authenticatedRemoteSessionDecisionFrame, rememberRemoteSession } from "./remote-access-session-handshake";
+import { openRemoteSession } from "./remote-access-session-opener";
+import { handleRemoteSessionData } from "./remote-access-session-data";
+import { RemoteRelayRegistration } from "./remote-access-relay-registration";
+import {
+  effectiveSetupRelay,
+  RemoteAccessSetupManager,
+} from "./remote-access-setup-manager";
 import type {
   ActiveRemoteSession, PendingRemotePairing, RemoteAccessServiceOptions,
   RemotePrivacySuspension,
@@ -96,6 +108,11 @@ export class RemoteAccessService {
   private reconnectAttempt = 0;
   private reconnectTimer: Timer | null = null;
   private registrationTimer: Timer | null = null;
+  private readonly relayRegistration: RemoteRelayRegistration;
+  private readonly peerCompatibility = new Map<string, Extract<
+    RelayServerMessage,
+    { type: "relay.peer-connected" }
+  >>();
   private sweepTimer: Timer | null = null;
   private privacyLocked: boolean;
   private privacySuspension: RemotePrivacySuspension | null;
@@ -103,6 +120,7 @@ export class RemoteAccessService {
   private storeError: string | null = null;
   private identityInitialization: Promise<void> | null = null;
   private readonly persistence: RemoteAccessPersistenceQueue;
+  private readonly setup: RemoteAccessSetupManager;
   private constructor(
     private readonly options: RemoteAccessServiceOptions,
     data: PersistedRemoteAccess | null,
@@ -129,8 +147,41 @@ export class RemoteAccessService {
         "The encrypted Remote Companion store could not be saved.",
       ),
     );
+    this.setup = new RemoteAccessSetupManager({
+      data: () => this.data,
+      initializeIdentity: async (relayUrl) =>
+        await this.initializeIdentity(relayUrl),
+      serialize: async (operation) => await this.serializeAuthorityMutation(operation),
+      persist: async () => await this.persist(),
+      persistAuthorityReduction: (mutate) => this.persistAuthorityReduction(mutate),
+      disableLiveAccess: () => this.disableLiveRemoteAccess(),
+      audit: (type, detail) => this.audit(type, null, detail),
+      now: () => this.now(),
+      emit: () => this.emitState(),
+    });
+    this.relayRegistration = new RemoteRelayRegistration({
+      data: () => this.requireData(),
+      endpointKeyPair: () => this.requireEndpointKeyPair(),
+      now: () => this.now(),
+      persist: async () => await this.persist(),
+      send: (message) => this.sendRelay(message),
+      reject: (message) => {
+        this.pendingConnectionMessage = message;
+        terminateRemoteSocket(this.socket);
+      },
+      online: (diagnostics) => {
+        this.clearRegistrationDeadline();
+        this.connection = "online";
+        this.connectionMessage = null;
+        this.setup.registered(diagnostics);
+        this.reconnectAttempt = 0;
+        this.emitState();
+      },
+    });
     this.sessionAdmissions = new RemoteSessionAdmissions({
       capacity: REMOTE_LIMITS.sessions,
+      authenticationCapacity: REMOTE_LIMITS.sessions
+        + REMOTE_LIMITS.sessionRejectionAuthentications,
       activeCount: () => this.sessions.size,
       hasActiveSession: (sessionId) => this.sessions.has(sessionId),
       hasUsedSession: (sessionId) =>
@@ -146,7 +197,25 @@ export class RemoteAccessService {
         ),
     });
     this.relayMessages = new RemoteRelayDispatcher({
-      registered: () => this.relayRegistered(),
+      hello: (message) => this.relayRegistration.begin(message),
+      challenge: (message) => {
+        try {
+          this.relayRegistration.prove(message, RELAY_HANDSHAKE_TIMEOUT_MS);
+        } catch {
+          this.pendingConnectionMessage = "The relay challenge could not be signed.";
+          terminateRemoteSocket(this.socket);
+        }
+      },
+      registered: (message) => {
+        void this.relayRegistration.accept(message).catch(() => {
+          this.pendingConnectionMessage = "The authenticated relay state could not be saved.";
+          terminateRemoteSocket(this.socket);
+        });
+      },
+      incompatible: (message) => this.relayRegistration.incompatible(message),
+      peerConnected: (message) => {
+        this.peerCompatibility.set(message.connectionId, message);
+      },
       error: (code) => this.relayError(code),
       frame: async (id, epoch, frame) => {
         if (!this.stopped) await this.handleFrame(id, epoch, frame);
@@ -156,7 +225,7 @@ export class RemoteAccessService {
       },
       disconnected: (id, epoch) => this.dropConnection(id, epoch),
       rejected: (id) => this.sendRelay({
-        protocolVersion: REMOTE_PROTOCOL_VERSION,
+        relayProtocolVersion: RELAY_PROTOCOL_VERSION,
         type: "relay.disconnect",
         connectionId: id,
       }),
@@ -205,6 +274,7 @@ export class RemoteAccessService {
       activeSessions: this.sessions.size,
       pendingPairings: this.pendingPairings.values(),
       invitation: this.invitation,
+      diagnostics: this.setup.current(),
     });
   }
 
@@ -212,10 +282,36 @@ export class RemoteAccessService {
     if (this.data?.enabled) this.connect();
   }
 
-  async setEnabled(enabled: boolean, relayUrl?: string): Promise<void> {
+  async testSetup(
+    relayUrl: string,
+    companionUrl: string,
+    setupMode: RemoteSetupMode,
+    resetEndpoint = false,
+  ): Promise<void> {
+    await this.setup.test(relayUrl, companionUrl, setupMode, resetEndpoint);
+  }
+
+  async setEnabled(
+    enabled: boolean,
+    relayUrl?: string,
+    setupMode?: RemoteSetupMode,
+    companionUrl?: string,
+  ): Promise<void> {
     const normalizedRelay = relayUrl === undefined
       ? undefined
       : validateRemoteRelayUrl(relayUrl);
+    const normalizedMode = setupMode ?? this.data?.setupMode
+      ?? "local-development";
+    const normalizedCompanion = companionUrl === undefined
+      ? this.data?.companionUrl ?? DEFAULT_REMOTE_COMPANION_URL
+      : validateRemoteCompanionUrl(companionUrl, normalizedMode);
+    this.setup.requireTested(
+      enabled,
+      effectiveSetupRelay(normalizedRelay, this.data),
+      normalizedCompanion,
+      normalizedMode,
+      setupMode !== undefined || companionUrl !== undefined,
+    );
     if (!enabled) {
       this.disableLiveRemoteAccess();
     }
@@ -246,6 +342,8 @@ export class RemoteAccessService {
         return;
       }
       if (normalizedRelay !== undefined) data.relayUrl = normalizedRelay;
+      data.setupMode = normalizedMode;
+      data.companionUrl = normalizedCompanion;
       if (data.enabled) {
         await this.persist();
         if (!this.socket) this.connect();
@@ -262,6 +360,9 @@ export class RemoteAccessService {
   async createInvitation(): Promise<RemotePairingInvitation> {
     const data = this.requireData();
     if (!data.enabled) throw new Error("Enable Remote Companion first.");
+    if (this.connection !== "online" || !data.relayBinding) {
+      throw new Error("The authenticated relay must be online before pairing.");
+    }
     if (this.pendingPairings.size >= REMOTE_LIMITS.pendingPairings) {
       throw new Error("Too many pairing requests are pending.");
     }
@@ -376,7 +477,14 @@ export class RemoteAccessService {
 
   async denyPairing(requestId: string): Promise<void> {
     const pending = this.pendingPairings.get(requestId);
-    if (!pending) return;
+    if (!pending) {
+      if (this.invitation?.invitationId !== requestId) return;
+      this.invitation = null;
+      this.audit("pairing.denied", null, "A pairing invitation was cancelled.");
+      await this.persist();
+      this.emitState();
+      return;
+    }
     this.pendingPairings.delete(requestId);
     this.audit("pairing.denied", pending.payload.deviceId, "A pairing request was denied.");
     await this.persist();
@@ -525,6 +633,7 @@ export class RemoteAccessService {
     }
     this.connection = "connecting";
     this.connectionMessage = null;
+    this.relayRegistration.reset();
     this.emitState();
     let socket: WebSocket;
     try {
@@ -546,13 +655,6 @@ export class RemoteAccessService {
         this.pendingConnectionMessage = "The relay did not accept the desktop.";
         terminateRemoteSocket(socket);
       }, RELAY_HANDSHAKE_TIMEOUT_MS);
-      this.sendRelay({
-        protocolVersion: REMOTE_PROTOCOL_VERSION,
-        type: "relay.register",
-        endpointId: data.endpointId,
-        role: "desktop",
-        relayVersion: REMOTE_RELAY_VERSION,
-      });
     });
     socket.on("message", (raw, isBinary) => {
       if (this.socket !== socket) return;
@@ -572,6 +674,8 @@ export class RemoteAccessService {
       this.connectionMessage = this.privacySuspensionMessage()
         ?? closedMessage ?? "The relay is offline.";
       this.relayMessages.reset();
+      this.relayRegistration.reset();
+      this.peerCompatibility.clear();
       this.dropAllSessions();
       this.scheduleReconnect();
       this.emitState();
@@ -583,17 +687,11 @@ export class RemoteAccessService {
       this.emitState();
     });
   }
-  private relayRegistered(): void {
-    this.clearRegistrationDeadline();
-    this.connection = "online";
-    this.connectionMessage = null;
-    this.reconnectAttempt = 0;
-    this.emitState();
-  }
   private relayError(
     code: Parameters<typeof remoteRelayErrorMessage>[0],
   ): void {
     this.connectionMessage = remoteRelayErrorMessage(code);
+    this.setup.relayError(code, this.connectionMessage);
     if (code === "capacity" && this.connection === "connecting") {
       terminateRemoteSocket(this.socket);
     }
@@ -604,6 +702,10 @@ export class RemoteAccessService {
     epoch: RemoteConnectionEpoch,
     frame: RemoteCipherFrame,
   ): Promise<void> {
+    if (!this.peerIsCompatible(connectionId, epoch)) {
+      this.relayMessages.invalidate(connectionId, epoch);
+      return;
+    }
     if (frame.kind === "pair.request") {
       return await this.handlePairingRequest(connectionId, epoch, frame);
     }
@@ -671,162 +773,49 @@ export class RemoteAccessService {
     epoch: RemoteConnectionEpoch,
     frame: Extract<RemoteCipherFrame, { kind: "session.open" }>,
   ): Promise<void> {
-    const data = this.requireData();
-    const admission = this.sessionAdmissions.reserve(
+    await openRemoteSession({
+      data: this.requireData(),
+      admissions: this.sessionAdmissions,
       connectionId,
       epoch,
-      frame.sessionId,
-    );
-    if (!admission) return;
-    try {
-      const hostKeys = this.requireHostKeyPair();
-      for (const device of data.devices) {
-        if (this.sessionAdmissions.isDeviceBlocked(device.id)) continue;
-        const authenticated = await authenticateRemoteSession({
-          data,
-          device,
-          frame,
-          hostKeys,
-          now: () => this.now(),
-          current: () => this.sessionAdmissions.owns(admission)
-            && !this.sessionAdmissions.isDeviceBlocked(device.id),
-        });
-        if (authenticated === "stale") return;
-        if (!authenticated) continue;
-        if (
-          !data.devices.includes(device)
-          || this.sessionAdmissions.isDeviceBlocked(device.id)
-          || authenticated.subject.grantVersion !== device.grantVersion
-        ) return;
-        if (!this.sessionAdmissions.bindDevice(admission, device.id)) return;
-        if (authenticated.disposition !== "accepted") {
-          rememberRemoteSession(data, frame.sessionId, this.now().toISOString());
-          await this.persist();
-          if (!authenticatedRemoteRejectionIsCurrent({
-            data,
-            device,
-            authenticated,
-            now: this.now(),
-            current: () => this.sessionAdmissions.owns(admission)
-              && !this.sessionAdmissions.isDeviceBlocked(device.id),
-          })) return;
-          this.sendFrame(connectionId, authenticatedRemoteSessionDecisionFrame(frame.sessionId, authenticated)); return;
-        }
-        const now = this.now().getTime();
-        rememberRemoteSession(data, frame.sessionId, this.now().toISOString());
-        const session: ActiveRemoteSession = {
-          connectionId,
-          connectionEpoch: epoch,
-          sessionId: frame.sessionId,
-          device,
-          recipient: authenticated.recipient,
-          sender: authenticated.sender,
-          subject: authenticated.subject,
-          supportsAuthenticatedRejection:
-            authenticated.supportsAuthenticatedRejection,
-          createdAt: now,
-          lastActivityAt: now,
-          requestTimes: [],
-          promptTimes: [],
-          inFlight: new Map(),
-          postedPromptDeliveries: new Set(),
-          outboundTail: Promise.resolve(),
-          outboundAbandoned: false,
-        };
-        device.lastSeenAt = this.now().toISOString();
-        this.audit("session.connected", device.id, "A remote session connected.");
-        await this.persist();
-        if (
-          !this.sessionAdmissions.owns(admission)
-          || this.sessionAdmissions.isDeviceBlocked(device.id)
-        ) return;
-        this.sessions.set(frame.sessionId, session);
-        this.sessionByConnection.set(connectionId, frame.sessionId);
-        this.sendFrame(connectionId, {
-          protocolVersion: REMOTE_PROTOCOL_VERSION,
-          kind: "session.accept",
-          sessionId: frame.sessionId,
-          enc: authenticated.sender.enc,
-          ciphertext: authenticated.ciphertext,
-        });
-        this.emitState();
-        return;
-      }
-    } finally {
-      this.sessionAdmissions.release(admission);
-    }
+      frame,
+      hostKeys: this.requireHostKeyPair(),
+      sessions: this.sessions,
+      sessionByConnection: this.sessionByConnection,
+      now: () => this.now(),
+      persist: async () => await this.persist(),
+      sendFrame: (id, value) => this.sendFrame(id, value),
+      audit: (deviceId, detail) => {
+        this.audit("session.connected", deviceId, detail);
+      },
+      emit: () => this.emitState(),
+    });
   }
   private async handleSessionData(
     connectionId: string,
     epoch: RemoteConnectionEpoch,
     frame: Extract<RemoteCipherFrame, { kind: "session.data" }>,
   ): Promise<void> {
-    const session = this.sessions.get(frame.sessionId);
-    if (
-      !session
-      || session.connectionId !== connectionId
-      || session.connectionEpoch !== epoch
-    ) return;
-    if (!remoteDeviceIsCurrent(session.device, this.now().getTime())) {
-      this.closeSession(session, "expired");
-      return;
-    }
-    if (!takeRemoteRate(
-      session.requestTimes,
-      REMOTE_LIMITS.requestsPerMinute,
-      this.now().getTime(),
-    )) {
-      this.closeSession(session, "rate-limited");
-      return;
-    }
-    let request: RemoteRequest;
-    try {
-      request = remoteRequestSchema.parse(
-        await openSessionData(session.recipient, frame),
-      );
-    } catch {
-      this.closeSession(session, "replay");
-      return;
-    }
-    if (!this.relayMessages.owns(connectionId, epoch)) return;
-    session.lastActivityAt = this.now().getTime();
-    if (
-      request.type === "prompt.send"
-      && !takeRemoteRate(
-        session.promptTimes,
-        REMOTE_LIMITS.promptRequestsPerMinute,
-        this.now().getTime(),
-      )
-    ) {
-      await this.respond(session, {
-        type: "response",
-        requestId: request.requestId,
-        ok: false,
-        code: "rate-limited",
-        message: "Remote prompting is temporarily rate limited.",
-      });
-      return;
-    }
-    if (
-      session.inFlight.size >= REMOTE_LIMITS.inFlightRequestsPerSession
-      || session.inFlight.has(request.requestId)
-    ) {
-      await this.respond(session, {
-        type: "response",
-        requestId: request.requestId,
-        ok: false,
-        code: "busy",
-        message: "Too many remote requests are active.",
-      });
-      return;
-    }
-    session.inFlight.set(request.requestId, request);
-    void this.requests.dispatch(session, request).catch(() => {
-      this.relayMessages.invalidate(
-        session.connectionId,
-        session.connectionEpoch,
-      );
-      this.dropConnection(session.connectionId, session.connectionEpoch);
+    await handleRemoteSessionData({
+      sessions: this.sessions,
+      connectionId,
+      epoch,
+      frame,
+      now: () => this.now(),
+      owns: (id, connectionEpoch) =>
+        this.relayMessages.owns(id, connectionEpoch),
+      close: (session, reason) => this.closeSession(session, reason),
+      respond: async (session, response) =>
+        await this.respond(session, response),
+      dispatch: async (session, request) =>
+        await this.requests.dispatch(session, request),
+      drop: (session) => {
+        this.relayMessages.invalidate(
+          session.connectionId,
+          session.connectionEpoch,
+        );
+        this.dropConnection(session.connectionId, session.connectionEpoch);
+      },
     });
   }
   private async respond(
@@ -861,13 +850,28 @@ export class RemoteAccessService {
     return !this.sessionAdmissions.isDeviceBlocked(session.device.id)
       && remoteSessionRetainsAuthority(this.sessionAuthority(session));
   }
+  private peerIsCompatible(
+    connectionId: string,
+    epoch: RemoteConnectionEpoch,
+  ): boolean {
+    const peer = this.peerCompatibility.get(connectionId);
+    const hello = this.relayRegistration.hello();
+    return peer !== undefined
+      && hello !== null
+      && peer.endpointEpoch === epoch
+      && peer.relayIdentity === hello.relayIdentity
+      && peer.selected.relayProtocol === RELAY_PROTOCOL_VERSION
+      && peer.selected.remoteProtocol === REMOTE_PROTOCOL_VERSION
+      && peer.versions.relay === hello.relayVersion
+      && peer.versions.desktop === REMOTE_DESKTOP_COMPATIBILITY.version;
+  }
   private sendFrame(connectionId: string, frame: RemoteCipherFrame): void {
     if (
       !remoteCipherFrameSchema.safeParse(frame).success
       || encodedRemoteFrameBytes(frame) > REMOTE_LIMITS.encryptedFrameBytes
     ) return;
     this.sendRelay({
-      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId,
       frame,
@@ -945,6 +949,7 @@ export class RemoteAccessService {
   ): void {
     this.sessionAdmissions.drop(connectionId, epoch);
     this.sessionAuthenticationBudget.drop(connectionId);
+    this.peerCompatibility.delete(connectionId);
     for (const [requestId, pending] of this.pendingPairings) {
       if (
         pending.connectionId === connectionId
@@ -995,6 +1000,7 @@ export class RemoteAccessService {
       this.dropConnection(connectionId, undefined, persistChanges);
     }
     this.pendingPairings.clear();
+    this.peerCompatibility.clear();
   }
   private disconnect(
     reason: Extract<RemoteCipherFrame, { kind: "session.close" }>["reason"],
@@ -1078,6 +1084,9 @@ export class RemoteAccessService {
         this.closeSession(session, "expired");
       }
     }
+    if (this.data && pruneRemoteDeviceTombstones(this.data, this.now())) {
+      void this.persist().catch(() => undefined);
+    }
     this.emitState();
   }
   private takePairingAttempt(): boolean {
@@ -1141,6 +1150,13 @@ export class RemoteAccessService {
       throw new Error("The Remote Companion identity is unavailable.");
     }
     return this.hostKeyPair;
+  }
+  private requireEndpointKeyPair(): NonNullable<
+    PersistedRemoteAccess["endpointKeyPair"]
+  > {
+    const value = this.requireData().endpointKeyPair;
+    if (!value) throw new Error("The relay endpoint identity is unavailable.");
+    return value;
   }
   private persist(): Promise<void> {
     return this.persistence.save(this.requireData());

@@ -6,11 +6,15 @@ import {
 } from "./remote-grants";
 
 export const REMOTE_PROTOCOL_VERSION = 2 as const;
+export const RELAY_PROTOCOL_VERSION = 2 as const;
 export const REMOTE_BROWSER_VERSION = "0.2.0";
 export const REMOTE_RELAY_VERSION = "0.2.0";
+export const REMOTE_DESKTOP_VERSION = "0.2.0";
 export const REMOTE_AUTHENTICATED_REJECTION_CAPABILITY = "auth-reject-v1";
 export const REMOTE_BROWSER_SESSION_VERSION =
   `${REMOTE_BROWSER_VERSION}+${REMOTE_AUTHENTICATED_REJECTION_CAPABILITY}`;
+export const RELAY_PROTOCOL_RANGE = Object.freeze({ minimum: 2, maximum: 2 });
+export const REMOTE_PROTOCOL_RANGE = Object.freeze({ minimum: 2, maximum: 2 });
 
 export const REMOTE_LIMITS = Object.freeze({
   relayEnvelopeBytes: 132 * 1024,
@@ -25,6 +29,7 @@ export const REMOTE_LIMITS = Object.freeze({
   subagents: 64,
   devices: 16,
   sessions: 4,
+  sessionRejectionAuthentications: 8,
   connections: 8,
   pendingPairings: 1,
   queuedFramesPerConnection: 16,
@@ -48,6 +53,52 @@ const entityId = z.string().min(1).max(200);
 const boundedBase64Url = (maximum: number) =>
   z.string().min(1).max(maximum).regex(/^[A-Za-z0-9_-]+$/u);
 const routingId = boundedBase64Url(64);
+const componentVersion = z.string().trim().min(1).max(40).regex(
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u,
+);
+export const remoteProtocolRangeSchema = z.object({
+  minimum: z.number().int().positive(),
+  maximum: z.number().int().positive(),
+}).strict().refine(({ minimum, maximum }) => maximum >= minimum);
+export type RemoteProtocolRange = z.infer<typeof remoteProtocolRangeSchema>;
+
+const componentCompatibilitySchema = <Kind extends "browser" | "desktop" | "relay">(
+  kind: Kind,
+) => z.object({
+  kind: z.literal(kind),
+  version: componentVersion,
+  relayProtocol: remoteProtocolRangeSchema,
+  remoteProtocol: remoteProtocolRangeSchema,
+}).strict();
+
+export const remoteBrowserCompatibilitySchema =
+  componentCompatibilitySchema("browser");
+export const remoteDesktopCompatibilitySchema =
+  componentCompatibilitySchema("desktop");
+export const remoteRelayCompatibilitySchema =
+  componentCompatibilitySchema("relay");
+export type RemoteBrowserCompatibility = z.infer<
+  typeof remoteBrowserCompatibilitySchema
+>;
+export type RemoteDesktopCompatibility = z.infer<
+  typeof remoteDesktopCompatibilitySchema
+>;
+export type RemoteRelayCompatibility = z.infer<
+  typeof remoteRelayCompatibilitySchema
+>;
+
+export const REMOTE_BROWSER_COMPATIBILITY: RemoteBrowserCompatibility = {
+  kind: "browser",
+  version: REMOTE_BROWSER_VERSION,
+  relayProtocol: RELAY_PROTOCOL_RANGE,
+  remoteProtocol: REMOTE_PROTOCOL_RANGE,
+};
+export const REMOTE_DESKTOP_COMPATIBILITY: RemoteDesktopCompatibility = {
+  kind: "desktop",
+  version: REMOTE_DESKTOP_VERSION,
+  relayProtocol: RELAY_PROTOCOL_RANGE,
+  remoteProtocol: REMOTE_PROTOCOL_RANGE,
+};
 // Base64url is ASCII, so this character bound is also an encoded-byte bound.
 // The sender and receiver separately enforce the complete serialized frame.
 const encryptedBody = boundedBase64Url(REMOTE_LIMITS.encryptedFrameBytes);
@@ -72,6 +123,8 @@ export const remoteConversationGrantsSchema = z
 export const remotePairingInvitationSchema = z.object({
   protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
   relayUrl: z.string().url().max(2_048),
+  relayIdentity: uuid,
+  desktop: remoteDesktopCompatibilitySchema,
   endpointId: routingId,
   hostId: uuid,
   hostPublicKey: boundedBase64Url(256),
@@ -241,28 +294,84 @@ export const remoteCipherFrameSchema = z.discriminatedUnion("kind", [
 ]);
 export type RemoteCipherFrame = z.infer<typeof remoteCipherFrameSchema>;
 
+const relaySelectedVersionsSchema = z.object({
+  relayProtocol: z.number().int().positive(),
+  remoteProtocol: z.number().int().positive(),
+}).strict();
+
+const relayEndpointChallengeSchema = z.object({
+  purpose: z.enum(["claim", "register"]),
+  relayIdentity: uuid,
+  endpointId: routingId,
+  endpointPublicKey: boundedBase64Url(256),
+  nonce: boundedBase64Url(64),
+  epoch: z.number().int().positive(),
+  expiresAt: z.number().int().positive(),
+}).strict();
+export type RelayEndpointChallenge = z.infer<
+  typeof relayEndpointChallengeSchema
+>;
+
+const relayGuidanceSchema = z.object({
+  action: z.enum(["upgrade", "downgrade"]),
+  component: z.enum(["browser", "desktop", "relay"]),
+  requiredProtocol: remoteProtocolRangeSchema,
+}).strict();
+
+export const relayIncompatibilitySchema = z.object({
+  relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
+  type: z.literal("relay.incompatible"),
+  axis: z.enum(["relay-protocol", "remote-protocol"]),
+  reason: z.enum([
+    "client-too-old",
+    "client-too-new",
+    "relay-too-old",
+    "relay-too-new",
+  ]),
+  component: z.enum(["browser", "desktop", "relay"]),
+  received: remoteProtocolRangeSchema,
+  supported: remoteProtocolRangeSchema,
+  guidance: z.array(relayGuidanceSchema).max(3),
+}).strict();
+export type RelayIncompatibility = z.infer<typeof relayIncompatibilitySchema>;
+
 export const relayClientMessageSchema = z.discriminatedUnion("type", [
   z.object({
-    protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
-    type: z.literal("relay.register"),
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
+    type: z.literal("relay.claim.begin"),
     endpointId: routingId,
-    role: z.literal("desktop"),
-    relayVersion: z.string().trim().min(1).max(40),
+    endpointPublicKey: boundedBase64Url(256),
+    desktop: remoteDesktopCompatibilitySchema,
   }).strict(),
   z.object({
-    protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
+    type: z.literal("relay.register.begin"),
+    endpointId: routingId,
+    desktop: remoteDesktopCompatibilitySchema,
+  }).strict(),
+  relayEndpointChallengeSchema.extend({
+    type: z.literal("relay.register.proof"),
+    signature: boundedBase64Url(128),
+  }).strict(),
+  z.object({
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
     type: z.literal("relay.connect"),
     endpointId: routingId,
-    browserVersion: z.string().trim().min(1).max(40),
+    browser: remoteBrowserCompatibilitySchema,
   }).strict(),
   z.object({
-    protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
+    type: z.literal("relay.origin.probe"),
+    browser: remoteBrowserCompatibilitySchema,
+  }).strict(),
+  z.object({
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
     type: z.literal("relay.frame"),
     connectionId: uuid,
     frame: remoteCipherFrameSchema,
   }).strict(),
   z.object({
-    protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
     type: z.literal("relay.disconnect"),
     connectionId: uuid,
   }).strict(),
@@ -271,42 +380,97 @@ export type RelayClientMessage = z.infer<typeof relayClientMessageSchema>;
 
 export const relayServerMessageSchema = z.discriminatedUnion("type", [
   z.object({
-    protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
-    type: z.literal("relay.registered"),
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
+    type: z.literal("relay.hello"),
+    relayVersion: componentVersion,
+    relayIdentity: uuid,
+    relayProtocol: remoteProtocolRangeSchema,
+    remoteProtocol: remoteProtocolRangeSchema,
+    endpointAuthentication: z.enum(["required", "migration"]),
+    persistence: z.enum(["durable", "ephemeral"]),
   }).strict(),
   z.object({
-    protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
+    type: z.literal("relay.register.challenge"),
+    relayProtocol: remoteProtocolRangeSchema,
+    remoteProtocol: remoteProtocolRangeSchema,
+    ...relayEndpointChallengeSchema.shape,
+  }).strict(),
+  z.object({
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
+    type: z.literal("relay.registered"),
+    ownership: z.enum(["claimed", "verified", "taken-over"]),
+    endpointEpoch: z.number().int().positive(),
+    lastConnectedAt: timestamp.nullable(),
+    selected: relaySelectedVersionsSchema,
+    versions: z.object({
+      relay: componentVersion,
+      desktop: componentVersion,
+    }).strict(),
+  }).strict(),
+  z.object({
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
+    type: z.literal("relay.origin.accepted"),
+    relayVersion: componentVersion,
+    relayProtocol: remoteProtocolRangeSchema,
+    remoteProtocol: remoteProtocolRangeSchema,
+  }).strict(),
+  z.object({
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
     type: z.literal("relay.connected"),
     connectionId: uuid,
+    endpointEpoch: z.number().int().positive(),
+    relayIdentity: uuid,
+    selected: relaySelectedVersionsSchema,
+    versions: z.object({
+      relay: componentVersion,
+      desktop: componentVersion,
+      browser: componentVersion,
+    }).strict(),
   }).strict(),
   z.object({
-    protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
     type: z.literal("relay.peer-connected"),
     connectionId: uuid,
+    endpointEpoch: z.number().int().positive(),
+    relayIdentity: uuid,
+    selected: relaySelectedVersionsSchema,
+    versions: z.object({
+      relay: componentVersion,
+      desktop: componentVersion,
+      browser: componentVersion,
+    }).strict(),
   }).strict(),
   z.object({
-    protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
     type: z.literal("relay.frame"),
     connectionId: uuid,
+    endpointEpoch: z.number().int().positive(),
     frame: remoteCipherFrameSchema,
   }).strict(),
   z.object({
-    protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
     type: z.literal("relay.peer-disconnected"),
     connectionId: uuid,
+    endpointEpoch: z.number().int().positive(),
   }).strict(),
   z.object({
-    protocolVersion: z.literal(REMOTE_PROTOCOL_VERSION),
+    relayProtocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
     type: z.literal("relay.error"),
     code: z.enum([
       "invalid-message",
-      "not-registered",
       "desktop-offline",
       "connection-missing",
       "capacity",
       "rate-limited",
+      "challenge-expired",
+      "endpoint-missing",
+      "endpoint-owned",
+      "proof-invalid",
+      "storage-unavailable",
     ]),
   }).strict(),
+  relayIncompatibilitySchema,
 ]);
 export type RelayServerMessage = z.infer<typeof relayServerMessageSchema>;
 
@@ -512,10 +676,49 @@ export interface RemoteAuditEvent {
   createdAt: string;
 }
 
+export type RemoteSetupMode = "local-development" | "self-hosted";
+
+export interface RemoteSetupDiagnostics {
+  status: "untested" | "testing" | "passed" | "failed";
+  testedAt: string | null;
+  transport: "loopback-development" | "wss" | null;
+  tls: "not-applicable" | "verified" | "failed" | null;
+  originPolicy: "accepted" | "rejected" | "unknown";
+  relayVersion: string | null;
+  browserVersion: string | null;
+  desktopVersion: string;
+  relayProtocol: number | null;
+  remoteProtocol: number | null;
+  endpointAuthentication: "required" | "migration" | null;
+  persistence: "durable" | "ephemeral" | null;
+  endpointOwnership:
+    | "unclaimed"
+    | "verified"
+    | "missing"
+    | "owned-by-another-key";
+  endpointEpoch: number | null;
+  lastConnectedAt: string | null;
+  retryClass: "none" | "automatic" | "manual";
+  failureClass:
+    | "none"
+    | "configuration"
+    | "network"
+    | "tls-certificate"
+    | "origin-policy"
+    | "browser-headers"
+    | "compatibility"
+    | "endpoint-authentication"
+    | "relay-storage";
+  message: string | null;
+}
+
 export interface RemoteAccessState {
   available: boolean;
   enabled: boolean;
   relayUrl: string;
+  setupMode: RemoteSetupMode;
+  companionUrl: string;
+  diagnostics: RemoteSetupDiagnostics;
   connection:
     | "disabled"
     | "connecting"

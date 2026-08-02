@@ -144,6 +144,22 @@ textarea {
   margin-inline: auto;
 }
 
+.pairing-advanced {
+  margin-block: 0.9rem;
+  padding: 0.7rem;
+  border: 1px solid #384039;
+  border-radius: 0.55rem;
+}
+
+.pairing-advanced summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.pairing-advanced label {
+  margin-top: 0.75rem;
+}
+
 .pairing-code {
   margin-top: 1rem;
   font: 700 2rem ui-monospace, monospace;
@@ -211,11 +227,42 @@ form {
 }
 
 @media (max-width: 720px) {
+  main {
+    padding: 0.65rem;
+  }
+
   header {
     display: block;
+    padding-bottom: 0.8rem;
   }
 
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .card,
+  nav,
+  .conversation {
+    padding: 0.8rem;
+    border-radius: 0.6rem;
+  }
+
+  button {
+    min-height: 44px;
+  }
+
+  button + button {
+    margin-left: 0;
+    margin-top: 0.5rem;
+  }
+
+  .pair button,
+  form button,
+  header + .card button {
+    width: 100%;
+  }
+
+  .transcript {
+    max-height: none;
   }
 }

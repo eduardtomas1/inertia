@@ -4,7 +4,9 @@ import {
   type Page,
 } from "@playwright/test";
 import { createServer, type Server } from "node:http";
-import { resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { once } from "node:events";
 
 import { WebSocket } from "ws";
@@ -26,6 +28,7 @@ import {
   sealSessionHandshake,
 } from "../../src/shared/remote-crypto";
 import {
+  RELAY_PROTOCOL_VERSION,
   remoteCipherFrameSchema,
   remoteRequestSchema,
   type RemoteRequest,
@@ -39,6 +42,7 @@ import {
   type SeededBrowserProfile,
 } from "./support/remote-browser-fixtures";
 import { launchRemoteBrowser } from "./support/remote-browser-electron-fixture";
+import { registerRelayDesktop } from "./support/remote-relay-v2";
 
 let staticServer: Server;
 let staticUrl: string;
@@ -46,8 +50,17 @@ let relay: ReferenceRelay;
 let relayUrl: string;
 let desktop: WebSocket;
 let navigationSequence = 0;
+let relayStateDirectory: string;
+let endpointKeyPair: Awaited<
+  ReturnType<typeof registerRelayDesktop>
+>["endpointKeyPair"] | undefined;
+let relayIdentity: string | undefined;
 
 test.beforeAll(async () => {
+  relayStateDirectory = await mkdtemp(join(
+    tmpdir(),
+    "inertia-remote-e2e-relay-",
+  ));
   const root = resolve("remote/browser/dist");
   staticServer = createServer((request, response) => {
     void serveBrowserAsset(root, request, response);
@@ -64,6 +77,8 @@ test.beforeAll(async () => {
     host: "127.0.0.1",
     port: 0,
     allowedOrigins: [staticUrl],
+    stateDirectory: relayStateDirectory,
+    initializeState: true,
   });
   const relayAddress = relay.address();
   if (!relayAddress) throw new Error("Relay did not bind.");
@@ -73,6 +88,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   desktop?.terminate();
   await relay.close();
+  await rm(relayStateDirectory, { recursive: true, force: true });
   await new Promise<void>((resolveClose) =>
     staticServer.close(() => resolveClose()));
 });
@@ -120,6 +136,7 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
       hostId,
       deviceId,
       endpointId,
+      relayIdentity: relayIdentity!,
       scopes: ["view", "prompt"],
     });
     const initialSession = acceptSeededSession(
@@ -281,6 +298,7 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
       host: "127.0.0.1",
       port: restartPort,
       allowedOrigins: [staticUrl],
+      stateDirectory: relayStateDirectory,
     });
     relayUrl = `ws://127.0.0.1:${restartPort}/remote`;
     desktop = await registerDesktop(endpointId, relayUrl);
@@ -329,7 +347,7 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
     });
 
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: session.connectionId,
       frame: {
@@ -363,7 +381,7 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
       && "kind" in message.frame
       && message.frame.kind === "session.open");
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: session.connectionId,
       frame: {
@@ -402,7 +420,7 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
       && "kind" in message.frame
       && message.frame.kind === "session.open");
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: session.connectionId,
       frame: await sealSessionData(session.sender, session.sessionId, {
@@ -413,7 +431,7 @@ test("recovers truthful state across browser, desktop, and relay lifecycles", as
     await expect(page.getByText("Lifecycle project")).toHaveCount(0);
     await expect(page.locator("[data-remote-key]")).toHaveCount(0);
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: session.connectionId,
       frame: {
@@ -464,18 +482,17 @@ async function registerDesktop(
   endpointId: string,
   url: string,
 ): Promise<WebSocket> {
-  const socket = new WebSocket(url);
-  await once(socket, "open");
-  socket.send(JSON.stringify({
-    protocolVersion: 2,
-    type: "relay.register",
+  const registration = await registerRelayDesktop(
     endpointId,
-    role: "desktop",
-    relayVersion: "0.1.0",
-  }));
-  await nextSocketMessage(socket, (message) =>
-    message.type === "relay.registered");
-  return socket;
+    url,
+    endpointKeyPair,
+  );
+  endpointKeyPair = registration.endpointKeyPair;
+  if (relayIdentity && registration.relayIdentity !== relayIdentity) {
+    throw new Error("Relay identity changed across restart.");
+  }
+  relayIdentity = registration.relayIdentity;
+  return registration.socket;
 }
 
 async function acceptSeededSession(
@@ -538,7 +555,7 @@ async function acceptSeededSession(
     };
     const firstRequest = nextSessionRequestOrOpening(session);
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: session.connectionId,
       frame: {
@@ -612,7 +629,7 @@ async function rejectSeededOpening(
     await importRemotePublicKey(profile.publicKey),
   );
   desktop.send(JSON.stringify({
-    protocolVersion: 2,
+    relayProtocolVersion: RELAY_PROTOCOL_VERSION,
     type: "relay.frame",
     connectionId: opening.connectionId,
     frame: {
@@ -729,7 +746,7 @@ async function sendSessionResponse(
   result: unknown,
 ): Promise<void> {
   desktop.send(JSON.stringify({
-    protocolVersion: 2,
+    relayProtocolVersion: RELAY_PROTOCOL_VERSION,
     type: "relay.frame",
     connectionId: session.connectionId,
     frame: await sealSessionData(session.sender, session.sessionId, {

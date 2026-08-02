@@ -2,16 +2,37 @@ import { describe, expect, it, vi } from "vitest";
 
 import { RemoteRelayDispatcher } from "../../src/main/remote-access-relay-dispatcher";
 import {
+  RELAY_PROTOCOL_VERSION,
+  REMOTE_BROWSER_VERSION,
+  REMOTE_DESKTOP_VERSION,
   REMOTE_LIMITS,
   REMOTE_PROTOCOL_VERSION,
+  REMOTE_RELAY_VERSION,
   type RemoteCipherFrame,
 } from "../../src/shared/remote-protocol";
 
 function message(value: object): Buffer {
   return Buffer.from(JSON.stringify({
-    protocolVersion: REMOTE_PROTOCOL_VERSION,
+    relayProtocolVersion: RELAY_PROTOCOL_VERSION,
     ...value,
   }));
+}
+
+const ENDPOINT_EPOCH = 7;
+
+function peerConnected(connectionId: string): object {
+  return {
+    type: "relay.peer-connected",
+    connectionId,
+    endpointEpoch: ENDPOINT_EPOCH,
+    relayIdentity: crypto.randomUUID(),
+    selected: { relayProtocol: 2, remoteProtocol: 2 },
+    versions: {
+      relay: REMOTE_RELAY_VERSION,
+      desktop: REMOTE_DESKTOP_VERSION,
+      browser: REMOTE_BROWSER_VERSION,
+    },
+  };
 }
 
 function dataFrame(
@@ -57,16 +78,18 @@ describe("Remote Companion relay frame ownership", () => {
       rejected: vi.fn(),
       oversized: vi.fn(),
     });
-    dispatcher.receive(message({ type: "relay.peer-connected", connectionId }));
+    dispatcher.receive(message(peerConnected(connectionId)));
     dispatcher.receive(message({
       type: "relay.frame",
       connectionId,
+      endpointEpoch: ENDPOINT_EPOCH,
       frame: dataFrame(sessionId, 0),
     }));
     await waitFor(() => sequences.length === 1);
     dispatcher.receive(message({
       type: "relay.frame",
       connectionId,
+      endpointEpoch: ENDPOINT_EPOCH,
       frame: dataFrame(sessionId, 1),
     }));
     expect(sequences).toEqual([0]);
@@ -74,6 +97,7 @@ describe("Remote Companion relay frame ownership", () => {
     dispatcher.receive(message({
       type: "relay.peer-disconnected",
       connectionId,
+      endpointEpoch: ENDPOINT_EPOCH,
     }));
     expect(invalidated).toHaveBeenCalledTimes(1);
     release();
@@ -99,7 +123,7 @@ describe("Remote Companion relay frame ownership", () => {
       rejected: vi.fn(),
       oversized: vi.fn(),
     });
-    dispatcher.receive(message({ type: "relay.peer-connected", connectionId }));
+    dispatcher.receive(message(peerConnected(connectionId)));
     for (
       let sequence = 0;
       sequence <= REMOTE_LIMITS.queuedFramesPerConnection;
@@ -108,6 +132,7 @@ describe("Remote Companion relay frame ownership", () => {
       dispatcher.receive(message({
         type: "relay.frame",
         connectionId,
+        endpointEpoch: ENDPOINT_EPOCH,
         frame: dataFrame(sessionId, sequence),
       }));
     }

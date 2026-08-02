@@ -7,12 +7,32 @@ import type {
   RemoteSafeShell,
   RemoteSafeSubagent,
 } from "../../../src/shared/remote-protocol";
+import { parseRemotePairingFragment } from "../../../src/shared/remote-pairing-link";
 import type { RemoteConnectionSnapshot } from "./connection-supervisor";
 import { RemoteCompanionClient } from "./remote-client";
 import { appendRemoteText, button } from "./safe-dom";
 
 const root = document.querySelector<HTMLElement>("#app")!;
 if (!root) throw new Error("Remote Companion root is missing.");
+
+const initialPairingFragment = window.location.hash;
+let initialInvitationText = "";
+let pairingLinkMessage = "";
+if (initialPairingFragment.startsWith("#pair=")) {
+  // Clear the secret-bearing fragment before parsing or rendering it. Fragments
+  // are not sent in HTTP requests; removing it also prevents later referrers,
+  // screenshots, and copied address bars from retaining invitation material.
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  try {
+    const invitation = parseRemotePairingFragment(initialPairingFragment);
+    initialInvitationText = invitation ? JSON.stringify(invitation) : "";
+    pairingLinkMessage = invitation
+      ? "Secure invitation loaded from this device-only link. Name the browser, then pair."
+      : "";
+  } catch {
+    pairingLinkMessage = "This pairing link is invalid or expired. Create a new invitation on the desktop.";
+  }
+}
 
 let shell: RemoteSafeShell | null = null;
 let detail: RemoteSafeConversationDetail | null = null;
@@ -193,9 +213,12 @@ function createPairingView(): {
   section.append(heading);
   appendRemoteText(
     section,
-    "On the desktop, enable Remote Companion and create a five-minute invitation. Compare the six-digit code before approving.",
+    "Keep the desktop nearby. Pairing is supervised: compare the six-digit code, choose exact conversation grants on the desktop, then approve there.",
     "muted",
   );
+  const linkStatus = appendRemoteText(section, pairingLinkMessage, "status");
+  linkStatus.setAttribute("role", "status");
+  linkStatus.hidden = pairingLinkMessage.length === 0;
   const nameLabel = document.createElement("label");
   nameLabel.textContent = "Browser name";
   const name = document.createElement("input");
@@ -205,19 +228,32 @@ function createPairingView(): {
     ? "Mobile browser"
     : "Web browser";
   nameLabel.append(name);
+  const advanced = document.createElement("details");
+  advanced.className = "pairing-advanced";
+  advanced.open = initialInvitationText.length === 0;
+  const advancedSummary = document.createElement("summary");
+  advancedSummary.textContent = "Advanced: paste invitation JSON";
   const invitationLabel = document.createElement("label");
-  invitationLabel.textContent = "Invitation";
+  invitationLabel.textContent = "Raw invitation JSON";
   const invitation = document.createElement("textarea");
   invitation.id = "remote-invitation-input";
+  invitation.setAttribute("aria-label", "Invitation");
   invitation.rows = 8;
   invitation.spellcheck = false;
+  invitation.autocomplete = "off";
+  invitation.value = initialInvitationText;
   invitationLabel.append(invitation);
+  advanced.append(advancedSummary, invitationLabel);
   const submit = button("Pair", () => {
     if (pairing || !browserOnline) return;
     pairing = true;
     render();
     void client.pair(invitation.value, name.value).then(() => {
       invitation.value = "";
+      initialInvitationText = "";
+      pairingLinkMessage = "";
+      linkStatus.textContent = "";
+      linkStatus.hidden = true;
       pairing = false;
       pairingCode = null;
       render();
@@ -229,7 +265,7 @@ function createPairingView(): {
   });
   const code = appendRemoteText(section, "", "pairing-code");
   code.setAttribute("role", "status");
-  section.append(nameLabel, invitationLabel, submit);
+  section.append(nameLabel, advanced, submit);
   return { root: section, name, invitation, submit, code };
 }
 

@@ -24,6 +24,8 @@ import {
   type RemoteSerializedKeyPair,
 } from "../../src/shared/remote-crypto";
 import {
+  RELAY_PROTOCOL_VERSION,
+  REMOTE_BROWSER_COMPATIBILITY,
   REMOTE_BROWSER_SESSION_VERSION,
   REMOTE_LIMITS,
   REMOTE_PROTOCOL_VERSION,
@@ -39,6 +41,7 @@ import {
   type RemoteSessionAcceptPayload,
 } from "../../src/shared/remote-protocol";
 import { REMOTE_MAX_BUFFERED_BYTES } from "../../src/main/remote-access-lifecycle";
+import { rememberRemoteDeviceTombstone } from "../../src/main/remote-access-devices";
 import { RemoteAccessService } from "../../src/main/remote-access-service";
 import type { RemoteAccessServiceOptions } from "../../src/main/remote-access-service-types";
 import {
@@ -79,6 +82,7 @@ vi.mock("../../src/shared/remote-crypto", async (importOriginal) => {
 const relays: ReferenceRelay[] = [];
 const sockets: WebSocket[] = [];
 const directories: string[] = [];
+const TEST_BROWSER_ORIGIN = "http://127.0.0.1:4173";
 
 afterEach(async () => {
   remoteCryptoGate.afterPairingOpen = null;
@@ -126,7 +130,11 @@ function encryptedStore() {
 }
 
 async function relay() {
-  const value = await createReferenceRelay({ host: "127.0.0.1", port: 0 });
+  const value = await createReferenceRelay({
+    host: "127.0.0.1",
+    port: 0,
+    allowedOrigins: [TEST_BROWSER_ORIGIN],
+  });
   relays.push(value);
   const address = value.address();
   if (!address) throw new Error("Relay did not bind.");
@@ -137,15 +145,17 @@ async function browserTunnel(
   relayUrl: string,
   endpointId: string,
 ): Promise<{ socket: WebSocket; connectionId: string }> {
-  const socket = new WebSocket(relayUrl);
+  const socket = new WebSocket(relayUrl, { origin: TEST_BROWSER_ORIGIN });
   sockets.push(socket);
+  const hello = nextMessage(socket);
   await once(socket, "open");
+  expect(await hello).toMatchObject({ type: "relay.hello" });
   const response = nextMessage(socket);
   socket.send(JSON.stringify({
-    protocolVersion: 2,
+    relayProtocolVersion: RELAY_PROTOCOL_VERSION,
     type: "relay.connect",
     endpointId,
-    browserVersion: "0.1.0",
+    browser: REMOTE_BROWSER_COMPATIBILITY,
   }));
   const connected = await response;
   if (connected.type !== "relay.connected") throw new Error("Browser did not connect.");
@@ -243,7 +253,7 @@ function sendFrame(
   frame: RemoteCipherFrame,
 ): void {
   socket.send(JSON.stringify({
-    protocolVersion: REMOTE_PROTOCOL_VERSION,
+    relayProtocolVersion: RELAY_PROTOCOL_VERSION,
     type: "relay.frame",
     connectionId,
     frame,
@@ -487,6 +497,13 @@ describe("Remote Companion outbound encrypted service", () => {
       const restartNow = disposition === "expired"
         ? new Date(Date.now() + 31 * 24 * 60 * 60 * 1_000)
         : new Date();
+      const durable = await pairing.store.load();
+      if (!durable) throw new Error("Missing paired-device vault fixture.");
+      const retired = durable.devices.find(({ id }) => id === pairing.deviceId);
+      if (!retired) throw new Error("Missing retired device fixture.");
+      rememberRemoteDeviceTombstone(durable, retired, restartNow);
+      durable.devices = durable.devices.filter(({ id }) => id !== pairing.deviceId);
+      await pairing.store.save(durable);
       const restarted = await RemoteAccessService.create({
         initialPrivacy: null,
         autoConnect: true,
@@ -711,62 +728,21 @@ describe("Remote Companion outbound encrypted service", () => {
     socket.bufferedAmount = REMOTE_MAX_BUFFERED_BYTES;
     await service.setEnabled(true, "ws://127.0.0.1:8787/remote");
     socket.emit("open");
+    socket.emit("message", Buffer.from(JSON.stringify({
+      relayProtocolVersion: 2,
+      type: "relay.hello",
+      relayVersion: "0.2.0",
+      relayIdentity: crypto.randomUUID(),
+      relayProtocol: { minimum: 2, maximum: 2 },
+      remoteProtocol: { minimum: 2, maximum: 2 },
+      endpointAuthentication: "required",
+      persistence: "durable",
+    })), false);
 
     expect(socket.sent).toHaveLength(0);
     expect(socket.terminated).toBe(true);
     expect(service.state().connectionMessage).toBe(
       "The relay stopped reading desktop traffic.",
-    );
-    await service.shutdown();
-  });
-
-  it("retries registration after a stale endpoint owner disconnects", async () => {
-    const relayUrl = await relay();
-    const store = encryptedStore();
-    const createdSockets: WebSocket[] = [];
-    const rejectedClosures: Array<Promise<unknown>> = [];
-    const createSocket = vi.fn((url: string) => {
-      const value = new WebSocket(url);
-      sockets.push(value);
-      createdSockets.push(value);
-      if (createdSockets.length > 1) {
-        rejectedClosures.push(once(value, "close"));
-      }
-      return value;
-    });
-    const service = await RemoteAccessService.create({
-      initialPrivacy: null,
-      store,
-      createSocket,
-      runtime: { remoteRequest: async () => {
-        throw new Error("unused");
-      } },
-    });
-    await service.setEnabled(true, relayUrl);
-    await waitFor(() => service.state().connection === "online");
-    await service.setEnabled(false);
-    const endpointId = (await store.load())!.endpointId;
-    const staleDesktop = new WebSocket(relayUrl);
-    sockets.push(staleDesktop);
-    await once(staleDesktop, "open");
-    staleDesktop.send(JSON.stringify({
-      protocolVersion: REMOTE_PROTOCOL_VERSION,
-      type: "relay.register",
-      endpointId,
-      role: "desktop",
-      relayVersion: "0.1.0",
-    }));
-    expect(await nextMessage(staleDesktop)).toMatchObject({
-      type: "relay.registered",
-    });
-
-    await service.setEnabled(true);
-    await rejectedClosures[0];
-    staleDesktop.terminate();
-    await waitFor(
-      () => createSocket.mock.calls.length >= 3
-        && service.state().connection === "online",
-      3_000,
     );
     await service.shutdown();
   });
@@ -902,7 +878,7 @@ describe("Remote Companion outbound encrypted service", () => {
     );
     await pairingOpened;
     tunnel.socket.send(JSON.stringify({
-      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.disconnect",
       connectionId: tunnel.connectionId,
     }));
@@ -1164,7 +1140,7 @@ describe("Remote Companion outbound encrypted service", () => {
     const excess = attempts.at(-1)!;
     sendFrame(excess.tunnel.socket, excess.tunnel.connectionId, excess.frame);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(recipientCalls).toHaveLength(REMOTE_LIMITS.sessions);
+    expect(recipientCalls).toHaveLength(REMOTE_LIMITS.sessions + 1);
     expect(paired.service.state().activeSessions).toBe(0);
 
     releaseSave();

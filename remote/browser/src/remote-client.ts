@@ -13,6 +13,8 @@ import {
   type RemoteSenderState,
 } from "../../../src/shared/remote-crypto";
 import {
+  RELAY_PROTOCOL_VERSION,
+  REMOTE_BROWSER_COMPATIBILITY,
   REMOTE_BROWSER_SESSION_VERSION,
   REMOTE_BROWSER_VERSION,
   REMOTE_LIMITS,
@@ -91,6 +93,7 @@ export class RemoteCompanionClient {
   private profile: SealedBrowserDeviceProfile | null = null;
   private socket: WebSocket | null = null;
   private connectionId: string | null = null;
+  private endpointEpoch: number | null = null;
   private sessionId: string | null = null;
   private sender: RemoteSenderState | null = null;
   private recipient: RemoteRecipientState | null = null;
@@ -211,11 +214,14 @@ export class RemoteCompanionClient {
         epoch,
         relayUrl,
         invitation.endpointId,
+        invitation.relayIdentity,
+        invitation.desktop.version,
       );
       if (!tunnel) return;
       pairingSocket = tunnel.socket;
       this.socket = tunnel.socket;
       this.connectionId = tunnel.connectionId;
+      this.endpointEpoch = tunnel.endpointEpoch;
       const code = await remotePairingComparisonCode(
         invitation.hostPublicKey,
         deviceKeys.publicKey,
@@ -245,6 +251,7 @@ export class RemoteCompanionClient {
           candidate.kind === "pair.response"
           && candidate.requestId === requestId,
         Math.max(1, Date.parse(invitation.expiresAt) - Date.now()),
+        tunnel.endpointEpoch,
       );
       if (!this.ownsAttempt(epoch)) return;
       if (responseFrame.kind !== "pair.response") {
@@ -277,6 +284,8 @@ export class RemoteCompanionClient {
         hostId: invitation.hostId,
         hostPublicKey: invitation.hostPublicKey,
         relayUrl,
+        relayIdentity: invitation.relayIdentity,
+        desktop: invitation.desktop,
         endpointId: invitation.endpointId,
         scopes: response.scopes,
         projectIds: response.projectIds,
@@ -289,6 +298,7 @@ export class RemoteCompanionClient {
       tunnel.socket.close(1000, "pairing complete");
       this.socket = null;
       this.connectionId = null;
+      this.endpointEpoch = null;
       await this.connect();
     } catch (error) {
       if (this.ownsAttempt(epoch)) throw error;
@@ -321,15 +331,24 @@ export class RemoteCompanionClient {
         "grant-expired",
       );
     }
+    if (!profile.relayIdentity || !profile.desktop) {
+      throw terminalProtocolFailure(
+        "This pairing predates endpoint-authenticated relay v2. Pair it again.",
+        "pairing-migration-required",
+      );
+    }
     try {
       const tunnel = await this.openOwnedTunnel(
         epoch,
         profile.relayUrl,
         profile.endpointId,
+        profile.relayIdentity,
+        profile.desktop.version,
       );
       if (!tunnel) return;
       this.socket = tunnel.socket;
       this.connectionId = tunnel.connectionId;
+      this.endpointEpoch = tunnel.endpointEpoch;
       const sessionId = crypto.randomUUID();
       let deviceKeys: {
         privateKey: CryptoKey;
@@ -384,6 +403,7 @@ export class RemoteCompanionClient {
             || candidate.kind === "session.close")
           && candidate.sessionId === sessionId,
         REMOTE_LIMITS.sessionHandshakeTtlMs,
+        tunnel.endpointEpoch,
       );
       if (!this.ownsAttempt(epoch)) return;
       if (acceptFrame.kind === "session.close") {
@@ -455,6 +475,7 @@ export class RemoteCompanionClient {
       );
       this.socket = tunnel.socket;
       this.connectionId = tunnel.connectionId;
+      this.endpointEpoch = tunnel.endpointEpoch;
       this.sessionId = sessionId;
       this.sender = sender;
       this.recipient = recipient;
@@ -712,6 +733,8 @@ export class RemoteCompanionClient {
     if (
       message.data.type !== "relay.frame"
       || message.data.connectionId !== this.connectionId
+      || (this.endpointEpoch !== null
+        && message.data.endpointEpoch !== this.endpointEpoch)
     ) return;
     const frame = message.data.frame;
     if (frame.kind === "session.close") {
@@ -783,12 +806,20 @@ export class RemoteCompanionClient {
     epoch: number,
     relayUrl: string,
     endpointId: string,
-  ): Promise<{ socket: WebSocket; connectionId: string } | null> {
+    relayIdentity: string,
+    desktopVersion: string,
+  ): Promise<{
+    socket: WebSocket;
+    connectionId: string;
+    endpointEpoch: number;
+  } | null> {
     let opening: WebSocket | null = null;
     try {
       const tunnel = await openTunnel(
         relayUrl,
         endpointId,
+        relayIdentity,
+        desktopVersion,
         (socket) => {
           opening = socket;
           this.openingSockets.add(socket);
@@ -942,6 +973,7 @@ export class RemoteCompanionClient {
     const socket = this.socket;
     this.socket = null;
     this.connectionId = null;
+    this.endpointEpoch = null;
     this.sessionId = null;
     this.sender = null;
     this.recipient = null;
@@ -963,31 +995,76 @@ export class RemoteCompanionClient {
 async function openTunnel(
   relayUrl: string,
   endpointId: string,
+  relayIdentity: string,
+  desktopVersion: string,
   onCreate?: (socket: WebSocket) => void,
-): Promise<{ socket: WebSocket; connectionId: string }> {
+): Promise<{
+  socket: WebSocket;
+  connectionId: string;
+  endpointEpoch: number;
+}> {
   const socket = new WebSocket(relayUrl);
   onCreate?.(socket);
   try {
     await waitForRemoteWebSocketOpen(socket);
+    const hello = await waitForRemoteRelayMessage(
+      socket,
+      (message) => message.type === "relay.hello",
+      REQUEST_TIMEOUT_MS,
+    );
+    if (
+      hello.type !== "relay.hello"
+      || hello.relayIdentity !== relayIdentity
+      || hello.endpointAuthentication !== "required"
+      || !rangeSupports(hello.relayProtocol, RELAY_PROTOCOL_VERSION)
+      || !rangeSupports(hello.remoteProtocol, REMOTE_PROTOCOL_VERSION)
+    ) {
+      throw terminalProtocolFailure(
+        "The invitation and relay are incompatible.",
+        "relay-incompatible",
+      );
+    }
     socket.send(JSON.stringify({
-      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.connect",
       endpointId,
-      browserVersion: REMOTE_BROWSER_VERSION,
+      browser: REMOTE_BROWSER_COMPATIBILITY,
     }));
     const response = await waitForRemoteRelayMessage(
       socket,
       (message) =>
-        message.type === "relay.connected" || message.type === "relay.error",
+        message.type === "relay.connected"
+        || message.type === "relay.error"
+        || message.type === "relay.incompatible",
       REQUEST_TIMEOUT_MS,
     );
-    if (response.type !== "relay.connected") {
-      if (response.type !== "relay.error") {
-        throw terminalProtocolFailure("The relay response was invalid.");
-      }
+    if (response.type === "relay.incompatible") {
+      throw failureForIncompatibility(response);
+    }
+    if (response.type === "relay.error") {
       throw failureForRelayError(response.code);
     }
-    return { socket, connectionId: response.connectionId };
+    if (response.type !== "relay.connected") {
+      throw terminalProtocolFailure("The relay response was invalid.");
+    }
+    if (
+      response.relayIdentity !== relayIdentity
+      || response.versions.relay !== hello.relayVersion
+      || response.versions.desktop !== desktopVersion
+      || response.versions.browser !== REMOTE_BROWSER_VERSION
+      || response.selected.relayProtocol !== RELAY_PROTOCOL_VERSION
+      || response.selected.remoteProtocol !== REMOTE_PROTOCOL_VERSION
+    ) {
+      throw terminalProtocolFailure(
+        "The relay selected an incompatible component set.",
+        "relay-incompatible",
+      );
+    }
+    return {
+      socket,
+      connectionId: response.connectionId,
+      endpointEpoch: response.endpointEpoch,
+    };
   } catch (error) {
     socket.close(1000, "connection failed");
     throw error;
@@ -1123,6 +1200,7 @@ async function waitForRelayFrame(
     >["frame"],
   ) => boolean,
   timeoutMs: number,
+  endpointEpoch?: number,
 ): Promise<Extract<
   ReturnType<typeof relayServerMessageSchema.parse>,
   { type: "relay.frame" }
@@ -1132,7 +1210,10 @@ async function waitForRelayFrame(
     (candidate) =>
       candidate.type === "relay.error"
       || candidate.type === "relay.peer-disconnected"
-      || (candidate.type === "relay.frame" && accept(candidate.frame)),
+      || (candidate.type === "relay.frame"
+        && (endpointEpoch === undefined
+          || candidate.endpointEpoch === endpointEpoch)
+        && accept(candidate.frame)),
     timeoutMs,
   );
   if (message.type === "relay.error") {
@@ -1151,7 +1232,7 @@ function sendFrame(
   frame: unknown,
 ): void {
   socket.send(JSON.stringify({
-    protocolVersion: REMOTE_PROTOCOL_VERSION,
+    relayProtocolVersion: RELAY_PROTOCOL_VERSION,
     type: "relay.frame",
     connectionId,
     frame,
@@ -1253,9 +1334,33 @@ function failureForRelayError(
 function hasUnsupportedProtocolVersion(value: unknown): boolean {
   return typeof value === "object"
     && value !== null
-    && "protocolVersion" in value
-    && typeof value.protocolVersion === "number"
-    && value.protocolVersion !== REMOTE_PROTOCOL_VERSION;
+    && "relayProtocolVersion" in value
+    && typeof value.relayProtocolVersion === "number"
+    && value.relayProtocolVersion !== RELAY_PROTOCOL_VERSION;
+}
+
+function rangeSupports(
+  range: { minimum: number; maximum: number },
+  version: number,
+): boolean {
+  return range.minimum <= version && range.maximum >= version;
+}
+
+function failureForIncompatibility(
+  incompatibility: Extract<
+    ReturnType<typeof relayServerMessageSchema.parse>,
+    { type: "relay.incompatible" }
+  >,
+): RemoteConnectionFailure {
+  const upgrade = incompatibility.guidance.find(
+    ({ action }) => action === "upgrade",
+  );
+  return terminalProtocolFailure(
+    upgrade
+      ? `Remote Companion versions are incompatible. Upgrade the ${upgrade.component}.`
+      : "Remote Companion versions are incompatible.",
+    "relay-incompatible",
+  );
 }
 
 export function parseRemoteInvitation(value: string): RemotePairingInvitation {

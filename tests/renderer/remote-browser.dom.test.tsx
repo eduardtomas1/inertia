@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { REMOTE_BROWSER_HEADERS } from "../../remote/browser/vite.config";
@@ -28,6 +28,16 @@ function pendingState(now: string): RemoteAccessState {
     available: true,
     enabled: true,
     relayUrl: "wss://relay.example/remote",
+    setupMode: "self-hosted",
+    companionUrl: "https://companion.example/",
+    diagnostics: {
+      status: "passed", testedAt: now, transport: "wss", tls: "verified",
+      originPolicy: "accepted", relayVersion: "0.2.0", browserVersion: "0.2.0",
+      desktopVersion: "0.2.0", relayProtocol: 2, remoteProtocol: 2,
+      endpointAuthentication: "required", persistence: "durable",
+      endpointOwnership: "verified", endpointEpoch: 1, lastConnectedAt: now,
+      retryClass: "none", failureClass: "none", message: null,
+    },
     connection: "online",
     connectionMessage: null,
     activeSessions: 0,
@@ -122,6 +132,119 @@ describe("Remote Companion browser output boundary", () => {
     })).toBeVisible();
     expect(getRemoteAccessState).toHaveBeenCalledTimes(2);
   });
+
+  it("uses normalized setup URLs returned by the setup test when enabling", async () => {
+    const state = pendingState(new Date().toISOString());
+    state.enabled = false;
+    state.connection = "disabled";
+    state.pendingPairings = [];
+    state.diagnostics = {
+      ...state.diagnostics,
+      status: "untested",
+    };
+    const testedState: RemoteAccessState = {
+      ...state,
+      relayUrl: "wss://relay.example/remote",
+      companionUrl: "https://companion.example/",
+      diagnostics: {
+        ...state.diagnostics,
+        status: "passed",
+      },
+    };
+    let publish = (_state: RemoteAccessState): void => undefined;
+    const setRemoteAccessEnabled = vi.fn(async (request: {
+      enabled: boolean;
+      testOnly?: boolean;
+    }) => {
+      const next = { ...testedState, enabled: request.enabled };
+      publish(next);
+      return next;
+    });
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRemoteAccessState: vi.fn(async () => state),
+        onRemoteAccessState: vi.fn((listener) => {
+          publish = listener;
+          return vi.fn();
+        }),
+        setRemoteAccessEnabled,
+      },
+    });
+    render(<RemoteAccessSettings projects={[]} conversations={[]} />);
+
+    const companionInput = await screen.findByPlaceholderText(
+      "https://companion.your-tailnet.ts.net/",
+    );
+    const relayInput = screen.getByPlaceholderText(
+      "wss://companion.your-tailnet.ts.net/remote",
+    );
+    fireEvent.change(companionInput, {
+      target: { value: " https://companion.example " },
+    });
+    fireEvent.change(relayInput, {
+      target: { value: " wss://relay.example/remote " },
+    });
+    screen.getByRole("button", { name: "Test setup" }).click();
+
+    const allow = screen.getByRole("switch", { name: "Allow remote access" });
+    await waitFor(() => expect(allow).toBeEnabled());
+    expect(companionInput).toHaveValue(testedState.companionUrl);
+    allow.click();
+    await waitFor(() => expect(setRemoteAccessEnabled).toHaveBeenLastCalledWith({
+      enabled: true,
+      relayUrl: testedState.relayUrl,
+      companionUrl: testedState.companionUrl,
+      setupMode: testedState.setupMode,
+    }));
+  });
+
+  it.each([
+    ["missing", "The relay lost this endpoint binding."],
+    ["owned-by-another-key", "The relay endpoint is owned by another signing key."],
+  ] as const)(
+    "offers endpoint reset for %s ownership recovery",
+    async (endpointOwnership, message) => {
+      const state = pendingState(new Date().toISOString());
+      state.connection = "error";
+      state.connectionMessage = message;
+      state.diagnostics = {
+        ...state.diagnostics,
+        status: "failed",
+        endpointOwnership,
+        retryClass: "manual",
+        failureClass: "endpoint-authentication",
+        message,
+      };
+      const setRemoteAccessEnabled = vi.fn(async () => ({
+        ...state,
+        enabled: false,
+      }));
+      Object.defineProperty(window, "inertia", {
+        configurable: true,
+        value: {
+          getRemoteAccessState: vi.fn(async () => state),
+          onRemoteAccessState: vi.fn(() => vi.fn()),
+          setRemoteAccessEnabled,
+        },
+      });
+
+      render(<RemoteAccessSettings projects={[]} conversations={[]} />);
+      const reset = await screen.findByRole("button", {
+        name: "Reset endpoint and re-test",
+      });
+      expect(reset).toBeEnabled();
+      reset.click();
+      await waitFor(() => expect(setRemoteAccessEnabled).toHaveBeenCalledWith({
+        enabled: false,
+        relayUrl: state.relayUrl,
+        companionUrl: state.companionUrl,
+        setupMode: state.setupMode,
+        testOnly: true,
+        resetEndpoint: true,
+      }));
+    },
+  );
 
   it("serializes invitation creation through the busy mutation boundary", async () => {
     const now = new Date().toISOString();
@@ -258,6 +381,13 @@ describe("Remote Companion browser output boundary", () => {
       hostId: crypto.randomUUID(),
       hostPublicKey: "safe_host_key",
       relayUrl: "wss://relay.example/remote",
+      relayIdentity: "189dd54b-655b-4f8a-ae52-d90531c829c9",
+      desktop: {
+        kind: "desktop",
+        version: "0.2.0",
+        relayProtocol: { minimum: 2, maximum: 2 },
+        remoteProtocol: { minimum: 2, maximum: 2 },
+      },
       endpointId: "safe_endpoint",
       scopes: ["view"],
       projectIds: [crypto.randomUUID()],

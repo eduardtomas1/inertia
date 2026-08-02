@@ -19,6 +19,7 @@ import {
 import type {
   PersistedRemoteAccess,
   PersistedRemoteDevice,
+  PersistedRemoteDeviceTombstone,
 } from "./remote-access-store";
 import type { PendingRemotePairing } from "./remote-access-service-types";
 
@@ -92,7 +93,62 @@ function pruneRetiredDevicesForAppend(
   const removed = new Set(
     retired.slice(0, removalCount).map(({ id }) => id),
   );
+  for (const device of retired.slice(0, removalCount)) {
+    rememberRemoteDeviceTombstone(data, device, now);
+  }
   data.devices = data.devices.filter(({ id }) => !removed.has(id));
+}
+
+const REMOTE_TOMBSTONE_RETENTION_MS = 8 * 24 * 60 * 60 * 1_000;
+const MAX_REMOTE_TOMBSTONES = 64;
+
+export function rememberRemoteDeviceTombstone(
+  data: PersistedRemoteAccess,
+  device: PersistedRemoteDevice,
+  now: Date,
+): PersistedRemoteDeviceTombstone {
+  const retiredAt = device.revokedAt ?? device.expiresAt;
+  const disposition: PersistedRemoteDeviceTombstone["disposition"] =
+    device.revokedAt === null ? "expired" : "revoked";
+  const tombstone: PersistedRemoteDeviceTombstone = {
+    deviceId: device.id,
+    publicKey: device.publicKey,
+    grantVersion: device.grantVersion,
+    disposition,
+    retiredAt,
+    retainUntil: new Date(Math.max(
+      now.getTime(),
+      Date.parse(retiredAt),
+    ) + REMOTE_TOMBSTONE_RETENTION_MS).toISOString(),
+  };
+  data.deviceTombstones = (data.deviceTombstones ?? []).filter(
+    ({ deviceId, retainUntil }) =>
+      deviceId !== device.id && Date.parse(retainUntil) > now.getTime(),
+  );
+  data.deviceTombstones.push(tombstone);
+  data.deviceTombstones.sort((left, right) =>
+    Date.parse(left.retiredAt) - Date.parse(right.retiredAt)
+    || left.deviceId.localeCompare(right.deviceId));
+  if (data.deviceTombstones.length > MAX_REMOTE_TOMBSTONES) {
+    data.deviceTombstones.splice(
+      0,
+      data.deviceTombstones.length - MAX_REMOTE_TOMBSTONES,
+    );
+  }
+  return tombstone;
+}
+
+export function pruneRemoteDeviceTombstones(
+  data: PersistedRemoteAccess,
+  now: Date,
+): boolean {
+  const current = data.deviceTombstones ?? [];
+  const retained = current.filter(
+    ({ retainUntil }) => Date.parse(retainUntil) > now.getTime(),
+  );
+  if (retained.length === current.length) return false;
+  data.deviceTombstones = retained;
+  return true;
 }
 
 function retiredAt(device: PersistedRemoteDevice): number {

@@ -23,6 +23,7 @@ import {
   openSessionData,
   sealSessionData,
 } from "../src/shared/remote-crypto";
+import { REMOTE_DESKTOP_COMPATIBILITY } from "../src/shared/remote-protocol";
 
 const HOST_ID = "5f7b2c1e-2a44-4a1f-9d4a-8c6f0d5b1a11";
 const DEVICE_ID = "09400fa3-32c0-4d8d-8d17-e8ea0a4f6937";
@@ -42,6 +43,8 @@ async function sealedProfile(
     hostId: HOST_ID,
     hostPublicKey: host.publicKey,
     relayUrl: "wss://relay.example/remote",
+    relayIdentity: "a669bb38-857d-4b8d-a0aa-3a592197d2c8",
+    desktop: REMOTE_DESKTOP_COMPATIBILITY,
     endpointId: "opaque_endpoint",
     scopes: ["view"],
     projectIds: ["project"],

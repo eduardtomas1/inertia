@@ -221,6 +221,13 @@ jobs:
             }
           }
 
+      - name: Build and verify versioned Remote Companion artifacts
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          npm run build:remote-artifacts
+          npm run verify:remote-artifacts
+
       - name: Stage exact release assets and checksums
         env:
           INERTIA_RELEASE_STAGE_DIR: ${{ runner.temp }}/inertia-release-stage
@@ -311,8 +318,8 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -d '' -t assets < <(find "$ASSET_DIRECTORY" -maxdepth 1 -type f -print0 | sort -z)
-          if [[ "${#assets[@]}" -ne 5 ]]; then
-            echo "Expected four installers/archives and SHA256SUMS.txt; found ${#assets[@]}." >&2
+          if [[ "${#assets[@]}" -ne 8 ]]; then
+            echo "Expected four desktop assets, three Remote Companion assets, and SHA256SUMS.txt; found ${#assets[@]}." >&2
             exit 1
           fi
 

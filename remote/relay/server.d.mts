@@ -1,5 +1,5 @@
-import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
 
 export interface ReferenceRelay {
   server: Server;
@@ -14,5 +14,14 @@ export function createReferenceRelay(options?: {
   maxConnectionsPerDesktop?: number;
   maxBufferedBytes?: number;
   allowedOrigins?: string[];
+  stateDirectory?: string;
+  initializeState?: boolean;
+  allowLegacyRegistration?: boolean;
+  maxEndpoints?: number;
+  maxChallenges?: number;
+  maxIpFailures?: number;
+  maxEndpointFailures?: number;
+  maxClaimsPerSourcePerMinute?: number;
+  maxRateKeys?: number;
   now?: () => number;
 }): Promise<ReferenceRelay>;

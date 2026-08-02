@@ -13,6 +13,7 @@ export interface RemoteSessionAdmission {
 
 interface RemoteSessionAdmissionAuthority {
   capacity: number;
+  authenticationCapacity: number;
   activeCount(): number;
   hasActiveSession(sessionId: string): boolean;
   hasUsedSession(sessionId: string): boolean;
@@ -28,6 +29,7 @@ export class RemoteSessionAdmissions {
   private readonly bySession = new Map<string, RemoteSessionAdmission>();
   private readonly byConnection = new Map<string, RemoteSessionAdmission>();
   private readonly byDevice = new Map<string, Set<RemoteSessionAdmission>>();
+  private readonly promoted = new Set<RemoteSessionAdmission>();
   private readonly blockedDevices = new Map<string, number>();
 
   constructor(private readonly authority: RemoteSessionAdmissionAuthority) {}
@@ -39,8 +41,7 @@ export class RemoteSessionAdmissions {
   ): RemoteSessionAdmission | null {
     if (
       !this.authority.ownsConnection(connectionId, connectionEpoch)
-      || this.authority.activeCount() + this.bySession.size
-        >= this.authority.capacity
+      || this.bySession.size >= this.authority.authenticationCapacity
       || this.authority.hasActiveSession(sessionId)
       || this.bySession.has(sessionId)
       || this.authority.hasUsedSession(sessionId)
@@ -79,7 +80,19 @@ export class RemoteSessionAdmissions {
     return true;
   }
 
+  promote(admission: RemoteSessionAdmission): boolean {
+    if (
+      !this.owns(admission)
+      || this.promoted.has(admission)
+      || this.authority.activeCount() + this.promoted.size
+        >= this.authority.capacity
+    ) return false;
+    this.promoted.add(admission);
+    return true;
+  }
+
   release(admission: RemoteSessionAdmission): void {
+    this.promoted.delete(admission);
     if (this.bySession.get(admission.sessionId) === admission) {
       this.bySession.delete(admission.sessionId);
     }
@@ -110,6 +123,7 @@ export class RemoteSessionAdmissions {
     this.bySession.clear();
     this.byConnection.clear();
     this.byDevice.clear();
+    this.promoted.clear();
   }
 
   dropDevice(deviceId: string): void {

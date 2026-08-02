@@ -9,7 +9,9 @@ import {
   UnsupportedDeviceKeyStorage,
 } from "./device-keys";
 import {
+  remoteDesktopCompatibilitySchema,
   remoteScopeSchema,
+  type RemoteDesktopCompatibility,
   type RemoteScope,
 } from "../../../src/shared/remote-protocol";
 
@@ -21,6 +23,8 @@ export interface BrowserDeviceProfile {
   hostId: string;
   hostPublicKey: string;
   relayUrl: string;
+  relayIdentity?: string;
+  desktop?: RemoteDesktopCompatibility;
   endpointId: string;
   scopes: RemoteScope[];
   projectIds: string[];
@@ -37,6 +41,8 @@ export interface SealedBrowserDeviceProfile {
   hostId: string;
   hostPublicKey: string;
   relayUrl: string;
+  relayIdentity?: string;
+  desktop?: RemoteDesktopCompatibility;
   endpointId: string;
   scopes: RemoteScope[];
   projectIds: string[];
@@ -110,6 +116,8 @@ export const browserDeviceProfileSchema = z.object({
     },
     "Relay URL must use WSS or loopback WS.",
   ),
+  relayIdentity: z.string().uuid(),
+  desktop: remoteDesktopCompatibilitySchema,
   endpointId: keyMaterial.max(64),
   scopes: z.array(remoteScopeSchema).min(1).max(2),
   projectIds: z.array(entityId).min(1).max(64)
@@ -238,6 +246,8 @@ async function migrateLegacyProfile(
     hostId: legacy.hostId,
     hostPublicKey: legacy.hostPublicKey,
     relayUrl: legacy.relayUrl,
+    relayIdentity: legacy.relayIdentity,
+    desktop: legacy.desktop,
     endpointId: legacy.endpointId,
     scopes: [...legacy.scopes],
     projectIds: [...legacy.projectIds],

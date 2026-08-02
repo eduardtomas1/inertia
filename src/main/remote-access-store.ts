@@ -23,6 +23,8 @@ import {
 const timestamp = z.string().datetime({ offset: true });
 const entityId = z.string().min(1).max(200);
 const keyMaterial = z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/u);
+const endpointKeyMaterial = z.string().min(1).max(512)
+  .regex(/^[A-Za-z0-9_-]+$/u);
 const AUTHORITY_REDUCTION_MARKER = "inertia-remote-authority-reduction-v1";
 
 const persistedDeviceSchema = z.object({
@@ -82,6 +84,15 @@ const usedSessionSchema = z.object({
   createdAt: timestamp,
 }).strict();
 
+const remoteDeviceTombstoneSchema = z.object({
+  deviceId: z.string().uuid(),
+  publicKey: keyMaterial,
+  grantVersion: z.number().int().positive(),
+  disposition: z.enum(["revoked", "expired"]),
+  retiredAt: timestamp,
+  retainUntil: timestamp,
+}).strict();
+
 const remoteStoreSchema = z.object({
   version: z.literal(1),
   enabled: z.boolean(),
@@ -92,7 +103,25 @@ const remoteStoreSchema = z.object({
     publicKey: keyMaterial,
     privateKey: keyMaterial,
   }).strict(),
+  endpointKeyPair: z.object({
+    publicKey: endpointKeyMaterial,
+    privateKey: endpointKeyMaterial,
+  }).strict().nullable().default(null),
+  setupMode: z.enum(["local-development", "self-hosted"]).default(
+    "local-development",
+  ),
+  companionUrl: z.string().url().max(2_048).default(
+    "http://127.0.0.1:4173/",
+  ),
+  endpointAuthMigratedAt: timestamp.nullable().default(null),
+  relayBinding: z.object({
+    relayIdentity: z.string().uuid(),
+    epoch: z.number().int().positive(),
+    lastConnectedAt: timestamp.nullable(),
+    connectedAt: timestamp.nullable().default(null),
+  }).strict().nullable().default(null),
   devices: z.array(persistedDeviceSchema).max(REMOTE_LIMITS.devices),
+  deviceTombstones: z.array(remoteDeviceTombstoneSchema).max(64).default([]),
   audit: z.array(auditEventSchema).max(REMOTE_LIMITS.auditEvents),
   receipts: z.array(deliveryReceiptSchema).max(REMOTE_LIMITS.deliveryReceipts),
   usedSessions: z.array(usedSessionSchema).max(REMOTE_LIMITS.deliveryReceipts)
@@ -130,10 +159,33 @@ export interface PersistedRemoteAccess {
   hostId: string;
   endpointId: string;
   keyPair: RemoteSerializedKeyPair;
+  endpointKeyPair?: {
+    publicKey: string;
+    privateKey: string;
+  } | null;
+  setupMode?: "local-development" | "self-hosted";
+  companionUrl?: string;
+  endpointAuthMigratedAt?: string | null;
+  relayBinding?: {
+    relayIdentity: string;
+    epoch: number;
+    lastConnectedAt: string | null;
+    connectedAt?: string | null;
+  } | null;
   devices: PersistedRemoteDevice[];
+  deviceTombstones?: PersistedRemoteDeviceTombstone[];
   audit: RemoteAuditEvent[];
   receipts: RemoteDeliveryReceipt[];
   usedSessions: Array<{ id: string; createdAt: string }>;
+}
+
+export interface PersistedRemoteDeviceTombstone {
+  deviceId: string;
+  publicKey: string;
+  grantVersion: number;
+  disposition: "revoked" | "expired";
+  retiredAt: string;
+  retainUntil: string;
 }
 
 export interface RemoteStoreEncryption {

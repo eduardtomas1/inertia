@@ -8,6 +8,7 @@ import type {
   RemoteCipherFrame,
   RemotePairingInvitation,
   RemoteRequest,
+  RemoteSetupDiagnostics,
   RemoteScope,
 } from "../shared/remote-protocol";
 import type {
@@ -31,6 +32,30 @@ export function boundedRemoteGrantMs(
   return Math.min(Math.trunc(requestedMs), ceiling);
 }
 export const DEFAULT_REMOTE_RELAY_URL = "ws://127.0.0.1:8787/remote";
+export const DEFAULT_REMOTE_COMPANION_URL = "http://127.0.0.1:4173/";
+
+export function emptyRemoteSetupDiagnostics(): RemoteSetupDiagnostics {
+  return {
+    status: "untested",
+    testedAt: null,
+    transport: null,
+    tls: null,
+    originPolicy: "unknown",
+    relayVersion: null,
+    browserVersion: null,
+    desktopVersion: "0.2.0",
+    relayProtocol: null,
+    remoteProtocol: null,
+    endpointAuthentication: null,
+    persistence: null,
+    endpointOwnership: "unclaimed",
+    endpointEpoch: null,
+    lastConnectedAt: null,
+    retryClass: "none",
+    failureClass: "none",
+    message: null,
+  };
+}
 
 export function validateRemoteRelayUrl(value: string): string {
   const url = new URL(value.trim());
@@ -122,12 +147,26 @@ export function trimRemoteArray<T>(values: T[], maximum: number): void {
 }
 
 export function remoteRelayErrorMessage(
-  code: "invalid-message" | "not-registered" | "desktop-offline"
-    | "connection-missing" | "capacity" | "rate-limited",
+  code: "invalid-message" | "desktop-offline"
+    | "connection-missing" | "capacity" | "rate-limited"
+    | "challenge-expired" | "endpoint-missing" | "endpoint-owned"
+    | "proof-invalid" | "storage-unavailable",
 ): string {
   if (code === "desktop-offline") return "The desktop is offline.";
   if (code === "capacity") return "The relay is at capacity.";
   if (code === "rate-limited") return "The relay is rate limiting connections.";
+  if (code === "endpoint-owned") {
+    return "The relay endpoint is owned by another signing key.";
+  }
+  if (code === "endpoint-missing") {
+    return "The relay lost this endpoint binding. Create a fresh endpoint and re-pair.";
+  }
+  if (code === "storage-unavailable") {
+    return "The relay could not persist endpoint ownership.";
+  }
+  if (code === "challenge-expired" || code === "proof-invalid") {
+    return "Relay endpoint authentication failed.";
+  }
   return "The relay rejected a protocol message.";
 }
 
@@ -140,13 +179,28 @@ export function projectRemoteAccessState(input: {
   activeSessions: number;
   pendingPairings: Iterable<PendingRemotePairing>;
   invitation: RemotePairingInvitation | null;
+  diagnostics?: RemoteSetupDiagnostics;
 }): RemoteAccessState {
   const { data } = input;
+  const diagnostics = input.diagnostics ?? emptyRemoteSetupDiagnostics();
+  const relayBinding = data?.relayBinding ?? null;
   return {
     available: input.storageAvailable && input.storeError === null,
     enabled: data?.enabled ?? false,
     relayUrl: data?.relayUrl
       ?? (input.storageAvailable ? DEFAULT_REMOTE_RELAY_URL : ""),
+    setupMode: data?.setupMode ?? "local-development",
+    companionUrl: data?.companionUrl ?? DEFAULT_REMOTE_COMPANION_URL,
+    diagnostics: {
+      ...diagnostics,
+      endpointOwnership: relayBinding ? "verified" : "unclaimed",
+      endpointEpoch: relayBinding?.epoch ?? null,
+      lastConnectedAt: relayBinding?.connectedAt
+        ?? relayBinding?.lastConnectedAt ?? null,
+      retryClass: data?.enabled && input.connection !== "online"
+        ? "automatic"
+        : diagnostics.retryClass,
+    },
     connection: data?.enabled ? input.connection : "disabled",
     connectionMessage: input.storeError ?? input.connectionMessage,
     activeSessions: input.activeSessions,

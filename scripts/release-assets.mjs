@@ -6,8 +6,19 @@ import { basename, join, resolve } from "node:path";
 const command = process.argv[2] ?? "";
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const version = packageJson.version;
+const remoteBrowserVersion = JSON.parse(
+  await readFile("remote/browser/package.json", "utf8"),
+).version;
+const remoteRelayVersion = JSON.parse(
+  await readFile("remote/relay/package.json", "utf8"),
+).version;
 if (typeof version !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version)) {
   throw new Error("Release assets require a strict stable package version.");
+}
+for (const remoteVersion of [remoteBrowserVersion, remoteRelayVersion]) {
+  if (typeof remoteVersion !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(remoteVersion)) {
+    throw new Error("Remote Companion assets require strict stable component versions.");
+  }
 }
 
 const platforms = {
@@ -16,8 +27,19 @@ const platforms = {
     `Inertia-${version}-arm64-mac.zip`,
   ],
   "windows-x64": [`Inertia.Setup.${version}.exe`],
-  "linux-x64": [`Inertia-${version}.AppImage`],
+  "linux-x64": [
+    `Inertia-${version}.AppImage`,
+    `inertia-remote-browser-${remoteBrowserVersion}.tar.gz`,
+    `inertia-remote-relay-${remoteRelayVersion}.tar.gz`,
+    "REMOTE-SHA256SUMS.txt",
+  ],
 };
+
+function releaseSource(name) {
+  return name.startsWith("inertia-remote-") || name === "REMOTE-SHA256SUMS.txt"
+    ? resolve("release", "remote", name)
+    : resolve("release", name);
+}
 
 async function sha256(path) {
   const hash = createHash("sha256");
@@ -45,7 +67,7 @@ if (command === "stage") {
   await mkdir(platformDirectory);
   const assets = [];
   for (const name of expectedNames) {
-    const source = resolve("release", name);
+    const source = releaseSource(name);
     const metadata = await fileMetadata(source);
     await copyFile(source, join(platformDirectory, name), constants.COPYFILE_EXCL);
     assets.push(metadata);

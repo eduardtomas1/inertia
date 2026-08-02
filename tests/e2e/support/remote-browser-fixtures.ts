@@ -13,6 +13,7 @@ import {
 } from "node:path";
 
 import type {
+  RemoteDesktopCompatibility,
   RemoteSafeConversation,
   RemoteSafeConversationDetail,
 } from "../../../src/shared/remote-protocol";
@@ -62,6 +63,7 @@ export async function seedBrowserProfile(
     hostId?: string;
     deviceId?: string;
     endpointId?: string;
+    relayIdentity: string;
     scopes?: Array<"view" | "prompt">;
   },
 ): Promise<SeededBrowserProfile> {
@@ -72,7 +74,9 @@ export async function seedBrowserProfile(
     hostId: requestedHostId,
     deviceId: requestedDeviceId,
     endpointId: requestedEndpointId,
+    relayIdentity,
     scopes,
+    desktop,
   }) => {
     const keys = await crypto.subtle.generateKey(
       { name: "ECDH", namedCurve: "P-256" },
@@ -111,6 +115,8 @@ export async function seedBrowserProfile(
         hostId,
         hostPublicKey,
         relayUrl: url,
+        relayIdentity,
+        desktop,
         endpointId,
         scopes: scopes ?? ["view"],
         projectIds: ["safe-project"],
@@ -123,7 +129,12 @@ export async function seedBrowserProfile(
     });
     db.close();
     return { hostId, deviceId, endpointId, publicKey, expiresAt };
-  }, input);
+  }, { ...input, desktop: {
+    kind: "desktop",
+    version: "0.2.0",
+    relayProtocol: { minimum: 2, maximum: 2 },
+    remoteProtocol: { minimum: 2, maximum: 2 },
+  } satisfies RemoteDesktopCompatibility });
 }
 
 export async function serveBrowserAsset(

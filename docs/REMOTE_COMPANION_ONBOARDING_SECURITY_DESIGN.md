@@ -1,11 +1,8 @@
 # Remote Companion onboarding and relay hardening design
 
-Status: implementation design for the post-v0.0.21 hardening program. The
-baseline is `origin/main` at
-`4640bbab6a49ffabd4dc211ef9d70b3c8c47e1e9`. Integration with the remote
-browser lifecycle and desktop settings is blocked until the remote-lifecycle
-change is squash-merged and this branch is rebased onto the coordinator's
-authoritative merge SHA.
+Status: implemented design for the post-v0.0.21 hardening program, integrated
+on the coordinator's authoritative remote-lifecycle base
+`63e01b5e8888696e8ed627e54cd122e53168e23f`.
 
 This document is intentionally more precise than the product copy. It defines
 the compatibility, endpoint-ownership, deployment, diagnostic, migration, and

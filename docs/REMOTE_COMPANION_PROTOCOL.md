@@ -57,7 +57,8 @@ The implementation preserves Inertia's existing privilege boundaries:
 - The existing privileged loopback WebSocket remains unchanged and is never
   sent to a remote browser or relay.
 - The reference relay routes bounded opaque frames between an outbound desktop
-  connection and a browser connection. It has no durable message queue.
+  connection and a browser connection. It durably stores only its relay
+  identity and endpoint public-key/epoch bindings; it has no message queue.
 - The independent browser stores one strictly validated device profile in
   IndexedDB and renders all provider-derived strings through `textContent`.
 
@@ -155,8 +156,14 @@ Sessions:
    monotonically increasing sequence. A duplicate, skipped, or reordered
    sequence closes the session.
 
-Relay peer routes have desktop-local epochs established only by
-`relay.peer-connected`. Each connection has one bounded inbound frame queue, so
+Before any peer route, the relay sends a stable identity and requires an ECDSA
+P-256 challenge proving the endpoint key held in the encrypted desktop vault.
+First claim creates a durable binding at epoch 1. Reconnect/takeover advances
+that epoch before old sockets and routes are fenced. Browser and desktop each
+verify relay identity, endpoint epoch, selected relay/application protocols,
+and all three component versions before accepting frames.
+
+Each connection has one bounded inbound frame queue, so
 HPKE recipient sequence advances cannot race. Successfully opened application
 requests are detached from that queue and may remain concurrently active up to
 the in-flight limit. Responses have a separate per-session send queue so their
@@ -270,13 +277,14 @@ The relay sees endpoint and connection identifiers, IP/network timing,
 connection/session/invitation IDs, frame kinds, sequences, sizes, and traffic
 timing. It cannot decrypt or forge authenticated application payloads, but it
 can correlate, delay, drop, replay, reorder, rate-limit, or deny traffic. It
-must not log frame bodies. The reference implementation keeps routing only in
-memory, caps connections/messages/payloads, disables compression, checks peer
-ownership for disconnect, and terminates a destination before its queued
-outbound bytes plus the next message exceed the configured buffer budget. It
-heartbeats clients and has bounded shutdown. If registration finds a duplicate
-desktop endpoint, the rejected desktop closes its socket and retries with
-bounded backoff rather than remaining indefinitely connected but offline.
+must not log frame bodies. The reference implementation keeps routes only in
+memory and durable endpoint bindings private on disk, caps connections,
+messages, authentication failures, payloads, and stored endpoints, disables
+compression, checks peer/epoch ownership, and terminates a destination before
+its queued outbound bytes plus the next message exceed the configured buffer
+budget. It heartbeats clients and has bounded shutdown. An authenticated
+duplicate owner is a deliberate takeover: the binding epoch is persisted,
+then the previous routes and desktop are closed.
 Every plaintext `session.close`, including `revoked` and `expired`, is
 non-authoritative transport guidance: the browser may reconnect, but it does
 not delete its sealed identity or purge authorization-bound DOM/drafts from
@@ -286,10 +294,11 @@ requires authenticated session data or an authenticated changed accept.
 
 ## Lifecycle bounds
 
-- Device records: 16 total; active peer routes: 8; active sessions: 4; pending
-  pairings: 1. Pairing a new device deterministically evicts only the oldest
-  revoked/expired record needed to stay within 16; a full set of current
-  devices rejects the pairing without mutation.
+- Device records: 16 total; authenticated terminal tombstones: 64 for eight
+  days; active peer routes: 8; active sessions: 4; pending pairings: 1. Pairing
+  a new device deterministically evicts only the oldest revoked/expired record
+  needed to stay within 16 and retains its public verification material in a
+  tombstone; a full set of current devices rejects without mutation.
   In-progress admissions share the four-session bound and reserve unique IDs
   across routes until success, failure, or disconnect. Each route queues at
   most 16 encrypted frames. A local user must resolve the current

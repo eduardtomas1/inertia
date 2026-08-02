@@ -23,7 +23,11 @@ import {
   RemoteAccessStore,
 } from "./remote-access-store";
 import { RemotePrivacyMonitor } from "./remote-access-lifecycle";
-import { DEFAULT_REMOTE_RELAY_URL } from "./remote-access-policy";
+import {
+  DEFAULT_REMOTE_COMPANION_URL,
+  DEFAULT_REMOTE_RELAY_URL,
+  emptyRemoteSetupDiagnostics,
+} from "./remote-access-policy";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -155,6 +159,9 @@ export class RemoteAccessHost {
       relayUrl: this.initializationError === null
         ? DEFAULT_REMOTE_RELAY_URL
         : "",
+      setupMode: "local-development",
+      companionUrl: DEFAULT_REMOTE_COMPANION_URL,
+      diagnostics: emptyRemoteSetupDiagnostics(),
       connection: "disabled",
       connectionMessage: this.initializationError,
       activeSessions: 0,
@@ -211,7 +218,29 @@ export class RemoteAccessHost {
       const request = parseRemoteAccessEnableRequest(args[0]);
       if (!request) throw new Error("Invalid Remote Companion settings.");
       const service = await this.ensureService();
-      await service.setEnabled(request.enabled, request.relayUrl);
+      if (request.testOnly) {
+        if (
+          request.enabled
+          || request.setupMode === undefined
+          || request.companionUrl === undefined
+        ) throw new Error("Invalid Remote Companion setup test.");
+        await service.testSetup(
+          request.relayUrl,
+          request.companionUrl,
+          request.setupMode,
+          request.resetEndpoint === true,
+        );
+      } else {
+        if (request.resetEndpoint) {
+          throw new Error("Invalid Remote Companion endpoint reset.");
+        }
+        await service.setEnabled(
+          request.enabled,
+          request.relayUrl,
+          request.setupMode,
+          request.companionUrl,
+        );
+      }
       return service.state();
     });
     ipcMain.handle(REMOTE_ACCESS_IPC.createInvitation, async (event, ...args) => {

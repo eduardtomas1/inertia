@@ -1,0 +1,187 @@
+import { remoteRandomSecret } from "../shared/remote-crypto";
+import type {
+  RemoteAuditEvent,
+  RemoteSetupDiagnostics,
+  RemoteSetupMode,
+} from "../shared/remote-protocol";
+import { generateRemoteEndpointKeyPair } from "./remote-access-endpoint-auth";
+import {
+  DEFAULT_REMOTE_RELAY_URL,
+  emptyRemoteSetupDiagnostics,
+} from "./remote-access-policy";
+import {
+  probeRemoteSetup,
+  RemoteSetupProbeError,
+} from "./remote-access-setup-diagnostics";
+import type { PersistedRemoteAccess } from "./remote-access-store";
+
+interface RemoteAccessSetupManagerOptions {
+  data(): PersistedRemoteAccess | null;
+  initializeIdentity(relayUrl: string): Promise<PersistedRemoteAccess>;
+  serialize<T>(operation: () => Promise<T>): Promise<T>;
+  persist(): Promise<void>;
+  disableLiveAccess(): void;
+  audit(type: RemoteAuditEvent["type"], detail: string): void;
+  now(): Date;
+  emit(): void;
+}
+
+export class RemoteAccessSetupManager {
+  private diagnostics = emptyRemoteSetupDiagnostics();
+  private successfulFingerprint: string | null = null;
+
+  constructor(private readonly options: RemoteAccessSetupManagerOptions) {}
+
+  current(): RemoteSetupDiagnostics {
+    return this.diagnostics;
+  }
+
+  requireTested(
+    enabled: boolean,
+    relayUrl: string,
+    companionUrl: string,
+    setupMode: RemoteSetupMode,
+    enforce: boolean,
+  ): void {
+    if (
+      enabled
+      && enforce
+      && this.successfulFingerprint !== setupFingerprint(
+        relayUrl,
+        companionUrl,
+        setupMode,
+      )
+    ) throw new Error("Test this exact Remote Companion setup before enabling it.");
+  }
+
+  async test(
+    relayUrl: string,
+    companionUrl: string,
+    setupMode: RemoteSetupMode,
+    resetEndpoint = false,
+  ): Promise<void> {
+    this.diagnostics = {
+      ...emptyRemoteSetupDiagnostics(),
+      status: "testing",
+      message: "Testing companion HTTPS headers and relay WSS policy…",
+    };
+    this.options.emit();
+    try {
+      const result = await probeRemoteSetup(relayUrl, companionUrl, setupMode, {
+        now: this.options.now,
+      });
+      await this.options.serialize(async () => {
+        const data = this.options.data()
+          ?? await this.options.initializeIdentity(result.relayUrl);
+        if (
+          data.relayBinding
+          && data.relayBinding.relayIdentity !== result.relayIdentity
+        ) {
+          if (!resetEndpoint) {
+            throw new RemoteSetupProbeError(
+              "endpoint-authentication",
+              "This relay has a different durable identity. Reset the endpoint and re-pair every browser.",
+            );
+          }
+          this.resetEndpoint(data);
+        }
+        data.relayUrl = result.relayUrl;
+        data.setupMode = setupMode;
+        data.companionUrl = result.companionUrl;
+        await this.options.persist();
+      });
+      this.diagnostics = result.diagnostics;
+      this.successfulFingerprint = setupFingerprint(
+        result.relayUrl,
+        result.companionUrl,
+        setupMode,
+      );
+      this.options.emit();
+    } catch (error) {
+      const failure = error instanceof RemoteSetupProbeError
+        ? error
+        : new RemoteSetupProbeError(
+            "network",
+            "The Remote Companion setup test failed.",
+          );
+      this.successfulFingerprint = null;
+      this.diagnostics = {
+        ...emptyRemoteSetupDiagnostics(),
+        status: "failed",
+        testedAt: this.options.now().toISOString(),
+        tls: failure.failureClass === "tls-certificate" ? "failed" : null,
+        originPolicy: failure.failureClass === "origin-policy"
+          ? "rejected"
+          : "unknown",
+        retryClass: failure.failureClass === "network" ? "automatic" : "manual",
+        failureClass: failure.failureClass,
+        message: failure.message,
+      };
+      this.options.emit();
+      throw failure;
+    }
+  }
+
+  registered(input: {
+    relayVersion: string;
+    relayProtocol: number;
+    remoteProtocol: number;
+    endpointAuthentication: "required" | "migration";
+    persistence: "durable" | "ephemeral";
+    endpointEpoch: number;
+    connectedAt: string;
+    desktopVersion: string;
+  }): void {
+    this.diagnostics = {
+      ...this.diagnostics,
+      relayVersion: input.relayVersion,
+      desktopVersion: input.desktopVersion,
+      relayProtocol: input.relayProtocol,
+      remoteProtocol: input.remoteProtocol,
+      endpointAuthentication: input.endpointAuthentication,
+      persistence: input.persistence,
+      endpointOwnership: "verified",
+      endpointEpoch: input.endpointEpoch,
+      lastConnectedAt: input.connectedAt,
+      retryClass: "none",
+      failureClass: "none",
+    };
+  }
+
+  private resetEndpoint(data: PersistedRemoteAccess): void {
+    this.options.disableLiveAccess();
+    const retiredAt = this.options.now().toISOString();
+    data.enabled = false;
+    data.endpointId = remoteRandomSecret(24);
+    data.endpointKeyPair = generateRemoteEndpointKeyPair();
+    data.endpointAuthMigratedAt = retiredAt;
+    data.relayBinding = null;
+    for (const device of data.devices) {
+      if (device.revokedAt === null) {
+        device.revokedAt = retiredAt;
+        device.grantVersion += 1;
+      }
+    }
+    data.receipts = [];
+    data.usedSessions = [];
+    this.options.audit(
+      "remote.disabled",
+      "The relay endpoint was reset; every browser must be paired again.",
+    );
+  }
+}
+
+function setupFingerprint(
+  relayUrl: string,
+  companionUrl: string,
+  setupMode: RemoteSetupMode,
+): string {
+  return `${setupMode}\u0000${relayUrl}\u0000${companionUrl}`;
+}
+
+export function effectiveSetupRelay(
+  relayUrl: string | undefined,
+  data: PersistedRemoteAccess | null,
+): string {
+  return relayUrl ?? data?.relayUrl ?? DEFAULT_REMOTE_RELAY_URL;
+}

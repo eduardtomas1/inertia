@@ -1,0 +1,18 @@
+# Tailscale Serve terminates HTTPS and proxies only tailnet traffic to this
+# loopback Caddy listener. Replace the browser root with the exact directory
+# extracted from the verified browser artifact.
+:8080 {
+	@relay path /remote
+	reverse_proxy @relay 127.0.0.1:8787
+
+	header {
+		Cache-Control "no-store"
+		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; connect-src wss:; img-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'"
+		Cross-Origin-Resource-Policy "same-origin"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+	}
+
+	root * /srv/inertia-remote-browser-0.2.0/site
+	file_server
+}

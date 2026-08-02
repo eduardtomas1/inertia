@@ -7,6 +7,7 @@ import {
 import type {
   RemoteAccessState,
   RemotePairingInvitation,
+  RemoteSetupMode,
   RemoteScope,
 } from "./remote-protocol";
 
@@ -134,6 +135,10 @@ export function parseOpenProjectPathRequest(value: unknown): OpenProjectPathRequ
 export interface RemoteAccessEnableRequest {
   enabled: boolean;
   relayUrl: string;
+  setupMode?: RemoteSetupMode;
+  companionUrl?: string;
+  testOnly?: boolean;
+  resetEndpoint?: boolean;
 }
 
 export interface RemotePairingApprovalRequest {
@@ -155,11 +160,47 @@ export interface RemoteDeviceUpdateRequest {
 export function parseRemoteAccessEnableRequest(
   value: unknown,
 ): RemoteAccessEnableRequest | null {
-  if (!plainObject(value) || Object.keys(value).length !== 2) return null;
+  if (!plainObject(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.length < 2
+    || keys.length > 6
+    || !keys.every((key) =>
+      key === "enabled"
+      || key === "relayUrl"
+      || key === "setupMode"
+      || key === "companionUrl"
+      || key === "testOnly"
+      || key === "resetEndpoint")
+    || (value.setupMode !== undefined
+      && value.setupMode !== "local-development"
+      && value.setupMode !== "self-hosted")
+    || (value.companionUrl !== undefined
+      && (typeof value.companionUrl !== "string"
+        || value.companionUrl.length > 2_048))
+    || (value.testOnly !== undefined && typeof value.testOnly !== "boolean")
+    || (value.resetEndpoint !== undefined
+      && typeof value.resetEndpoint !== "boolean")
+  ) return null;
   return typeof value.enabled === "boolean"
     && typeof value.relayUrl === "string"
     && value.relayUrl.length <= 2_048
-    ? { enabled: value.enabled, relayUrl: value.relayUrl }
+    ? {
+        enabled: value.enabled,
+        relayUrl: value.relayUrl,
+        ...(value.setupMode === undefined
+          ? {}
+          : { setupMode: value.setupMode }),
+        ...(value.companionUrl === undefined
+          ? {}
+          : { companionUrl: value.companionUrl }),
+        ...(value.testOnly === undefined
+          ? {}
+          : { testOnly: value.testOnly }),
+        ...(value.resetEndpoint === undefined
+          ? {}
+          : { resetEndpoint: value.resetEndpoint }),
+      }
     : null;
 }
 

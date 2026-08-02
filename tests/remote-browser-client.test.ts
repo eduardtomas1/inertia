@@ -27,7 +27,11 @@ import {
   sealSessionHandshake,
 } from "../src/shared/remote-crypto";
 import {
+  RELAY_PROTOCOL_VERSION,
+  REMOTE_BROWSER_VERSION,
+  REMOTE_DESKTOP_COMPATIBILITY,
   REMOTE_LIMITS,
+  REMOTE_RELAY_VERSION,
   remoteCipherFrameSchema,
   remotePairingRequestPayloadSchema,
   type RemotePairingInvitation,
@@ -35,6 +39,25 @@ import {
   type RemoteResponse,
 } from "../src/shared/remote-protocol";
 import type { RemoteConnectionFailure } from "../remote/browser/src/connection-supervisor";
+
+const TEST_RELAY_IDENTITY = "a669bb38-857d-4b8d-a0aa-3a592197d2c8";
+const TEST_ENDPOINT_EPOCH = 1;
+
+function relayConnected(connectionId: string): object {
+  return {
+    relayProtocolVersion: RELAY_PROTOCOL_VERSION,
+    type: "relay.connected",
+    connectionId,
+    endpointEpoch: TEST_ENDPOINT_EPOCH,
+    relayIdentity: TEST_RELAY_IDENTITY,
+    selected: { relayProtocol: 2, remoteProtocol: 2 },
+    versions: {
+      relay: REMOTE_RELAY_VERSION,
+      desktop: REMOTE_DESKTOP_COMPATIBILITY.version,
+      browser: REMOTE_BROWSER_VERSION,
+    },
+  };
+}
 
 class FakeBrowserSocket extends EventTarget {
   static instances: FakeBrowserSocket[] = [];
@@ -76,6 +99,16 @@ class FakeBrowserSocket extends EventTarget {
   open(): void {
     this.readyState = 1;
     this.dispatchEvent(new Event("open"));
+    queueMicrotask(() => this.message({
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
+      type: "relay.hello",
+      relayVersion: REMOTE_RELAY_VERSION,
+      relayIdentity: TEST_RELAY_IDENTITY,
+      relayProtocol: { minimum: 2, maximum: 2 },
+      remoteProtocol: { minimum: 2, maximum: 2 },
+      endpointAuthentication: "required",
+      persistence: "durable",
+    }));
   }
 
   message(value: unknown): void {
@@ -121,6 +154,8 @@ async function beginFakePairing(expiresAt: string): Promise<{
   const invitation: RemotePairingInvitation = {
     protocolVersion: 2,
     relayUrl: "wss://relay.example/remote",
+    relayIdentity: TEST_RELAY_IDENTITY,
+    desktop: REMOTE_DESKTOP_COMPATIBILITY,
     endpointId: remoteRandomSecret(24),
     hostId: crypto.randomUUID(),
     hostPublicKey: hostKeys.publicKey,
@@ -141,7 +176,7 @@ async function beginFakePairing(expiresAt: string): Promise<{
   socket.open();
   await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
   const connectionId = crypto.randomUUID();
-  socket.message({ protocolVersion: 2, type: "relay.connected", connectionId });
+  socket.message(relayConnected(connectionId));
   await vi.waitFor(() => expect(socket.sent).toHaveLength(2));
   const envelope = JSON.parse(socket.sent[1]!) as { frame: unknown };
   const frame = remoteCipherFrameSchema.parse(envelope.frame);
@@ -171,6 +206,8 @@ describe("Remote Companion browser connection ownership", () => {
       hostId: crypto.randomUUID(),
       hostPublicKey: hostKeys.publicKey,
       relayUrl: "wss://relay.example/remote",
+      relayIdentity: TEST_RELAY_IDENTITY,
+      desktop: REMOTE_DESKTOP_COMPATIBILITY,
       endpointId: "opaque_endpoint",
       scopes: ["view"],
       projectIds: ["project"],
@@ -196,11 +233,7 @@ describe("Remote Companion browser connection ownership", () => {
 
     first.open();
     await vi.waitFor(() => expect(first.sent).toHaveLength(1));
-    first.message({
-      protocolVersion: 2,
-      type: "relay.connected",
-      connectionId: crypto.randomUUID(),
-    });
+    first.message(relayConnected(crypto.randomUUID()));
     await vi.waitFor(() => expect(first.sent).toHaveLength(2));
     (
       client as unknown as {
@@ -282,6 +315,8 @@ describe("Remote Companion browser connection ownership", () => {
       hostId: crypto.randomUUID(),
       hostPublicKey: hostKeys.publicKey,
       relayUrl: "wss://relay.example/remote",
+      relayIdentity: TEST_RELAY_IDENTITY,
+      desktop: REMOTE_DESKTOP_COMPATIBILITY,
       endpointId: "opaque_endpoint",
       scopes: ["view"],
       projectIds: ["project"],
@@ -341,9 +376,10 @@ describe("Remote Companion browser connection ownership", () => {
       new Date(Date.now() + 60_000).toISOString(),
     );
     attempt.socket.message({
-      protocolVersion: 2,
+      relayProtocolVersion: 2,
       type: "relay.frame",
       connectionId: attempt.connectionId,
+      endpointEpoch: TEST_ENDPOINT_EPOCH,
       frame: await sealPairingResponse(
         await importRemoteKeyPair(attempt.hostKeys),
         await importRemotePublicKey(attempt.payload.devicePublicKey),
@@ -446,7 +482,7 @@ describe("Remote Companion browser connection ownership", () => {
     );
     malformed.rawMessage("{");
     malformed.message({
-      protocolVersion: 2,
+      relayProtocolVersion: 2,
       type: "relay.error",
       code: "desktop-offline",
     });
@@ -506,7 +542,7 @@ describe("Remote Companion browser connection ownership", () => {
 
   it.each([
     ["invalid-message", "terminal"],
-    ["not-registered", "terminal"],
+    ["endpoint-owned", "terminal"],
     ["desktop-offline", "transient"],
     ["connection-missing", "transient"],
     ["capacity", "transient"],
@@ -540,7 +576,7 @@ describe("Remote Companion browser connection ownership", () => {
           ): Promise<void>;
         }
       ).handleMessage(17, new FakeBrowserSocket("") as unknown as WebSocket, JSON.stringify({
-        protocolVersion: 2,
+        relayProtocolVersion: 2,
         type: "relay.error",
         code,
       }));
@@ -597,9 +633,10 @@ describe("Remote Companion browser connection ownership", () => {
       );
 
       await internals.handleMessage(9, new FakeBrowserSocket("") as unknown as WebSocket, JSON.stringify({
-        protocolVersion: 2,
+        relayProtocolVersion: 2,
         type: "relay.frame",
         connectionId,
+        endpointEpoch: TEST_ENDPOINT_EPOCH,
         frame: {
           protocolVersion: 2,
           kind: "session.close",
@@ -686,9 +723,10 @@ describe("Remote Companion browser connection ownership", () => {
         ): Promise<void>;
       }
     ).handleMessage(1, socket, JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: 2,
       type: "relay.frame",
       connectionId,
+      endpointEpoch: TEST_ENDPOINT_EPOCH,
       frame,
     }));
 
@@ -809,9 +847,10 @@ describe("Remote Companion browser connection ownership", () => {
       }
     ).handleMessage.bind(client);
     const staleControl = handleMessage(1, oldSocket, JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: 2,
       type: "relay.frame",
       connectionId: oldConnectionId,
+      endpointEpoch: TEST_ENDPOINT_EPOCH,
       frame: oldFrame,
     }));
     await decryptStarted;
@@ -827,9 +866,10 @@ describe("Remote Companion browser connection ownership", () => {
     expect(authorizationInvalidated).not.toHaveBeenCalled();
 
     await handleMessage(2, currentSocket, JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: 2,
       type: "relay.frame",
       connectionId: currentConnectionId,
+      endpointEpoch: TEST_ENDPOINT_EPOCH,
       frame: currentFrame,
     }));
     expect(authorizationInvalidated).toHaveBeenCalledOnce();
@@ -1085,6 +1125,8 @@ describe("Remote Companion browser connection ownership", () => {
       hostId: crypto.randomUUID(),
       hostPublicKey: hostKeys.publicKey,
       relayUrl: "wss://relay.example/remote",
+      relayIdentity: TEST_RELAY_IDENTITY,
+      desktop: REMOTE_DESKTOP_COMPATIBILITY,
       endpointId: "opaque_endpoint",
       scopes: ["view"],
       projectIds: ["project"],

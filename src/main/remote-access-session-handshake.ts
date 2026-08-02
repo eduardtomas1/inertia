@@ -19,6 +19,7 @@ import {
 import type {
   PersistedRemoteAccess,
   PersistedRemoteDevice,
+  PersistedRemoteDeviceTombstone,
 } from "./remote-access-store";
 
 export interface AuthenticatedRemoteSession {
@@ -28,6 +29,82 @@ export interface AuthenticatedRemoteSession {
   disposition: "accepted" | "revoked" | "expired";
   supportsAuthenticatedRejection: boolean;
   ciphertext: string;
+}
+
+export interface AuthenticatedRemoteTombstoneRejection {
+  sender: RemoteSenderState & { enc: string };
+  disposition: "revoked" | "expired";
+  supportsAuthenticatedRejection: boolean;
+  ciphertext: string;
+}
+
+export async function authenticateRemoteTombstoneSession(input: {
+  data: PersistedRemoteAccess;
+  tombstone: PersistedRemoteDeviceTombstone;
+  frame: Extract<RemoteCipherFrame, { kind: "session.open" }>;
+  hostKeys: RemoteImportedKeyPair;
+  now(): Date;
+  current(): boolean;
+}): Promise<AuthenticatedRemoteTombstoneRejection | "stale" | null> {
+  let recipient: RemoteRecipientState;
+  let payload: ReturnType<typeof remoteSessionOpenPayloadSchema.parse>;
+  let devicePublicKey: CryptoKey;
+  try {
+    devicePublicKey = await importRemotePublicKey(input.tombstone.publicKey);
+    if (!input.current()) return "stale";
+    recipient = await createAuthenticatedSessionRecipient(
+      input.data.hostId,
+      input.tombstone.deviceId,
+      input.frame.sessionId,
+      input.hostKeys,
+      devicePublicKey,
+      input.frame.enc,
+    );
+    payload = remoteSessionOpenPayloadSchema.parse(await openSessionHandshake(
+      recipient,
+      "session.open",
+      input.frame.sessionId,
+      input.frame.ciphertext,
+    ));
+  } catch {
+    return input.current() ? null : "stale";
+  }
+  if (
+    !input.current()
+    || payload.sessionId !== input.frame.sessionId
+    || payload.deviceId !== input.tombstone.deviceId
+    || Math.abs(Date.parse(payload.createdAt) - input.now().getTime())
+      > REMOTE_LIMITS.sessionHandshakeTtlMs
+  ) return input.current() ? null : "stale";
+  const sender = await createAuthenticatedSessionSender(
+    input.data.hostId,
+    input.tombstone.deviceId,
+    input.frame.sessionId,
+    input.hostKeys,
+    devicePublicKey,
+  );
+  const responseTime = input.now();
+  const ciphertext = await sealSessionHandshake(
+    sender,
+    "session.accept",
+    input.frame.sessionId,
+    {
+      type: "session.reject",
+      sessionId: input.frame.sessionId,
+      hostId: input.data.hostId,
+      reason: input.tombstone.disposition,
+      serverTime: responseTime.toISOString(),
+    },
+  );
+  return input.current()
+    ? {
+        sender,
+        disposition: input.tombstone.disposition,
+        supportsAuthenticatedRejection:
+          payload.browserVersion === REMOTE_BROWSER_SESSION_VERSION,
+        ciphertext,
+      }
+    : "stale";
 }
 
 export async function authenticateRemoteSession(input: {

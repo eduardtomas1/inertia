@@ -13,6 +13,7 @@ import {
   RemoteSessionAuthenticationBudget,
 } from "../../src/main/remote-access-lifecycle";
 import { RemoteAccessService } from "../../src/main/remote-access-service";
+import { generateRemoteEndpointKeyPair } from "../../src/main/remote-access-endpoint-auth";
 import { RemoteAccessStore } from "../../src/main/remote-access-store";
 import {
   generateRemoteKeyPair,
@@ -150,6 +151,7 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
       hostId: crypto.randomUUID(),
       endpointId: remoteRandomSecret(24),
       keyPair: await generateRemoteKeyPair(),
+      endpointKeyPair: generateRemoteEndpointKeyPair(),
       devices: [],
       audit: [],
       receipts: [],
@@ -255,6 +257,7 @@ describe("Remote Companion authentication and shutdown lifecycle", () => {
       hostId: crypto.randomUUID(),
       endpointId: remoteRandomSecret(24),
       keyPair: await generateRemoteKeyPair(),
+      endpointKeyPair: generateRemoteEndpointKeyPair(),
       devices: [],
       audit: [],
       receipts: [],

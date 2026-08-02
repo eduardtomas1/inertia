@@ -15,7 +15,19 @@ import {
 export type RemoteConnectionEpoch = number;
 
 interface RemoteRelayDispatcherHandlers {
-  registered(): void;
+  hello?(message: Extract<RelayServerMessage, { type: "relay.hello" }>): void;
+  challenge?(
+    message: Extract<RelayServerMessage, { type: "relay.register.challenge" }>,
+  ): void;
+  registered(
+    message: Extract<RelayServerMessage, { type: "relay.registered" }>,
+  ): void;
+  incompatible?(
+    message: Extract<RelayServerMessage, { type: "relay.incompatible" }>,
+  ): void;
+  peerConnected?(
+    message: Extract<RelayServerMessage, { type: "relay.peer-connected" }>,
+  ): void;
   error(code: Extract<RelayServerMessage, { type: "relay.error" }>["code"]): void;
   frame(
     connectionId: string,
@@ -55,8 +67,20 @@ export class RemoteRelayDispatcher {
     const parsed = relayServerMessageSchema.safeParse(value);
     if (!parsed.success) return;
     const message = parsed.data;
+    if (message.type === "relay.hello") {
+      this.handlers.hello?.(message);
+      return;
+    }
+    if (message.type === "relay.register.challenge") {
+      this.handlers.challenge?.(message);
+      return;
+    }
     if (message.type === "relay.registered") {
-      this.handlers.registered();
+      this.handlers.registered(message);
+      return;
+    }
+    if (message.type === "relay.incompatible") {
+      this.handlers.incompatible?.(message);
       return;
     }
     if (message.type === "relay.error") {
@@ -64,18 +88,19 @@ export class RemoteRelayDispatcher {
       return;
     }
     if (message.type === "relay.peer-connected") {
-      this.activate(message.connectionId);
+      this.activate(message.connectionId, message.endpointEpoch);
+      this.handlers.peerConnected?.(message);
       return;
     }
     if (message.type === "relay.peer-disconnected") {
-      this.deactivate(message.connectionId);
+      this.deactivate(message.connectionId, message.endpointEpoch);
       return;
     }
     if (message.type !== "relay.frame") return;
     const epoch = this.epochs.get(message.connectionId);
-    if (epoch === undefined) return;
+    if (epoch === undefined || epoch !== message.endpointEpoch) return;
     if (encodedRemoteFrameBytes(message.frame) > REMOTE_LIMITS.encryptedFrameBytes) {
-      this.deactivate(message.connectionId);
+      this.deactivate(message.connectionId, message.endpointEpoch);
       return;
     }
     this.enqueue(message.connectionId, { epoch, frame: message.frame });
@@ -97,7 +122,10 @@ export class RemoteRelayDispatcher {
     }
   }
 
-  private activate(connectionId: string): void {
+  private activate(
+    connectionId: string,
+    endpointEpoch: RemoteConnectionEpoch,
+  ): void {
     const previous = this.epochs.get(connectionId);
     if (previous !== undefined) {
       this.invalidate(connectionId, previous);
@@ -107,12 +135,16 @@ export class RemoteRelayDispatcher {
       this.handlers.rejected(connectionId);
       return;
     }
-    this.epochs.set(connectionId, ++this.nextEpoch);
+    this.nextEpoch = Math.max(this.nextEpoch, endpointEpoch);
+    this.epochs.set(connectionId, endpointEpoch);
   }
 
-  private deactivate(connectionId: string): void {
+  private deactivate(
+    connectionId: string,
+    endpointEpoch: RemoteConnectionEpoch,
+  ): void {
     const epoch = this.epochs.get(connectionId);
-    if (epoch === undefined) return;
+    if (epoch === undefined || epoch !== endpointEpoch) return;
     this.invalidate(connectionId, epoch);
     this.enqueueDisconnect(connectionId, epoch);
   }

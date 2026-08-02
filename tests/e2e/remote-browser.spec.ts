@@ -34,6 +34,8 @@ import {
   sealSessionHandshake,
 } from "../../src/shared/remote-crypto";
 import {
+  REMOTE_DESKTOP_COMPATIBILITY,
+  RELAY_PROTOCOL_VERSION,
   remoteCipherFrameSchema,
   remotePairingRequestPayloadSchema,
   remoteRequestSchema,
@@ -43,6 +45,7 @@ import {
   closeRemoteBrowserRelayResources,
   launchRemoteBrowser,
 } from "./support/remote-browser-electron-fixture";
+import { registerRelayDesktop } from "./support/remote-relay-v2";
 
 let staticServer: Server;
 let staticUrl: string;
@@ -91,27 +94,21 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
   });
   const { page } = browser;
   const hostKeys = await generateRemoteKeyPair();
+  const endpointId = remoteRandomSecret(24);
+  const registration = await registerRelayDesktop(endpointId, relayUrl);
+  desktop = registration.socket;
   const invitation: RemotePairingInvitation = {
     protocolVersion: 2,
     relayUrl,
-    endpointId: remoteRandomSecret(24),
+    relayIdentity: registration.relayIdentity,
+    desktop: REMOTE_DESKTOP_COMPATIBILITY,
+    endpointId,
     hostId: crypto.randomUUID(),
     hostPublicKey: hostKeys.publicKey,
     invitationId: crypto.randomUUID(),
     pairingSecret: remoteRandomSecret(),
     expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
   };
-  desktop = new WebSocket(relayUrl);
-  await once(desktop, "open");
-  desktop.send(JSON.stringify({
-    protocolVersion: 2,
-    type: "relay.register",
-    endpointId: invitation.endpointId,
-    role: "desktop",
-    relayVersion: "0.1.0",
-  }));
-  await nextDesktopMessage((message) => message.type === "relay.registered");
-
   try {
     await expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible();
     await page.context().setOffline(true);
@@ -162,7 +159,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
       payload.devicePublicKey,
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: relayed.connectionId,
       frame: await sealPairingResponse(
@@ -228,7 +225,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         && message.frame.kind === "session.data",
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: sessionMessage.connectionId,
       frame: {
@@ -273,7 +270,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
     );
     expect(request.type).toBe("state.get");
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: sessionMessage.connectionId,
       frame: await sealSessionData(sender, sessionId, {
@@ -302,7 +299,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         && message.frame.kind === "session.open",
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: sessionMessage.connectionId,
       frame: {
@@ -360,7 +357,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         && message.frame.kind === "session.data",
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: reducedMessage.connectionId,
       frame: {
@@ -400,7 +397,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
       await openSessionData(reducedRecipient, reducedRequestFrame),
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: reducedMessage.connectionId,
       frame: await sealSessionData(reducedSender, reducedOpen.sessionId, {
@@ -450,7 +447,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
         && message.frame.kind === "session.open",
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: reducedMessage.connectionId,
       frame: {
@@ -486,7 +483,7 @@ test("runs HPKE pairing in a real strict-CSP browser bundle", async () => {
       devicePublicKey,
     );
     desktop.send(JSON.stringify({
-      protocolVersion: 2,
+      relayProtocolVersion: RELAY_PROTOCOL_VERSION,
       type: "relay.frame",
       connectionId: revokedMessage.connectionId,
       frame: {
@@ -529,14 +526,34 @@ test("stops automatic retries on a terminal relay protocol mismatch", async () =
     if (!address || typeof address === "string") {
       throw new Error("Mismatch relay did not bind.");
     }
+    const mismatchIdentity = crypto.randomUUID();
     let connections = 0;
     mismatchRelay.on("connection", (socket) => {
       connections += 1;
+      socket.send(JSON.stringify({
+        relayProtocolVersion: RELAY_PROTOCOL_VERSION,
+        type: "relay.hello",
+        relayVersion: "0.2.0",
+        relayIdentity: mismatchIdentity,
+        relayProtocol: { minimum: 2, maximum: 2 },
+        remoteProtocol: { minimum: 2, maximum: 2 },
+        endpointAuthentication: "required",
+        persistence: "ephemeral",
+      }));
       socket.once("message", () => {
         socket.send(JSON.stringify({
-          protocolVersion: 99,
-          type: "relay.connected",
-          connectionId: crypto.randomUUID(),
+          relayProtocolVersion: RELAY_PROTOCOL_VERSION,
+          type: "relay.incompatible",
+          axis: "remote-protocol",
+          reason: "client-too-new",
+          component: "browser",
+          received: { minimum: 3, maximum: 3 },
+          supported: { minimum: 2, maximum: 2 },
+          guidance: [{
+            action: "downgrade",
+            component: "browser",
+            requiredProtocol: { minimum: 2, maximum: 2 },
+          }],
         }));
       });
     });
@@ -552,11 +569,12 @@ test("stops automatic retries on a terminal relay protocol mismatch", async () =
     await seedBrowserProfile(page, {
       hostPublicKey: hostKeys.publicKey,
       relayUrl: `ws://127.0.0.1:${address.port}/remote`,
+      relayIdentity: mismatchIdentity,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
     connections = 0;
     await navigateRemoteBrowser(page, "terminal-protocol-mismatch");
-    await expect(page.getByText(/incompatible Remote Companion protocol/u))
+    await expect(page.getByText(/Remote Companion versions are incompatible/u))
       .toBeVisible();
     await expect(page.getByRole("button", { name: "Retry connection" }))
       .toBeVisible();
@@ -618,6 +636,7 @@ async function seedBrowserProfile(
     hostId?: string;
     deviceId?: string;
     endpointId?: string;
+    relayIdentity?: string;
     scopes?: Array<"view" | "prompt">;
   },
 ): Promise<{
@@ -634,7 +653,9 @@ async function seedBrowserProfile(
     hostId: requestedHostId,
     deviceId: requestedDeviceId,
     endpointId: requestedEndpointId,
+    relayIdentity: requestedRelayIdentity,
     scopes,
+    desktop,
   }) => {
     const keys = await crypto.subtle.generateKey(
       { name: "ECDH", namedCurve: "P-256" },
@@ -653,6 +674,7 @@ async function seedBrowserProfile(
     const hostId = requestedHostId ?? crypto.randomUUID();
     const deviceId = requestedDeviceId ?? crypto.randomUUID();
     const endpointId = requestedEndpointId ?? "lifecycle_endpoint";
+    const relayIdentity = requestedRelayIdentity ?? crypto.randomUUID();
     const db = await new Promise<IDBDatabase>((resolveDatabase, reject) => {
       const opening = indexedDB.open("inertia-remote-companion", 1);
       opening.onupgradeneeded = () => {
@@ -673,6 +695,8 @@ async function seedBrowserProfile(
         hostId,
         hostPublicKey,
         relayUrl: url,
+        relayIdentity,
+        desktop,
         endpointId,
         scopes: scopes ?? ["view"],
         projectIds: ["safe-project"],
@@ -685,7 +709,7 @@ async function seedBrowserProfile(
     });
     db.close();
     return { hostId, deviceId, endpointId, publicKey, expiresAt };
-  }, input);
+  }, { ...input, desktop: REMOTE_DESKTOP_COMPATIBILITY });
 }
 
 async function nextDesktopMessage(

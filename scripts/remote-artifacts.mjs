@@ -23,12 +23,14 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const ARCHIVE_NAME = /^inertia-remote-(browser|relay)-((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))\.tar\.gz$/u;
 
 const relayFiles = [
+  "Caddyfile.tailscale.example",
   "compatibility.d.mts",
   "compatibility.mjs",
   "endpoint-auth.d.mts",
   "endpoint-auth.mjs",
   "package-lock.json",
   "package.json",
+  "relay.env.example",
   "server.d.mts",
   "server.mjs",
 ];

@@ -26,6 +26,7 @@ export function createDuoCommandHandler(
     "duo.prepare",
     "duo.dispatch",
     "duo.cancel",
+    "duo.pending",
     "duo.status",
   ], async (socket, command) => {
     switch (command.type) {
@@ -66,6 +67,16 @@ export function createDuoCommandHandler(
         });
         return "handled";
       }
+      case "duo.pending":
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "duo.pending",
+            ...dependencies.coordinator.pending(command.payload.projectIds),
+          },
+        });
+        return "handled";
       case "duo.status":
         dependencies.send(socket, {
           type: "request.result",

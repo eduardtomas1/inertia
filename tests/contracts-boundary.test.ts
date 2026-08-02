@@ -57,6 +57,7 @@ describe("shared contracts boundary", () => {
       "project.update",
       "conversation.create",
       "duo.prepare",
+      "duo.pending",
       "duo.dispatch",
       "duo.cancel",
       "duo.status",

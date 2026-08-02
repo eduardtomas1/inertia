@@ -40,6 +40,11 @@ export interface StoredPairedLaunch extends DuoLaunchStatus {
   plans: [StoredPairedLaunchSidePlan, StoredPairedLaunchSidePlan];
 }
 
+export interface PendingPairedLaunchIds {
+  launchIds: string[];
+  hasMore: boolean;
+}
+
 function boundedFailure(message: string | null): string | null {
   return message === null ? null : message.slice(0, 2_000);
 }
@@ -133,6 +138,42 @@ export class PairedLaunchRepository {
     const launch = this.find(launchId);
     if (!launch) throw new RecordNotFoundError("Duo launch not found.");
     return launch;
+  }
+
+  pendingLaunchIdsForProjects(
+    projectIds: readonly string[],
+    limit: number,
+  ): PendingPairedLaunchIds {
+    const exactProjectIds = [...new Set(projectIds)];
+    if (
+      exactProjectIds.length < 1
+      || exactProjectIds.length > 2
+      || !Number.isInteger(limit)
+      || limit < 1
+      || limit > 32
+    ) {
+      throw new Error("The pending Duo lookup bounds are invalid.");
+    }
+    const placeholders = exactProjectIds.map(() => "?").join(", ");
+    const rows = this.database.prepare(`
+      SELECT launch.id
+      FROM paired_launches AS launch
+      WHERE launch.status IN (
+        'preparing', 'prepared', 'dispatching', 'recovery-required'
+      )
+        AND EXISTS (
+          SELECT 1
+          FROM paired_launch_sides AS project_side
+          WHERE project_side.launch_id = launch.id
+            AND project_side.project_id IN (${placeholders})
+        )
+      ORDER BY launch.created_at DESC, launch.id ASC
+      LIMIT ?
+    `).all(...exactProjectIds, limit + 1) as Array<{ id: string }>;
+    return {
+      launchIds: rows.slice(0, limit).map(({ id }) => id),
+      hasMore: rows.length > limit,
+    };
   }
 
   assertConversationDeletionAllowed(conversationId: string): void {

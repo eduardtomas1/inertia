@@ -73,3 +73,9 @@ export interface DuoPreparedResult {
 }
 
 export type DuoStatusResult = DuoLaunchStatus & { kind: "duo.status" };
+
+export interface DuoPendingResult {
+  kind: "duo.pending";
+  launchIds: string[];
+  hasMore: boolean;
+}

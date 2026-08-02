@@ -31,6 +31,7 @@ import type { TurnController } from "../turns/turn-controller";
 type DuoPrepareCommand = Extract<ClientCommand, { type: "duo.prepare" }>;
 type DuoPreparePayload = DuoPrepareCommand["payload"];
 type DuoSidePayload = DuoPreparePayload["sides"][number];
+const MAX_PENDING_DUO_LAUNCHES = 16;
 
 export interface PreparedDuoLaunch {
   launchId: string;
@@ -417,6 +418,16 @@ export class DuoLaunchCoordinator {
 
   status(launchId: string): DuoLaunchStatus {
     return publicStatus(this.store, this.store.pairedLaunch(launchId));
+  }
+
+  pending(projectIds: readonly string[]): {
+    launchIds: string[];
+    hasMore: boolean;
+  } {
+    return this.store.pendingPairedLaunchIds(
+      projectIds,
+      MAX_PENDING_DUO_LAUNCHES,
+    );
   }
 
   private async prepareFresh(

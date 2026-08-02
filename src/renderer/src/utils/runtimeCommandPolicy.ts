@@ -120,6 +120,7 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutMs: DUO_DISPATCH_REQUEST_TIMEOUT_MS,
     timeoutDelivery: "ambiguous",
   },
+  "duo.pending": shortRetrySafe,
   "duo.prepare": gitMutation,
   "duo.status": shortRetrySafe,
   "git.branch.create": gitMutation,

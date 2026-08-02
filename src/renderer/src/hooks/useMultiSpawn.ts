@@ -16,7 +16,6 @@ import {
   clearMultiSpawnPreset,
   clearPendingMultiSpawnLaunchId,
   multiSpawnConversationPayload,
-  readPendingMultiSpawnLaunchId,
   validateMultiSpawnDraft,
   writeMultiSpawnPreset,
   writePendingMultiSpawnLaunchId,
@@ -29,6 +28,10 @@ import { runtimeCommandDelivery } from "../utils/connectionMessages";
 type DuoPreparedResult = Extract<
   Extract<ServerEvent, { type: "request.result" }>["result"],
   { kind: "duo.prepared" }
+>;
+type DuoPendingResult = Extract<
+  Extract<ServerEvent, { type: "request.result" }>["result"],
+  { kind: "duo.pending" }
 >;
 type DuoStatusResult = Extract<
   Extract<ServerEvent, { type: "request.result" }>["result"],
@@ -178,53 +181,101 @@ export function useMultiSpawn({
 
   const reconcilePendingLaunch = useCallback(async (
     launchId: string,
-  ): Promise<void> => {
-    let durableLaunchFound = false;
-    try {
-      let status = await queryLaunchStatus(launchId);
-      durableLaunchFound = true;
-      if (
-        status.state === "prepared"
-        || status.state === "recovery-required"
-      ) {
-        const cancellation = resultEvent(await run("multi-spawn:cancel", {
-          type: "duo.cancel",
-          payload: { launchId },
-        }));
-        if (cancellation.result.kind !== "duo.status") {
-          throw new Error(
-            "The local service returned an unexpected Duo recovery response.",
-          );
-        }
-        status = cancellation.result;
+  ): Promise<DuoStatusResult> => {
+    let status = await queryLaunchStatus(launchId);
+    if (
+      status.state === "prepared"
+      || status.state === "recovery-required"
+    ) {
+      const cancellation = resultEvent(await run("multi-spawn:cancel", {
+        type: "duo.cancel",
+        payload: { launchId },
+      }));
+      if (cancellation.result.kind !== "duo.status") {
+        throw new Error(
+          "The local service returned an unexpected Duo recovery response.",
+        );
       }
-      const message = launchStatusMessage(status);
-      setRecoveryGuidance(status.recoveryGuidance ?? []);
-      if (!launchRetainsRecoveryIdentity(status)) {
-        clearPendingMultiSpawnLaunchId(window.localStorage);
-      }
-      if (message) setError(message);
-    } catch (caught) {
-      if (
-        !durableLaunchFound
-        && runtimeCommandDelivery(caught) === "rejected"
-      ) {
-        clearPendingMultiSpawnLaunchId(window.localStorage);
-      }
-      setError(
-        "A previous duo launch could not be reconciled yet. Refresh before launching another pair.",
-      );
+      status = cancellation.result;
     }
+    return status;
   }, [queryLaunchStatus, run]);
+
+  const queryPendingLaunches = useCallback(async (
+    projectIds: readonly string[],
+  ): Promise<DuoPendingResult> => {
+    const event = resultEvent(await run("multi-spawn:pending", {
+      type: "duo.pending",
+      payload: { projectIds: [...new Set(projectIds)] },
+    }));
+    if (event.result.kind !== "duo.pending") {
+      throw new Error("The local service returned an unexpected pending Duo result.");
+    }
+    return event.result;
+  }, [run]);
+
+  const reconcileProjectLaunches = useCallback(async (
+    projectIds: readonly string[],
+  ): Promise<boolean> => {
+    try {
+      const pending = await queryPendingLaunches(projectIds);
+      clearPendingMultiSpawnLaunchId(window.localStorage);
+      const statuses: DuoStatusResult[] = [];
+      let reconciliationFailed = false;
+      for (const launchId of pending.launchIds) {
+        try {
+          statuses.push(await reconcilePendingLaunch(launchId));
+        } catch {
+          reconciliationFailed = true;
+        }
+      }
+      const retained = statuses.filter(launchRetainsRecoveryIdentity);
+      setRecoveryGuidance(retained.flatMap(
+        ({ recoveryGuidance }) => recoveryGuidance ?? [],
+      ));
+      const retainedMessages = retained.map(launchStatusMessage).filter(
+        (message): message is string => Boolean(message),
+      );
+      const statusMessages = statuses.map(launchStatusMessage).filter(
+        (message): message is string => Boolean(message),
+      );
+      if (reconciliationFailed) {
+        setError(
+          "One or more previous duo launches could not be reconciled yet. Refresh before launching another pair.",
+        );
+        return true;
+      }
+      if (pending.hasMore) {
+        setError(
+          "More previous duo launches need reconciliation for these projects. Reconcile again before starting another pair.",
+        );
+        return true;
+      }
+      if (retained.length > 1) {
+        setError(
+          `${retained.length} previous duo launches still need recovery. ${retainedMessages.join(" ")}`,
+        );
+      } else if (retainedMessages[0]) {
+        setError(retainedMessages[0]);
+      } else if (statusMessages[0]) {
+        setError(statusMessages[0]);
+      }
+      return retained.length > 0;
+    } catch {
+      setError(
+        "Previous duo launches could not be discovered or reconciled yet. Refresh before launching another pair.",
+      );
+      return true;
+    }
+  }, [queryPendingLaunches, reconcilePendingLaunch]);
 
   const openDialog = useCallback(() => {
     if (!snapshot?.activeProjectId || submittingRef.current) return;
     setError(null);
     setRecoveryGuidance([]);
     setOpen(true);
-    const pendingLaunchId = readPendingMultiSpawnLaunchId(window.localStorage);
-    if (pendingLaunchId) void reconcilePendingLaunch(pendingLaunchId);
-  }, [reconcilePendingLaunch, snapshot?.activeProjectId]);
+    void reconcileProjectLaunches([snapshot.activeProjectId]);
+  }, [reconcileProjectLaunches, snapshot?.activeProjectId]);
 
   const cancelActiveLaunch = useCallback(async (): Promise<void> => {
     const launchId = activeLaunchIdRef.current;
@@ -273,33 +324,25 @@ export function useMultiSpawn({
 
   const submit = useCallback(async (draft: MultiSpawnDraft): Promise<void> => {
     if (submittingRef.current || !snapshot) return;
-    const pendingLaunchId = readPendingMultiSpawnLaunchId(window.localStorage);
-    if (pendingLaunchId) {
-      setError("Reconciling the previous duo before accepting another launch.");
-      await reconcilePendingLaunch(pendingLaunchId);
-      return;
-    }
     const validationError = validateMultiSpawnDraft(draft);
     if (validationError) {
       setError(validationError);
       return;
     }
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError("Checking these projects for previous duo launches.");
+    if (await reconcileProjectLaunches(draft.sides.map(({ projectId }) => projectId))) {
+      submittingRef.current = false;
+      setSubmitting(false);
+      return;
+    }
     const launchId = crypto.randomUUID();
     activeLaunchIdRef.current = launchId;
     cancelRequestedRef.current = false;
-    submittingRef.current = true;
-    setSubmitting(true);
     setError(null);
     setActionError(null);
-    if (!writePendingMultiSpawnLaunchId(window.localStorage, launchId)) {
-      activeLaunchIdRef.current = null;
-      submittingRef.current = false;
-      setSubmitting(false);
-      setError(
-        "This browser cannot save a safe Duo recovery identity, so neither chat was launched.",
-      );
-      return;
-    }
+    writePendingMultiSpawnLaunchId(window.localStorage, launchId);
 
     let prepared = false;
     try {
@@ -427,7 +470,7 @@ export function useMultiSpawn({
     discardDraftConversation,
     focusWorkspace,
     run,
-    reconcilePendingLaunch,
+    reconcileProjectLaunches,
     queryLaunchStatus,
     setActionError,
     settings,

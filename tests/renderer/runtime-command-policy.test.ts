@@ -85,6 +85,10 @@ describe("runtime command delivery policy", () => {
       timeoutMs: 15_000,
       timeoutDelivery: "rejected",
     });
+    expect(runtimeCommandPolicy("duo.pending")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "rejected",
+    });
   });
 
   it("assigns an explicit supported timeout-delivery state to every mapped command", () => {

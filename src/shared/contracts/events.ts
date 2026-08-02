@@ -28,7 +28,11 @@ import type {
   WorkspaceRun,
 } from "./app";
 import type { ConversationDetailResult } from "./conversation-detail";
-import type { DuoPreparedResult, DuoStatusResult } from "./duo";
+import type {
+  DuoPendingResult,
+  DuoPreparedResult,
+  DuoStatusResult,
+} from "./duo";
 import type {
   DiffReversalOperation,
   DiffReversalPlan,
@@ -141,6 +145,7 @@ export type ServerEvent =
         | { kind: "conversation.created"; conversationId: string }
         | MessageSendAcceptance
         | DuoPreparedResult
+        | DuoPendingResult
         | DuoStatusResult
         | { kind: "backend.profile"; profile: ModelBackendProfileDetail }
         | { kind: "backend.profile.probe"; profile: ModelBackendProfileDetail }

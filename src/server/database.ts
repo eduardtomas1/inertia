@@ -364,6 +364,13 @@ export class RuntimeStore {
     return this.pairedLaunchRepository.find(launchId);
   }
 
+  pendingPairedLaunchIds(projectIds: readonly string[], limit: number) {
+    return this.pairedLaunchRepository.pendingLaunchIdsForProjects(
+      projectIds,
+      limit,
+    );
+  }
+
   assertConversationDeletionAllowed(conversationId: string): void {
     this.pairedLaunchRepository.assertConversationDeletionAllowed(
       conversationId,

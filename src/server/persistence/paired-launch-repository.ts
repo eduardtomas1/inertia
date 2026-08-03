@@ -623,7 +623,11 @@ export class PairedLaunchRepository {
           throw new Error("The Duo dispatch result was already recorded.");
         }
       });
-      const state: DuoLaunchState = started.every(Boolean) ? "running" : "failed";
+      const state: DuoLaunchState = started.every(Boolean)
+        ? "running"
+        : started.some(Boolean)
+          ? "interrupted"
+          : "failed";
       this.touch(launchId, state, failure, now);
       return this.get(launchId);
     })();

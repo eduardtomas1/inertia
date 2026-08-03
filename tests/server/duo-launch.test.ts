@@ -2361,14 +2361,15 @@ describe("Duo dispatch ownership", () => {
     const runtime = await createRuntime({ captureGitBefore: () => capture });
     const prepared = preparePair(runtime);
     runtime.provider.throwOnRun = 2;
-    const dispatch = coordinator(runtime).dispatch(prepared.launchId);
+    const launches = coordinator(runtime);
+    const dispatch = launches.dispatch(prepared.launchId);
     await Promise.resolve();
     expect(runtime.provider.inputs).toEqual([]);
 
     releaseCapture();
     const status = await dispatch;
     expect(status).toMatchObject({
-      state: "failed",
+      state: "interrupted",
       sides: [
         { dispatchState: "started" },
         { dispatchState: "failed" },
@@ -2380,6 +2381,24 @@ describe("Duo dispatch ownership", () => {
       .toBe("cancelled");
     expect(runtime.store.agentTurn(prepared.queued[1].turn.id).status)
       .toBe("failed");
+    expect(runtime.store.pendingPairedLaunchIds([
+      runtime.projectId,
+    ], 16)).toEqual({
+      launchIds: [prepared.launchId],
+      hasMore: false,
+    });
+    expect(() => runtime.store.deleteConversation(
+      prepared.conversations[0].id,
+    )).toThrow(/acknowledge an interrupted dispatch/u);
+    expect(launches.acknowledgeInterrupted(prepared.launchId)).toMatchObject({
+      state: "failed",
+      error: expect.stringContaining(
+        "Uncertain provider dispatch acknowledged by the user.",
+      ),
+    });
+    expect(runtime.store.pendingPairedLaunchIds([
+      runtime.projectId,
+    ], 16)).toEqual({ launchIds: [], hasMore: false });
     runtime.store.close();
   });
 
@@ -2390,9 +2409,10 @@ describe("Duo dispatch ownership", () => {
       const prepared = preparePair(runtime);
       runtime.provider.rejectOnRun = rejectedSide;
 
-      const status = await coordinator(runtime).dispatch(prepared.launchId);
+      const launches = coordinator(runtime);
+      const status = await launches.dispatch(prepared.launchId);
 
-      expect(status.state).toBe("failed");
+      expect(status.state).toBe("interrupted");
       expect(runtime.provider.inputs).toHaveLength(2);
       const sibling = prepared.conversations[rejectedSide === 1 ? 1 : 0];
       expect(runtime.provider.cancellations).toContain(sibling.id);
@@ -2402,6 +2422,14 @@ describe("Duo dispatch ownership", () => {
       expect(runtime.store.agentTurn(
         prepared.queued[rejectedSide - 1].turn.id,
       ).status).toBe("failed");
+      expect(runtime.store.pendingPairedLaunchIds([
+        runtime.projectId,
+      ], 16)).toEqual({
+        launchIds: [prepared.launchId],
+        hasMore: false,
+      });
+      expect(launches.acknowledgeInterrupted(prepared.launchId).state)
+        .toBe("failed");
       runtime.store.close();
     },
   );

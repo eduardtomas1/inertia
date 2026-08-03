@@ -52,12 +52,30 @@ function cssBlock(source: string, marker: string): string {
 }
 
 describe("Quiet Ledger active-to-settled motion", () => {
+  it("keeps frequent overlays opaque while reserving backdrop blur for rare dialogs", () => {
+    for (const selector of [
+      ".activity-center {",
+      ".environment-summary-popover {",
+      ".palette-backdrop {",
+      ".composer-suggestion-menu,",
+    ]) {
+      const block = cssBlock(css, selector);
+      const filters = [...block.matchAll(/backdrop-filter:\s*([^;]+)/gu)]
+        .map((match) => match[1]?.trim());
+      expect(filters.every((value) => value === "none"), selector).toBe(true);
+    }
+    expect(css).toMatch(
+      /\.commit-dialog,\s*\.provider-auth-dialog\s*\{[^}]*backdrop-filter:\s*var\(--glass-filter\)/su,
+    );
+  });
+
   it("gates settlement motion on a turn that was active so history stays still on load", () => {
     expect(turnSource).toContain("const wasActive = useRef(turn.isActive)");
     expect(turnSource).toContain("const [settlingTransition, setSettlingTransition] = useState<");
     expect(turnSource).toContain("const isSettling = settlingTransition !== null");
     expect(turnSource).toContain("setSettlingTransition({");
-    expect(turnSource).toContain("window.setTimeout(() => setSettlingTransition(null), 220)");
+    expect(turnSource).toContain("const TURN_SETTLEMENT_TRANSITION_MS = 160");
+    expect(turnSource).toContain("TURN_SETTLEMENT_TRANSITION_MS");
     expect(turnSource).toContain('isSettling && "is-settling"');
     expect(turnSource).toContain(
       'data-completion-transition={isSettling ? "active-to-settled" : undefined}',

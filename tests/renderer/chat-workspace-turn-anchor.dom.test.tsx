@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatWorkspace } from "../../src/renderer/src/components/ChatWorkspace";
 import type {
+  ChatMessage,
   Conversation,
   Project,
 } from "../../src/shared/contracts";
@@ -253,5 +254,56 @@ describe("draft turn anchoring", () => {
         "none",
       );
     });
+  });
+});
+
+describe("transcript following motion", () => {
+  it("uses instant following through settlement and an explicit Jump", async () => {
+    const activeConversation = conversation("conversation-follow");
+    const scrollTo = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollTo;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    const props = workspaceProps(activeConversation, async () => null);
+    const view = render(<ChatWorkspace {...props} streamingText="partial" />);
+    await screen.findByTestId("turn-anchor-projection");
+    scrollTo.mockClear();
+
+    const terminalMessage: ChatMessage = {
+      id: "terminal-message",
+      conversationId: activeConversation.id,
+      turnId: null,
+      role: "assistant",
+      content: "Settled answer",
+      attachments: [],
+      createdAt: "2026-08-02T10:00:01.000Z",
+    };
+    view.rerender(
+      <ChatWorkspace
+        {...props}
+        messages={[terminalMessage]}
+        streamingText=""
+      />,
+    );
+    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+    expect(scrollTo.mock.calls.every(([options]) =>
+      options?.behavior === "auto")).toBe(true);
+
+    const transcript = screen.getByLabelText("Thread transcript");
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+    fireEvent.wheel(transcript);
+    fireEvent.scroll(transcript);
+    const jump = await screen.findByRole("button", { name: "Jump to latest" });
+    scrollTo.mockClear();
+    fireEvent.click(jump);
+    expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({
+      behavior: "auto",
+    }));
   });
 });

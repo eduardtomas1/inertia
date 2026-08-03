@@ -32,6 +32,7 @@ import {
   defaultSettings,
   type AppSettings,
   type Conversation,
+  type DatabaseBackupStatus,
   type ModelBackendDefault,
   type ModelBackendProfileDetail,
   type ModelBackendProfileDraft,
@@ -65,6 +66,7 @@ type SettingsViewProps = {
   projects: Project[];
   conversations: Conversation[];
   archived: Conversation[];
+  databaseBackup?: DatabaseBackupStatus;
   onUpdate: (settings: Partial<AppSettings>) => void;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
@@ -138,6 +140,7 @@ export function SettingsView({
   projects,
   conversations,
   archived,
+  databaseBackup,
   onUpdate,
   onConnectProvider,
   onRefreshProvider,
@@ -511,12 +514,23 @@ export function SettingsView({
               {archived.length > 0 ? <div className="archive-list">{archived.map((thread) => <div className="archive-row" key={thread.id}><span><strong>{thread.title}</strong><small>{archivedByProvider.get(thread.providerId) ?? thread.providerId}</small></span><button type="button" className="secondary-button" disabled={disabled} onClick={() => onUnarchive(thread)}><ArchiveRestore size={14} />Restore</button></div>)}</div> : <div className="settings-empty-state"><ArchiveRestore size={19} /><strong>No archived threads</strong><span>Archived work will appear here.</span></div>}
             </section>
             <section className="settings-card" aria-labelledby="data-heading">
-              <div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="data-heading">Local data</h3><p>Projects, sessions, context usage, and preferences are stored locally.</p></span></div>
+              <div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="data-heading">Local data</h3><p>Full SQLite backups and portable conversation exports serve different recovery needs.</p></span></div>
               <div className="settings-data-note"><ShieldCheck size={17} /><span><strong>Provider credentials stay outside Inertia.</strong><small>Account authentication remains in each provider’s own secure storage.</small></span></div>
               <div className="codex-binary-path runtime-log-setting">
                 <span>
-                  <strong>Recovery export</strong>
-                  <small>Export project paths and conversation messages without attachment bytes, credentials, provider sessions, secret references, or vault data. Imports always create new identities.</small>
+                  <strong>Full local database backup</strong>
+                  <small>Automatic validated copies of the complete SQLite database include provider-session references, execution context, Git artifacts, and attachment records. Credential secrets and separately stored attachment bytes remain outside SQLite.</small>
+                  <small>
+                    {databaseBackup?.lastValidatedAt
+                      ? <>Last validated backup: <time dateTime={databaseBackup.lastValidatedAt} title={databaseBackup.lastValidatedAt}>{new Date(databaseBackup.lastValidatedAt).toLocaleString()}</time>.</>
+                      : "No validated backup yet. Inertia creates one after a short startup quiet period or the first completed turn, then keeps an hourly rotation."}
+                  </small>
+                </span>
+              </div>
+              <div className="codex-binary-path runtime-log-setting">
+                <span>
+                  <strong>Portable conversation recovery export</strong>
+                  <small>Exports contain project paths and conversation messages only. They exclude attachments, provider sessions, execution context, Git artifacts, credentials, secret references, and vault data. Imports always create new identities with supervised access.</small>
                 </span>
                 <div>
                   <button type="button" className="secondary-button" disabled={disabled || recoveryOperation !== null} onClick={() => { void exportRecoveryData(); }}><Download size={14} />{recoveryOperation === "export" ? "Exporting…" : "Export recovery file"}</button>

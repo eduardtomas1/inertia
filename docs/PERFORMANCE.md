@@ -26,10 +26,23 @@ framing, and a real node-pty lifecycle. It writes
 under `NODE_ENV=test`, which deliberately disables provider discovery. It is a
 provider-disabled test-mode baseline for a fresh-profile launch, a reused-profile
 launch, 1.5 seconds of idle CPU/RSS, a 600-message scroll, file-tree interaction,
-terminal creation, split-chat activation, shutdown, display scale, GPU feature
-observations, and per-process metrics for the main, renderer, supervised utility
-runtime, GPU, and other Electron utility processes. It writes
+terminal creation, split-chat activation, forced-GC post-close reclamation,
+eight repeated Files/Terminal/split open-close cycles, a 600-frame long-session
+soak, shutdown, display scale, GPU feature observations, and per-process metrics
+for the main, renderer, supervised utility runtime, GPU, and other Electron
+utility processes. It writes
 `performance-results/desktop-<platform>-<architecture>.json`.
+The renderer series forces a V8 collection before each sample and records both
+live JavaScript heap and operating-system working set. Treat peak working set as
+a high-water observation, not proof of retained live work; use the post-close,
+repeated-cycle, and soak deltas to decide whether product optimization is due.
+The deterministic streaming scenario measures the full provider-to-paint path,
+visible update gaps, long tasks, frames, WAL growth, and memory. Its stable-host
+targets are under 50 ms to first paint and under 100 ms at p95 between visible
+updates; the enforced cross-platform ceiling is intentionally looser so noisy
+hosted runners catch catastrophic regressions without pretending to be a lab.
+The platform report separately compares the 64, 80, and 96 ms persistence and
+projection cadences with exact write, byte, CPU, memory, and ordering evidence.
 
 `npm run benchmark:platform:smoke` adds deliberately generous catastrophic
 budgets. Hosted CI is too noisy for tight latency gates, so the smoke gate also

@@ -508,7 +508,7 @@ describe("append-oriented stream text persistence", () => {
       DROP TABLE reasoning_content_chunks_v44_source;
       CREATE INDEX reasoning_content_chunks_reasoning_sequence_idx
         ON reasoning_content_chunks(reasoning_id, sequence ASC);
-      DELETE FROM schema_migrations WHERE version = 44;
+      DELETE FROM schema_migrations WHERE version >= 44;
     `);
     old.close();
 

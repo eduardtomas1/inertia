@@ -28,6 +28,7 @@ export function createDuoCommandHandler(
     "duo.cancel",
     "duo.pending",
     "duo.status",
+    "duo.acknowledge",
   ], async (socket, command) => {
     switch (command.type) {
       case "duo.prepare": {
@@ -86,6 +87,18 @@ export function createDuoCommandHandler(
           )),
         });
         return "handled";
+      case "duo.acknowledge": {
+        const status = dependencies.coordinator.acknowledgeInterrupted(
+          command.payload.launchId,
+        );
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: statusResult(status),
+        });
+        return "handled";
+      }
       default:
         return "not-handled";
     }

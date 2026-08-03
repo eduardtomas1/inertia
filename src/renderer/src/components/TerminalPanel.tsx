@@ -6,6 +6,7 @@ import { Columns2, Maximize2, Plus, RotateCcw, TerminalSquare, X } from "lucide-
 import type { ClientCommand, ServerEvent, ThemePreference } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { usePersistedSize } from "../hooks/usePersistedSize";
+import { terminalInputChunks } from "../utils/terminalInputChunks";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { IconButton, LoadingMark } from "./ui";
 
@@ -100,8 +101,7 @@ function TerminalSession({
     const inputDisposable = terminal.onData((data) => {
       const terminalId = terminalIdRef.current;
       if (!terminalId) return;
-      for (let offset = 0; offset < data.length; offset += 8192) {
-        const chunk = data.slice(offset, offset + 8192);
+      for (const chunk of terminalInputChunks(data)) {
         void sendCommand(command({ type: "terminal.input", payload: { terminalId, data: chunk } })).catch(() => undefined);
       }
     });

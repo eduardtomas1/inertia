@@ -10,15 +10,23 @@ import type {
 } from "../provider/interactions";
 
 const MAX_PERMISSION_ROOTS = 12;
+const UNSAFE_APPROVAL_FORMATTING =
+  /(?:\p{Cf}|\p{Zl}|\p{Zp})/u;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
+const CONTROL_CHARACTERS_EXCEPT_LINE_BREAKS =
+  /[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
 const APPROVAL_METHODS = new Set([
   "item/commandExecution/requestApproval",
   "item/fileChange/requestApproval",
   "item/permissions/requestApproval",
+  "execCommandApproval",
+  "applyPatchApproval",
 ]);
 
 export interface ParsedCodexApprovalRequest {
   request: AgentApprovalRequest;
-  protocol: "decision" | "permissions";
+  protocol: "decision" | "permissions" | "legacy-review";
+  providerThreadId?: string;
   requestedPermissions?: JsonObject;
 }
 
@@ -34,14 +42,15 @@ interface PermissionProjection {
 function strictBoundedText(
   value: unknown,
   maxChars: number,
-  rejectControlCharacters = true,
+  allowLineBreaks = false,
 ): string | undefined {
   if (
     typeof value !== "string"
+    || UNSAFE_APPROVAL_FORMATTING.test(value)
     || (
-      rejectControlCharacters
-        ? /[\u0000-\u001f\u007f]/u.test(value)
-        : value.includes("\0")
+      allowLineBreaks
+        ? CONTROL_CHARACTERS_EXCEPT_LINE_BREAKS.test(value)
+        : CONTROL_CHARACTERS.test(value)
     )
     || value.length > maxChars
   ) return undefined;
@@ -54,6 +63,71 @@ function exactFilesystemPath(value: unknown): string | undefined {
     && isAbsolute(path)
     ? path
     : undefined;
+}
+
+function legacyCommand(value: unknown): string | undefined {
+  if (
+    !Array.isArray(value)
+    || value.length < 1
+    || value.length > 128
+    || value.some((part) =>
+      typeof part !== "string"
+      || CONTROL_CHARACTERS.test(part)
+      || UNSAFE_APPROVAL_FORMATTING.test(part)
+      || part.length > 2_000)
+  ) return undefined;
+  const command = value.map((part) =>
+    /^[A-Za-z0-9_./:@%+=,-]+$/u.test(part as string)
+      ? part
+      : JSON.stringify(part)
+  ).join(" ");
+  return command.length <= 4_000 ? command : undefined;
+}
+
+function legacyFileChangeSummary(value: unknown): string | undefined {
+  const fileChanges = objectValue(value);
+  if (!fileChanges) return undefined;
+  const entries = Object.entries(fileChanges);
+  if (
+    entries.length < 1
+    || entries.length > 256
+  ) return undefined;
+
+  const affectedPaths: string[] = [];
+  for (const [path, rawChange] of entries) {
+    if (
+      !path
+      || path.length > 4_096
+      || CONTROL_CHARACTERS.test(path)
+      || UNSAFE_APPROVAL_FORMATTING.test(path)
+    ) return undefined;
+    const change = objectValue(rawChange);
+    if (!change || typeof change.type !== "string") return undefined;
+    if (change.type === "add" || change.type === "delete") {
+      if (
+        !hasOnlyKeys(change, ["type", "content"])
+        || typeof change.content !== "string"
+      ) return undefined;
+    } else if (change.type === "update") {
+      if (
+        !hasOnlyKeys(change, ["type", "unified_diff", "move_path"])
+        || typeof change.unified_diff !== "string"
+      ) return undefined;
+    } else {
+      return undefined;
+    }
+
+    affectedPaths.push(`Change ${path}`);
+    if (change.type === "update" && change.move_path !== undefined) {
+      if (change.move_path === null) continue;
+      const destination = strictBoundedText(change.move_path, 4_096);
+      if (!destination) return undefined;
+      affectedPaths.push(`Move to ${destination}`);
+    }
+  }
+
+  const summary = affectedPaths.join("\n");
+  return summary.length <= 4_000 ? summary : undefined;
 }
 
 function hasOnlyKeys(value: JsonObject, keys: readonly string[]): boolean {
@@ -226,15 +300,21 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
   const requestId = randomUUID();
   const command = strictBoundedText(params.command, 4_000);
   const cwd = exactFilesystemPath(params.cwd);
-  const reason = strictBoundedText(params.reason, 1_000, false);
+  const reason = strictBoundedText(params.reason, 1_000, true);
+  const providerThreadId = strictBoundedText(params.threadId, 512);
   const hasAdditionalPermissions = Object.prototype.hasOwnProperty.call(
     params,
     "additionalPermissions",
   );
   const additionalPermissions = objectValue(params.additionalPermissions);
   if (
-    Object.prototype.hasOwnProperty.call(params, "command")
+    method !== "execCommandApproval"
+    && Object.prototype.hasOwnProperty.call(params, "command")
     && !command
+  ) return undefined;
+  if (
+    Object.prototype.hasOwnProperty.call(params, "threadId")
+    && !providerThreadId
   ) return undefined;
   if (
     Object.prototype.hasOwnProperty.call(params, "cwd")
@@ -287,9 +367,67 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     ? [...new Set(advertised)]
     : ["approve", "deny", "cancel"];
 
+  if (method === "execCommandApproval") {
+    const legacy = legacyCommand(params.command);
+    const conversationId = strictBoundedText(params.conversationId, 512);
+    const callId = strictBoundedText(params.callId, 512);
+    if (!legacy || !cwd || !conversationId || !callId) return undefined;
+    return {
+      protocol: "legacy-review",
+      providerThreadId: conversationId,
+      request: {
+        requestId,
+        kind: "command",
+        title: "Approve command",
+        command: legacy,
+        cwd,
+        ...(reason ? { reason } : {}),
+        permissionRoots: [],
+        detail: legacy,
+        availableDecisions: ["approve", "deny", "cancel"],
+      },
+    };
+  }
+  if (method === "applyPatchApproval") {
+    const summary = legacyFileChangeSummary(params.fileChanges);
+    const conversationId = strictBoundedText(params.conversationId, 512);
+    const callId = strictBoundedText(params.callId, 512);
+    const grantRoot = params.grantRoot === null
+      || params.grantRoot === undefined
+      ? undefined
+      : exactFilesystemPath(params.grantRoot);
+    if (
+      !summary
+      || !conversationId
+      || !callId
+      || (
+        params.grantRoot !== null
+        && params.grantRoot !== undefined
+        && !grantRoot
+      )
+    ) return undefined;
+    return {
+      protocol: "legacy-review",
+      providerThreadId: conversationId,
+      request: {
+        requestId,
+        kind: "file-change",
+        title: "Approve file changes",
+        ...(grantRoot ? { cwd: grantRoot } : {}),
+        ...(reason ? { reason } : {}),
+        permissionRoots: grantRoot
+          ? [{ path: grantRoot, access: "write" }]
+          : [],
+        detail: reason ? `${reason}\n${summary}` : summary,
+        availableDecisions: ["approve", "deny", "cancel"],
+      },
+    };
+  }
+
   if (method === "item/commandExecution/requestApproval") {
     return {
       protocol: "decision",
+      ...(providerThreadId ? { providerThreadId } : {}),
       request: {
         requestId,
         kind: "command",
@@ -313,6 +451,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     ) return undefined;
     return {
       protocol: "decision",
+      ...(providerThreadId ? { providerThreadId } : {}),
       request: {
         requestId,
         kind: "file-change",
@@ -333,6 +472,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     const network = objectValue(projection.permissions.network);
     return {
       protocol: "permissions",
+      ...(providerThreadId ? { providerThreadId } : {}),
       requestedPermissions: projection.permissions,
       request: {
         requestId,

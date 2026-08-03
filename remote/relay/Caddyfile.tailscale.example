@@ -13,6 +13,6 @@
 		X-Content-Type-Options "nosniff"
 	}
 
-	root * /srv/inertia-remote-browser-0.2.0/site
+	root * /srv/inertia-remote-browser-0.3.0/site
 	file_server
 }

@@ -2368,7 +2368,7 @@ describe("Duo dispatch ownership", () => {
     releaseCapture();
     const status = await dispatch;
     expect(status).toMatchObject({
-      state: "failed",
+      state: "interrupted",
       sides: [
         { dispatchState: "started" },
         { dispatchState: "failed" },
@@ -2392,7 +2392,7 @@ describe("Duo dispatch ownership", () => {
 
       const status = await coordinator(runtime).dispatch(prepared.launchId);
 
-      expect(status.state).toBe("failed");
+      expect(status.state).toBe("interrupted");
       expect(runtime.provider.inputs).toHaveLength(2);
       const sibling = prepared.conversations[rejectedSide === 1 ? 1 : 0];
       expect(runtime.provider.cancellations).toContain(sibling.id);

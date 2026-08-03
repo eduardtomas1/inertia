@@ -153,9 +153,9 @@
   --control-height-small: calc(var(--ui-control-height) - 4px);
   --composer-control-height: calc(var(--ui-control-height) - 2px);
   --model-row-height: calc(var(--ui-control-height) + 6px);
-  --motion-fast: 140ms;
-  --motion-base: 180ms;
-  --motion-slow: 220ms;
+  --motion-fast: 90ms;
+  --motion-base: 120ms;
+  --motion-slow: 160ms;
   --motion-ease: cubic-bezier(0.2, 0, 0, 1);
   /*
    * Compatibility aliases for established Quiet Ledger selectors. New work
@@ -1597,9 +1597,7 @@ textarea {
   overflow: auto;
   border: 1px solid var(--border-strong);
   border-radius: 15px;
-  background: color-mix(in srgb, var(--surface-strong) 94%, transparent);
-  -webkit-backdrop-filter: blur(32px) saturate(120%);
-  backdrop-filter: blur(32px) saturate(120%);
+  background: var(--surface-strong);
   box-shadow: var(--shadow), var(--glass-inset);
   animation: environment-summary-enter var(--motion-fast) var(--motion-ease);
   transform-origin: top right;
@@ -5695,7 +5693,7 @@ textarea {
 .activity-center-button.has-attention .activity-count { background: var(--warning); }
 .activity-center-button.has-attention > svg { color: var(--status-approval); }
 .activity-center-backdrop { position: fixed; z-index: 90; inset: 0; background: rgba(0, 0, 0, 0.18); }
-.activity-center { position: absolute; top: 66px; right: 12px; display: flex; width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 78px); flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 14px; outline: 0; background: var(--glass-float); box-shadow: var(--shadow), var(--glass-inset); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); }
+.activity-center { position: absolute; top: 66px; right: 12px; display: flex; width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 78px); flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 14px; outline: 0; background: var(--surface-strong); box-shadow: var(--shadow), var(--glass-inset); }
 .activity-center:focus-visible { border-color: color-mix(in srgb, var(--accent) 48%, var(--border-strong)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent), var(--shadow), var(--glass-inset); }
 .activity-center > header { display: flex; min-height: 44px; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 0 7px 0 13px; border-bottom: 1px solid var(--border); }
 .activity-center > header > span { display: flex; min-width: 0; align-items: center; gap: 8px; color: var(--text); font-size: 10px; }
@@ -6261,6 +6259,79 @@ textarea {
   background: color-mix(in srgb, var(--failure-state) 7%, transparent);
 }
 
+.multi-spawn-recovery-status,
+.multi-spawn-recovery-guidance {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--failure-state) 24%, var(--border));
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.multi-spawn-recovery-status p,
+.multi-spawn-recovery-guidance p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.multi-spawn-recovery-status dl,
+.multi-spawn-recovery-guidance dl {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.multi-spawn-recovery-status dl > div {
+  display: contents;
+}
+
+.multi-spawn-recovery-status dt,
+.multi-spawn-recovery-guidance dt {
+  color: var(--text-muted);
+}
+
+.multi-spawn-recovery-status dd,
+.multi-spawn-recovery-guidance dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.multi-spawn-recovery-guidance ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.multi-spawn-recovery-guidance li {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.multi-spawn-recovery-guidance [data-recovery-command] {
+  display: block;
+  padding: 7px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.multi-spawn-recovery-status .secondary-button,
+.multi-spawn-recovery-guidance .secondary-button {
+  width: max-content;
+  max-width: 100%;
+  margin: 0;
+}
+
 .multi-spawn-dialog-footer {
   position: sticky;
   z-index: 4;
@@ -6567,8 +6638,6 @@ textarea {
   justify-content: center;
   padding: min(14vh, 120px) 18px 18px;
   background: rgba(9, 9, 12, 0.44);
-  -webkit-backdrop-filter: blur(5px);
-  backdrop-filter: blur(5px);
   animation: palette-backdrop-in var(--motion-fast) var(--motion-ease) both;
 }
 
@@ -8061,7 +8130,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   width: min(340px, calc(100vw - 44px));
   flex-direction: column;
   gap: 7px;
-  transition: bottom 180ms var(--motion-ease);
+  transition: bottom var(--motion-base) var(--motion-ease);
 }
 
 .provider-quota-notice {
@@ -8078,7 +8147,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   backdrop-filter: var(--glass-filter);
   box-shadow: var(--shadow), var(--glass-inset);
   grid-template-columns: 17px minmax(0, 1fr) 28px;
-  animation: quota-notice-enter 180ms var(--motion-ease) both;
+  animation: quota-notice-enter var(--motion-base) var(--motion-ease) both;
 }
 
 .provider-quota-notice > svg {
@@ -8149,14 +8218,21 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   font-size: 10px;
 }
 
-/* Translucency belongs to chrome and floating controls; content stays opaque. */
+/* High-frequency controls stay opaque so opening them does not trigger a
+ * full-frame backdrop repaint. Richer glass remains reserved for rare dialogs. */
 .composer-suggestion-menu,
 .composer-popover,
 .header-popover,
 .environment-summary-popover,
 .project-menu,
 .conversation-menu,
-.command-palette,
+.command-palette {
+  background: var(--surface-strong);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--shadow), var(--glass-inset);
+}
+
 .commit-dialog,
 .provider-auth-dialog {
   background: var(--glass-float);
@@ -8165,15 +8241,10 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   box-shadow: var(--shadow), var(--glass-inset);
 }
 
-.composer-suggestion-menu,
-.composer-popover,
-.header-popover,
-.environment-summary-popover,
-.project-menu,
-.conversation-menu {
-  background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
-  -webkit-backdrop-filter: blur(32px) saturate(120%);
-  backdrop-filter: blur(32px) saturate(120%);
+.overlay-loading-shell {
+  min-height: 112px;
+  align-items: center;
+  justify-content: center;
 }
 
 .workspace-panel-tabs,

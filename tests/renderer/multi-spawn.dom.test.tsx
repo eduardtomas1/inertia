@@ -750,7 +750,7 @@ describe("multi-spawn", () => {
     )).toBeVisible();
   });
 
-  it("renders recovery instructions as inert argv on Windows and metacharacter paths", () => {
+  it("renders safe copyable recovery commands with exact topology on Windows and metacharacter paths", () => {
     const repositoryPath = "C:\\Users\\Ada $()\\project`name`";
     const worktreePath = `${repositoryPath}\\.inertia\\worktrees\\route\nnext-line`;
     const branch = "inertia/33333333";
@@ -763,6 +763,7 @@ describe("multi-spawn", () => {
         error="Owned worktree cleanup still needs attention."
         recoveryGuidance={[{
           kind: "git-worktree",
+          launchId: "33333333-3333-4333-8333-333333333333",
           ordinal: 0,
           topology: "owned",
           repositoryPath,
@@ -798,26 +799,18 @@ describe("multi-spawn", () => {
     const guidance = screen.getByRole("region", {
       name: "Manual Git recovery for route 1",
     });
-    expect(guidance).toHaveTextContent(
-      "These are literal values, not a shell command.",
-    );
+    expect(guidance).toHaveTextContent("Inspect this exact topology");
     expect(guidance).toHaveTextContent(repositoryPath);
     expect(guidance).toHaveTextContent(`Expected commit${"a".repeat(40)}`);
-    expect(Array.from(guidance.querySelectorAll("[data-git-argument]"))
-      .map((argument) => argument.textContent)).toEqual([
-      "worktree",
-      "remove",
-      "--",
-      worktreePath,
-      "branch",
-      "-d",
-      "--",
-      branch,
+    expect(guidance).toHaveTextContent(`Observed branch${branch}`);
+    expect(guidance).toHaveTextContent(`Observed commit${"a".repeat(40)}`);
+    expect(Array.from(guidance.querySelectorAll("[data-recovery-command]"))
+      .map((command) => command.textContent)).toEqual([
+      `git -C '${repositoryPath}' 'worktree' 'remove' '--' '${worktreePath}'`,
+      `git -C '${repositoryPath}' 'branch' '-d' '--' '${branch}'`,
     ]);
-    expect(guidance.querySelectorAll("code")).not.toHaveLength(0);
-    expect(guidance.textContent).not.toContain(
-      `git worktree remove -- ${JSON.stringify(worktreePath)}`,
-    );
+    expect(screen.getAllByRole("button", { name: /Copy .* command/u }))
+      .toHaveLength(2);
   });
 
   it("keeps setup available for an exact custom route that needs a probe", () => {
@@ -978,18 +971,24 @@ describe("multi-spawn", () => {
   it.each([
     { state: "failed", expectedStored: false },
     { state: "cancelled", expectedStored: false },
-    { state: "interrupted", expectedStored: false },
+    { state: "interrupted", expectedStored: true },
     { state: "recovery-required", expectedStored: true },
   ] as const)(
     "retains recovery identity after dispatch: $expectedStored ($state)",
     async ({ state, expectedStored }) => {
       let launchId = "";
+      let dispatched = false;
+      let acknowledged = false;
       const run = vi.fn(async (
         _key: string,
         command: CommandWithoutId,
       ): Promise<ServerEvent> => {
         if (command.type === "duo.pending") {
-          return pendingLaunchesEvent();
+          return pendingLaunchesEvent(
+            state === "interrupted" && dispatched && !acknowledged
+              ? [launchId]
+              : [],
+          );
         }
         if (command.type === "duo.prepare") {
           launchId = command.payload.launchId;
@@ -1008,6 +1007,7 @@ describe("multi-spawn", () => {
           };
         }
         if (command.type === "duo.dispatch") {
+          dispatched = true;
           expect(window.localStorage.getItem(
             MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
           )).toBe(command.payload.launchId);
@@ -1019,6 +1019,39 @@ describe("multi-spawn", () => {
               launchId: command.payload.launchId,
               state,
               error: `Deterministic ${state} result.`,
+              sides: [
+                { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "failed" },
+                { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "failed" },
+              ],
+            },
+          };
+        }
+        if (command.type === "duo.status") {
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId,
+              state,
+              error: `Deterministic ${state} result.`,
+              sides: [
+                { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "failed" },
+                { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "failed" },
+              ],
+            },
+          };
+        }
+        if (command.type === "duo.acknowledge") {
+          acknowledged = true;
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId,
+              state: "failed",
+              error: "Uncertain provider dispatch acknowledged by the user.",
               sides: [
                 { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "failed" },
                 { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "failed" },
@@ -1046,6 +1079,27 @@ describe("multi-spawn", () => {
       expect(window.localStorage.getItem(
         MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
       )).toBe(expectedStored ? launchId : null);
+      if (state === "interrupted") {
+        await act(async () => hook.result.current.recheckRecovery());
+        expect(run.mock.calls.slice(-2).map(([, command]) => command.type))
+          .toEqual(["duo.pending", "duo.status"]);
+        expect(hook.result.current.recoveryStatus?.state).toBe("interrupted");
+        expect(window.localStorage.getItem(
+          MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+        )).toBeNull();
+
+        act(() => hook.result.current.closeDialog());
+        act(() => hook.result.current.openDialog());
+        await waitFor(() => {
+          expect(hook.result.current.recoveryStatus?.state).toBe("interrupted");
+        });
+
+        await act(async () => hook.result.current.acknowledgeRecovery());
+        expect(run.mock.calls.slice(-2).map(([, command]) => command.type))
+          .toEqual(["duo.acknowledge", "duo.pending"]);
+        expect(hook.result.current.recoveryStatus).toBeNull();
+        expect(hook.result.current.error).toBeNull();
+      }
     },
   );
 
@@ -1917,9 +1971,182 @@ describe("multi-spawn", () => {
       "/workspace/retained duo 1",
       "/workspace/retained duo 2",
     ]);
+    expect(hook.result.current.recoveryGuidance.map(({ launchId }) => launchId))
+      .toEqual(launchIds);
     expect(run.mock.calls.some(([, command]) =>
       command.type === "duo.prepare" || command.type === "duo.dispatch"))
       .toBe(false);
+  });
+
+  it("rechecks every retained launch before reporting recovery complete", async () => {
+    const launchIds = [
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc",
+    ];
+    let rechecking = false;
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        return pendingLaunchesEvent(launchIds);
+      }
+      if (command.type !== "duo.status" && command.type !== "duo.cancel") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      const launchId = command.payload.launchId;
+      const ordinal = launchIds.indexOf(launchId) as 0 | 1;
+      expect(ordinal).toBeGreaterThanOrEqual(0);
+      const cleared = rechecking && ordinal === 0 && command.type === "duo.cancel";
+      const plannedPath = `/workspace/retained recheck ${ordinal + 1}`;
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId,
+          state: cleared ? "cancelled" : "recovery-required",
+          error: cleared ? null : `Recovery ${ordinal + 1} remains required.`,
+          sides: [
+            {
+              ordinal: 0,
+              conversationId: null,
+              turnId: null,
+              dispatchState: cleared ? "cancelled" : "pending",
+            },
+            {
+              ordinal: 1,
+              conversationId: null,
+              turnId: null,
+              dispatchState: cleared ? "cancelled" : "pending",
+            },
+          ],
+          recoveryGuidance: cleared ? [] : [{
+            kind: "git-worktree",
+            ordinal,
+            topology: "owned",
+            repositoryPath: "/workspace/repository",
+            plannedPath,
+            observedPath: plannedPath,
+            worktreeId: `worktree-recheck-${ordinal + 1}`,
+            generatedBranch: `inertia/recheck-${ordinal + 1}`,
+            expectedHead: `${ordinal + 1}`.repeat(40),
+            observedBranch: `inertia/recheck-${ordinal + 1}`,
+            observedHead: `${ordinal + 1}`.repeat(40),
+            actions: [{
+              label: "Remove retained linked worktree",
+              cwd: "/workspace/repository",
+              executable: "git",
+              args: ["worktree", "remove", "--", plannedPath],
+            }],
+          }],
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(5));
+    expect(hook.result.current.recoveryGuidance).toHaveLength(2);
+
+    rechecking = true;
+    await act(async () => hook.result.current.recheckRecovery());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(10));
+
+    expect(hook.result.current.recoveryStatus?.launchId).toBe(launchIds[1]);
+    expect(hook.result.current.recoveryGuidance.map(
+      ({ plannedPath }) => plannedPath,
+    )).toEqual(["/workspace/retained recheck 2"]);
+    expect(hook.result.current.error).toBe("Recovery 2 remains required.");
+  });
+
+  it("discards a late recovery recheck after the dialog is reopened", async () => {
+    const launchId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    let pendingCalls = 0;
+    let resolveStalePending!: (event: ServerEvent) => void;
+    const stalePending = new Promise<ServerEvent>((resolve) => {
+      resolveStalePending = resolve;
+    });
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        pendingCalls += 1;
+        if (pendingCalls === 1) return pendingLaunchesEvent([launchId]);
+        if (pendingCalls === 2) return stalePending;
+        return pendingLaunchesEvent();
+      }
+      if (command.type !== "duo.status" && command.type !== "duo.cancel") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId,
+          state: "recovery-required",
+          error: "Stale recovery must not return.",
+          sides: [
+            { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+            { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+          ],
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(3));
+
+    let recheck!: Promise<void>;
+    act(() => {
+      recheck = hook.result.current.recheckRecovery();
+    });
+    await waitFor(() => expect(pendingCalls).toBe(2));
+
+    act(() => hook.result.current.closeDialog());
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(pendingCalls).toBe(3));
+    await waitFor(() => expect(hook.result.current.recoveryStatus).toBeNull());
+
+    resolveStalePending(pendingLaunchesEvent([launchId]));
+    await act(async () => recheck);
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+      "duo.status",
+      "duo.cancel",
+      "duo.pending",
+      "duo.pending",
+    ]);
+    expect(hook.result.current.recoveryStatus).toBeNull();
+    expect(hook.result.current.recoveryGuidance).toEqual([]);
+    expect(hook.result.current.error).toBeNull();
+    expect(hook.result.current.recheckingRecovery).toBe(false);
   });
 
   it("continues reconciling later blockers when an earlier status is unavailable", async () => {
@@ -2016,12 +2243,13 @@ describe("multi-spawn", () => {
     }];
     let recoveryRequired = false;
     let manualCleanupComplete = false;
+    let pendingCleared = false;
     const run = vi.fn(async (
       _key: string,
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
       if (command.type === "duo.pending") {
-        return pendingLaunchesEvent([launchId]);
+        return pendingLaunchesEvent(pendingCleared ? [] : [launchId]);
       }
       if (command.type === "duo.status") {
         return {
@@ -2082,11 +2310,13 @@ describe("multi-spawn", () => {
     expect(hook.result.current.error).toBe(
       retainedWorktreeMessage,
     );
-    expect(hook.result.current.recoveryGuidance).toEqual(recoveryGuidance);
+    expect(hook.result.current.recoveryGuidance).toEqual(
+      recoveryGuidance.map((guidance) => ({ ...guidance, launchId })),
+    );
+    expect(hook.result.current.recoveryStatus?.state).toBe("recovery-required");
 
     manualCleanupComplete = true;
-    act(() => hook.result.current.closeDialog());
-    act(() => hook.result.current.openDialog());
+    await act(async () => hook.result.current.recheckRecovery());
     await waitFor(() => expect(run).toHaveBeenCalledTimes(6));
 
     expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
@@ -2104,6 +2334,16 @@ describe("multi-spawn", () => {
       "The duo launch was cancelled before both providers began.",
     );
     expect(hook.result.current.recoveryGuidance).toEqual([]);
+    expect(hook.result.current.recoveryStatus?.state).toBe("cancelled");
+
+    pendingCleared = true;
+    await act(async () => hook.result.current.recheckRecovery());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(7));
+
+    expect(run.mock.calls.at(-1)?.[1].type).toBe("duo.pending");
+    expect(hook.result.current.error).toBeNull();
+    expect(hook.result.current.recoveryGuidance).toEqual([]);
+    expect(hook.result.current.recoveryStatus).toBeNull();
   });
 
   it("closes for authoritative reconciliation after ambiguous preparation", async () => {

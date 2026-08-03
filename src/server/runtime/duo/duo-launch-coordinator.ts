@@ -396,7 +396,7 @@ export class DuoLaunchCoordinator {
     }
     const failure = started.every(Boolean)
       ? null
-      : "Only part of the provider dispatch was accepted. Any started sibling was stopped; dispatch was not retried.";
+      : "Only part of the provider dispatch was accepted. Cancellation was requested for any started sibling, but provider-side effects are not atomic and must be inspected. Dispatch was not retried.";
     return publicStatus(this.store, this.store.finishPairedLaunchDispatch(
       launchId,
       started,
@@ -447,6 +447,19 @@ export class DuoLaunchCoordinator {
 
   status(launchId: string): DuoLaunchStatus {
     return publicStatus(this.store, this.store.pairedLaunch(launchId));
+  }
+
+  acknowledgeInterrupted(launchId: string): DuoLaunchStatus {
+    const current = this.store.pairedLaunch(launchId);
+    if (current.state === "interrupted") {
+      for (const { conversationId } of current.sides) {
+        if (conversationId) this.turns.cancel(conversationId);
+      }
+    }
+    return publicStatus(
+      this.store,
+      this.store.acknowledgeInterruptedPairedLaunch(launchId),
+    );
   }
 
   pending(projectIds: readonly string[]): {

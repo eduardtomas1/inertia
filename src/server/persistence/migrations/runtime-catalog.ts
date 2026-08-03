@@ -22,7 +22,7 @@ import {
   type DatabaseMigrationDefinition,
 } from "./catalog";
 import { durableDataMigrationDefinitions } from "./durable-data";
-import { rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
+import { protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
 import { quotedSqlIdentifier } from "./sql-identifiers";
 
@@ -1205,6 +1205,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
       },
     });
     migrationExtensions.push(...durableDataMigrationDefinitions);
+    migrationExtensions.push({ name: "ProtectInterruptedDuoRecovery", up: protectInterruptedPairedLaunchDeletion });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import remoteComponentVersions from "../../remote/component-versions.json" with {
+  type: "json",
+};
+
 import {
   REMOTE_GRANT_LIMITS,
   type RemoteConversationGrant,
@@ -7,13 +11,14 @@ import {
 
 export const REMOTE_PROTOCOL_VERSION = 2 as const;
 export const RELAY_PROTOCOL_VERSION = 2 as const;
-export const REMOTE_BROWSER_VERSION = "0.3.0";
-export const REMOTE_RELAY_VERSION = "0.2.0";
-export const REMOTE_DESKTOP_VERSION = "0.2.0";
+export const REMOTE_BROWSER_VERSION = remoteComponentVersions.browser;
+export const REMOTE_RELAY_VERSION = remoteComponentVersions.relay;
+export const REMOTE_DESKTOP_VERSION = remoteComponentVersions.desktop;
 export const REMOTE_AUTHENTICATED_REJECTION_CAPABILITY = "auth-reject-v1";
 export const REMOTE_CONDITIONAL_PROJECTIONS_CAPABILITY =
   "conditional-projections-v1";
-export const REMOTE_CONDITIONAL_PROJECTIONS_BROWSER_VERSION = "0.3.0";
+export const REMOTE_CONDITIONAL_PROJECTIONS_BROWSER_VERSION =
+  "0.3.0";
 // Keep the authenticated-rejection marker stable for mixed desktop/browser
 // versions. Conditional reads are negotiated separately through the relay's
 // authenticated component-version projection.

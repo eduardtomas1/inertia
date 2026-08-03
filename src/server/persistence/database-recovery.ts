@@ -19,6 +19,7 @@ import Database from "better-sqlite3";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "./migrations/catalog";
 
 export const DATABASE_BACKUP_INTERVAL_MS = 60 * 60 * 1_000;
+export const DATABASE_INITIAL_BACKUP_QUIET_MS = 30 * 1_000;
 export const DATABASE_BACKUP_MAX_COUNT = 5;
 export const DATABASE_BACKUP_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 export const DATABASE_BACKUP_VALIDATION_TIMEOUT_MS = 120_000;
@@ -72,11 +73,13 @@ export interface DatabaseRecoveryOptions {
 }
 
 export interface DatabaseBackupOptions {
+  readonly initialDelayMs?: number;
   readonly intervalMs?: number;
   readonly maxBackups?: number;
   readonly maxTotalBytes?: number;
   readonly now?: () => Date;
   readonly onError?: (error: unknown) => void;
+  readonly onCreated?: (result: DatabaseBackupResult) => void;
   readonly validateBackup?: (
     path: string,
     signal: AbortSignal,
@@ -87,6 +90,10 @@ export interface DatabaseBackupResult {
   readonly createdAt: string;
   readonly filename: string;
   readonly size: number;
+}
+
+export interface DatabaseBackupStatus {
+  readonly lastValidatedAt: string | null;
 }
 
 interface ValidatedBackup {
@@ -645,17 +652,28 @@ export function recoverDatabaseOnStartup(
 
 export class DatabaseBackupManager {
   private timer: NodeJS.Timeout | null = null;
+  private initialTimer: NodeJS.Timeout | null = null;
   private inFlight: Promise<DatabaseBackupResult> | null = null;
   private inFlightAbort: AbortController | null = null;
+  private started = false;
+  private initialBackupComplete = false;
+  private lastValidatedAt: string | null;
 
   constructor(
     private readonly database: Database.Database,
     private readonly databasePath: string,
     private readonly options: DatabaseBackupOptions = {},
-  ) {}
+  ) {
+    // A filename and mtime prove only that a previous process left a file.
+    // Do not label it as validated until this manager has completed the full
+    // integrity/schema check for a newly written backup.
+    this.lastValidatedAt = null;
+  }
 
   start(): void {
-    if (this.timer) return;
+    if (this.started) return;
+    this.started = true;
+    this.scheduleInitialBackup();
     const intervalMs = Math.max(
       1_000,
       Math.trunc(this.options.intervalMs ?? DATABASE_BACKUP_INTERVAL_MS),
@@ -669,12 +687,22 @@ export class DatabaseBackupManager {
   }
 
   stop(): void {
-    if (!this.timer) return;
-    clearInterval(this.timer);
-    this.timer = null;
+    this.started = false;
+    if (this.initialTimer) {
+      clearTimeout(this.initialTimer);
+      this.initialTimer = null;
+    }
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
   }
 
   createBackup(): Promise<DatabaseBackupResult> {
+    if (this.initialTimer) {
+      clearTimeout(this.initialTimer);
+      this.initialTimer = null;
+    }
     if (this.inFlight) return this.inFlight;
     const controller = new AbortController();
     const operation = this.createBackupOnce(controller.signal);
@@ -684,9 +712,19 @@ export class DatabaseBackupManager {
       if (this.inFlight === operation) {
         this.inFlight = null;
         this.inFlightAbort = null;
+        if (!this.initialBackupComplete) this.scheduleInitialBackup();
       }
     }).catch(() => undefined);
     return operation;
+  }
+
+  createInitialBackup(): Promise<DatabaseBackupResult | null> {
+    if (this.initialBackupComplete) return Promise.resolve(null);
+    return this.createBackup();
+  }
+
+  status(): DatabaseBackupStatus {
+    return { lastValidatedAt: this.lastValidatedAt };
   }
 
   async cancelAndWait(): Promise<void> {
@@ -733,15 +771,45 @@ export class DatabaseBackupManager {
       renameSync(partialPath, finalPath);
       chmodSync(finalPath, FILE_MODE);
       this.prune(finalPath);
-      return {
+      const result = {
         createdAt: createdAt.toISOString(),
         filename,
         size: statSync(finalPath).size,
       };
+      this.lastValidatedAt = result.createdAt;
+      this.initialBackupComplete = true;
+      try {
+        this.options.onCreated?.(result);
+      } catch (error) {
+        this.options.onError?.(error);
+      }
+      return result;
     } catch (error) {
       removeIfRegularFile(partialPath);
       throw error;
     }
+  }
+
+  private scheduleInitialBackup(): void {
+    if (
+      !this.started
+      || this.initialBackupComplete
+      || this.initialTimer
+      || this.inFlight
+    ) return;
+    const delayMs = Math.max(
+      1_000,
+      Math.trunc(
+        this.options.initialDelayMs ?? DATABASE_INITIAL_BACKUP_QUIET_MS,
+      ),
+    );
+    this.initialTimer = setTimeout(() => {
+      this.initialTimer = null;
+      void this.createInitialBackup().catch((error: unknown) => {
+        this.options.onError?.(error);
+      });
+    }, delayMs);
+    this.initialTimer.unref();
   }
 
   private prune(protectedPath: string): void {

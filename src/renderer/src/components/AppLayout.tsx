@@ -2,7 +2,7 @@ import type {
   Dispatch,
   SetStateAction,
 } from "react";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import type {
   AppSettings,
   Conversation,
@@ -38,12 +38,17 @@ import {
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
 import { resultEvent } from "../lib/runtimeCommands";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
+import {
+  loadCommitDialog,
+  loadMultiSpawnDialog,
+  scheduleFrequentSurfacePrefetch,
+} from "./lazySurfaceLoaders";
 
 const CommitDialog = lazy(async () => ({
-  default: (await import("./CommitDialog")).CommitDialog,
+  default: (await loadCommitDialog()).CommitDialog,
 }));
 const MultiSpawnDialog = lazy(async () => ({
-  default: (await import("./MultiSpawnDialog")).MultiSpawnDialog,
+  default: (await loadMultiSpawnDialog()).MultiSpawnDialog,
 }));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -286,6 +291,10 @@ export function AppLayout({
       }
     },
   });
+  useEffect(() => {
+    if (connection.status !== "online") return;
+    return scheduleFrequentSurfacePrefetch();
+  }, [connection.status]);
 
   return (
     <div
@@ -484,8 +493,13 @@ export function AppLayout({
             cancelling={multiSpawn.cancelling}
             error={multiSpawn.error}
             recoveryGuidance={multiSpawn.recoveryGuidance}
+            recoveryStatus={multiSpawn.recoveryStatus}
+            recheckingRecovery={multiSpawn.recheckingRecovery}
+            acknowledgingRecovery={multiSpawn.acknowledgingRecovery}
             onClose={multiSpawn.closeDialog}
             onSubmit={multiSpawn.submit}
+            onRecheckRecovery={multiSpawn.recheckRecovery}
+            onAcknowledgeRecovery={multiSpawn.acknowledgeRecovery}
             onOpenProviderSetup={actions.openProviderSetup}
             onOpenBackendSetup={actions.openBackendSetup}
           />

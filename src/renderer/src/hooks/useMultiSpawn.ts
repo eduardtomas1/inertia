@@ -10,7 +10,6 @@ import {
 import type {
   AppSettings,
   AppSnapshot,
-  DuoWorktreeRecoveryGuidance,
   ServerEvent,
 } from "@shared/contracts";
 import {
@@ -20,6 +19,7 @@ import {
   validateMultiSpawnDraft,
   writeMultiSpawnPreset,
   writePendingMultiSpawnLaunchId,
+  type IdentifiedDuoRecoveryGuidance,
   type MultiSpawnDraft,
 } from "../utils/multiSpawn";
 import { resultEvent } from "../lib/runtimeCommands";
@@ -44,10 +44,15 @@ export interface MultiSpawnController {
   submitting: boolean;
   cancelling: boolean;
   error: string | null;
-  recoveryGuidance: DuoWorktreeRecoveryGuidance[];
+  recoveryGuidance: IdentifiedDuoRecoveryGuidance[];
+  recoveryStatus: DuoStatusResult | null;
+  recheckingRecovery: boolean;
+  acknowledgingRecovery: boolean;
   openDialog: () => void;
   closeDialog: () => void;
   submit: (draft: MultiSpawnDraft) => Promise<void>;
+  recheckRecovery: () => Promise<void>;
+  acknowledgeRecovery: () => Promise<void>;
 }
 
 function errorMessage(error: unknown): string {
@@ -64,12 +69,23 @@ function reconciliationMessage(detail: string): string {
 
 function launchStatusMessage(status: DuoStatusResult): string | null {
   if (status.state === "running") return null;
+  const startedRoutes: number[] = [];
+  const failedRoutes: number[] = [];
+  for (const { dispatchState, ordinal } of status.sides) {
+    if (dispatchState === "started") startedRoutes.push(ordinal + 1);
+    if (dispatchState === "failed") failedRoutes.push(ordinal + 1);
+  }
+  if (startedRoutes.length > 0 && failedRoutes.length > 0) {
+    return `Provider dispatch was partial: route ${startedRoutes.join(", ")} accepted a start while route ${failedRoutes.join(", ")} failed. Inertia requested cancellation for started work, but provider-side effects are not atomic. Inspect both saved chats; nothing will be retried automatically.`;
+  }
   if (status.error) return status.error;
   if (status.state === "cancelled") {
     return "The duo launch was cancelled before both providers began.";
   }
   if (status.state === "interrupted" || status.state === "recovery-required") {
-    return "The duo needs recovery after an interrupted launch. Both chats remain visible; refresh before starting new work.";
+    return status.state === "interrupted"
+      ? "Duo dispatch was durably claimed, but one or both provider outcomes are uncertain. Provider-side effects are not atomic and nothing will be retried automatically. Inspect both saved chats and re-check the status."
+      : "The duo needs manual Git recovery. Inertia retained uncertain worktree or branch state and will not delete it automatically. Inspect the exact topology, complete any safe manual command, then re-check recovery status.";
   }
   if (status.state === "failed") {
     return "Neither side will be retried automatically. Open the two saved chats to inspect the launch failure.";
@@ -84,7 +100,17 @@ function launchRetainsRecoveryIdentity(status: DuoStatusResult): boolean {
   return status.state === "preparing"
     || status.state === "prepared"
     || status.state === "dispatching"
-    || status.state === "recovery-required";
+    || status.state === "recovery-required"
+    || status.state === "interrupted";
+}
+
+function identifiedRecoveryGuidance(
+  status: DuoStatusResult,
+): IdentifiedDuoRecoveryGuidance[] {
+  return (status.recoveryGuidance ?? []).map((guidance) => ({
+    ...guidance,
+    launchId: status.launchId,
+  }));
 }
 
 function orderedPreparedSides(result: DuoPreparedResult): DuoPreparedResult["sides"] {
@@ -131,13 +157,26 @@ export function useMultiSpawn({
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recoveryGuidance, setRecoveryGuidance] = useState<
-    DuoWorktreeRecoveryGuidance[]
+    IdentifiedDuoRecoveryGuidance[]
   >([]);
+  const [recoveryStatus, setRecoveryStatusState] =
+    useState<DuoStatusResult | null>(null);
+  const [recheckingRecovery, setRecheckingRecovery] = useState(false);
+  const [acknowledgingRecovery, setAcknowledgingRecovery] = useState(false);
+  const recoveryStatusRef = useRef<DuoStatusResult | null>(null);
+  const recoveryProjectIdsRef = useRef<string[]>([]);
   const submittingRef = useRef(false);
   const cancellingRef = useRef(false);
   const activeLaunchIdRef = useRef<string | null>(null);
   const cancelRequestedRef = useRef(false);
   const operationGenerationRef = useRef(0);
+
+  const setRecoveryStatus = useCallback((
+    status: DuoStatusResult | null,
+  ): void => {
+    recoveryStatusRef.current = status;
+    setRecoveryStatusState(status);
+  }, []);
 
   useEffect(() => () => {
     operationGenerationRef.current += 1;
@@ -231,6 +270,9 @@ export function useMultiSpawn({
     generation: number,
   ): Promise<"blocked" | "clear" | "stale"> => {
     const isCurrent = () => operationGenerationRef.current === generation;
+    if (isCurrent()) {
+      recoveryProjectIdsRef.current = [...new Set(projectIds)];
+    }
     try {
       const pending = await queryPendingLaunches(projectIds);
       if (!isCurrent()) return "stale";
@@ -248,9 +290,8 @@ export function useMultiSpawn({
         }
       }
       const retained = statuses.filter(launchRetainsRecoveryIdentity);
-      setRecoveryGuidance(retained.flatMap(
-        ({ recoveryGuidance }) => recoveryGuidance ?? [],
-      ));
+      setRecoveryStatus(retained[0] ?? statuses[0] ?? null);
+      setRecoveryGuidance(retained.flatMap(identifiedRecoveryGuidance));
       const retainedMessages = retained.map(launchStatusMessage).filter(
         (message): message is string => Boolean(message),
       );
@@ -277,6 +318,8 @@ export function useMultiSpawn({
         setError(retainedMessages[0]);
       } else if (statusMessages[0]) {
         setError(statusMessages[0]);
+      } else {
+        setError(null);
       }
       return retained.length > 0 ? "blocked" : "clear";
     } catch {
@@ -286,7 +329,7 @@ export function useMultiSpawn({
       );
       return "blocked";
     }
-  }, [queryPendingLaunches, reconcilePendingLaunch]);
+  }, [queryPendingLaunches, reconcilePendingLaunch, setRecoveryStatus]);
 
   const openDialog = useCallback(() => {
     if (
@@ -298,9 +341,11 @@ export function useMultiSpawn({
     operationGenerationRef.current = generation;
     setError(null);
     setRecoveryGuidance([]);
+    setRecoveryStatus(null);
+    setRecheckingRecovery(false);
     setOpen(true);
     void reconcileProjectLaunches([snapshot.activeProjectId], generation);
-  }, [reconcileProjectLaunches, snapshot?.activeProjectId]);
+  }, [reconcileProjectLaunches, setRecoveryStatus, snapshot?.activeProjectId]);
 
   const cancelActiveLaunch = useCallback(async (): Promise<void> => {
     if (cancellingRef.current) return;
@@ -314,6 +359,7 @@ export function useMultiSpawn({
         setSubmitting(false);
         setError(null);
         setRecoveryGuidance([]);
+        setRecoveryStatus(null);
         setOpen(false);
         focusWorkspace();
       }
@@ -333,7 +379,8 @@ export function useMultiSpawn({
       if (event.result.kind !== "duo.status") {
         throw new Error("The local service returned an unexpected cancellation response.");
       }
-      setRecoveryGuidance(event.result.recoveryGuidance ?? []);
+        setRecoveryGuidance(identifiedRecoveryGuidance(event.result));
+      setRecoveryStatus(event.result);
       if (!launchRetainsRecoveryIdentity(event.result)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
       }
@@ -354,7 +401,7 @@ export function useMultiSpawn({
         setCancelling(false);
       }
     }
-  }, [focusWorkspace, run, setActionError]);
+  }, [focusWorkspace, run, setActionError, setRecoveryStatus]);
 
   const closeDialog = useCallback(() => {
     if (cancellingRef.current) return;
@@ -365,8 +412,11 @@ export function useMultiSpawn({
     operationGenerationRef.current += 1;
     setError(null);
     setRecoveryGuidance([]);
+    setRecoveryStatus(null);
+    setRecheckingRecovery(false);
+    setAcknowledgingRecovery(false);
     setOpen(false);
-  }, [cancelActiveLaunch]);
+  }, [cancelActiveLaunch, setRecoveryStatus]);
 
   const submit = useCallback(async (draft: MultiSpawnDraft): Promise<void> => {
     if (submittingRef.current || cancellingRef.current || !snapshot) return;
@@ -458,11 +508,15 @@ export function useMultiSpawn({
         throw new Error("The local service returned an unexpected dispatch response.");
       }
       const launchMessage = launchStatusMessage(dispatchEvent.result);
-      setRecoveryGuidance(dispatchEvent.result.recoveryGuidance ?? []);
+      setRecoveryGuidance(identifiedRecoveryGuidance(dispatchEvent.result));
+      setRecoveryStatus(dispatchEvent.result);
       if (!launchRetainsRecoveryIdentity(dispatchEvent.result)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
       }
-      if (launchMessage) setActionError(launchMessage);
+      if (launchMessage) {
+        setError(launchMessage);
+        setOpen(true);
+      }
     } catch (caught) {
       if (!isCurrent()) return;
       const delivery = runtimeCommandDelivery(caught);
@@ -492,7 +546,8 @@ export function useMultiSpawn({
             status = recovery.result;
           }
           const message = launchStatusMessage(status);
-          setRecoveryGuidance(status.recoveryGuidance ?? []);
+          setRecoveryGuidance(identifiedRecoveryGuidance(status));
+          setRecoveryStatus(status);
           if (!launchRetainsRecoveryIdentity(status)) {
             clearPendingMultiSpawnLaunchId(window.localStorage);
           }
@@ -537,8 +592,91 @@ export function useMultiSpawn({
     reconcileProjectLaunches,
     queryLaunchStatus,
     setActionError,
+    setRecoveryStatus,
     settings,
     snapshot,
+  ]);
+
+  const recheckRecovery = useCallback(async (): Promise<void> => {
+    if (!recoveryStatus || recheckingRecovery || acknowledgingRecovery) return;
+    const generation = operationGenerationRef.current;
+    const launchId = recoveryStatus.launchId;
+    const projectIds = [...recoveryProjectIdsRef.current];
+    const isCurrent = () =>
+      operationGenerationRef.current === generation
+      && recoveryStatusRef.current?.launchId === launchId;
+    setRecheckingRecovery(true);
+    try {
+      if (projectIds.length === 0) {
+        throw new Error("The projects for this Duo launch are unavailable.");
+      }
+      const reconciliation = await reconcileProjectLaunches(
+        projectIds,
+        generation,
+      );
+      if (!isCurrent() || reconciliation === "stale") return;
+    } catch (caught) {
+      if (!isCurrent()) return;
+      setError(
+        `Recovery status could not be re-checked. ${errorMessage(caught)}`,
+      );
+    } finally {
+      if (operationGenerationRef.current === generation) {
+        setRecheckingRecovery(false);
+      }
+    }
+  }, [
+    acknowledgingRecovery,
+    reconcileProjectLaunches,
+    recheckingRecovery,
+    recoveryStatus,
+  ]);
+
+  const acknowledgeRecovery = useCallback(async (): Promise<void> => {
+    if (
+      recoveryStatus?.state !== "interrupted"
+      || recheckingRecovery
+      || acknowledgingRecovery
+    ) return;
+    const generation = operationGenerationRef.current;
+    const launchId = recoveryStatus.launchId;
+    const projectIds = [...recoveryProjectIdsRef.current];
+    const isCurrent = () =>
+      operationGenerationRef.current === generation
+      && recoveryStatusRef.current?.launchId === launchId;
+    setAcknowledgingRecovery(true);
+    setError(null);
+    try {
+      const event = resultEvent(await run("multi-spawn:acknowledge", {
+        type: "duo.acknowledge",
+        payload: { launchId },
+      }));
+      if (!isCurrent()) return;
+      if (event.result.kind !== "duo.status" || event.result.state !== "failed") {
+        throw new Error(
+          "The local service did not confirm the Duo acknowledgement.",
+        );
+      }
+      if (projectIds.length === 0) {
+        throw new Error("The projects for this Duo launch are unavailable.");
+      }
+      await reconcileProjectLaunches(projectIds, generation);
+    } catch (caught) {
+      if (!isCurrent()) return;
+      setError(
+        `The uncertain Duo launch could not be acknowledged. ${errorMessage(caught)}`,
+      );
+    } finally {
+      if (operationGenerationRef.current === generation) {
+        setAcknowledgingRecovery(false);
+      }
+    }
+  }, [
+    acknowledgingRecovery,
+    reconcileProjectLaunches,
+    recheckingRecovery,
+    recoveryStatus,
+    run,
   ]);
 
   return {
@@ -547,8 +685,13 @@ export function useMultiSpawn({
     cancelling,
     error,
     recoveryGuidance,
+    recoveryStatus,
+    recheckingRecovery,
+    acknowledgingRecovery,
     openDialog,
     closeDialog,
     submit,
+    recheckRecovery,
+    acknowledgeRecovery,
   };
 }

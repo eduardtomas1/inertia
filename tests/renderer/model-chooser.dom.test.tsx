@@ -258,4 +258,45 @@ describe("model chooser active route", () => {
     expect(favorite).toHaveFocus();
     expect(favorite).toHaveAttribute("aria-pressed", "true");
   });
+
+  it("preserves keyboard navigation across equivalent route refreshes", async () => {
+    const routes = Array.from({ length: 120 }, (_, index) =>
+      catalogRoute(index));
+    const selectedRoute = routes[0]!;
+    const rendered = render(
+      <ModelChooser
+        routes={routes}
+        selectedRoute={selectedRoute}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    fireEvent.change(search, { target: { value: "Team Model" } });
+    fireEvent.keyDown(search, { key: "End" });
+    await waitFor(() => {
+      const activeId = search.getAttribute("aria-activedescendant");
+      expect(activeId).not.toBeNull();
+      expect(document.getElementById(activeId!)).toHaveTextContent(
+        "Team Model 119",
+      );
+    });
+
+    rendered.rerender(
+      <ModelChooser
+        routes={routes.map((route) => ({ ...route }))}
+        selectedRoute={{ ...selectedRoute }}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      const activeId = search.getAttribute("aria-activedescendant");
+      expect(activeId).not.toBeNull();
+      expect(document.getElementById(activeId!)).toHaveTextContent(
+        "Team Model 119",
+      );
+    });
+  });
 });

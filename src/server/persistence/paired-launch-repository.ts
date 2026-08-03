@@ -55,6 +55,9 @@ function boundedFailure(message: string | null): string | null {
   return message === null ? null : message.slice(0, 2_000);
 }
 
+const INTERRUPTED_ACKNOWLEDGEMENT =
+  "Uncertain provider dispatch acknowledged by the user.";
+
 export class PairedLaunchRepository {
   constructor(private readonly database: Database.Database) {}
 
@@ -168,7 +171,8 @@ export class PairedLaunchRepository {
       SELECT launch.id
       FROM paired_launches AS launch
       WHERE launch.status IN (
-        'preparing', 'prepared', 'dispatching', 'recovery-required'
+        'preparing', 'prepared', 'dispatching', 'interrupted',
+        'recovery-required'
       )
         AND EXISTS (
           SELECT 1
@@ -194,7 +198,8 @@ export class PairedLaunchRepository {
       WHERE conversation_side.conversation_id = ?
         AND (
           launch.status IN (
-            'preparing', 'prepared', 'dispatching', 'recovery-required'
+            'preparing', 'prepared', 'dispatching', 'interrupted',
+            'recovery-required'
           )
           OR EXISTS (
             SELECT 1
@@ -219,7 +224,7 @@ export class PairedLaunchRepository {
     `).get(conversationId);
     if (blocked) {
       throw new Error(
-        "Cancel the active Duo launch before deleting this thread.",
+        "Cancel the active Duo launch, or acknowledge an interrupted dispatch, before deleting this thread.",
       );
     }
   }
@@ -233,7 +238,8 @@ export class PairedLaunchRepository {
       WHERE project_side.project_id = ?
         AND (
           launch.status IN (
-            'preparing', 'prepared', 'dispatching', 'recovery-required'
+            'preparing', 'prepared', 'dispatching', 'interrupted',
+            'recovery-required'
           )
           OR EXISTS (
             SELECT 1
@@ -273,7 +279,7 @@ export class PairedLaunchRepository {
     `).get(projectId, projectId);
     if (blocked) {
       throw new Error(
-        "Cancel the active Duo launch before removing this project.",
+        "Cancel the active Duo launch, or acknowledge an interrupted dispatch, before removing this project.",
       );
     }
   }
@@ -617,7 +623,11 @@ export class PairedLaunchRepository {
           throw new Error("The Duo dispatch result was already recorded.");
         }
       });
-      const state: DuoLaunchState = started.every(Boolean) ? "running" : "failed";
+      const state: DuoLaunchState = started.every(Boolean)
+        ? "running"
+        : started.some(Boolean)
+          ? "interrupted"
+          : "failed";
       this.touch(launchId, state, failure, now);
       return this.get(launchId);
     })();
@@ -657,6 +667,28 @@ export class PairedLaunchRepository {
         `).run(launchId);
       }
       this.touch(launchId, state, message, now);
+      return this.get(launchId);
+    })();
+  }
+
+  acknowledgeInterrupted(launchId: string, now: string): StoredPairedLaunch {
+    return this.database.transaction(() => {
+      const current = this.get(launchId);
+      if (
+        current.state === "failed"
+        && current.error?.startsWith(INTERRUPTED_ACKNOWLEDGEMENT)
+      ) {
+        return current;
+      }
+      if (current.state !== "interrupted") {
+        throw new Error("Only an interrupted Duo launch can be acknowledged.");
+      }
+      this.touch(
+        launchId,
+        "failed",
+        `${INTERRUPTED_ACKNOWLEDGEMENT} ${current.error ?? "Provider acceptance remains unknown."}`,
+        now,
+      );
       return this.get(launchId);
     })();
   }

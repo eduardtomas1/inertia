@@ -43,6 +43,7 @@ import {
   type SidebarThreadStatus,
 } from "../utils/sidebarModel";
 import { IconButton, LoadingMark } from "./ui";
+import { loadMultiSpawnDialog, loadSettingsView } from "./lazySurfaceLoaders";
 
 const ACTIVITY_HISTORY_PAGE = 10;
 
@@ -542,6 +543,9 @@ function SidebarView({
               label="Launch two chats"
               className="multi-spawn-button"
               disabled={connectionStatus !== "online"}
+              onFocus={() => void loadMultiSpawnDialog()}
+              onPointerDown={() => void loadMultiSpawnDialog()}
+              onPointerEnter={() => void loadMultiSpawnDialog()}
               onClick={onOpenMultiSpawn}
             >
               <Zap size={15} fill="currentColor" />
@@ -730,7 +734,7 @@ function SidebarView({
         </div>
 
         <div className="sidebar-footer">
-          <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-current={view === "settings" ? "page" : undefined} onClick={() => navigate("settings")}>
+          <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
             <Settings size={16} /><span>Settings</span>
           </button>
         </div>

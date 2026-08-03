@@ -8,6 +8,11 @@ import { EnvironmentSummary } from "./EnvironmentSummary";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { IconButton } from "./ui";
 import { useRemoteAccessState } from "../hooks/useRemoteAccessState";
+import {
+  loadActivityCenter,
+  loadCommitDialog,
+  loadTerminalPanel,
+} from "./lazySurfaceLoaders";
 
 type WorkspaceHeaderProps = {
   project: Project | null;
@@ -229,7 +234,7 @@ export function WorkspaceHeader({
                 )}
               </div>
             )}
-            <button type="button" className="header-button primary-header-button" onClick={onCommit} disabled={busy || !gitStatus?.isRepository || gitStatus.files.length === 0}>
+            <button type="button" className="header-button primary-header-button" onFocus={() => void loadCommitDialog()} onPointerDown={() => void loadCommitDialog()} onPointerEnter={() => void loadCommitDialog()} onClick={onCommit} disabled={busy || !gitStatus?.isRepository || gitStatus.files.length === 0}>
               <GitCommitHorizontal size={14} /><span>Commit & push</span><ChevronDown size={12} />
             </button>
             {gitStatus?.upstream && <button type="button" className="header-button" onClick={onPull} disabled={busy || gitStatus.files.length > 0}><Download size={14} /><span>{gitStatus.behind > 0 ? `Pull ${gitStatus.behind}` : "Pull"}</span></button>}
@@ -265,6 +270,9 @@ export function WorkspaceHeader({
           label={activityLabel}
           className={`activity-center-button${attentionRunCount > 0 ? " has-attention" : ""}`}
           aria-pressed={activityOpen}
+          onFocus={() => void loadActivityCenter()}
+          onPointerDown={() => void loadActivityCenter()}
+          onPointerEnter={() => void loadActivityCenter()}
           onClick={onToggleActivity}
         >
           <Activity size={17} />
@@ -276,6 +284,9 @@ export function WorkspaceHeader({
             label={workspaceToolsUnavailableReason
               ?? (activeTool ? "Close workspace tools" : "Open workspace tools")}
             aria-pressed={Boolean(activeTool)}
+            onFocus={() => void loadTerminalPanel()}
+            onPointerDown={() => void loadTerminalPanel()}
+            onPointerEnter={() => void loadTerminalPanel()}
             onClick={onToggleTools}
             disabled={!project || Boolean(workspaceToolsUnavailableReason)}
           >

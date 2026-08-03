@@ -277,14 +277,13 @@ export function ChatWorkspace({
     [onLatestContentVisibilityChange],
   );
 
-  const followBehavior: ScrollBehavior = streamingText ? "auto" : "smooth";
   useEffect(() => {
     if (!transcriptNavigationFollowsContent(navigationRef.current)) return;
     const frame = window.requestAnimationFrame(
-      () => performScrollToLatest(followBehavior),
+      () => performScrollToLatest("auto"),
     );
     return () => window.cancelAnimationFrame(frame);
-  }, [contentSignal, followBehavior, performScrollToLatest]);
+  }, [contentSignal, performScrollToLatest]);
 
   useEffect(() => {
     const content = timelineRef.current;

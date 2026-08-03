@@ -2,6 +2,7 @@ import type {
   AccessMode,
   AppSettings,
   AppSnapshot,
+  DuoWorktreeRecoveryGuidance,
   InteractionMode,
   ModelSelection,
   Project,
@@ -21,6 +22,10 @@ export const MULTI_SPAWN_PRESET_STORAGE_KEY =
   "inertia:multi-spawn:preset:v1";
 export const MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY =
   "inertia:multi-spawn:pending-launch:v1";
+
+export type IdentifiedDuoRecoveryGuidance = DuoWorktreeRecoveryGuidance & {
+  launchId: string;
+};
 
 const ACCESS_MODES = new Set<AccessMode>([
   "supervised",

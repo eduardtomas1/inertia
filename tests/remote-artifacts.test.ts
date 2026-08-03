@@ -10,7 +10,11 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import remoteComponentVersions from "../remote/component-versions.json" with {
+  type: "json",
+};
 import {
+  buildRemoteArtifacts,
   verifyRemoteArtifacts,
   writeRemoteArtifactSet,
   type RemoteArtifactInput,
@@ -62,6 +66,31 @@ afterEach(async () => {
 });
 
 describe("Remote Companion release artifacts", () => {
+  it("uses canonical component versions in production artifact names", async () => {
+    const browserDirectory = await temporaryDirectory("remote-browser-build");
+    const outputDirectory = join(
+      await temporaryDirectory("remote-artifact-output"),
+      "set",
+    );
+    await writeFile(
+      join(browserDirectory, "index.html"),
+      "<!doctype html>\n",
+      "utf8",
+    );
+
+    const built = await buildRemoteArtifacts({
+      browserDirectory,
+      outputDirectory,
+      sourceCommit: "d".repeat(40),
+    });
+
+    expect(built.artifacts.map(({ name }) => name)).toEqual([
+      `inertia-remote-browser-${remoteComponentVersions.browser}.tar.gz`,
+      `inertia-remote-relay-${remoteComponentVersions.relay}.tar.gz`,
+    ]);
+    await expect(verifyRemoteArtifacts(outputDirectory)).resolves.toBe(true);
+  });
+
   it("builds deterministic versioned archives with verified manifests", async () => {
     const fixture = await temporaryDirectory("remote-artifact-input");
     const firstOutput = join(await temporaryDirectory("remote-artifact-output"), "set");

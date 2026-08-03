@@ -7,7 +7,7 @@ listener or shares the privileged local runtime capability.
 
 The two independently versioned reference artifacts are:
 
-- `inertia-remote-browser-0.2.0.tar.gz`: a static strict-CSP companion;
+- `inertia-remote-browser-0.3.0.tar.gz`: a static strict-CSP companion;
 - `inertia-remote-relay-0.2.0.tar.gz`: the blind relay, endpoint-authentication
   implementation, lockfile, and private-network reverse-proxy examples.
 

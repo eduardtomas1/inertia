@@ -232,11 +232,17 @@ export interface AppSnapshot {
   /** Safe backend configuration only; credential values and references are forbidden. */
   backendProfiles?: ModelBackendProfileView[];
   backendDefaults?: ModelBackendDefault[];
+  /** Automatic full-database backup status; absent from legacy fixtures. */
+  databaseBackup?: DatabaseBackupStatus;
   settings: AppSettings;
   activeProjectId: string | null;
   activeConversationId: string | null;
   /** Present on authoritative runtime snapshots; optional for legacy fixtures. */
   sync?: RuntimeSyncCursor;
+}
+
+export interface DatabaseBackupStatus {
+  lastValidatedAt: string | null;
 }
 
 export const defaultSettings: AppSettings = {

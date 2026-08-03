@@ -99,6 +99,10 @@ const approvalMethod = process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "file-ch
   ? "item/fileChange/requestApproval"
   : process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "permissions"
     ? "item/permissions/requestApproval"
+    : process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "legacy-command"
+      ? "execCommandApproval"
+      : process.env.INERTIA_APP_SERVER_APPROVAL_KIND === "legacy-file-change"
+        ? "applyPatchApproval"
     : "item/commandExecution/requestApproval";
 let threadId = "thread-new";
 let turnId = "turn-1";
@@ -297,13 +301,27 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       requestInput();
       return;
     }
+    const approvalThreadId =
+      process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval"
+        ? "child-approval"
+        : process.env.INERTIA_APP_SERVER_SCENARIO === "unrelated-approval"
+          ? "thread-unrelated"
+          : threadId;
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval") {
+      send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-approval", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: [approvalThreadId], prompt: "Run a supervised check", model: null, reasoningEffort: null, agentsStates: { [approvalThreadId]: { status: "running", message: "Waiting for approval" } } } } });
+      send({ method: "thread/started", params: { thread: { id: approvalThreadId, parentThreadId: threadId, agentNickname: "Approval verifier", agentRole: "tester", preview: "Run a supervised check" } } });
+    }
     const params = process.env.INERTIA_APP_SERVER_SCENARIO === "unsupported-decisions"
-      ? { threadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: ["acceptForSession"] }
+      ? { threadId: approvalThreadId, turnId, itemId: "command-1", startedAtMs: Date.now(), command: "npm test", cwd: process.cwd(), availableDecisions: ["acceptForSession"] }
+      : approvalMethod === "execCommandApproval"
+        ? { conversationId: approvalThreadId, callId: "command-1", command: ["npm", "test"], parsedCmd: [], cwd: process.cwd(), reason: "Validate the change" }
+      : approvalMethod === "applyPatchApproval"
+        ? { conversationId: approvalThreadId, callId: "change-1", fileChanges: { "src/example.ts": { type: "add", content: "export {};" } }, grantRoot: process.cwd(), reason: "Write the requested file" }
       : approvalMethod === "item/fileChange/requestApproval"
-      ? { threadId, turnId, itemId: "change-1", startedAtMs: Date.now(), reason: "Write the requested file", grantRoot: process.cwd() }
+      ? { threadId: approvalThreadId, turnId, itemId: "change-1", startedAtMs: Date.now(), reason: "Write the requested file", grantRoot: process.cwd() }
       : approvalMethod === "item/permissions/requestApproval"
         ? {
-            threadId,
+            threadId: approvalThreadId,
             turnId,
             itemId: "permission-1",
             environmentId: null,
@@ -322,7 +340,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
             },
           }
       : {
-          threadId,
+          threadId: approvalThreadId,
           turnId,
           itemId: "command-1",
           startedAtMs: Date.now(),
@@ -560,6 +578,125 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(messages.find(({ method }) => method === "initialized")).toEqual({ method: "initialized" });
     await manager.disposeAll();
   });
+
+  it("accepts supervised approvals from a tracked child thread", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "child-approval";
+    const manager = trackedManager(fake.command);
+    const approvals: ProviderApprovalEvent["request"][] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-child-approval",
+      cwd: fake.root,
+      prompt: "Delegate a supervised check.",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (event) => {
+        approvals.push(event.request);
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+        )).toBe(true);
+      },
+      onInput: (event) => {
+        expect(manager.respondToInput(
+          event.conversationId,
+          event.request.requestId,
+          { choice: ["Safe"] },
+        )).toBe(true);
+      },
+    });
+
+    expect(result).toMatchObject({ status: "completed", text: "Hello from Codex" });
+    expect(approvals).toEqual([expect.objectContaining({
+      kind: "command",
+      command: "npm test",
+    })]);
+    expect(captured(fake.capturePath).find(
+      ({ id }) => id === "approval-rpc",
+    )).toMatchObject({ result: { decision: "accept" } });
+  });
+
+  it("rejects supervised approvals from an unrelated provider thread", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "unrelated-approval";
+    const manager = trackedManager(fake.command);
+    const onApproval = vi.fn();
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-unrelated-approval",
+      cwd: fake.root,
+      prompt: "Reject unrelated authority.",
+      interactionMode: "build",
+      access: "supervised",
+    }), { onApproval });
+
+    expect(result.status).toBe("cancelled");
+    expect(onApproval).not.toHaveBeenCalled();
+    expect(captured(fake.capturePath).find(
+      ({ id }) => id === "approval-rpc",
+    )).toMatchObject({
+      error: {
+        code: -32602,
+        message: "Codex sent an approval for a different provider thread.",
+      },
+    });
+  });
+
+  it.each([
+    ["legacy-command", "command", "npm test"],
+    ["legacy-file-change", "file-change", "Write the requested file\nChange src/example.ts"],
+  ] as const)(
+    "keeps supervised %s approval requests compatible with the installed protocol",
+    async (approvalKind, expectedKind, expectedDetail) => {
+      const fake = fakeAppServer();
+      process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+      process.env.INERTIA_APP_SERVER_APPROVAL_KIND = approvalKind;
+      const manager = trackedManager(fake.command);
+      const approvals: ProviderApprovalEvent["request"][] = [];
+
+      const result = await manager.run(nativeProviderRunInput({
+        providerId: "codex",
+        conversationId: `conversation-${approvalKind}`,
+        cwd: fake.root,
+        prompt: "Use supervised approval.",
+        interactionMode: "build",
+        access: "supervised",
+      }), {
+        onApproval: (event) => {
+          approvals.push(event.request);
+          expect(manager.respondToApproval(
+            event.conversationId,
+            event.request.requestId,
+            "approve",
+          )).toBe(true);
+        },
+        onInput: (event) => {
+          expect(manager.respondToInput(
+            event.conversationId,
+            event.request.requestId,
+            { choice: ["Safe"] },
+          )).toBe(true);
+        },
+      });
+
+      expect(result.status).toBe("completed");
+      expect(approvals).toEqual([expect.objectContaining({
+        kind: expectedKind,
+        detail: expectedDetail,
+        availableDecisions: ["approve", "deny", "cancel"],
+      })]);
+      expect(captured(fake.capturePath).find(
+        ({ id }) => id === "approval-rpc",
+      )).toMatchObject({ result: { decision: "approved" } });
+    },
+  );
 
   it("fails a stale resume visibly instead of silently replacing the provider session", async () => {
     const fake = fakeAppServer();

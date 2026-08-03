@@ -6,6 +6,7 @@ import { CheckCircle2, PlugZap, X } from "lucide-react";
 import type { ClientCommand, ProviderInfo, ServerEvent, ThemePreference } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { terminalInputChunks } from "../utils/terminalInputChunks";
 import { IconButton, LoadingMark } from "./ui";
 
 type ProviderAuthDialogProps = {
@@ -91,8 +92,8 @@ export function ProviderAuthDialog({
     const input = terminal.onData((data) => {
       const terminalId = terminalIdRef.current;
       if (!terminalId) return;
-      for (let offset = 0; offset < data.length; offset += 8192) {
-        void sendCommand(command({ type: "terminal.input", payload: { terminalId, data: data.slice(offset, offset + 8192) } })).catch(() => undefined);
+      for (const chunk of terminalInputChunks(data)) {
+        void sendCommand(command({ type: "terminal.input", payload: { terminalId, data: chunk } })).catch(() => undefined);
       }
     });
     let frame: number | undefined;

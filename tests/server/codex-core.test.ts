@@ -47,6 +47,64 @@ describe("Codex protocol seams", () => {
     );
   });
 
+  it("represents installed legacy supervised approvals without exposing patch content", () => {
+    expect(parseCodexApprovalRequest("execCommandApproval", {
+      conversationId: "thread-legacy",
+      callId: "command-1",
+      command: ["printf", "emoji: 😀 and spaces"],
+      parsedCmd: [],
+      cwd: "/workspace",
+      reason: "Verify output",
+    })).toMatchObject({
+      protocol: "legacy-review",
+      providerThreadId: "thread-legacy",
+      request: {
+        kind: "command",
+        command: "printf \"emoji: 😀 and spaces\"",
+        detail: "printf \"emoji: 😀 and spaces\"",
+        availableDecisions: ["approve", "deny", "cancel"],
+      },
+    });
+
+    const patch = parseCodexApprovalRequest("applyPatchApproval", {
+      conversationId: "thread-legacy",
+      callId: "patch-1",
+      fileChanges: {
+        "src/secret.ts": { type: "add", content: "credential-value" },
+      },
+      grantRoot: "/workspace",
+      reason: "Apply the requested edit",
+    });
+    expect(patch).toMatchObject({
+      protocol: "legacy-review",
+      providerThreadId: "thread-legacy",
+      request: {
+        kind: "file-change",
+        detail: "Apply the requested edit\nChange src/secret.ts",
+        permissionRoots: [{ path: "/workspace", access: "write" }],
+      },
+    });
+    expect(JSON.stringify(patch)).not.toContain("credential-value");
+
+    const movedPatch = parseCodexApprovalRequest("applyPatchApproval", {
+      conversationId: "thread-legacy",
+      callId: "patch-move",
+      fileChanges: {
+        "src/original.ts": {
+          type: "update",
+          unified_diff: "@@ -1 +1 @@",
+          move_path: "src/destination.ts",
+        },
+        "src/second.ts": { type: "delete", content: "hidden" },
+      },
+      grantRoot: "/workspace",
+    });
+    expect(movedPatch?.request.detail).toBe(
+      "Change src/original.ts\nMove to src/destination.ts\nChange src/second.ts",
+    );
+    expect(JSON.stringify(movedPatch)).not.toContain("@@ -1 +1 @@");
+  });
+
   it("preserves exact absolute permission paths and provider display patterns", () => {
     const absoluteRoot = isAbsolute("C:\\workspace") ? "C:\\workspace" : "/workspace";
     const mixedAbsolutePath = `${absoluteRoot}/generated/../fixtures`;
@@ -100,6 +158,33 @@ describe("Codex protocol seams", () => {
       permissions: {
         fileSystem: { read: roots, write: null, entries: [] },
       },
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("execCommandApproval", {
+      conversationId: "thread-legacy",
+      callId: "command-1",
+      command: ["npm", "test\nunsafe"],
+      parsedCmd: [],
+      cwd: "/workspace",
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("applyPatchApproval", {
+      conversationId: "thread-legacy",
+      callId: "patch-1",
+      fileChanges: {
+        "src/file.ts": { type: "future-change", content: "hidden" },
+      },
+      grantRoot: "/workspace",
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("applyPatchApproval", {
+      conversationId: "thread-legacy",
+      callId: "patch-too-large-to-display",
+      fileChanges: Object.fromEntries(Array.from(
+        { length: 256 },
+        (_, index) => [
+          `src/${index}-${"x".repeat(20)}.ts`,
+          { type: "add", content: "hidden" },
+        ],
+      )),
+      grantRoot: "/workspace",
     })).toBeUndefined();
     expect(parseCodexApprovalRequest("item/permissions/requestApproval", {
       permissions: {
@@ -196,6 +281,47 @@ describe("Codex protocol seams", () => {
           },
         },
       )).toBeUndefined();
+    }
+    for (const unsafeFormatting of [
+      "\u0085",
+      "\u009b",
+      "\u00ad",
+      "\u2028",
+      "\u2029",
+      "\u202e",
+      "\u2066",
+      "\ufeff",
+    ]) {
+      expect(parseCodexApprovalRequest("execCommandApproval", {
+        conversationId: "thread-legacy",
+        callId: "command-formatting",
+        command: ["printf", `safe${unsafeFormatting}echo injected`],
+        parsedCmd: [],
+        cwd: "/workspace",
+      })).toBeUndefined();
+      expect(parseCodexApprovalRequest("applyPatchApproval", {
+        conversationId: "thread-legacy",
+        callId: "patch-directional-source",
+        fileChanges: {
+          [`src/safe${unsafeFormatting}cod.exe`]: {
+            type: "delete",
+            content: "hidden",
+          },
+        },
+        grantRoot: "/workspace",
+      })).toBeUndefined();
+      expect(parseCodexApprovalRequest("applyPatchApproval", {
+        conversationId: "thread-legacy",
+        callId: "patch-directional-destination",
+        fileChanges: {
+          "src/source.ts": {
+            type: "update",
+            unified_diff: "@@ -1 +1 @@",
+            move_path: `src/safe${unsafeFormatting}cod.exe`,
+          },
+        },
+        grantRoot: "/workspace",
+      })).toBeUndefined();
     }
   });
 

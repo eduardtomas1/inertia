@@ -145,6 +145,7 @@ export class RuntimeStore {
     databasePath: string,
     _defaultWorkspacePath: string,
     options: {
+      onDatabaseBackupCreated?: (result: DatabaseBackupResult) => void;
       recoverInterruptedRuns?: boolean;
       recoveryExportMaxBytes?: number;
     } = {},
@@ -164,6 +165,7 @@ export class RuntimeStore {
         onError: () => {
           console.error("The scheduled database backup failed.");
         },
+        onCreated: options.onDatabaseBackupCreated,
       },
     );
     this.backendProfileRepository = new BackendProfileRepository({
@@ -275,12 +277,20 @@ export class RuntimeStore {
     this.backupManager.start();
   }
 
+  createInitialBackup(): Promise<DatabaseBackupResult | null> {
+    return this.backupManager.createInitialBackup();
+  }
+
   createBackup(): Promise<DatabaseBackupResult> {
     return this.backupManager.createBackup();
   }
 
   databaseRecoveryReport(): DatabaseRecoveryReport {
     return this.recoveryReport;
+  }
+
+  databaseBackupStatus(): ReturnType<DatabaseBackupManager["status"]> {
+    return this.backupManager.status();
   }
 
   exportRecoveryData(): string {
@@ -352,7 +362,10 @@ export class RuntimeStore {
   }
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
-    return this.snapshotRepository.shellSnapshot(providers);
+    return {
+      ...this.snapshotRepository.shellSnapshot(providers),
+      databaseBackup: this.backupManager.status(),
+    };
   }
 
   conversationShell(conversationId: string): ConversationShell | null {
@@ -655,6 +668,13 @@ export class RuntimeStore {
     now = new Date().toISOString(),
   ): StoredPairedLaunch {
     return this.pairedLaunchRepository.fail(launchId, state, message, now);
+  }
+
+  acknowledgeInterruptedPairedLaunch(
+    launchId: string,
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.acknowledgeInterrupted(launchId, now);
   }
 
   recoverInterruptedPairedLaunches(

@@ -37,8 +37,19 @@ const relayFiles = [
 
 export async function buildRemoteArtifacts(options = {}) {
   const sourceCommit = options.sourceCommit ?? cleanSourceCommit();
+  const componentVersions = await readComponentVersions(
+    "remote/component-versions.json",
+  );
   const browserPackage = await readPackageJson("remote/browser/package.json");
   const relayPackage = await readPackageJson("remote/relay/package.json");
+  if (
+    browserPackage.version !== componentVersions.browser
+    || relayPackage.version !== componentVersions.relay
+  ) {
+    throw new Error(
+      "Remote Companion package versions do not match the canonical component versions.",
+    );
+  }
   const browserDirectory = resolve(
     options.browserDirectory ?? "remote/browser/dist",
   );
@@ -61,14 +72,14 @@ export async function buildRemoteArtifacts(options = {}) {
     components: [
       {
         kind: "browser",
-        version: browserPackage.version,
+        version: componentVersions.browser,
         nodeRange: browserPackage.engines?.node,
         lockfilePath: resolve("package-lock.json"),
         entries: browserEntries,
       },
       {
         kind: "relay",
-        version: relayPackage.version,
+        version: componentVersions.relay,
         nodeRange: relayPackage.engines?.node,
         lockfilePath: join(relayDirectory, "package-lock.json"),
         entries: relayEntries,
@@ -338,6 +349,20 @@ async function readPackageJson(path) {
   const value = JSON.parse(await readFile(path, "utf8"));
   if (!STABLE_VERSION.test(value?.version ?? "")) {
     throw new Error(`Remote component package version is invalid: ${path}`);
+  }
+  return value;
+}
+
+async function readComponentVersions(path) {
+  const value = JSON.parse(await readFile(path, "utf8"));
+  if (
+    !plainObject(value)
+    || !exactKeys(value, 3)
+    || [value.browser, value.desktop, value.relay].some(
+      (version) => !STABLE_VERSION.test(version ?? ""),
+    )
+  ) {
+    throw new Error(`Remote component version map is invalid: ${path}`);
   }
   return value;
 }

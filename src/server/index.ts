@@ -199,10 +199,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const dataDirectory = resolve(options.dataDirectory);
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
   const databasePath = join(dataDirectory, "inertia.sqlite");
+  let onDatabaseBackupCreated = (): void => undefined;
   const store = new RuntimeStore(
     databasePath,
     options.defaultWorkspacePath,
-    { recoverInterruptedRuns: false },
+    {
+      recoverInterruptedRuns: false,
+      onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
+    },
   );
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
@@ -406,6 +410,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   const broadcastSnapshot = (): void => snapshotBroadcasts.request();
   const flushSnapshot = (): void => snapshotBroadcasts.flush();
+  onDatabaseBackupCreated = () => {
+    if (!closed) broadcastSnapshot();
+  };
   workspaceRuns = new WorkspaceRunController(
     store,
     terminals,
@@ -601,7 +608,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         );
         applyProviderMetadata(providerId, metadata);
       },
-      onTurnSettled: testOnlyOnTurnSettled,
+      onTurnSettled: (turn) => {
+        if (turn.status === "completed") {
+          // The durable turn is already settled. Backup work stays off the
+          // settlement path and the manager deduplicates it with quiet/hourly
+          // triggers.
+          void store.createInitialBackup().catch(() => undefined);
+        }
+        return testOnlyOnTurnSettled?.(turn);
+      },
     },
   );
   const duoLaunches = new DuoLaunchCoordinator(

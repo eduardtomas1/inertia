@@ -15,30 +15,40 @@ import { ConversationDetailState } from "./ConversationDetailState";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { LoadingMark } from "./ui";
 import { WorkspacePanel, type WorkspacePanelTab } from "./WorkspacePanel";
+import {
+  loadFilesPanel,
+  loadGoalPanel,
+  loadHistoricalDiffPanel,
+  loadPlanPanel,
+  loadPreviewPanel,
+  loadSettingsView,
+  loadTerminalPanel,
+  loadWorkspaceChangesPanel,
+} from "./lazySurfaceLoaders";
 
 const FilesPanel = lazy(async () => ({
-  default: (await import("./FilesPanel")).FilesPanel,
+  default: (await loadFilesPanel()).FilesPanel,
 }));
 const HistoricalDiffPanel = lazy(async () => ({
-  default: (await import("./HistoricalDiffPanel")).HistoricalDiffPanel,
+  default: (await loadHistoricalDiffPanel()).HistoricalDiffPanel,
 }));
 const GoalPanel = lazy(async () => ({
-  default: (await import("./GoalPanel")).GoalPanel,
+  default: (await loadGoalPanel()).GoalPanel,
 }));
 const PlanPanel = lazy(async () => ({
-  default: (await import("./PlanPanel")).PlanPanel,
+  default: (await loadPlanPanel()).PlanPanel,
 }));
 const PreviewPanel = lazy(async () => ({
-  default: (await import("./PreviewPanel")).PreviewPanel,
+  default: (await loadPreviewPanel()).PreviewPanel,
 }));
 const SettingsView = lazy(async () => ({
-  default: (await import("./SettingsView")).SettingsView,
+  default: (await loadSettingsView()).SettingsView,
 }));
 const TerminalPanel = lazy(async () => ({
-  default: (await import("./TerminalPanel")).TerminalPanel,
+  default: (await loadTerminalPanel()).TerminalPanel,
 }));
 const WorkspaceChangesPanel = lazy(async () => ({
-  default: (await import("./WorkspaceChangesPanel")).WorkspaceChangesPanel,
+  default: (await loadWorkspaceChangesPanel()).WorkspaceChangesPanel,
 }));
 
 function WorkspaceToolFallback(): JSX.Element {

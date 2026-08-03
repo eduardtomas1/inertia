@@ -266,6 +266,7 @@ export function createWorkspaceSceneModel({
       archived: connection.snapshot?.conversations.filter(
         ({ archivedAt }) => archivedAt !== null,
       ) ?? [],
+      databaseBackup: connection.snapshot?.databaseBackup,
       onUpdate: (updates) => {
         void actions.updateSettings(updates);
       },

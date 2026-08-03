@@ -37,6 +37,7 @@ import {
 } from "../../src/server/provider/io";
 import { TerminalManager } from "../../src/server/terminal";
 import { TurnStreamCoalescer } from "../../src/server/runtime/turns/turn-stream-coalescer";
+import { STREAM_PROJECTION_FLUSH_INTERVAL_MS } from "../../src/server/runtime/turns/turn-stream-channel";
 import {
   listWorkspaceEntries,
   searchWorkspaceEntries,
@@ -917,9 +918,14 @@ describe("cross-platform performance benchmark", () => {
       expect(streamingCadenceCandidates).toHaveLength(3);
       for (const candidate of streamingCadenceCandidates) {
         expect(candidate.firstProjectionMs).toBeLessThan(50);
-        expect(candidate.p95VisibleGapMs).toBeLessThan(125);
+        expect(candidate.p95VisibleGapMs).toBeGreaterThan(0);
         expect(candidate.sqliteWrites).toBe(candidate.visibleUpdates);
       }
+      const selectedStreamingCadence = streamingCadenceCandidates.find(
+        ({ intervalMs }) => intervalMs === STREAM_PROJECTION_FLUSH_INTERVAL_MS,
+      );
+      expect(selectedStreamingCadence).toBeDefined();
+      expect(selectedStreamingCadence!.p95VisibleGapMs).toBeLessThan(100);
 
       if (enforce) {
         expect(workspaceList.medianMs).toBeLessThan(8_000);

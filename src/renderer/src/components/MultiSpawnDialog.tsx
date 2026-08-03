@@ -62,9 +62,11 @@ export interface MultiSpawnDialogProps {
   recoveryGuidance?: DuoWorktreeRecoveryGuidance[];
   recoveryStatus?: DuoLaunchStatus | null;
   recheckingRecovery?: boolean;
+  acknowledgingRecovery?: boolean;
   onClose: () => void;
   onSubmit: (draft: MultiSpawnDraft) => Promise<void>;
   onRecheckRecovery?: () => Promise<void>;
+  onAcknowledgeRecovery?: () => Promise<void>;
   onOpenProviderSetup: (providerId: ProviderId) => void;
   onOpenBackendSetup: (profileId: string) => void;
 }
@@ -282,9 +284,11 @@ export function MultiSpawnDialog({
   recoveryGuidance = [],
   recoveryStatus = null,
   recheckingRecovery = false,
+  acknowledgingRecovery = false,
   onClose,
   onSubmit,
   onRecheckRecovery,
+  onAcknowledgeRecovery,
   onOpenProviderSetup,
   onOpenBackendSetup,
 }: MultiSpawnDialogProps): React.JSX.Element | null {
@@ -297,7 +301,7 @@ export function MultiSpawnDialog({
     string | null
   >(null);
   useNativePreviewSuspension(open);
-  const busy = submitting || cancelling;
+  const busy = submitting || cancelling || acknowledgingRecovery;
   const copyRecoveryCommand = async (
     key: string,
     commandText: string,
@@ -645,6 +649,19 @@ export function MultiSpawnDialog({
                     onClick={() => { void onRecheckRecovery(); }}
                   >
                     {recheckingRecovery ? "Re-checking…" : "Re-check recovery status"}
+                  </button>
+                )}
+                {recoveryStatus.state === "interrupted"
+                  && onAcknowledgeRecovery && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={busy || recheckingRecovery}
+                    onClick={() => { void onAcknowledgeRecovery(); }}
+                  >
+                    {acknowledgingRecovery
+                      ? "Acknowledging…"
+                      : "I inspected both chats — continue"}
                   </button>
                 )}
               </section>

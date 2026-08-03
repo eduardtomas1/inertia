@@ -977,13 +977,16 @@ describe("multi-spawn", () => {
     async ({ state, expectedStored }) => {
       let launchId = "";
       let dispatched = false;
+      let acknowledged = false;
       const run = vi.fn(async (
         _key: string,
         command: CommandWithoutId,
       ): Promise<ServerEvent> => {
         if (command.type === "duo.pending") {
           return pendingLaunchesEvent(
-            state === "interrupted" && dispatched ? [launchId] : [],
+            state === "interrupted" && dispatched && !acknowledged
+              ? [launchId]
+              : [],
           );
         }
         if (command.type === "duo.prepare") {
@@ -1038,6 +1041,23 @@ describe("multi-spawn", () => {
             },
           };
         }
+        if (command.type === "duo.acknowledge") {
+          acknowledged = true;
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId,
+              state: "failed",
+              error: "Uncertain provider dispatch acknowledged by the user.",
+              sides: [
+                { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "failed" },
+                { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "failed" },
+              ],
+            },
+          };
+        }
         return { type: "request.ok", requestId: crypto.randomUUID() };
       });
       const hook = renderHook(() => useMultiSpawn({
@@ -1072,6 +1092,12 @@ describe("multi-spawn", () => {
         await waitFor(() => {
           expect(hook.result.current.recoveryStatus?.state).toBe("interrupted");
         });
+
+        await act(async () => hook.result.current.acknowledgeRecovery());
+        expect(run.mock.calls.slice(-2).map(([, command]) => command.type))
+          .toEqual(["duo.acknowledge", "duo.pending"]);
+        expect(hook.result.current.recoveryStatus).toBeNull();
+        expect(hook.result.current.error).toBeNull();
       }
     },
   );

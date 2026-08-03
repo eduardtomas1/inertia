@@ -670,6 +670,13 @@ export class RuntimeStore {
     return this.pairedLaunchRepository.fail(launchId, state, message, now);
   }
 
+  acknowledgeInterruptedPairedLaunch(
+    launchId: string,
+    now = new Date().toISOString(),
+  ): StoredPairedLaunch {
+    return this.pairedLaunchRepository.acknowledgeInterrupted(launchId, now);
+  }
+
   recoverInterruptedPairedLaunches(
     now = new Date().toISOString(),
   ): StoredPairedLaunch[] {

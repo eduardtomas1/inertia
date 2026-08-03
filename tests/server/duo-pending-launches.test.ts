@@ -32,15 +32,17 @@ function createPending(
   launchId: string,
   projectIds: readonly [string, string],
   createdAt: string,
-): void {
+): [string, string] {
+  const conversationIds = [randomUUID(), randomUUID()] as [string, string];
   store.createPairedLaunch(launchId, [0, 1].map((ordinal) => ({
     ordinal: ordinal as 0 | 1,
     projectId: projectIds[ordinal]!,
-    plannedConversationId: randomUUID(),
+    plannedConversationId: conversationIds[ordinal]!,
     plannedWorktreePath: null,
     plannedBranch: "main",
     ownsWorktree: false,
   })) as Parameters<RuntimeStore["createPairedLaunch"]>[1], createdAt);
+  return conversationIds;
 }
 
 afterEach(async () => {
@@ -50,6 +52,53 @@ afterEach(async () => {
 });
 
 describe("pending Duo launch discovery", () => {
+  it("protects interrupted identity until an idempotent acknowledgement", async () => {
+    const fixture = await runtime();
+    try {
+      const launchId = randomUUID();
+      const conversationIds = createPending(
+        fixture.store,
+        launchId,
+        [fixture.projectId, fixture.projectId],
+        "2026-08-02T10:00:00.000Z",
+      );
+      const conversations = fixture.store.createPairedConversations(launchId, [
+        { projectId: fixture.projectId, title: "Left", options: { id: conversationIds[0], activate: false } },
+        { projectId: fixture.projectId, title: "Right", options: { id: conversationIds[1], activate: false } },
+      ]);
+      fixture.store.failPairedLaunch(
+        launchId,
+        "interrupted",
+        "Provider acceptance could not be confirmed.",
+      );
+
+      expect(() => fixture.store.deleteConversation(conversations[0].id))
+        .toThrow(/acknowledge an interrupted dispatch/u);
+      expect(() => fixture.store.removeProject(fixture.projectId))
+        .toThrow(/acknowledge an interrupted dispatch/u);
+      expect(fixture.store.pendingPairedLaunchIds([fixture.projectId], 16))
+        .toEqual({ launchIds: [launchId], hasMore: false });
+
+      const acknowledged = fixture.store.acknowledgeInterruptedPairedLaunch(
+        launchId,
+      );
+      expect(acknowledged).toMatchObject({
+        state: "failed",
+        error: expect.stringContaining(
+          "Uncertain provider dispatch acknowledged by the user.",
+        ),
+      });
+      expect(fixture.store.acknowledgeInterruptedPairedLaunch(launchId))
+        .toEqual(acknowledged);
+      expect(fixture.store.pendingPairedLaunchIds([fixture.projectId], 16))
+        .toEqual({ launchIds: [], hasMore: false });
+      fixture.store.deleteConversation(conversations[0].id);
+      expect(fixture.store.findPairedLaunch(launchId)).toBeNull();
+    } finally {
+      fixture.store.close();
+    }
+  });
+
   it("uses exact project identities across rename, deletion, and restart", async () => {
     const fixture = await runtime();
     let originalClosed = false;

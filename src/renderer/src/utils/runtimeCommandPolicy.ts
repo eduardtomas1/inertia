@@ -112,6 +112,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "conversation.unarchive": shortMutation,
   "conversation.unsettle": shortMutation,
   "conversation.update": shortMutation,
+  "duo.acknowledge": shortMutation,
   "duo.cancel": {
     timeoutMs: DUO_CANCEL_REQUEST_TIMEOUT_MS,
     timeoutDelivery: "ambiguous",

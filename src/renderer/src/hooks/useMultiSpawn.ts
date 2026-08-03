@@ -47,10 +47,12 @@ export interface MultiSpawnController {
   recoveryGuidance: DuoWorktreeRecoveryGuidance[];
   recoveryStatus: DuoStatusResult | null;
   recheckingRecovery: boolean;
+  acknowledgingRecovery: boolean;
   openDialog: () => void;
   closeDialog: () => void;
   submit: (draft: MultiSpawnDraft) => Promise<void>;
   recheckRecovery: () => Promise<void>;
+  acknowledgeRecovery: () => Promise<void>;
 }
 
 function errorMessage(error: unknown): string {
@@ -151,6 +153,7 @@ export function useMultiSpawn({
   const [recoveryStatus, setRecoveryStatusState] =
     useState<DuoStatusResult | null>(null);
   const [recheckingRecovery, setRecheckingRecovery] = useState(false);
+  const [acknowledgingRecovery, setAcknowledgingRecovery] = useState(false);
   const recoveryStatusRef = useRef<DuoStatusResult | null>(null);
   const recoveryProjectIdsRef = useRef<string[]>([]);
   const submittingRef = useRef(false);
@@ -402,6 +405,7 @@ export function useMultiSpawn({
     setRecoveryGuidance([]);
     setRecoveryStatus(null);
     setRecheckingRecovery(false);
+    setAcknowledgingRecovery(false);
     setOpen(false);
   }, [cancelActiveLaunch, setRecoveryStatus]);
 
@@ -585,7 +589,7 @@ export function useMultiSpawn({
   ]);
 
   const recheckRecovery = useCallback(async (): Promise<void> => {
-    if (!recoveryStatus || recheckingRecovery) return;
+    if (!recoveryStatus || recheckingRecovery || acknowledgingRecovery) return;
     const generation = operationGenerationRef.current;
     const launchId = recoveryStatus.launchId;
     const projectIds = [...recoveryProjectIdsRef.current];
@@ -613,9 +617,57 @@ export function useMultiSpawn({
       }
     }
   }, [
+    acknowledgingRecovery,
     reconcileProjectLaunches,
     recheckingRecovery,
     recoveryStatus,
+  ]);
+
+  const acknowledgeRecovery = useCallback(async (): Promise<void> => {
+    if (
+      recoveryStatus?.state !== "interrupted"
+      || recheckingRecovery
+      || acknowledgingRecovery
+    ) return;
+    const generation = operationGenerationRef.current;
+    const launchId = recoveryStatus.launchId;
+    const projectIds = [...recoveryProjectIdsRef.current];
+    const isCurrent = () =>
+      operationGenerationRef.current === generation
+      && recoveryStatusRef.current?.launchId === launchId;
+    setAcknowledgingRecovery(true);
+    setError(null);
+    try {
+      const event = resultEvent(await run("multi-spawn:acknowledge", {
+        type: "duo.acknowledge",
+        payload: { launchId },
+      }));
+      if (!isCurrent()) return;
+      if (event.result.kind !== "duo.status" || event.result.state !== "failed") {
+        throw new Error(
+          "The local service did not confirm the Duo acknowledgement.",
+        );
+      }
+      if (projectIds.length === 0) {
+        throw new Error("The projects for this Duo launch are unavailable.");
+      }
+      await reconcileProjectLaunches(projectIds, generation);
+    } catch (caught) {
+      if (!isCurrent()) return;
+      setError(
+        `The uncertain Duo launch could not be acknowledged. ${errorMessage(caught)}`,
+      );
+    } finally {
+      if (operationGenerationRef.current === generation) {
+        setAcknowledgingRecovery(false);
+      }
+    }
+  }, [
+    acknowledgingRecovery,
+    reconcileProjectLaunches,
+    recheckingRecovery,
+    recoveryStatus,
+    run,
   ]);
 
   return {
@@ -626,9 +678,11 @@ export function useMultiSpawn({
     recoveryGuidance,
     recoveryStatus,
     recheckingRecovery,
+    acknowledgingRecovery,
     openDialog,
     closeDialog,
     submit,
     recheckRecovery,
+    acknowledgeRecovery,
   };
 }

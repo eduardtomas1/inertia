@@ -161,6 +161,7 @@ export const appCommandSchemas = [
         "duo.dispatch",
         "duo.cancel",
         "duo.status",
+        "duo.acknowledge",
       ]),
       payload: z.object({ launchId: z.string().uuid() }).strict(),
     })

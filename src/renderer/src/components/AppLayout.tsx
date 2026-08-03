@@ -495,9 +495,11 @@ export function AppLayout({
             recoveryGuidance={multiSpawn.recoveryGuidance}
             recoveryStatus={multiSpawn.recoveryStatus}
             recheckingRecovery={multiSpawn.recheckingRecovery}
+            acknowledgingRecovery={multiSpawn.acknowledgingRecovery}
             onClose={multiSpawn.closeDialog}
             onSubmit={multiSpawn.submit}
             onRecheckRecovery={multiSpawn.recheckRecovery}
+            onAcknowledgeRecovery={multiSpawn.acknowledgeRecovery}
             onOpenProviderSetup={actions.openProviderSetup}
             onOpenBackendSetup={actions.openBackendSetup}
           />

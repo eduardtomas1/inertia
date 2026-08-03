@@ -61,6 +61,7 @@ describe("shared contracts boundary", () => {
       "duo.dispatch",
       "duo.cancel",
       "duo.status",
+      "duo.acknowledge",
       "conversation.select",
       "conversation.detail.load",
       "conversation.detail.subscription",

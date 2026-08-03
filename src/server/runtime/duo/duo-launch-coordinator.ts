@@ -449,6 +449,19 @@ export class DuoLaunchCoordinator {
     return publicStatus(this.store, this.store.pairedLaunch(launchId));
   }
 
+  acknowledgeInterrupted(launchId: string): DuoLaunchStatus {
+    const current = this.store.pairedLaunch(launchId);
+    if (current.state === "interrupted") {
+      for (const { conversationId } of current.sides) {
+        if (conversationId) this.turns.cancel(conversationId);
+      }
+    }
+    return publicStatus(
+      this.store,
+      this.store.acknowledgeInterruptedPairedLaunch(launchId),
+    );
+  }
+
   pending(projectIds: readonly string[]): {
     launchIds: string[];
     hasMore: boolean;

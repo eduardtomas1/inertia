@@ -10,6 +10,8 @@ import type {
 } from "../provider/interactions";
 
 const MAX_PERMISSION_ROOTS = 12;
+const UNSAFE_DIRECTIONAL_FORMATTING =
+  /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 const APPROVAL_METHODS = new Set([
   "item/commandExecution/requestApproval",
   "item/fileChange/requestApproval",
@@ -41,6 +43,7 @@ function strictBoundedText(
 ): string | undefined {
   if (
     typeof value !== "string"
+    || UNSAFE_DIRECTIONAL_FORMATTING.test(value)
     || (
       rejectControlCharacters
         ? /[\u0000-\u001f\u007f]/u.test(value)
@@ -67,6 +70,7 @@ function legacyCommand(value: unknown): string | undefined {
     || value.some((part) =>
       typeof part !== "string"
       || /[\u0000-\u001f\u007f]/u.test(part)
+      || UNSAFE_DIRECTIONAL_FORMATTING.test(part)
       || part.length > 2_000)
   ) return undefined;
   const command = value.map((part) =>
@@ -92,6 +96,7 @@ function legacyFileChangeSummary(value: unknown): string | undefined {
       !path
       || path.length > 4_096
       || /[\u0000-\u001f\u007f]/u.test(path)
+      || UNSAFE_DIRECTIONAL_FORMATTING.test(path)
     ) return undefined;
     const change = objectValue(rawChange);
     if (!change || typeof change.type !== "string") return undefined;

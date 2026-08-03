@@ -282,6 +282,31 @@ describe("Codex protocol seams", () => {
         },
       )).toBeUndefined();
     }
+    for (const directionalControl of ["\u202e", "\u2066"]) {
+      expect(parseCodexApprovalRequest("applyPatchApproval", {
+        conversationId: "thread-legacy",
+        callId: "patch-directional-source",
+        fileChanges: {
+          [`src/safe${directionalControl}cod.exe`]: {
+            type: "delete",
+            content: "hidden",
+          },
+        },
+        grantRoot: "/workspace",
+      })).toBeUndefined();
+      expect(parseCodexApprovalRequest("applyPatchApproval", {
+        conversationId: "thread-legacy",
+        callId: "patch-directional-destination",
+        fileChanges: {
+          "src/source.ts": {
+            type: "update",
+            unified_diff: "@@ -1 +1 @@",
+            move_path: `src/safe${directionalControl}cod.exe`,
+          },
+        },
+        grantRoot: "/workspace",
+      })).toBeUndefined();
+    }
   });
 
   it.skipIf(process.platform !== "win32")(

@@ -240,6 +240,8 @@ export function ModelChooser({
   const searchRef = useRef<HTMLInputElement>(null);
   const resultsScrollRef = useRef<HTMLDivElement>(null);
   const restoreFocusWhenEnabledRef = useRef(false);
+  const activeRouteKeyRef = useRef<string | null>(null);
+  const activeSelectionContextRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   useNativePreviewSuspension(open);
   const [query, setQuery] = useState("");
@@ -379,14 +381,34 @@ export function ModelChooser({
     });
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
+  useLayoutEffect(() => {
+    if (!open) {
+      activeRouteKeyRef.current = null;
+      activeSelectionContextRef.current = null;
+      return;
+    }
+    const selectionContext = JSON.stringify([
+      query,
+      selectedSourceId,
+      selectedKey,
+    ]);
+    const preserveNavigation =
+      activeSelectionContextRef.current === selectionContext;
+    const preservedIndex = preserveNavigation && activeRouteKeyRef.current
+      ? results.items.findIndex((route) =>
+        route.key === activeRouteKeyRef.current && route.selectable)
+      : -1;
     const selectedIndex = results.items.findIndex((route) =>
-      activeKeyForRoute(route) === selectedKey);
-    setActiveIndex(selectedIndex >= 0 && results.items[selectedIndex]?.selectable
-      ? selectedIndex
-      : nextModelChooserIndex(results.items, -1, "Home"));
-  }, [open, results.items, selectedKey]);
+      activeKeyForRoute(route) === selectedKey && route.selectable);
+    const nextIndex = preservedIndex >= 0
+      ? preservedIndex
+      : selectedIndex >= 0
+        ? selectedIndex
+        : nextModelChooserIndex(results.items, -1, "Home");
+    activeSelectionContextRef.current = selectionContext;
+    activeRouteKeyRef.current = results.items[nextIndex]?.key ?? null;
+    setActiveIndex((current) => current === nextIndex ? current : nextIndex);
+  }, [open, query, results.items, selectedKey, selectedSourceId]);
 
   useEffect(() => {
     if (!open) return;
@@ -441,8 +463,9 @@ export function ModelChooser({
   }, []);
 
   const navigateTo = useCallback((index: number): void => {
+    activeRouteKeyRef.current = results.items[index]?.key ?? null;
     setActiveIndex(index);
-  }, []);
+  }, [results.items]);
 
   const handleNavigation = (
     event: ReactKeyboardEvent<HTMLDivElement>,
@@ -466,12 +489,15 @@ export function ModelChooser({
       ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
     ) {
       event.preventDefault();
-      setActiveIndex((current) =>
-        nextModelChooserIndex(
+      setActiveIndex((current) => {
+        const nextIndex = nextModelChooserIndex(
           results.items,
           current,
           event.key as ModelChooserNavigationKey,
-        ));
+        );
+        activeRouteKeyRef.current = results.items[nextIndex]?.key ?? null;
+        return nextIndex;
+      });
       return;
     }
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;

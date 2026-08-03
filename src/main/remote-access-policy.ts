@@ -3,13 +3,14 @@ import { createHash } from "node:crypto";
 import type { RawData } from "ws";
 
 import { remoteGrantsNeedReview } from "../shared/remote-grants";
-import type {
-  RemoteAccessState,
-  RemoteCipherFrame,
-  RemotePairingInvitation,
-  RemoteRequest,
-  RemoteSetupDiagnostics,
-  RemoteScope,
+import {
+  REMOTE_DESKTOP_VERSION,
+  type RemoteAccessState,
+  type RemoteCipherFrame,
+  type RemotePairingInvitation,
+  type RemoteRequest,
+  type RemoteSetupDiagnostics,
+  type RemoteScope,
 } from "../shared/remote-protocol";
 import type {
   PersistedRemoteAccess,
@@ -43,7 +44,7 @@ export function emptyRemoteSetupDiagnostics(): RemoteSetupDiagnostics {
     originPolicy: "unknown",
     relayVersion: null,
     browserVersion: null,
-    desktopVersion: "0.2.0",
+    desktopVersion: REMOTE_DESKTOP_VERSION,
     relayProtocol: null,
     remoteProtocol: null,
     endpointAuthentication: null,

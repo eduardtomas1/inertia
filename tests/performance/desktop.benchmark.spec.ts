@@ -195,6 +195,84 @@ async function scrollSample(page: Page) {
   });
 }
 
+async function rendererMemorySample(
+  electronApp: ElectronApplication,
+  page: Page,
+  phase: string,
+) {
+  const session = await page.context().newCDPSession(page);
+  let heap: { usedSize: number; totalSize: number };
+  try {
+    await session.send("HeapProfiler.collectGarbage");
+    await page.evaluate(async () => {
+      await new Promise<void>((resolveFrame) => requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolveFrame());
+      }));
+    });
+    heap = await session.send("Runtime.getHeapUsage");
+  } finally {
+    await session.detach();
+  }
+  const processMemory = await electronApp.evaluate(({ app, BrowserWindow }) => {
+    const rendererPid = BrowserWindow.getAllWindows()[0]
+      ?.webContents.getOSProcessId() ?? null;
+    const metric = app.getAppMetrics().find(({ pid }) => pid === rendererPid);
+    return {
+      rendererPid,
+      workingSetKb: metric?.memory.workingSetSize ?? null,
+      peakWorkingSetKb: metric?.memory.peakWorkingSetSize ?? null,
+      privateKb: metric?.memory.privateBytes ?? null,
+    };
+  });
+  return {
+    phase,
+    collectedAt: new Date().toISOString(),
+    usedJsHeapBytes: heap.usedSize,
+    totalJsHeapBytes: heap.totalSize,
+    ...processMemory,
+  };
+}
+
+async function openWorkspaceTools(page: Page): Promise<void> {
+  if (await page.locator(".workspace-panel").isVisible().catch(() => false)) {
+    return;
+  }
+  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await page.locator(".workspace-panel").waitFor();
+}
+
+async function openSplitChat(page: Page): Promise<void> {
+  await page.getByRole("button", {
+    name: "Thread actions for Performance secondary",
+  }).click();
+  await page.getByRole("menuitem", {
+    name: "Add this chat to split view",
+  }).click();
+  await page.getByRole("main", {
+    name: "Split conversation workspace",
+  }).waitFor();
+}
+
+async function closeSplitChat(page: Page): Promise<void> {
+  await page.getByRole("button", {
+    name: "Close split chat Performance secondary",
+  }).click();
+  await expect(page.getByRole("main", {
+    name: "Split conversation workspace",
+  })).toHaveCount(0);
+}
+
+async function openAndCloseToolCycle(page: Page): Promise<void> {
+  await openWorkspaceTools(page);
+  const tools = page.getByRole("complementary", { name: "Workspace tools" });
+  await tools.getByRole("tab", { name: /Files/u }).click();
+  await tools.getByRole("tree", { name: "Workspace files" }).waitFor();
+  await tools.getByRole("tab", { name: "Terminal", exact: true }).click();
+  await tools.locator(".terminal-panel[data-terminal-id]").waitFor();
+  await tools.getByRole("button", { name: "Close terminal" }).first().click();
+  await expect(tools.locator(".terminal-panel[data-terminal-id]")).toHaveCount(0);
+}
+
 async function closeApp(
   electronApp: ElectronApplication,
   runtimePid: number | null,
@@ -237,6 +315,11 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     const idleStart = await processSample(cold.electronApp);
     await cold.page.waitForTimeout(1_500);
     const idleEnd = await processSample(cold.electronApp);
+    const memoryBaseline = await rendererMemorySample(
+      cold.electronApp,
+      cold.page,
+      "idle-baseline",
+    );
     const scroll = await scrollSample(cold.page);
 
     if (!await cold.page.locator(".workspace-panel").isVisible().catch(() => false)) {
@@ -256,20 +339,63 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     const terminalStartupMs = performance.now() - terminalStartedAt;
 
     const splitStartedAt = performance.now();
-    await cold.page.getByRole("button", {
-      name: "Thread actions for Performance secondary",
-    }).click();
-    await cold.page.getByRole("menuitem", {
-      name: "Add this chat to split view",
-    }).click();
-    await cold.page.getByRole("main", {
-      name: "Split conversation workspace",
-    }).waitFor();
+    await openSplitChat(cold.page);
     const splitChatMs = performance.now() - splitStartedAt;
     const activeSample = await processSample(cold.electronApp);
+    const memoryActive = await rendererMemorySample(
+      cold.electronApp,
+      cold.page,
+      "long-thread-files-terminal-split-active",
+    );
+
+    await closeSplitChat(cold.page);
     await cold.page.getByRole("button", {
-      name: "Close split chat Performance secondary",
-    }).click();
+      name: "Close workspace tools",
+    }).first().click();
+    const memoryPanelsHidden = await rendererMemorySample(
+      cold.electronApp,
+      cold.page,
+      "split-closed-tools-hidden",
+    );
+
+    await openWorkspaceTools(cold.page);
+    await cold.page.getByRole("complementary", { name: "Workspace tools" })
+      .getByRole("button", { name: "Close terminal" })
+      .first()
+      .click();
+    const memoryPostClose = await rendererMemorySample(
+      cold.electronApp,
+      cold.page,
+      "split-and-terminal-closed",
+    );
+
+    const repeatedOpenClose: Awaited<ReturnType<typeof rendererMemorySample>>[] = [];
+    for (let iteration = 0; iteration < 8; iteration += 1) {
+      await openAndCloseToolCycle(cold.page);
+      await openSplitChat(cold.page);
+      await closeSplitChat(cold.page);
+      repeatedOpenClose.push(await rendererMemorySample(
+        cold.electronApp,
+        cold.page,
+        `open-close-${iteration + 1}`,
+      ));
+    }
+
+    const soakBefore = await rendererMemorySample(
+      cold.electronApp,
+      cold.page,
+      "soak-before",
+    );
+    const soakScrollSamples = [];
+    for (let iteration = 0; iteration < 5; iteration += 1) {
+      soakScrollSamples.push(await scrollSample(cold.page));
+      await openAndCloseToolCycle(cold.page);
+    }
+    const soakAfter = await rendererMemorySample(
+      cold.electronApp,
+      cold.page,
+      "soak-after-600-scroll-frames-and-tool-cycles",
+    );
     const coldStartup = {
       firstWindowMs: cold.firstWindowMs,
       runtimeInteractiveMs: cold.startupMs,
@@ -305,7 +431,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
           ? "x11"
           : "none";
     const report = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       collectedAt: new Date().toISOString(),
       runtime: {
         node: process.version,
@@ -347,6 +473,30 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         fileTree: { interactiveMs: fileTreeMs },
         terminal: { startupMs: terminalStartupMs },
         splitChat: { interactiveMs: splitChatMs },
+        rendererMemory: {
+          baseline: memoryBaseline,
+          active: memoryActive,
+          panelsHidden: memoryPanelsHidden,
+          postClose: memoryPostClose,
+          postCloseReclaimedJsHeapBytes: Math.max(
+            0,
+            memoryActive.usedJsHeapBytes - memoryPostClose.usedJsHeapBytes,
+          ),
+          repeatedOpenClose,
+          soak: {
+            iterations: 5,
+            scrollFrames: soakScrollSamples.reduce(
+              (sum, sample) => sum + sample.frames,
+              0,
+            ),
+            before: soakBefore,
+            after: soakAfter,
+            retainedJsHeapBytes: Math.max(
+              0,
+              soakAfter.usedJsHeapBytes - soakBefore.usedJsHeapBytes,
+            ),
+          },
+        },
         active: activeSample,
         warm: warmSample,
         shutdown: { coldMs: coldShutdownMs, warmMs: warmShutdownMs },
@@ -371,6 +521,31 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.active.runtimePid).not.toBeNull();
     expect(report.scenarios.active.rendererPid).not.toBeNull();
     expect(report.scenarios.terminal.startupMs).toBeLessThan(30_000);
+    expect(report.scenarios.rendererMemory.postClose.usedJsHeapBytes)
+      .toBeLessThanOrEqual(
+        report.scenarios.rendererMemory.active.usedJsHeapBytes
+          + 32 * 1024 * 1024,
+      );
+    expect(report.scenarios.rendererMemory.repeatedOpenClose).toHaveLength(8);
+    const firstOpenClose = report.scenarios.rendererMemory.repeatedOpenClose[0]!;
+    const lastOpenClose = report.scenarios.rendererMemory.repeatedOpenClose.at(-1)!;
+    expect(lastOpenClose.usedJsHeapBytes).toBeLessThanOrEqual(
+      firstOpenClose.usedJsHeapBytes + 16 * 1024 * 1024,
+    );
+    if (
+      firstOpenClose.workingSetKb !== null
+      && lastOpenClose.workingSetKb !== null
+    ) {
+      expect(lastOpenClose.workingSetKb).toBeLessThanOrEqual(
+        firstOpenClose.workingSetKb + 64 * 1024,
+      );
+    }
+    expect(report.scenarios.rendererMemory.soak.scrollFrames).toBe(600);
+    expect(report.scenarios.rendererMemory.soak.after.usedJsHeapBytes)
+      .toBeLessThanOrEqual(
+        report.scenarios.rendererMemory.soak.before.usedJsHeapBytes
+          + 32 * 1024 * 1024,
+      );
     expect(report.scenarios.shutdown.coldMs).toBeLessThan(15_000);
     expect(report.scenarios.shutdown.warmMs).toBeLessThan(15_000);
   } finally {

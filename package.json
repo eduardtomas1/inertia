@@ -28,7 +28,7 @@
     "test:portable": "vitest run --maxWorkers=1 tests/main/runtime-process-protocol.test.ts tests/main/runtime-supervisor.test.ts tests/server/process-lifecycle.test.ts tests/server/providers.test.ts tests/server/provider-metadata.test.ts tests/server/provider-io.test.ts tests/server/agent-harness.test.ts tests/server/codex-app-server.test.ts tests/server/claude-agent-sdk-harness.test.ts tests/server/cursor-acp-harness.test.ts tests/server/opencode-sdk-harness.test.ts tests/server/opencode-boundary.test.ts",
     "test:windows-codex": "vitest run tests/server/windows-codex-core.test.ts tests/server/windows-codex-discovery.test.ts",
     "test:linux-package": "vitest run tests/main/linux-packaging.test.ts tests/main/runtime-assets.test.ts",
-    "check:remote": "tsc --noEmit -p remote/browser/tsconfig.json && vite build --config remote/browser/vite.config.ts && node --check remote/relay/server.mjs",
+    "check:remote": "tsc --noEmit -p remote/browser/tsconfig.json && vite build --config remote/browser/vite.config.ts && node scripts/check-remote-version-consistency.mjs && node --check remote/relay/server.mjs",
     "benchmark:platform": "node scripts/run-platform-benchmark.mjs",
     "benchmark:platform:smoke": "node scripts/run-platform-benchmark.mjs --enforce",
     "benchmark:desktop": "npm run build && node scripts/run-desktop-benchmark.mjs",

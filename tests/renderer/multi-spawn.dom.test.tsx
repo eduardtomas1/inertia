@@ -750,7 +750,7 @@ describe("multi-spawn", () => {
     )).toBeVisible();
   });
 
-  it("renders recovery instructions as inert argv on Windows and metacharacter paths", () => {
+  it("renders safe copyable recovery commands with exact topology on Windows and metacharacter paths", () => {
     const repositoryPath = "C:\\Users\\Ada $()\\project`name`";
     const worktreePath = `${repositoryPath}\\.inertia\\worktrees\\route\nnext-line`;
     const branch = "inertia/33333333";
@@ -798,26 +798,18 @@ describe("multi-spawn", () => {
     const guidance = screen.getByRole("region", {
       name: "Manual Git recovery for route 1",
     });
-    expect(guidance).toHaveTextContent(
-      "These are literal values, not a shell command.",
-    );
+    expect(guidance).toHaveTextContent("Inspect this exact topology");
     expect(guidance).toHaveTextContent(repositoryPath);
     expect(guidance).toHaveTextContent(`Expected commit${"a".repeat(40)}`);
-    expect(Array.from(guidance.querySelectorAll("[data-git-argument]"))
-      .map((argument) => argument.textContent)).toEqual([
-      "worktree",
-      "remove",
-      "--",
-      worktreePath,
-      "branch",
-      "-d",
-      "--",
-      branch,
+    expect(guidance).toHaveTextContent(`Observed branch${branch}`);
+    expect(guidance).toHaveTextContent(`Observed commit${"a".repeat(40)}`);
+    expect(Array.from(guidance.querySelectorAll("[data-recovery-command]"))
+      .map((command) => command.textContent)).toEqual([
+      `git -C '${repositoryPath}' 'worktree' 'remove' '--' '${worktreePath}'`,
+      `git -C '${repositoryPath}' 'branch' '-d' '--' '${branch}'`,
     ]);
-    expect(guidance.querySelectorAll("code")).not.toHaveLength(0);
-    expect(guidance.textContent).not.toContain(
-      `git worktree remove -- ${JSON.stringify(worktreePath)}`,
-    );
+    expect(screen.getAllByRole("button", { name: /Copy .* command/u }))
+      .toHaveLength(2);
   });
 
   it("keeps setup available for an exact custom route that needs a probe", () => {
@@ -978,7 +970,7 @@ describe("multi-spawn", () => {
   it.each([
     { state: "failed", expectedStored: false },
     { state: "cancelled", expectedStored: false },
-    { state: "interrupted", expectedStored: false },
+    { state: "interrupted", expectedStored: true },
     { state: "recovery-required", expectedStored: true },
   ] as const)(
     "retains recovery identity after dispatch: $expectedStored ($state)",
@@ -2083,17 +2075,16 @@ describe("multi-spawn", () => {
       retainedWorktreeMessage,
     );
     expect(hook.result.current.recoveryGuidance).toEqual(recoveryGuidance);
+    expect(hook.result.current.recoveryStatus?.state).toBe("recovery-required");
 
     manualCleanupComplete = true;
-    act(() => hook.result.current.closeDialog());
-    act(() => hook.result.current.openDialog());
-    await waitFor(() => expect(run).toHaveBeenCalledTimes(6));
+    await act(async () => hook.result.current.recheckRecovery());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(5));
 
     expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
       "duo.pending",
       "duo.status",
       "duo.cancel",
-      "duo.pending",
       "duo.status",
       "duo.cancel",
     ]);
@@ -2104,6 +2095,7 @@ describe("multi-spawn", () => {
       "The duo launch was cancelled before both providers began.",
     );
     expect(hook.result.current.recoveryGuidance).toEqual([]);
+    expect(hook.result.current.recoveryStatus?.state).toBe("cancelled");
   });
 
   it("closes for authoritative reconciliation after ambiguous preparation", async () => {

@@ -46,7 +46,7 @@ import type {
 interface PendingApproval {
   rpcId: RpcId;
   request: AgentApprovalRequest;
-  protocol: "decision" | "permissions";
+  protocol: "decision" | "permissions" | "legacy-review";
   requestedPermissions?: JsonObject;
 }
 
@@ -171,7 +171,9 @@ export class CodexAppServerEvents {
         id,
         result: protocol === "permissions"
           ? { permissions: {}, scope: "turn" }
-          : { decision: "cancel" },
+          : protocol === "legacy-review"
+            ? { decision: "abort" }
+            : { decision: "cancel" },
       });
       this.host.options.onApprovalResolved?.(request.requestId, "cancelled");
     }
@@ -200,7 +202,15 @@ export class CodexAppServerEvents {
             : {},
           scope: "turn",
         }
-      : {
+      : pending.protocol === "legacy-review"
+        ? {
+            decision: decision === "approve"
+              ? "approved"
+              : decision === "deny"
+                ? { denied: { rejection: "Denied by the user in Inertia." } }
+                : "abort",
+          }
+        : {
           decision: decision === "approve"
             ? "accept"
             : decision === "deny"
@@ -239,6 +249,17 @@ export class CodexAppServerEvents {
     if (this.host.isSettled()) return;
     const parsedApproval = parseCodexApprovalRequest(method, params);
     if (parsedApproval) {
+      if (
+        parsedApproval.providerThreadId
+        && parsedApproval.providerThreadId !== this.host.providerThreadId()
+      ) {
+        const message = "Codex sent an approval for a different provider thread.";
+        this.host.writeMessage({ id, error: { code: -32602, message } });
+        this.host.setLastError(message);
+        this.emitActivity("system", "failed", message);
+        this.host.cancel();
+        return;
+      }
       const { request: approval } = parsedApproval;
       if (approval.availableDecisions.length === 0) {
         const message =

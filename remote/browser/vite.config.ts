@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 
 import { defineConfig } from "vite";
 
+import remoteComponentVersions from "../component-versions.json";
+
 export const REMOTE_BROWSER_HEADERS = {
   "Content-Security-Policy": [
     "default-src 'none'",
@@ -22,6 +24,15 @@ export const REMOTE_BROWSER_HEADERS = {
 } as const;
 
 export default defineConfig({
+  plugins: [{
+    name: "inertia-remote-browser-version",
+    transformIndexHtml(html) {
+      return html.replaceAll(
+        "__REMOTE_BROWSER_VERSION__",
+        remoteComponentVersions.browser,
+      );
+    },
+  }],
   root: resolve(import.meta.dirname),
   publicDir: false,
   server: {

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -14,12 +15,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import {
   DatabaseBackupCancelledError,
   DatabaseBackupManager,
+  DATABASE_BACKUP_INTERVAL_MS,
   databaseRecoveryPaths,
 } from "../../src/server/persistence/database-recovery";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
@@ -53,12 +55,97 @@ function backupNames(databasePath: string): string[] {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
 describe("database backup and startup recovery", () => {
+  it("creates the first validated backup after a short delay and deduplicates a turn trigger", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let backupCalls = 0;
+    const writer = {
+      open: true,
+      backup: async (destination: string) => {
+        backupCalls += 1;
+        copyFileSync(databasePath, destination);
+      },
+    } as unknown as Database.Database;
+    const manager = new DatabaseBackupManager(writer, databasePath, {
+      initialDelayMs: 1_000,
+      intervalMs: DATABASE_BACKUP_INTERVAL_MS,
+      validateBackup: async () => "valid-current",
+    });
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(backupCalls).toBe(0);
+    const first = manager.createInitialBackup();
+    const duplicate = manager.createInitialBackup();
+    expect(duplicate).toBe(first);
+    await expect(first).resolves.toMatchObject({
+      createdAt: expect.any(String),
+    });
+    expect(backupCalls).toBe(1);
+    await expect(manager.createInitialBackup()).resolves.toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(backupCalls).toBe(1);
+    expect(manager.status().lastValidatedAt).toEqual(expect.any(String));
+    await manager.cancelAndWait();
+  });
+
+  it("automatically creates the first validated backup after the quiet period", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 1_000,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).toHaveBeenCalledOnce();
+    expect(manager.status().lastValidatedAt).toEqual(expect.any(String));
+    await manager.cancelAndWait();
+  });
+
+  it("cancels the quiet-period backup without starting work during shutdown", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const backup = vi.fn(async () => undefined);
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 1_000,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await manager.cancelAndWait();
+    await vi.advanceTimersByTimeAsync(DATABASE_BACKUP_INTERVAL_MS);
+    expect(backup).not.toHaveBeenCalled();
+  });
+
   it("distinguishes a clean first launch from a recovery incident", () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");

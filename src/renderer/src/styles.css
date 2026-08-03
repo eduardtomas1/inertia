@@ -6261,6 +6261,79 @@ textarea {
   background: color-mix(in srgb, var(--failure-state) 7%, transparent);
 }
 
+.multi-spawn-recovery-status,
+.multi-spawn-recovery-guidance {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--failure-state) 24%, var(--border));
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.multi-spawn-recovery-status p,
+.multi-spawn-recovery-guidance p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.multi-spawn-recovery-status dl,
+.multi-spawn-recovery-guidance dl {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.multi-spawn-recovery-status dl > div {
+  display: contents;
+}
+
+.multi-spawn-recovery-status dt,
+.multi-spawn-recovery-guidance dt {
+  color: var(--text-muted);
+}
+
+.multi-spawn-recovery-status dd,
+.multi-spawn-recovery-guidance dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.multi-spawn-recovery-guidance ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.multi-spawn-recovery-guidance li {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.multi-spawn-recovery-guidance [data-recovery-command] {
+  display: block;
+  padding: 7px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.multi-spawn-recovery-status .secondary-button,
+.multi-spawn-recovery-guidance .secondary-button {
+  width: max-content;
+  max-width: 100%;
+  margin: 0;
+}
+
 .multi-spawn-dialog-footer {
   position: sticky;
   z-index: 4;

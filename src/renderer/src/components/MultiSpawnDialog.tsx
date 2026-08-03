@@ -19,6 +19,7 @@ import type {
   AccessMode,
   AppSettings,
   AppSnapshot,
+  DuoLaunchStatus,
   DuoWorktreeRecoveryGuidance,
   ModelSelection,
   ProviderId,
@@ -44,6 +45,10 @@ import {
   type MultiSpawnSideDraft,
 } from "../utils/multiSpawn";
 import { accessOptions } from "./composer/config";
+import {
+  formatDuoRecoveryCommand,
+  recoveryCommandShell,
+} from "../utils/duoRecoveryCommands";
 import { ModelChooser } from "./ModelChooser";
 import { IconButton, LoadingMark } from "./ui";
 
@@ -55,8 +60,11 @@ export interface MultiSpawnDialogProps {
   cancelling?: boolean;
   error: string | null;
   recoveryGuidance?: DuoWorktreeRecoveryGuidance[];
+  recoveryStatus?: DuoLaunchStatus | null;
+  recheckingRecovery?: boolean;
   onClose: () => void;
   onSubmit: (draft: MultiSpawnDraft) => Promise<void>;
+  onRecheckRecovery?: () => Promise<void>;
   onOpenProviderSetup: (providerId: ProviderId) => void;
   onOpenBackendSetup: (profileId: string) => void;
 }
@@ -272,8 +280,11 @@ export function MultiSpawnDialog({
   cancelling = false,
   error,
   recoveryGuidance = [],
+  recoveryStatus = null,
+  recheckingRecovery = false,
   onClose,
   onSubmit,
+  onRecheckRecovery,
   onOpenProviderSetup,
   onOpenBackendSetup,
 }: MultiSpawnDialogProps): React.JSX.Element | null {
@@ -282,8 +293,22 @@ export function MultiSpawnDialog({
   const initializedForOpenRef = useRef(false);
   const restoreFocusRef = useRef(true);
   const [draft, setDraft] = useState<MultiSpawnDraft | null>(null);
+  const [copiedRecoveryCommand, setCopiedRecoveryCommand] = useState<
+    string | null
+  >(null);
   useNativePreviewSuspension(open);
   const busy = submitting || cancelling;
+  const copyRecoveryCommand = async (
+    key: string,
+    commandText: string,
+  ): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(commandText);
+      setCopiedRecoveryCommand(key);
+    } catch {
+      setCopiedRecoveryCommand(null);
+    }
+  };
 
   const routesForSelection = useMemo(() => (
     selection: ModelSelection,
@@ -502,7 +527,8 @@ export function MultiSpawnDialog({
           <span>
             <h2 id="multi-spawn-title">Launch a duo</h2>
             <p id="multi-spawn-description">
-              Send one brief to two independent routes. Both chats open side by side.
+              Send one brief to two independent routes. Inertia coordinates
+              the launch durably, but provider-side effects cannot be atomic.
             </p>
           </span>
           <IconButton
@@ -566,13 +592,63 @@ export function MultiSpawnDialog({
           </div>
         )}
 
-        {(error || (!routesReady && !submitting)) && (
+        {(error || recoveryStatus || (!routesReady && !submitting)) && (
           <div
             className={`multi-spawn-dialog-status${error ? " is-error" : ""}`}
             role={error ? "alert" : "status"}
           >
             {error
               ?? "Choose two ready routes before launching the duo."}
+            {recoveryStatus && (
+              <section
+                className="multi-spawn-recovery-status"
+                aria-label="Duo dispatch and recovery status"
+              >
+                <strong>
+                  {recoveryStatus.state === "recovery-required"
+                    ? "Recovery required"
+                    : recoveryStatus.state === "interrupted"
+                      ? "Dispatch outcome uncertain"
+                      : recoveryStatus.sides.some(
+                          ({ dispatchState }) => dispatchState === "started",
+                        ) && recoveryStatus.sides.some(
+                          ({ dispatchState }) => dispatchState === "failed",
+                        )
+                        ? "Partial provider dispatch"
+                        : `Duo ${recoveryStatus.state}`}
+                </strong>
+                <p>
+                  Local coordination is durable. A provider may have accepted
+                  work before its sibling failed or the connection changed, so
+                  Inertia will not claim those external effects were atomic.
+                </p>
+                <dl>
+                  {recoveryStatus.sides.map((side) => (
+                    <div key={side.ordinal}>
+                      <dt>Route {side.ordinal + 1}</dt>
+                      <dd>{({
+                        pending: "Not dispatched",
+                        claimed: "Dispatch claimed",
+                        started: "Provider accepted start",
+                        failed: "Provider start failed",
+                        cancelled: "Dispatch cancelled",
+                        uncertain: "Provider effect unknown",
+                      } as const)[side.dispatchState]}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {onRecheckRecovery && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={busy || recheckingRecovery}
+                    onClick={() => { void onRecheckRecovery(); }}
+                  >
+                    {recheckingRecovery ? "Re-checking…" : "Re-check recovery status"}
+                  </button>
+                )}
+              </section>
+            )}
             {recoveryGuidance.map((guidance) => (
               <section
                 key={`${guidance.ordinal}:${guidance.worktreeId ?? "unknown"}`}
@@ -580,8 +656,10 @@ export function MultiSpawnDialog({
                 aria-label={`Manual Git recovery for route ${guidance.ordinal + 1}`}
               >
                 <p>
-                  These are literal values, not a shell command. Inspect them
-                  with your platform&apos;s Git client before making a manual change.
+                  Inspect this exact topology before making a manual change.
+                  Commands are offered only for an exact owned worktree or a
+                  retained generated branch; ambiguous and conflicting state
+                  remains read-only.
                 </p>
                 <dl>
                   <dt>Repository</dt>
@@ -592,31 +670,42 @@ export function MultiSpawnDialog({
                   <dd><code>{guidance.observedPath ?? "Not verified"}</code></dd>
                   <dt>Worktree ID</dt>
                   <dd><code>{guidance.worktreeId ?? "Not verified"}</code></dd>
+                  <dt>Topology</dt>
+                  <dd><code>{guidance.topology}</code></dd>
                   <dt>Generated branch</dt>
                   <dd><code>{guidance.generatedBranch}</code></dd>
                   <dt>Expected commit</dt>
                   <dd><code>{guidance.expectedHead ?? "Not verified"}</code></dd>
+                  <dt>Observed branch</dt>
+                  <dd><code>{guidance.observedBranch ?? "Not verified"}</code></dd>
+                  <dt>Observed commit</dt>
+                  <dd><code>{guidance.observedHead ?? "Not verified"}</code></dd>
                 </dl>
                 {guidance.actions.length > 0 && (
                   <ol>
-                    {guidance.actions.map((action) => (
-                      <li key={`${action.label}:${action.args.join("\0")}`}>
+                    {guidance.actions.map((action) => {
+                      const key = `${action.label}:${action.args.join("\0")}`;
+                      const shell = recoveryCommandShell(action);
+                      const commandText = formatDuoRecoveryCommand(action, shell);
+                      return (
+                      <li key={key}>
                         <strong>{action.label}</strong>
-                        <span>Working directory: <code>{action.cwd}</code></span>
-                        <span>Executable: <code>{action.executable}</code></span>
-                        <span className="multi-spawn-recovery-arguments">
-                          Arguments:
-                          {action.args.map((argument, index) => (
-                            <code
-                              key={`${index}:${argument}`}
-                              data-git-argument={index}
-                            >
-                              {argument}
-                            </code>
-                          ))}
-                        </span>
+                        <span>{shell === "powershell" ? "PowerShell" : "POSIX shell"}</span>
+                        <code data-recovery-command>{commandText}</code>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => {
+                            void copyRecoveryCommand(key, commandText);
+                          }}
+                        >
+                          {copiedRecoveryCommand === key
+                            ? "Copied"
+                            : `Copy ${action.label.toLocaleLowerCase("en-US")} command`}
+                        </button>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ol>
                 )}
               </section>

@@ -484,8 +484,11 @@ export function AppLayout({
             cancelling={multiSpawn.cancelling}
             error={multiSpawn.error}
             recoveryGuidance={multiSpawn.recoveryGuidance}
+            recoveryStatus={multiSpawn.recoveryStatus}
+            recheckingRecovery={multiSpawn.recheckingRecovery}
             onClose={multiSpawn.closeDialog}
             onSubmit={multiSpawn.submit}
+            onRecheckRecovery={multiSpawn.recheckRecovery}
             onOpenProviderSetup={actions.openProviderSetup}
             onOpenBackendSetup={actions.openBackendSetup}
           />

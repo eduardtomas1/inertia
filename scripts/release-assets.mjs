@@ -6,12 +6,11 @@ import { basename, join, resolve } from "node:path";
 const command = process.argv[2] ?? "";
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const version = packageJson.version;
-const remoteBrowserVersion = JSON.parse(
-  await readFile("remote/browser/package.json", "utf8"),
-).version;
-const remoteRelayVersion = JSON.parse(
-  await readFile("remote/relay/package.json", "utf8"),
-).version;
+const remoteComponentVersions = JSON.parse(
+  await readFile("remote/component-versions.json", "utf8"),
+);
+const remoteBrowserVersion = remoteComponentVersions.browser;
+const remoteRelayVersion = remoteComponentVersions.relay;
 if (typeof version !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version)) {
   throw new Error("Release assets require a strict stable package version.");
 }

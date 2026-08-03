@@ -47,6 +47,46 @@ describe("Codex protocol seams", () => {
     );
   });
 
+  it("represents installed legacy supervised approvals without exposing patch content", () => {
+    expect(parseCodexApprovalRequest("execCommandApproval", {
+      conversationId: "thread-legacy",
+      callId: "command-1",
+      command: ["printf", "emoji: 😀 and spaces"],
+      parsedCmd: [],
+      cwd: "/workspace",
+      reason: "Verify output",
+    })).toMatchObject({
+      protocol: "legacy-review",
+      providerThreadId: "thread-legacy",
+      request: {
+        kind: "command",
+        command: "printf \"emoji: 😀 and spaces\"",
+        detail: "printf \"emoji: 😀 and spaces\"",
+        availableDecisions: ["approve", "deny", "cancel"],
+      },
+    });
+
+    const patch = parseCodexApprovalRequest("applyPatchApproval", {
+      conversationId: "thread-legacy",
+      callId: "patch-1",
+      fileChanges: {
+        "src/secret.ts": { type: "add", content: "credential-value" },
+      },
+      grantRoot: "/workspace",
+      reason: "Apply the requested edit",
+    });
+    expect(patch).toMatchObject({
+      protocol: "legacy-review",
+      providerThreadId: "thread-legacy",
+      request: {
+        kind: "file-change",
+        detail: "Apply the requested edit\nChange src/secret.ts",
+        permissionRoots: [{ path: "/workspace", access: "write" }],
+      },
+    });
+    expect(JSON.stringify(patch)).not.toContain("credential-value");
+  });
+
   it("preserves exact absolute permission paths and provider display patterns", () => {
     const absoluteRoot = isAbsolute("C:\\workspace") ? "C:\\workspace" : "/workspace";
     const mixedAbsolutePath = `${absoluteRoot}/generated/../fixtures`;
@@ -100,6 +140,21 @@ describe("Codex protocol seams", () => {
       permissions: {
         fileSystem: { read: roots, write: null, entries: [] },
       },
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("execCommandApproval", {
+      conversationId: "thread-legacy",
+      callId: "command-1",
+      command: ["npm", "test\nunsafe"],
+      parsedCmd: [],
+      cwd: "/workspace",
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("applyPatchApproval", {
+      conversationId: "thread-legacy",
+      callId: "patch-1",
+      fileChanges: {
+        "src/file.ts": { type: "future-change", content: "hidden" },
+      },
+      grantRoot: "/workspace",
     })).toBeUndefined();
     expect(parseCodexApprovalRequest("item/permissions/requestApproval", {
       permissions: {

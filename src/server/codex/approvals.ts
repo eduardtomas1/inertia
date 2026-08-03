@@ -14,11 +14,14 @@ const APPROVAL_METHODS = new Set([
   "item/commandExecution/requestApproval",
   "item/fileChange/requestApproval",
   "item/permissions/requestApproval",
+  "execCommandApproval",
+  "applyPatchApproval",
 ]);
 
 export interface ParsedCodexApprovalRequest {
   request: AgentApprovalRequest;
-  protocol: "decision" | "permissions";
+  protocol: "decision" | "permissions" | "legacy-review";
+  providerThreadId?: string;
   requestedPermissions?: JsonObject;
 }
 
@@ -54,6 +57,63 @@ function exactFilesystemPath(value: unknown): string | undefined {
     && isAbsolute(path)
     ? path
     : undefined;
+}
+
+function legacyCommand(value: unknown): string | undefined {
+  if (
+    !Array.isArray(value)
+    || value.length < 1
+    || value.length > 128
+    || value.some((part) =>
+      typeof part !== "string"
+      || /[\u0000-\u001f\u007f]/u.test(part)
+      || part.length > 2_000)
+  ) return undefined;
+  const command = value.map((part) =>
+    /^[A-Za-z0-9_./:@%+=,-]+$/u.test(part as string)
+      ? part
+      : JSON.stringify(part)
+  ).join(" ");
+  return command.length <= 4_000 ? command : undefined;
+}
+
+function legacyFileChangeSummary(value: unknown): string | undefined {
+  const fileChanges = objectValue(value);
+  if (!fileChanges) return undefined;
+  const entries = Object.entries(fileChanges);
+  const paths = entries.map(([path]) => path);
+  if (
+    paths.length < 1
+    || paths.length > 256
+    || paths.some((path) =>
+      !path
+      || path.length > 4_096
+      || /[\u0000-\u001f\u007f]/u.test(path))
+    || entries.some(([, rawChange]) => {
+      const change = objectValue(rawChange);
+      if (!change || typeof change.type !== "string") return true;
+      if (change.type === "add" || change.type === "delete") {
+        return !hasOnlyKeys(change, ["type", "content"])
+          || typeof change.content !== "string";
+      }
+      if (change.type !== "update") return true;
+      if (
+        !hasOnlyKeys(change, ["type", "unified_diff", "move_path"])
+        || typeof change.unified_diff !== "string"
+      ) return true;
+      return change.move_path !== undefined
+        && change.move_path !== null
+        && !strictBoundedText(change.move_path, 4_096);
+    })
+  ) return undefined;
+  const visible = paths.slice(0, 12);
+  const suffix = paths.length > visible.length
+    ? ` and ${paths.length - visible.length} more`
+    : "";
+  const summary = `Change ${visible.join(", ")}${suffix}`;
+  return summary.length <= 4_000
+    ? summary
+    : `Change ${paths.length} project files`;
 }
 
 function hasOnlyKeys(value: JsonObject, keys: readonly string[]): boolean {
@@ -227,14 +287,20 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
   const command = strictBoundedText(params.command, 4_000);
   const cwd = exactFilesystemPath(params.cwd);
   const reason = strictBoundedText(params.reason, 1_000, false);
+  const providerThreadId = strictBoundedText(params.threadId, 512);
   const hasAdditionalPermissions = Object.prototype.hasOwnProperty.call(
     params,
     "additionalPermissions",
   );
   const additionalPermissions = objectValue(params.additionalPermissions);
   if (
-    Object.prototype.hasOwnProperty.call(params, "command")
+    method !== "execCommandApproval"
+    && Object.prototype.hasOwnProperty.call(params, "command")
     && !command
+  ) return undefined;
+  if (
+    Object.prototype.hasOwnProperty.call(params, "threadId")
+    && !providerThreadId
   ) return undefined;
   if (
     Object.prototype.hasOwnProperty.call(params, "cwd")
@@ -287,9 +353,67 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     ? [...new Set(advertised)]
     : ["approve", "deny", "cancel"];
 
+  if (method === "execCommandApproval") {
+    const legacy = legacyCommand(params.command);
+    const conversationId = strictBoundedText(params.conversationId, 512);
+    const callId = strictBoundedText(params.callId, 512);
+    if (!legacy || !cwd || !conversationId || !callId) return undefined;
+    return {
+      protocol: "legacy-review",
+      providerThreadId: conversationId,
+      request: {
+        requestId,
+        kind: "command",
+        title: "Approve command",
+        command: legacy,
+        cwd,
+        ...(reason ? { reason } : {}),
+        permissionRoots: [],
+        detail: legacy,
+        availableDecisions: ["approve", "deny", "cancel"],
+      },
+    };
+  }
+  if (method === "applyPatchApproval") {
+    const summary = legacyFileChangeSummary(params.fileChanges);
+    const conversationId = strictBoundedText(params.conversationId, 512);
+    const callId = strictBoundedText(params.callId, 512);
+    const grantRoot = params.grantRoot === null
+      || params.grantRoot === undefined
+      ? undefined
+      : exactFilesystemPath(params.grantRoot);
+    if (
+      !summary
+      || !conversationId
+      || !callId
+      || (
+        params.grantRoot !== null
+        && params.grantRoot !== undefined
+        && !grantRoot
+      )
+    ) return undefined;
+    return {
+      protocol: "legacy-review",
+      providerThreadId: conversationId,
+      request: {
+        requestId,
+        kind: "file-change",
+        title: "Approve file changes",
+        ...(grantRoot ? { cwd: grantRoot } : {}),
+        ...(reason ? { reason } : {}),
+        permissionRoots: grantRoot
+          ? [{ path: grantRoot, access: "write" }]
+          : [],
+        detail: reason ? `${reason}\n${summary}` : summary,
+        availableDecisions: ["approve", "deny", "cancel"],
+      },
+    };
+  }
+
   if (method === "item/commandExecution/requestApproval") {
     return {
       protocol: "decision",
+      ...(providerThreadId ? { providerThreadId } : {}),
       request: {
         requestId,
         kind: "command",
@@ -313,6 +437,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     ) return undefined;
     return {
       protocol: "decision",
+      ...(providerThreadId ? { providerThreadId } : {}),
       request: {
         requestId,
         kind: "file-change",
@@ -333,6 +458,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
     const network = objectValue(projection.permissions.network);
     return {
       protocol: "permissions",
+      ...(providerThreadId ? { providerThreadId } : {}),
       requestedPermissions: projection.permissions,
       request: {
         requestId,

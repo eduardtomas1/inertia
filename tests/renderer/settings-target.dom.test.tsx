@@ -52,6 +52,9 @@ describe("Settings external section targets", () => {
       projects: [],
       conversations: [],
       archived: [],
+      databaseBackup: {
+        lastValidatedAt: "2026-08-03T10:15:00.000Z",
+      },
       onUpdate: vi.fn(),
       onConnectProvider: vi.fn(),
       onRefreshProvider: vi.fn(),
@@ -115,5 +118,14 @@ describe("Settings external section targets", () => {
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
       "Remote Companion",
     );
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
+    expect(screen.getByText("Full local database backup")).toBeVisible();
+    expect(screen.getByText(/Last validated backup:/u)).toBeVisible();
+    expect(screen.getByText("Portable conversation recovery export"))
+      .toBeVisible();
+    expect(screen.getByText(
+      /exclude attachments, provider sessions, execution context, Git artifacts, credentials/u,
+    )).toBeVisible();
   });
 });

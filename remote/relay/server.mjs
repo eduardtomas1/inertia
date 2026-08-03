@@ -7,6 +7,8 @@ import { pathToFileURL } from "node:url";
 
 import { WebSocket, WebSocketServer } from "ws";
 
+import relayPackage from "./package.json" with { type: "json" };
+
 import {
   RELAY_PROTOCOL_RANGE,
   REMOTE_PROTOCOL_RANGE,
@@ -19,7 +21,7 @@ import {
 
 const RELAY_PROTOCOL_VERSION = 2;
 const REMOTE_PROTOCOL_VERSION = 2;
-const RELAY_VERSION = "0.2.0";
+const RELAY_VERSION = relayPackage.version;
 const MAX_ENVELOPE_BYTES = 132 * 1024;
 const MAX_CONNECTIONS = 1_024;
 const MAX_CONNECTIONS_PER_DESKTOP = 8;

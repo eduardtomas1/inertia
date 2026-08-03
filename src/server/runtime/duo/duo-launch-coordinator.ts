@@ -396,7 +396,7 @@ export class DuoLaunchCoordinator {
     }
     const failure = started.every(Boolean)
       ? null
-      : "Only part of the provider dispatch was accepted. Any started sibling was stopped; dispatch was not retried.";
+      : "Only part of the provider dispatch was accepted. Cancellation was requested for any started sibling, but provider-side effects are not atomic and must be inspected. Dispatch was not retried.";
     return publicStatus(this.store, this.store.finishPairedLaunchDispatch(
       launchId,
       started,

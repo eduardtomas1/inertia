@@ -20,7 +20,6 @@ import type {
   AppSettings,
   AppSnapshot,
   DuoLaunchStatus,
-  DuoWorktreeRecoveryGuidance,
   ModelSelection,
   ProviderId,
 } from "@shared/contracts";
@@ -42,6 +41,7 @@ import {
   refreshMultiSpawnSelection,
   validateMultiSpawnDraft,
   type MultiSpawnDraft,
+  type IdentifiedDuoRecoveryGuidance,
   type MultiSpawnSideDraft,
 } from "../utils/multiSpawn";
 import { accessOptions } from "./composer/config";
@@ -59,7 +59,7 @@ export interface MultiSpawnDialogProps {
   submitting: boolean;
   cancelling?: boolean;
   error: string | null;
-  recoveryGuidance?: DuoWorktreeRecoveryGuidance[];
+  recoveryGuidance?: IdentifiedDuoRecoveryGuidance[];
   recoveryStatus?: DuoLaunchStatus | null;
   recheckingRecovery?: boolean;
   acknowledgingRecovery?: boolean;
@@ -668,7 +668,7 @@ export function MultiSpawnDialog({
             )}
             {recoveryGuidance.map((guidance) => (
               <section
-                key={`${guidance.ordinal}:${guidance.worktreeId ?? "unknown"}`}
+                key={`${guidance.launchId}:${guidance.ordinal}:${guidance.worktreeId ?? "unknown"}`}
                 className="multi-spawn-recovery-guidance"
                 aria-label={`Manual Git recovery for route ${guidance.ordinal + 1}`}
               >

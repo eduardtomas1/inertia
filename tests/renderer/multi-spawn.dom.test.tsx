@@ -763,6 +763,7 @@ describe("multi-spawn", () => {
         error="Owned worktree cleanup still needs attention."
         recoveryGuidance={[{
           kind: "git-worktree",
+          launchId: "33333333-3333-4333-8333-333333333333",
           ordinal: 0,
           topology: "owned",
           repositoryPath,
@@ -1970,6 +1971,8 @@ describe("multi-spawn", () => {
       "/workspace/retained duo 1",
       "/workspace/retained duo 2",
     ]);
+    expect(hook.result.current.recoveryGuidance.map(({ launchId }) => launchId))
+      .toEqual(launchIds);
     expect(run.mock.calls.some(([, command]) =>
       command.type === "duo.prepare" || command.type === "duo.dispatch"))
       .toBe(false);
@@ -2306,7 +2309,9 @@ describe("multi-spawn", () => {
     expect(hook.result.current.error).toBe(
       retainedWorktreeMessage,
     );
-    expect(hook.result.current.recoveryGuidance).toEqual(recoveryGuidance);
+    expect(hook.result.current.recoveryGuidance).toEqual(
+      recoveryGuidance.map((guidance) => ({ ...guidance, launchId })),
+    );
     expect(hook.result.current.recoveryStatus?.state).toBe("recovery-required");
 
     manualCleanupComplete = true;

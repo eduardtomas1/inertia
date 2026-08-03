@@ -10,7 +10,6 @@ import {
 import type {
   AppSettings,
   AppSnapshot,
-  DuoWorktreeRecoveryGuidance,
   ServerEvent,
 } from "@shared/contracts";
 import {
@@ -20,6 +19,7 @@ import {
   validateMultiSpawnDraft,
   writeMultiSpawnPreset,
   writePendingMultiSpawnLaunchId,
+  type IdentifiedDuoRecoveryGuidance,
   type MultiSpawnDraft,
 } from "../utils/multiSpawn";
 import { resultEvent } from "../lib/runtimeCommands";
@@ -44,7 +44,7 @@ export interface MultiSpawnController {
   submitting: boolean;
   cancelling: boolean;
   error: string | null;
-  recoveryGuidance: DuoWorktreeRecoveryGuidance[];
+  recoveryGuidance: IdentifiedDuoRecoveryGuidance[];
   recoveryStatus: DuoStatusResult | null;
   recheckingRecovery: boolean;
   acknowledgingRecovery: boolean;
@@ -104,6 +104,15 @@ function launchRetainsRecoveryIdentity(status: DuoStatusResult): boolean {
     || status.state === "interrupted";
 }
 
+function identifiedRecoveryGuidance(
+  status: DuoStatusResult,
+): IdentifiedDuoRecoveryGuidance[] {
+  return (status.recoveryGuidance ?? []).map((guidance) => ({
+    ...guidance,
+    launchId: status.launchId,
+  }));
+}
+
 function orderedPreparedSides(result: DuoPreparedResult): DuoPreparedResult["sides"] {
   const ordered = [...result.sides].sort((left, right) =>
     left.ordinal - right.ordinal);
@@ -148,7 +157,7 @@ export function useMultiSpawn({
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recoveryGuidance, setRecoveryGuidance] = useState<
-    DuoWorktreeRecoveryGuidance[]
+    IdentifiedDuoRecoveryGuidance[]
   >([]);
   const [recoveryStatus, setRecoveryStatusState] =
     useState<DuoStatusResult | null>(null);
@@ -282,9 +291,7 @@ export function useMultiSpawn({
       }
       const retained = statuses.filter(launchRetainsRecoveryIdentity);
       setRecoveryStatus(retained[0] ?? statuses[0] ?? null);
-      setRecoveryGuidance(retained.flatMap(
-        ({ recoveryGuidance }) => recoveryGuidance ?? [],
-      ));
+      setRecoveryGuidance(retained.flatMap(identifiedRecoveryGuidance));
       const retainedMessages = retained.map(launchStatusMessage).filter(
         (message): message is string => Boolean(message),
       );
@@ -370,7 +377,7 @@ export function useMultiSpawn({
       if (event.result.kind !== "duo.status") {
         throw new Error("The local service returned an unexpected cancellation response.");
       }
-      setRecoveryGuidance(event.result.recoveryGuidance ?? []);
+        setRecoveryGuidance(identifiedRecoveryGuidance(event.result));
       setRecoveryStatus(event.result);
       if (!launchRetainsRecoveryIdentity(event.result)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
@@ -499,7 +506,7 @@ export function useMultiSpawn({
         throw new Error("The local service returned an unexpected dispatch response.");
       }
       const launchMessage = launchStatusMessage(dispatchEvent.result);
-      setRecoveryGuidance(dispatchEvent.result.recoveryGuidance ?? []);
+      setRecoveryGuidance(identifiedRecoveryGuidance(dispatchEvent.result));
       setRecoveryStatus(dispatchEvent.result);
       if (!launchRetainsRecoveryIdentity(dispatchEvent.result)) {
         clearPendingMultiSpawnLaunchId(window.localStorage);
@@ -537,7 +544,7 @@ export function useMultiSpawn({
             status = recovery.result;
           }
           const message = launchStatusMessage(status);
-          setRecoveryGuidance(status.recoveryGuidance ?? []);
+          setRecoveryGuidance(identifiedRecoveryGuidance(status));
           setRecoveryStatus(status);
           if (!launchRetainsRecoveryIdentity(status)) {
             clearPendingMultiSpawnLaunchId(window.localStorage);

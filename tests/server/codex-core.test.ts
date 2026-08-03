@@ -282,12 +282,25 @@ describe("Codex protocol seams", () => {
         },
       )).toBeUndefined();
     }
-    for (const directionalControl of ["\u202e", "\u2066"]) {
+    for (const unsafeFormatting of [
+      "\u0085",
+      "\u2028",
+      "\u2029",
+      "\u202e",
+      "\u2066",
+    ]) {
+      expect(parseCodexApprovalRequest("execCommandApproval", {
+        conversationId: "thread-legacy",
+        callId: "command-formatting",
+        command: ["printf", `safe${unsafeFormatting}echo injected`],
+        parsedCmd: [],
+        cwd: "/workspace",
+      })).toBeUndefined();
       expect(parseCodexApprovalRequest("applyPatchApproval", {
         conversationId: "thread-legacy",
         callId: "patch-directional-source",
         fileChanges: {
-          [`src/safe${directionalControl}cod.exe`]: {
+          [`src/safe${unsafeFormatting}cod.exe`]: {
             type: "delete",
             content: "hidden",
           },
@@ -301,7 +314,7 @@ describe("Codex protocol seams", () => {
           "src/source.ts": {
             type: "update",
             unified_diff: "@@ -1 +1 @@",
-            move_path: `src/safe${directionalControl}cod.exe`,
+            move_path: `src/safe${unsafeFormatting}cod.exe`,
           },
         },
         grantRoot: "/workspace",

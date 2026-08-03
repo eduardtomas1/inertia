@@ -4,6 +4,30 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.23 — 2026-08-03
+
+### Supervision and recovery stay truthful
+
+- Legacy Codex patch approvals once again use the provider's supervised flow, reject unsafe display text, and show every bounded source and move destination before the user decides.
+- Duo dispatch and recovery are durable across partial launches, restarts, deletion attempts, and explicit acknowledgement. Obsolete recovery alerts clear only after an authoritative clean recheck.
+- Remote Companion now distinguishes an absent browser identity from an expired sealed or legacy grant during cold start. Expired grants are removed, never open transport, and lead directly to truthful re-pairing guidance.
+- Recovery status no longer describes an unvalidated retained SQLite backup as verified, and the UI distinguishes portable export from full database recovery.
+
+### Frequent paths respond sooner
+
+- Sustained transcript streaming now uses a measured 64 ms cadence while preserving the fast first flush, Unicode boundaries, persistence ordering, terminal delivery, and restart reconstruction.
+- Frequent lazy surfaces prefetch on idle or intent, show immediate loading shells, avoid high-frequency backdrop blur, and use shorter interaction motion without weakening reduced-motion behavior.
+- Expensive recovered history stays collapsed and unmounted until requested. Its cost includes inferred turns, messages, reasoning, plans, checkpoints, and activity detail, and a same-conversation history that becomes expensive collapses before mounting the new weight.
+- Model-route refresh and asynchronous menu updates preserve navigation and restore focus only when the user has not deliberately moved it elsewhere.
+- Production-path platform and desktop benchmarks cover streaming paint and gaps, long tasks, SQLite WAL growth, long-thread scrolling, first-open latency, split panes, terminal activity, scaling, memory, and repeated-open soak behavior without relaxing the established hosted ceilings.
+
+### Provider, remote-release, and supply-chain confidence
+
+- Remote Companion browser and relay artifacts carry checked component versions and release-time compatibility validation while the conditional-projection floor remains pinned to protocol version 0.3.0.
+- OpenCode SDK 1.18.10 ships as an independently revertible protocol update, protected by all 217 portable provider contracts.
+- Newly disclosed transitive issues are resolved with `fast-uri` 3.1.5, `ip-address` 10.4.0, and `hono` 4.12.34; the production dependency audit is clean.
+- Architecture and lint checks, four TypeScript projects, 2,398 local unit and integration tests, focused real Electron expiry coverage, exact-head review, and green Linux, macOS, and Windows E2E, benchmark, packaging, fuse, audit, and smoke gates protect the release.
+
 ## 0.0.22 — 2026-08-02
 
 ### Long sessions stay lighter across every platform

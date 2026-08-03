@@ -146,13 +146,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.22
+### Version 0.0.23
 
-This release makes long sessions cheaper, local history recoverable, and the experimental **Remote Companion** practical to self-host without widening its authority.
+This release makes supervision, recovery, and frequent interaction paths more truthful under real desktop load.
 
-Terminal bursts and growing transcript streams now use bounded coalescing and append storage, SQLite has validated rotating backups plus explicit export/import recovery, and PDF extraction is bounded across initialization, concurrency, memory, and cancellation. Remote Companion adds guided setup diagnostics, durable endpoint authentication, checksummed deployment artifacts, resilient browser lifecycle supervision, and conditional encrypted projections that avoid resending unchanged histories.
+Codex patch approvals regain their complete supervised flow, Duo launches recover durably, and Remote Companion distinguishes expired browser grants from a device that was never paired. Transcript streaming uses a measured 64 ms cadence, frequent lazy surfaces prefetch on intent or idle, expensive recovered history remains unmounted until requested, and focus restoration no longer fights deliberate navigation. Cross-platform desktop benchmarks, fixed Remote Companion artifact compatibility, OpenCode SDK 1.18.10, and a clean production dependency audit keep those gains visible and reviewable.
 
-Download [Inertia v0.0.22](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.22):
+Download [Inertia v0.0.23](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.23):
 
 | Platform | Download |
 | --- | --- |

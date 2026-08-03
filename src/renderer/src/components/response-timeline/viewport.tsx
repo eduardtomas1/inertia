@@ -1017,7 +1017,13 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
         onAfterToggle={restoreExpansionAnchor}
       />
     )
-    : <CompatibilityTimeline compatibility={item.compatibility} props={props} />;
+    : (
+      <CompatibilityTimeline
+        key={props.conversationId}
+        compatibility={item.compatibility}
+        props={props}
+      />
+    );
 
   return (
     <>

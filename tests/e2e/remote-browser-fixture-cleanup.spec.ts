@@ -17,6 +17,8 @@ test("cleans a launched app and profile when readiness fails", async () => {
   await expect(launchRemoteBrowser({
     staticUrl: "data:text/html,<title>cleanup fixture</title>",
     profilePrefix,
+    gracefulCloseTimeoutMs: 25,
+    closeApp: async () => await new Promise<void>(() => undefined),
     ready: async (launchedPage) => {
       observed.page = launchedPage;
       throw new Error("Injected readiness failure");

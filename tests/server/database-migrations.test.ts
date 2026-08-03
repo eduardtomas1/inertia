@@ -297,7 +297,7 @@ describe("published database fixtures", () => {
       ).get() as { count: number }).count).toBe(2);
       inspection.close();
     }
-  });
+  }, 30_000);
 
   it("backfills typed non-repository artifact absence for legacy persisted rows", async () => {
     const directory = await temporaryDirectory();

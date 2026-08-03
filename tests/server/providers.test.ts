@@ -315,10 +315,11 @@ process.exit(2);
   it("removes descendants from a timed-out provider discovery probe", async () => {
     const root = temporaryRoot();
     const childPidPath = join(root, "discovery-child.pid");
-    // Starting a copied Node executable can exceed the synthetic 250 ms
-    // deadline on a loaded Windows runner. Use the real discovery bound there
-    // so the fixture has actually created the descendant being asserted.
-    const probeTimeoutMs = process.platform === "win32" ? 2_500 : 250;
+    // Starting a copied Node executable can exceed the production discovery
+    // deadline on a contended Windows runner. This test proves descendant
+    // cleanup, not startup latency, so leave enough time for the fixture to
+    // establish the descendant whose ownership is being asserted.
+    const probeTimeoutMs = process.platform === "win32" ? 5_000 : 250;
     const descendantExecutable = portableNodeExecutable(
       root,
       "discovery-descendant",
@@ -346,7 +347,15 @@ setInterval(() => {}, 1000);
       canRun: false,
     });
 
-    const descendantPid = Number(readFileSync(childPidPath, "utf8"));
+    let descendantPid = 0;
+    await waitFor("the discovery descendant PID to be recorded", () => {
+      try {
+        descendantPid = Number(readFileSync(childPidPath, "utf8"));
+        return Number.isSafeInteger(descendantPid);
+      } catch {
+        return false;
+      }
+    });
     expect(Number.isSafeInteger(descendantPid)).toBe(true);
     if (process.platform === "win32") {
       // A stopped Windows PID can be recycled by another Vitest worker before

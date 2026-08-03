@@ -12,6 +12,8 @@ import { forceKillRuntimeProcessTree } from "../../../src/main/runtime-process-t
 const GRACEFUL_CLOSE_TIMEOUT_MS = 2_000;
 const FORCE_KILL_TIMEOUT_MS = 4_000;
 
+class RemoteBrowserFixtureCloseTimeoutError extends Error {}
+
 type ElectronApp = Awaited<ReturnType<typeof electron.launch>>;
 type ElectronProcess = ReturnType<ElectronApp["process"]>;
 
@@ -24,6 +26,7 @@ export interface RemoteBrowserElectronFixture {
 interface LaunchRemoteBrowserOptions {
   staticUrl: string;
   profilePrefix?: string;
+  gracefulCloseTimeoutMs?: number;
   ready?(page: Page): Promise<void>;
   closeApp?(app: ElectronApp): Promise<void>;
   forceKillProcessTree?(
@@ -36,6 +39,7 @@ interface LaunchRemoteBrowserOptions {
 export async function launchRemoteBrowser({
   staticUrl,
   profilePrefix = "inertia-remote-e2e-",
+  gracefulCloseTimeoutMs = GRACEFUL_CLOSE_TIMEOUT_MS,
   ready,
   closeApp = async (app) => await app.close(),
   forceKillProcessTree = forceKillRuntimeProcessTree,
@@ -60,6 +64,7 @@ export async function launchRemoteBrowser({
       close: async () => await cleanupOwnedApp(
         ownedApp,
         userDataDir,
+        gracefulCloseTimeoutMs,
         closeApp,
         forceKillProcessTree,
         removeOwnedProfile,
@@ -71,6 +76,7 @@ export async function launchRemoteBrowser({
         await cleanupOwnedApp(
           electronApp,
           userDataDir,
+          gracefulCloseTimeoutMs,
           closeApp,
           forceKillProcessTree,
           removeOwnedProfile,
@@ -114,6 +120,7 @@ export async function closeRemoteBrowserRelayResources(
 async function cleanupOwnedApp(
   app: ElectronApp,
   userDataDir: string,
+  gracefulCloseTimeoutMs: number,
   closeApp: (app: ElectronApp) => Promise<void>,
   forceKillProcessTree: (
     pid: number,
@@ -127,17 +134,23 @@ async function cleanupOwnedApp(
   try {
     await withTimeout(
       closeApp(app),
-      GRACEFUL_CLOSE_TIMEOUT_MS,
-      "Remote browser fixture close timed out.",
+      gracefulCloseTimeoutMs,
+      new RemoteBrowserFixtureCloseTimeoutError(
+        "Remote browser fixture close timed out.",
+      ),
     );
     closeSucceeded = true;
   } catch (error) {
-    errors.push(error);
+    // A graceful-close timeout is the signal to use the owned-tree fallback.
+    // It is not itself a cleanup failure when that fallback is confirmed.
+    if (!(error instanceof RemoteBrowserFixtureCloseTimeoutError)) {
+      errors.push(error);
+    }
   }
 
   let rootExited = await waitForRootExit(
     child,
-    Date.now() + GRACEFUL_CLOSE_TIMEOUT_MS,
+    Date.now() + gracefulCloseTimeoutMs,
   );
   if (!rootExited) {
     if (closeSucceeded) {
@@ -210,7 +223,7 @@ async function closeRelay(relay: WebSocketServer): Promise<void> {
         });
       }),
       GRACEFUL_CLOSE_TIMEOUT_MS,
-      "Remote browser fixture relay close timed out.",
+      new Error("Remote browser fixture relay close timed out."),
     );
   } catch (error) {
     errors.push(error);
@@ -253,14 +266,14 @@ function rootHasExited(child: ElectronProcess): boolean {
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
-  message: string,
+  timeoutError: Error,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        timer = setTimeout(() => reject(timeoutError), timeoutMs);
       }),
     ]);
   } finally {

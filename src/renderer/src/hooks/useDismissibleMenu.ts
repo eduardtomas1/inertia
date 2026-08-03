@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+} from "react";
 import {
   dismissibleMenuTransition,
   outsidePointerShouldRestoreFocus,
   type DismissibleMenuAction,
 } from "../utils/dismissibleMenu";
+
+const MAX_FOCUS_ATTEMPTS = 30;
 
 export function useDismissibleMenu<Menu extends string>(): {
   menu: Menu | null;
@@ -14,6 +21,8 @@ export function useDismissibleMenu<Menu extends string>(): {
 } {
   const [menu, dispatch] = useReducer(dismissibleMenuTransition<Menu>, null);
   const menuRef = useRef<Menu | null>(null);
+  const focusGeneration = useRef(0);
+  const pendingFocusCleanup = useRef<(() => void) | null>(null);
   const triggers = useRef(new Map<Menu, HTMLButtonElement>());
   const popovers = useRef(new Map<Menu, HTMLDivElement>());
   menuRef.current = menu;
@@ -30,16 +39,74 @@ export function useDismissibleMenu<Menu extends string>(): {
 
   const restoreTriggerFocus = useCallback((name: Menu | null) => {
     if (!name) return;
-    window.requestAnimationFrame(() => triggers.current.get(name)?.focus());
+    pendingFocusCleanup.current?.();
+    pendingFocusCleanup.current = null;
+    focusGeneration.current += 1;
+    const generation = focusGeneration.current;
+    let attempts = 0;
+    const finish = (): void => {
+      pendingFocusCleanup.current?.();
+      pendingFocusCleanup.current = null;
+    };
+    let removeIntentListeners = (): void => undefined;
+    const intentTimer = window.setTimeout(() => {
+      if (generation !== focusGeneration.current) return;
+      const cancel = (): void => {
+        if (generation !== focusGeneration.current) return;
+        focusGeneration.current += 1;
+        finish();
+      };
+      const cancelOnFocusMove = (event: FocusEvent): void => {
+        if (event.target !== triggers.current.get(name)) cancel();
+      };
+      document.addEventListener("pointerdown", cancel, true);
+      document.addEventListener("focusin", cancelOnFocusMove, true);
+      removeIntentListeners = () => {
+        document.removeEventListener("pointerdown", cancel, true);
+        document.removeEventListener("focusin", cancelOnFocusMove, true);
+      };
+    }, 0);
+    pendingFocusCleanup.current = () => {
+      window.clearTimeout(intentTimer);
+      removeIntentListeners();
+    };
+    const focusWhenReady = (): void => {
+      if (generation !== focusGeneration.current) return;
+      const trigger = triggers.current.get(name);
+      if (trigger?.isConnected && !trigger.disabled) {
+        finish();
+        trigger.focus();
+        return;
+      }
+      attempts += 1;
+      if (attempts < MAX_FOCUS_ATTEMPTS) {
+        window.requestAnimationFrame(focusWhenReady);
+      } else {
+        finish();
+      }
+    };
+    window.requestAnimationFrame(focusWhenReady);
+  }, []);
+
+  const cancelPendingFocus = useCallback(() => {
+    focusGeneration.current += 1;
+    pendingFocusCleanup.current?.();
+    pendingFocusCleanup.current = null;
   }, []);
 
   const dismissMenu = useCallback((reason: "escape" | "selection" | "context-change") => {
     const activeMenu = menuRef.current;
     dispatch({ type: reason });
     if (reason === "escape" || reason === "selection") restoreTriggerFocus(activeMenu);
-  }, [restoreTriggerFocus]);
+    else cancelPendingFocus();
+  }, [cancelPendingFocus, restoreTriggerFocus]);
 
-  const toggleMenu = useCallback((name: Menu) => dispatch({ type: "toggle", menu: name }), []);
+  const toggleMenu = useCallback((name: Menu) => {
+    cancelPendingFocus();
+    dispatch({ type: "toggle", menu: name });
+  }, [cancelPendingFocus]);
+
+  useEffect(() => cancelPendingFocus, [cancelPendingFocus]);
 
   useEffect(() => {
     if (!menu) return;

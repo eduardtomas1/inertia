@@ -19,6 +19,8 @@ import {
 import { turnCompletionAnnouncement } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 
+const TURN_SETTLEMENT_TRANSITION_MS = 160;
+
 function TurnTimelineComponent({
   turn,
   props,
@@ -87,7 +89,10 @@ function TurnTimelineComponent({
   ]);
   useEffect(() => {
     if (!isSettling) return;
-    const timer = window.setTimeout(() => setSettlingTransition(null), 220);
+    const timer = window.setTimeout(
+      () => setSettlingTransition(null),
+      TURN_SETTLEMENT_TRANSITION_MS,
+    );
     return () => window.clearTimeout(timer);
   }, [isSettling]);
 

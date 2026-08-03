@@ -5,7 +5,7 @@ import {
 } from "./turn-stream-coalescer";
 
 export const STREAM_PROJECTION_FIRST_FLUSH_MS = 24;
-export const STREAM_PROJECTION_FLUSH_INTERVAL_MS = 240;
+export const STREAM_PROJECTION_FLUSH_INTERVAL_MS = 64;
 export const STREAM_PROJECTION_CHAR_THRESHOLD = 16_384;
 
 export interface TurnStreamChannelOptions {
@@ -18,10 +18,11 @@ export interface TurnStreamChannelOptions {
 /**
  * Gives live rendering and durable storage one bounded, ordered cadence.
  *
- * The 240ms sustained window avoids reparsing and rewriting on every provider
- * callback. Each flush persists before it projects, so text that reached a
- * renderer also survives an abrupt utility-process loss. Explicit lifecycle
- * edges drain the same channel before terminal snapshots.
+ * The 64ms sustained window keeps visible updates below a 100ms interaction
+ * budget without persisting every provider callback. Each flush persists
+ * before it projects, so text that reached a renderer also survives an abrupt
+ * utility-process loss. Explicit lifecycle edges drain the same channel before
+ * terminal snapshots.
  */
 export class TurnStreamChannel {
   private readonly channel: TurnStreamCoalescer;

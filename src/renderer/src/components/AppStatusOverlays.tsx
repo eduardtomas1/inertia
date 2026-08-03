@@ -9,9 +9,10 @@ import { AppUpdateNotice } from "./AppUpdateNotice";
 import { DatabaseRecoveryNotice } from "./DatabaseRecoveryNotice";
 import { ProviderQuotaNotices } from "./ProviderQuotaNotices";
 import { IconButton } from "./ui";
+import { loadProviderAuthDialog } from "./lazySurfaceLoaders";
 
 const ProviderAuthDialog = lazy(async () => ({
-  default: (await import("./ProviderAuthDialog")).ProviderAuthDialog,
+  default: (await loadProviderAuthDialog()).ProviderAuthDialog,
 }));
 
 interface AppStatusOverlaysProps {

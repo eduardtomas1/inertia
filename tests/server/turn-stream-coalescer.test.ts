@@ -80,6 +80,10 @@ class ClockScheduler implements TurnTimerScheduler {
     this.timers.delete(handle as number);
   }
 
+  get currentTime(): number {
+    return this.now;
+  }
+
   advance(delayMs: number): void {
     const target = this.now + delayMs;
     while (true) {
@@ -388,11 +392,14 @@ describe("TurnStreamCoalescer", () => {
 });
 
 describe("TurnStreamChannel performance cadence", () => {
-  it("reduces rewrites for a time-distributed stream without adding visible lag", () => {
+  it("keeps continuous delivery below 100ms without reverting to per-token writes", () => {
     const oldScheduler = new ClockScheduler();
     const oldFlushes: string[] = [];
     const oldChannel = new TurnStreamCoalescer({
       scheduler: oldScheduler,
+      firstFlushMs: 24,
+      flushIntervalMs: 240,
+      maxBufferedChars: 16_384,
       onFlush: ({ delta }) => oldFlushes.push(delta),
       onTimerError: (error) => {
         throw error;
@@ -400,10 +407,14 @@ describe("TurnStreamChannel performance cadence", () => {
     });
     const nextScheduler = new ClockScheduler();
     const projected: string[] = [];
+    const projectedAt: number[] = [];
     const persisted: string[] = [];
     const nextChannel = new TurnStreamChannel({
       scheduler: nextScheduler,
-      onProjectionFlush: ({ delta }) => projected.push(delta),
+      onProjectionFlush: ({ delta }) => {
+        projected.push(delta);
+        projectedAt.push(nextScheduler.currentTime);
+      },
       onPersistenceFlush: ({ delta }) => persisted.push(delta),
       onTimerError: (error) => {
         throw error;
@@ -422,9 +433,43 @@ describe("TurnStreamChannel performance cadence", () => {
 
     expect(projected.join("")).toBe(chunk.repeat(100));
     expect(persisted).toEqual(projected);
-    expect(projected.length).toBeLessThan(oldFlushes.length);
-    expect(projected).toHaveLength(6);
-    expect(oldFlushes).toHaveLength(11);
+    expect(projected).toHaveLength(15);
+    expect(oldFlushes).toHaveLength(6);
+    expect(projected.length).toBeLessThan(100);
+    expect(projectedAt[0]).toBe(24);
+    for (let index = 1; index < projectedAt.length - 1; index += 1) {
+      const gap = projectedAt[index]! - projectedAt[index - 1]!;
+      expect(gap).toBeGreaterThanOrEqual(64);
+      expect(gap).toBeLessThan(75);
+    }
+  });
+
+  it("bounds sparse-token visibility after the first fast flush", () => {
+    const scheduler = new ClockScheduler();
+    const projected: Array<{ delta: string; at: number }> = [];
+    const channel = new TurnStreamChannel({
+      scheduler,
+      onProjectionFlush: ({ delta }) => projected.push({
+        delta,
+        at: scheduler.currentTime,
+      }),
+      onPersistenceFlush: () => undefined,
+      onTimerError: (error) => {
+        throw error;
+      },
+    });
+
+    channel.append("first🙂");
+    scheduler.advance(24);
+    scheduler.advance(120);
+    channel.append(" second🧠");
+    scheduler.advance(63);
+    expect(projected).toEqual([{ delta: "first🙂", at: 24 }]);
+    scheduler.advance(1);
+    expect(projected).toEqual([
+      { delta: "first🙂", at: 24 },
+      { delta: " second🧠", at: 208 },
+    ]);
   });
 
   it("keeps projection responsive while reducing sustained persistence rewrites", () => {

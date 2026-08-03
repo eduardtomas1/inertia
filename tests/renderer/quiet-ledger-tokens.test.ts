@@ -78,9 +78,9 @@ describe("Minimal Workstream tokens", () => {
     expect(root).toContain("--answer-max-width: var(--final-answer-max-width)");
     expect(root).toContain("--user-message-max-width: var(--user-request-max-width)");
     expect(root).toContain("--execution-rail-border: var(--activity-rail-border)");
-    expect(root).toMatch(/--motion-fast:\s*140ms/u);
-    expect(root).toMatch(/--motion-base:\s*180ms/u);
-    expect(root).toMatch(/--motion-slow:\s*220ms/u);
+    expect(root).toMatch(/--motion-fast:\s*90ms/u);
+    expect(root).toMatch(/--motion-base:\s*120ms/u);
+    expect(root).toMatch(/--motion-slow:\s*160ms/u);
     expect(root).toMatch(/--ui-font-main:\s*14px/u);
     expect(root).toMatch(/--ui-font-secondary:\s*11\.5px/u);
   });

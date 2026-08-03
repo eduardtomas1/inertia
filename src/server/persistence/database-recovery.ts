@@ -664,10 +664,10 @@ export class DatabaseBackupManager {
     private readonly databasePath: string,
     private readonly options: DatabaseBackupOptions = {},
   ) {
-    const latest = listBackupMetadata(databasePath)[0];
-    this.lastValidatedAt = latest
-      ? new Date(latest.modifiedAt).toISOString()
-      : null;
+    // A filename and mtime prove only that a previous process left a file.
+    // Do not label it as validated until this manager has completed the full
+    // integrity/schema check for a newly written backup.
+    this.lastValidatedAt = null;
   }
 
   start(): void {

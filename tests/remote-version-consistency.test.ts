@@ -2,7 +2,9 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
-import remoteComponentVersions from "../remote/component-versions.json";
+import remoteComponentVersions from "../remote/component-versions.json" with {
+  type: "json",
+};
 import { REMOTE_BROWSER_VERSION } from "../src/shared/remote-protocol";
 import { checkRemoteVersionConsistency } from "../scripts/check-remote-version-consistency.mjs";
 

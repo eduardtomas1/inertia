@@ -62,6 +62,26 @@ afterEach(() => {
 });
 
 describe("database backup and startup recovery", () => {
+  it("does not present an unverified retained file as a validated backup", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    await store.createBackup();
+    store.close();
+
+    const database = new Database(databasePath);
+    const manager = new DatabaseBackupManager(database, databasePath, {
+      validateBackup: async () => "valid-current",
+    });
+    expect(backupNames(databasePath)).toHaveLength(1);
+    expect(manager.status().lastValidatedAt).toBeNull();
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      createdAt: expect.any(String),
+    });
+    expect(manager.status().lastValidatedAt).toEqual(expect.any(String));
+    database.close();
+  });
+
   it("creates the first validated backup after a short delay and deduplicates a turn trigger", async () => {
     vi.useFakeTimers();
     const directory = temporaryDirectory();

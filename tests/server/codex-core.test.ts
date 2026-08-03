@@ -85,6 +85,24 @@ describe("Codex protocol seams", () => {
       },
     });
     expect(JSON.stringify(patch)).not.toContain("credential-value");
+
+    const movedPatch = parseCodexApprovalRequest("applyPatchApproval", {
+      conversationId: "thread-legacy",
+      callId: "patch-move",
+      fileChanges: {
+        "src/original.ts": {
+          type: "update",
+          unified_diff: "@@ -1 +1 @@",
+          move_path: "src/destination.ts",
+        },
+        "src/second.ts": { type: "delete", content: "hidden" },
+      },
+      grantRoot: "/workspace",
+    });
+    expect(movedPatch?.request.detail).toBe(
+      "Change src/original.ts\nMove to src/destination.ts\nChange src/second.ts",
+    );
+    expect(JSON.stringify(movedPatch)).not.toContain("@@ -1 +1 @@");
   });
 
   it("preserves exact absolute permission paths and provider display patterns", () => {
@@ -154,6 +172,18 @@ describe("Codex protocol seams", () => {
       fileChanges: {
         "src/file.ts": { type: "future-change", content: "hidden" },
       },
+      grantRoot: "/workspace",
+    })).toBeUndefined();
+    expect(parseCodexApprovalRequest("applyPatchApproval", {
+      conversationId: "thread-legacy",
+      callId: "patch-too-large-to-display",
+      fileChanges: Object.fromEntries(Array.from(
+        { length: 256 },
+        (_, index) => [
+          `src/${index}-${"x".repeat(20)}.ts`,
+          { type: "add", content: "hidden" },
+        ],
+      )),
       grantRoot: "/workspace",
     })).toBeUndefined();
     expect(parseCodexApprovalRequest("item/permissions/requestApproval", {

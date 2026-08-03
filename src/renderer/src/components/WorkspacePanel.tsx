@@ -9,14 +9,10 @@ import {
   X,
 } from "lucide-react";
 import { IconButton } from "./ui";
+import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
+import type { WorkspacePanelTab } from "./workspacePanelTypes";
 
-export type WorkspacePanelTab =
-  | "changes"
-  | "files"
-  | "terminal"
-  | "goal"
-  | "plan"
-  | "preview";
+export type { WorkspacePanelTab } from "./workspacePanelTypes";
 
 export type WorkspacePanelProps = {
   activeTab: WorkspacePanelTab;
@@ -76,6 +72,9 @@ export function WorkspacePanel({
                 aria-selected={active}
                 aria-controls={`${panelId}-content`}
                 className={active ? "workspace-panel-tab is-active" : "workspace-panel-tab"}
+                onFocus={() => prefetchWorkspaceTool(tab)}
+                onPointerDown={() => prefetchWorkspaceTool(tab)}
+                onPointerEnter={() => prefetchWorkspaceTool(tab)}
                 onClick={() => onTabChange(tab)}
                 key={tab}
               >

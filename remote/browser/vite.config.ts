@@ -2,7 +2,9 @@ import { resolve } from "node:path";
 
 import { defineConfig } from "vite";
 
-import remoteComponentVersions from "../component-versions.json";
+import remoteComponentVersions from "../component-versions.json" with {
+  type: "json",
+};
 
 export const REMOTE_BROWSER_HEADERS = {
   "Content-Security-Policy": [

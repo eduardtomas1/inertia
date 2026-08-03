@@ -10,7 +10,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import remoteComponentVersions from "../remote/component-versions.json";
+import remoteComponentVersions from "../remote/component-versions.json" with {
+  type: "json",
+};
 import {
   buildRemoteArtifacts,
   verifyRemoteArtifacts,

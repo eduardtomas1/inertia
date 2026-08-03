@@ -21,6 +21,7 @@ import {
   remoteAuthorizationSubjectSchema,
   remoteConversationGrantsSchema,
   REMOTE_BROWSER_VERSION,
+  REMOTE_CONDITIONAL_PROJECTIONS_BROWSER_VERSION,
   REMOTE_DESKTOP_VERSION,
   REMOTE_LIMITS,
   REMOTE_PROTOCOL_VERSION,
@@ -112,6 +113,7 @@ describe("remote frame and request parsing never yields authority", () => {
     expect(remoteVersionSupportsConditionalProjections("0.3.0")).toBe(true);
     expect(remoteVersionSupportsConditionalProjections("1.0.0")).toBe(true);
     expect(remoteVersionSupportsConditionalProjections("invalid")).toBe(false);
+    expect(REMOTE_CONDITIONAL_PROJECTIONS_BROWSER_VERSION).toBe("0.3.0");
   });
 
   it("rejects malformed frames without throwing", () => {

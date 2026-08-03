@@ -81,39 +81,45 @@ function legacyFileChangeSummary(value: unknown): string | undefined {
   const fileChanges = objectValue(value);
   if (!fileChanges) return undefined;
   const entries = Object.entries(fileChanges);
-  const paths = entries.map(([path]) => path);
   if (
-    paths.length < 1
-    || paths.length > 256
-    || paths.some((path) =>
+    entries.length < 1
+    || entries.length > 256
+  ) return undefined;
+
+  const affectedPaths: string[] = [];
+  for (const [path, rawChange] of entries) {
+    if (
       !path
       || path.length > 4_096
-      || /[\u0000-\u001f\u007f]/u.test(path))
-    || entries.some(([, rawChange]) => {
-      const change = objectValue(rawChange);
-      if (!change || typeof change.type !== "string") return true;
-      if (change.type === "add" || change.type === "delete") {
-        return !hasOnlyKeys(change, ["type", "content"])
-          || typeof change.content !== "string";
-      }
-      if (change.type !== "update") return true;
+      || /[\u0000-\u001f\u007f]/u.test(path)
+    ) return undefined;
+    const change = objectValue(rawChange);
+    if (!change || typeof change.type !== "string") return undefined;
+    if (change.type === "add" || change.type === "delete") {
+      if (
+        !hasOnlyKeys(change, ["type", "content"])
+        || typeof change.content !== "string"
+      ) return undefined;
+    } else if (change.type === "update") {
       if (
         !hasOnlyKeys(change, ["type", "unified_diff", "move_path"])
         || typeof change.unified_diff !== "string"
-      ) return true;
-      return change.move_path !== undefined
-        && change.move_path !== null
-        && !strictBoundedText(change.move_path, 4_096);
-    })
-  ) return undefined;
-  const visible = paths.slice(0, 12);
-  const suffix = paths.length > visible.length
-    ? ` and ${paths.length - visible.length} more`
-    : "";
-  const summary = `Change ${visible.join(", ")}${suffix}`;
-  return summary.length <= 4_000
-    ? summary
-    : `Change ${paths.length} project files`;
+      ) return undefined;
+    } else {
+      return undefined;
+    }
+
+    affectedPaths.push(`Change ${path}`);
+    if (change.type === "update" && change.move_path !== undefined) {
+      if (change.move_path === null) continue;
+      const destination = strictBoundedText(change.move_path, 4_096);
+      if (!destination) return undefined;
+      affectedPaths.push(`Move to ${destination}`);
+    }
+  }
+
+  const summary = affectedPaths.join("\n");
+  return summary.length <= 4_000 ? summary : undefined;
 }
 
 function hasOnlyKeys(value: JsonObject, keys: readonly string[]): boolean {

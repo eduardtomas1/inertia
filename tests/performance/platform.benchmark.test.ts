@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import {
@@ -35,6 +36,7 @@ import {
   ProviderRunEventBudget,
 } from "../../src/server/provider/io";
 import { TerminalManager } from "../../src/server/terminal";
+import { TurnStreamCoalescer } from "../../src/server/runtime/turns/turn-stream-coalescer";
 import {
   listWorkspaceEntries,
   searchWorkspaceEntries,
@@ -62,6 +64,131 @@ interface Measurement {
   maximumMs: number;
   samples: number[];
   [key: string]: number | number[];
+}
+
+interface StreamingCadenceMeasurement extends Measurement {
+  intervalMs: number;
+  firstProjectionMs: number;
+  medianVisibleGapMs: number;
+  p95VisibleGapMs: number;
+  visibleUpdatesPerSecond: number;
+  visibleUpdates: number;
+  sqliteWrites: number;
+  walBytes: number;
+  serializedProjectionBytes: number;
+  runtimeCpuMs: number;
+  runtimeRssDeltaBytes: number;
+  sourceCharacters: number;
+}
+
+function percentile(values: readonly number[], fraction: number): number {
+  if (values.length === 0) return 0;
+  const ordered = [...values].sort((left, right) => left - right);
+  return ordered[Math.min(
+    ordered.length - 1,
+    Math.floor(ordered.length * fraction),
+  )]!;
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+}
+
+async function streamingCadenceMeasurement(
+  root: string,
+  workspace: string,
+  intervalMs: 64 | 80 | 96,
+): Promise<StreamingCadenceMeasurement> {
+  const databasePath = join(root, `stream-cadence-${intervalMs}.sqlite`);
+  const store = new RuntimeStore(databasePath, workspace, {
+    recoverInterruptedRuns: false,
+  });
+  const project = store.createProject(`Cadence ${intervalMs}`, workspace);
+  const conversation = store.createConversation(
+    project.id,
+    `Cadence ${intervalMs}`,
+  );
+  const message = store.createMessage(conversation.id, "", "assistant");
+  const sourceChunks = Array.from({ length: 128 }, (_, index) => (
+    index % 9 === 0
+      ? `🙂 unicode-${index}\n`
+      : index % 13 === 0
+        ? `\`\`\`ts\nconst value${index} = ${index};\n\`\`\`\n`
+        : `token-${index} `
+  ));
+  const expectedText = sourceChunks.join("");
+  const projectionTimes: number[] = [];
+  let sqliteWrites = 0;
+  let serializedProjectionBytes = 0;
+  const startedAt = performance.now();
+  const cpuStart = process.cpuUsage();
+  const rssStart = process.memoryUsage().rss;
+  const channel = new TurnStreamCoalescer({
+    scheduler: {
+      setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+      clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+    },
+    firstFlushMs: 24,
+    flushIntervalMs: intervalMs,
+    maxBufferedChars: 16_384,
+    onFlush: ({ delta }) => {
+      store.appendMessageContent(message.id, delta);
+      sqliteWrites += 1;
+      projectionTimes.push(performance.now());
+      serializedProjectionBytes += Buffer.byteLength(JSON.stringify({
+        type: "agent.text",
+        delta,
+      }));
+    },
+    onTimerError: (error) => {
+      throw error;
+    },
+  });
+
+  try {
+    for (const chunk of sourceChunks) {
+      channel.append(chunk);
+      await sleep(8);
+    }
+    channel.flush();
+    const completedAt = performance.now();
+    const cpu = process.cpuUsage(cpuStart);
+    const projected = store.message(message.id).content;
+    expect(projected).toBe(expectedText);
+    const visibleGaps = projectionTimes.slice(1).map(
+      (time, index) => time - projectionTimes[index]!,
+    );
+    const elapsedMs = completedAt - startedAt;
+    const walBytes = await stat(`${databasePath}-wal`)
+      .then(({ size }) => size)
+      .catch(() => 0);
+    const sample = Number(elapsedMs.toFixed(3));
+    return {
+      intervalMs,
+      medianMs: sample,
+      minimumMs: sample,
+      maximumMs: sample,
+      samples: [sample],
+      firstProjectionMs: Number(
+        ((projectionTimes[0] ?? completedAt) - startedAt).toFixed(3),
+      ),
+      medianVisibleGapMs: Number(percentile(visibleGaps, 0.5).toFixed(3)),
+      p95VisibleGapMs: Number(percentile(visibleGaps, 0.95).toFixed(3)),
+      visibleUpdatesPerSecond: Number(
+        (projectionTimes.length / (elapsedMs / 1_000)).toFixed(3),
+      ),
+      visibleUpdates: projectionTimes.length,
+      sqliteWrites,
+      walBytes,
+      serializedProjectionBytes,
+      runtimeCpuMs: Number(((cpu.user + cpu.system) / 1_000).toFixed(3)),
+      runtimeRssDeltaBytes: Math.max(0, process.memoryUsage().rss - rssStart),
+      sourceCharacters: expectedText.length,
+    };
+  } finally {
+    channel.dispose();
+    store.close();
+  }
 }
 
 async function measured(
@@ -705,6 +832,14 @@ describe("cross-platform performance benchmark", () => {
         });
       });
       const activeProviderStream = await activeProviderStreamMeasurement();
+      const streamingCadenceCandidates: StreamingCadenceMeasurement[] = [];
+      for (const intervalMs of [64, 80, 96] as const) {
+        streamingCadenceCandidates.push(await streamingCadenceMeasurement(
+          join(fixtureRoot, "runtime"),
+          workspace,
+          intervalMs,
+        ));
+      }
       const providerHarnessLifecycle = await providerHarnessLifecycleMeasurement(
         fixtureRoot,
       );
@@ -758,6 +893,7 @@ describe("cross-platform performance benchmark", () => {
           sqliteWarmOpen,
           processSpawn,
           activeProviderStream,
+          streamingCadenceCandidates,
           providerHarnessLifecycle,
           processTreeLifecycle,
           terminalBurst,
@@ -778,6 +914,12 @@ describe("cross-platform performance benchmark", () => {
       expect(sqliteWrites.medianMs).toBeGreaterThan(0);
       expect(processSpawn.medianMs).toBeGreaterThan(0);
       expect(terminalBurst.frames).toBeGreaterThan(0);
+      expect(streamingCadenceCandidates).toHaveLength(3);
+      for (const candidate of streamingCadenceCandidates) {
+        expect(candidate.firstProjectionMs).toBeLessThan(50);
+        expect(candidate.p95VisibleGapMs).toBeLessThan(125);
+        expect(candidate.sqliteWrites).toBe(candidate.visibleUpdates);
+      }
 
       if (enforce) {
         expect(workspaceList.medianMs).toBeLessThan(8_000);
@@ -788,6 +930,12 @@ describe("cross-platform performance benchmark", () => {
         expect(sqliteWrites.medianMs).toBeLessThan(15_000);
         expect(processSpawn.medianMs).toBeLessThan(5_000);
         expect(activeProviderStream.medianMs).toBeLessThan(5_000);
+        for (const candidate of streamingCadenceCandidates) {
+          expect(candidate.firstProjectionMs).toBeLessThan(75);
+          expect(candidate.p95VisibleGapMs).toBeLessThan(175);
+          expect(candidate.runtimeCpuMs).toBeLessThan(5_000);
+          expect(candidate.runtimeRssDeltaBytes).toBeLessThan(128 * 1024 * 1024);
+        }
         expect(providerHarnessLifecycle.medianMs).toBeLessThan(10_000);
         expect(processTreeLifecycle.medianMs).toBeLessThan(10_000);
         expect(processTreeLifecycle.confirmedStops).toBe(3);

@@ -1914,6 +1914,177 @@ describe("multi-spawn", () => {
       .toBe(false);
   });
 
+  it("rechecks every retained launch before reporting recovery complete", async () => {
+    const launchIds = [
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc",
+    ];
+    let rechecking = false;
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        return pendingLaunchesEvent(launchIds);
+      }
+      if (command.type !== "duo.status" && command.type !== "duo.cancel") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      const launchId = command.payload.launchId;
+      const ordinal = launchIds.indexOf(launchId) as 0 | 1;
+      expect(ordinal).toBeGreaterThanOrEqual(0);
+      const cleared = rechecking && ordinal === 0 && command.type === "duo.cancel";
+      const plannedPath = `/workspace/retained recheck ${ordinal + 1}`;
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId,
+          state: cleared ? "cancelled" : "recovery-required",
+          error: cleared ? null : `Recovery ${ordinal + 1} remains required.`,
+          sides: [
+            {
+              ordinal: 0,
+              conversationId: null,
+              turnId: null,
+              dispatchState: cleared ? "cancelled" : "pending",
+            },
+            {
+              ordinal: 1,
+              conversationId: null,
+              turnId: null,
+              dispatchState: cleared ? "cancelled" : "pending",
+            },
+          ],
+          recoveryGuidance: cleared ? [] : [{
+            kind: "git-worktree",
+            ordinal,
+            topology: "owned",
+            repositoryPath: "/workspace/repository",
+            plannedPath,
+            observedPath: plannedPath,
+            worktreeId: `worktree-recheck-${ordinal + 1}`,
+            generatedBranch: `inertia/recheck-${ordinal + 1}`,
+            expectedHead: `${ordinal + 1}`.repeat(40),
+            observedBranch: `inertia/recheck-${ordinal + 1}`,
+            observedHead: `${ordinal + 1}`.repeat(40),
+            actions: [{
+              label: "Remove retained linked worktree",
+              cwd: "/workspace/repository",
+              executable: "git",
+              args: ["worktree", "remove", "--", plannedPath],
+            }],
+          }],
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(5));
+    expect(hook.result.current.recoveryGuidance).toHaveLength(2);
+
+    rechecking = true;
+    await act(async () => hook.result.current.recheckRecovery());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(10));
+
+    expect(hook.result.current.recoveryStatus?.launchId).toBe(launchIds[1]);
+    expect(hook.result.current.recoveryGuidance.map(
+      ({ plannedPath }) => plannedPath,
+    )).toEqual(["/workspace/retained recheck 2"]);
+    expect(hook.result.current.error).toBe("Recovery 2 remains required.");
+  });
+
+  it("discards a late recovery recheck after the dialog is reopened", async () => {
+    const launchId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    let pendingCalls = 0;
+    let resolveStalePending!: (event: ServerEvent) => void;
+    const stalePending = new Promise<ServerEvent>((resolve) => {
+      resolveStalePending = resolve;
+    });
+    const run = vi.fn(async (
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "duo.pending") {
+        pendingCalls += 1;
+        if (pendingCalls === 1) return pendingLaunchesEvent([launchId]);
+        if (pendingCalls === 2) return stalePending;
+        return pendingLaunchesEvent();
+      }
+      if (command.type !== "duo.status" && command.type !== "duo.cancel") {
+        throw new Error(`Unexpected command: ${command.type}`);
+      }
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId,
+          state: "recovery-required",
+          error: "Stale recovery must not return.",
+          sides: [
+            { ordinal: 0, conversationId: null, turnId: null, dispatchState: "pending" },
+            { ordinal: 1, conversationId: null, turnId: null, dispatchState: "pending" },
+          ],
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(3));
+
+    let recheck!: Promise<void>;
+    act(() => {
+      recheck = hook.result.current.recheckRecovery();
+    });
+    await waitFor(() => expect(pendingCalls).toBe(2));
+
+    act(() => hook.result.current.closeDialog());
+    act(() => hook.result.current.openDialog());
+    await waitFor(() => expect(pendingCalls).toBe(3));
+    await waitFor(() => expect(hook.result.current.recoveryStatus).toBeNull());
+
+    resolveStalePending(pendingLaunchesEvent([launchId]));
+    await act(async () => recheck);
+
+    expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
+      "duo.pending",
+      "duo.status",
+      "duo.cancel",
+      "duo.pending",
+      "duo.pending",
+    ]);
+    expect(hook.result.current.recoveryStatus).toBeNull();
+    expect(hook.result.current.recoveryGuidance).toEqual([]);
+    expect(hook.result.current.error).toBeNull();
+    expect(hook.result.current.recheckingRecovery).toBe(false);
+  });
+
   it("continues reconciling later blockers when an earlier status is unavailable", async () => {
     const launchIds = [
       "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -2079,12 +2250,13 @@ describe("multi-spawn", () => {
 
     manualCleanupComplete = true;
     await act(async () => hook.result.current.recheckRecovery());
-    await waitFor(() => expect(run).toHaveBeenCalledTimes(5));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(6));
 
     expect(run.mock.calls.map(([, command]) => command.type)).toEqual([
       "duo.pending",
       "duo.status",
       "duo.cancel",
+      "duo.pending",
       "duo.status",
       "duo.cancel",
     ]);

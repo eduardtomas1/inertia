@@ -148,14 +148,23 @@ export function useMultiSpawn({
   const [recoveryGuidance, setRecoveryGuidance] = useState<
     DuoWorktreeRecoveryGuidance[]
   >([]);
-  const [recoveryStatus, setRecoveryStatus] =
+  const [recoveryStatus, setRecoveryStatusState] =
     useState<DuoStatusResult | null>(null);
   const [recheckingRecovery, setRecheckingRecovery] = useState(false);
+  const recoveryStatusRef = useRef<DuoStatusResult | null>(null);
+  const recoveryProjectIdsRef = useRef<string[]>([]);
   const submittingRef = useRef(false);
   const cancellingRef = useRef(false);
   const activeLaunchIdRef = useRef<string | null>(null);
   const cancelRequestedRef = useRef(false);
   const operationGenerationRef = useRef(0);
+
+  const setRecoveryStatus = useCallback((
+    status: DuoStatusResult | null,
+  ): void => {
+    recoveryStatusRef.current = status;
+    setRecoveryStatusState(status);
+  }, []);
 
   useEffect(() => () => {
     operationGenerationRef.current += 1;
@@ -249,6 +258,9 @@ export function useMultiSpawn({
     generation: number,
   ): Promise<"blocked" | "clear" | "stale"> => {
     const isCurrent = () => operationGenerationRef.current === generation;
+    if (isCurrent()) {
+      recoveryProjectIdsRef.current = [...new Set(projectIds)];
+    }
     try {
       const pending = await queryPendingLaunches(projectIds);
       if (!isCurrent()) return "stale";
@@ -266,7 +278,7 @@ export function useMultiSpawn({
         }
       }
       const retained = statuses.filter(launchRetainsRecoveryIdentity);
-      setRecoveryStatus(retained[0] ?? null);
+      setRecoveryStatus(retained[0] ?? statuses[0] ?? null);
       setRecoveryGuidance(retained.flatMap(
         ({ recoveryGuidance }) => recoveryGuidance ?? [],
       ));
@@ -305,7 +317,7 @@ export function useMultiSpawn({
       );
       return "blocked";
     }
-  }, [queryPendingLaunches, reconcilePendingLaunch]);
+  }, [queryPendingLaunches, reconcilePendingLaunch, setRecoveryStatus]);
 
   const openDialog = useCallback(() => {
     if (
@@ -318,9 +330,10 @@ export function useMultiSpawn({
     setError(null);
     setRecoveryGuidance([]);
     setRecoveryStatus(null);
+    setRecheckingRecovery(false);
     setOpen(true);
     void reconcileProjectLaunches([snapshot.activeProjectId], generation);
-  }, [reconcileProjectLaunches, snapshot?.activeProjectId]);
+  }, [reconcileProjectLaunches, setRecoveryStatus, snapshot?.activeProjectId]);
 
   const cancelActiveLaunch = useCallback(async (): Promise<void> => {
     if (cancellingRef.current) return;
@@ -376,7 +389,7 @@ export function useMultiSpawn({
         setCancelling(false);
       }
     }
-  }, [focusWorkspace, run, setActionError]);
+  }, [focusWorkspace, run, setActionError, setRecoveryStatus]);
 
   const closeDialog = useCallback(() => {
     if (cancellingRef.current) return;
@@ -388,8 +401,9 @@ export function useMultiSpawn({
     setError(null);
     setRecoveryGuidance([]);
     setRecoveryStatus(null);
+    setRecheckingRecovery(false);
     setOpen(false);
-  }, [cancelActiveLaunch]);
+  }, [cancelActiveLaunch, setRecoveryStatus]);
 
   const submit = useCallback(async (draft: MultiSpawnDraft): Promise<void> => {
     if (submittingRef.current || cancellingRef.current || !snapshot) return;
@@ -565,35 +579,41 @@ export function useMultiSpawn({
     reconcileProjectLaunches,
     queryLaunchStatus,
     setActionError,
+    setRecoveryStatus,
     settings,
     snapshot,
   ]);
 
   const recheckRecovery = useCallback(async (): Promise<void> => {
     if (!recoveryStatus || recheckingRecovery) return;
+    const generation = operationGenerationRef.current;
+    const launchId = recoveryStatus.launchId;
+    const projectIds = [...recoveryProjectIdsRef.current];
+    const isCurrent = () =>
+      operationGenerationRef.current === generation
+      && recoveryStatusRef.current?.launchId === launchId;
     setRecheckingRecovery(true);
     try {
-      const status = recoveryStatus.state === "recovery-required"
-          || recoveryStatus.state === "prepared"
-        ? await reconcilePendingLaunch(recoveryStatus.launchId, () => true)
-        : await queryLaunchStatus(recoveryStatus.launchId);
-      if (!status) return;
-      setRecoveryStatus(status);
-      setRecoveryGuidance(status.recoveryGuidance ?? []);
-      setError(launchStatusMessage(status));
-      if (!launchRetainsRecoveryIdentity(status)) {
-        clearPendingMultiSpawnLaunchId(window.localStorage);
+      if (projectIds.length === 0) {
+        throw new Error("The projects for this Duo launch are unavailable.");
       }
+      const reconciliation = await reconcileProjectLaunches(
+        projectIds,
+        generation,
+      );
+      if (!isCurrent() || reconciliation === "stale") return;
     } catch (caught) {
+      if (!isCurrent()) return;
       setError(
         `Recovery status could not be re-checked. ${errorMessage(caught)}`,
       );
     } finally {
-      setRecheckingRecovery(false);
+      if (operationGenerationRef.current === generation) {
+        setRecheckingRecovery(false);
+      }
     }
   }, [
-    queryLaunchStatus,
-    reconcilePendingLaunch,
+    reconcileProjectLaunches,
     recheckingRecovery,
     recoveryStatus,
   ]);

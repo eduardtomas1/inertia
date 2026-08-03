@@ -4,7 +4,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import clsx from "clsx";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { formatClockTime } from "../../lib/format";
 import {
   estimateTimelineItemRenderWeight,
@@ -28,20 +28,41 @@ export function CompatibilityTimeline({
   compatibility: ResponseTimelineCompatibility;
   props: ResponseTimelineProps;
 }): React.JSX.Element {
-  const recordCount = compatibility.inferredTurns.length
-    + compatibility.malformedTurns.length
-    + compatibility.messages.length
-    + compatibility.activities.length
-    + compatibility.reasonings.length
-    + compatibility.plans.length
-    + compatibility.checkpoints.length;
-  const deferContent = recordCount >= TIMELINE_VIRTUALIZATION_MIN_ROWS
-    || estimateTimelineItemRenderWeight({
-      kind: "compatibility",
-      id: "legacy-orphan-history",
-      compatibility,
-    }) >= TIMELINE_VIRTUALIZATION_MIN_WEIGHT;
-  const [expanded, setExpanded] = useState(!deferContent);
+  const deferContent = useMemo(() => {
+    const recordCount = compatibility.inferredTurns.length
+      + compatibility.malformedTurns.length
+      + compatibility.messages.length
+      + compatibility.activities.length
+      + compatibility.reasonings.length
+      + compatibility.plans.length
+      + compatibility.checkpoints.length;
+    return recordCount >= TIMELINE_VIRTUALIZATION_MIN_ROWS
+      || estimateTimelineItemRenderWeight({
+        kind: "compatibility",
+        id: "legacy-orphan-history",
+        compatibility,
+      }) >= TIMELINE_VIRTUALIZATION_MIN_WEIGHT;
+  }, [compatibility]);
+  return (
+    <CompatibilityDisclosure
+      key={`${props.conversationId}:${deferContent ? "deferred" : "ordinary"}`}
+      compatibility={compatibility}
+      initiallyExpanded={!deferContent}
+      props={props}
+    />
+  );
+}
+
+function CompatibilityDisclosure({
+  compatibility,
+  initiallyExpanded,
+  props,
+}: {
+  compatibility: ResponseTimelineCompatibility;
+  initiallyExpanded: boolean;
+  props: ResponseTimelineProps;
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   return (
     <section className="orphan-run-flow" aria-label="Recovered legacy and orphaned history" data-response-row-id="legacy-orphan-history">
       <details

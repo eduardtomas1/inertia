@@ -604,12 +604,20 @@ test("expires a browser grant while a real socket attempt is in flight", async (
       },
     });
     const { page } = browser;
+    const now = Date.parse("2026-08-03T12:00:00.000Z");
+    await page.clock.install({ time: now });
+    await page.clock.pauseAt(now);
     await seedBrowserProfile(page, {
       hostPublicKey: hostKeys.publicKey,
       relayUrl: `ws://127.0.0.1:${address.port}/remote`,
-      expiresAt: new Date(Date.now() + 1_000).toISOString(),
+      expiresAt: new Date(now + 1_000).toISOString(),
     });
-    await navigateRemoteBrowser(page, "grant-expiry");
+    const connected = once(silentRelay, "connection");
+    await navigateRemoteBrowser(page, "in-flight-grant-expiry");
+    await connected;
+
+    await page.clock.fastForward(1_000);
+
     await expect(page.getByText("This device grant expired. Pair it again."))
       .toBeVisible();
     await expect(page.getByRole("heading", { name: "Pair this browser" }))

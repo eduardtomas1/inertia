@@ -178,6 +178,86 @@ describe("CompatibilityTimeline", () => {
     expect(screen.queryByText(`${legacyMessage.content} 0`)).not.toBeInTheDocument();
   });
 
+  it("collapses immediately when recovered history grows from ordinary to expensive", () => {
+    const ordinaryCompatibility = {
+      inferredTurns: [],
+      malformedTurns: [],
+      messages: [legacyMessage],
+      activities: [],
+      reasonings: [],
+      plans: [],
+      checkpoints: [],
+    };
+    const expensiveCompatibility = {
+      ...ordinaryCompatibility,
+      messages: largeLegacyHistory,
+    };
+    const { container, rerender } = render(
+      <CompatibilityTimeline
+        compatibility={ordinaryCompatibility}
+        props={timelineProps(ordinaryCompatibility.messages)}
+      />,
+    );
+
+    expect(screen.getByText(legacyMessage.content)).toBeInTheDocument();
+
+    rerender(
+      <CompatibilityTimeline
+        compatibility={expensiveCompatibility}
+        props={timelineProps(expensiveCompatibility.messages)}
+      />,
+    );
+
+    expect(container.querySelector("details")).not.toHaveAttribute("open");
+    expect(screen.queryByText(`${legacyMessage.content} 0`))
+      .not.toBeInTheDocument();
+  });
+
+  it("preserves an explicit expansion while expensive history keeps growing", () => {
+    const expensiveCompatibility = {
+      inferredTurns: [],
+      malformedTurns: [],
+      messages: largeLegacyHistory,
+      activities: [],
+      reasonings: [],
+      plans: [],
+      checkpoints: [],
+    };
+    const { container, rerender } = render(
+      <CompatibilityTimeline
+        compatibility={expensiveCompatibility}
+        props={timelineProps(expensiveCompatibility.messages)}
+      />,
+    );
+    const details = container.querySelector("details");
+    expect(details).not.toBeNull();
+    details!.open = true;
+    fireEvent(details!, new Event("toggle"));
+    expect(screen.getByText(`${legacyMessage.content} 0`)).toBeInTheDocument();
+
+    const growingCompatibility = {
+      ...expensiveCompatibility,
+      messages: [
+        ...largeLegacyHistory,
+        {
+          ...legacyMessage,
+          id: "legacy-message-latest",
+          content: "Recovered while the disclosure is open.",
+        },
+      ],
+    };
+    rerender(
+      <CompatibilityTimeline
+        compatibility={growingCompatibility}
+        props={timelineProps(growingCompatibility.messages)}
+      />,
+    );
+
+    expect(container.querySelector("details")).toHaveAttribute("open");
+    expect(screen.getByText("Recovered while the disclosure is open."))
+      .toBeInTheDocument();
+  });
+
   it("does not mount a single expensive inferred turn by default", () => {
     const inferredTurn = inferredTurnWithLargeAnswer();
     const { container } = render(

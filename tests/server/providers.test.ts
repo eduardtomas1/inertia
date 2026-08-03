@@ -351,12 +351,12 @@ setInterval(() => {}, 1000);
     await waitFor("the discovery descendant PID to be recorded", () => {
       try {
         descendantPid = Number(readFileSync(childPidPath, "utf8"));
-        return Number.isSafeInteger(descendantPid);
+        return Number.isSafeInteger(descendantPid) && descendantPid > 0;
       } catch {
         return false;
       }
     });
-    expect(Number.isSafeInteger(descendantPid)).toBe(true);
+    expect(Number.isSafeInteger(descendantPid) && descendantPid > 0).toBe(true);
     if (process.platform === "win32") {
       // A stopped Windows PID can be recycled by another Vitest worker before
       // this assertion runs. The owned executable remains a stable identity:

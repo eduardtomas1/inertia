@@ -148,24 +148,22 @@ export class RemoteCompanionClient {
 
   async initialize(): Promise<SealedBrowserDeviceProfile | null> {
     const epoch = ++this.attemptEpoch;
-    const profile = await loadSealedDeviceProfile();
+    const loaded = await loadSealedDeviceProfile();
     if (!this.ownsAttempt(epoch)) return this.profile;
-    this.profile = profile;
-    if (this.profile && Date.parse(this.profile.expiresAt) > Date.now()) {
+    this.profile = loaded.profile;
+    if (loaded.status === "active" && !sealedProfileHasExpired(loaded.profile)) {
       void this.supervisor.start();
-    } else if (this.profile) {
-      await this.forgetExpiredProfile(epoch);
+    } else if (loaded.status === "active") {
+      await this.clearExpiredProfile();
+      if (this.ownsAttempt(epoch) && !this.profile) {
+        this.callbacks.status("This device grant expired. Pair it again.", false);
+      }
+    } else if (loaded.status === "expired") {
+      this.callbacks.status("This device grant expired. Pair it again.", false);
     } else {
       this.callbacks.status("Paste a short-lived invitation from the desktop.", false);
     }
     return this.profile;
-  }
-  private async forgetExpiredProfile(epoch: number): Promise<void> {
-    await this.clearExpiredProfile();
-    if (!this.ownsAttempt(epoch)) return;
-    if (!this.profile) {
-      this.callbacks.status("This device grant expired. Pair it again.", false);
-    }
   }
 
   currentProfile(): SealedBrowserDeviceProfile | null {

@@ -2243,12 +2243,13 @@ describe("multi-spawn", () => {
     }];
     let recoveryRequired = false;
     let manualCleanupComplete = false;
+    let pendingCleared = false;
     const run = vi.fn(async (
       _key: string,
       command: CommandWithoutId,
     ): Promise<ServerEvent> => {
       if (command.type === "duo.pending") {
-        return pendingLaunchesEvent([launchId]);
+        return pendingLaunchesEvent(pendingCleared ? [] : [launchId]);
       }
       if (command.type === "duo.status") {
         return {
@@ -2334,6 +2335,15 @@ describe("multi-spawn", () => {
     );
     expect(hook.result.current.recoveryGuidance).toEqual([]);
     expect(hook.result.current.recoveryStatus?.state).toBe("cancelled");
+
+    pendingCleared = true;
+    await act(async () => hook.result.current.recheckRecovery());
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(7));
+
+    expect(run.mock.calls.at(-1)?.[1].type).toBe("duo.pending");
+    expect(hook.result.current.error).toBeNull();
+    expect(hook.result.current.recoveryGuidance).toEqual([]);
+    expect(hook.result.current.recoveryStatus).toBeNull();
   });
 
   it("closes for authoritative reconciliation after ambiguous preparation", async () => {

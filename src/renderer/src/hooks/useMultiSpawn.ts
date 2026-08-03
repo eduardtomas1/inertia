@@ -318,6 +318,8 @@ export function useMultiSpawn({
         setError(retainedMessages[0]);
       } else if (statusMessages[0]) {
         setError(statusMessages[0]);
+      } else {
+        setError(null);
       }
       return retained.length > 0 ? "blocked" : "clear";
     } catch {

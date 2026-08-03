@@ -8,6 +8,7 @@ import {
 import * as deviceStore from "../remote/browser/src/device-store";
 import {
   REMOTE_INACTIVITY_EXPIRY_MS,
+  type SealedDeviceProfileLoadResult,
   type SealedBrowserDeviceProfile,
 } from "../remote/browser/src/device-store";
 import {
@@ -192,6 +193,40 @@ async function beginFakePairing(expiresAt: string): Promise<{
 }
 
 describe("Remote Companion browser connection ownership", () => {
+  it.each([
+    {
+      loaded: { status: "absent", profile: null },
+      expected: "Paste a short-lived invitation from the desktop.",
+    },
+    {
+      loaded: { status: "expired", profile: null },
+      expected: "This device grant expired. Pair it again.",
+    },
+  ] satisfies Array<{
+    loaded: SealedDeviceProfileLoadResult;
+    expected: string;
+  }>)("keeps a $loaded.status cold load offline and truthful", async ({
+    loaded,
+    expected,
+  }) => {
+    vi.stubGlobal("WebSocket", FakeBrowserSocket);
+    vi.spyOn(deviceStore, "loadSealedDeviceProfile")
+      .mockResolvedValueOnce(loaded);
+    const statuses: Array<[string, boolean]> = [];
+    const client = new RemoteCompanionClient({
+      status: (message, online) => statuses.push([message, online]),
+      pairingCode: vi.fn(),
+      shell: vi.fn(),
+      detail: vi.fn(),
+      promptResult: vi.fn(),
+    });
+
+    await expect(client.initialize()).resolves.toBeNull();
+
+    expect(statuses.at(-1)).toEqual([expected, false]);
+    expect(FakeBrowserSocket.instances).toHaveLength(0);
+  });
+
   it("coalesces overlapping connect requests into one owned attempt", async () => {
     vi.stubGlobal("WebSocket", FakeBrowserSocket);
     const deviceKeys = await generateNonExtractableDeviceKeys();

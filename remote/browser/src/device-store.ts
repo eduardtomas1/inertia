@@ -51,6 +51,11 @@ export interface SealedBrowserDeviceProfile {
   lastUsedAt: string;
 }
 
+export type SealedDeviceProfileLoadResult =
+  | { status: "active"; profile: SealedBrowserDeviceProfile }
+  | { status: "absent"; profile: null }
+  | { status: "expired"; profile: null };
+
 export function profileAuthorizationChanged(
   current: Pick<
     SealedBrowserDeviceProfile,
@@ -177,7 +182,7 @@ export function sealedProfileHasExpired(
 }
 
 export async function loadSealedDeviceProfile(): Promise<
-  SealedBrowserDeviceProfile | null
+  SealedDeviceProfileLoadResult
 > {
   const db = await database();
   try {
@@ -195,10 +200,10 @@ export async function loadSealedDeviceProfile(): Promise<
           );
         }
         await deleteRecords(db, [PROFILE_KEY]);
-        return sealed;
+        return { status: "active", profile: sealed };
       }
       await deleteRecords(db, [SEALED_PROFILE_KEY, PROFILE_KEY]);
-      return null;
+      return { status: "expired", profile: null };
     }
     if (sealedRecord !== undefined) {
       await deleteRecords(db, [SEALED_PROFILE_KEY, PROFILE_KEY]);
@@ -207,7 +212,7 @@ export async function loadSealedDeviceProfile(): Promise<
       );
     }
     const legacy = await readRecord(db, PROFILE_KEY);
-    if (legacy === undefined) return null;
+    if (legacy === undefined) return { status: "absent", profile: null };
     const parsed = browserDeviceProfileSchema.safeParse(legacy);
     if (!parsed.success) {
       await deleteRecords(db, [PROFILE_KEY, SEALED_PROFILE_KEY]);
@@ -224,7 +229,11 @@ export async function loadSealedDeviceProfile(): Promise<
 async function migrateLegacyProfile(
   db: IDBDatabase,
   legacy: BrowserDeviceProfile,
-): Promise<SealedBrowserDeviceProfile | null> {
+): Promise<SealedDeviceProfileLoadResult> {
+  if (Date.parse(legacy.expiresAt) <= Date.now()) {
+    await deleteRecords(db, [PROFILE_KEY, SEALED_PROFILE_KEY]);
+    return { status: "expired", profile: null };
+  }
   let adopted: Awaited<ReturnType<typeof adoptNonExtractableDeviceKeys>>;
   try {
     adopted = await adoptNonExtractableDeviceKeys(
@@ -256,7 +265,7 @@ async function migrateLegacyProfile(
     lastUsedAt: new Date().toISOString(),
   };
   await writeSealedProfile(db, sealed, true);
-  return sealedProfileHasExpired(sealed) ? null : sealed;
+  return { status: "active", profile: sealed };
 }
 
 function writeSealedProfile(

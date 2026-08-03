@@ -29,6 +29,7 @@ const reportPath = resolve(
 const CI_STREAM_FIRST_PAINT_CATASTROPHIC_MS = 500;
 const CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS = 500;
 const CI_STREAM_FINAL_PAINT_CATASTROPHIC_MS = 1_500;
+const CI_STREAM_LONG_TASK_CATASTROPHIC_MS = 2_000;
 
 const streamingAppServer = `
 const readline = require("node:readline");
@@ -250,7 +251,14 @@ async function processSample(electronApp: ElectronApplication) {
 }
 
 async function scrollSample(page: Page) {
-  return await page.locator(".response-timeline").evaluate(async (timeline) => {
+  const recoveredHistory = page.locator(".orphan-run-flow details");
+  const hasRecoveredHistory = await recoveredHistory.count() > 0;
+  if (hasRecoveredHistory) {
+    await recoveredHistory.locator("summary").click();
+    await expect(recoveredHistory).toHaveJSProperty("open", true);
+    await recoveredHistory.locator(".message").first().waitFor();
+  }
+  const result = await page.locator(".response-timeline").evaluate(async (timeline) => {
     const frameIntervals: number[] = [];
     let previous = performance.now();
     for (let index = 0; index < 120; index += 1) {
@@ -271,6 +279,12 @@ async function scrollSample(page: Page) {
       mountedElements: timeline.querySelectorAll("*").length,
     };
   });
+  if (hasRecoveredHistory) {
+    await recoveredHistory.locator("summary").click();
+    await expect(recoveredHistory).toHaveJSProperty("open", false);
+    await expect(recoveredHistory.locator(".message")).toHaveCount(0);
+  }
+  return result;
 }
 
 async function streamingResponsivenessSample(
@@ -278,6 +292,15 @@ async function streamingResponsivenessSample(
   page: Page,
   dataDirectory: string,
 ) {
+  // Long-history traversal is measured independently. Start this scenario at
+  // the live edge so its provider-delta metric is not contaminated by restored
+  // scroll state or another interaction performed by the benchmark.
+  await page.locator(".response-timeline").evaluate(async (timeline) => {
+    timeline.scrollTop = timeline.scrollHeight;
+    await new Promise<void>((resolveFrame) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()));
+    });
+  });
   const memoryBefore = await rendererMemorySample(
     electronApp,
     page,
@@ -674,12 +697,15 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       cold.page,
       "idle-baseline",
     );
-    const scroll = await scrollSample(cold.page);
     const streamingResponsiveness = await streamingResponsivenessSample(
       cold.electronApp,
       cold.page,
       dataDirectory,
     );
+    // Deliberately mounting thousands of recovered nodes and then unmounting
+    // them can schedule cleanup/GC work. Keep that workload after streaming so
+    // neither scenario measures the other's teardown cost.
+    const scroll = await scrollSample(cold.page);
 
     if (!await cold.page.locator(".workspace-panel").isVisible().catch(() => false)) {
       await cold.page.getByRole("button", {
@@ -899,7 +925,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.streamingResponsiveness.completionToFinalPaintMs)
       .toBeLessThan(CI_STREAM_FINAL_PAINT_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.longTaskTotalMs)
-      .toBeLessThan(2_000);
+      .toBeLessThan(CI_STREAM_LONG_TASK_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.droppedOrOverBudgetFrames)
       .toBeLessThan(report.scenarios.streamingResponsiveness.frames);
     expect(report.scenarios.streamingResponsiveness.memory.after.usedJsHeapBytes)

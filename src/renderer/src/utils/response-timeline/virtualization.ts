@@ -49,6 +49,10 @@ export function estimateTimelineItemRenderWeight(
   item: ResponseTimelineItem,
 ): number {
   if (item.kind === "compatibility") {
+    const inferredTurnWeight = item.compatibility.inferredTurns.reduce(
+      (total, turn) => total + estimateResponseTurnRenderWeight(turn),
+      0,
+    );
     const textChars = item.compatibility.messages.reduce(
       (total, message) => total + message.content.length,
       0,
@@ -57,17 +61,54 @@ export function estimateTimelineItemRenderWeight(
       (total, activity) => total + (activity.detail?.length ?? 0),
       0,
     );
+    const supportingTextChars = item.compatibility.reasonings.reduce(
+      (total, reasoning) => total + reasoning.content.length,
+      0,
+    ) + estimatePlanTextChars(item.compatibility.plans)
+      + item.compatibility.checkpoints.reduce(
+        (total, checkpoint) => total + checkpoint.label.length,
+        0,
+      )
+      + item.compatibility.malformedTurns.reduce(
+        (total, turn) => total + turn.id.length + turn.status.length,
+        0,
+      );
     return 1
+      + inferredTurnWeight
       + item.compatibility.messages.length / 8
       + item.compatibility.activities.length / 24
-      + textChars / 40_000
+      + (textChars + supportingTextChars) / 40_000
       + detailChars / 50_000;
   }
-  const turn = item.turn;
+  return estimateResponseTurnRenderWeight(item.turn);
+}
+
+function estimatePlanTextChars(plans: ResponseTurn["plans"]): number {
+  return plans.reduce(
+    (total, plan) => total
+      + (plan.explanation?.length ?? 0)
+      + plan.steps.reduce((stepTotal, step) => stepTotal + step.step.length, 0),
+    0,
+  );
+}
+
+function estimateResponseTurnRenderWeight(turn: ResponseTurn): number {
   const messageChars = turn.assistantMessages.reduce(
     (total, message) => total + message.content.length,
-    turn.userMessage.content.length,
-  );
+    turn.userMessage.content.length
+      + turn.followUpMessages.reduce(
+        (total, message) => total + message.content.length,
+        0,
+      )
+      + turn.systemMessages.reduce(
+        (total, message) => total + message.content.length,
+        0,
+      ),
+  ) + turn.reasonings.reduce(
+    (total, reasoning) => total + reasoning.content.length,
+    0,
+  ) + estimatePlanTextChars(turn.plans)
+    + (turn.checkpoint?.label.length ?? 0);
   const detailChars = turn.activities.reduce(
     (total, activity) => total + (activity.detail?.length ?? 0),
     0,

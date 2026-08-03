@@ -373,9 +373,17 @@ export function MultiSpawnDialog({
     const previous = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-    const frame = window.requestAnimationFrame(
-      () => promptRef.current?.focus(),
-    );
+    const frame = window.requestAnimationFrame(() => {
+      const dialog = dialogRef.current;
+      const active = document.activeElement;
+      if (
+        !dialog
+        || !(active instanceof HTMLElement)
+        || !dialog.contains(active)
+      ) {
+        promptRef.current?.focus();
+      }
+    });
     return () => {
       window.cancelAnimationFrame(frame);
       if (restoreFocusRef.current && previous?.isConnected) {

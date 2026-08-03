@@ -581,6 +581,48 @@ describe("multi-spawn", () => {
     trigger.remove();
   });
 
+  it("does not steal focus when a user reaches a field before delayed autofocus", () => {
+    const frames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(
+      window,
+      "requestAnimationFrame",
+    ).mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const cancelFrame = vi.spyOn(
+      window,
+      "cancelAnimationFrame",
+    ).mockImplementation(() => undefined);
+
+    try {
+      render(
+        <MultiSpawnDialog
+          open
+          snapshot={snapshot}
+          settings={settings}
+          submitting={false}
+          error={null}
+          onClose={vi.fn()}
+          onSubmit={vi.fn(async () => undefined)}
+          onOpenProviderSetup={vi.fn()}
+          onOpenBackendSetup={vi.fn()}
+        />,
+      );
+
+      const secondName = screen.getByLabelText("Chat 2 name");
+      secondName.focus();
+      act(() => {
+        for (const frame of frames.splice(0)) frame(performance.now());
+      });
+
+      expect(secondName).toHaveFocus();
+    } finally {
+      requestFrame.mockRestore();
+      cancelFrame.mockRestore();
+    }
+  });
+
   it.each(["Escape", "close button", "Cancel launch"] as const)(
     "routes %s through the same launch-cancellation callback",
     (route) => {

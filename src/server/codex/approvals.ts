@@ -11,7 +11,10 @@ import type {
 
 const MAX_PERMISSION_ROOTS = 12;
 const UNSAFE_APPROVAL_FORMATTING =
-  /[\u0085\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u;
+  /(?:\p{Cf}|\p{Zl}|\p{Zp})/u;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
+const CONTROL_CHARACTERS_EXCEPT_LINE_BREAKS =
+  /[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
 const APPROVAL_METHODS = new Set([
   "item/commandExecution/requestApproval",
   "item/fileChange/requestApproval",
@@ -39,15 +42,15 @@ interface PermissionProjection {
 function strictBoundedText(
   value: unknown,
   maxChars: number,
-  rejectControlCharacters = true,
+  allowLineBreaks = false,
 ): string | undefined {
   if (
     typeof value !== "string"
     || UNSAFE_APPROVAL_FORMATTING.test(value)
     || (
-      rejectControlCharacters
-        ? /[\u0000-\u001f\u007f]/u.test(value)
-        : value.includes("\0")
+      allowLineBreaks
+        ? CONTROL_CHARACTERS_EXCEPT_LINE_BREAKS.test(value)
+        : CONTROL_CHARACTERS.test(value)
     )
     || value.length > maxChars
   ) return undefined;
@@ -69,7 +72,7 @@ function legacyCommand(value: unknown): string | undefined {
     || value.length > 128
     || value.some((part) =>
       typeof part !== "string"
-      || /[\u0000-\u001f\u007f]/u.test(part)
+      || CONTROL_CHARACTERS.test(part)
       || UNSAFE_APPROVAL_FORMATTING.test(part)
       || part.length > 2_000)
   ) return undefined;
@@ -95,7 +98,7 @@ function legacyFileChangeSummary(value: unknown): string | undefined {
     if (
       !path
       || path.length > 4_096
-      || /[\u0000-\u001f\u007f]/u.test(path)
+      || CONTROL_CHARACTERS.test(path)
       || UNSAFE_APPROVAL_FORMATTING.test(path)
     ) return undefined;
     const change = objectValue(rawChange);
@@ -297,7 +300,7 @@ export function parseCodexApprovalRequest(method: string, params: JsonObject): P
   const requestId = randomUUID();
   const command = strictBoundedText(params.command, 4_000);
   const cwd = exactFilesystemPath(params.cwd);
-  const reason = strictBoundedText(params.reason, 1_000, false);
+  const reason = strictBoundedText(params.reason, 1_000, true);
   const providerThreadId = strictBoundedText(params.threadId, 512);
   const hasAdditionalPermissions = Object.prototype.hasOwnProperty.call(
     params,

@@ -284,10 +284,13 @@ describe("Codex protocol seams", () => {
     }
     for (const unsafeFormatting of [
       "\u0085",
+      "\u009b",
+      "\u00ad",
       "\u2028",
       "\u2029",
       "\u202e",
       "\u2066",
+      "\ufeff",
     ]) {
       expect(parseCodexApprovalRequest("execCommandApproval", {
         conversationId: "thread-legacy",

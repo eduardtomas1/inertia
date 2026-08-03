@@ -27,6 +27,7 @@ const reportPath = resolve(
 // comparisons, while CI blocks only catastrophic regressions large enough to
 // remain meaningful under transient runner contention.
 const CI_STREAM_FIRST_PAINT_CATASTROPHIC_MS = 500;
+const CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS = 500;
 const CI_STREAM_FINAL_PAINT_CATASTROPHIC_MS = 1_500;
 
 const streamingAppServer = `
@@ -890,7 +891,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.streamingResponsiveness.firstProviderDeltaToPaintMs)
       .toBeLessThan(CI_STREAM_FIRST_PAINT_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.p95VisibleGapMs)
-      .toBeLessThan(175);
+      .toBeLessThan(CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.visibleUpdates)
       .toBeGreaterThan(4);
     expect(report.scenarios.streamingResponsiveness.walBytes)

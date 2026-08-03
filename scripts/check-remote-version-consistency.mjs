@@ -7,6 +7,24 @@ async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
 }
 
+export function assertRemoteReadmeVersions(readme, versions) {
+  for (const [component, version] of [
+    ["browser", versions.browser],
+    ["relay", versions.relay],
+  ]) {
+    if (!readme.includes(`inertia-remote-${component}-${version}.tar.gz`)) {
+      throw new Error(
+        `The Remote Companion README uses an inconsistent ${component} artifact version.`,
+      );
+    }
+  }
+  if (!readme.includes(`/opt/inertia-remote-relay-${versions.relay}`)) {
+    throw new Error(
+      "The Remote Companion README uses an inconsistent relay installation path.",
+    );
+  }
+}
+
 export async function checkRemoteVersionConsistency(options = {}) {
   const versions = await readJson("remote/component-versions.json");
   for (const component of ["browser", "desktop", "relay"]) {
@@ -76,16 +94,7 @@ export async function checkRemoteVersionConsistency(options = {}) {
   }
 
   const readme = await readFile("remote/README.md", "utf8");
-  for (const [component, version] of [
-    ["browser", versions.browser],
-    ["relay", versions.relay],
-  ]) {
-    if (!readme.includes(`inertia-remote-${component}-${version}.tar.gz`)) {
-      throw new Error(
-        `The Remote Companion README uses an inconsistent ${component} artifact version.`,
-      );
-    }
-  }
+  assertRemoteReadmeVersions(readme, versions);
   return versions;
 }
 

@@ -251,7 +251,7 @@ export class CodexAppServerEvents {
     if (parsedApproval) {
       if (
         parsedApproval.providerThreadId
-        && parsedApproval.providerThreadId !== this.host.providerThreadId()
+        && !this.isOwnedProviderThread(parsedApproval.providerThreadId)
       ) {
         const message = "Codex sent an approval for a different provider thread.";
         this.host.writeMessage({ id, error: { code: -32602, message } });
@@ -338,6 +338,20 @@ export class CodexAppServerEvents {
         message: "Method not supported by this client.",
       },
     });
+  }
+
+  private isOwnedProviderThread(threadId: string): boolean {
+    const rootThreadId = this.host.providerThreadId();
+    if (!rootThreadId) return false;
+    let currentThreadId: string | undefined = threadId;
+    const visited = new Set<string>();
+    while (currentThreadId) {
+      if (currentThreadId === rootThreadId) return true;
+      if (visited.has(currentThreadId)) return false;
+      visited.add(currentThreadId);
+      currentThreadId = this.childParents.get(currentThreadId);
+    }
+    return false;
   }
 
   handleNotification(method: string, params: JsonObject): void {

@@ -976,12 +976,15 @@ describe("multi-spawn", () => {
     "retains recovery identity after dispatch: $expectedStored ($state)",
     async ({ state, expectedStored }) => {
       let launchId = "";
+      let dispatched = false;
       const run = vi.fn(async (
         _key: string,
         command: CommandWithoutId,
       ): Promise<ServerEvent> => {
         if (command.type === "duo.pending") {
-          return pendingLaunchesEvent();
+          return pendingLaunchesEvent(
+            state === "interrupted" && dispatched ? [launchId] : [],
+          );
         }
         if (command.type === "duo.prepare") {
           launchId = command.payload.launchId;
@@ -1000,6 +1003,7 @@ describe("multi-spawn", () => {
           };
         }
         if (command.type === "duo.dispatch") {
+          dispatched = true;
           expect(window.localStorage.getItem(
             MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
           )).toBe(command.payload.launchId);
@@ -1009,6 +1013,22 @@ describe("multi-spawn", () => {
             result: {
               kind: "duo.status",
               launchId: command.payload.launchId,
+              state,
+              error: `Deterministic ${state} result.`,
+              sides: [
+                { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "failed" },
+                { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "failed" },
+              ],
+            },
+          };
+        }
+        if (command.type === "duo.status") {
+          return {
+            type: "request.result",
+            requestId: crypto.randomUUID(),
+            result: {
+              kind: "duo.status",
+              launchId,
               state,
               error: `Deterministic ${state} result.`,
               sides: [
@@ -1038,6 +1058,21 @@ describe("multi-spawn", () => {
       expect(window.localStorage.getItem(
         MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
       )).toBe(expectedStored ? launchId : null);
+      if (state === "interrupted") {
+        await act(async () => hook.result.current.recheckRecovery());
+        expect(run.mock.calls.slice(-2).map(([, command]) => command.type))
+          .toEqual(["duo.pending", "duo.status"]);
+        expect(hook.result.current.recoveryStatus?.state).toBe("interrupted");
+        expect(window.localStorage.getItem(
+          MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+        )).toBeNull();
+
+        act(() => hook.result.current.closeDialog());
+        act(() => hook.result.current.openDialog());
+        await waitFor(() => {
+          expect(hook.result.current.recoveryStatus?.state).toBe("interrupted");
+        });
+      }
     },
   );
 

@@ -168,7 +168,8 @@ export class PairedLaunchRepository {
       SELECT launch.id
       FROM paired_launches AS launch
       WHERE launch.status IN (
-        'preparing', 'prepared', 'dispatching', 'recovery-required'
+        'preparing', 'prepared', 'dispatching', 'interrupted',
+        'recovery-required'
       )
         AND EXISTS (
           SELECT 1

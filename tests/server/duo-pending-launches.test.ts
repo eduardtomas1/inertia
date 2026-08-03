@@ -72,6 +72,7 @@ describe("pending Duo launch discovery", () => {
         second: "00000000-0000-4000-8000-000000000003",
         third: "00000000-0000-4000-8000-000000000004",
         deleted: "00000000-0000-4000-8000-000000000005",
+        interrupted: "00000000-0000-4000-8000-000000000006",
       };
       createPending(
         fixture.store,
@@ -113,12 +114,27 @@ describe("pending Duo launch discovery", () => {
         "failed",
         "Terminal launch before project deletion.",
       );
+      createPending(
+        fixture.store,
+        launchIds.interrupted,
+        [fixture.projectId, fixture.projectId],
+        "2026-08-02T10:05:00.000Z",
+      );
+      fixture.store.failPairedLaunch(
+        launchIds.interrupted,
+        "interrupted",
+        "Dispatch acknowledgement was interrupted.",
+      );
       fixture.store.removeProject(deleted.id);
       fixture.store.updateProject(second.id, { name: "Renamed second" });
 
       expect(fixture.store.pendingPairedLaunchIds([fixture.projectId], 16))
         .toEqual({
-          launchIds: [launchIds.cross, launchIds.first],
+          launchIds: [
+            launchIds.interrupted,
+            launchIds.cross,
+            launchIds.first,
+          ],
           hasMore: false,
         });
       expect(fixture.store.pendingPairedLaunchIds([second.id], 16)).toEqual({
@@ -129,7 +145,12 @@ describe("pending Duo launch discovery", () => {
         fixture.projectId,
         second.id,
       ], 16)).toEqual({
-        launchIds: [launchIds.second, launchIds.cross, launchIds.first],
+        launchIds: [
+          launchIds.interrupted,
+          launchIds.second,
+          launchIds.cross,
+          launchIds.first,
+        ],
         hasMore: false,
       });
       expect(fixture.store.pendingPairedLaunchIds([third.id], 16)).toEqual({
@@ -152,7 +173,12 @@ describe("pending Duo launch discovery", () => {
         fixture.projectId,
         second.id,
       ], 16)).toEqual({
-        launchIds: [launchIds.second, launchIds.cross, launchIds.first],
+        launchIds: [
+          launchIds.interrupted,
+          launchIds.second,
+          launchIds.cross,
+          launchIds.first,
+        ],
         hasMore: false,
       });
     } finally {

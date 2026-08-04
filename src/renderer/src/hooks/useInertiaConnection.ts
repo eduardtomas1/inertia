@@ -67,6 +67,7 @@ export function useInertiaConnection(): InertiaConnection {
     let attempt = 0;
     let forceSnapshot = false;
     let connectInFlight = false;
+    let immediateReconnectPending = false;
 
     const scheduleConnect = (delay: number): void => {
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
@@ -74,6 +75,14 @@ export function useInertiaConnection(): InertiaConnection {
         reconnectTimer = undefined;
         void connect();
       }, delay);
+    };
+
+    const requestImmediateConnect = (): void => {
+      if (connectInFlight) {
+        immediateReconnectPending = true;
+        return;
+      }
+      scheduleConnect(0);
     };
 
     const connect = async () => {
@@ -225,12 +234,16 @@ export function useInertiaConnection(): InertiaConnection {
         scheduleConnect(delay);
       } finally {
         connectInFlight = false;
+        if (!disposed && immediateReconnectPending) {
+          immediateReconnectPending = false;
+          scheduleConnect(0);
+        }
       }
     };
 
     const stopRuntimeReady = window.inertia?.onRuntimeReady?.(() => {
       attempt = 0;
-      scheduleConnect(0);
+      requestImmediateConnect();
     });
     void connect();
 

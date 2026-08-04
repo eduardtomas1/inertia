@@ -52,6 +52,9 @@ export class TurnStreamProjection {
       scheduler: this.options.scheduler,
       onProjectionFlush: (flush) => this.broadcast(active(), kind, flush),
       onPersistenceFlush: (flush) => this.persist(active(), kind, flush),
+      onFlushStarted: () => {
+        this.options.hooks.testOnlyStreamingTrace?.mark("stream-flush-started");
+      },
       onTimerError: (error) => {
         const current = active();
         if (current.settled) return;
@@ -73,6 +76,7 @@ export class TurnStreamProjection {
     if (!accepted) return;
     active.assistantText += accepted;
     active.assistantSegmentText += accepted;
+    this.options.hooks.testOnlyStreamingTrace?.mark("delta-accepted-by-channel");
     active.assistantStream.append(accepted);
   }
 
@@ -108,6 +112,7 @@ export class TurnStreamProjection {
     );
     if (!accepted) return;
     active.reasoningText += accepted;
+    this.options.hooks.testOnlyStreamingTrace?.mark("delta-accepted-by-channel");
     active.reasoningStream.append(accepted);
   }
 
@@ -185,6 +190,7 @@ export class TurnStreamProjection {
     kind: "assistant" | "reasoning",
     flush: StreamDeltaFlush,
   ): void {
+    this.options.hooks.testOnlyStreamingTrace?.mark("sqlite-append-started");
     let recordId: string;
     if (kind === "assistant") {
       if (active.assistantMessageId) {
@@ -231,6 +237,7 @@ export class TurnStreamProjection {
       }
       recordId = active.reasoningId;
     }
+    this.options.hooks.testOnlyStreamingTrace?.mark("sqlite-append-completed");
 
     try {
       this.options.hooks.onStreamingPersisted?.({
@@ -251,6 +258,7 @@ export class TurnStreamProjection {
     // A terminal correction is projected by the authoritative snapshot.
     // Treating its complete value as an append-only delta would duplicate text.
     if (flush.replacement) return;
+    this.options.hooks.testOnlyStreamingTrace?.mark("projection-event-created");
     this.options.hooks.broadcast({
       type: kind === "assistant" ? "agent.text" : "agent.reasoning",
       conversationId: active.conversation.id,

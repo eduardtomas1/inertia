@@ -49,8 +49,9 @@ import {
 } from "./project-identity-refresh";
 import { TurnGitArtifactManager } from "./turn-git-artifacts";
 import {
-  sendRuntimeEvent as send,
+  sendRuntimeEvent,
 } from "./runtime-protocol";
+import { createTestStreamingTrace } from "./runtime/test-streaming-trace";
 import {
   initialProviderSnapshots,
   providerSnapshot,
@@ -199,12 +200,30 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const dataDirectory = resolve(options.dataDirectory);
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
   const databasePath = join(dataDirectory, "inertia.sqlite");
+  let turns: TurnController;
+  let closed = false;
+  let databaseRecoveryImportActive = false;
+  const streamingTrace = createTestStreamingTrace(dataDirectory);
+  const send = (
+    socket: WebSocket,
+    event: Parameters<typeof sendRuntimeEvent>[1],
+  ): void => {
+    const isStreamingEvent = event.type === "runtime.event"
+      && event.event.type === "agent.text";
+    if (isStreamingEvent) streamingTrace.mark("runtime-event-serialized");
+    sendRuntimeEvent(socket, event);
+    if (isStreamingEvent) streamingTrace.mark("runtime-websocket-send-accepted");
+  };
   let onDatabaseBackupCreated = (): void => undefined;
   const store = new RuntimeStore(
     databasePath,
     options.defaultWorkspacePath,
     {
       recoverInterruptedRuns: false,
+      canStartDatabaseBackup: () =>
+        !closed
+        && !databaseRecoveryImportActive
+        && (turns?.activeConversationIds().length ?? 0) === 0,
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
     },
   );
@@ -312,7 +331,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       )
     : null;
   const cachedProviderMetadata = Object.fromEntries(PROVIDER_IDS.map((providerId) => [providerId, providers.cachedMetadata(providerId)]));
-  let turns: TurnController;
   let providerInfo = initialProviderSnapshots(enableProviders, cachedProviderMetadata);
   let providerMaintenance: ProviderMaintenanceController;
   const runtimeSync = new RuntimeSyncHub<WebSocket>(send);
@@ -331,8 +349,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let workspaceRuns: WorkspaceRunController<WebSocket>;
   const token = randomBytes(32).toString("base64url");
   const websocketPath = `/runtime/${token}`;
-  let closed = false;
-  let databaseRecoveryImportActive = false;
   let activeRuntimeCommands = 0;
   const runtimeCommandDrainWaiters = new Set<() => void>();
   let artifactReconciliation: Promise<void> | null = null;
@@ -613,10 +629,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           // The durable turn is already settled. Backup work stays off the
           // settlement path and the manager deduplicates it with quiet/hourly
           // triggers.
-          void store.createInitialBackup().catch(() => undefined);
+          void store.createInitialBackup({ quietGraceMs: 1_000 }).catch(() => undefined);
         }
         return testOnlyOnTurnSettled?.(turn);
       },
+      testOnlyStreamingTrace: streamingTrace,
     },
   );
   const duoLaunches = new DuoLaunchCoordinator(

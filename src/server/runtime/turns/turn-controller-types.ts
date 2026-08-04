@@ -29,6 +29,7 @@ import type { HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "
 import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
 import type { DeltaTimerScheduler } from "./turn-stream-coalescer";
 import type { TurnStreamChannel } from "./turn-stream-channel";
+import type { StreamingTrace } from "../test-streaming-trace";
 
 export interface TurnTimerScheduler extends DeltaTimerScheduler {}
 
@@ -130,6 +131,8 @@ export interface TurnControllerHooks {
   refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;
   releaseTurnAttachments?(input: TurnAttachmentReleaseHookInput): void | Promise<void>;
   onTurnSettled?(turn: AgentTurn): void | Promise<void>;
+  /** Benchmark-only stage attribution; absent in ordinary runtime instances. */
+  testOnlyStreamingTrace?: StreamingTrace;
 }
 
 export interface QueueTurnRequest {

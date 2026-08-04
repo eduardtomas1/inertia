@@ -8,9 +8,15 @@ transactionally safe, while a sudden host power loss can still lose the newest
 OS-buffered commits. Recovery is provided by validated rotating backups rather
 than by adding a full filesystem sync to every streamed update.
 
-At runtime, Inertia creates an online backup every hour. Clean shutdown cancels
-unfinished backup work instead of starting a database-sized operation inside
-the process-wide shutdown deadline. `better-sqlite3`'s online backup API
+At runtime, Inertia creates an online backup every hour. The first backup is
+eligible after 30 seconds or the first successfully settled authoritative turn,
+but eligibility is queued until the runtime is quiet: no active turn, recovery
+import, recovery replacement, critical settlement, or other backup is in
+flight. A small grace period after the last active turn prevents the backup
+from landing on the interaction path. Timer, first-turn, hourly, and manual
+triggers are deduplicated. Clean shutdown cancels unfinished backup work
+instead of starting a database-sized operation inside the process-wide
+shutdown deadline. `better-sqlite3`'s online backup API
 includes committed WAL data without racing a file copy. Backups are written
 beside the primary database:
 
@@ -23,6 +29,8 @@ beside the primary database:
   larger than the byte budget. Backups from a newer schema are protected from
   downgrade pruning and are never treated as corruption.
 
+Validation failures remove partial files, leave `lastValidatedAt` unchanged,
+and retry with bounded exponential backoff for a finite five-retry budget.
 Interrupted `.partial` backup and restore files are removed on the next startup.
 The data, backup, recovery, and corruption directories are owner-only (`0700`)
 and their artifacts are owner-readable/writable (`0600`) on POSIX systems.

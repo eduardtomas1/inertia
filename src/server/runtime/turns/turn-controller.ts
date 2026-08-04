@@ -762,6 +762,9 @@ export class TurnController {
     const active = this.activeByConversation.get(event.conversationId);
     if (!active || !this.accepts(active, event)) return false;
     try {
+      if (event.type === "text") {
+        this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
+      }
       this.providerEvents.project(active, event);
       return true;
     } catch (error) {
@@ -797,6 +800,9 @@ export class TurnController {
 
   private handleProviderResult(active: ActiveTurn, result: ProviderRunResult): void {
     if (active.settled) return;
+    if (result.status === "completed") {
+      this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");
+    }
     if (result.sessionId) {
       active.sessionAfter = result.sessionId;
       this.store.updateConversation(active.conversation.id, {

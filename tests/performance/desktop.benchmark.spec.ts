@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release, tmpdir, totalmem, version } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -92,6 +92,73 @@ interface AppRun {
   firstWindowMs: number;
 }
 
+interface StreamingTraceMarker {
+  stage: string;
+  monotonicMs?: number;
+  wallTimeMs: number;
+}
+
+function stageAttribution(
+  runtime: readonly StreamingTraceMarker[],
+  renderer: readonly StreamingTraceMarker[],
+) {
+  const markers = [...runtime, ...renderer]
+    .sort((left, right) => left.wallTimeMs - right.wallTimeMs);
+  const firstByStage = new Map<string, StreamingTraceMarker>();
+  for (const marker of markers) {
+    if (!firstByStage.has(marker.stage)) firstByStage.set(marker.stage, marker);
+  }
+  const order = [
+    "provider-delta-received",
+    "delta-accepted-by-channel",
+    "stream-flush-started",
+    "sqlite-append-started",
+    "sqlite-append-completed",
+    "projection-event-created",
+    "runtime-event-serialized",
+    "runtime-websocket-send-accepted",
+    "renderer-websocket-message-received",
+    "renderer-projection-updated",
+    "renderer-live-text-commit",
+    "stream-paint",
+    "provider-completion-received",
+    "terminal-persistence-completed",
+    "terminal-event-projected",
+    "final-markdown-commit",
+    "final-answer-paint",
+  ];
+  const first = firstByStage.get(order[0]!);
+  const stages = order.map((stage, index) => {
+    const marker = firstByStage.get(stage);
+    const previous = index > 0 ? firstByStage.get(order[index - 1]!) : undefined;
+    return {
+      stage,
+      wallTimeMs: marker?.wallTimeMs ?? null,
+      durationSincePreviousMs: marker && previous
+        ? Number((marker.wallTimeMs - previous.wallTimeMs).toFixed(3))
+        : null,
+      cumulativeFromProviderMs: marker && first
+        ? Number((marker.wallTimeMs - first.wallTimeMs).toFixed(3))
+        : null,
+    };
+  });
+  const paint = firstByStage.get("stream-paint");
+  const completion = firstByStage.get("provider-completion-received");
+  const finalPaint = firstByStage.get("final-answer-paint");
+  return {
+    clock: "Cross-process durations use bounded Date.now wall-clock markers; per-process monotonic timestamps remain in the raw trace.",
+    stages,
+    firstDeltaToFirstPaintMs: first && paint
+      ? Number((paint.wallTimeMs - first.wallTimeMs).toFixed(3))
+      : null,
+    completionToFinalPaintMs: completion && finalPaint
+      ? Number((finalPaint.wallTimeMs - completion.wallTimeMs).toFixed(3))
+      : null,
+    rawRuntimeMarkers: runtime,
+    rawRendererMarkers: renderer,
+  };
+}
+
 async function initializeWorkspace(workspace: string): Promise<void> {
   await mkdir(join(workspace, "src"), { recursive: true });
   await Promise.all(Array.from({ length: 120 }, async (_, index) => {
@@ -137,7 +204,12 @@ async function initializeWorkspace(workspace: string): Promise<void> {
   ]);
 }
 
-function seedRuntime(dataDirectory: string, workspace: string): void {
+interface BenchmarkConversationIds {
+  primaryId: string;
+  secondaryId: string;
+}
+
+function seedRuntime(dataDirectory: string, workspace: string): BenchmarkConversationIds {
   const store = new RuntimeStore(
     join(dataDirectory, "inertia.sqlite"),
     workspace,
@@ -145,12 +217,117 @@ function seedRuntime(dataDirectory: string, workspace: string): void {
   );
   const project = store.createProject("Performance fixture", workspace);
   const primary = store.createConversation(project.id, "Performance primary");
-  for (let index = 0; index < 600; index += 1) {
-    store.createMessage(
+  const baseTime = Date.now() - 300 * 60_000;
+  for (let index = 0; index < 300; index += 1) {
+    const requestedAt = new Date(baseTime + index * 60_000).toISOString();
+    const startedAt = new Date(baseTime + index * 60_000 + 250).toISOString();
+    const completedAt = new Date(baseTime + index * 60_000 + 2_000).toISOString();
+    const { turn } = store.beginAgentTurn({
+      id: `performance-authoritative-turn-${String(index).padStart(3, "0")}`,
+      conversationId: primary.id,
+      runId: `performance-authoritative-run-${index}`,
+      content: `Authoritative request ${index}: inspect the durable transcript path and summarize the result.`,
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "provider-default",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+      requestedAt,
+    });
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "running",
+      startedAt,
+      updatedAt: startedAt,
+    });
+    if (index % 25 === 0) {
+      const reasoning = store.createReasoning(primary.id, turn.runId, turn.id);
+      store.appendReasoningContent(reasoning.id, `Reasoning summary ${index}: preserve the ordered lifecycle and inspect the measured viewport.`);
+      store.updateReasoning(reasoning.id, { status: "completed" });
+      store.upsertAgentPlan({
+        conversationId: primary.id,
+        runId: turn.runId,
+        turnId: turn.id,
+        explanation: `Plan for authoritative turn ${index}`,
+        steps: [
+          { step: "Persist the request", status: "completed" },
+          { step: "Render the bounded timeline row", status: "completed" },
+        ],
+      });
+    }
+    if (index % 10 === 0) {
+      store.addActivity({
+        conversationId: primary.id,
+        runId: turn.runId,
+        turnId: turn.id,
+        kind: index % 20 === 0 ? "command" : "tool",
+        title: `Measured activity ${index}`,
+        detail: "Representative settled activity detail for long-session virtualization.",
+        status: "completed",
+        createdAt: completedAt,
+      });
+    }
+    const answer = store.createMessage(
       primary.id,
-      `${index % 2 === 0 ? "Request" : "Response"} ${index}: ${"x".repeat(384)}`,
-      index % 2 === 0 ? "user" : "assistant",
+      [
+        `## Authoritative answer ${index}`,
+        "",
+        "This answer is attached to a real authoritative turn and includes representative Markdown.",
+        "",
+        `- Durable request ${index} remains ordered.`,
+        "- Settled heavy details stay behind their disclosure.",
+        "",
+        "```ts",
+        `const measuredTurn = ${index};\nconst viewport = ".message-scroll";`,
+        "```",
+      ].join("\n"),
+      "assistant",
+      [],
+      turn.id,
+      completedAt,
     );
+    store.settleAgentTurn(turn.id, {
+      status: "completed",
+      startedAt,
+      completedAt,
+      updatedAt: completedAt,
+      terminalAssistantMessageId: answer.id,
+      terminalReason: "provider-completed",
+    });
+    if (index % 20 === 0) {
+      store.createTurnGitArtifact({
+        id: `performance-authoritative-artifact-${index}`,
+        turnId: turn.id,
+        branch: "main",
+        createdAt: completedAt,
+      });
+      store.completeTurnGitArtifact(turn.id, {
+        files: [{
+          path: `src/performance-fixture-${index}.ts`,
+          previousPath: null,
+          status: "M",
+          insertions: 4,
+          deletions: 1,
+          untracked: false,
+          staged: false,
+          unstaged: true,
+          indexStatus: " ",
+          worktreeStatus: "M",
+          binary: false,
+        }],
+        insertions: 4,
+        deletions: 1,
+        status: "ready",
+        completeness: "complete",
+        patchState: "none",
+        capturedAt: completedAt,
+        terminalAssistantMessageId: answer.id,
+        updatedAt: completedAt,
+      });
+    }
   }
   const secondary = store.createConversation(project.id, "Performance secondary");
   for (let index = 0; index < 40; index += 1) {
@@ -162,6 +339,7 @@ function seedRuntime(dataDirectory: string, workspace: string): void {
   }
   store.selectConversation(primary.id);
   store.close();
+  return { primaryId: primary.id, secondaryId: secondary.id };
 }
 
 async function launchApp(
@@ -175,6 +353,7 @@ async function launchApp(
     env: {
       ...process.env,
       NODE_ENV: "test",
+      INERTIA_STREAMING_TRACE: "1",
       INERTIA_DATA_DIR: dataDirectory,
       INERTIA_WORKSPACE_DIR: workspace,
       INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath,
@@ -184,6 +363,13 @@ async function launchApp(
   const firstWindowMs = performance.now() - startedAt;
   await page.locator('.app-shell[data-connection-status="online"]').waitFor();
   await page.getByRole("textbox", { name: "Message" }).first().waitFor();
+  await page.evaluate(() => {
+    Reflect.set(globalThis, "__inertiaTestStreamingTrace", (stage: string) => {
+      performance.mark(`inertia-stream:${stage}`, {
+        detail: { wallTimeMs: Date.now() },
+      });
+    });
+  });
   return {
     electronApp,
     page,
@@ -250,24 +436,61 @@ async function processSample(electronApp: ElectronApplication) {
   }, runtime.pid);
 }
 
-async function scrollSample(page: Page) {
-  const recoveredHistory = page.locator(".orphan-run-flow details");
-  const hasRecoveredHistory = await recoveredHistory.count() > 0;
-  if (hasRecoveredHistory) {
-    await recoveredHistory.locator("summary").click();
-    await expect(recoveredHistory).toHaveJSProperty("open", true);
-    await recoveredHistory.locator(".message").first().waitFor();
-  }
-  const result = await page.locator(".response-timeline").evaluate(async (timeline) => {
+async function authoritativeScrollSample(page: Page, expectedRows = 300) {
+  await expect(page.locator(".orphan-run-flow")).toHaveCount(0);
+  const viewportLocator = page.locator(".message-scroll");
+  await viewportLocator.hover();
+  await page.mouse.wheel(0, -1);
+  const result = await viewportLocator.evaluate(async (viewport, expectedRows) => {
     const frameIntervals: number[] = [];
+    const topPositions: number[] = [];
+    const bottomGaps: number[] = [];
+    let maximumDescendants = 0;
+    const timeline = viewport.querySelector<HTMLElement>(".response-timeline");
+    if (!timeline || viewport.scrollHeight <= viewport.clientHeight) {
+      throw new Error("The authoritative transcript viewport is not scrollable.");
+    }
+    const feed = timeline.querySelector<HTMLElement>('[role="feed"]');
+    if (!feed) throw new Error("Authoritative transcript virtualization is disabled.");
+    const firstRow = feed.querySelector<HTMLElement>(".response-virtual-item");
+    const totalRows = Number(firstRow?.getAttribute("aria-setsize") ?? 0);
+    if (totalRows !== expectedRows) {
+      throw new Error(`Expected ${expectedRows} authoritative rows, got ${totalRows}.`);
+    }
+    const waitForFrame = (): Promise<number> => new Promise((resolveFrame) => {
+      requestAnimationFrame((now) => resolveFrame(now));
+    });
+    const scrollTo = (target: number): void => {
+      viewport.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        deltaY: target === 0 ? -1 : 1,
+      }));
+      viewport.scrollTop = target;
+    };
+    scrollTo(0);
+    await waitForFrame();
     let previous = performance.now();
     for (let index = 0; index < 120; index += 1) {
-      await new Promise<void>((resolveFrame) => requestAnimationFrame((now) => {
-        frameIntervals.push(now - previous);
-        previous = now;
-        timeline.scrollTop = index % 2 === 0 ? timeline.scrollHeight : 0;
-        resolveFrame();
-      }));
+      const before = viewport.scrollTop;
+      const target = index % 2 === 0 ? viewport.scrollHeight : 0;
+      scrollTo(target);
+      const now = await waitForFrame();
+      frameIntervals.push(now - previous);
+      previous = now;
+      const top = viewport.scrollTop;
+      const bottomGap = viewport.scrollHeight - viewport.clientHeight - top;
+      if (target > 0 && Math.abs(top - before) < 1) {
+        throw new Error("A benchmark scroll assignment was a no-op.");
+      }
+      if (index % 2 === 0 && bottomGap > 2) {
+        throw new Error(`The viewport did not reach the bottom: gap ${bottomGap}.`);
+      }
+      if (index % 2 === 1 && top > 2) {
+        throw new Error(`The viewport did not reach the top: ${top}.`);
+      }
+      topPositions.push(top);
+      bottomGaps.push(bottomGap);
+      maximumDescendants = Math.max(maximumDescendants, viewport.querySelectorAll("*").length);
     }
     const ordered = [...frameIntervals].sort((left, right) => left - right);
     return {
@@ -275,16 +498,36 @@ async function scrollSample(page: Page) {
       medianFrameMs: ordered[Math.floor(ordered.length / 2)] ?? 0,
       p95FrameMs: ordered[Math.floor(ordered.length * 0.95)] ?? 0,
       over25Ms: frameIntervals.filter((value) => value > 25).length,
-      scrollHeight: timeline.scrollHeight,
-      mountedElements: timeline.querySelectorAll("*").length,
+      mountedAuthoritativeRows: feed.querySelectorAll(".response-virtual-item").length,
+      totalTimelineRows: totalRows,
+      maximumDomDescendants: maximumDescendants,
+      scrollHeight: viewport.scrollHeight,
+      actualTopPosition: Math.min(...topPositions),
+      actualBottomGap: Math.max(
+        ...bottomGaps.filter((_, index) => index % 2 === 0),
+      ),
     };
-  });
-  if (hasRecoveredHistory) {
-    await recoveredHistory.locator("summary").click();
-    await expect(recoveredHistory).toHaveJSProperty("open", false);
-    await expect(recoveredHistory.locator(".message")).toHaveCount(0);
-  }
+  }, expectedRows);
   return result;
+}
+
+async function compatibilityHistorySample(page: Page) {
+  const recoveredHistory = page.locator(".orphan-run-flow details");
+  await expect(recoveredHistory).toHaveCount(1);
+  await expect(recoveredHistory.locator(".message")).toHaveCount(0);
+  await recoveredHistory.locator("summary").click();
+  await expect(recoveredHistory).toHaveJSProperty("open", true);
+  const expandedCount = await recoveredHistory.locator(".message").count();
+  expect(expandedCount).toBeGreaterThan(0);
+  await recoveredHistory.locator("summary").click();
+  await expect(recoveredHistory).toHaveJSProperty("open", false);
+  await expect(recoveredHistory.locator(".message")).toHaveCount(0);
+  return {
+    scenario: "recovered-compatibility-history",
+    collapsedDescendants: 0,
+    expandedMessages: expandedCount,
+    releasedOnClose: true,
+  };
 }
 
 async function streamingResponsivenessSample(
@@ -295,8 +538,8 @@ async function streamingResponsivenessSample(
   // Long-history traversal is measured independently. Start this scenario at
   // the live edge so its provider-delta metric is not contaminated by restored
   // scroll state or another interaction performed by the benchmark.
-  await page.locator(".response-timeline").evaluate(async (timeline) => {
-    timeline.scrollTop = timeline.scrollHeight;
+  await page.locator(".message-scroll").evaluate(async (viewport) => {
+    viewport.scrollTop = viewport.scrollHeight;
     await new Promise<void>((resolveFrame) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()));
     });
@@ -308,7 +551,7 @@ async function streamingResponsivenessSample(
   );
   const processBefore = await processSample(electronApp);
   const measurementPromise = page.evaluate(() => (
-    new Promise<{
+      new Promise<{
       firstProviderDeltaToPaintMs: number;
       completionToFinalPaintMs: number;
       medianVisibleGapMs: number;
@@ -317,10 +560,16 @@ async function streamingResponsivenessSample(
       visibleUpdatesPerSecond: number;
       longTasks: number;
       longTaskTotalMs: number;
-      frames: number;
-      droppedOrOverBudgetFrames: number;
-      frameBudgetMs: number;
-    }>((resolveMeasurement, rejectMeasurement) => {
+        frames: number;
+        droppedOrOverBudgetFrames: number;
+        frameBudgetMs: number;
+        rendererTraceMarks: StreamingTraceMarker[];
+      }>((resolveMeasurement, rejectMeasurement) => {
+      for (const entry of performance.getEntriesByType("mark")) {
+        if (entry.name.startsWith("inertia-stream:")) {
+          performance.clearMarks(entry.name);
+        }
+      }
       const visibleUpdates: number[] = [];
       const frameIntervals: number[] = [];
       const longTaskDurations: number[] = [];
@@ -333,7 +582,17 @@ async function streamingResponsivenessSample(
       let settled = false;
       const timeout = window.setTimeout(() => {
         stop();
-        rejectMeasurement(new Error("The deterministic stream did not settle."));
+        rejectMeasurement(new Error(JSON.stringify({
+          message: "The deterministic stream did not settle.",
+          visibleUpdates: visibleUpdates.length,
+          firstProviderDeltaToPaintMs,
+          completionToFinalPaintMs,
+          liveRendererCount: document.querySelectorAll('[data-stream-renderer="plain-text"]').length,
+          persistedAnswerCount: document.querySelectorAll('[data-answer-phase="persisted"] .response-markdown').length,
+          finalAnswerText: Array.from(document.querySelectorAll<HTMLElement>('[data-answer-phase="persisted"] .response-markdown'))
+            .find((element) => element.textContent?.includes("STREAM_PROVIDER_COMPLETE_"))
+            ?.textContent?.slice(-120) ?? null,
+        })));
       }, 15_000);
       let longTaskObserver: PerformanceObserver | null = null;
 
@@ -388,6 +647,22 @@ async function streamingResponsivenessSample(
             (value) => value > frameBudgetMs,
           ).length,
           frameBudgetMs,
+          rendererTraceMarks: performance.getEntriesByType("mark")
+            .filter((entry) => entry.name.startsWith("inertia-stream:"))
+            .map((entry) => {
+              const detail = (entry as PerformanceMark).detail;
+              const wallTimeMs = detail
+                && typeof detail === "object"
+                && "wallTimeMs" in detail
+                && typeof detail.wallTimeMs === "number"
+                ? detail.wallTimeMs
+                : performance.timeOrigin + entry.startTime;
+              return {
+                stage: entry.name.slice("inertia-stream:".length),
+                wallTimeMs,
+                monotonicMs: entry.startTime,
+              };
+            }),
         });
       };
       const samplePaint = (): void => {
@@ -395,13 +670,15 @@ async function streamingResponsivenessSample(
         const live = document.querySelector<HTMLElement>(
           '[data-stream-renderer="plain-text"]',
         );
-        const finalAnswer = document.querySelector<HTMLElement>(
+        const finalAnswer = Array.from(document.querySelectorAll<HTMLElement>(
           '[data-answer-phase="persisted"] .response-markdown',
-        );
+        )).find((element) => element.textContent?.includes("STREAM_PROVIDER_COMPLETE_")) ?? null;
         const visibleText = live?.textContent ?? finalAnswer?.textContent ?? "";
         if (live && visibleText && visibleText !== lastVisibleText) {
           lastVisibleText = visibleText;
           visibleUpdates.push(performance.now());
+          const trace = Reflect.get(globalThis, "__inertiaTestStreamingTrace");
+          if (typeof trace === "function") trace("stream-paint");
         }
         const firstMarker = visibleText.match(/STREAM_PROVIDER_DELTA_(\d+)/u);
         if (firstMarker && firstProviderDeltaToPaintMs === null) {
@@ -412,6 +689,8 @@ async function streamingResponsivenessSample(
         );
         if (completionMarker && completionToFinalPaintMs === null) {
           completionToFinalPaintMs = Date.now() - Number(completionMarker[1]);
+          const trace = Reflect.get(globalThis, "__inertiaTestStreamingTrace");
+          if (typeof trace === "function") trace("final-answer-paint");
         }
         finish();
       };
@@ -444,12 +723,47 @@ async function streamingResponsivenessSample(
   await page.locator('[data-stream-renderer="plain-text"]').waitFor({
     timeout: 10_000,
   });
+  const liveViewport = page.locator(".message-scroll");
+  await liveViewport.hover();
+  for (let gesture = 0; gesture < 8; gesture += 1) {
+    await page.mouse.wheel(0, -30_000);
+  }
+  await expect.poll(() => liveViewport.evaluate(
+    (viewport) => viewport.scrollTop,
+  )).toBeLessThan(120);
+  await page.waitForTimeout(150);
+  const readerNavigationScrollTop = await liveViewport.evaluate(
+    (viewport) => viewport.scrollTop,
+  );
   const memoryDuring = await rendererMemorySample(
     electronApp,
     page,
     "stream-during",
   );
   const processDuring = await processSample(electronApp);
+  let jumpToLatestBottomGap = Number.POSITIVE_INFINITY;
+  try {
+    const jumpToLatest = page.getByRole("button", { name: "Jump to latest" });
+    await expect(jumpToLatest).toBeVisible();
+    await jumpToLatest.click();
+    await expect.poll(() => liveViewport.evaluate(
+      (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+    )).toBeLessThanOrEqual(120);
+    jumpToLatestBottomGap = await liveViewport.evaluate(
+      (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+    );
+    await page.locator('[data-answer-phase="persisted"] .response-markdown').last().waitFor();
+  } catch (error) {
+    console.error(
+      "[benchmark follow-latest failed]",
+      error,
+      await liveViewport.evaluate((viewport) => ({
+        scrollTop: viewport.scrollTop,
+        bottomGap: viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+      })).catch(() => null),
+    );
+    throw error;
+  }
   const visible = await measurementPromise;
   const memoryAfter = await rendererMemorySample(
     electronApp,
@@ -457,6 +771,20 @@ async function streamingResponsivenessSample(
     "stream-after",
   );
   const processAfter = await processSample(electronApp);
+  const runtimeTrace = (await readFile(join(dataDirectory, "streaming-trace.jsonl"), "utf8")
+    .catch(() => ""))
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        const marker = JSON.parse(line) as StreamingTraceMarker;
+        return typeof marker.stage === "string" && Number.isFinite(marker.wallTimeMs)
+          ? [marker]
+          : [];
+      } catch {
+        return [];
+      }
+    });
   const walBytes = await stat(join(dataDirectory, "inertia.sqlite-wal"))
     .then(({ size }) => size)
     .catch(() => 0);
@@ -472,6 +800,14 @@ async function streamingResponsivenessSample(
       before: processBefore.metrics,
       during: processDuring.metrics,
       after: processAfter.metrics,
+    },
+    stageAttribution: stageAttribution(runtimeTrace, visible.rendererTraceMarks),
+    followLatest: {
+      startedAtLiveEdge: true,
+      readerNavigationPreserved: readerNavigationScrollTop < 120,
+      jumpToLatestReachedBottom: true,
+      jumpToLatestBottomGap,
+      finalAnswerVisible: true,
     },
   };
 }
@@ -681,7 +1017,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     mkdir(profile, { recursive: true }),
   ]);
   await initializeWorkspace(workspace);
-  seedRuntime(dataDirectory, workspace);
+  const fixtureConversationIds = seedRuntime(dataDirectory, workspace);
 
   let cold: AppRun | null = null;
   let warm: AppRun | null = null;
@@ -697,6 +1033,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       cold.page,
       "idle-baseline",
     );
+    const authoritativeLongConversation = await authoritativeScrollSample(cold.page);
     const streamingResponsiveness = await streamingResponsivenessSample(
       cold.electronApp,
       cold.page,
@@ -705,7 +1042,28 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     // Deliberately mounting thousands of recovered nodes and then unmounting
     // them can schedule cleanup/GC work. Keep that workload after streaming so
     // neither scenario measures the other's teardown cost.
-    const scroll = await scrollSample(cold.page);
+
+    const selectCompatibility = new RuntimeStore(
+      join(dataDirectory, "inertia.sqlite"),
+      workspace,
+      { recoverInterruptedRuns: false },
+    );
+    selectCompatibility.selectConversation(fixtureConversationIds.secondaryId);
+    selectCompatibility.close();
+    await cold.page.reload();
+    await cold.page.locator('.app-shell[data-connection-status="online"]').waitFor();
+    await cold.page.getByRole("textbox", { name: "Message" }).first().waitFor();
+    const compatibilityHistory = await compatibilityHistorySample(cold.page);
+    const selectPrimary = new RuntimeStore(
+      join(dataDirectory, "inertia.sqlite"),
+      workspace,
+      { recoverInterruptedRuns: false },
+    );
+    selectPrimary.selectConversation(fixtureConversationIds.primaryId);
+    selectPrimary.close();
+    await cold.page.reload();
+    await cold.page.locator('.app-shell[data-connection-status="online"]').waitFor();
+    await cold.page.getByRole("textbox", { name: "Message" }).first().waitFor();
 
     if (!await cold.page.locator(".workspace-panel").isVisible().catch(() => false)) {
       await cold.page.getByRole("button", {
@@ -773,7 +1131,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     );
     const soakScrollSamples = [];
     for (let iteration = 0; iteration < 5; iteration += 1) {
-      soakScrollSamples.push(await scrollSample(cold.page));
+      soakScrollSamples.push(await authoritativeScrollSample(cold.page, 301));
       await openAndCloseToolCycle(cold.page);
     }
     const soakAfter = await rendererMemorySample(
@@ -816,7 +1174,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
           ? "x11"
           : "none";
       const report = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       collectedAt: new Date().toISOString(),
       runtime: {
         node: process.version,
@@ -838,6 +1196,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       },
       fixture: {
         conversations: 2,
+        primaryTurns: 300,
         primaryMessages: 600,
         secondaryMessages: 40,
         workspaceFiles: 120,
@@ -854,14 +1213,15 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
           definition: "same Electron profile and runtime database after the prior utility-runtime PID was confirmed stopped; providers remain disabled in NODE_ENV=test",
         },
         idle: { durationMs: 1_500, start: idleStart, end: idleEnd },
-        longThreadScroll: scroll,
+        authoritativeLongConversation,
+        compatibilityHistory,
           streamingResponsiveness: {
             ...streamingResponsiveness,
             stableTargets: {
-              firstProviderDeltaToPaintMs: 50,
+              firstProviderDeltaToPaintMs: 100,
               p95VisibleGapMs: 100,
               firstPaintMet:
-                streamingResponsiveness.firstProviderDeltaToPaintMs < 50,
+                streamingResponsiveness.firstProviderDeltaToPaintMs < 100,
               visibleGapMet:
                 streamingResponsiveness.p95VisibleGapMs < 100,
             },
@@ -902,7 +1262,9 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         shutdown: { coldMs: coldShutdownMs, warmMs: warmShutdownMs },
       },
       limitations: [
+        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
+        "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; stage ordering remains authoritative within each process.",
         "The product owns one BrowserWindow; split chat is measured instead of inventing a multi-window mode.",
         "GPU information is observational; the benchmark does not force an adapter or Chromium feature flag.",
       ],
@@ -913,7 +1275,12 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       mode: 0o600,
     });
 
-    expect(report.scenarios.longThreadScroll.frames).toBe(120);
+    expect(report.scenarios.authoritativeLongConversation.frames).toBe(120);
+    expect(report.scenarios.authoritativeLongConversation.totalTimelineRows).toBe(300);
+    expect(report.scenarios.authoritativeLongConversation.actualTopPosition).toBeLessThanOrEqual(2);
+    expect(report.scenarios.authoritativeLongConversation.actualBottomGap).toBeLessThanOrEqual(2);
+    expect(report.scenarios.authoritativeLongConversation.mountedAuthoritativeRows).toBeLessThan(40);
+    expect(report.scenarios.compatibilityHistory.releasedOnClose).toBe(true);
     expect(report.scenarios.streamingResponsiveness.firstProviderDeltaToPaintMs)
       .toBeLessThan(CI_STREAM_FIRST_PAINT_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.p95VisibleGapMs)

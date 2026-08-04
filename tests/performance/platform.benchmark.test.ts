@@ -68,6 +68,7 @@ interface Measurement {
 }
 
 interface StreamingCadenceMeasurement extends Measurement {
+  firstFlushMs: 12 | 16 | 24;
   intervalMs: number;
   firstProjectionMs: number;
   medianVisibleGapMs: number;
@@ -99,8 +100,9 @@ async function streamingCadenceMeasurement(
   root: string,
   workspace: string,
   intervalMs: 64 | 80 | 96,
+  firstFlushMs: 12 | 16 | 24 = 24,
 ): Promise<StreamingCadenceMeasurement> {
-  const databasePath = join(root, `stream-cadence-${intervalMs}.sqlite`);
+  const databasePath = join(root, `stream-cadence-${firstFlushMs}-${intervalMs}.sqlite`);
   const store = new RuntimeStore(databasePath, workspace, {
     recoverInterruptedRuns: false,
   });
@@ -129,7 +131,7 @@ async function streamingCadenceMeasurement(
       setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
       clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
     },
-    firstFlushMs: 24,
+    firstFlushMs,
     flushIntervalMs: intervalMs,
     maxBufferedChars: 16_384,
     onFlush: ({ delta }) => {
@@ -165,6 +167,7 @@ async function streamingCadenceMeasurement(
       .catch(() => 0);
     const sample = Number(elapsedMs.toFixed(3));
     return {
+      firstFlushMs,
       intervalMs,
       medianMs: sample,
       minimumMs: sample,
@@ -834,12 +837,15 @@ describe("cross-platform performance benchmark", () => {
       });
       const activeProviderStream = await activeProviderStreamMeasurement();
       const streamingCadenceCandidates: StreamingCadenceMeasurement[] = [];
-      for (const intervalMs of [64, 80, 96] as const) {
-        streamingCadenceCandidates.push(await streamingCadenceMeasurement(
-          join(fixtureRoot, "runtime"),
-          workspace,
-          intervalMs,
-        ));
+      for (const firstFlushMs of [12, 16, 24] as const) {
+        for (const intervalMs of [64, 80, 96] as const) {
+          streamingCadenceCandidates.push(await streamingCadenceMeasurement(
+            join(fixtureRoot, "runtime"),
+            workspace,
+            intervalMs,
+            firstFlushMs,
+          ));
+        }
       }
       const providerHarnessLifecycle = await providerHarnessLifecycleMeasurement(
         fixtureRoot,
@@ -915,17 +921,20 @@ describe("cross-platform performance benchmark", () => {
       expect(sqliteWrites.medianMs).toBeGreaterThan(0);
       expect(processSpawn.medianMs).toBeGreaterThan(0);
       expect(terminalBurst.frames).toBeGreaterThan(0);
-      expect(streamingCadenceCandidates).toHaveLength(3);
+      expect(streamingCadenceCandidates).toHaveLength(9);
       for (const candidate of streamingCadenceCandidates) {
         expect(candidate.firstProjectionMs).toBeLessThan(50);
         expect(candidate.p95VisibleGapMs).toBeGreaterThan(0);
         expect(candidate.sqliteWrites).toBe(candidate.visibleUpdates);
       }
       const selectedStreamingCadence = streamingCadenceCandidates.find(
-        ({ intervalMs }) => intervalMs === STREAM_PROJECTION_FLUSH_INTERVAL_MS,
+        ({ intervalMs, firstFlushMs }) =>
+          intervalMs === STREAM_PROJECTION_FLUSH_INTERVAL_MS
+          && firstFlushMs === 24,
       );
       expect(selectedStreamingCadence).toBeDefined();
       expect(selectedStreamingCadence!.p95VisibleGapMs).toBeLessThan(100);
+      expect(selectedStreamingCadence!.firstFlushMs).toBe(24);
 
       if (enforce) {
         expect(workspaceList.medianMs).toBeLessThan(8_000);

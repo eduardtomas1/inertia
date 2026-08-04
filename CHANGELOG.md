@@ -4,6 +4,29 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.24 — 2026-08-04
+
+### Recovery waits for a genuinely quiet moment
+
+- Initial, first-settled-turn, hourly, and validation-retry backups now share one scheduler that deduplicates pending work and waits until turns, critical settlement, recovery operations, and other backups are quiet.
+- Every completed, failed, or cancelled turn renews the complete interaction grace period. Validation failures use a separate bounded exponential backoff, so an ordinary eligibility retry cannot accidentally shorten either deadline.
+- Explicit manual backups still start immediately after joining any in-flight operation, successful manual work satisfies racing automatic requests, and shutdown cancels pending timers and unfinished backup work without starting new database-sized work.
+- Recovery coverage now exercises blocked triggers, trigger races, rotation, finite retry exhaustion, shutdown cancellation, consecutive settlement, and the precedence between interaction grace and validation backoff.
+
+### Long transcripts stay measurable without stealing focus
+
+- Follow-latest converges through bounded virtual-row and Git-artifact layout corrections, reaches the real settled bottom, and yields immediately when wheel, touch, pointer, or keyboard input shows that the reader moved into history.
+- A late content or resize callback can no longer reclaim the viewport after intentional navigation on slower Windows runners. **Jump to latest**, a newly accepted turn, and a conversation change remain explicit ways to resume following.
+- The desktop benchmark now uses an authoritative 300-turn conversation plus a separate recovered-history stress case, measures the complete provider-to-paint path over repeated samples, and retains raw stage attribution without counting hidden paints produced by the old auto-follow race.
+- Hosted performance gates preserve reader navigation, final-answer visibility, real bottom reachability, mounted-row bounds, streaming latency and cadence, long-task and frame evidence, WAL growth, workspace release, repeated cycles, and long-session soak behavior across all three operating systems.
+
+### Provider startup and runtime recovery are less surprising
+
+- `CODEX_HOME=~/…` is expanded before shell-free Codex discovery and launch on macOS, Linux, and Windows, while other-user and variable syntax remains literal instead of being interpreted by a shell.
+- A runtime-ready signal that arrives during a failed renderer connection attempt now invalidates that attempt and reconnects immediately rather than waiting for exponential backoff.
+- Turn Git-artifact finalization and the desktop benchmark share the same explicit timeout contract, keeping product behavior and release evidence aligned.
+- Architecture and lint checks, four TypeScript projects, 2,424 unit and integration tests, 53 Electron scenarios, repeated transcript anchoring, portable provider contracts, production audit, desktop benchmarks, native packaging, fuse verification, and package smoke are green on Linux, macOS, and Windows.
+
 ## 0.0.23 — 2026-08-03
 
 ### Supervision and recovery stay truthful

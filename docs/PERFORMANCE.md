@@ -193,7 +193,7 @@ working-set retention. Working-set growth alone is not treated as a JavaScript
 leak or a deterministic macOS gate; if live objects are released while native
 Chromium memory remains high, the report classifies that as native retention.
 
-### Final V0.0.23 stabilization sample
+### Final V0.0.24 stabilization sample
 
 The final local sample used Node 22.23.2 on the same Apple M5 Pro/macOS arm64
 host. Five deterministic streams produced these distributions in milliseconds:

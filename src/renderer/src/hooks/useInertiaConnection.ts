@@ -22,6 +22,7 @@ import {
 import { applyConversationShellEvent } from "../utils/runtimeSnapshotProjection";
 import { runtimeCommandPolicy } from "../utils/runtimeCommandPolicy";
 import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
+import { markTestStreamingStage } from "../utils/testStreamingTrace";
 
 export type ConnectionStatus = "connecting" | "online" | "offline";
 
@@ -116,6 +117,12 @@ export function useInertiaConnection(): InertiaConnection {
           deliverDecodedServerEvent(
             message.data,
             (receivedEvent) => {
+              if (
+                receivedEvent.type === "runtime.event"
+                && receivedEvent.event.type === "agent.text"
+              ) {
+                markTestStreamingStage("renderer-websocket-message-received");
+              }
               let event = receivedEvent;
               const requireAuthoritativeRefresh = (): void => {
                 forceSnapshot = true;

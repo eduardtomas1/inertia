@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
   FileText,
   Image as ImageIcon,
@@ -13,6 +13,7 @@ import {
 } from "@shared/contracts";
 import { formatClockTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
+import { markTestStreamingStage } from "../../utils/testStreamingTrace";
 import {
   collapsedUserRequestPreview,
   shouldCollapseUserRequest,
@@ -292,6 +293,14 @@ export function FinalAnswerDocument({
     liveContent,
     retainedLiveContent.current,
   );
+  useLayoutEffect(() => {
+    if (
+      presentation?.phase === "persisted"
+      && presentation.content.includes("STREAM_PROVIDER_COMPLETE_")
+    ) {
+      markTestStreamingStage("final-markdown-commit");
+    }
+  }, [presentation?.content, presentation?.phase]);
   if (!presentation) return null;
   const isStreaming = presentation.phase === "streaming";
 

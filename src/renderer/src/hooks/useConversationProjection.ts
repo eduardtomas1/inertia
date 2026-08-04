@@ -22,6 +22,7 @@ import {
 } from "../utils/conversationDetail";
 import type { ConnectionStatus } from "./useInertiaConnection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import { markTestStreamingStage } from "../utils/testStreamingTrace";
 
 const EMPTY_REASONINGS: AgentReasoning[] = [];
 const EMPTY_CHECKPOINTS: CheckpointSummary[] = [];
@@ -500,6 +501,7 @@ export function useConversationProjection({
     if (event.type === "agent.text") {
       setStreamingText((current) =>
         `${current}${event.text}`.slice(-500_000));
+      markTestStreamingStage("renderer-projection-updated");
     }
     if (event.type === "agent.reasoning") {
       setStreamingReasoning((current) =>

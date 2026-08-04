@@ -25,10 +25,12 @@ framing, and a real node-pty lifecycle. It writes
 `benchmark:desktop` builds Inertia and launches the real Electron application
 under `NODE_ENV=test`, which deliberately disables provider discovery. It is a
 provider-disabled test-mode baseline for a fresh-profile launch, a reused-profile
-launch, 1.5 seconds of idle CPU/RSS, a 600-message scroll, file-tree interaction,
-terminal creation, split-chat activation, forced-GC post-close reclamation,
-eight repeated Files/Terminal/split open-close cycles, a 600-frame long-session
-soak, shutdown, display scale, GPU feature observations, and per-process metrics
+launch, 1.5 seconds of idle CPU/RSS, an authoritative 300-turn/600-message
+transcript, a separate recovered compatibility-history stress case, file-tree
+interaction, terminal creation, split-chat activation, forced-GC post-close
+reclamation, eight repeated Files/Terminal/split open-close cycles, a 600-frame
+long-session soak, shutdown, display scale, GPU feature observations, and
+per-process metrics
 for the main, renderer, supervised utility runtime, GPU, and other Electron
 utility processes. It writes
 `performance-results/desktop-<platform>-<architecture>.json`.
@@ -37,16 +39,22 @@ live JavaScript heap and operating-system working set. Treat peak working set as
 a high-water observation, not proof of retained live work; use the post-close,
 repeated-cycle, and soak deltas to decide whether product optimization is due.
 The deterministic streaming scenario measures the full provider-to-paint path,
-visible update gaps, long tasks, frames, WAL growth, and memory. Its stable-host
-targets are under 50 ms to first paint and under 100 ms at p95 between visible
-updates; the enforced cross-platform ceiling is intentionally looser so noisy
-hosted runners catch catastrophic regressions without pretending to be a lab.
-The platform report separately compares the 64, 80, and 96 ms persistence and
-projection cadences with exact write, byte, CPU, memory, and ordering evidence.
+stage-by-stage attribution, visible update gaps, long tasks, frames, WAL growth,
+and memory. Its required stable-host targets are under 100 ms to first paint and
+under 100 ms at p95 between visible updates; under 50 ms remains aspirational.
+The enforced cross-platform ceiling is intentionally looser so noisy hosted
+runners catch catastrophic regressions without pretending to be a lab.
+The platform report separately compares first-flush candidates of 12, 16, and
+24 ms across the 64, 80, and 96 ms sustained persistence/projection cadences
+with exact write, byte, CPU, memory, and ordering evidence. The selected
+baseline remains 24 ms first flush and 64 ms sustained cadence because that is
+the current evidence-backed configuration.
 
 `npm run benchmark:platform:smoke` adds deliberately generous catastrophic
-budgets. Hosted CI is too noisy for tight latency gates, so the smoke gate also
-checks structural properties such as bounded terminal frames. CI runs both
+budgets to every exploratory cadence. Only the shipped 24/64 cadence also has
+the tighter hosted first-projection and visible-gap ceilings. Hosted CI is too
+noisy for lab-grade latency gates, so the smoke gate also checks structural
+properties such as bounded terminal frames. CI runs both
 harnesses on Windows x64, Linux x64 under X11/Xvfb, and macOS arm64 and retains
 the JSON reports for 14 days.
 
@@ -93,8 +101,23 @@ application produced alongside the AppImage, not AppImage mount time.
   uncontrolled.
 - Desktop warm start: the same provider-disabled profile and database only
   after the prior utility-runtime PID is confirmed gone.
-- Long-thread scroll: 120 animation frames alternating between the ends of a
-  600-message timeline; the report includes median, p95, and frames over 25 ms.
+- Authoritative long conversation: 300 turns created through
+  `beginAgentTurn`, valid running/settled lifecycle transitions, turn-owned
+  user/assistant messages, representative Markdown/code, plans, reasoning,
+  activities, and Git artifact summaries. The report asserts no compatibility
+  disclosure, virtualization, 300 total timeline rows, bounded mounted rows,
+  real `.message-scroll` scrolling, changed scroll positions, top/bottom
+  reachability, DOM descendants, and 120 post-animation-frame samples.
+- Recovered compatibility history: a separate legacy/orphan fixture starts
+  collapsed, mounts content only when opened, and releases it on close. It is
+  not used as ordinary long-conversation scrolling evidence.
+- Follow-latest streaming: starts at the live edge, checks the real
+  `.message-scroll` viewport, simulates reader navigation away from the bottom,
+  verifies streaming does not force-follow history, then checks Jump to latest
+  and final-answer visibility.
+- Long-session soak: five authoritative 120-frame scroll passes (600 real
+  viewport frames) interleaved with tool cycles, with post-soak JS heap,
+  renderer working set, and mounted-row samples.
 - Split workload: Inertia's supported two-chat split view. Inertia intentionally
   owns one primary `BrowserWindow`; the benchmark does not invent a multi-window
   architecture.
@@ -133,11 +156,15 @@ Search, Git scan, SQLite, and raw process-spawn controls did not receive product
 changes in this pass and remained within ordinary run-to-run noise. The desktop
 harness was introduced with this change, so its provider-disabled test-mode run
 is observational and is not presented as a general provider-enabled baseline or
-a before/after optimization claim. That run recorded:
+a before/after optimization claim. The earlier V0.0.23 report also recorded
+the following historical observations, but its 600-message fixture inserted
+standalone messages and scrolled `.response-timeline`; those messages rendered
+as recovered compatibility history and the assignment was a no-op. That result
+is retained only as a baseline defect, not as normal transcript evidence:
 
 - fresh-profile runtime interactivity in 733.5 ms and reused-profile
   interactivity in 497.8 ms;
-- 600-message scroll p95 of 9.7 ms with no frames over 25 ms;
+- invalid compatibility-history scroll p95 of 9.7 ms with no frames over 25 ms;
 - terminal creation in 26.0 ms and split-chat activation in 188.4 ms;
 - shutdown with confirmed utility-runtime exit in 134.2 ms (workload run) and
   237.2 ms (warm relaunch).
@@ -145,8 +172,11 @@ a before/after optimization claim. That run recorded:
 The same run separated Browser/main, Tab/renderer, utility runtime, GPU, and
 Chromium utility RSS/CPU. Renderer working set grew from about 165 MiB before
 the workload to about 578 MiB after long-scroll, files, terminal, and split-chat
-activation. That observation belongs to the renderer-efficiency workstream; no
-renderer algorithm was changed here.
+activation. The current benchmark keeps JavaScript heap, DOM/observer,
+terminal-session, repeated-cycle, and soak evidence separate from OS
+working-set retention. Working-set growth alone is not treated as a JavaScript
+leak or a deterministic macOS gate; if live objects are released while native
+Chromium memory remains high, the report classifies that as native retention.
 
 ## Platform investigation and limitations
 

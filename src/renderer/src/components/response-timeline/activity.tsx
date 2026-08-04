@@ -17,6 +17,7 @@ import {
   ListChecks,
   TriangleAlert,
 } from "lucide-react";
+import { markTestStreamingStage } from "../../utils/testStreamingTrace";
 import clsx from "clsx";
 import type {
   AgentActivity,
@@ -303,6 +304,11 @@ const CommentaryRow = memo(function CommentaryRow({
   defaultCodeWrap: boolean;
   onOpenProjectFile: (path: string) => void;
 }): React.JSX.Element {
+  useLayoutEffect(() => {
+    if (entry.streaming && entry.content) {
+      markTestStreamingStage("renderer-live-text-commit");
+    }
+  }, [entry.content, entry.streaming]);
   return (
     <article
       className={clsx("turn-commentary-row", entry.streaming && "is-streaming")}

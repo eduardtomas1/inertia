@@ -13,6 +13,7 @@ export interface TurnStreamChannelOptions {
   onProjectionFlush(flush: StreamDeltaFlush): void;
   onPersistenceFlush(flush: StreamDeltaFlush): void;
   onTimerError(error: unknown): void;
+  onFlushStarted?(): void;
 }
 
 /**
@@ -34,6 +35,7 @@ export class TurnStreamChannel {
       flushIntervalMs: STREAM_PROJECTION_FLUSH_INTERVAL_MS,
       maxBufferedChars: STREAM_PROJECTION_CHAR_THRESHOLD,
       onFlush: (flush) => {
+        options.onFlushStarted?.();
         // Never make text user-visible before the same ordered prefix is
         // durable. This keeps abrupt utility-process loss from rolling the
         // transcript behind what the renderer already showed.

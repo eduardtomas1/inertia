@@ -213,6 +213,7 @@ export class TurnSettlementCoordinator {
       updatedAt: completedAt,
     });
     active.turn = settlement.turn;
+    this.options.hooks.testOnlyStreamingTrace?.mark("terminal-persistence-completed");
     this.options.cleanup(active);
     if (!settlement.settled) return false;
 
@@ -283,6 +284,7 @@ export class TurnSettlementCoordinator {
         turnId: active.turn.id,
       });
     }
+    this.options.hooks.testOnlyStreamingTrace?.mark("terminal-event-projected");
     this.options.hooks.broadcast({
       type: "conversation.detail.invalidated",
       conversationId: active.conversation.id,

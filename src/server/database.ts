@@ -146,6 +146,8 @@ export class RuntimeStore {
     _defaultWorkspacePath: string,
     options: {
       onDatabaseBackupCreated?: (result: DatabaseBackupResult) => void;
+      canStartDatabaseBackup?: () => boolean;
+      databaseBackupQuietGraceMs?: number;
       recoverInterruptedRuns?: boolean;
       recoveryExportMaxBytes?: number;
     } = {},
@@ -162,6 +164,8 @@ export class RuntimeStore {
       this.database,
       databasePath,
       {
+        canStartBackup: options.canStartDatabaseBackup,
+        quietGraceMs: options.databaseBackupQuietGraceMs,
         onError: () => {
           console.error("The scheduled database backup failed.");
         },
@@ -277,8 +281,8 @@ export class RuntimeStore {
     this.backupManager.start();
   }
 
-  createInitialBackup(): Promise<DatabaseBackupResult | null> {
-    return this.backupManager.createInitialBackup();
+  createInitialBackup(options: { quietGraceMs?: number } = {}): Promise<DatabaseBackupResult | null> {
+    return this.backupManager.requestInitialBackup(options.quietGraceMs ?? 0);
   }
 
   createBackup(): Promise<DatabaseBackupResult> {

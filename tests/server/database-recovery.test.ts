@@ -144,6 +144,203 @@ describe("database backup and startup recovery", () => {
     await manager.cancelAndWait();
   });
 
+  it("keeps the initial backup pending while an active turn blocks the quiet gate", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let activeTurn = true;
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 1_000,
+        quietGraceMs: 1_000,
+        canStartBackup: () => !activeTurn,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).not.toHaveBeenCalled();
+    activeTurn = false;
+    await vi.advanceTimersByTimeAsync(999);
+    expect(backup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(backup).toHaveBeenCalledOnce();
+    expect(manager.status().lastValidatedAt).toEqual(expect.any(String));
+    await manager.cancelAndWait();
+  });
+
+  it("deduplicates a first-turn quiet-grace request with an active timer", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 1_000,
+        quietGraceMs: 1_000,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(900);
+    const fromTurn = manager.requestInitialBackup(1_000);
+    const fromTimer = manager.requestInitialBackup();
+    expect(fromTimer).toBe(fromTurn);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(backup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(fromTurn).resolves.toMatchObject({ filename: expect.any(String) });
+    expect(backup).toHaveBeenCalledOnce();
+    await manager.cancelAndWait();
+  });
+
+  it("retries an initial validation failure with bounded backoff and truthful status", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let valid = false;
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        retryDelayMs: 1_000,
+        validateBackup: async () => valid ? "valid-current" : "corrupt",
+      },
+    );
+
+    manager.start();
+    const first = manager.requestInitialBackup();
+    await expect(first).rejects.toThrow(/failed validation/u);
+    expect(manager.status().lastValidatedAt).toBeNull();
+    valid = true;
+    await vi.advanceTimersByTimeAsync(999);
+    expect(backup).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(backup).toHaveBeenCalledTimes(2);
+    expect(manager.status().lastValidatedAt).toEqual(expect.any(String));
+    await manager.cancelAndWait();
+  });
+
+  it("observes an overlapping backup when initial eligibility arrives", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let releaseValidation!: () => void;
+    const validationBlocked = new Promise<void>((resolveValidation) => {
+      releaseValidation = resolveValidation;
+    });
+    let validationStarted!: () => void;
+    const validationReady = new Promise<void>((resolveStarted) => {
+      validationStarted = resolveStarted;
+    });
+    const manager = new DatabaseBackupManager(
+      {
+        open: true,
+        backup: async (destination: string) => {
+          copyFileSync(databasePath, destination);
+        },
+      } as unknown as Database.Database,
+      databasePath,
+      {
+        canStartBackup: () => false,
+        validateBackup: async () => {
+          validationStarted();
+          await validationBlocked;
+          return "corrupt";
+        },
+      },
+    );
+
+    manager.start();
+    const overlapping = manager.createBackup();
+    await validationReady;
+    const initial = manager.requestInitialBackup();
+    releaseValidation();
+    await expect(overlapping).rejects.toThrow(/failed validation/u);
+    await expect(initial).rejects.toThrow(/failed validation/u);
+    await manager.cancelAndWait();
+  });
+
+  it("reschedules the automatic first backup after an early manual failure", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let valid = false;
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 1_000,
+        validateBackup: async () => valid ? "valid-current" : "corrupt",
+      },
+    );
+
+    manager.start();
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    valid = true;
+    await vi.advanceTimersByTimeAsync(999);
+    expect(backup).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(backup).toHaveBeenCalledTimes(2);
+    expect(manager.status().lastValidatedAt).toEqual(expect.any(String));
+    await manager.cancelAndWait();
+  });
+
+  it("stops retrying after the bounded initial retry budget", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        retryDelayMs: 1_000,
+        maxInitialRetries: 2,
+        validateBackup: async () => "corrupt",
+      },
+    );
+
+    manager.start();
+    await expect(manager.requestInitialBackup()).rejects.toThrow(/failed validation/u);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(backup).toHaveBeenCalledTimes(3);
+    expect(manager.status().lastValidatedAt).toBeNull();
+    await manager.cancelAndWait();
+  });
+
   it("cancels the quiet-period backup without starting work during shutdown", async () => {
     vi.useFakeTimers();
     const directory = temporaryDirectory();

@@ -20,6 +20,9 @@ import { CURRENT_DATABASE_SCHEMA_VERSION } from "./migrations/catalog";
 
 export const DATABASE_BACKUP_INTERVAL_MS = 60 * 60 * 1_000;
 export const DATABASE_INITIAL_BACKUP_QUIET_MS = 30 * 1_000;
+export const DATABASE_INITIAL_BACKUP_GRACE_MS = 1_000;
+export const DATABASE_INITIAL_BACKUP_RETRY_MS = 5_000;
+export const DATABASE_INITIAL_BACKUP_MAX_RETRIES = 5;
 export const DATABASE_BACKUP_MAX_COUNT = 5;
 export const DATABASE_BACKUP_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 export const DATABASE_BACKUP_VALIDATION_TIMEOUT_MS = 120_000;
@@ -74,12 +77,17 @@ export interface DatabaseRecoveryOptions {
 
 export interface DatabaseBackupOptions {
   readonly initialDelayMs?: number;
+  readonly quietGraceMs?: number;
+  readonly retryDelayMs?: number;
+  readonly maxInitialRetries?: number;
   readonly intervalMs?: number;
   readonly maxBackups?: number;
   readonly maxTotalBytes?: number;
   readonly now?: () => Date;
   readonly onError?: (error: unknown) => void;
   readonly onCreated?: (result: DatabaseBackupResult) => void;
+  /** Initial backups must not begin while the runtime is in an interaction path. */
+  readonly canStartBackup?: () => boolean;
   readonly validateBackup?: (
     path: string,
     signal: AbortSignal,
@@ -653,10 +661,16 @@ export function recoverDatabaseOnStartup(
 export class DatabaseBackupManager {
   private timer: NodeJS.Timeout | null = null;
   private initialTimer: NodeJS.Timeout | null = null;
+  private quietTimer: NodeJS.Timeout | null = null;
   private inFlight: Promise<DatabaseBackupResult> | null = null;
   private inFlightAbort: AbortController | null = null;
   private started = false;
   private initialBackupComplete = false;
+  private initialEligible = false;
+  private initialRetryAttempt = 0;
+  private initialObservedOperation: Promise<DatabaseBackupResult> | null = null;
+  private pendingInitial:
+    { promise: Promise<DatabaseBackupResult | null>; resolve: (result: DatabaseBackupResult | null) => void; reject: (error: unknown) => void } | null = null;
   private lastValidatedAt: string | null;
 
   constructor(
@@ -692,6 +706,10 @@ export class DatabaseBackupManager {
       clearTimeout(this.initialTimer);
       this.initialTimer = null;
     }
+    if (this.quietTimer) {
+      clearTimeout(this.quietTimer);
+      this.quietTimer = null;
+    }
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -712,15 +730,37 @@ export class DatabaseBackupManager {
       if (this.inFlight === operation) {
         this.inFlight = null;
         this.inFlightAbort = null;
-        if (!this.initialBackupComplete) this.scheduleInitialBackup();
+        if (!this.initialBackupComplete && !this.initialEligible) {
+          this.scheduleInitialBackup();
+        }
       }
     }).catch(() => undefined);
     return operation;
   }
 
   createInitialBackup(): Promise<DatabaseBackupResult | null> {
+    return this.requestInitialBackup();
+  }
+
+  /**
+   * Marks the initial backup eligible without making the settlement path wait.
+   * A caller may provide a small grace period after the last active turn.
+   */
+  requestInitialBackup(quietGraceMs = 0): Promise<DatabaseBackupResult | null> {
     if (this.initialBackupComplete) return Promise.resolve(null);
-    return this.createBackup();
+    if (!this.initialEligible) this.initialRetryAttempt = 0;
+    this.initialEligible = true;
+    if (this.initialTimer) {
+      clearTimeout(this.initialTimer);
+      this.initialTimer = null;
+    }
+    const pending = this.pendingInitial ?? this.createPendingInitial();
+    if (quietGraceMs > 0) {
+      this.scheduleQuietRetry(quietGraceMs);
+    } else {
+      this.tryStartInitialBackup();
+    }
+    return pending.promise;
   }
 
   status(): DatabaseBackupStatus {
@@ -729,6 +769,7 @@ export class DatabaseBackupManager {
 
   async cancelAndWait(): Promise<void> {
     this.stop();
+    this.rejectPendingInitial(new DatabaseBackupCancelledError());
     const operation = this.inFlight;
     this.inFlightAbort?.abort();
     if (!operation) return;
@@ -778,6 +819,9 @@ export class DatabaseBackupManager {
       };
       this.lastValidatedAt = result.createdAt;
       this.initialBackupComplete = true;
+      this.initialEligible = false;
+      this.initialRetryAttempt = 0;
+      this.resolvePendingInitial(result);
       try {
         this.options.onCreated?.(result);
       } catch (error) {
@@ -805,11 +849,120 @@ export class DatabaseBackupManager {
     );
     this.initialTimer = setTimeout(() => {
       this.initialTimer = null;
-      void this.createInitialBackup().catch((error: unknown) => {
+      void this.requestInitialBackup().catch((error: unknown) => {
         this.options.onError?.(error);
       });
     }, delayMs);
     this.initialTimer.unref();
+  }
+
+  private createPendingInitial(): NonNullable<DatabaseBackupManager["pendingInitial"]> {
+    let resolve!: (result: DatabaseBackupResult | null) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<DatabaseBackupResult | null>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    this.pendingInitial = { promise, resolve, reject };
+    return this.pendingInitial;
+  }
+
+  private resolvePendingInitial(result: DatabaseBackupResult | null): void {
+    const pending = this.pendingInitial;
+    this.pendingInitial = null;
+    pending?.resolve(result);
+  }
+
+  private rejectPendingInitial(error: unknown): void {
+    const pending = this.pendingInitial;
+    this.pendingInitial = null;
+    pending?.reject(error);
+  }
+
+  private tryStartInitialBackup(): void {
+    if (
+      !this.initialEligible
+      || this.initialBackupComplete
+      || this.quietTimer
+    ) return;
+    if (this.inFlight) {
+      this.observeInitialOperation(this.inFlight);
+      return;
+    }
+    if (this.options.canStartBackup && !this.options.canStartBackup()) {
+      this.scheduleQuietRetry();
+      return;
+    }
+    this.observeInitialOperation(this.createBackup());
+  }
+
+  private observeInitialOperation(
+    operation: Promise<DatabaseBackupResult>,
+  ): void {
+    if (this.initialObservedOperation === operation) return;
+    this.initialObservedOperation = operation;
+    void operation.then(
+      (result) => {
+        if (this.initialObservedOperation === operation) {
+          this.initialObservedOperation = null;
+        }
+        this.resolvePendingInitial(result);
+      },
+      (error: unknown) => {
+        if (this.initialObservedOperation === operation) {
+          this.initialObservedOperation = null;
+        }
+        if (error instanceof DatabaseBackupCancelledError) {
+          this.rejectPendingInitial(error);
+          return;
+        }
+        this.options.onError?.(error);
+        this.initialRetryAttempt += 1;
+        if (this.initialRetryAttempt <= this.maxInitialRetries()) {
+          this.scheduleQuietRetry(this.retryDelayMs());
+        } else {
+          this.initialEligible = false;
+        }
+        this.rejectPendingInitial(error);
+      },
+    );
+  }
+
+  private scheduleQuietRetry(delayMs = this.quietGraceMs()): void {
+    if (
+      !this.started
+      || !this.initialEligible
+      || this.initialBackupComplete
+      || this.inFlight
+      || this.quietTimer
+    ) return;
+    this.quietTimer = setTimeout(() => {
+      this.quietTimer = null;
+      this.tryStartInitialBackup();
+    }, Math.max(1_000, Math.trunc(delayMs)));
+    this.quietTimer.unref();
+  }
+
+  private quietGraceMs(): number {
+    return Math.max(
+      1_000,
+      Math.trunc(this.options.quietGraceMs ?? DATABASE_INITIAL_BACKUP_GRACE_MS),
+    );
+  }
+
+  private retryDelayMs(): number {
+    const configured = Math.max(
+      1_000,
+      Math.trunc(this.options.retryDelayMs ?? DATABASE_INITIAL_BACKUP_RETRY_MS),
+    );
+    return Math.min(configured * 2 ** Math.min(this.initialRetryAttempt - 1, 5), 5 * 60 * 1_000);
+  }
+
+  private maxInitialRetries(): number {
+    return Math.max(
+      0,
+      Math.trunc(this.options.maxInitialRetries ?? DATABASE_INITIAL_BACKUP_MAX_RETRIES),
+    );
   }
 
   private prune(protectedPath: string): void {

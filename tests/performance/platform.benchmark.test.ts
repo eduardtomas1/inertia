@@ -51,6 +51,10 @@ import { nativeProviderRunInput } from "../server/model-route-fixture";
 
 const execFileAsync = promisify(execFile);
 const enforce = process.env.INERTIA_BENCHMARK_ENFORCE === "1";
+const HOSTED_STREAM_FIRST_PROJECTION_CATASTROPHIC_MS = 500;
+const HOSTED_STREAM_VISIBLE_GAP_CATASTROPHIC_MS = 500;
+const HOSTED_SELECTED_STREAM_FIRST_PROJECTION_MS = 75;
+const HOSTED_SELECTED_STREAM_VISIBLE_GAP_MS = 175;
 const PTY_RECORD_PREFIX = "INERTIA_PTY_RECORD_BEGIN:";
 const PTY_RECORD_SEPARATOR = ":PAYLOAD:";
 const PTY_RECORD_SUFFIX = ":INERTIA_PTY_RECORD_END";
@@ -68,6 +72,7 @@ interface Measurement {
 }
 
 interface StreamingCadenceMeasurement extends Measurement {
+  firstFlushMs: 12 | 16 | 24;
   intervalMs: number;
   firstProjectionMs: number;
   medianVisibleGapMs: number;
@@ -99,8 +104,9 @@ async function streamingCadenceMeasurement(
   root: string,
   workspace: string,
   intervalMs: 64 | 80 | 96,
+  firstFlushMs: 12 | 16 | 24 = 24,
 ): Promise<StreamingCadenceMeasurement> {
-  const databasePath = join(root, `stream-cadence-${intervalMs}.sqlite`);
+  const databasePath = join(root, `stream-cadence-${firstFlushMs}-${intervalMs}.sqlite`);
   const store = new RuntimeStore(databasePath, workspace, {
     recoverInterruptedRuns: false,
   });
@@ -129,7 +135,7 @@ async function streamingCadenceMeasurement(
       setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
       clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
     },
-    firstFlushMs: 24,
+    firstFlushMs,
     flushIntervalMs: intervalMs,
     maxBufferedChars: 16_384,
     onFlush: ({ delta }) => {
@@ -165,6 +171,7 @@ async function streamingCadenceMeasurement(
       .catch(() => 0);
     const sample = Number(elapsedMs.toFixed(3));
     return {
+      firstFlushMs,
       intervalMs,
       medianMs: sample,
       minimumMs: sample,
@@ -834,12 +841,15 @@ describe("cross-platform performance benchmark", () => {
       });
       const activeProviderStream = await activeProviderStreamMeasurement();
       const streamingCadenceCandidates: StreamingCadenceMeasurement[] = [];
-      for (const intervalMs of [64, 80, 96] as const) {
-        streamingCadenceCandidates.push(await streamingCadenceMeasurement(
-          join(fixtureRoot, "runtime"),
-          workspace,
-          intervalMs,
-        ));
+      for (const firstFlushMs of [12, 16, 24] as const) {
+        for (const intervalMs of [64, 80, 96] as const) {
+          streamingCadenceCandidates.push(await streamingCadenceMeasurement(
+            join(fixtureRoot, "runtime"),
+            workspace,
+            intervalMs,
+            firstFlushMs,
+          ));
+        }
       }
       const providerHarnessLifecycle = await providerHarnessLifecycleMeasurement(
         fixtureRoot,
@@ -915,17 +925,20 @@ describe("cross-platform performance benchmark", () => {
       expect(sqliteWrites.medianMs).toBeGreaterThan(0);
       expect(processSpawn.medianMs).toBeGreaterThan(0);
       expect(terminalBurst.frames).toBeGreaterThan(0);
-      expect(streamingCadenceCandidates).toHaveLength(3);
+      expect(streamingCadenceCandidates).toHaveLength(9);
       for (const candidate of streamingCadenceCandidates) {
         expect(candidate.firstProjectionMs).toBeLessThan(50);
         expect(candidate.p95VisibleGapMs).toBeGreaterThan(0);
         expect(candidate.sqliteWrites).toBe(candidate.visibleUpdates);
       }
       const selectedStreamingCadence = streamingCadenceCandidates.find(
-        ({ intervalMs }) => intervalMs === STREAM_PROJECTION_FLUSH_INTERVAL_MS,
+        ({ intervalMs, firstFlushMs }) =>
+          intervalMs === STREAM_PROJECTION_FLUSH_INTERVAL_MS
+          && firstFlushMs === 24,
       );
       expect(selectedStreamingCadence).toBeDefined();
       expect(selectedStreamingCadence!.p95VisibleGapMs).toBeLessThan(100);
+      expect(selectedStreamingCadence!.firstFlushMs).toBe(24);
 
       if (enforce) {
         expect(workspaceList.medianMs).toBeLessThan(8_000);
@@ -937,11 +950,20 @@ describe("cross-platform performance benchmark", () => {
         expect(processSpawn.medianMs).toBeLessThan(5_000);
         expect(activeProviderStream.medianMs).toBeLessThan(5_000);
         for (const candidate of streamingCadenceCandidates) {
-          expect(candidate.firstProjectionMs).toBeLessThan(75);
-          expect(candidate.p95VisibleGapMs).toBeLessThan(175);
+          // The non-selected combinations are comparative evidence, not
+          // shipped configurations. Keep catastrophic guards on every sample
+          // without pretending that all nine must meet the product cadence.
+          expect(candidate.firstProjectionMs)
+            .toBeLessThan(HOSTED_STREAM_FIRST_PROJECTION_CATASTROPHIC_MS);
+          expect(candidate.p95VisibleGapMs)
+            .toBeLessThan(HOSTED_STREAM_VISIBLE_GAP_CATASTROPHIC_MS);
           expect(candidate.runtimeCpuMs).toBeLessThan(5_000);
           expect(candidate.runtimeRssDeltaBytes).toBeLessThan(128 * 1024 * 1024);
         }
+        expect(selectedStreamingCadence!.firstProjectionMs)
+          .toBeLessThan(HOSTED_SELECTED_STREAM_FIRST_PROJECTION_MS);
+        expect(selectedStreamingCadence!.p95VisibleGapMs)
+          .toBeLessThan(HOSTED_SELECTED_STREAM_VISIBLE_GAP_MS);
         expect(providerHarnessLifecycle.medianMs).toBeLessThan(10_000);
         expect(processTreeLifecycle.medianMs).toBeLessThan(10_000);
         expect(processTreeLifecycle.confirmedStops).toBe(3);

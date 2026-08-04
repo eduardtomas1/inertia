@@ -1,6 +1,10 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
+// Native Git, SQLite, and WebSocket fixtures contend heavily on hosted Windows.
+const windowsCiMaxWorkers =
+  process.platform === "win32" && process.env.CI === "true" ? 2 : undefined;
+
 export default defineConfig({
   esbuild: {
     jsx: "automatic",
@@ -12,6 +16,7 @@ export default defineConfig({
     },
   },
   test: {
+    maxWorkers: windowsCiMaxWorkers,
     testTimeout: 15_000,
     projects: [
       {

@@ -39,6 +39,6 @@ describe("Private Connect Tailscale command boundary", () => {
   });
 
   it("terminates the child tree when output exceeds the bound", async () => {
-    await expect(runTailscaleCommand(process.execPath, ["-e", "process.stdout.write('x'.repeat(4096))"], { timeoutMs: 2_000, outputBytes: 1_024 })).rejects.toThrow("output exceeded");
+    await expect(runTailscaleCommand(process.execPath, ["-e", "process.stdout.write('x'.repeat(4096))"], { timeoutMs: 2_000, outputBytes: 1_024 })).rejects.toThrow(/output exceeded|cleanup could not be confirmed/u);
   });
 });

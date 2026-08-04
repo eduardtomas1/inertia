@@ -38,6 +38,5 @@ evicted for retry, and a successful load remains cached. The shared 12-second
 extraction deadline begins after that one-time module initialization; the outer
 120-second message-preparation deadline still bounds the complete operation.
 
-Remote relay byte measurements intentionally remain absent from this baseline.
-Remote revisioning is a separate dependent change and must be measured only
-after the authoritative remote protocol/state contracts are integrated.
+Private Connect gateway byte measurements belong to the local HTTP/WebSocket
+boundary and are covered by its bounded body and frame limits.

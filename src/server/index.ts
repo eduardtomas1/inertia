@@ -19,13 +19,13 @@ import {
 import type { OpenProjectPathRequest } from "../shared/desktop";
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
 import type {
-  RemoteAuthorizationSubject,
-  RemoteRequest,
-  RemoteResponse,
-} from "../shared/remote-protocol";
+  PrivateConnectRuntimeAuthorization,
+  PrivateConnectRuntimeRequest,
+  PrivateConnectRuntimeResponse,
+} from "../shared/private-connect/runtime-contract";
 import type {
-  RuntimeRemoteForgetScope,
-  RuntimeRemotePromptPreparation,
+  RuntimePrivateConnectForgetScope,
+  RuntimePrivateConnectPromptPreparation,
 } from "../node/runtime-process-protocol";
 import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
@@ -116,11 +116,11 @@ import {
   type RuntimeSecureFileBroker,
 } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
-import { RemoteRuntimeGateway } from "./remote-gateway";
-import { RemoteTranscriptCache } from "./remote-transcript-cache";
+import { PrivateConnectRuntimeGateway } from "./private-connect/runtime-gateway";
+import { PrivateConnectTranscriptCache } from "./private-connect/transcript-cache";
 import {
-  remotePromptSafetyForHarness,
-} from "../shared/remote-prompt-safety";
+  privateConnectPromptSafetyForHarness,
+} from "../shared/private-connect/prompt-safety";
 import {
   writeDatabaseRecoveryExportFile,
 } from "./persistence/database-export-file";
@@ -172,20 +172,20 @@ export interface RunningRuntime {
   websocketUrl: string;
   databaseRecovery: ReturnType<RuntimeStore["databaseRecoveryReport"]>;
   resolveProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
-  remoteRequest: (
-    subject: RemoteAuthorizationSubject,
-    request: Exclude<RemoteRequest, { type: "prompt.send" }>,
-  ) => Promise<RemoteResponse>;
-  prepareRemotePrompt: (
-    subject: RemoteAuthorizationSubject,
-    request: Extract<RemoteRequest, { type: "prompt.send" }>,
-  ) => Promise<RuntimeRemotePromptPreparation | RemoteResponse>;
-  commitRemotePrompt: (
-    subject: RemoteAuthorizationSubject,
-    request: Extract<RemoteRequest, { type: "prompt.send" }>,
+  privateConnectRequest: (
+    subject: PrivateConnectRuntimeAuthorization,
+    request: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
+  ) => Promise<PrivateConnectRuntimeResponse>;
+  preparePrivateConnectPrompt: (
+    subject: PrivateConnectRuntimeAuthorization,
+    request: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
+  ) => Promise<RuntimePrivateConnectPromptPreparation | PrivateConnectRuntimeResponse>;
+  commitPrivateConnectPrompt: (
+    subject: PrivateConnectRuntimeAuthorization,
+    request: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
     preparationId: string,
-  ) => RemoteResponse;
-  forgetRemoteTranscripts: (scope: RuntimeRemoteForgetScope) => void;
+  ) => PrivateConnectRuntimeResponse;
+  forgetPrivateConnectTranscripts: (scope: RuntimePrivateConnectForgetScope) => void;
   exportRecoveryData: (path: string, signal?: AbortSignal) => Promise<void>;
   importRecoveryData: (
     path: string,
@@ -300,7 +300,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       );
     },
   };
-  const remoteTranscriptCache = new RemoteTranscriptCache();
+  const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
   const enableProviders = options.enableProviders ?? true;
   const terminals = new TerminalManager();
@@ -676,8 +676,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         deletedConversationIds,
         dataDirectory,
         rememberDeletedConversation,
-        forgetRemoteTranscript: (conversationId) =>
-          remoteTranscriptCache.invalidateConversation(conversationId),
+      forgetRemoteTranscript: (conversationId: string) =>
+          privateConnectTranscriptCache.invalidateConversation(conversationId),
         broadcastSnapshot: flushSnapshot,
         publicError,
         send,
@@ -749,8 +749,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         secureFileAuthorities,
         workspacePath,
         rememberDeletedConversation,
-        forgetRemoteTranscript: (conversationId) =>
-          remoteTranscriptCache.invalidateConversation(conversationId),
+      forgetRemoteTranscript: (conversationId: string) =>
+          privateConnectTranscriptCache.invalidateConversation(conversationId),
         broadcastSnapshot,
         send,
       }),
@@ -831,7 +831,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     broadcastSnapshot();
   });
 
-  const remoteGateway = new RemoteRuntimeGateway({
+  const privateConnectGateway = new PrivateConnectRuntimeGateway({
     shell: currentSnapshot,
     detail: (conversationId) => store.conversationDetail(conversationId),
     isConversationActive: (conversationId) =>
@@ -860,9 +860,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         );
       }
     },
-    transcriptCache: remoteTranscriptCache,
-    remotePromptSafety: (conversation) =>
-      remotePromptSafetyForHarness(conversation.modelSelection.harnessId),
+    transcriptCache: privateConnectTranscriptCache,
+    privateConnectPromptSafety: (conversation) =>
+      privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId),
     queuePrompt: (conversationId, content) => {
       let queued: ReturnType<TurnController["queue"]> | null = null;
       try {
@@ -895,6 +895,27 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         throw error;
       }
     },
+    respondToInput: (conversationId, inputRequestId, answers) => {
+      const pending = pendingInputs.get(inputRequestId);
+      if (!pending || pending.conversationId !== conversationId || pending.questions.some((question) => question.isSecret)) return false;
+      const expected = new Map(pending.questions.map((question) => [question.id, question]));
+      for (const [questionId, values] of Object.entries(answers)) {
+        const question = expected.get(questionId);
+        if (!question || values.length === 0 || (!question.allowMultiple && values.length !== 1)) return false;
+        const optionIds = new Set(question.options.map((option) => option.id));
+        if (question.options.length > 0 && values.some((value) => !optionIds.has(value) && !question.isOther)) return false;
+      }
+      if ([...expected.keys()].some((questionId) => !answers[questionId]?.length)) return false;
+      return turns.respondToInput(conversationId, inputRequestId, answers);
+    },
+    stopRun: (conversationId, runId) => {
+      const run = currentSnapshot().runs.find((candidate) => candidate.id === runId);
+      if (!run || run.conversationId !== conversationId) return { stopped: false, alreadyStopped: false };
+      if (run.status !== "running" && run.status !== "waiting") return { stopped: false, alreadyStopped: true };
+      const stopped = isolatedRuns.stopConversation(conversationId) || turns.cancel(conversationId);
+      return { stopped, alreadyStopped: false };
+    },
+    inputs: () => pendingInputs.values(),
   });
 
   return {
@@ -905,7 +926,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       request,
       projectIdentityAuthority,
     )).absolute,
-    remoteRequest: (subject, request) => databaseRecoveryImportActive
+    privateConnectRequest: (subject, request) => databaseRecoveryImportActive
       ? Promise.resolve({
           type: "response",
           requestId: request.requestId,
@@ -913,8 +934,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           code: "unavailable",
           message: "Database recovery is in progress.",
         })
-      : remoteGateway.request(subject, request),
-    prepareRemotePrompt: (subject, request) => databaseRecoveryImportActive
+      : privateConnectGateway.request(subject, request),
+    preparePrivateConnectPrompt: (subject, request) => databaseRecoveryImportActive
       ? Promise.resolve({
           type: "response",
           requestId: request.requestId,
@@ -922,8 +943,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           code: "unavailable",
           message: "Database recovery is in progress.",
         })
-      : remoteGateway.preparePrompt(subject, request),
-    commitRemotePrompt: (subject, request, preparationId) =>
+      : privateConnectGateway.preparePrompt(subject, request),
+    commitPrivateConnectPrompt: (subject, request, preparationId) =>
       databaseRecoveryImportActive
         ? {
             type: "response",
@@ -932,10 +953,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             code: "unavailable",
             message: "Database recovery is in progress.",
           }
-        : remoteGateway.commitPrompt(subject, request, preparationId),
-    forgetRemoteTranscripts: (scope) => {
-      if (scope.kind === "all") remoteGateway.reset();
-      else remoteGateway.forgetConversation(scope.conversationId);
+        : privateConnectGateway.commitPrompt(subject, request, preparationId),
+    forgetPrivateConnectTranscripts: (scope) => {
+      if (scope.kind === "all") privateConnectGateway.reset();
+      else privateConnectGateway.forgetConversation(scope.conversationId);
     },
     exportRecoveryData: async (path, signal) => {
       await writeDatabaseRecoveryExportFile(

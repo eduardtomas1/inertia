@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseOpenProjectPathRequest,
-  parseRemoteDeviceUpdateRequest,
-  parseRemotePairingApprovalRequest,
+  parsePrivateConnectDeviceUpdateRequest,
+  parsePrivateConnectPairingApprovalRequest,
 } from "../src/shared/desktop";
 import {
   BACKEND_CREDENTIAL_MASK,
@@ -66,34 +66,28 @@ describe("desktop credential contract", () => {
   });
 });
 
-describe("desktop remote-access contract", () => {
-  it("rejects unknown remote-access request fields", () => {
+describe("desktop Private Connect contract", () => {
+  it("rejects unknown pairing and device fields", () => {
     const deviceUpdate = {
       deviceId: projectId,
-      scopes: ["view"],
+      preset: "monitor",
       projectIds: [projectId],
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
-    expect(parseRemoteDeviceUpdateRequest(deviceUpdate)).toEqual({
-      ...deviceUpdate,
-      grants: null,
-    });
-    expect(parseRemoteDeviceUpdateRequest({
+    expect(parsePrivateConnectDeviceUpdateRequest(deviceUpdate)).toEqual(deviceUpdate);
+    expect(parsePrivateConnectDeviceUpdateRequest({
       ...deviceUpdate,
       injected: true,
     })).toBeNull();
 
     const pairing = {
       requestId: conversationId,
-      scopes: ["view"],
+      preset: "monitor",
       projectIds: [projectId],
       grantDays: 1,
     };
-    expect(parseRemotePairingApprovalRequest(pairing)).toEqual({
-      ...pairing,
-      grants: null,
-    });
-    expect(parseRemotePairingApprovalRequest({
+    expect(parsePrivateConnectPairingApprovalRequest(pairing)).toEqual(pairing);
+    expect(parsePrivateConnectPairingApprovalRequest({
       ...pairing,
       injected: true,
     })).toBeNull();
@@ -102,15 +96,14 @@ describe("desktop remote-access contract", () => {
   it("rejects sparse conversation grants at the preload boundary", () => {
     const sparseConversationIds: string[] = [];
     sparseConversationIds.length = 1;
-    expect(parseRemoteDeviceUpdateRequest({
+    expect(parsePrivateConnectDeviceUpdateRequest({
       deviceId: projectId,
-      scopes: ["view"],
+      preset: "monitor",
       projectIds: [projectId],
       grants: [{
         projectId,
         conversationIds: sparseConversationIds,
         includeFutureConversations: false,
-        legacyProjectWide: false,
       }],
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     })).toBeNull();

@@ -81,7 +81,7 @@ function renderHeader(
       onSetEnvironmentOpen={vi.fn()}
       onCycleTheme={vi.fn()}
       onOpenSettings={vi.fn()}
-      onOpenRemoteSettings={vi.fn()}
+      onOpenConnectionsSettings={vi.fn()}
       onOpenProject={vi.fn()}
       onRefreshBranches={vi.fn()}
       onSwitchBranch={vi.fn()}

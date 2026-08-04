@@ -98,7 +98,7 @@ export default function App(): React.JSX.Element {
   );
   const [view, setView] = useState<"workspace" | "settings">("workspace");
   const [settingsTarget, setSettingsTarget] = useState<{
-    section: "providers" | "backends" | "remote";
+    section: "providers" | "backends" | "connections";
     profileId?: string;
   } | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -693,8 +693,8 @@ export default function App(): React.JSX.Element {
     setSettingsTarget({ section: "backends", profileId });
     setView("settings");
   }, []);
-  const openRemoteSettings = useCallback(() => {
-    setSettingsTarget({ section: "remote" });
+  const openConnectionsSettings = useCallback(() => {
+    setSettingsTarget({ section: "connections" });
     setView("settings");
   }, []);
 
@@ -945,7 +945,7 @@ export default function App(): React.JSX.Element {
         closeConversationSplit: () => updateSplitConversationId(null),
         openProviderSetup,
         openBackendSetup,
-        openRemoteSettings,
+        openConnectionsSettings,
         createConversation,
         updateSettings,
         openProjectPath,

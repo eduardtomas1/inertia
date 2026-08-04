@@ -41,12 +41,12 @@ function HeaderHarness({
   activeProject = null,
   workspaceToolsUnavailableReason = null,
   onOpenSettings = vi.fn(),
-  onOpenRemoteSettings = vi.fn(),
+  onOpenConnectionsSettings = vi.fn(),
 }: {
   activeProject?: Project | null;
   workspaceToolsUnavailableReason?: string | null;
   onOpenSettings?: () => void;
-  onOpenRemoteSettings?: () => void;
+  onOpenConnectionsSettings?: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(true);
   return (
@@ -73,7 +73,7 @@ function HeaderHarness({
         onSetEnvironmentOpen={setOpen}
         onCycleTheme={vi.fn()}
         onOpenSettings={onOpenSettings}
-        onOpenRemoteSettings={onOpenRemoteSettings}
+        onOpenConnectionsSettings={onOpenConnectionsSettings}
         onOpenProject={vi.fn()}
         onRefreshBranches={vi.fn()}
         onSwitchBranch={vi.fn()}
@@ -127,38 +127,39 @@ describe("environment summary header popover", () => {
     })).toHaveFocus();
   });
 
-  it("routes the Remote indicator directly to Remote Companion settings", async () => {
+  it("routes the Private Connect indicator directly to Connections & devices settings", async () => {
     const onOpenSettings = vi.fn();
-    const onOpenRemoteSettings = vi.fn();
+    const onOpenConnectionsSettings = vi.fn();
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
-        getRemoteAccessState: vi.fn(async () => ({
+        getPrivateConnectState: vi.fn(async () => ({
           available: true,
           enabled: true,
-          relayUrl: "wss://relay.example/remote",
-          connection: "online",
-          connectionMessage: null,
+          status: "ready",
+          statusMessage: null,
+          externalUrl: "https://inertia.tailnet.ts.net",
           activeSessions: 0,
           devices: [],
           pendingPairings: [],
           invitation: null,
-          audit: [],
+          notice: null,
+          diagnostics: { tailscale: "connected", magicDns: "available", gatewayPort: 1, servePort: 8443, externalUrl: "https://inertia.tailnet.ts.net", mappingOwnership: "owned", errorClass: null },
         })),
-        onRemoteAccessState: vi.fn(() => vi.fn()),
+        onPrivateConnectState: vi.fn(() => vi.fn()),
       },
     });
     try {
       render(<HeaderHarness
         activeProject={project}
         onOpenSettings={onOpenSettings}
-        onOpenRemoteSettings={onOpenRemoteSettings}
+        onOpenConnectionsSettings={onOpenConnectionsSettings}
       />);
       const indicator = await screen.findByRole("button", {
-        name: "Remote Companion online",
+        name: "Connections & devices ready",
       });
       indicator.click();
-      expect(onOpenRemoteSettings).toHaveBeenCalledOnce();
+      expect(onOpenConnectionsSettings).toHaveBeenCalledOnce();
       expect(onOpenSettings).not.toHaveBeenCalled();
     } finally {
       Reflect.deleteProperty(window, "inertia");

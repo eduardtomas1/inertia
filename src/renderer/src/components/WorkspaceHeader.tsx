@@ -7,7 +7,7 @@ import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { EnvironmentSummary } from "./EnvironmentSummary";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { IconButton } from "./ui";
-import { useRemoteAccessState } from "../hooks/useRemoteAccessState";
+import { usePrivateConnectState } from "../hooks/usePrivateConnectState";
 import {
   loadActivityCenter,
   loadCommitDialog,
@@ -36,7 +36,7 @@ type WorkspaceHeaderProps = {
   onSetEnvironmentOpen: (open: boolean) => void;
   onCycleTheme: () => void;
   onOpenSettings: () => void;
-  onOpenRemoteSettings: () => void;
+  onOpenConnectionsSettings: () => void;
   onOpenProject: () => void;
   onRefreshBranches: () => void;
   onSwitchBranch: (name: string) => void;
@@ -73,7 +73,7 @@ export function WorkspaceHeader({
   onSetEnvironmentOpen,
   onCycleTheme,
   onOpenSettings,
-  onOpenRemoteSettings,
+  onOpenConnectionsSettings,
   onOpenProject,
   onRefreshBranches,
   onSwitchBranch,
@@ -88,8 +88,8 @@ export function WorkspaceHeader({
   onToggleActivity,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | null>(null);
-  const remoteLoad = useRemoteAccessState();
-  const remoteAccess = remoteLoad.status === "ready" ? remoteLoad.state : null;
+  const privateConnectLoad = usePrivateConnectState();
+  const privateConnect = privateConnectLoad.state;
   useNativePreviewSuspension(menu !== null);
   const environmentAnchorRef = useRef<HTMLDivElement>(null);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
@@ -138,20 +138,20 @@ export function WorkspaceHeader({
       </div>
 
       <div className="header-actions no-drag">
-        {remoteAccess?.enabled && (
+        {privateConnect && (
           <button
             type="button"
-            className={`header-button remote-access-indicator${remoteAccess.activeSessions > 0 ? " is-active" : ""}`}
-            aria-label={remoteAccess.activeSessions > 0
-              ? `Remote Companion, ${remoteAccess.activeSessions} active sessions`
-              : `Remote Companion ${remoteAccess.connection}`}
-            onClick={onOpenRemoteSettings}
+            className={`header-button private-connect-indicator${privateConnect.activeSessions > 0 ? " is-active" : ""}`}
+            aria-label={privateConnect.activeSessions > 0
+              ? `Connections & devices, ${privateConnect.activeSessions} active browsers`
+              : `Connections & devices ${privateConnect.status}`}
+            onClick={onOpenConnectionsSettings}
           >
             <RadioTower size={14} />
             <span>
-              {remoteAccess.activeSessions > 0
-                ? `Remote · ${remoteAccess.activeSessions} active`
-                : "Remote on"}
+              {privateConnect.activeSessions > 0
+                ? `Devices · ${privateConnect.activeSessions} active`
+                : "Devices"}
             </span>
           </button>
         )}

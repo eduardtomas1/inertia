@@ -12464,114 +12464,27 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     forced-color-adjust: auto;
   }
 }
-/* Remote Companion keeps its local controls visually explicit and separate
+/* Private Connect keeps its local controls visually explicit and separate
    from provider/runtime permissions. */
-.remote-access-indicator {
+.private-connect-indicator {
   color: var(--text-muted);
 }
 
-.remote-access-indicator.is-active {
+.private-connect-indicator.is-active {
   color: var(--success-text, #2f8a52);
   border-color: currentColor;
 }
 
-.remote-relay-setting,
-.remote-expiry-setting {
-  display: grid;
-  gap: 6px;
-  margin: 14px 0;
+.private-connect-qr {
+  display: block;
+  width: min(220px, 100%);
+  height: auto;
+  margin: 16px auto 4px;
+  border-radius: 12px;
+  background: white;
 }
 
-.remote-relay-setting small {
-  color: var(--text-muted);
-}
-
-.remote-invitation {
-  width: 100%;
-  resize: vertical;
+.private-connect-code {
   font-family: var(--font-mono);
-  overflow-wrap: anywhere;
-}
-
-.remote-comparison-code {
-  margin: 12px 0 18px;
-  font-family: var(--font-mono);
-  font-size: 30px;
-  font-weight: 700;
   letter-spacing: 0.18em;
-}
-
-.remote-project-scope {
-  display: grid;
-  gap: 8px;
-  margin: 12px 0;
-  padding: 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-}
-
-.remote-project-scope label,
-.remote-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.remote-grant-editor {
-  display: grid;
-  gap: 4px;
-}
-
-.remote-grant-editor .settings-card-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.remote-access-preview {
-  display: grid;
-  gap: 6px;
-  margin: 8px 0 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--surface-sunken, transparent);
-}
-
-.remote-access-preview > div {
-  display: grid;
-  gap: 2px;
-}
-
-.remote-access-preview small {
-  color: var(--text-muted);
-}
-
-.remote-pairing-actions,
-.remote-device-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.remote-device {
-  padding: 12px 0;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.remote-device-heading > span,
-.remote-audit-list > div {
-  display: grid;
-  gap: 3px;
-}
-
-.remote-device-heading small,
-.remote-audit-list small {
-  color: var(--text-muted);
-}
-
-.remote-audit-list {
-  display: grid;
-  gap: 10px;
 }

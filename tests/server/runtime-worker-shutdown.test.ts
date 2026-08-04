@@ -18,16 +18,16 @@ function runtimeWithClose(
       unsupportedBackupsSkipped: 0,
     },
     resolveProjectPath: vi.fn(),
-    remoteRequest: vi.fn(async () => {
+    privateConnectRequest: vi.fn(async () => {
       throw new Error("unused");
     }),
-    prepareRemotePrompt: vi.fn(async () => {
+    preparePrivateConnectPrompt: vi.fn(async () => {
       throw new Error("unused");
     }),
-    commitRemotePrompt: vi.fn(() => {
+    commitPrivateConnectPrompt: vi.fn(() => {
       throw new Error("unused");
     }),
-    forgetRemoteTranscripts: vi.fn(),
+    forgetPrivateConnectTranscripts: vi.fn(),
     exportRecoveryData: vi.fn(async () => undefined),
     importRecoveryData: vi.fn(async () => ({
       projects: 0,

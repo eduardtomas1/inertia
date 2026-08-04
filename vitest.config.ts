@@ -56,19 +56,19 @@ export default defineConfig({
           functions: 29,
           lines: 34.5,
         },
-        "src/shared/remote-*.ts": {
+        "src/shared/private-connect/*.ts": {
           statements: 96,
           branches: 91,
           functions: 96,
           lines: 97,
         },
-        "src/server/remote-*.ts": {
+        "src/server/private-connect/*.ts": {
           statements: 84,
           branches: 75,
           functions: 80,
           lines: 87,
         },
-        "src/main/remote-access-*.ts": {
+        "src/main/private-connect/*.ts": {
           statements: 74,
           branches: 69,
           functions: 80,

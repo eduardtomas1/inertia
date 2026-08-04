@@ -13,8 +13,8 @@ import {
 } from "../../src/main/runtime-supervisor";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 import {
-  remoteConversationGrantsFromProjectIds,
-} from "../../src/shared/remote-grants";
+  privateConnectRuntimeGrantsFromProjectIds,
+} from "../../src/shared/private-connect/runtime-grants";
 
 const firstUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
 const secondUrl = `ws://127.0.0.1:41002/runtime/${"b".repeat(43)}`;
@@ -1182,7 +1182,7 @@ describe("RuntimeSupervisor", () => {
     await expect(interrupted).rejects.toThrow("stopped before the project path was resolved");
   });
 
-  it("correlates, times out, and rejects remote requests across runtime generations", async () => {
+  it("correlates, times out, and rejects Private Connect requests across runtime generations", async () => {
     const { children, supervisor } = createHarness();
     supervisor.start();
     children[0].spawn();
@@ -1192,7 +1192,7 @@ describe("RuntimeSupervisor", () => {
       sessionId: crypto.randomUUID(),
       scopes: ["view" as const],
       projectIds: [projectPathRequest.projectId],
-      grants: remoteConversationGrantsFromProjectIds([projectPathRequest.projectId]),
+      grants: privateConnectRuntimeGrantsFromProjectIds([projectPathRequest.projectId]),
       grantVersion: 1,
       expiresAt: "2030-01-01T00:00:00.000Z",
     };
@@ -1200,15 +1200,15 @@ describe("RuntimeSupervisor", () => {
       type: "state.get" as const,
       requestId: crypto.randomUUID(),
     };
-    const resolved = supervisor.remoteRequest(subject, request);
+    const resolved = supervisor.privateConnectRequest(subject, request);
     expect(children[0].messages.at(-1)).toEqual({
-      type: "runtime.remote-request",
+      type: "runtime.private-connect-request",
       requestId: request.requestId,
       subject,
       request,
     });
     children[0].message({
-      type: "runtime.remote-response",
+      type: "runtime.private-connect-response",
       requestId: request.requestId,
       response: {
         type: "response",
@@ -1234,21 +1234,21 @@ describe("RuntimeSupervisor", () => {
       ...subject,
       scopes: ["view" as const, "prompt" as const],
     };
-    const prepared = supervisor.prepareRemotePrompt(
+    const prepared = supervisor.preparePrivateConnectPrompt(
       promptingSubject,
       prompt,
     );
     const prepareCommand = children[0].messages.at(-1);
     expect(prepareCommand).toMatchObject({
-      type: "runtime.remote-prompt-prepare",
+      type: "runtime.private-connect-prompt-prepare",
       subject: promptingSubject,
       request: prompt,
     });
-    if (prepareCommand?.type !== "runtime.remote-prompt-prepare") {
+    if (prepareCommand?.type !== "runtime.private-connect-prompt-prepare") {
       throw new Error("Missing prompt preparation command");
     }
     children[0].message({
-      type: "runtime.remote-prompt-result",
+      type: "runtime.private-connect-prompt-result",
       operationId: prepareCommand.operationId,
       requestId: prompt.requestId,
       phase: "prepare",
@@ -1260,7 +1260,7 @@ describe("RuntimeSupervisor", () => {
     });
 
     const commitPosted = vi.fn();
-    const committed = supervisor.commitRemotePrompt(
+    const committed = supervisor.commitPrivateConnectPrompt(
       promptingSubject,
       prompt,
       "33333333-3333-4333-8333-333333333333",
@@ -1269,15 +1269,15 @@ describe("RuntimeSupervisor", () => {
     expect(commitPosted).toHaveBeenCalledOnce();
     const commitCommand = children[0].messages.at(-1);
     expect(commitCommand).toMatchObject({
-      type: "runtime.remote-prompt-commit",
+      type: "runtime.private-connect-prompt-commit",
       subject: promptingSubject,
       request: prompt,
     });
-    if (commitCommand?.type !== "runtime.remote-prompt-commit") {
+    if (commitCommand?.type !== "runtime.private-connect-prompt-commit") {
       throw new Error("Missing prompt commit command");
     }
     children[0].message({
-      type: "runtime.remote-prompt-result",
+      type: "runtime.private-connect-prompt-result",
       operationId: commitCommand.operationId,
       requestId: prompt.requestId,
       phase: "commit",
@@ -1299,20 +1299,20 @@ describe("RuntimeSupervisor", () => {
       ...request,
       requestId: crypto.randomUUID(),
     };
-    const timed = supervisor.remoteRequest(subject, timedRequest);
+    const timed = supervisor.privateConnectRequest(subject, timedRequest);
     const timedRejection = expect(timed).rejects.toThrow(
-      "remote request timed out",
+      "Private Connect request timed out",
     );
     await vi.advanceTimersByTimeAsync(10_000);
     await timedRejection;
 
-    const interrupted = supervisor.remoteRequest(subject, {
+    const interrupted = supervisor.privateConnectRequest(subject, {
       ...request,
       requestId: crypto.randomUUID(),
     });
     children[0].exit(9);
     await expect(interrupted).rejects.toThrow(
-      "stopped before the remote request completed",
+      "stopped before the Private Connect request completed",
     );
   });
 
@@ -1326,7 +1326,7 @@ describe("RuntimeSupervisor", () => {
       sessionId: crypto.randomUUID(),
       scopes: ["view" as const, "prompt" as const],
       projectIds: [projectPathRequest.projectId],
-      grants: remoteConversationGrantsFromProjectIds([projectPathRequest.projectId]),
+      grants: privateConnectRuntimeGrantsFromProjectIds([projectPathRequest.projectId]),
       grantVersion: 1,
       expiresAt: "2030-01-01T00:00:00.000Z",
     };
@@ -1341,7 +1341,7 @@ describe("RuntimeSupervisor", () => {
     const messagesBeforeCommit = children[0].messages.length;
     const commitPosted = vi.fn();
 
-    await expect(supervisor.commitRemotePrompt(
+    await expect(supervisor.commitPrivateConnectPrompt(
       subject,
       request,
       crypto.randomUUID(),
@@ -1363,13 +1363,13 @@ describe("RuntimeSupervisor", () => {
     children[0].postError = new Error("utility port closed");
     const commitPosted = vi.fn();
 
-    await expect(supervisor.commitRemotePrompt(
+    await expect(supervisor.commitPrivateConnectPrompt(
       {
         deviceId: crypto.randomUUID(),
         sessionId: crypto.randomUUID(),
         scopes: ["view", "prompt"],
         projectIds: [projectPathRequest.projectId],
-        grants: remoteConversationGrantsFromProjectIds([projectPathRequest.projectId]),
+        grants: privateConnectRuntimeGrantsFromProjectIds([projectPathRequest.projectId]),
         grantVersion: 1,
         expiresAt: "2030-01-01T00:00:00.000Z",
       },

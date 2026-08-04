@@ -11,13 +11,18 @@ import { privateConnectRuntimeGrantsFromProjectIds } from "../../../src/shared/p
 import type { PrivateConnectRuntimeAuthorization } from "../../../src/shared/private-connect/runtime-contract";
 
 const directories: string[] = [];
-afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
+const stores: RuntimeStore[] = [];
+afterEach(() => {
+  for (const store of stores.splice(0)) store.close();
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
 
 describe("Private Connect supervised runtime gateway", () => {
   it("projects only granted conversations and never queues an ungranted prompt", async () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-runtime-"));
     directories.push(directory);
     const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+    stores.push(store);
     const project = store.createProject("Allowed", directory);
     const conversation = store.createConversation(project.id, "Allowed chat");
     const secretProject = store.createProject("Hidden", directory);

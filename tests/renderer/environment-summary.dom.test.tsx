@@ -166,6 +166,56 @@ describe("environment summary header popover", () => {
     }
   });
 
+  it("surfaces a pending browser approval outside Settings", async () => {
+    const onOpenConnectionsSettings = vi.fn();
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getPrivateConnectState: vi.fn(async () => ({
+          available: true,
+          enabled: true,
+          status: "ready",
+          statusMessage: null,
+          externalUrl: "https://inertia.tailnet.ts.net",
+          activeSessions: 0,
+          devices: [],
+          pendingPairings: [{
+            requestId: "11111111-1111-4111-8111-111111111111",
+            deviceLabel: "Phone",
+            comparisonCode: "123456",
+            receivedAt: "2030-01-01T00:00:00.000Z",
+            expiresAt: "2030-01-01T00:05:00.000Z",
+            tailnetLabel: "example",
+          }],
+          invitation: null,
+          notice: null,
+          diagnostics: { tailscale: "connected", magicDns: "available", gatewayPort: 1, servePort: 8443, externalUrl: "https://inertia.tailnet.ts.net", mappingOwnership: "owned", errorClass: null },
+        })),
+        onPrivateConnectState: vi.fn(() => vi.fn()),
+      },
+    });
+    try {
+      render(<HeaderHarness
+        activeProject={project}
+        onOpenConnectionsSettings={onOpenConnectionsSettings}
+      />);
+      const indicator = await screen.findByRole("button", {
+        name: "Connections & devices, 1 pairing approval waiting",
+      });
+      expect(indicator).toHaveTextContent("Approve device");
+      const alert = screen.getByRole("alert", {
+        name: "Private Connect pairing approval",
+      });
+      expect(alert).toHaveTextContent("Phone wants to connect");
+      expect(alert).toHaveTextContent("123456");
+      expect(alert).toHaveTextContent("example");
+      screen.getByRole("button", { name: "Review access" }).click();
+      expect(onOpenConnectionsSettings).toHaveBeenCalledOnce();
+    } finally {
+      Reflect.deleteProperty(window, "inertia");
+    }
+  });
+
   it("closes when the user clicks outside", async () => {
     render(<HeaderHarness />);
     fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));

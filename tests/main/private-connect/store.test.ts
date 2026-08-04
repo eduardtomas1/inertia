@@ -22,6 +22,7 @@ function value(): PersistedPrivateConnect {
     servePort: null,
     serveTarget: null,
     grantGeneration: 1,
+    pendingAuthorityReduction: null,
     devices: [],
     sessions: [],
     deliveryReceipts: [],
@@ -61,9 +62,9 @@ describe("Private Connect encrypted store", () => {
     await expect(corrupt.load()).rejects.toThrow("encrypted Private Connect store could not be opened");
   });
 
-  it("appends restart reconciliation and delivery fields when reading the prior schema", async () => {
-    let encoded = Buffer.from(JSON.stringify({ ...value(), serveTarget: undefined, deliveryReceipts: undefined }, (_key, current) => current === undefined ? undefined : current)).toString("base64");
+  it("appends restart reconciliation, reduction, and delivery fields when reading the prior schema", async () => {
+    let encoded = Buffer.from(JSON.stringify({ ...value(), serveTarget: undefined, pendingAuthorityReduction: undefined, deliveryReceipts: undefined }, (_key, current) => current === undefined ? undefined : current)).toString("base64");
     const store = new PrivateConnectStore("/tmp/private-connect-test.vault", encryption(), { read: async () => encoded, write: async (next: string) => { encoded = next; } });
-    expect(await store.load()).toMatchObject({ serveTarget: null, deliveryReceipts: [] });
+    expect(await store.load()).toMatchObject({ serveTarget: null, pendingAuthorityReduction: null, deliveryReceipts: [] });
   });
 });

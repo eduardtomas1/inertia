@@ -47,6 +47,7 @@ export interface PrivateConnectGatewayHost {
   csrf(session: PrivateConnectSession): string;
   issueWebSocketTicket(session: PrivateConnectSession): string;
   handleRequest(session: PrivateConnectSession, request: PrivateConnectRequest): Promise<PrivateConnectResponse>;
+  openSession?(session: PrivateConnectSession): Promise<void> | void;
   logout(session: PrivateConnectSession): Promise<void>;
   closeSession(session: PrivateConnectSession): Promise<void>;
 }
@@ -56,6 +57,7 @@ export interface PrivateConnectGatewayServerOptions {
   staticRoot: string;
   buildVersion: string;
   maxBodyBytes?: number;
+  requestTimeoutMs?: number;
   now?: () => Date;
 }
 
@@ -67,20 +69,29 @@ export class PrivateConnectGatewayServer {
   private readonly staticRoot: string;
   private readonly buildVersion: string;
   private readonly maxBodyBytes: number;
+  private readonly requestTimeoutMs: number;
   private readonly now: () => Date;
   private addressValue: { port: number; host: string } | null = null;
   private stopped = false;
   private readonly socketSessions = new Map<WebSocket, PrivateConnectSession>();
   private readonly admissions = new Map<string, number[]>();
+  private readonly inFlightBySession = new Map<string, number>();
 
   constructor(options: PrivateConnectGatewayServerOptions) {
     this.host = options.host;
     this.staticRoot = options.staticRoot;
     this.buildVersion = options.buildVersion;
     this.maxBodyBytes = Math.max(1_024, Math.min(options.maxBodyBytes ?? PRIVATE_CONNECT_LIMITS.bodyBytes, PRIVATE_CONNECT_LIMITS.bodyBytes));
+    this.requestTimeoutMs = Math.max(25, Math.min(options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS));
     this.now = options.now ?? (() => new Date());
     this.server = createServer((request, response) => {
-      void this.handleHttp(request, response);
+      void this.handleHttp(request, response).catch(() => {
+        if (!response.headersSent) {
+          writeJson(response, 500, { error: "unavailable", message: "Private Connect could not complete the request." });
+        } else if (!response.writableEnded) {
+          response.destroy();
+        }
+      });
     });
     this.websocketServer = new WebSocketServer({
       noServer: true,
@@ -131,6 +142,7 @@ export class PrivateConnectGatewayServer {
     for (const socket of this.sockets) socket.close(1001, "Private Connect is stopping");
     this.sockets.clear();
     this.socketSessions.clear();
+    this.inFlightBySession.clear();
     this.websocketServer.close();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
     this.addressValue = null;
@@ -140,8 +152,14 @@ export class PrivateConnectGatewayServer {
     for (const [socket, session] of this.socketSessions) if (session.deviceId === deviceId) socket.close(1008, "Private Connect access changed");
   }
 
-  closeAllSessions(): void {
-    for (const socket of this.sockets) socket.close(1008, "Private Connect access changed");
+  closeAllSessions(code = 1008, reason = "Private Connect access changed"): void {
+    for (const socket of this.sockets) socket.close(code, reason);
+  }
+
+  activeSessionCount(): number {
+    return new Set(
+      [...this.socketSessions.values()].map((session) => session.id),
+    ).size;
   }
 
   closeSession(sessionId: string): void {
@@ -247,7 +265,16 @@ export class PrivateConnectGatewayServer {
         writeJson(response, 400, { error: "invalid", message: "The Private Connect request schema is invalid." });
         return;
       }
-      await this.respondWithRequest(response, session, parsed.data);
+      const release = this.beginSessionRequest(session);
+      if (!release) {
+        writeJson(response, 200, busyResponse(parsed.data.requestId));
+        return;
+      }
+      const operation = Promise.resolve().then(async () =>
+        await this.host.handleRequest(session, parsed.data)
+      );
+      void operation.then(release, release);
+      await this.respondWithRequest(response, parsed.data, operation);
       return;
     }
     writeJson(response, 404, { error: "not-found", message: "The Private Connect endpoint was not found." });
@@ -291,12 +318,25 @@ export class PrivateConnectGatewayServer {
     }
   }
 
-  private async respondWithRequest(response: ServerResponse, session: PrivateConnectSession, request: PrivateConnectRequest): Promise<void> {
+  private async respondWithRequest(
+    response: ServerResponse,
+    request: PrivateConnectRequest,
+    operation: Promise<PrivateConnectResponse>,
+  ): Promise<void> {
     try {
-      const result = await withTimeout(this.host.handleRequest(session, request), REQUEST_TIMEOUT_MS);
+      const result = await withTimeout(operation, this.requestTimeoutMs);
       writeJson(response, 200, result);
     } catch {
-      writeJson(response, 503, { type: "response", requestId: request.requestId, ok: false, code: "unavailable", message: "The local runtime is unavailable." });
+      const promptMayHaveCommitted = request.type === "prompt.send";
+      writeJson(response, promptMayHaveCommitted ? 200 : 503, {
+        type: "response",
+        requestId: request.requestId,
+        ok: false,
+        code: promptMayHaveCommitted ? "uncertain" : "unavailable",
+        message: promptMayHaveCommitted
+          ? "Prompt delivery is uncertain. Check the desktop before retrying."
+          : "The local runtime is unavailable.",
+      });
     }
   }
 
@@ -324,6 +364,7 @@ export class PrivateConnectGatewayServer {
   private attachSocket(socket: WebSocket, request: IncomingMessage, session: PrivateConnectSession): void {
     this.sockets.add(socket);
     this.socketSessions.set(socket, session);
+    void Promise.resolve(this.host.openSession?.(session)).catch(() => undefined);
     const requestTimes: number[] = [];
     let lastActivity = this.now().getTime();
     const heartbeat = setInterval(() => {
@@ -354,11 +395,16 @@ export class PrivateConnectGatewayServer {
         socket.close(1008, "Invalid request");
         return;
       }
+      const release = this.beginSessionRequest(session);
+      if (!release) {
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(busyResponse(requestValue.data.requestId)));
+        return;
+      }
       void this.host.handleRequest(session, requestValue.data).then((result) => {
         if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(result));
       }).catch(() => {
         if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "response", requestId: requestValue.data.requestId, ok: false, code: "unavailable", message: "The local runtime is unavailable." } satisfies PrivateConnectResponse));
-      });
+      }).finally(release);
     });
     socket.once("close", () => {
       clearInterval(heartbeat);
@@ -460,6 +506,20 @@ export class PrivateConnectGatewayServer {
     return true;
   }
 
+  private beginSessionRequest(session: PrivateConnectSession): (() => void) | null {
+    const current = this.inFlightBySession.get(session.id) ?? 0;
+    if (current >= PRIVATE_CONNECT_LIMITS.inFlightRequestsPerSession) return null;
+    this.inFlightBySession.set(session.id, current + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const next = (this.inFlightBySession.get(session.id) ?? 1) - 1;
+      if (next <= 0) this.inFlightBySession.delete(session.id);
+      else this.inFlightBySession.set(session.id, next);
+    };
+  }
+
 }
 
 function parseUrl(request: IncomingMessage): URL | null {
@@ -558,6 +618,16 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
     timer.unref?.();
     promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
   });
+}
+
+function busyResponse(requestId: string): PrivateConnectResponse {
+  return {
+    type: "response",
+    requestId,
+    ok: false,
+    code: "busy",
+    message: "Too many Private Connect requests are already in progress.",
+  };
 }
 
 function isJsonMutation(request: IncomingMessage, url: URL): boolean {

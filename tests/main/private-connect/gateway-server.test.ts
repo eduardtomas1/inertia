@@ -10,7 +10,7 @@ import {
   type PrivateConnectGatewayHost,
   type PrivateConnectSession,
 } from "../../../src/main/private-connect/gateway-server";
-import type { PrivateConnectRequest, PrivateConnectResponse } from "../../../src/shared/private-connect/protocol";
+import { PRIVATE_CONNECT_LIMITS, type PrivateConnectRequest, type PrivateConnectResponse } from "../../../src/shared/private-connect/protocol";
 
 const session: PrivateConnectSession = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -117,5 +117,127 @@ describe("Private Connect loopback gateway", () => {
     expect(responses.at(-1)?.status).toBe(429);
     nowValue += 61_000;
     expect((await request("44444444-4444-4444-8444-444444444444")).status).toBe(200);
+  });
+
+  it("bounds concurrent work per authenticated session", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-inflight-"));
+    writeFileSync(join(root, "index.html"), "<html>ok</html>");
+    const releases: Array<() => void> = [];
+    let admitted = 0;
+    const blockingHost: PrivateConnectGatewayHost = {
+      ...host(),
+      handleRequest: async (_session, request) => {
+        admitted += 1;
+        await new Promise<void>((resolve) => releases.push(resolve));
+        return {
+          type: "response",
+          requestId: request.requestId,
+          ok: true,
+          result: { kind: "pong", at: "2030-01-01T00:00:00.000Z" },
+        };
+      },
+    };
+    const server = new PrivateConnectGatewayServer({
+      host: blockingHost,
+      staticRoot: root,
+      buildVersion: "0.0.24",
+    });
+    servers.push(server);
+    const address = await server.start();
+    const hostValue = hostHeader(address);
+    const origin = `https://${hostValue}`;
+    const request = (suffix: string) => fetch(`http://${hostValue}/api/request`, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: "__Host-inertia-private-connect=session-token",
+        "Content-Type": "application/json",
+        "x-inertia-private-connect-csrf": session.csrf,
+      },
+      body: JSON.stringify({
+        protocolVersion: 1,
+        type: "client.ping",
+        requestId: `33333333-3333-4333-8333-${suffix.padStart(12, "0")}`,
+      }),
+    });
+    const active = Array.from({ length: 8 }, (_, index) => request(String(index + 1)));
+    await expect.poll(() => admitted).toBe(8);
+    const overflow = await request("9");
+    expect(overflow.status).toBe(200);
+    await expect(overflow.json()).resolves.toMatchObject({
+      ok: false,
+      code: "busy",
+    });
+    releases.splice(0).forEach((release) => release());
+    await expect(Promise.all(active)).resolves.toHaveLength(8);
+  });
+
+  it("keeps timed-out runtime work inside the in-flight bound until it settles", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-timeout-inflight-"));
+    writeFileSync(join(root, "index.html"), "<html>ok</html>");
+    const releases: Array<() => void> = [];
+    let admitted = 0;
+    let completed = 0;
+    const blockingHost: PrivateConnectGatewayHost = {
+      ...host(),
+      handleRequest: async (_session, request) => {
+        admitted += 1;
+        if (admitted <= PRIVATE_CONNECT_LIMITS.inFlightRequestsPerSession) {
+          await new Promise<void>((resolve) => releases.push(resolve));
+        }
+        completed += 1;
+        return {
+          type: "response",
+          requestId: request.requestId,
+          ok: true,
+          result: { kind: "pong", at: "2030-01-01T00:00:00.000Z" },
+        };
+      },
+    };
+    const server = new PrivateConnectGatewayServer({
+      host: blockingHost,
+      staticRoot: root,
+      buildVersion: "0.0.24",
+      requestTimeoutMs: 25,
+    });
+    servers.push(server);
+    const address = await server.start();
+    const hostValue = hostHeader(address);
+    const origin = `https://${hostValue}`;
+    const request = (suffix: string) => fetch(`http://${hostValue}/api/request`, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: "__Host-inertia-private-connect=session-token",
+        "Content-Type": "application/json",
+        "x-inertia-private-connect-csrf": session.csrf,
+      },
+      body: JSON.stringify({
+        protocolVersion: 1,
+        type: "client.ping",
+        requestId: `33333333-3333-4333-8333-${suffix.padStart(12, "0")}`,
+      }),
+    });
+
+    const timedOut = await Promise.all(
+      Array.from(
+        { length: PRIVATE_CONNECT_LIMITS.inFlightRequestsPerSession },
+        (_, index) => request(String(index + 1)),
+      ),
+    );
+    expect(timedOut.every((response) => response.status === 503)).toBe(true);
+    expect(admitted).toBe(PRIVATE_CONNECT_LIMITS.inFlightRequestsPerSession);
+    const overflow = await request("9");
+    await expect(overflow.json()).resolves.toMatchObject({
+      ok: false,
+      code: "busy",
+    });
+    expect(admitted).toBe(PRIVATE_CONNECT_LIMITS.inFlightRequestsPerSession);
+
+    releases.splice(0).forEach((release) => release());
+    await expect.poll(() => completed).toBe(PRIVATE_CONNECT_LIMITS.inFlightRequestsPerSession);
+    const afterDrain = await request("10");
+    expect(afterDrain.status).toBe(200);
+    expect(admitted).toBe(PRIVATE_CONNECT_LIMITS.inFlightRequestsPerSession + 1);
   });
 });

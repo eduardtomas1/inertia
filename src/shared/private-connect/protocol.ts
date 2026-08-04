@@ -26,6 +26,7 @@ export const PRIVATE_CONNECT_LIMITS = Object.freeze({
   projectIds: 64,
   sessions: 8,
   requestsPerMinute: 120,
+  inFlightRequestsPerSession: 8,
   pairingAttemptsPerMinute: 10,
   pairingTtlMs: 5 * 60 * 1_000,
   sessionTtlMs: 30 * 24 * 60 * 60 * 1_000,
@@ -140,6 +141,26 @@ export type PrivateConnectSafeMessage = z.infer<
   typeof privateConnectSafeMessageSchema
 >;
 
+export const privateConnectSafeActivitySchema = z.object({
+  id: entityId,
+  turnId: entityId.nullable(),
+  kind: z.enum(["status", "tool", "command", "file", "reasoning", "error"]),
+  title: z.string().max(240),
+  status: z.enum(["running", "completed", "failed"]),
+  createdAt: timestamp,
+}).strict();
+
+export const privateConnectSafeSubagentSchema = z.object({
+  id: entityId,
+  turnId: entityId,
+  providerLabel: z.string().max(240),
+  name: z.string().max(240).nullable(),
+  status: z.string().max(240),
+  description: z.string().max(64 * 1024).nullable(),
+  progress: z.string().max(64 * 1024).nullable(),
+  updatedAt: timestamp,
+}).strict();
+
 export const privateConnectSafeQuestionSchema = z.object({
   id: uuid,
   label: z.string().max(240),
@@ -169,6 +190,14 @@ export const privateConnectConversationDetailSchema = z.object({
   generatedAt: timestamp,
   conversation: privateConnectSafeConversationSchema,
   messages: z.array(privateConnectSafeMessageSchema).max(200),
+  activities: z.array(privateConnectSafeActivitySchema).max(200).optional(),
+  subagents: z.array(privateConnectSafeSubagentSchema).max(64).optional(),
+  plan: z.object({
+    steps: z.array(z.object({
+      label: z.string().max(240),
+      status: z.enum(["pending", "inProgress", "completed"]),
+    }).strict()).max(100),
+  }).strict().nullable().optional(),
   questions: z.array(privateConnectSafeQuestionSchema).max(32),
   waitingForLocalAction: z.boolean(),
 }).strict();
@@ -220,6 +249,16 @@ export interface PrivateConnectDiagnostics {
   mappingOwnership: "owned" | "missing" | "unrelated" | "unknown";
   errorClass: string | null;
   setupUrl?: string | null;
+  buildVersion?: string;
+  protocolVersion?: number;
+}
+
+export interface PrivateConnectAuditEventView {
+  id: string;
+  type: string;
+  deviceId: string | null;
+  detail: string;
+  createdAt: string;
 }
 
 export interface PrivateConnectStateView {
@@ -234,6 +273,7 @@ export interface PrivateConnectStateView {
   invitation: { url: string; expiresAt: string } | null;
   notice: string | null;
   diagnostics: PrivateConnectDiagnostics;
+  audit?: PrivateConnectAuditEventView[];
 }
 
 export type PrivateConnectResponse =

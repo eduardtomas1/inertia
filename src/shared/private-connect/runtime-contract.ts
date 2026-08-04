@@ -106,6 +106,12 @@ export const privateConnectRuntimeSafeConversationDetailSchema = z.object({
   messages: z.array(privateConnectRuntimeSafeMessageSchema).max(PRIVATE_CONNECT_RUNTIME_LIMITS.transcriptMessages),
   activities: z.array(privateConnectRuntimeSafeActivitySchema).max(PRIVATE_CONNECT_RUNTIME_LIMITS.activities),
   subagents: z.array(privateConnectRuntimeSafeSubagentSchema).max(PRIVATE_CONNECT_RUNTIME_LIMITS.subagents),
+  plan: z.object({
+    steps: z.array(z.object({
+      label: safeLabel,
+      status: z.enum(["pending", "inProgress", "completed"]),
+    }).strict()).max(100),
+  }).strict().nullable().optional(),
   inputRequestId: uuid.nullable().optional(),
   questions: z.array(z.object({
     id: uuid,

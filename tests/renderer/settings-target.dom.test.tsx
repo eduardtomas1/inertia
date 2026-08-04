@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 
@@ -20,16 +20,33 @@ describe("Settings external section targets", () => {
       externalUrl: null,
       diagnostics: { tailscale: "unknown", magicDns: "unknown", gatewayPort: null, servePort: null, externalUrl: null, mappingOwnership: "unknown", errorClass: null },
       activeSessions: 0,
-      devices: [],
+      devices: [{
+        id: "11111111-1111-4111-8111-111111111111",
+        label: "Phone",
+        preset: "monitor",
+        scopes: ["private:read"],
+        projectIds: ["22222222-2222-4222-8222-222222222222"],
+        grants: [{
+          projectId: "22222222-2222-4222-8222-222222222222",
+          conversationIds: [],
+          includeFutureConversations: true,
+        }],
+        createdAt: "2026-08-04T10:00:00.000Z",
+        expiresAt: "2030-09-01T10:00:00.000Z",
+        lastSeenAt: null,
+        revokedAt: null,
+      }],
       pendingPairings: [],
       invitation: null,
       notice: null,
     };
+    const updatePrivateConnectDevice = vi.fn(async () => state);
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
         getPrivateConnectState: vi.fn(async () => state),
         onPrivateConnectState: vi.fn(() => vi.fn()),
+        updatePrivateConnectDevice,
       },
     });
     const providersTarget = { section: "providers" as const };
@@ -95,6 +112,17 @@ describe("Settings external section targets", () => {
     expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
       "Inertia Private Connect",
     );
+    fireEvent.change(await screen.findByLabelText("Phone access"), {
+      target: { value: "collaborate" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save access" }));
+    await waitFor(() => expect(updatePrivateConnectDevice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceId: "11111111-1111-4111-8111-111111111111",
+        preset: "collaborate",
+        projectIds: ["22222222-2222-4222-8222-222222222222"],
+      }),
+    ));
 
     fireEvent.click(screen.getByRole("button", { name: "General" }));
     view.rerender(<SettingsView {...props} target={connectionsTarget} disabled />);

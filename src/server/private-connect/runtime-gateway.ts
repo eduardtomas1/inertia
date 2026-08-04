@@ -269,6 +269,7 @@ export class PrivateConnectRuntimeGateway {
               progress: null,
               updatedAt: subagent.updatedAt,
             })),
+          plan: safePrivateConnectPlan(detail.plans.at(-1)),
           questions: safePrivateConnectQuestions(
             this.dependencies.inputs?.(),
             request.conversationId,
@@ -584,6 +585,18 @@ export class PrivateConnectRuntimeGateway {
       }
     }
   }
+}
+
+function safePrivateConnectPlan(
+  plan: ConversationDetail["plans"][number] | undefined,
+): { steps: Array<{ label: string; status: "pending" | "inProgress" | "completed" }> } | null {
+  if (!plan) return null;
+  return {
+    steps: plan.steps.slice(0, 100).map((step) => ({
+      label: sanitizePrivateConnectLabel(step.step) ?? "Plan step",
+      status: step.status,
+    })),
+  };
 }
 
 function safePrivateConnectQuestions(

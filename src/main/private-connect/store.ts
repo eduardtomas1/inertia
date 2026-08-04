@@ -69,6 +69,7 @@ const privateConnectAuditSchema = z.object({
     "pairing.denied",
     "device.revoked",
     "device.scope-changed",
+    "authority.recovered",
     "session.connected",
     "session.disconnected",
     "prompt.accepted",
@@ -87,6 +88,10 @@ const privateConnectStoreSchema = z.object({
   servePort: z.number().int().min(1).max(65_535).nullable(),
   serveTarget: z.string().regex(/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/u).nullable().default(null),
   grantGeneration: z.number().int().positive(),
+  pendingAuthorityReduction: z.object({
+    generation: z.number().int().positive(),
+    createdAt: timestamp,
+  }).strict().nullable().default(null),
   devices: z.array(privateConnectDeviceSchema).max(16),
   sessions: z.array(privateConnectSessionSchema).max(PRIVATE_CONNECT_LIMITS.sessions),
   deliveryReceipts: z.array(privateConnectDeliveryReceiptSchema).max(512).default([]),
@@ -130,6 +135,10 @@ export interface PersistedPrivateConnect {
   servePort: number | null;
   serveTarget: string | null;
   grantGeneration: number;
+  pendingAuthorityReduction?: {
+    generation: number;
+    createdAt: string;
+  } | null;
   devices: PrivateConnectDevice[];
   sessions: PrivateConnectSessionRecord[];
   deliveryReceipts: PrivateConnectDeliveryReceipt[];

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const closeListeners = new Set<(code: number) => void>();
@@ -20,11 +20,13 @@ vi.mock("../../src/renderer/private-connect/src/connection", () => ({
 }));
 
 import App from "../../src/renderer/private-connect/src/App";
+import { connectPrivateConnectSocket } from "../../src/renderer/private-connect/src/connection";
 
 afterEach(() => {
   closeListeners.clear();
   notifyClose = null;
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("Private Connect browser lifecycle", () => {
@@ -36,5 +38,19 @@ describe("Private Connect browser lifecycle", () => {
     notifyClose?.(1008);
     await waitFor(() => expect(screen.getByText("This browser no longer has access. Pair it again from the desktop.")).toBeInTheDocument());
     expect(screen.queryByRole("heading", { name: "Your workspace" })).not.toBeInTheDocument();
+  });
+
+  it("keeps cached workspace data and retries after a temporary host pause", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    render(<App initialPairingFragment={null} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
+    await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
+    const initialConnectCalls = vi.mocked(connectPrivateConnectSocket).mock.calls.length;
+    vi.useFakeTimers();
+    act(() => notifyClose?.(1012));
+    expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument();
+    expect(screen.queryByText(/pair it again/iu)).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(vi.mocked(connectPrivateConnectSocket)).toHaveBeenCalledTimes(initialConnectCalls + 1);
   });
 });

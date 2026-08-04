@@ -109,6 +109,8 @@ Inertia Private Connect is an opt-in, Tailscale-only companion for a running des
 
 Open **Settings → Connections & devices** to enable it, create a five-minute fragment-only pairing link or QR code, and approve the browser from the desktop. Each paired device receives an explicit Monitor or Collaborate grant for selected projects. Monitor is read-only; Collaborate can send a prompt to an existing supervised conversation, answer non-secret agent questions, and stop an active run.
 
+The desktop must remain online and unlocked. Locking it pauses live access but preserves a non-expired encrypted browser grant for reconnect after unlock; disabling Private Connect revokes active sessions. Project scope, access level, expiry, and revocation remain editable from the desktop.
+
 The packaged React PWA never receives credentials, files, terminals, approvals, provider settings, Git operations, secrets, Full Access, or arbitrary command execution. Pairing is single-use and device approval is explicit. App cookies are `Secure`, `HttpOnly`, and `SameSite=Strict`; state-changing requests require a same-origin check and CSRF token, while WebSocket access uses a short-lived single-use ticket. Transcript output is sanitized and bounded before it leaves the supervised runtime.
 
 See the [Private Connect guide](docs/PRIVATE_CONNECT.md), [security model](docs/PRIVATE_CONNECT_SECURITY.md), and [internals](docs/PRIVATE_CONNECT_INTERNALS.md). The implemented [database recovery model](docs/DATABASE_RECOVERY.md), [data-throughput design](docs/DATA_THROUGHPUT.md), [renderer isolation](docs/RENDERER_ISOLATION.md), and [security boundary coverage expectations](docs/SECURITY_BOUNDARY_COVERAGE.md) are documented separately.

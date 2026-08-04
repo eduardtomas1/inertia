@@ -32,6 +32,7 @@ describe("Private Connect browser lifecycle", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
     render(<App initialPairingFragment={null} />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
+    await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
     notifyClose?.(1008);
     await waitFor(() => expect(screen.getByText("This browser no longer has access. Pair it again from the desktop.")).toBeInTheDocument());
     expect(screen.queryByRole("heading", { name: "Your workspace" })).not.toBeInTheDocument();

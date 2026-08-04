@@ -49,7 +49,11 @@ export async function jsonRequest<T>(path: string, body: unknown, csrf?: string)
     body: JSON.stringify(body),
   });
   const value = await response.json() as T & { message?: string };
-  if (!response.ok) throw new Error(value.message ?? "Private Connect request failed.");
+  if (!response.ok) {
+    const error = new Error(value.message ?? "Private Connect request failed.") as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
   return value;
 }
 
@@ -59,7 +63,7 @@ export async function apiRequest(request: PrivateConnectRequest, csrf: string): 
 
 export interface PrivateConnectSocket {
   request(request: PrivateConnectRequest): Promise<PrivateConnectResponse>;
-  onClose(listener: () => void): () => void;
+  onClose(listener: (code: number) => void): () => void;
   close(): void;
 }
 
@@ -71,7 +75,7 @@ export async function connectPrivateConnectSocket(csrf: string): Promise<Private
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(`${protocol}//${window.location.host}/api/ws?ticket=${encodeURIComponent(ticket.ticket)}`);
   const pending = new Map<string, { resolve(response: PrivateConnectResponse): void; reject(error: Error): void; timer: number }>();
-  const closeListeners = new Set<() => void>();
+  const closeListeners = new Set<(code: number) => void>();
   let opened = false;
   let openingResolve: (() => void) | null = null;
   let openingReject: ((error: Error) => void) | null = null;
@@ -109,10 +113,10 @@ export async function connectPrivateConnectSocket(csrf: string): Promise<Private
     if (!opened) openingReject?.(new Error("Private Connect could not open a live connection."));
     failPending("The Private Connect live connection failed.");
   };
-  socket.onclose = () => {
+  socket.onclose = (event) => {
     if (!opened) openingReject?.(new Error("Private Connect could not open a live connection."));
     failPending("The Private Connect live connection closed.");
-    for (const listener of closeListeners) listener();
+    for (const listener of closeListeners) listener(event.code);
     closeListeners.clear();
   };
   try {

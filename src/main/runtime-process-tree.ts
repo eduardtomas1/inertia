@@ -11,6 +11,7 @@ const PROCESS_TREE_POLL_MS = 10;
 
 interface RuntimeTreeDependencies {
   platform: NodeJS.Platform;
+  rootProcessGroup: boolean;
   kill: typeof process.kill;
   spawnProcessSync: typeof spawnSync;
   environment: NodeJS.ProcessEnv;
@@ -119,7 +120,7 @@ export async function forceKillRuntimeProcessTree(
   const killed = forceKillPosixProcessTreeWithStatus(runtimePid, {
     kill,
     spawnProcessSync,
-    rootProcessGroup: false,
+    rootProcessGroup: dependencies.rootProcessGroup ?? false,
     deadlineAt,
     now,
   });

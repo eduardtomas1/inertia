@@ -76,7 +76,7 @@ export async function runTailscaleCommand(
       if (settled || terminationStarted) return;
       terminationStarted = true;
       if (!child.pid) { finish(error, undefined, true); return; }
-      void forceKillRuntimeProcessTree(child.pid, { environment: sanitizedEnvironment(options.env ?? process.env) }).then(
+      void forceKillRuntimeProcessTree(child.pid, { rootProcessGroup: true, environment: sanitizedEnvironment(options.env ?? process.env) }).then(
         (confirmed) => finish(confirmed ? error : new TailscaleCommandError("unknown", "Tailscale process cleanup could not be confirmed."), undefined, true),
         () => finish(new TailscaleCommandError("unknown", "Tailscale process cleanup could not be confirmed."), undefined, true),
       );

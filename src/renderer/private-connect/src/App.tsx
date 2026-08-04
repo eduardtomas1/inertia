@@ -99,10 +99,22 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
         const next = await connectPrivateConnectSocket(readyCsrf);
         if (cancelled) { next.close(); return; }
         current = next;
-        unsubscribeClose = next.onClose(retry);
+        unsubscribeClose = next.onClose((code) => {
+          if (code === 1008) {
+            setShell(null);
+            setDetail(null);
+            setSelectedConversation(null);
+            setPair({ kind: "pair", invitation: null, error: "This browser no longer has access. Pair it again from the desktop." });
+          } else retry();
+        });
         setSocket(next);
-      } catch {
-        retry();
+      } catch (error) {
+        if (isUnauthorized(error)) {
+          setShell(null);
+          setDetail(null);
+          setSelectedConversation(null);
+          setPair({ kind: "pair", invitation: null, error: "This browser no longer has access. Pair it again from the desktop." });
+        } else retry();
       }
     };
     void connect();
@@ -127,7 +139,9 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
         if (cancelled) return;
         if (status.status === "approved") void loadSession();
         else if (status.status === "denied" || status.status === "expired") setPair({ kind: "pair", invitation: null, error: "Pairing was not approved." });
-      }).catch(() => undefined);
+      }).catch((error) => {
+        if (!cancelled) setPair({ kind: "pair", invitation: null, error: error instanceof Error ? error.message : "Pairing status is unavailable." });
+      });
     }, 1_000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [pair, loadSession]);
@@ -235,4 +249,8 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
 function suggestedDeviceLabel(): string {
   const platform = navigator.platform || "browser";
   return platform.slice(0, 64);
+}
+
+function isUnauthorized(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "status" in error && (error as { status?: unknown }).status === 401);
 }

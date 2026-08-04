@@ -116,6 +116,8 @@ export type DatabaseValidation =
   | "unsupported-future"
   | "corrupt";
 
+type AutomaticBackupTrigger = "hourly" | "initial" | "retry";
+
 export class DatabaseBackupCancelledError extends Error {
   constructor() {
     super("The database backup was cancelled.");
@@ -661,14 +663,19 @@ export function recoverDatabaseOnStartup(
 export class DatabaseBackupManager {
   private timer: NodeJS.Timeout | null = null;
   private initialTimer: NodeJS.Timeout | null = null;
-  private quietTimer: NodeJS.Timeout | null = null;
+  private automaticTimer: NodeJS.Timeout | null = null;
+  private automaticTimerDeadline = 0;
   private inFlight: Promise<DatabaseBackupResult> | null = null;
   private inFlightAbort: AbortController | null = null;
   private started = false;
   private initialBackupComplete = false;
   private initialEligible = false;
-  private initialRetryAttempt = 0;
-  private initialObservedOperation: Promise<DatabaseBackupResult> | null = null;
+  private automaticRetryAttempt = 0;
+  private automaticObservedOperation: Promise<DatabaseBackupResult> | null = null;
+  private readonly pendingAutomaticTriggers = new Set<AutomaticBackupTrigger>();
+  private lastPublicationAt = Number.NEGATIVE_INFINITY;
+  private quietUntil = 0;
+  private retryNotBefore = 0;
   private pendingInitial:
     { promise: Promise<DatabaseBackupResult | null>; resolve: (result: DatabaseBackupResult | null) => void; reject: (error: unknown) => void } | null = null;
   private lastValidatedAt: string | null;
@@ -693,9 +700,7 @@ export class DatabaseBackupManager {
       Math.trunc(this.options.intervalMs ?? DATABASE_BACKUP_INTERVAL_MS),
     );
     this.timer = setInterval(() => {
-      void this.createBackup().catch((error: unknown) => {
-        this.options.onError?.(error);
-      });
+      this.requestAutomaticBackup("hourly");
     }, intervalMs);
     this.timer.unref();
   }
@@ -706,10 +711,7 @@ export class DatabaseBackupManager {
       clearTimeout(this.initialTimer);
       this.initialTimer = null;
     }
-    if (this.quietTimer) {
-      clearTimeout(this.quietTimer);
-      this.quietTimer = null;
-    }
+    this.clearAutomaticTimer();
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -721,7 +723,12 @@ export class DatabaseBackupManager {
       clearTimeout(this.initialTimer);
       this.initialTimer = null;
     }
-    if (this.inFlight) return this.inFlight;
+    if (this.inFlight) {
+      if (this.pendingAutomaticTriggers.size > 0) {
+        this.observeAutomaticOperation(this.inFlight);
+      }
+      return this.inFlight;
+    }
     const controller = new AbortController();
     const operation = this.createBackupOnce(controller.signal);
     this.inFlight = operation;
@@ -735,6 +742,9 @@ export class DatabaseBackupManager {
         }
       }
     }).catch(() => undefined);
+    if (this.pendingAutomaticTriggers.size > 0) {
+      this.observeAutomaticOperation(operation);
+    }
     return operation;
   }
 
@@ -747,19 +757,16 @@ export class DatabaseBackupManager {
    * A caller may provide a small grace period after the last active turn.
    */
   requestInitialBackup(quietGraceMs = 0): Promise<DatabaseBackupResult | null> {
+    if (quietGraceMs > 0) this.restartQuietGrace(quietGraceMs);
     if (this.initialBackupComplete) return Promise.resolve(null);
-    if (!this.initialEligible) this.initialRetryAttempt = 0;
+    if (!this.initialEligible) this.automaticRetryAttempt = 0;
     this.initialEligible = true;
     if (this.initialTimer) {
       clearTimeout(this.initialTimer);
       this.initialTimer = null;
     }
     const pending = this.pendingInitial ?? this.createPendingInitial();
-    if (quietGraceMs > 0) {
-      this.scheduleQuietRetry(quietGraceMs);
-    } else {
-      this.tryStartInitialBackup();
-    }
+    this.requestAutomaticBackup("initial");
     return pending.promise;
   }
 
@@ -769,6 +776,9 @@ export class DatabaseBackupManager {
 
   async cancelAndWait(): Promise<void> {
     this.stop();
+    this.pendingAutomaticTriggers.clear();
+    this.quietUntil = 0;
+    this.retryNotBefore = 0;
     this.rejectPendingInitial(new DatabaseBackupCancelledError());
     const operation = this.inFlight;
     this.inFlightAbort?.abort();
@@ -818,9 +828,11 @@ export class DatabaseBackupManager {
         size: statSync(finalPath).size,
       };
       this.lastValidatedAt = result.createdAt;
+      this.lastPublicationAt = Date.now();
       this.initialBackupComplete = true;
       this.initialEligible = false;
-      this.initialRetryAttempt = 0;
+      this.automaticRetryAttempt = 0;
+      this.retryNotBefore = 0;
       this.resolvePendingInitial(result);
       try {
         this.options.onCreated?.(result);
@@ -850,7 +862,7 @@ export class DatabaseBackupManager {
     this.initialTimer = setTimeout(() => {
       this.initialTimer = null;
       void this.requestInitialBackup().catch((error: unknown) => {
-        this.options.onError?.(error);
+        if (error instanceof DatabaseBackupCancelledError) return;
       });
     }, delayMs);
     this.initialTimer.unref();
@@ -879,68 +891,117 @@ export class DatabaseBackupManager {
     pending?.reject(error);
   }
 
-  private tryStartInitialBackup(): void {
-    if (
-      !this.initialEligible
-      || this.initialBackupComplete
-      || this.quietTimer
-    ) return;
+  private requestAutomaticBackup(trigger: AutomaticBackupTrigger): void {
+    if (!this.started) return;
+    if (trigger === "initial" && this.initialBackupComplete) return;
+    if (Date.now() - this.lastPublicationAt < this.quietGraceMs()) return;
+    if (this.pendingAutomaticTriggers.size === 0 && trigger !== "retry") {
+      this.automaticRetryAttempt = 0;
+      this.retryNotBefore = 0;
+    }
+    this.pendingAutomaticTriggers.add(trigger);
+    this.tryStartAutomaticBackup();
+  }
+
+  private tryStartAutomaticBackup(): void {
+    if (!this.started || this.pendingAutomaticTriggers.size === 0) return;
     if (this.inFlight) {
-      this.observeInitialOperation(this.inFlight);
+      this.observeAutomaticOperation(this.inFlight);
+      return;
+    }
+    const now = Date.now();
+    const notBefore = Math.max(this.quietUntil, this.retryNotBefore);
+    if (now < notBefore) {
+      this.scheduleAutomaticWake(notBefore);
       return;
     }
     if (this.options.canStartBackup && !this.options.canStartBackup()) {
-      this.scheduleQuietRetry();
+      this.scheduleAutomaticWake(now + this.quietGraceMs());
       return;
     }
-    this.observeInitialOperation(this.createBackup());
+    this.clearAutomaticTimer();
+    this.observeAutomaticOperation(this.createBackup());
   }
 
-  private observeInitialOperation(
+  private observeAutomaticOperation(
     operation: Promise<DatabaseBackupResult>,
   ): void {
-    if (this.initialObservedOperation === operation) return;
-    this.initialObservedOperation = operation;
+    if (this.automaticObservedOperation === operation) return;
+    this.automaticObservedOperation = operation;
     void operation.then(
       (result) => {
-        if (this.initialObservedOperation === operation) {
-          this.initialObservedOperation = null;
+        if (this.automaticObservedOperation === operation) {
+          this.automaticObservedOperation = null;
         }
+        this.pendingAutomaticTriggers.clear();
+        this.clearAutomaticTimer();
         this.resolvePendingInitial(result);
       },
       (error: unknown) => {
-        if (this.initialObservedOperation === operation) {
-          this.initialObservedOperation = null;
+        if (this.automaticObservedOperation === operation) {
+          this.automaticObservedOperation = null;
         }
         if (error instanceof DatabaseBackupCancelledError) {
+          this.pendingAutomaticTriggers.clear();
           this.rejectPendingInitial(error);
           return;
         }
         this.options.onError?.(error);
-        this.initialRetryAttempt += 1;
-        if (this.initialRetryAttempt <= this.maxInitialRetries()) {
-          this.scheduleQuietRetry(this.retryDelayMs());
+        this.automaticRetryAttempt += 1;
+        if (
+          this.started
+          && this.automaticRetryAttempt <= this.maxInitialRetries()
+        ) {
+          this.pendingAutomaticTriggers.add("retry");
+          this.retryNotBefore = Date.now() + this.retryDelayMs();
+          this.scheduleAutomaticWake(
+            Math.max(this.quietUntil, this.retryNotBefore),
+            true,
+          );
         } else {
           this.initialEligible = false;
+          this.pendingAutomaticTriggers.clear();
+          this.retryNotBefore = 0;
         }
         this.rejectPendingInitial(error);
       },
     );
   }
 
-  private scheduleQuietRetry(delayMs = this.quietGraceMs()): void {
+  private restartQuietGrace(delayMs: number): void {
+    this.quietUntil = Date.now() + Math.max(1_000, Math.trunc(delayMs));
     if (
-      !this.started
-      || !this.initialEligible
-      || this.initialBackupComplete
-      || this.inFlight
-      || this.quietTimer
-    ) return;
-    this.quietTimer = setTimeout(() => {
-      this.quietTimer = null;
-      this.tryStartInitialBackup();
-    }, Math.max(1_000, Math.trunc(delayMs)));
-    this.quietTimer.unref();
+      this.started
+      && this.pendingAutomaticTriggers.size > 0
+      && !this.inFlight
+    ) {
+      this.scheduleAutomaticWake(
+        Math.max(this.quietUntil, this.retryNotBefore),
+        true,
+      );
+    }
+  }
+
+  private scheduleAutomaticWake(deadline: number, replace = false): void {
+    if (!this.started || this.pendingAutomaticTriggers.size === 0 || this.inFlight) return;
+    const normalizedDeadline = Math.max(Date.now(), Math.trunc(deadline));
+    if (this.automaticTimer) {
+      if (!replace && this.automaticTimerDeadline <= normalizedDeadline) return;
+      clearTimeout(this.automaticTimer);
+    }
+    this.automaticTimerDeadline = normalizedDeadline;
+    this.automaticTimer = setTimeout(() => {
+      this.automaticTimer = null;
+      this.automaticTimerDeadline = 0;
+      this.tryStartAutomaticBackup();
+    }, Math.max(0, normalizedDeadline - Date.now()));
+    this.automaticTimer.unref();
+  }
+
+  private clearAutomaticTimer(): void {
+    if (this.automaticTimer) clearTimeout(this.automaticTimer);
+    this.automaticTimer = null;
+    this.automaticTimerDeadline = 0;
   }
 
   private quietGraceMs(): number {
@@ -955,7 +1016,7 @@ export class DatabaseBackupManager {
       1_000,
       Math.trunc(this.options.retryDelayMs ?? DATABASE_INITIAL_BACKUP_RETRY_MS),
     );
-    return Math.min(configured * 2 ** Math.min(this.initialRetryAttempt - 1, 5), 5 * 60 * 1_000);
+    return Math.min(configured * 2 ** Math.min(this.automaticRetryAttempt - 1, 5), 5 * 60 * 1_000);
   }
 
   private maxInitialRetries(): number {

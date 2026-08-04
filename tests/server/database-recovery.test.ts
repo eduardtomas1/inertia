@@ -177,6 +177,351 @@ describe("database backup and startup recovery", () => {
     await manager.cancelAndWait();
   });
 
+  it("queues an hourly backup behind the quiet gate until an active turn settles", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let activeTurn = true;
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 60_000,
+        intervalMs: 1_000,
+        quietGraceMs: 1_000,
+        canStartBackup: () => !activeTurn,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).not.toHaveBeenCalled();
+    activeTurn = false;
+    void manager.requestInitialBackup(1_000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(backup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(backup).toHaveBeenCalledOnce();
+    await manager.cancelAndWait();
+  });
+
+  it("keeps an hourly backup pending throughout recovery import", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let recoveryImportActive = true;
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 60_000,
+        intervalMs: 1_000,
+        quietGraceMs: 1_000,
+        canStartBackup: () => !recoveryImportActive,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(backup).not.toHaveBeenCalled();
+    recoveryImportActive = false;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).toHaveBeenCalledOnce();
+    await manager.cancelAndWait();
+  });
+
+  it("deduplicates simultaneous initial and hourly automatic triggers", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 1_000,
+        intervalMs: 1_000,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).toHaveBeenCalledOnce();
+    expect(backupNames(databasePath)).toHaveLength(1);
+    await manager.cancelAndWait();
+  });
+
+  it("lets an explicit manual backup satisfy a racing hourly request", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let releaseBackup!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseBackup = resolve;
+    });
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+      await blocked;
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 60_000,
+        intervalMs: 1_000,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(900);
+    const manual = manager.createBackup();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(backup).toHaveBeenCalledOnce();
+    releaseBackup();
+    await expect(manual).resolves.toMatchObject({ filename: expect.any(String) });
+    expect(backupNames(databasePath)).toHaveLength(1);
+    await manager.cancelAndWait();
+  });
+
+  it("coalesces repeated hourly ticks into one blocked automatic request", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let eligible = false;
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 60_000,
+        intervalMs: 1_000,
+        quietGraceMs: 1_000,
+        canStartBackup: () => eligible,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const timerCount = vi.getTimerCount();
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(vi.getTimerCount()).toBe(timerCount);
+    expect(backup).not.toHaveBeenCalled();
+    eligible = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).toHaveBeenCalledOnce();
+    await manager.cancelAndWait();
+  });
+
+  it("cancels a pending hourly request without starting it during shutdown", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let eligible = false;
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 60_000,
+        intervalMs: 1_000,
+        canStartBackup: () => eligible,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await manager.cancelAndWait();
+    eligible = true;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(backup).not.toHaveBeenCalled();
+  });
+
+  it("continues hourly rotation after the first validated backup", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 1_000,
+        intervalMs: 1_000,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).toHaveBeenCalledTimes(2);
+    expect(backupNames(databasePath)).toHaveLength(2);
+    await manager.cancelAndWait();
+  });
+
+  it("restarts the full quiet grace after consecutive turn settlements", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        quietGraceMs: 1_000,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    const first = manager.requestInitialBackup(1_000);
+    await vi.advanceTimersByTimeAsync(900);
+    expect(manager.requestInitialBackup(1_000)).toBe(first);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(backup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(first).resolves.toMatchObject({ filename: expect.any(String) });
+    expect(backup).toHaveBeenCalledOnce();
+    await manager.cancelAndWait();
+  });
+
+  it("restarts one scheduler deadline across three rapid settlements", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      { validateBackup: async () => "valid-current" },
+    );
+
+    manager.start();
+    const pending = manager.requestInitialBackup(1_000);
+    await vi.advanceTimersByTimeAsync(300);
+    void manager.requestInitialBackup(1_000);
+    await vi.advanceTimersByTimeAsync(300);
+    void manager.requestInitialBackup(1_000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(backup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(backup).toHaveBeenCalledOnce();
+    await manager.cancelAndWait();
+  });
+
+  it("keeps a settled-turn grace while another turn remains active", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let anotherTurnActive = true;
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        initialDelayMs: 60_000,
+        intervalMs: 1_000,
+        quietGraceMs: 1_000,
+        canStartBackup: () => !anotherTurnActive,
+        validateBackup: async () => "valid-current",
+      },
+    );
+
+    manager.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const pending = manager.requestInitialBackup(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(backup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(500);
+    anotherTurnActive = false;
+    await vi.advanceTimersByTimeAsync(499);
+    expect(backup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toMatchObject({ filename: expect.any(String) });
+    expect(backup).toHaveBeenCalledOnce();
+    await manager.cancelAndWait();
+  });
+
+  it("does not let quiet activity shorten validation retry backoff", async () => {
+    vi.useFakeTimers();
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    let valid = false;
+    const backup = vi.fn(async (destination: string) => {
+      copyFileSync(databasePath, destination);
+    });
+    const manager = new DatabaseBackupManager(
+      { open: true, backup } as unknown as Database.Database,
+      databasePath,
+      {
+        retryDelayMs: 2_000,
+        validateBackup: async () => valid ? "valid-current" : "corrupt",
+      },
+    );
+
+    manager.start();
+    await expect(manager.requestInitialBackup()).rejects.toThrow(/failed validation/u);
+    valid = true;
+    await vi.advanceTimersByTimeAsync(500);
+    const retry = manager.requestInitialBackup(1_000);
+    await vi.advanceTimersByTimeAsync(1_499);
+    expect(backup).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(retry).resolves.toMatchObject({ filename: expect.any(String) });
+    expect(backup).toHaveBeenCalledTimes(2);
+    await manager.cancelAndWait();
+  });
+
   it("deduplicates a first-turn quiet-grace request with an active timer", async () => {
     vi.useFakeTimers();
     const directory = temporaryDirectory();

@@ -7,6 +7,7 @@ import type {
   ChatMessage,
   Conversation,
   Project,
+  TurnGitArtifact,
 } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import type {
@@ -290,6 +291,40 @@ describe("transcript following motion", () => {
     await waitFor(() => expect(scrollTo).toHaveBeenCalled());
     expect(scrollTo.mock.calls.every(([options]) =>
       options?.behavior === "auto")).toBe(true);
+
+    const settledArtifact: TurnGitArtifact = {
+      id: "artifact-follow",
+      turnId: "turn-follow",
+      conversationId: activeConversation.id,
+      runId: "run-follow",
+      repositoryIdentity: null,
+      worktreeIdentity: null,
+      branch: "main",
+      beforeCheckpointId: null,
+      beforeFingerprint: null,
+      afterFingerprint: null,
+      files: [],
+      insertions: 0,
+      deletions: 0,
+      status: "ready",
+      completeness: "complete",
+      patchState: "none",
+      patchDigest: null,
+      capturedAt: "2026-08-02T10:00:02.000Z",
+      terminalAssistantMessageId: terminalMessage.id,
+      failureReason: null,
+      absenceReason: null,
+    };
+    scrollTo.mockClear();
+    view.rerender(
+      <ChatWorkspace
+        {...props}
+        messages={[terminalMessage]}
+        turnGitArtifacts={[settledArtifact]}
+        streamingText=""
+      />,
+    );
+    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
 
     const transcript = screen.getByLabelText("Thread transcript");
     Object.defineProperties(transcript, {

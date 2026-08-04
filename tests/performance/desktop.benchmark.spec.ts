@@ -40,7 +40,7 @@ if (args[0] === "--help") {
   process.exit(0);
 }
 let threadId = "performance-thread";
-const turnId = "performance-turn";
+let turnSequence = 0;
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") {
@@ -62,17 +62,27 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (message.method !== "turn/start") return;
+  turnSequence += 1;
+  const promptText = Array.isArray(message.params && message.params.input)
+    ? message.params.input.find((item) => item && item.type === "text")?.text || ""
+    : "";
+  const requestedSample = Number(/sample (\\d+)/u.exec(promptText)?.[1]);
+  const sampleNumber = Number.isInteger(requestedSample) && requestedSample > 0
+    ? requestedSample
+    : turnSequence;
+  const turnId = "performance-turn-" + sampleNumber;
+  const itemId = "performance-answer-" + sampleNumber;
   send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
   send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
   let index = 0;
   const timer = setInterval(() => {
     if (index === 0) {
-      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "performance-answer", delta: "STREAM_PROVIDER_DELTA_" + Date.now() + " " } });
+      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "STREAM_PROVIDER_DELTA_" + sampleNumber + "_" + Date.now() + " " } });
     } else if (index < 128) {
-      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "performance-answer", delta: "chunk-" + index + "🙂 " } });
+      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "chunk-" + index + "🙂 " } });
     } else {
       clearInterval(timer);
-      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "performance-answer", delta: " STREAM_PROVIDER_COMPLETE_" + Date.now() } });
+      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_COMPLETE_" + sampleNumber + "_" + Date.now() } });
       send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
     }
     index += 1;
@@ -98,15 +108,60 @@ interface StreamingTraceMarker {
   wallTimeMs: number;
 }
 
-function stageAttribution(
+interface DistributionSummary {
+  sampleCount: number;
+  minimum: number | null;
+  median: number | null;
+  p95: number | null;
+  maximum: number | null;
+}
+
+function distribution(values: readonly number[]): DistributionSummary {
+  const ordered = values.filter(Number.isFinite).toSorted((left, right) => left - right);
+  const percentile = (fraction: number): number | null => ordered.length > 0
+    ? ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * fraction))]!
+    : null;
+  return {
+    sampleCount: ordered.length,
+    minimum: ordered[0] ?? null,
+    median: percentile(0.5),
+    p95: percentile(0.95),
+    maximum: ordered.at(-1) ?? null,
+  };
+}
+
+const stageMetricDefinitions = [
+  ["providerDeltaToChannelAcceptedMs", "provider-delta-received", "delta-accepted-by-channel"],
+  ["firstFlushWaitMs", "delta-accepted-by-channel", "stream-flush-started"],
+  ["sqliteAppendMs", "sqlite-append-started", "sqlite-append-completed"],
+  ["projectionCreationMs", "sqlite-append-completed", "projection-event-created"],
+  ["runtimeSerializationAndSendMs", "projection-event-created", "runtime-websocket-send-accepted"],
+  ["rendererWebSocketReceiptMs", "runtime-websocket-send-accepted", "renderer-websocket-message-received"],
+  ["rendererStateProjectionMs", "renderer-websocket-message-received", "renderer-projection-updated"],
+  ["reactLiveTextCommitMs", "renderer-projection-updated", "renderer-live-text-commit"],
+  ["commitToVisiblePaintMs", "renderer-live-text-commit", "stream-paint"],
+  ["totalFirstDeltaToPaintMs", "provider-delta-received", "stream-paint"],
+  ["providerCompletionToTerminalPersistenceMs", "provider-completion-received", "terminal-persistence-completed"],
+  ["terminalProjectionMs", "terminal-persistence-completed", "terminal-event-projected"],
+  ["finalMarkdownCommitMs", "terminal-event-projected", "final-markdown-commit"],
+  ["finalAnswerPaintMs", "final-markdown-commit", "final-answer-paint"],
+] as const;
+
+function stageAttributionSample(
   runtime: readonly StreamingTraceMarker[],
   renderer: readonly StreamingTraceMarker[],
+  sampleNumber: number,
 ) {
   const markers = [...runtime, ...renderer]
     .sort((left, right) => left.wallTimeMs - right.wallTimeMs);
   const firstByStage = new Map<string, StreamingTraceMarker>();
   for (const marker of markers) {
-    if (!firstByStage.has(marker.stage)) firstByStage.set(marker.stage, marker);
+    const normalizedStage = marker.stage === `final-markdown-commit:${sampleNumber}`
+      ? "final-markdown-commit"
+      : marker.stage;
+    if (!firstByStage.has(normalizedStage)) {
+      firstByStage.set(normalizedStage, marker);
+    }
   }
   const order = [
     "provider-delta-received",
@@ -145,6 +200,13 @@ function stageAttribution(
   const paint = firstByStage.get("stream-paint");
   const completion = firstByStage.get("provider-completion-received");
   const finalPaint = firstByStage.get("final-answer-paint");
+  const metrics = Object.fromEntries(stageMetricDefinitions.map(([key, from, to]) => {
+    const fromMarker = firstByStage.get(from);
+    const toMarker = firstByStage.get(to);
+    return [key, fromMarker && toMarker
+      ? Number((toMarker.wallTimeMs - fromMarker.wallTimeMs).toFixed(3))
+      : null];
+  }));
   return {
     clock: "Cross-process durations use bounded Date.now wall-clock markers; per-process monotonic timestamps remain in the raw trace.",
     stages,
@@ -154,8 +216,25 @@ function stageAttribution(
     completionToFinalPaintMs: completion && finalPaint
       ? Number((finalPaint.wallTimeMs - completion.wallTimeMs).toFixed(3))
       : null,
+    metrics,
     rawRuntimeMarkers: runtime,
     rawRendererMarkers: renderer,
+  };
+}
+
+function summarizeStageAttribution(
+  samples: readonly ReturnType<typeof stageAttributionSample>[],
+) {
+  return {
+    sampleCount: samples.length,
+    metrics: Object.fromEntries(stageMetricDefinitions.map(([key]) => [
+      key,
+      distribution(samples.flatMap((sample) => {
+        const value = sample.metrics[key];
+        return typeof value === "number" ? [value] : [];
+      })),
+    ])),
+    samples,
   };
 }
 
@@ -445,6 +524,13 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
     const frameIntervals: number[] = [];
     const topPositions: number[] = [];
     const bottomGaps: number[] = [];
+    const rowCounts: number[] = [];
+    const topRowCounts: number[] = [];
+    const bottomRowCounts: number[] = [];
+    const layoutMeasurementMs: number[] = [];
+    const longTaskDurations: number[] = [];
+    let overrunWithRowRemount = 0;
+    let overrunWithLayoutMeasurement = 0;
     let maximumDescendants = 0;
     const timeline = viewport.querySelector<HTMLElement>(".response-timeline");
     if (!timeline || viewport.scrollHeight <= viewport.clientHeight) {
@@ -460,6 +546,15 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
     const waitForFrame = (): Promise<number> => new Promise((resolveFrame) => {
       requestAnimationFrame((now) => resolveFrame(now));
     });
+    let longTaskObserver: PerformanceObserver | null = null;
+    try {
+      longTaskObserver = new PerformanceObserver((list) => {
+        longTaskDurations.push(...list.getEntries().map(({ duration }) => duration));
+      });
+      longTaskObserver.observe({ entryTypes: ["longtask"] });
+    } catch {
+      longTaskObserver = null;
+    }
     const scrollTo = (target: number): void => {
       viewport.dispatchEvent(new WheelEvent("wheel", {
         bubbles: true,
@@ -470,15 +565,29 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
     scrollTo(0);
     await waitForFrame();
     let previous = performance.now();
+    let previousRowCount = feed.querySelectorAll(".response-virtual-item").length;
     for (let index = 0; index < 120; index += 1) {
       const before = viewport.scrollTop;
       const target = index % 2 === 0 ? viewport.scrollHeight : 0;
       scrollTo(target);
       const now = await waitForFrame();
-      frameIntervals.push(now - previous);
+      const frameInterval = now - previous;
+      frameIntervals.push(frameInterval);
       previous = now;
+      const measurementStartedAt = performance.now();
       const top = viewport.scrollTop;
       const bottomGap = viewport.scrollHeight - viewport.clientHeight - top;
+      const rowCount = feed.querySelectorAll(".response-virtual-item").length;
+      const measurementDuration = performance.now() - measurementStartedAt;
+      rowCounts.push(rowCount);
+      layoutMeasurementMs.push(measurementDuration);
+      if (frameInterval > 25 && rowCount !== previousRowCount) {
+        overrunWithRowRemount += 1;
+      }
+      if (frameInterval > 25 && measurementDuration > 1) {
+        overrunWithLayoutMeasurement += 1;
+      }
+      previousRowCount = rowCount;
       if (target > 0 && Math.abs(top - before) < 1) {
         throw new Error("A benchmark scroll assignment was a no-op.");
       }
@@ -490,15 +599,55 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
       }
       topPositions.push(top);
       bottomGaps.push(bottomGap);
+      if (target > 0) bottomRowCounts.push(rowCount);
+      else topRowCounts.push(rowCount);
       maximumDescendants = Math.max(maximumDescendants, viewport.querySelectorAll("*").length);
     }
+    longTaskObserver?.disconnect();
     const ordered = [...frameIntervals].sort((left, right) => left - right);
+    const medianFrameMs = ordered[Math.floor(ordered.length * 0.5)] ?? 0;
+    const summarize = (values: readonly number[]) => {
+      const sorted = [...values].sort((left, right) => left - right);
+      return {
+        sampleCount: sorted.length,
+        minimum: sorted[0] ?? null,
+        median: sorted[Math.floor(sorted.length * 0.5)] ?? null,
+        p95: sorted[Math.floor(sorted.length * 0.95)] ?? null,
+        maximum: sorted.at(-1) ?? null,
+      };
+    };
     return {
       frames: frameIntervals.length,
-      medianFrameMs: ordered[Math.floor(ordered.length / 2)] ?? 0,
+      estimatedRefreshRateHz: medianFrameMs > 0
+        ? Number((1_000 / medianFrameMs).toFixed(2))
+        : null,
+      medianFrameMs,
+      p90FrameMs: ordered[Math.floor(ordered.length * 0.9)] ?? 0,
       p95FrameMs: ordered[Math.floor(ordered.length * 0.95)] ?? 0,
+      maximumFrameMs: ordered.at(-1) ?? 0,
       over25Ms: frameIntervals.filter((value) => value > 25).length,
+      longTasks: longTaskDurations.length,
+      longTaskTotalMs: longTaskDurations.reduce((sum, value) => sum + value, 0),
+      maximumLongTaskMs: Math.max(0, ...longTaskDurations),
+      overrunCorrelations: {
+        withRowRemount: overrunWithRowRemount,
+        withLayoutMeasurementOver1Ms: overrunWithLayoutMeasurement,
+        note: "Counts are observational co-occurrence, not proof of causation.",
+      },
       mountedAuthoritativeRows: feed.querySelectorAll(".response-virtual-item").length,
+      mountedRowsAtTop: {
+        minimum: Math.min(...topRowCounts),
+        maximum: Math.max(...topRowCounts),
+      },
+      mountedRowsAtBottom: {
+        minimum: Math.min(...bottomRowCounts),
+        maximum: Math.max(...bottomRowCounts),
+      },
+      mountedRowCountRange: {
+        minimum: Math.min(...rowCounts),
+        maximum: Math.max(...rowCounts),
+      },
+      layoutMeasurementMs: summarize(layoutMeasurementMs),
       totalTimelineRows: totalRows,
       maximumDomDescendants: maximumDescendants,
       scrollHeight: viewport.scrollHeight,
@@ -535,7 +684,12 @@ async function streamingResponsivenessSample(
   electronApp: ElectronApplication,
   page: Page,
   dataDirectory: string,
+  sampleNumber: number,
 ) {
+  const runtimeTracePath = join(dataDirectory, "streaming-trace.jsonl");
+  const runtimeTraceOffset = await stat(runtimeTracePath)
+    .then(({ size }) => size)
+    .catch(() => 0);
   // Long-history traversal is measured independently. Start this scenario at
   // the live edge so its provider-delta metric is not contaminated by restored
   // scroll state or another interaction performed by the benchmark.
@@ -551,7 +705,7 @@ async function streamingResponsivenessSample(
     "stream-before",
   );
   const processBefore = await processSample(electronApp);
-  const measurementPromise = page.evaluate(() => (
+  const measurementPromise = page.evaluate((sampleNumber) => (
       new Promise<{
       firstProviderDeltaToPaintMs: number;
       completionToFinalPaintMs: number;
@@ -593,7 +747,7 @@ async function streamingResponsivenessSample(
           liveRendererCount: document.querySelectorAll('[data-stream-renderer="plain-text"]').length,
           persistedAnswerCount: document.querySelectorAll('[data-answer-phase="persisted"] .response-markdown').length,
           finalAnswerText: Array.from(document.querySelectorAll<HTMLElement>('[data-answer-phase="persisted"] .response-markdown'))
-            .find((element) => element.textContent?.includes("STREAM_PROVIDER_COMPLETE_"))
+            .find((element) => element.textContent?.includes(`STREAM_PROVIDER_COMPLETE_${sampleNumber}_`))
             ?.textContent?.slice(-120) ?? null,
         })));
       }, 15_000);
@@ -673,7 +827,9 @@ async function streamingResponsivenessSample(
         );
         const finalAnswer = Array.from(document.querySelectorAll<HTMLElement>(
           '[data-answer-phase="persisted"] .response-markdown',
-        )).find((element) => element.textContent?.includes("STREAM_PROVIDER_COMPLETE_")) ?? null;
+        )).find((element) => element.textContent?.includes(
+          `STREAM_PROVIDER_COMPLETE_${sampleNumber}_`,
+        )) ?? null;
         const visibleText = live?.textContent ?? finalAnswer?.textContent ?? "";
         const viewport = live?.closest<HTMLElement>(".message-scroll") ?? null;
         const liveRect = live?.getBoundingClientRect() ?? null;
@@ -698,13 +854,17 @@ async function streamingResponsivenessSample(
           const trace = Reflect.get(globalThis, "__inertiaTestStreamingTrace");
           if (typeof trace === "function") trace("stream-paint");
         }
-        const firstMarker = visibleText.match(/STREAM_PROVIDER_DELTA_(\d+)/u);
+        const firstMarker = visibleText.match(new RegExp(
+          `STREAM_PROVIDER_DELTA_${sampleNumber}_(\\d+)`,
+          "u",
+        ));
         if (firstMarker && firstProviderDeltaToPaintMs === null) {
           firstProviderDeltaToPaintMs = Date.now() - Number(firstMarker[1]);
         }
-        const completionMarker = finalAnswer?.textContent?.match(
-          /STREAM_PROVIDER_COMPLETE_(\d+)/u,
-        );
+        const completionMarker = finalAnswer?.textContent?.match(new RegExp(
+          `STREAM_PROVIDER_COMPLETE_${sampleNumber}_(\\d+)`,
+          "u",
+        ));
         if (completionMarker && completionToFinalPaintMs === null) {
           completionToFinalPaintMs = Date.now() - Number(completionMarker[1]);
           const trace = Reflect.get(globalThis, "__inertiaTestStreamingTrace");
@@ -732,11 +892,11 @@ async function streamingResponsivenessSample(
       }
       frameHandle = window.requestAnimationFrame(frame);
     })
-  ));
+  ), sampleNumber);
 
   const composer = page.getByRole("region", { name: "Message composer" });
   await composer.getByRole("textbox", { name: "Message" })
-    .fill("Run the deterministic streaming responsiveness fixture.");
+    .fill(`Run deterministic streaming responsiveness sample ${sampleNumber}.`);
   await composer.getByRole("button", { name: "Send message" }).click();
   await page.locator('[data-stream-renderer="plain-text"]').waitFor({
     timeout: 10_000,
@@ -759,7 +919,9 @@ async function streamingResponsivenessSample(
     "stream-during",
   );
   const processDuring = await processSample(electronApp);
-  let jumpToLatestBottomGap = Number.POSITIVE_INFINITY;
+  let streamingBottomGap = Number.POSITIVE_INFINITY;
+  let finalSettledBottomGap = Number.POSITIVE_INFINITY;
+  let finalAnswerVisible = false;
   try {
     const jumpToLatest = page.getByRole("button", { name: "Jump to latest" });
     await expect(jumpToLatest).toBeVisible();
@@ -767,10 +929,20 @@ async function streamingResponsivenessSample(
     await expect.poll(() => liveViewport.evaluate(
       (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
     )).toBeLessThanOrEqual(120);
-    jumpToLatestBottomGap = await liveViewport.evaluate(
+    streamingBottomGap = await liveViewport.evaluate(
       (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
     );
-    await page.locator('[data-answer-phase="persisted"] .response-markdown').last().waitFor();
+    const finalAnswer = page.locator(
+      '[data-answer-phase="persisted"] .response-markdown',
+    ).filter({ hasText: `STREAM_PROVIDER_COMPLETE_${sampleNumber}_` }).last();
+    await finalAnswer.waitFor();
+    finalAnswerVisible = await finalAnswer.isVisible();
+    await expect.poll(() => liveViewport.evaluate(
+      (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+    )).toBeLessThanOrEqual(2);
+    finalSettledBottomGap = await liveViewport.evaluate(
+      (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+    );
   } catch (error) {
     console.error(
       "[benchmark follow-latest failed]",
@@ -778,6 +950,18 @@ async function streamingResponsivenessSample(
       await liveViewport.evaluate((viewport) => ({
         scrollTop: viewport.scrollTop,
         bottomGap: viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+        scrollHeight: viewport.scrollHeight,
+        clientHeight: viewport.clientHeight,
+        scrollPaddingBottom: getComputedStyle(viewport).scrollPaddingBottom,
+        afterForcedMaximum: (() => {
+          viewport.scrollTop = Number.MAX_SAFE_INTEGER;
+          return {
+            scrollTop: viewport.scrollTop,
+            bottomGap: viewport.scrollHeight
+              - viewport.clientHeight
+              - viewport.scrollTop,
+          };
+        })(),
       })).catch(() => null),
     );
     throw error;
@@ -789,10 +973,10 @@ async function streamingResponsivenessSample(
     "stream-after",
   );
   const processAfter = await processSample(electronApp);
-  const runtimeTracePath = join(dataDirectory, "streaming-trace.jsonl");
   let serializedRuntimeTrace = "";
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    serializedRuntimeTrace = await readFile(runtimeTracePath, "utf8")
+    serializedRuntimeTrace = await readFile(runtimeTracePath)
+      .then((contents) => contents.subarray(runtimeTraceOffset).toString("utf8"))
       .catch(() => "");
     if (serializedRuntimeTrace.includes('"stage":"terminal-event-projected"')) {
       break;
@@ -831,14 +1015,97 @@ async function streamingResponsivenessSample(
       during: processDuring.metrics,
       after: processAfter.metrics,
     },
-    stageAttribution: stageAttribution(runtimeTrace, visible.rendererTraceMarks),
+    stageAttribution: stageAttributionSample(
+      runtimeTrace,
+      visible.rendererTraceMarks,
+      sampleNumber,
+    ),
     followLatest: {
       startedAtLiveEdge: true,
       readerNavigationPreserved: readerNavigationScrollTop < 120,
-      jumpToLatestReachedBottom: true,
-      jumpToLatestBottomGap,
-      finalAnswerVisible: true,
+      jumpToLatestWithinFollowThreshold: streamingBottomGap <= 120,
+      streamingBottomGap,
+      finalSettledBottomGap,
+      finalAnswerVisible,
     },
+  };
+}
+
+type StreamingResponsivenessSample = Awaited<
+  ReturnType<typeof streamingResponsivenessSample>
+>;
+
+function summarizeStreamingResponsiveness(
+  samples: readonly StreamingResponsivenessSample[],
+) {
+  const firstPaint = distribution(samples.map(
+    ({ firstProviderDeltaToPaintMs }) => firstProviderDeltaToPaintMs,
+  ));
+  const finalPaint = distribution(samples.map(
+    ({ completionToFinalPaintMs }) => completionToFinalPaintMs,
+  ));
+  const visibleGap = distribution(samples.map(({ p95VisibleGapMs }) => p95VisibleGapMs));
+  const longTaskTotal = distribution(samples.map(({ longTaskTotalMs }) => longTaskTotalMs));
+  const droppedFrames = distribution(samples.map(
+    ({ droppedOrOverBudgetFrames }) => droppedOrOverBudgetFrames,
+  ));
+  const last = samples.at(-1);
+  const first = samples[0];
+  if (!first || !last) throw new Error("At least one streaming sample is required.");
+  return {
+    sampleCount: samples.length,
+    distributions: {
+      firstProviderDeltaToPaintMs: firstPaint,
+      completionToFinalPaintMs: finalPaint,
+      p95VisibleGapMs: visibleGap,
+      longTaskTotalMs: longTaskTotal,
+      droppedOrOverBudgetFrames: droppedFrames,
+    },
+    firstProviderDeltaToPaintMs: firstPaint.median ?? Number.POSITIVE_INFINITY,
+    completionToFinalPaintMs: finalPaint.median ?? Number.POSITIVE_INFINITY,
+    medianVisibleGapMs: distribution(samples.map(
+      ({ medianVisibleGapMs }) => medianVisibleGapMs,
+    )).median ?? Number.POSITIVE_INFINITY,
+    p95VisibleGapMs: visibleGap.p95 ?? Number.POSITIVE_INFINITY,
+    visibleUpdates: Math.min(...samples.map(({ visibleUpdates }) => visibleUpdates)),
+    visibleUpdatesPerSecond: distribution(samples.map(
+      ({ visibleUpdatesPerSecond }) => visibleUpdatesPerSecond,
+    )).median ?? 0,
+    longTasks: samples.reduce((sum, { longTasks }) => sum + longTasks, 0),
+    longTaskTotalMs: longTaskTotal.maximum ?? Number.POSITIVE_INFINITY,
+    frames: samples.reduce((sum, { frames }) => sum + frames, 0),
+    droppedOrOverBudgetFrames: samples.reduce(
+      (sum, { droppedOrOverBudgetFrames }) => sum + droppedOrOverBudgetFrames,
+      0,
+    ),
+    frameBudgetMs: distribution(samples.map(({ frameBudgetMs }) => frameBudgetMs)).median,
+    walBytes: last.walBytes,
+    memory: {
+      before: first.memory.before,
+      during: samples.map(({ memory }) => memory.during),
+      after: last.memory.after,
+    },
+    processes: samples.map(({ processes }) => processes),
+    stageAttribution: summarizeStageAttribution(
+      samples.map(({ stageAttribution }) => stageAttribution),
+    ),
+    followLatest: {
+      readerNavigationPreserved:
+        samples.every(({ followLatest }) => followLatest.readerNavigationPreserved),
+      jumpToLatestWithinFollowThreshold:
+        samples.every(({ followLatest }) =>
+          followLatest.jumpToLatestWithinFollowThreshold),
+      streamingBottomGap: Math.max(...samples.map(
+        ({ followLatest }) => followLatest.streamingBottomGap,
+      )),
+      finalSettledBottomGap: Math.max(...samples.map(
+        ({ followLatest }) => followLatest.finalSettledBottomGap,
+      )),
+      finalAnswerVisible:
+        samples.every(({ followLatest }) => followLatest.finalAnswerVisible),
+      samples: samples.map(({ followLatest }) => followLatest),
+    },
+    samples,
   };
 }
 
@@ -860,6 +1127,17 @@ async function rendererMemorySample(
   } finally {
     await session.detach();
   }
+  const rendererCounters = await page.evaluate(() => ({
+    totalDomNodes: document.querySelectorAll("*").length,
+    mountedVirtualTimelineRows:
+      document.querySelectorAll(".response-virtual-item").length,
+    activeTerminalPanels:
+      document.querySelectorAll('.terminal-panel[data-terminal-id]').length,
+    activeXtermContainers: document.querySelectorAll(".xterm").length,
+    loadedWorkspaceSurfaces:
+      document.querySelectorAll('.workspace-panel:not([hidden]) [role="tabpanel"]').length,
+    splitPaneCount: document.querySelectorAll(".conversation-split-pane").length,
+  }));
   const processMemory = await electronApp.evaluate(({ app, BrowserWindow }) => {
     const rendererPid = BrowserWindow.getAllWindows()[0]
       ?.webContents.getOSProcessId() ?? null;
@@ -876,6 +1154,7 @@ async function rendererMemorySample(
     collectedAt: new Date().toISOString(),
     usedJsHeapBytes: heap.usedSize,
     totalJsHeapBytes: heap.totalSize,
+    ...rendererCounters,
     ...processMemory,
   };
 }
@@ -1064,10 +1343,18 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       "idle-baseline",
     );
     const authoritativeLongConversation = await authoritativeScrollSample(cold.page);
-    const streamingResponsiveness = await streamingResponsivenessSample(
-      cold.electronApp,
-      cold.page,
-      dataDirectory,
+    const streamingSampleCount = process.env.CI ? 3 : 5;
+    const streamingSamples: StreamingResponsivenessSample[] = [];
+    for (let sampleNumber = 1; sampleNumber <= streamingSampleCount; sampleNumber += 1) {
+      streamingSamples.push(await streamingResponsivenessSample(
+        cold.electronApp,
+        cold.page,
+        dataDirectory,
+        sampleNumber,
+      ));
+    }
+    const streamingResponsiveness = summarizeStreamingResponsiveness(
+      streamingSamples,
     );
     // Deliberately mounting thousands of recovered nodes and then unmounting
     // them can schedule cleanup/GC work. Keep that workload after streaming so
@@ -1136,10 +1423,34 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       .getByRole("button", { name: "Close terminal" })
       .first()
       .click();
+    const workspacePanel = cold.page.locator(".workspace-panel");
+    if (await workspacePanel.isVisible().catch(() => false)) {
+      await cold.page.getByRole("button", { name: "Close workspace tools" })
+        .first()
+        .click();
+    }
+    await expect(workspacePanel).not.toBeVisible();
+    await expect(cold.page.locator(".terminal-panel[data-terminal-id]"))
+      .toHaveCount(0);
+    await expect(cold.page.getByRole("main", {
+      name: "Split conversation workspace",
+    })).toHaveCount(0);
     const memoryPostClose = await rendererMemorySample(
       cold.electronApp,
       cold.page,
-      "split-and-terminal-closed",
+      "split-and-terminal-closed-immediate",
+    );
+    await cold.page.waitForTimeout(5_000);
+    const memoryPostClose5s = await rendererMemorySample(
+      cold.electronApp,
+      cold.page,
+      "split-and-terminal-closed-after-5s",
+    );
+    await cold.page.waitForTimeout(25_000);
+    const memoryPostClose30s = await rendererMemorySample(
+      cold.electronApp,
+      cold.page,
+      "split-and-terminal-closed-after-30s",
     );
 
     const repeatedOpenClose: Awaited<ReturnType<typeof rendererMemorySample>>[] = [];
@@ -1161,7 +1472,10 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     );
     const soakScrollSamples = [];
     for (let iteration = 0; iteration < 5; iteration += 1) {
-      soakScrollSamples.push(await authoritativeScrollSample(cold.page, 301));
+      soakScrollSamples.push(await authoritativeScrollSample(
+        cold.page,
+        300 + streamingSampleCount,
+      ));
       await openAndCloseToolCycle(cold.page);
     }
     const soakAfter = await rendererMemorySample(
@@ -1204,7 +1518,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
           ? "x11"
           : "none";
       const report = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       collectedAt: new Date().toISOString(),
       runtime: {
         node: process.version,
@@ -1232,6 +1546,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         workspaceFiles: 120,
         profileReuse: true,
         providerMode: "deterministic-codex-app-server",
+        streamingSamples: streamingSampleCount,
       },
         scenarios: {
         coldStartup: {
@@ -1268,6 +1583,8 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
           active: memoryActive,
           panelsHidden: memoryPanelsHidden,
           postClose: memoryPostClose,
+          postClose5s: memoryPostClose5s,
+          postClose30s: memoryPostClose30s,
           postCloseReclaimedJsHeapBytes: Math.max(
             0,
             memoryActive.usedJsHeapBytes - memoryPostClose.usedJsHeapBytes,
@@ -1294,7 +1611,9 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       limitations: [
         "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
-        "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; stage ordering remains authoritative within each process.",
+        "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; each first-delta and terminal chain is isolated to one run, while stage ordering remains authoritative within each process.",
+        "Animation-frame intervals describe compositor scheduling, while PerformanceObserver long-task durations describe main-thread stalls; hosted frame intervals are retained as observational evidence rather than a 60-fps claim.",
+        "Chromium process working-set retention after panels close is not classified as a leak when JavaScript heap, DOM, terminal, workspace-surface, and split-pane counters are released.",
         "The product owns one BrowserWindow; split chat is measured instead of inventing a multi-window mode.",
         "GPU information is observational; the benchmark does not force an adapter or Chromium feature flag.",
       ],
@@ -1311,6 +1630,20 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.authoritativeLongConversation.actualBottomGap).toBeLessThanOrEqual(2);
     expect(report.scenarios.authoritativeLongConversation.mountedAuthoritativeRows).toBeLessThan(40);
     expect(report.scenarios.compatibilityHistory.releasedOnClose).toBe(true);
+    expect(report.scenarios.streamingResponsiveness.sampleCount)
+      .toBe(streamingSampleCount);
+    expect(report.scenarios.streamingResponsiveness.stageAttribution.sampleCount)
+      .toBe(streamingSampleCount);
+    for (const metric of Object.values(
+      report.scenarios.streamingResponsiveness.stageAttribution.metrics,
+    )) {
+      expect(metric.sampleCount).toBe(streamingSampleCount);
+      expect(metric.minimum).not.toBeNull();
+      expect(metric.minimum ?? -1).toBeGreaterThanOrEqual(0);
+      expect(metric.median).not.toBeNull();
+      expect(metric.p95).not.toBeNull();
+      expect(metric.maximum).not.toBeNull();
+    }
     expect(report.scenarios.streamingResponsiveness.firstProviderDeltaToPaintMs)
       .toBeLessThan(CI_STREAM_FIRST_PAINT_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.p95VisibleGapMs)
@@ -1325,6 +1658,14 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       .toBeLessThan(CI_STREAM_LONG_TASK_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.droppedOrOverBudgetFrames)
       .toBeLessThan(report.scenarios.streamingResponsiveness.frames);
+    expect(report.scenarios.streamingResponsiveness.followLatest.readerNavigationPreserved)
+      .toBe(true);
+    expect(report.scenarios.streamingResponsiveness.followLatest.jumpToLatestWithinFollowThreshold)
+      .toBe(true);
+    expect(report.scenarios.streamingResponsiveness.followLatest.finalSettledBottomGap)
+      .toBeLessThanOrEqual(2);
+    expect(report.scenarios.streamingResponsiveness.followLatest.finalAnswerVisible)
+      .toBe(true);
     expect(report.scenarios.streamingResponsiveness.memory.after.usedJsHeapBytes)
       .toBeLessThanOrEqual(
         report.scenarios.streamingResponsiveness.memory.before.usedJsHeapBytes
@@ -1350,6 +1691,9 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         report.scenarios.rendererMemory.active.usedJsHeapBytes
           + 32 * 1024 * 1024,
       );
+    expect(report.scenarios.rendererMemory.postClose30s.activeTerminalPanels).toBe(0);
+    expect(report.scenarios.rendererMemory.postClose30s.activeXtermContainers).toBe(0);
+    expect(report.scenarios.rendererMemory.postClose30s.splitPaneCount).toBe(0);
     expect(report.scenarios.rendererMemory.repeatedOpenClose).toHaveLength(8);
     const firstOpenClose = report.scenarios.rendererMemory.repeatedOpenClose[0]!;
     const lastOpenClose = report.scenarios.rendererMemory.repeatedOpenClose.at(-1)!;

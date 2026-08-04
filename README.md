@@ -146,13 +146,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.23
+### Version 0.0.24
 
-This release makes supervision, recovery, and frequent interaction paths more truthful under real desktop load.
+This release makes recovery scheduling, long-transcript navigation, and provider startup more dependable under real desktop load.
 
-Codex patch approvals regain their complete supervised flow, Duo launches recover durably, and Remote Companion distinguishes expired browser grants from a device that was never paired. Transcript streaming uses a measured 64 ms cadence, frequent lazy surfaces prefetch on intent or idle, expensive recovered history remains unmounted until requested, and focus restoration no longer fights deliberate navigation. Cross-platform desktop benchmarks, fixed Remote Companion artifact compatibility, OpenCode SDK 1.18.10, and a clean production dependency audit keep those gains visible and reviewable.
+Automatic SQLite backups now share one quiet-time scheduler with bounded retry and shutdown behavior, while manual recovery stays immediate. Long transcripts reach the real settled bottom without allowing late layout work to drag a reader out of history, including on slower Windows runners. Runtime-ready recovery reconnects immediately, shell-free Codex launches understand `CODEX_HOME=~/…`, and the production desktop benchmark now proves authoritative 300-turn scrolling, provider-to-paint streaming, reader navigation, release, soak, packaging, and shutdown behavior across Linux, macOS, and Windows.
 
-Download [Inertia v0.0.23](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.23):
+Download [Inertia v0.0.24](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.24):
 
 | Platform | Download |
 | --- | --- |

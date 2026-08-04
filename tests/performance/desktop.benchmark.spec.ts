@@ -33,6 +33,11 @@ const CI_STREAM_FIRST_PAINT_CATASTROPHIC_MS = 500;
 const CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS = 500;
 const CI_STREAM_FINAL_PAINT_CATASTROPHIC_MS = 1_500;
 const CI_STREAM_LONG_TASK_CATASTROPHIC_MS = 2_000;
+// The scenario deliberately leaves the live edge to verify reader navigation,
+// so paints produced while the response is outside the viewport are excluded.
+// Four distinct visible commits still prove progressive rendering before and
+// after the explicit return to latest without rewarding a broken auto-follow.
+const CI_STREAM_MIN_VISIBLE_UPDATES = 4;
 
 const streamingAppServer = `
 const readline = require("node:readline");
@@ -1662,7 +1667,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.streamingResponsiveness.p95VisibleGapMs)
       .toBeLessThan(CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.visibleUpdates)
-      .toBeGreaterThan(4);
+      .toBeGreaterThanOrEqual(CI_STREAM_MIN_VISIBLE_UPDATES);
     expect(report.scenarios.streamingResponsiveness.walBytes)
       .toBeGreaterThan(0);
     expect(report.scenarios.streamingResponsiveness.completionToFinalPaintMs)

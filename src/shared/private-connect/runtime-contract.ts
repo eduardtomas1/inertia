@@ -44,6 +44,7 @@ export const privateConnectRuntimeSafeConversationSchema = z.object({
   projectId: entityId,
   title: safeLabel,
   providerLabel: safeLabel,
+  runId: entityId.nullable(),
   status: z.enum(["idle", "running", "needs-input", "completed", "failed"]),
   pendingLocalApproval: z.boolean(),
   promptSafety: z.object({

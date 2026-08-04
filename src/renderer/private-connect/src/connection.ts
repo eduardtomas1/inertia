@@ -1,4 +1,4 @@
-import type { PrivateConnectRequest, PrivateConnectResponse } from "../../../shared/private-connect/protocol";
+import { privateConnectResponseSchema, type PrivateConnectRequest, type PrivateConnectResponse } from "../../../shared/private-connect/protocol";
 
 export interface PairingInvitation {
   protocolVersion: 1;
@@ -97,12 +97,13 @@ export async function connectPrivateConnectSocket(csrf: string): Promise<Private
     if (typeof event.data !== "string") return;
     let value: unknown;
     try { value = JSON.parse(event.data) as unknown; } catch { return; }
-    if (!plainObject(value) || value.type !== "response" || typeof value.requestId !== "string" || typeof value.ok !== "boolean") return;
-    const request = pending.get(value.requestId);
+    const parsed = privateConnectResponseSchema.safeParse(value);
+    if (!parsed.success) return;
+    const request = pending.get(parsed.data.requestId);
     if (!request) return;
-    pending.delete(value.requestId);
+    pending.delete(parsed.data.requestId);
     window.clearTimeout(request.timer);
-    request.resolve(value as PrivateConnectResponse);
+    request.resolve(parsed.data);
   };
   socket.onerror = () => {
     if (!opened) openingReject?.(new Error("Private Connect could not open a live connection."));

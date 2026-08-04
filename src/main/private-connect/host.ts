@@ -194,7 +194,7 @@ class PrivateConnectPrivacyMonitor {
   private readonly unlock = (): void => { if (!this.stopped) this.onLock(false); };
 }
 
-async function cleanupLegacyAuthority(userDataDirectory: string): Promise<{ cleaned: boolean }> {
+export async function cleanupLegacyAuthority(userDataDirectory: string): Promise<{ cleaned: boolean }> {
   const entries = await readdir(userDataDirectory).catch(() => [] as string[]);
   const candidates = entries.filter((name) => LEGACY_NAMES.some((pattern) => pattern.test(name)));
   let cleaned = false;

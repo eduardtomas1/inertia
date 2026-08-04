@@ -712,6 +712,7 @@ function safeConversation(
     projectId: conversation.projectId,
     title: sanitizePrivateConnectLabel(conversation.title) ?? "Conversation",
     providerLabel: PROVIDER_INFO[conversation.providerId].name,
+    runId: conversation.latestTurn?.runId ?? null,
     status: conversation.status,
     pendingLocalApproval: conversation.pendingApproval,
     promptSafety: {

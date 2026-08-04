@@ -69,6 +69,21 @@ describe("Private Connect loopback gateway", () => {
     expect(await requestWithHost(address.port, "bad host")).toBe(400);
   });
 
+  it("serves the PWA root with its self-contained CSP and exposes a guarded session ticket", async () => {
+    const { address } = await startServer();
+    const host = hostHeader(address);
+    const root = await fetch(`http://${host}/`, { headers: { Host: host } });
+    expect(root.status).toBe(200);
+    expect(root.headers.get("content-security-policy")).toContain("default-src 'self'");
+    const origin = `https://${host}`;
+    const csrf = await fetch(`http://${host}/api/session/csrf`, { headers: { Host: host, Cookie: "__Host-inertia-private-connect=session-token" } });
+    expect(await csrf.json()).toEqual({ csrf: session.csrf });
+    const body = "{}";
+    const ticket = await fetch(`http://${host}/api/session/ws-ticket`, { method: "POST", headers: { Host: host, Origin: origin, Cookie: "__Host-inertia-private-connect=session-token", "Content-Type": "application/json", "Content-Length": String(body.length), "x-inertia-private-connect-csrf": session.csrf }, body });
+    expect(ticket.status).toBe(200);
+    expect(await ticket.json()).toEqual({ ticket: "ticket", expiresInMs: 45_000 });
+  });
+
   it("requires strict pairing schemas, same-origin mutations, and CSRF", async () => {
     const { address } = await startServer();
     const origin = `https://${hostHeader(address)}`;

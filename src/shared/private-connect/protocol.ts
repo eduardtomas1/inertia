@@ -118,6 +118,7 @@ export const privateConnectSafeConversationSchema = z.object({
   projectId: entityId,
   title: z.string().max(240),
   providerLabel: z.string().max(240),
+  runId: entityId.nullable(),
   status: z.enum(["idle", "running", "needs-input", "completed", "failed"]),
   pendingLocalApproval: z.boolean(),
   pendingLocalAction: z.boolean(),
@@ -237,3 +238,19 @@ export interface PrivateConnectStateView {
 export type PrivateConnectResponse =
   | { type: "response"; requestId: string; ok: true; result: unknown }
   | { type: "response"; requestId: string; ok: false; code: "forbidden" | "not-found" | "busy" | "stale" | "rate-limited" | "invalid" | "unavailable" | "uncertain"; message: string };
+
+export const privateConnectResponseSchema = z.discriminatedUnion("ok", [
+  z.object({
+    type: z.literal("response"),
+    requestId: uuid,
+    ok: z.literal(true),
+    result: z.unknown(),
+  }).strict(),
+  z.object({
+    type: z.literal("response"),
+    requestId: uuid,
+    ok: z.literal(false),
+    code: z.enum(["forbidden", "not-found", "busy", "stale", "rate-limited", "invalid", "unavailable", "uncertain"]),
+    message: z.string().trim().min(1).max(300),
+  }).strict(),
+]);

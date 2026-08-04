@@ -154,9 +154,9 @@ export class PrivateConnectTailscaleController {
     if (!verifiedMapping || !mappingMatchesPrivateConnect(verifiedMapping, ownership)) {
       throw new PrivateConnectTailscaleError("mapping-ownership-lost", "Tailscale Serve did not retain Inertia’s private mapping.");
     }
+    this.owned = ownership;
     const externalUrl = privateConnectExternalUrl(status.dnsName, servePort);
     await this.probe(externalUrl, status.dnsName);
-    this.owned = ownership;
     return { status, servePort, gatewayPort, externalUrl, ownership };
   }
 

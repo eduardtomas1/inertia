@@ -132,7 +132,7 @@ export class PrivateConnectGatewayServer {
   }
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const headers = securityHeaders(request.url?.endsWith(".html") === true);
+    const headers = securityHeaders(request.url === "/" || request.url?.endsWith(".html") === true);
     for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
     if (this.stopped) {
       writeJson(response, 503, { error: "unavailable", message: "Private Connect is shutting down." });

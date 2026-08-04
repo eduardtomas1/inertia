@@ -93,6 +93,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   private externalUrl: string | null = null;
   private privacyLocked = false;
   private resumeAfterUnlock = false;
+  private enableOperation = 0;
   private diagnostics: PrivateConnectStateView["diagnostics"] = {
     tailscale: "unknown",
     magicDns: "unknown",
@@ -170,12 +171,13 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     if (this.privacyLocked === locked || this.stopped) return;
     this.privacyLocked = locked;
     if (locked) {
+      this.enableOperation += 1;
       this.resumeAfterUnlock = this.data?.enabled === true && this.status === "ready";
       this.sessions.clear();
       this.tickets.clear();
-      void this.gateway.stop().catch(() => undefined);
-      this.status = this.data?.enabled ? "error" : "off";
-      this.statusMessage = this.data?.enabled ? "Private Connect is paused while the desktop is locked." : null;
+      void this.stopOwnedServeAndGateway();
+      this.status = this.data?.enabled || this.status === "starting" ? "error" : "off";
+      this.statusMessage = this.data?.enabled || this.status === "error" ? "Private Connect is paused while the desktop is locked." : null;
       this.emit();
       return;
     }
@@ -191,6 +193,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   async createInvitation(): Promise<{ url: string; expiresAt: string }> {
     this.requireReady();
     if (!this.data?.hostId || !this.externalUrl) throw new Error("Private Connect is not ready.");
+    this.prunePendingPairings();
     if (this.pending.size > 0) throw new Error("Finish or deny the current pairing before creating another link.");
     this.invitation = createPrivateConnectInvitation(this.data.hostId, this.now());
     this.audit("pairing.created", null, "A short-lived Private Connect pairing link was created.");
@@ -203,6 +206,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
 
   async pairStart(request: PrivateConnectPairStartRequest, networkLabel: string | null): Promise<{ requestId: string; expiresAt: string; comparisonCode: string }> {
     this.requireReady();
+    this.prunePendingPairings();
     const invitation = this.invitation;
     if (!invitation || invitation.invitationId !== request.invitation.invitationId || invitation.pairingSecret !== request.invitation.pairingSecret) {
       throw new Error("That Private Connect invitation is invalid or has expired.");
@@ -431,15 +435,17 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   async shutdown(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
+    this.enableOperation += 1;
     this.pending.clear();
     this.tickets.clear();
-    await this.gateway.stop().catch(() => undefined);
+    await this.stopOwnedServeAndGateway();
   }
 
   private async enable(): Promise<void> {
     if (this.privacyLocked) throw new Error("Private Connect is paused while the desktop is locked.");
     if (this.data?.enabled && this.status === "ready") return;
     if (!this.options.store.available()) throw new Error("Secure platform storage is unavailable; Private Connect remains disabled.");
+    const operation = ++this.enableOperation;
     this.status = "starting";
     this.statusMessage = "Starting the Private Connect gateway…";
     this.data ??= {
@@ -458,7 +464,16 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const address = await this.gateway.start();
     this.diagnostics.gatewayPort = address.port;
     try {
+      if (operation !== this.enableOperation || this.privacyLocked || this.stopped) {
+        await this.gateway.stop().catch(() => undefined);
+        return;
+      }
       const ready = await this.tailscale.ensurePrivateServe(address.port, this.data.servePort);
+      if (operation !== this.enableOperation || this.privacyLocked || this.stopped) {
+        await this.tailscale.disableOwnedServe(address.port).catch(() => undefined);
+        await this.gateway.stop().catch(() => undefined);
+        return;
+      }
       this.data.enabled = true;
       this.data.servePort = ready.servePort;
       this.externalUrl = ready.externalUrl;
@@ -468,7 +483,9 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       this.audit("enabled", null, "Private Connect enabled through private Tailscale HTTPS.");
       await this.persist();
     } catch (error) {
+      await this.tailscale.disableOwnedServe(address.port).catch(() => undefined);
       await this.gateway.stop().catch(() => undefined);
+      if (operation !== this.enableOperation || this.privacyLocked || this.stopped) return;
       this.status = "error";
       this.statusMessage = error instanceof PrivateConnectTailscaleError ? error.message : "Private Connect could not be established safely.";
       this.diagnostics.errorClass = error instanceof PrivateConnectTailscaleError ? error.classification : "unknown";
@@ -480,6 +497,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
 
   private async disable(): Promise<void> {
     if (!this.data) return;
+    this.enableOperation += 1;
     this.data.enabled = false;
     this.data.grantGeneration += 1;
     this.sessions.clear();
@@ -494,6 +512,22 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     this.diagnostics = { ...this.diagnostics, gatewayPort: null, externalUrl: null, mappingOwnership: "missing", setupUrl: null };
     this.audit("disabled", null, "Private Connect disabled.");
     await this.persist();
+  }
+
+  private async stopOwnedServeAndGateway(): Promise<void> {
+    const gatewayPort = this.diagnostics.gatewayPort;
+    this.externalUrl = null;
+    this.diagnostics = { ...this.diagnostics, gatewayPort: null, servePort: null, externalUrl: null, mappingOwnership: "missing" };
+    if (gatewayPort) await this.tailscale.disableOwnedServe(gatewayPort).catch(() => undefined);
+    await this.gateway.stop().catch(() => undefined);
+  }
+
+  private prunePendingPairings(): void {
+    const now = this.now().getTime();
+    for (const [requestId, pending] of this.pending) {
+      if (pending.status === "pending" && Date.parse(pending.expiresAt) <= now) pending.status = "expired";
+      if (pending.status === "expired" || pending.status === "denied") this.pending.delete(requestId);
+    }
   }
 
   private async dispatchPrompt(session: PrivateConnectSession, device: PrivateConnectDevice, request: Extract<PrivateConnectRequest, { type: "prompt.send" }>): Promise<PrivateConnectResponse> {

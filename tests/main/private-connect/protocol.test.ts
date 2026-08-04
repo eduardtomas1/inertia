@@ -8,6 +8,7 @@ import {
 import {
   privateConnectInvitationSchema,
   privateConnectRequestSchema,
+  privateConnectResponseSchema,
 } from "../../../src/shared/private-connect/protocol";
 import { normalizePrivateConnectGrants } from "../../../src/shared/private-connect/grants";
 import { scopesForPreset } from "../../../src/shared/private-connect/scopes";
@@ -46,5 +47,13 @@ describe("Private Connect shared contract", () => {
     }]);
     expect(scopesForPreset("monitor")).toEqual(["private:read"]);
     expect(scopesForPreset("collaborate")).toContain("private:stop");
+  });
+
+  it("validates browser responses before they are projected into the UI", () => {
+    const requestId = "22222222-2222-4222-8222-222222222222";
+    expect(privateConnectResponseSchema.safeParse({ type: "response", requestId, ok: true, result: { kind: "state" } }).success).toBe(true);
+    expect(privateConnectResponseSchema.safeParse({ type: "response", requestId, ok: false, code: "unavailable", message: "retry" }).success).toBe(true);
+    expect(privateConnectResponseSchema.safeParse({ type: "response", requestId, ok: false, code: "bad", message: "retry" }).success).toBe(false);
+    expect(privateConnectResponseSchema.safeParse({ type: "response", requestId, ok: true, result: {}, extra: true }).success).toBe(false);
   });
 });

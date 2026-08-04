@@ -203,6 +203,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let turns: TurnController;
   let closed = false;
   let databaseRecoveryImportActive = false;
+  let activeRuntimeCommands = 0;
   const streamingTrace = createTestStreamingTrace(dataDirectory);
   const send = (
     socket: WebSocket,
@@ -223,6 +224,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       canStartDatabaseBackup: () =>
         !closed
         && !databaseRecoveryImportActive
+        && activeRuntimeCommands === 0
         && (turns?.activeConversationIds().length ?? 0) === 0,
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
     },
@@ -349,7 +351,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let workspaceRuns: WorkspaceRunController<WebSocket>;
   const token = randomBytes(32).toString("base64url");
   const websocketPath = `/runtime/${token}`;
-  let activeRuntimeCommands = 0;
   const runtimeCommandDrainWaiters = new Set<() => void>();
   let artifactReconciliation: Promise<void> | null = null;
 

@@ -668,6 +668,7 @@ export class DatabaseBackupManager {
   private initialBackupComplete = false;
   private initialEligible = false;
   private initialRetryAttempt = 0;
+  private initialObservedOperation: Promise<DatabaseBackupResult> | null = null;
   private pendingInitial:
     { promise: Promise<DatabaseBackupResult | null>; resolve: (result: DatabaseBackupResult | null) => void; reject: (error: unknown) => void } | null = null;
   private lastValidatedAt: string | null;
@@ -729,6 +730,9 @@ export class DatabaseBackupManager {
       if (this.inFlight === operation) {
         this.inFlight = null;
         this.inFlightAbort = null;
+        if (!this.initialBackupComplete && !this.initialEligible) {
+          this.scheduleInitialBackup();
+        }
       }
     }).catch(() => undefined);
     return operation;
@@ -879,22 +883,40 @@ export class DatabaseBackupManager {
     if (
       !this.initialEligible
       || this.initialBackupComplete
-      || this.inFlight
       || this.quietTimer
     ) return;
+    if (this.inFlight) {
+      this.observeInitialOperation(this.inFlight);
+      return;
+    }
     if (this.options.canStartBackup && !this.options.canStartBackup()) {
       this.scheduleQuietRetry();
       return;
     }
-    const operation = this.createBackup();
+    this.observeInitialOperation(this.createBackup());
+  }
+
+  private observeInitialOperation(
+    operation: Promise<DatabaseBackupResult>,
+  ): void {
+    if (this.initialObservedOperation === operation) return;
+    this.initialObservedOperation = operation;
     void operation.then(
-      (result) => this.resolvePendingInitial(result),
+      (result) => {
+        if (this.initialObservedOperation === operation) {
+          this.initialObservedOperation = null;
+        }
+        this.resolvePendingInitial(result);
+      },
       (error: unknown) => {
-        this.options.onError?.(error);
+        if (this.initialObservedOperation === operation) {
+          this.initialObservedOperation = null;
+        }
         if (error instanceof DatabaseBackupCancelledError) {
           this.rejectPendingInitial(error);
           return;
         }
+        this.options.onError?.(error);
         this.initialRetryAttempt += 1;
         if (this.initialRetryAttempt <= this.maxInitialRetries()) {
           this.scheduleQuietRetry(this.retryDelayMs());

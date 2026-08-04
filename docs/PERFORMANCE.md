@@ -51,8 +51,10 @@ baseline remains 24 ms first flush and 64 ms sustained cadence because that is
 the current evidence-backed configuration.
 
 `npm run benchmark:platform:smoke` adds deliberately generous catastrophic
-budgets. Hosted CI is too noisy for tight latency gates, so the smoke gate also
-checks structural properties such as bounded terminal frames. CI runs both
+budgets to every exploratory cadence. Only the shipped 24/64 cadence also has
+the tighter hosted first-projection and visible-gap ceilings. Hosted CI is too
+noisy for lab-grade latency gates, so the smoke gate also checks structural
+properties such as bounded terminal frames. CI runs both
 harnesses on Windows x64, Linux x64 under X11/Xvfb, and macOS arm64 and retains
 the JSON reports for 14 days.
 

@@ -51,6 +51,10 @@ import { nativeProviderRunInput } from "../server/model-route-fixture";
 
 const execFileAsync = promisify(execFile);
 const enforce = process.env.INERTIA_BENCHMARK_ENFORCE === "1";
+const HOSTED_STREAM_FIRST_PROJECTION_CATASTROPHIC_MS = 500;
+const HOSTED_STREAM_VISIBLE_GAP_CATASTROPHIC_MS = 500;
+const HOSTED_SELECTED_STREAM_FIRST_PROJECTION_MS = 75;
+const HOSTED_SELECTED_STREAM_VISIBLE_GAP_MS = 175;
 const PTY_RECORD_PREFIX = "INERTIA_PTY_RECORD_BEGIN:";
 const PTY_RECORD_SEPARATOR = ":PAYLOAD:";
 const PTY_RECORD_SUFFIX = ":INERTIA_PTY_RECORD_END";
@@ -946,11 +950,20 @@ describe("cross-platform performance benchmark", () => {
         expect(processSpawn.medianMs).toBeLessThan(5_000);
         expect(activeProviderStream.medianMs).toBeLessThan(5_000);
         for (const candidate of streamingCadenceCandidates) {
-          expect(candidate.firstProjectionMs).toBeLessThan(75);
-          expect(candidate.p95VisibleGapMs).toBeLessThan(175);
+          // The non-selected combinations are comparative evidence, not
+          // shipped configurations. Keep catastrophic guards on every sample
+          // without pretending that all nine must meet the product cadence.
+          expect(candidate.firstProjectionMs)
+            .toBeLessThan(HOSTED_STREAM_FIRST_PROJECTION_CATASTROPHIC_MS);
+          expect(candidate.p95VisibleGapMs)
+            .toBeLessThan(HOSTED_STREAM_VISIBLE_GAP_CATASTROPHIC_MS);
           expect(candidate.runtimeCpuMs).toBeLessThan(5_000);
           expect(candidate.runtimeRssDeltaBytes).toBeLessThan(128 * 1024 * 1024);
         }
+        expect(selectedStreamingCadence!.firstProjectionMs)
+          .toBeLessThan(HOSTED_SELECTED_STREAM_FIRST_PROJECTION_MS);
+        expect(selectedStreamingCadence!.p95VisibleGapMs)
+          .toBeLessThan(HOSTED_SELECTED_STREAM_VISIBLE_GAP_MS);
         expect(providerHarnessLifecycle.medianMs).toBeLessThan(10_000);
         expect(processTreeLifecycle.medianMs).toBeLessThan(10_000);
         expect(processTreeLifecycle.confirmedStops).toBe(3);

@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFile, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 
@@ -27,7 +27,10 @@ const NOOP_TRACE: StreamingTrace = { mark: () => undefined };
  * provider text, paths, credentials, or identities are recorded.
  */
 export function createTestStreamingTrace(dataDirectory: string): StreamingTrace {
-  if (process.env.INERTIA_STREAMING_TRACE !== "1") return NOOP_TRACE;
+  if (
+    process.env.NODE_ENV !== "test"
+    || process.env.INERTIA_STREAMING_TRACE !== "1"
+  ) return NOOP_TRACE;
   const path = join(dataDirectory, "streaming-trace.jsonl");
   try {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -35,17 +38,32 @@ export function createTestStreamingTrace(dataDirectory: string): StreamingTrace 
   } catch {
     return NOOP_TRACE;
   }
+  let queued = "";
+  let writeInFlight = false;
+  let writeScheduled = false;
+  const scheduleWrite = (): void => {
+    if (writeInFlight || writeScheduled || !queued) return;
+    writeScheduled = true;
+    setImmediate(() => {
+      writeScheduled = false;
+      if (writeInFlight || !queued) return;
+      const payload = queued;
+      queued = "";
+      writeInFlight = true;
+      appendFile(path, payload, { encoding: "utf8", mode: 0o600 }, () => {
+        writeInFlight = false;
+        scheduleWrite();
+      });
+    });
+  };
   return {
     mark(stage) {
-      try {
-        appendFileSync(path, `${JSON.stringify({
-          stage,
-          monotonicMs: performance.now(),
-          wallTimeMs: Date.now(),
-        })}\n`, { encoding: "utf8", mode: 0o600 });
-      } catch {
-        // Attribution must never affect the production lifecycle.
-      }
+      queued += `${JSON.stringify({
+        stage,
+        monotonicMs: performance.now(),
+        wallTimeMs: Date.now(),
+      })}\n`;
+      scheduleWrite();
     },
   };
 }

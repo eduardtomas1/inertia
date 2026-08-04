@@ -515,11 +515,12 @@ async function compatibilityHistorySample(page: Page) {
   const recoveredHistory = page.locator(".orphan-run-flow details");
   await expect(recoveredHistory).toHaveCount(1);
   await expect(recoveredHistory.locator(".message")).toHaveCount(0);
-  await recoveredHistory.locator("summary").click();
+  const summary = recoveredHistory.locator("summary");
+  await summary.press("Enter");
   await expect(recoveredHistory).toHaveJSProperty("open", true);
   const expandedCount = await recoveredHistory.locator(".message").count();
   expect(expandedCount).toBeGreaterThan(0);
-  await recoveredHistory.locator("summary").click();
+  await summary.press("Enter");
   await expect(recoveredHistory).toHaveJSProperty("open", false);
   await expect(recoveredHistory.locator(".message")).toHaveCount(0);
   return {
@@ -571,9 +572,11 @@ async function streamingResponsivenessSample(
         }
       }
       const visibleUpdates: number[] = [];
+      const visibleUpdateGaps: number[] = [];
       const frameIntervals: number[] = [];
       const longTaskDurations: number[] = [];
       let lastVisibleText = "";
+      let lastVisibleUpdateAt: number | null = null;
       let firstProviderDeltaToPaintMs: number | null = null;
       let completionToFinalPaintMs: number | null = null;
       let previousFrame = performance.now();
@@ -623,23 +626,21 @@ async function streamingResponsivenessSample(
           || completionToFinalPaintMs === null
         ) return;
         stop();
-        const gaps = visibleUpdates.slice(1).map(
-          (time, index) => time - visibleUpdates[index]!,
-        );
         const stableFrames = frameIntervals.filter((value) => value > 0 && value < 50);
         const observedFrameMs = percentile(stableFrames, 0.5) || 16.667;
         const frameBudgetMs = Math.min(25, Math.max(10, observedFrameMs * 1.75));
-        const durationMs = Math.max(
+        const visibleDurationMs = Math.max(
           1,
-          (visibleUpdates.at(-1) ?? 0) - (visibleUpdates[0] ?? 0),
+          visibleUpdateGaps.reduce((sum, gap) => sum + gap, 0),
         );
         resolveMeasurement({
           firstProviderDeltaToPaintMs,
           completionToFinalPaintMs,
-          medianVisibleGapMs: percentile(gaps, 0.5),
-          p95VisibleGapMs: percentile(gaps, 0.95),
+          medianVisibleGapMs: percentile(visibleUpdateGaps, 0.5),
+          p95VisibleGapMs: percentile(visibleUpdateGaps, 0.95),
           visibleUpdates: visibleUpdates.length,
-          visibleUpdatesPerSecond: visibleUpdates.length / (durationMs / 1_000),
+          visibleUpdatesPerSecond:
+            visibleUpdateGaps.length / (visibleDurationMs / 1_000),
           longTasks: longTaskDurations.length,
           longTaskTotalMs: longTaskDurations.reduce((sum, value) => sum + value, 0),
           frames: frameIntervals.length,
@@ -674,9 +675,26 @@ async function streamingResponsivenessSample(
           '[data-answer-phase="persisted"] .response-markdown',
         )).find((element) => element.textContent?.includes("STREAM_PROVIDER_COMPLETE_")) ?? null;
         const visibleText = live?.textContent ?? finalAnswer?.textContent ?? "";
-        if (live && visibleText && visibleText !== lastVisibleText) {
+        const viewport = live?.closest<HTMLElement>(".message-scroll") ?? null;
+        const liveRect = live?.getBoundingClientRect() ?? null;
+        const viewportRect = viewport?.getBoundingClientRect() ?? null;
+        const liveIsVisible = Boolean(
+          live
+          && viewport
+          && liveRect
+          && viewportRect
+          && liveRect.bottom > viewportRect.top
+          && liveRect.top < viewportRect.bottom,
+        );
+        if (!liveIsVisible) lastVisibleUpdateAt = null;
+        if (liveIsVisible && visibleText && visibleText !== lastVisibleText) {
           lastVisibleText = visibleText;
-          visibleUpdates.push(performance.now());
+          const visibleAt = performance.now();
+          if (lastVisibleUpdateAt !== null) {
+            visibleUpdateGaps.push(visibleAt - lastVisibleUpdateAt);
+          }
+          lastVisibleUpdateAt = visibleAt;
+          visibleUpdates.push(visibleAt);
           const trace = Reflect.get(globalThis, "__inertiaTestStreamingTrace");
           if (typeof trace === "function") trace("stream-paint");
         }
@@ -771,8 +789,20 @@ async function streamingResponsivenessSample(
     "stream-after",
   );
   const processAfter = await processSample(electronApp);
-  const runtimeTrace = (await readFile(join(dataDirectory, "streaming-trace.jsonl"), "utf8")
-    .catch(() => ""))
+  const runtimeTracePath = join(dataDirectory, "streaming-trace.jsonl");
+  let serializedRuntimeTrace = "";
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    serializedRuntimeTrace = await readFile(runtimeTracePath, "utf8")
+      .catch(() => "");
+    if (serializedRuntimeTrace.includes('"stage":"terminal-event-projected"')) {
+      break;
+    }
+    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 20));
+  }
+  if (!serializedRuntimeTrace.includes('"stage":"terminal-event-projected"')) {
+    throw new Error("The runtime streaming trace did not flush its terminal receipt.");
+  }
+  const runtimeTrace = serializedRuntimeTrace
     .split("\n")
     .filter(Boolean)
     .flatMap((line) => {

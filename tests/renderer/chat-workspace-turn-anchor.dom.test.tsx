@@ -401,9 +401,23 @@ describe("transcript following motion", () => {
 
     fireEvent.wheel(transcript);
     height = 800;
-    const readerIntentFrame = [...scheduled.entries()].at(-1)!;
-    scheduled.delete(readerIntentFrame[0]);
-    readerIntentFrame[1](32);
+    expect(scrollTop).toBe(550);
+    expect(scheduled.size).toBe(0);
+
+    scrollTo.mockClear();
+    const lateMessage: ChatMessage = {
+      ...message,
+      id: "late-measurement-message",
+      content: "A late content signal must not reclaim the reader.",
+      createdAt: "2026-08-02T10:00:02.000Z",
+    };
+    view.rerender(
+      <ChatWorkspace {...props} messages={[message, lateMessage]} />,
+    );
+    const lateContentFrame = [...scheduled.entries()].at(-1)!;
+    scheduled.delete(lateContentFrame[0]);
+    lateContentFrame[1](32);
+    expect(scrollTo).not.toHaveBeenCalled();
     expect(scrollTop).toBe(550);
     expect(scheduled.size).toBe(0);
   });

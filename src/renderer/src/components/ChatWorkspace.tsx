@@ -65,6 +65,8 @@ const ResponseTimeline = lazy(async () => ({
   default: (await import("./ResponseTimeline")).ResponseTimeline,
 }));
 
+const READER_INTENT_GUARD_MS = 750;
+
 type ChatWorkspaceProps = {
   embedded?: boolean;
   project: Project | null;
@@ -229,6 +231,7 @@ export function ChatWorkspace({
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
   const followCorrectionFrameRef = useRef<number | null>(null);
+  const readerIntentReleaseTimerRef = useRef<number | null>(null);
   const conversationId = conversation?.id ?? null;
   const [navigation, dispatchNavigation] = useReducer(
     transcriptNavigationReducer,
@@ -245,9 +248,18 @@ export function ChatWorkspace({
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
   const contentSignal = `${turns.length}:${turns.at(-1)?.updatedAt ?? ""}:${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${subagents.length}:${subagents.at(-1)?.updatedAt ?? ""}:${plans.length}:${checkpoints.length}:${turnGitArtifacts.length}:${turnGitArtifacts.at(-1)?.status ?? ""}:${turnGitArtifacts.at(-1)?.capturedAt ?? ""}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
 
+  const clearReaderIntent = useCallback((): void => {
+    readerIntentRef.current = false;
+    if (readerIntentReleaseTimerRef.current !== null) {
+      window.clearTimeout(readerIntentReleaseTimerRef.current);
+      readerIntentReleaseTimerRef.current = null;
+    }
+  }, []);
+
   const performScrollToLatest = useCallback((
     behavior: ScrollBehavior = "smooth",
   ): void => {
+    if (readerIntentRef.current) return;
     const element = scrollRef.current;
     if (!element) return;
     element.scrollTo({ top: element.scrollHeight, behavior });
@@ -285,20 +297,22 @@ export function ChatWorkspace({
     behavior: ScrollBehavior = "smooth",
   ): void => {
     if (!conversationId) return;
+    clearReaderIntent();
     dispatchNavigation({
       type: "latest.requested",
       conversationId,
     });
     performScrollToLatest(behavior);
-  }, [conversationId, performScrollToLatest]);
+  }, [clearReaderIntent, conversationId, performScrollToLatest]);
 
   useLayoutEffect(() => {
+    clearReaderIntent();
     dispatchNavigation({
       type: "conversation.changed",
       conversationId,
     });
     performScrollToLatest("auto");
-  }, [conversationId, performScrollToLatest]);
+  }, [clearReaderIntent, conversationId, performScrollToLatest]);
 
   useEffect(
     () => () => {
@@ -308,6 +322,11 @@ export function ChatWorkspace({
       onLatestContentVisibilityChange?.(false);
     },
     [onLatestContentVisibilityChange],
+  );
+
+  useEffect(
+    () => () => clearReaderIntent(),
+    [clearReaderIntent],
   );
 
   useEffect(() => {
@@ -344,6 +363,17 @@ export function ChatWorkspace({
 
   const noteReaderIntent = (): void => {
     readerIntentRef.current = true;
+    if (followCorrectionFrameRef.current !== null) {
+      window.cancelAnimationFrame(followCorrectionFrameRef.current);
+      followCorrectionFrameRef.current = null;
+    }
+    if (readerIntentReleaseTimerRef.current !== null) {
+      window.clearTimeout(readerIntentReleaseTimerRef.current);
+    }
+    readerIntentReleaseTimerRef.current = window.setTimeout(() => {
+      readerIntentRef.current = false;
+      readerIntentReleaseTimerRef.current = null;
+    }, READER_INTENT_GUARD_MS);
   };
 
   const noteReaderKeyboardIntent = (
@@ -357,7 +387,7 @@ export function ChatWorkspace({
     if (!element) return;
     const follows = shouldFollowTimeline(element.scrollTop, element.clientHeight, element.scrollHeight);
     const intentional = readerIntentRef.current;
-    readerIntentRef.current = false;
+    if (follows) clearReaderIntent();
     dispatchNavigation({
       type: "reader.scrolled",
       conversationId: conversationId ?? "",
@@ -381,12 +411,13 @@ export function ChatWorkspace({
       skillIds,
     );
     if (!acceptance) return;
+    clearReaderIntent();
     dispatchNavigation({
       type: "message.accepted",
       acceptance,
       sourceConversationId,
     });
-  }, [conversationId, onSendMessage]);
+  }, [clearReaderIntent, conversationId, onSendMessage]);
 
   const turnAnchorId = activeNavigation.mode === "await-turn"
     ? activeNavigation.turnId

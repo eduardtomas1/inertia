@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import {
   PRIVATE_CONNECT_LIMITS,
+  PRIVATE_CONNECT_SOCKET_CLOSE,
   privateConnectRequestSchema,
   type PrivateConnectInvitation,
   type PrivateConnectRequest,
@@ -209,7 +210,10 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
         this.enableOperation += 1;
         this.resumeAfterUnlock = this.data?.enabled === true && this.status === "ready";
         this.tickets.clear();
-        this.gateway.closeAllSessions(1012, "Private Connect is paused while the desktop is locked");
+        this.gateway.closeAllSessions(
+          PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable,
+          "Private Connect is paused while the desktop is locked",
+        );
         this.status = this.data?.enabled || this.status === "starting" ? "error" : "off";
         this.statusMessage = this.data?.enabled || this.status === "error" ? "Private Connect is paused while the desktop is locked." : null;
         await this.stopOwnedServeAndGateway();
@@ -410,7 +414,11 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     try {
       await this.finishAuthorityReduction(authorityReduction);
     } finally {
-      this.gateway.closeSessionsForDevice(deviceId);
+      this.gateway.closeSessionsForDevice(
+        deviceId,
+        PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged,
+        "Private Connect authority changed",
+      );
     }
     this.emit();
   }
@@ -470,7 +478,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       if (parsed.data.type === "input.respond" || parsed.data.type === "run.stop") {
         return await this.trackMutation(async () => {
           const response = await this.options.runtime.privateConnectRequest(
-            this.legacyAuthorization(session, device),
+            this.runtimeAuthorization(session, device),
             parsed.data as Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
           );
           return adaptPrivateConnectRuntimeResponse(response, device);
@@ -502,11 +510,11 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
           return response;
         });
       }
-      const legacySubject = this.legacyAuthorization(session, device);
-      const legacyRequest = parsed.data.type === "state.get"
+      const runtimeSubject = this.runtimeAuthorization(session, device);
+      const runtimeRequest = parsed.data.type === "state.get"
         ? { type: "state.get", requestId: parsed.data.requestId, ...(parsed.data.ifNoneMatch === undefined ? {} : { ifNoneMatch: parsed.data.ifNoneMatch }) }
         : { type: "conversation.get", requestId: parsed.data.requestId, conversationId: parsed.data.conversationId, ...(parsed.data.ifNoneMatch === undefined ? {} : { ifNoneMatch: parsed.data.ifNoneMatch }) };
-      const response = await this.options.runtime.privateConnectRequest(legacySubject, legacyRequest as Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>);
+      const response = await this.options.runtime.privateConnectRequest(runtimeSubject, runtimeRequest as Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>);
       return adaptPrivateConnectRuntimeResponse(response, device);
     } catch (error) {
       const message = error instanceof Error ? sanitizeError(error.message) : "The request was rejected.";
@@ -663,8 +671,8 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   private async dispatchPrompt(session: PrivateConnectSession, device: PrivateConnectDevice, request: Extract<PrivateConnectRequest, { type: "prompt.send" }>): Promise<PrivateConnectResponse> {
-    const subject = this.legacyAuthorization(session, device);
-    const legacyRequest: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }> = {
+    const subject = this.runtimeAuthorization(session, device);
+    const runtimeRequest: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }> = {
       type: "prompt.send",
       requestId: request.requestId,
       deliveryId: request.deliveryId,
@@ -674,16 +682,16 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const prepare = this.options.runtime.preparePrivateConnectPrompt;
     const commit = this.options.runtime.commitPrivateConnectPrompt;
     if (!prepare || !commit) return failure(request.requestId, "unavailable", "The supervised runtime is not ready.");
-    const prepared = await prepare(subject, legacyRequest);
+    const prepared = await prepare(subject, runtimeRequest);
     if (!("preparationId" in prepared)) return prepared;
     this.requireCurrentSession(session);
     this.requireDevice(device.id);
     if (!hasPrivateConnectScope(device.scopes, "private:prompt")) return failure(request.requestId, "forbidden", "Prompt permission changed before delivery.");
-    const response = await commit(subject, legacyRequest, prepared.preparationId);
+    const response = await commit(subject, runtimeRequest, prepared.preparationId);
     return response;
   }
 
-  private legacyAuthorization(session: PrivateConnectSession, device: PrivateConnectDevice): PrivateConnectRuntimeAuthorization {
+  private runtimeAuthorization(session: PrivateConnectSession, device: PrivateConnectDevice): PrivateConnectRuntimeAuthorization {
     const scopes: ("view" | "prompt")[] = device.scopes.includes("private:prompt") ? ["view", "prompt"] : ["view"];
     const grants: PrivateConnectRuntimeGrant[] = device.grants.map((grant) => ({ ...grant, legacyProjectWide: grant.includeFutureConversations }));
     return {
@@ -904,6 +912,9 @@ function adaptPrivateConnectRuntimeResponse(
       ...response,
       result: {
         kind: "state",
+        ...(response.result.validator === undefined
+          ? {}
+          : { validator: response.result.validator }),
         state: {
           generatedAt: response.result.state.generatedAt,
           projects: response.result.state.projects,
@@ -919,6 +930,9 @@ function adaptPrivateConnectRuntimeResponse(
       ...response,
       result: {
         kind: "conversation",
+        ...(response.result.validator === undefined
+          ? {}
+          : { validator: response.result.validator }),
         detail: {
           generatedAt: detail.generatedAt,
           conversation: publicConversation(detail.conversation, detail.waitingForLocalAction),

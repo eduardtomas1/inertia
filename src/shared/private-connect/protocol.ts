@@ -18,6 +18,12 @@ export const PRIVATE_CONNECT_PROTOCOL_RANGE = Object.freeze({
   maximum: PRIVATE_CONNECT_PROTOCOL_VERSION,
 });
 
+export const PRIVATE_CONNECT_SOCKET_CLOSE = Object.freeze({
+  accessRevoked: 1008,
+  hostUnavailable: 1012,
+  authorityChanged: 4001,
+});
+
 export const PRIVATE_CONNECT_LIMITS = Object.freeze({
   bodyBytes: 128 * 1024,
   websocketFrameBytes: 128 * 1024,

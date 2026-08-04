@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  PRIVATE_CONNECT_SOCKET_CLOSE,
+  type PrivateConnectResponse,
+} from "../../../shared/private-connect/protocol";
+import {
   apiRequest,
   browserDeviceId,
   connectPrivateConnectSocket,
@@ -50,6 +54,40 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   } | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const followLatestRef = useRef(true);
+  const stateValidatorRef = useRef<string | null>(null);
+  const conversationValidatorsRef = useRef(new Map<string, string>());
+
+  const clearWorkspace = useCallback((): void => {
+    setShell(null);
+    setDetail(null);
+    setSelectedConversation(null);
+    setAnswers({});
+    stateValidatorRef.current = null;
+    conversationValidatorsRef.current.clear();
+  }, []);
+
+  const applyStateResponse = useCallback((response: PrivateConnectResponse): void => {
+    if (!response.ok) throw new Error(response.message);
+    const result = projectionResult(response);
+    if (!result || result.kind === "not-modified") return;
+    if (result.kind !== "state") throw new Error("Private Connect returned an invalid state projection.");
+    stateValidatorRef.current = result.validator;
+    setShell(result.state);
+  }, []);
+
+  const applyConversationResponse = useCallback((
+    response: PrivateConnectResponse,
+    conversationId: string,
+  ): void => {
+    if (!response.ok) throw new Error(response.message);
+    const result = projectionResult(response);
+    if (!result || result.kind === "not-modified") return;
+    if (result.kind !== "conversation") {
+      throw new Error("Private Connect returned an invalid conversation projection.");
+    }
+    conversationValidatorsRef.current.set(conversationId, result.validator);
+    setDetail(result.detail);
+  }, []);
 
   const loadSession = useCallback(async () => {
     const response = await fetch("/api/session/csrf", { credentials: "same-origin" });
@@ -110,12 +148,15 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
         if (cancelled) { next.close(); return; }
         current = next;
         unsubscribeClose = next.onClose((code) => {
-          if (code === 1008) {
-            setShell(null);
-            setDetail(null);
-            setSelectedConversation(null);
+          if (code === PRIVATE_CONNECT_SOCKET_CLOSE.accessRevoked) {
+            clearWorkspace();
             setPair({ kind: "pair", invitation: null, error: "This browser no longer has access. Pair it again from the desktop." });
-          } else retry();
+          } else {
+            if (code === PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged) {
+              clearWorkspace();
+            }
+            retry();
+          }
         });
         setSocket(next);
       } catch (error) {
@@ -135,7 +176,7 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
       current?.close();
       setSocket(null);
     };
-  }, [pair.kind, readyCsrf]);
+  }, [clearWorkspace, pair.kind, readyCsrf]);
 
   const request = useCallback(async (value: Parameters<PrivateConnectSocket["request"]>[0], csrf: string) => {
     return socket ? await socket.request(value) : await apiRequest(value, csrf);
@@ -160,46 +201,62 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
     if (!readyCsrf) return;
     let cancelled = false;
     const load = async (): Promise<void> => {
-      const response = await request({ protocolVersion: 1, type: "state.get", requestId: crypto.randomUUID() }, readyCsrf);
-      if (!response.ok) throw new Error(response.message);
-      if (!cancelled && response.result && typeof response.result === "object" && "state" in response.result) setShell((response.result as { state: Shell }).state);
+      const response = await request({
+        protocolVersion: 1,
+        type: "state.get",
+        requestId: crypto.randomUUID(),
+        ifNoneMatch: stateValidatorRef.current,
+      }, readyCsrf);
+      if (!cancelled) applyStateResponse(response);
     };
     void load().catch((error) => { if (!cancelled) setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "State could not be loaded." } : current); });
     return () => { cancelled = true; };
-  }, [readyCsrf, request]);
+  }, [applyStateResponse, readyCsrf, request]);
 
   useEffect(() => {
     if (!readyCsrf || !selectedConversation) return;
     let cancelled = false;
-    void request({ protocolVersion: 1, type: "conversation.get", requestId: crypto.randomUUID(), conversationId: selectedConversation }, readyCsrf).then((response) => {
-      if (!response.ok) throw new Error(response.message);
-      if (!cancelled && response.result && typeof response.result === "object" && "detail" in response.result) setDetail((response.result as { detail: Detail }).detail);
+    void request({
+      protocolVersion: 1,
+      type: "conversation.get",
+      requestId: crypto.randomUUID(),
+      conversationId: selectedConversation,
+      ifNoneMatch: conversationValidatorsRef.current.get(selectedConversation) ?? null,
+    }, readyCsrf).then((response) => {
+      if (!cancelled) applyConversationResponse(response, selectedConversation);
     }).catch((error) => {
       if (!cancelled) setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "Conversation could not be loaded." } : current);
     });
     return () => { cancelled = true; };
-  }, [readyCsrf, request, selectedConversation]);
+  }, [applyConversationResponse, readyCsrf, request, selectedConversation]);
 
   useEffect(() => {
     if (!readyCsrf || !socket) return;
     let cancelled = false;
     const refresh = async (): Promise<void> => {
-      const stateRequest = socket.request({ protocolVersion: 1, type: "state.get", requestId: crypto.randomUUID() });
+      const stateRequest = socket.request({
+        protocolVersion: 1,
+        type: "state.get",
+        requestId: crypto.randomUUID(),
+        ifNoneMatch: stateValidatorRef.current,
+      });
       const detailRequest = selectedConversation
-        ? socket.request({ protocolVersion: 1, type: "conversation.get", requestId: crypto.randomUUID(), conversationId: selectedConversation })
+        ? socket.request({
+            protocolVersion: 1,
+            type: "conversation.get",
+            requestId: crypto.randomUUID(),
+            conversationId: selectedConversation,
+            ifNoneMatch: conversationValidatorsRef.current.get(selectedConversation) ?? null,
+          })
         : null;
       const [stateResponse, detailResponse] = await Promise.all([
         stateRequest,
         detailRequest,
       ]);
       if (cancelled) return;
-      if (!stateResponse.ok) throw new Error(stateResponse.message);
-      if (detailResponse && !detailResponse.ok) throw new Error(detailResponse.message);
-      if (stateResponse.result && typeof stateResponse.result === "object" && "state" in stateResponse.result) {
-        setShell((stateResponse.result as { state: Shell }).state);
-      }
-      if (detailResponse?.result && typeof detailResponse.result === "object" && "detail" in detailResponse.result) {
-        setDetail((detailResponse.result as { detail: Detail }).detail);
+      applyStateResponse(stateResponse);
+      if (detailResponse && selectedConversation) {
+        applyConversationResponse(detailResponse, selectedConversation);
       }
     };
     const timer = window.setInterval(() => {
@@ -208,7 +265,7 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
       });
     }, 5_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [readyCsrf, selectedConversation, socket]);
+  }, [applyConversationResponse, applyStateResponse, readyCsrf, selectedConversation, socket]);
 
   useLayoutEffect(() => {
     const messages = messagesRef.current;
@@ -264,6 +321,7 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
     if (pair.kind !== "ready") return;
     try {
       await jsonRequest("/api/session/logout", {}, pair.csrf);
+      clearWorkspace();
       setPair({ kind: "pair", invitation: null, error: null });
     } catch (error) {
       setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "Sign out failed." } : current);
@@ -273,7 +331,31 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   if (pair.kind === "checking") return <main className="connect-card"><div className="brand-mark">I</div><h1>Inertia Private Connect</h1><p>Checking this browser’s connection…</p></main>;
   if (pair.kind === "pair") return <main className="connect-card"><div className="brand-mark">I</div><h1>Inertia Private Connect</h1><p>Pair this browser with your online Inertia computer through your private Tailscale network.</p>{pair.error && <p className="error">{pair.error}</p>}<p className="muted">Open a fresh pairing link from Connections &amp; devices on the desktop.</p></main>;
   if (pair.kind === "waiting") return <main className="connect-card"><div className="brand-mark">I</div><h1>Waiting for approval</h1><p>Approve this browser on the Inertia desktop.</p><div className="comparison-code" aria-label={`Comparison code ${pair.comparisonCode}`}>{pair.comparisonCode}</div><p className="muted">The code must match what your computer displays.</p></main>;
-  return <main className="shell"><header><div><span className="eyebrow">Inertia Private Connect</span><h1>Your workspace</h1></div><button type="button" onClick={() => void signOut()}>Sign out</button></header>{pair.error && <div className="banner error">{pair.error}</div>}<div className="layout"><aside><h2>Projects</h2>{shell?.projects.map((project) => <section key={project.id}><h3>{project.name}</h3>{shell.conversations.filter((conversation) => conversation.projectId === project.id).map((conversation) => <button type="button" className={selectedConversation === conversation.id ? "conversation-link selected" : "conversation-link"} key={conversation.id} onClick={() => { setSelectedConversation(conversation.id); setDetail(null); setAnswers({}); followLatestRef.current = true; }}><span>{conversation.title}</span><small>{conversation.status}</small></button>)}</section>)}</aside><section className="conversation-pane">{detail ? <><div className="conversation-heading"><div><span className="eyebrow">{detail.conversation.providerLabel}</span><h2>{detail.conversation.title}</h2></div>{shell?.capabilities.scopes.includes("private:stop") && detail.conversation.runId && <button type="button" onClick={() => void stopRun()}>Stop run</button>}</div><div className="messages" ref={messagesRef} onScroll={(event) => { const element = event.currentTarget; followLatestRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>{detail.messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span className="role">{message.role === "assistant" ? "Inertia" : "You"}</span><p>{message.content}</p></article>)}</div><ActivitySummary detail={detail} />{detail.questions.length > 0 && shell?.capabilities.scopes.includes("private:input") && <form className="question-card" onSubmit={(event) => { event.preventDefault(); void answerQuestions(); }}><h3>Inertia needs your answer</h3>{detail.questions.map((question) => <fieldset key={question.id}><legend>{question.label}</legend>{question.options.map((option) => <label key={option.id}><input type={question.allowMultiple ? "checkbox" : "radio"} name={question.id} checked={answers[question.id]?.includes(option.id) ?? false} onChange={() => setAnswers((current) => ({ ...current, [question.id]: question.allowMultiple ? current[question.id]?.includes(option.id) ? current[question.id]!.filter((id) => id !== option.id) : [...(current[question.id] ?? []), option.id] : [option.id] }))} /> {option.label}</label>)}</fieldset>)}<button type="submit" disabled={busy}>Answer</button></form>}{detail.waitingForLocalAction && <div className="banner">This conversation needs an action on the desktop. Secrets and approvals stay local.</div>}{shell?.capabilities.scopes.includes("private:prompt") && <form className="composer" onSubmit={(event) => { event.preventDefault(); void sendPrompt(); }}><textarea aria-label="Send a prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Send a supervised prompt" disabled={busy} /><button type="submit" disabled={busy || !prompt.trim()}>Send</button></form>}</> : <div className="empty"><h2>Choose a conversation</h2><p>Only projects and conversations granted by the desktop appear here.</p></div>}</section></div></main>;
+  return <main className="shell"><header><div><span className="eyebrow">Inertia Private Connect</span><h1>Your workspace</h1></div><button type="button" onClick={() => void signOut()}>Sign out</button></header>{pair.error && <div className="banner error">{pair.error}</div>}<div className="layout"><aside><h2>Projects</h2>{shell?.projects.map((project) => <section key={project.id}><h3>{project.name}</h3>{shell.conversations.filter((conversation) => conversation.projectId === project.id).map((conversation) => <button type="button" className={selectedConversation === conversation.id ? "conversation-link selected" : "conversation-link"} key={conversation.id} onClick={() => { conversationValidatorsRef.current.delete(conversation.id); setSelectedConversation(conversation.id); setDetail(null); setAnswers({}); followLatestRef.current = true; }}><span>{conversation.title}</span><small>{conversation.status}</small></button>)}</section>)}</aside><section className="conversation-pane">{detail ? <><div className="conversation-heading"><div><span className="eyebrow">{detail.conversation.providerLabel}</span><h2>{detail.conversation.title}</h2></div>{shell?.capabilities.scopes.includes("private:stop") && detail.conversation.runId && <button type="button" onClick={() => void stopRun()}>Stop run</button>}</div><div className="messages" ref={messagesRef} onScroll={(event) => { const element = event.currentTarget; followLatestRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>{detail.messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span className="role">{message.role === "assistant" ? "Inertia" : "You"}</span><p>{message.content}</p></article>)}</div><ActivitySummary detail={detail} />{detail.questions.length > 0 && shell?.capabilities.scopes.includes("private:input") && <form className="question-card" onSubmit={(event) => { event.preventDefault(); void answerQuestions(); }}><h3>Inertia needs your answer</h3>{detail.questions.map((question) => <fieldset key={question.id}><legend>{question.label}</legend>{question.options.map((option) => <label key={option.id}><input type={question.allowMultiple ? "checkbox" : "radio"} name={question.id} checked={answers[question.id]?.includes(option.id) ?? false} onChange={() => setAnswers((current) => ({ ...current, [question.id]: question.allowMultiple ? current[question.id]?.includes(option.id) ? current[question.id]!.filter((id) => id !== option.id) : [...(current[question.id] ?? []), option.id] : [option.id] }))} /> {option.label}</label>)}</fieldset>)}<button type="submit" disabled={busy}>Answer</button></form>}{detail.waitingForLocalAction && <div className="banner">This conversation needs an action on the desktop. Secrets and approvals stay local.</div>}{shell?.capabilities.scopes.includes("private:prompt") && <form className="composer" onSubmit={(event) => { event.preventDefault(); void sendPrompt(); }}><textarea aria-label="Send a prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Send a supervised prompt" disabled={busy} /><button type="submit" disabled={busy || !prompt.trim()}>Send</button></form>}</> : <div className="empty"><h2>Choose a conversation</h2><p>Only projects and conversations granted by the desktop appear here.</p></div>}</section></div></main>;
+}
+
+type ProjectionResult =
+  | { kind: "state"; validator: string; state: Shell }
+  | { kind: "conversation"; validator: string; detail: Detail }
+  | { kind: "not-modified"; validator: string };
+
+function projectionResult(response: Extract<PrivateConnectResponse, { ok: true }>): ProjectionResult | null {
+  const result = response.result;
+  if (!result || typeof result !== "object" || !("kind" in result)) return null;
+  const kind = result.kind;
+  if ((kind !== "state" && kind !== "conversation" && kind !== "not-modified")
+    || !("validator" in result)
+    || typeof result.validator !== "string"
+    || !/^[A-Za-z0-9_-]{43}$/u.test(result.validator)) return null;
+  if (kind === "state" && "state" in result) {
+    return { kind, validator: result.validator, state: result.state as Shell };
+  }
+  if (kind === "conversation" && "detail" in result) {
+    return { kind, validator: result.validator, detail: result.detail as Detail };
+  }
+  return kind === "not-modified"
+    ? { kind, validator: result.validator }
+    : null;
 }
 
 function ActivitySummary({ detail }: { detail: Detail }): React.JSX.Element | null {

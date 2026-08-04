@@ -758,7 +758,7 @@ describe("database backup and startup recovery", () => {
     store.close();
   });
 
-  it("releases every validation worker before backup publication and concurrent teardown", async () => {
+  it("isolates concurrent validation workers and releases them before publication and teardown", async () => {
     const directory = temporaryDirectory();
     const operations = Array.from({ length: 4 }, async (_value, index) => {
       const databasePath = join(directory, `inertia-${index}.sqlite`);

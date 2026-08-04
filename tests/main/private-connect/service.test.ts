@@ -11,6 +11,7 @@ import { PrivateConnectService, type PrivateConnectServiceOptions } from "../../
 import type { PrivateConnectTailscaleController } from "../../../src/main/private-connect/tailscale-controller";
 import type { PrivateConnectStore, PersistedPrivateConnect } from "../../../src/main/private-connect/store";
 import { parsePrivateConnectPairingFragment } from "../../../src/shared/private-connect/pairing-link";
+import { PRIVATE_CONNECT_SOCKET_CLOSE } from "../../../src/shared/private-connect/protocol";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const deviceId = "22222222-2222-4222-8222-222222222222";
@@ -75,6 +76,7 @@ async function createServiceWith(memory = testStore(), tailscale = testTailscale
           type: "response", requestId: request.requestId, ok: true,
           result: {
             kind: "state",
+            validator: "A".repeat(43),
             state: {
               generatedAt: "2030-01-01T00:00:00.000Z",
               projects: [{ id: projectId, name: "Project" }],
@@ -87,6 +89,7 @@ async function createServiceWith(memory = testStore(), tailscale = testTailscale
           type: "response", requestId: request.requestId, ok: true,
           result: {
             kind: "conversation",
+            validator: "B".repeat(43),
             detail: {
               generatedAt: "2030-01-01T00:00:00.000Z",
               conversation: { id: request.conversationId, projectId, title: "Conversation", providerLabel: "Test", runId: null, status: "idle", pendingLocalApproval: false, promptSafety: { supported: false, headline: "Unavailable", explanation: "Desktop-only." }, updatedAt: "2030-01-01T00:00:00.000Z" },
@@ -137,10 +140,12 @@ describe("Private Connect service lifecycle", () => {
     const ping = await service.handleRequest(session!, { protocolVersion: 1, type: "client.ping", requestId: "33333333-3333-4333-8333-333333333333" });
     expect(ping).toMatchObject({ ok: true, result: { kind: "pong" } });
     const state = await service.handleRequest(session!, { protocolVersion: 1, type: "state.get", requestId: "55555555-5555-4555-8555-555555555555" });
-    expect(state).toMatchObject({ ok: true, result: { kind: "state", state: { capabilities: { scopes: ["private:read", "private:prompt", "private:input", "private:stop"], preset: "collaborate" } } } });
+    expect(state).toMatchObject({ ok: true, result: { kind: "state", validator: "A".repeat(43), state: { capabilities: { scopes: ["private:read", "private:prompt", "private:input", "private:stop"], preset: "collaborate" } } } });
     await service.revokeDevice(deviceId);
     expect(service.session(cookie)).toBeNull();
-    await expect(closed).resolves.toBe(1008);
+    await expect(closed).resolves.toBe(
+      PRIVATE_CONNECT_SOCKET_CLOSE.accessRevoked,
+    );
     await expect.poll(() => service.state().activeSessions).toBe(0);
   });
 
@@ -183,7 +188,9 @@ describe("Private Connect service lifecycle", () => {
     );
 
     await service.setPrivacyLocked(true);
-    await expect(closed).resolves.toBe(1012);
+    await expect(closed).resolves.toBe(
+      PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable,
+    );
     expect(service.session(cookie)).toBeNull();
     expect(service.state()).toMatchObject({
       status: "error",
@@ -297,7 +304,9 @@ describe("Private Connect service lifecycle", () => {
       "2030-01-15T00:00:00.000Z",
     );
 
-    await expect(closed).resolves.toBe(1008);
+    await expect(closed).resolves.toBe(
+      PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged,
+    );
     const refreshed = service.session(cookie);
     expect(refreshed).not.toBeNull();
     const state = await service.handleRequest(refreshed!, {

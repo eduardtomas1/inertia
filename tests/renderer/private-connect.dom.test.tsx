@@ -1,12 +1,17 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { PRIVATE_CONNECT_SOCKET_CLOSE } from "../../src/shared/private-connect/protocol";
+
+const STATE_VALIDATOR = "A".repeat(43);
+const CONVERSATION_VALIDATOR = "B".repeat(43);
 
 const closeListeners = new Set<(code: number) => void>();
 let notifyClose: ((code: number) => void) | null = null;
 const socket = {
-  request: vi.fn(async (request: { type: string }) => request.type === "state.get"
-    ? { type: "response", requestId: "11111111-1111-4111-8111-111111111111", ok: true, result: { kind: "state", state: { generatedAt: "2030-01-01T00:00:00.000Z", projects: [{ id: "22222222-2222-4222-8222-222222222222", name: "Project" }], conversations: [{ id: "33333333-3333-4333-8333-333333333333", projectId: "22222222-2222-4222-8222-222222222222", title: "Conversation", providerLabel: "Test", runId: null, status: "idle", pendingLocalApproval: false, pendingLocalAction: false, updatedAt: "2030-01-01T00:00:00.000Z" }], capabilities: { scopes: ["private:read"], preset: "monitor", expiresAt: "2030-02-01T00:00:00.000Z" } } } }
-    : { type: "response", requestId: "44444444-4444-4444-8444-444444444444", ok: true, result: { kind: "conversation", detail: { generatedAt: "2030-01-01T00:00:00.000Z", conversation: { id: "33333333-3333-4333-8333-333333333333", projectId: "22222222-2222-4222-8222-222222222222", title: "Conversation", providerLabel: "Test", runId: null, status: "idle", pendingLocalApproval: false, pendingLocalAction: false, updatedAt: "2030-01-01T00:00:00.000Z" }, messages: [], questions: [], waitingForLocalAction: false } } }),
+  request: vi.fn(async (request: { type: string; requestId?: string }) => request.type === "state.get"
+    ? { type: "response", requestId: request.requestId ?? "11111111-1111-4111-8111-111111111111", ok: true, result: { kind: "state", validator: STATE_VALIDATOR, state: { generatedAt: "2030-01-01T00:00:00.000Z", projects: [{ id: "22222222-2222-4222-8222-222222222222", name: "Project" }], conversations: [{ id: "33333333-3333-4333-8333-333333333333", projectId: "22222222-2222-4222-8222-222222222222", title: "Conversation", providerLabel: "Test", runId: null, status: "idle", pendingLocalApproval: false, pendingLocalAction: false, updatedAt: "2030-01-01T00:00:00.000Z" }], capabilities: { scopes: ["private:read"], preset: "monitor", expiresAt: "2030-02-01T00:00:00.000Z" } } } }
+    : { type: "response", requestId: request.requestId ?? "44444444-4444-4444-8444-444444444444", ok: true, result: { kind: "conversation", validator: CONVERSATION_VALIDATOR, detail: { generatedAt: "2030-01-01T00:00:00.000Z", conversation: { id: "33333333-3333-4333-8333-333333333333", projectId: "22222222-2222-4222-8222-222222222222", title: "Conversation", providerLabel: "Test", runId: null, status: "idle", pendingLocalApproval: false, pendingLocalAction: false, updatedAt: "2030-01-01T00:00:00.000Z" }, messages: [], questions: [], waitingForLocalAction: false } } }),
   onClose: vi.fn((listener: (code: number) => void) => { notifyClose = listener; closeListeners.add(listener); return () => closeListeners.delete(listener); }),
   close: vi.fn(),
 };
@@ -26,6 +31,7 @@ afterEach(() => {
   closeListeners.clear();
   notifyClose = null;
   vi.restoreAllMocks();
+  vi.clearAllMocks();
   vi.useRealTimers();
 });
 
@@ -35,7 +41,7 @@ describe("Private Connect browser lifecycle", () => {
     render(<App initialPairingFragment={null} />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
     await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
-    notifyClose?.(1008);
+    notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.accessRevoked);
     await waitFor(() => expect(screen.getByText("This browser no longer has access. Pair it again from the desktop.")).toBeInTheDocument());
     expect(screen.queryByRole("heading", { name: "Your workspace" })).not.toBeInTheDocument();
   });
@@ -47,10 +53,49 @@ describe("Private Connect browser lifecycle", () => {
     await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
     const initialConnectCalls = vi.mocked(connectPrivateConnectSocket).mock.calls.length;
     vi.useFakeTimers();
-    act(() => notifyClose?.(1012));
+    act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable));
     expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument();
     expect(screen.queryByText(/pair it again/iu)).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
     expect(vi.mocked(connectPrivateConnectSocket)).toHaveBeenCalledTimes(initialConnectCalls + 1);
+  });
+
+  it("purges stale authority and reconnects without requiring another pairing", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    render(<App initialPairingFragment={null} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /Conversation/u })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Conversation/u }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Conversation" })).toBeInTheDocument());
+    await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
+    const initialConnectCalls = vi.mocked(connectPrivateConnectSocket).mock.calls.length;
+
+    vi.useFakeTimers();
+    act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged));
+
+    expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Conversation" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/pair it again/iu)).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(vi.mocked(connectPrivateConnectSocket)).toHaveBeenCalledTimes(initialConnectCalls + 1);
+  });
+
+  it("reuses validators so unchanged polling does not replace cached projections", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    render(<App initialPairingFragment={null} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /Conversation/u })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Conversation/u }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Conversation" })).toBeInTheDocument());
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+
+    expect(socket.request).toHaveBeenCalledWith(expect.objectContaining({
+      type: "state.get",
+      ifNoneMatch: STATE_VALIDATOR,
+    }));
+    expect(socket.request).toHaveBeenCalledWith(expect.objectContaining({
+      type: "conversation.get",
+      ifNoneMatch: CONVERSATION_VALIDATOR,
+    }));
   });
 });

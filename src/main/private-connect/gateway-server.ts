@@ -6,6 +6,7 @@ import WebSocket, { WebSocketServer } from "ws";
 
 import {
   PRIVATE_CONNECT_LIMITS,
+  PRIVATE_CONNECT_SOCKET_CLOSE,
   privateConnectInvitationSchema,
   privateConnectRequestSchema,
   type PrivateConnectRequest,
@@ -148,11 +149,20 @@ export class PrivateConnectGatewayServer {
     this.addressValue = null;
   }
 
-  closeSessionsForDevice(deviceId: string): void {
-    for (const [socket, session] of this.socketSessions) if (session.deviceId === deviceId) socket.close(1008, "Private Connect access changed");
+  closeSessionsForDevice(
+    deviceId: string,
+    code: number = PRIVATE_CONNECT_SOCKET_CLOSE.accessRevoked,
+    reason = "Private Connect access revoked",
+  ): void {
+    for (const [socket, session] of this.socketSessions) {
+      if (session.deviceId === deviceId) socket.close(code, reason);
+    }
   }
 
-  closeAllSessions(code = 1008, reason = "Private Connect access changed"): void {
+  closeAllSessions(
+    code: number = PRIVATE_CONNECT_SOCKET_CLOSE.accessRevoked,
+    reason = "Private Connect access changed",
+  ): void {
     for (const socket of this.sockets) socket.close(code, reason);
   }
 

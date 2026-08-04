@@ -180,6 +180,53 @@ describe("Private Connect conversation-scoped authority", () => {
     expect(response.ok).toBe(false);
   });
 
+  it("returns grant-bound validators and compact unchanged projections", async () => {
+    const f = fixture();
+    const subject = f.subject([f.explicit(f.project.id, [f.granted.id])]);
+    const first = await f.gateway.request(subject, {
+      type: "state.get",
+      requestId: REQUEST_ID,
+      ifNoneMatch: null,
+    });
+    expect(first).toMatchObject({
+      ok: true,
+      result: { kind: "state", validator: expect.any(String) },
+    });
+    if (!first.ok || first.result.kind !== "state" || !first.result.validator) {
+      throw new Error("Private Connect did not issue a state validator");
+    }
+
+    const unchanged = await f.gateway.request(subject, {
+      type: "state.get",
+      requestId: REQUEST_ID,
+      ifNoneMatch: first.result.validator,
+    });
+    expect(unchanged).toMatchObject({
+      ok: true,
+      result: {
+        kind: "not-modified",
+        validator: first.result.validator,
+        resource: { kind: "state" },
+      },
+    });
+
+    const changedAuthority = await f.gateway.request({
+      ...subject,
+      grantVersion: subject.grantVersion + 1,
+    }, {
+      type: "state.get",
+      requestId: REQUEST_ID,
+      ifNoneMatch: first.result.validator,
+    });
+    expect(changedAuthority).toMatchObject({
+      ok: true,
+      result: { kind: "state", validator: expect.any(String) },
+    });
+    if (changedAuthority.ok && changedAuthority.result.kind === "state") {
+      expect(changedAuthority.result.validator).not.toBe(first.result.validator);
+    }
+  });
+
   it("removes access when the conversation is archived", async () => {
     const f = fixture();
     const subject = f.subject([f.explicit(f.project.id, [f.granted.id])]);

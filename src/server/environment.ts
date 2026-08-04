@@ -14,6 +14,32 @@ export interface ProviderEnvironment {
   pathEntries: string[];
 }
 
+/**
+ * Expand the leading home-directory shorthand that a shell normally resolves.
+ * Child processes are launched with shell:false, so CODEX_HOME=~/.codex-work
+ * would otherwise reach Codex as a literal relative path.
+ */
+export function expandHomePath(value: string): string {
+  if (!value) return value;
+  if (value === "~") return homedir();
+  if (value.startsWith("~/") || value.startsWith("~\\")) {
+    return join(homedir(), value.slice(2));
+  }
+  return value;
+}
+
+function normalizeCodexHomeEnvironment(
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const codexHomeKey = Object.keys(environment).find(
+    (key) => key.toUpperCase() === "CODEX_HOME",
+  );
+  if (!codexHomeKey) return environment;
+  const value = environment[codexHomeKey];
+  if (value !== undefined) environment[codexHomeKey] = expandHomePath(value);
+  return environment;
+}
+
 let environmentPromise: Promise<ProviderEnvironment> | undefined;
 
 const SAFE_CHILD_ENVIRONMENT_KEYS = new Set([
@@ -96,6 +122,7 @@ export function providerChildEnvironment(
       result[key] = value;
     }
   }
+  if (providerId === "codex") normalizeCodexHomeEnvironment(result);
   if (
     providerId === "claude"
     && source.CLAUDE_CODE_USE_BEDROCK === "1"
@@ -269,10 +296,10 @@ function commonExecutableDirectories(environment: NodeJS.ProcessEnv): string[] {
 
 async function loadProviderEnvironment(): Promise<ProviderEnvironment> {
   const shellEnvironment = await loginShellEnvironment();
-  const env = {
+  const env = normalizeCodexHomeEnvironment({
     ...process.env,
     ...allowedLoginShellEnvironment(shellEnvironment),
-  };
+  });
   const inheritedPath = environmentValue(process.env, "PATH") ?? "";
   const effectivePath = environmentValue(shellEnvironment, "PATH") ?? "";
   const pathEntries = unique([

@@ -6,6 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -186,6 +187,29 @@ process.exit(2);
     expect(result).toMatchObject({ status: "completed", text: "A calm result.", sessionId: "11111111-1111-4111-8111-111111111111" });
     expect(text).toEqual(["A calm result."]);
     expect(sessions).toEqual(["11111111-1111-4111-8111-111111111111"]);
+    await manager.disposeAll();
+  });
+
+  it("expands CODEX_HOME before launching a shell-free Codex App Server", async () => {
+    const fake = fakeCodex();
+    process.env.CODEX_HOME = "~/.codex-work";
+    const manager = new ProviderManager({ commands: { codex: fake.command } });
+
+    const result = await manager.run(
+      nativeProviderRunInput({
+        providerId: "codex",
+        conversationId: "conversation-home-shorthand",
+        cwd: fake.root,
+        prompt: "Read the home path",
+        interactionMode: "build",
+        access: "full",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: "completed",
+      text: `A calm result.:${join(homedir(), ".codex-work")}`,
+    });
     await manager.disposeAll();
   });
 

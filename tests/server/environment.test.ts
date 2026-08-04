@@ -1,10 +1,11 @@
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   executableCandidates,
+  expandHomePath,
   providerChildEnvironment,
   providerEnvironment,
 } from "../../src/server/environment";
@@ -103,7 +104,7 @@ describe.sequential("provider environment discovery", () => {
         NODE_EXTRA_CA_CERTS: join(home, "provider-ca.pem"),
         SSL_CERT_FILE: join(home, "provider-cert.pem"),
         OPENAI_API_KEY: "shell-openai",
-        CODEX_HOME: join(home, ".codex-shell"),
+        CODEX_HOME: "~/.codex-shell",
         ANTHROPIC_API_KEY: "shell-anthropic",
         CLAUDE_CODE_USE_BEDROCK: "1",
         AWS_SECRET_ACCESS_KEY: "shell-bedrock",
@@ -143,7 +144,7 @@ describe.sequential("provider environment discovery", () => {
         NODE_EXTRA_CA_CERTS: shellValues.NODE_EXTRA_CA_CERTS,
         SSL_CERT_FILE: shellValues.SSL_CERT_FILE,
         OPENAI_API_KEY: shellValues.OPENAI_API_KEY,
-        CODEX_HOME: shellValues.CODEX_HOME,
+        CODEX_HOME: join(home, ".codex-shell"),
         ANTHROPIC_API_KEY: shellValues.ANTHROPIC_API_KEY,
         CLAUDE_CODE_USE_BEDROCK: shellValues.CLAUDE_CODE_USE_BEDROCK,
         AWS_SECRET_ACCESS_KEY: shellValues.AWS_SECRET_ACCESS_KEY,
@@ -276,6 +277,24 @@ describe.sequential("provider environment discovery", () => {
     expect(providerChildEnvironment("claude", source)).not.toHaveProperty(
       "INERTIA_LOGIN_SHELL_MARKER",
     );
+  });
+
+  it("expands Codex's leading home shorthand before a shell-free launch", () => {
+    const codexHome = "~/.codex-work";
+
+    expect(expandHomePath(codexHome)).toBe(join(homedir(), ".codex-work"));
+    expect(expandHomePath("~\\.codex-work")).toBe(join(homedir(), ".codex-work"));
+    expect(expandHomePath("~other/.codex-work")).toBe("~other/.codex-work");
+    expect(providerChildEnvironment("codex", {
+      PATH: process.env.PATH,
+      CODEX_HOME: codexHome,
+    })).toMatchObject({
+      CODEX_HOME: expandHomePath(codexHome),
+    });
+    expect(providerChildEnvironment("claude", {
+      PATH: process.env.PATH,
+      CODEX_HOME: codexHome,
+    })).not.toHaveProperty("CODEX_HOME");
   });
 
   it("passes documented OpenCode cloud-provider authentication without unrelated secrets", () => {

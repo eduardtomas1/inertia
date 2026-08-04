@@ -17,6 +17,7 @@ const SESSION_COOKIE = "__Host-inertia-private-connect";
 const CSRF_HEADER = "x-inertia-private-connect-csrf";
 const MAX_CONNECTIONS = 8;
 const REQUEST_TIMEOUT_MS = 15_000;
+const RATE_WINDOW_MS = 60_000;
 
 export interface PrivateConnectSession {
   id: string;
@@ -38,6 +39,7 @@ export type PrivateConnectPairStatus =
 
 export interface PrivateConnectGatewayHost {
   wellKnown(): Record<string, unknown>;
+  validHost?(host: string | undefined): boolean;
   pairStart(request: PrivateConnectPairStartRequest, networkLabel: string | null): Promise<{ requestId: string; expiresAt: string; comparisonCode: string }>;
   pairStatus(requestId: string): Promise<PrivateConnectPairStatus>;
   session(cookie: string | null): PrivateConnectSession | null;
@@ -68,6 +70,8 @@ export class PrivateConnectGatewayServer {
   private readonly now: () => Date;
   private addressValue: { port: number; host: string } | null = null;
   private stopped = false;
+  private readonly socketSessions = new Map<WebSocket, PrivateConnectSession>();
+  private readonly admissions = new Map<string, number[]>();
 
   constructor(options: PrivateConnectGatewayServerOptions) {
     this.host = options.host;
@@ -126,19 +130,33 @@ export class PrivateConnectGatewayServer {
     this.stopped = true;
     for (const socket of this.sockets) socket.close(1001, "Private Connect is stopping");
     this.sockets.clear();
+    this.socketSessions.clear();
     this.websocketServer.close();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
     this.addressValue = null;
   }
 
+  closeSessionsForDevice(deviceId: string): void {
+    for (const [socket, session] of this.socketSessions) if (session.deviceId === deviceId) socket.close(1008, "Private Connect access changed");
+  }
+
+  closeAllSessions(): void {
+    for (const socket of this.sockets) socket.close(1008, "Private Connect access changed");
+  }
+
+  closeSession(sessionId: string): void {
+    for (const [socket, session] of this.socketSessions) if (session.id === sessionId) socket.close(1008, "Private Connect session ended");
+  }
+
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const headers = securityHeaders(request.url === "/" || request.url?.endsWith(".html") === true);
+    const parsedRequestUrl = parseUrl(request);
+    const headers = securityHeaders(parsedRequestUrl?.pathname === "/" || parsedRequestUrl?.pathname.endsWith(".html") === true);
     for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
     if (this.stopped) {
       writeJson(response, 503, { error: "unavailable", message: "Private Connect is shutting down." });
       return;
     }
-    const url = parseUrl(request);
+    const url = parsedRequestUrl;
     if (!url || !this.validHost(request.headers.host)) {
       writeJson(response, 400, { error: "invalid", message: "The request host is invalid." });
       return;
@@ -182,10 +200,18 @@ export class PrivateConnectGatewayServer {
     }
     const session = this.host.session(readCookie(request.headers.cookie, SESSION_COOKIE));
     if (url.pathname === "/api/pair/start") {
+      if (!this.admit(`pair-start:${this.clientKey(request)}`, PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute)) {
+        writeJson(response, 429, { error: "rate-limited", message: "Pairing attempts are temporarily limited." });
+        return;
+      }
       await this.handlePairStart(body, request, response);
       return;
     }
     if (url.pathname === "/api/pair/status") {
+      if (!this.admit(`pair-status:${this.clientKey(request)}`, PRIVATE_CONNECT_LIMITS.requestsPerMinute)) {
+        writeJson(response, 429, { error: "rate-limited", message: "Pairing status checks are temporarily limited." });
+        return;
+      }
       await this.handlePairStatus(body, response);
       return;
     }
@@ -198,6 +224,10 @@ export class PrivateConnectGatewayServer {
       return;
     }
     if (url.pathname === "/api/session/ws-ticket") {
+      if (!this.admit(`ticket:${session.deviceId}`, PRIVATE_CONNECT_LIMITS.requestsPerMinute)) {
+        writeJson(response, 429, { error: "rate-limited", message: "Live connection requests are temporarily limited." });
+        return;
+      }
       writeJson(response, 200, { ticket: this.host.issueWebSocketTicket(session), expiresInMs: PRIVATE_CONNECT_LIMITS.websocketTicketTtlMs });
       return;
     }
@@ -208,6 +238,10 @@ export class PrivateConnectGatewayServer {
       return;
     }
     if (url.pathname === "/api/request") {
+      if (!this.admit(`request:${session.deviceId}`, PRIVATE_CONNECT_LIMITS.requestsPerMinute)) {
+        writeJson(response, 429, { type: "response", requestId: requestIdFromBody(body), ok: false, code: "rate-limited", message: "Private Connect requests are temporarily limited." } satisfies PrivateConnectResponse);
+        return;
+      }
       const parsed = privateConnectRequestSchema.safeParse(body);
       if (!parsed.success) {
         writeJson(response, 400, { error: "invalid", message: "The Private Connect request schema is invalid." });
@@ -273,8 +307,12 @@ export class PrivateConnectGatewayServer {
       return;
     }
     const ticket = url.searchParams.get("ticket");
-    const session = ticket ? this.host.consumeWebSocketTicket(ticket) : null;
-    if (!ticket || !session || this.sockets.size >= MAX_CONNECTIONS) {
+    if (!ticket || this.sockets.size >= MAX_CONNECTIONS) {
+      socket.destroy();
+      return;
+    }
+    const session = this.host.consumeWebSocketTicket(ticket);
+    if (!session) {
       socket.destroy();
       return;
     }
@@ -285,6 +323,8 @@ export class PrivateConnectGatewayServer {
 
   private attachSocket(socket: WebSocket, request: IncomingMessage, session: PrivateConnectSession): void {
     this.sockets.add(socket);
+    this.socketSessions.set(socket, session);
+    const requestTimes: number[] = [];
     let lastActivity = this.now().getTime();
     const heartbeat = setInterval(() => {
       if (this.now().getTime() - lastActivity > 15 * 60_000) socket.terminate();
@@ -293,6 +333,13 @@ export class PrivateConnectGatewayServer {
     heartbeat.unref?.();
     socket.on("message", (raw, isBinary) => {
       lastActivity = this.now().getTime();
+      const cutoff = lastActivity - RATE_WINDOW_MS;
+      while (requestTimes[0] !== undefined && requestTimes[0] <= cutoff) requestTimes.shift();
+      if (requestTimes.length >= PRIVATE_CONNECT_LIMITS.requestsPerMinute) {
+        socket.send(JSON.stringify({ type: "response", requestId: requestIdFromRaw(raw), ok: false, code: "rate-limited", message: "Private Connect requests are temporarily limited." } satisfies PrivateConnectResponse));
+        return;
+      }
+      requestTimes.push(lastActivity);
       if (isBinary || Buffer.byteLength(raw.toString("utf8"), "utf8") > PRIVATE_CONNECT_LIMITS.websocketFrameBytes) {
         socket.close(1009, "Message too large");
         return;
@@ -316,6 +363,7 @@ export class PrivateConnectGatewayServer {
     socket.once("close", () => {
       clearInterval(heartbeat);
       this.sockets.delete(socket);
+      this.socketSessions.delete(socket);
       void this.host.closeSession(session);
     });
     socket.once("error", () => socket.terminate());
@@ -367,11 +415,6 @@ export class PrivateConnectGatewayServer {
     response.end(body);
   }
 
-  private validHost(host: string | undefined): boolean {
-    if (!host || host.length > 255 || /[\s\\/]/u.test(host)) return false;
-    return true;
-  }
-
   private validOrigin(origin: string | undefined, host: string | undefined): boolean {
     if (!origin) return false;
     try {
@@ -385,14 +428,51 @@ export class PrivateConnectGatewayServer {
     }
   }
 
+  private validHost(host: string | undefined): boolean {
+    if (this.host.validHost) return this.host.validHost(host);
+    const address = this.addressValue;
+    return Boolean(address && host && (host === `127.0.0.1:${address.port}` || host === `localhost:${address.port}`));
+  }
+
   private validCsrf(request: IncomingMessage, session: PrivateConnectSession): boolean {
     return request.headers[CSRF_HEADER] === this.host.csrf(session);
+  }
+
+  private clientKey(request: IncomingMessage): string {
+    const address = request.socket.remoteAddress?.trim();
+    return address && address.length <= 64 ? address : "unknown";
+  }
+
+  private admit(key: string, limit: number): boolean {
+    const now = this.now().getTime();
+    const cutoff = now - RATE_WINDOW_MS;
+    const values = (this.admissions.get(key) ?? []).filter((value) => value > cutoff);
+    if (values.length >= limit) {
+      this.admissions.set(key, values);
+      return false;
+    }
+    values.push(now);
+    this.admissions.set(key, values);
+    if (this.admissions.size > 128) {
+      const oldest = this.admissions.keys().next().value;
+      if (typeof oldest === "string") this.admissions.delete(oldest);
+    }
+    return true;
   }
 
 }
 
 function parseUrl(request: IncomingMessage): URL | null {
   try { return new URL(request.url ?? "/", "http://127.0.0.1"); } catch { return null; }
+}
+
+function requestIdFromBody(value: unknown): string {
+  if (plainObject(value) && typeof value.requestId === "string" && /^[0-9a-f-]{36}$/iu.test(value.requestId)) return value.requestId;
+  return "00000000-0000-4000-8000-000000000000";
+}
+
+function requestIdFromRaw(raw: WebSocket.RawData): string {
+  try { return requestIdFromBody(JSON.parse(raw.toString("utf8")) as unknown); } catch { return "00000000-0000-4000-8000-000000000000"; }
 }
 
 function plainObject(value: unknown): value is Record<string, unknown> {

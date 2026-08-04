@@ -54,6 +54,16 @@ export interface PrivateConnectTailscaleReady {
   ownership: PrivateConnectServeOwnership;
 }
 
+export interface PrivateConnectServeProof {
+  port: number;
+  target: string;
+}
+
+export interface PrivateConnectEndpointIdentity {
+  hostId: string;
+  buildVersion: string;
+}
+
 export interface PrivateConnectTailscaleControllerOptions {
   platform?: NodeJS.Platform;
   environment?: NodeJS.ProcessEnv;
@@ -105,6 +115,8 @@ export class PrivateConnectTailscaleController {
   async ensurePrivateServe(
     gatewayPort: number,
     preferredPort: number | null = this.owned?.port ?? null,
+    previousTarget: string | null = null,
+    identity?: PrivateConnectEndpointIdentity,
   ): Promise<PrivateConnectTailscaleReady> {
     const status = await this.readStatus();
     if (status.backendState !== "Running" || !status.connected) {
@@ -120,11 +132,10 @@ export class PrivateConnectTailscaleController {
     if (existing?.funnel) {
       throw new PrivateConnectTailscaleError("serve-conflict", "The selected Tailscale Serve port is configured for Funnel.");
     }
-    let servePort = existing && mappingMatchesPrivateConnect(existing, {
-      port: existing.port,
-      gatewayPort,
-      target: privateConnectServeTarget(gatewayPort),
-    })
+    const currentTarget = privateConnectServeTarget(gatewayPort);
+    const previousMapping = existing && previousTarget !== null && existing.target === previousTarget && !existing.funnel;
+    const currentMapping = existing && !existing.funnel && existing.target === currentTarget;
+    let servePort = existing && (previousMapping || currentMapping)
       ? existing.port
       : choosePrivateConnectServePort(mappings, preferredPort);
     if (servePort === null) {
@@ -133,8 +144,9 @@ export class PrivateConnectTailscaleController {
     const ownership: PrivateConnectServeOwnership = {
       port: servePort,
       gatewayPort,
-      target: privateConnectServeTarget(gatewayPort),
+      target: currentTarget,
     };
+    this.owned = ownership;
     if (!mappingMatchesPrivateConnect(
       mappings.find((mapping) => mapping.port === servePort) ?? { port: -1, host: null, target: null, funnel: false },
       ownership,
@@ -154,24 +166,24 @@ export class PrivateConnectTailscaleController {
     if (!verifiedMapping || !mappingMatchesPrivateConnect(verifiedMapping, ownership)) {
       throw new PrivateConnectTailscaleError("mapping-ownership-lost", "Tailscale Serve did not retain Inertia’s private mapping.");
     }
-    this.owned = ownership;
     const externalUrl = privateConnectExternalUrl(status.dnsName, servePort);
-    await this.probe(externalUrl, status.dnsName);
+    await this.probe(externalUrl, status.dnsName, identity);
     return { status, servePort, gatewayPort, externalUrl, ownership };
   }
 
-  async disableOwnedServe(gatewayPort: number): Promise<void> {
-    const ownership = this.owned;
-    if (!ownership || ownership.gatewayPort !== gatewayPort) return;
+  async disableOwnedServe(gatewayPort: number | null, persisted?: PrivateConnectServeProof | null): Promise<void> {
+    const currentOwnership = this.owned && (gatewayPort === null || this.owned.gatewayPort === gatewayPort) ? this.owned : null;
+    const proof = currentOwnership ?? persisted;
+    if (!proof) return;
     const mappings = await this.readServeStatus();
-    const current = mappings.find((mapping) => mapping.port === ownership.port);
-    if (!current || !mappingMatchesPrivateConnect(current, ownership)) {
+    const current = mappings.find((mapping) => mapping.port === proof.port);
+    if (!current || current.funnel || current.port !== proof.port || current.target !== proof.target) {
       this.owned = null;
       throw new PrivateConnectTailscaleError("mapping-ownership-lost", "The Tailscale Serve mapping changed, so Inertia left it untouched.");
     }
     const executable = await this.requireExecutable();
     try {
-      await this.command(executable, ["serve", `--https=${ownership.port}`, "off"]);
+      await this.command(executable, ["serve", `--https=${proof.port}`, "off"]);
       this.owned = null;
     } catch (error) {
       throw classifyControllerError(error, "Inertia could not disable its Tailscale Serve mapping.");
@@ -204,7 +216,7 @@ export class PrivateConnectTailscaleController {
     }
   }
 
-  private async probe(externalUrl: string, expectedHost: string): Promise<void> {
+  private async probe(externalUrl: string, expectedHost: string, identity?: PrivateConnectEndpointIdentity): Promise<void> {
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), 7_000);
     timer.unref?.();
@@ -218,7 +230,10 @@ export class PrivateConnectTailscaleController {
       if (!payload || typeof payload !== "object" || (payload as { product?: unknown }).product !== "Inertia Private Connect") {
         throw new Error("The endpoint identity did not match.");
       }
-      if (new URL(externalUrl).hostname !== expectedHost) throw new Error("The endpoint host did not match.");
+      const record = payload as { hostId?: unknown; buildVersion?: unknown; protocol?: { minimum?: unknown; maximum?: unknown } };
+      if (record.protocol?.minimum !== 1 || record.protocol.maximum !== 1) throw new Error("The endpoint protocol did not match.");
+      if (identity && (record.hostId !== identity.hostId || record.buildVersion !== identity.buildVersion)) throw new Error("The endpoint environment did not match.");
+      if (new URL(externalUrl).hostname.toLowerCase() !== expectedHost.toLowerCase()) throw new Error("The endpoint host did not match.");
     } catch (error) {
       if (error instanceof PrivateConnectTailscaleError) throw error;
       throw new PrivateConnectTailscaleError("endpoint-unreachable", "The private HTTPS endpoint could not be verified.");
@@ -253,7 +268,12 @@ function classifyControllerError(error: unknown, fallback: string): PrivateConne
               : error.classification === "command-timeout"
                 ? "command-timeout"
                 : "unknown";
-    return new PrivateConnectTailscaleError(classification, fallback);
+    const consentUrl = extractTrustedServeConsentUrl(`${error.stdout}\n${error.stderr}`);
+    return new PrivateConnectTailscaleError(
+      consentUrl ? "serve-consent-required" : classification,
+      consentUrl ? "Finish Tailscale HTTPS setup, then try again." : fallback,
+      consentUrl,
+    );
   }
   return new PrivateConnectTailscaleError("unknown", fallback);
 }

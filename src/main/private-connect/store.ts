@@ -42,6 +42,22 @@ const privateConnectSessionSchema = z.object({
   grantVersion: z.number().int().positive(),
 }).strict();
 
+const privateConnectDeliveryReceiptSchema = z.object({
+  deliveryId: z.string().uuid(),
+  conversationId: z.string().uuid(),
+  contentDigest: z.string().regex(/^[0-9a-f]{64}$/u),
+  response: z.object({
+    type: z.literal("response"),
+    requestId: z.string().uuid(),
+    ok: z.literal(true),
+    result: z.object({
+      kind: z.literal("prompt.accepted"),
+      deliveryId: z.string().uuid(),
+      turnId: entityId,
+    }).strict(),
+  }).strict(),
+}).strict();
+
 const privateConnectAuditSchema = z.object({
   id: z.string().uuid(),
   type: z.enum([
@@ -69,9 +85,11 @@ const privateConnectStoreSchema = z.object({
   enabled: z.boolean(),
   hostId: z.string().uuid(),
   servePort: z.number().int().min(1).max(65_535).nullable(),
+  serveTarget: z.string().regex(/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/u).nullable().default(null),
   grantGeneration: z.number().int().positive(),
   devices: z.array(privateConnectDeviceSchema).max(16),
   sessions: z.array(privateConnectSessionSchema).max(PRIVATE_CONNECT_LIMITS.sessions),
+  deliveryReceipts: z.array(privateConnectDeliveryReceiptSchema).max(512).default([]),
   audit: z.array(privateConnectAuditSchema).max(PRIVATE_CONNECT_LIMITS.auditEvents),
   migrationNoticeShown: z.boolean(),
 }).strict();
@@ -110,11 +128,25 @@ export interface PersistedPrivateConnect {
   enabled: boolean;
   hostId: string;
   servePort: number | null;
+  serveTarget: string | null;
   grantGeneration: number;
   devices: PrivateConnectDevice[];
   sessions: PrivateConnectSessionRecord[];
+  deliveryReceipts: PrivateConnectDeliveryReceipt[];
   audit: PrivateConnectAuditEvent[];
   migrationNoticeShown: boolean;
+}
+
+export interface PrivateConnectDeliveryReceipt {
+  deliveryId: string;
+  conversationId: string;
+  contentDigest: string;
+  response: {
+    type: "response";
+    requestId: string;
+    ok: true;
+    result: { kind: "prompt.accepted"; deliveryId: string; turnId: string };
+  };
 }
 
 export interface PrivateConnectStoreEncryption {

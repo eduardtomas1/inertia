@@ -2,10 +2,12 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { request as httpRequest } from "node:http";
+import WebSocket from "ws";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { PrivateConnectService } from "../../../src/main/private-connect/service";
+import { PrivateConnectService, type PrivateConnectServiceOptions } from "../../../src/main/private-connect/service";
 import type { PrivateConnectTailscaleController } from "../../../src/main/private-connect/tailscale-controller";
 import type { PrivateConnectStore, PersistedPrivateConnect } from "../../../src/main/private-connect/store";
 import { parsePrivateConnectPairingFragment } from "../../../src/shared/private-connect/pairing-link";
@@ -15,13 +17,24 @@ const deviceId = "22222222-2222-4222-8222-222222222222";
 const directories: string[] = [];
 const services: PrivateConnectService[] = [];
 
+function requestStatus(port: number, host: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({ hostname: "127.0.0.1", port, path: "/.well-known/inertia/private-connect", headers: { Host: host } }, (response) => {
+      response.resume();
+      response.once("end", () => resolve(response.statusCode ?? 0));
+    });
+    request.once("error", reject);
+    request.end();
+  });
+}
+
 afterEach(async () => {
   for (const service of services.splice(0)) await service.shutdown();
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 
-function testStore(): { store: PrivateConnectStore; saved: () => PersistedPrivateConnect | null } {
-  let state: PersistedPrivateConnect | null = null;
+function testStore(initial: PersistedPrivateConnect | null = null): { store: PrivateConnectStore; saved: () => PersistedPrivateConnect | null } {
+  let state: PersistedPrivateConnect | null = initial;
   return {
     store: {
       available: () => true,
@@ -32,36 +45,69 @@ function testStore(): { store: PrivateConnectStore; saved: () => PersistedPrivat
   };
 }
 
-function testTailscale(): PrivateConnectTailscaleController {
+function testTailscale(calls?: { ensure: unknown[][]; disable: number[] }): PrivateConnectTailscaleController {
   return {
-    ensurePrivateServe: async (gatewayPort: number) => ({
+    ensurePrivateServe: async (...args: unknown[]) => {
+      calls?.ensure.push(args);
+      const gatewayPort = args[0] as number;
+      return {
       status: { backendState: "Running", connected: true, dnsName: "desktop.example.ts.net", tailnetLabel: "example", addresses: ["100.64.0.2"] },
       servePort: 8443,
       gatewayPort,
       externalUrl: "https://desktop.example.ts.net:8443/",
       ownership: { port: 8443, gatewayPort, target: `http://127.0.0.1:${gatewayPort}` },
-    }),
-    disableOwnedServe: async () => undefined,
+      };
+    },
+    disableOwnedServe: async () => { calls?.disable.push(1); },
   } as unknown as PrivateConnectTailscaleController;
 }
 
-async function createService(): Promise<PrivateConnectService> {
+async function createServiceWith(memory = testStore(), tailscale = testTailscale(), runtimeOverrides: Partial<PrivateConnectServiceOptions["runtime"]> = {}): Promise<PrivateConnectService> {
   const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-service-"));
   directories.push(directory);
   await mkdir(join(directory, "static"));
   await writeFile(join(directory, "static", "index.html"), "<!doctype html><title>Private Connect</title>");
-  const memory = testStore();
   const service = await PrivateConnectService.create({
     store: memory.store,
-    runtime: { privateConnectRequest: async (_subject, request) => ({ type: "response", requestId: request.requestId, ok: false, code: "unavailable", message: "test" }) },
+    runtime: {
+      privateConnectRequest: async (_subject, request) => {
+        if (request.type === "state.get") return {
+          type: "response", requestId: request.requestId, ok: true,
+          result: {
+            kind: "state",
+            state: {
+              generatedAt: "2030-01-01T00:00:00.000Z",
+              projects: [{ id: projectId, name: "Project" }],
+              conversations: [{ id: "44444444-4444-4444-8444-444444444444", projectId, title: "Conversation", providerLabel: "Test", runId: null, status: "idle", pendingLocalApproval: false, promptSafety: { supported: false, headline: "Unavailable", explanation: "Desktop-only." }, updatedAt: "2030-01-01T00:00:00.000Z" }],
+              runs: [],
+            },
+          },
+        };
+        if (request.type === "conversation.get") return {
+          type: "response", requestId: request.requestId, ok: true,
+          result: {
+            kind: "conversation",
+            detail: {
+              generatedAt: "2030-01-01T00:00:00.000Z",
+              conversation: { id: request.conversationId, projectId, title: "Conversation", providerLabel: "Test", runId: null, status: "idle", pendingLocalApproval: false, promptSafety: { supported: false, headline: "Unavailable", explanation: "Desktop-only." }, updatedAt: "2030-01-01T00:00:00.000Z" },
+              messages: [], activities: [], subagents: [], questions: [], waitingForLocalAction: false,
+            },
+          },
+        };
+        return { type: "response", requestId: request.requestId, ok: false, code: "unavailable", message: "test" };
+      },
+      ...runtimeOverrides,
+    },
     staticRoot: join(directory, "static"),
     buildVersion: "test",
-    tailscale: testTailscale(),
+    tailscale,
     now: () => new Date("2030-01-01T00:00:00.000Z"),
   });
   services.push(service);
   return service;
 }
+
+async function createService(): Promise<PrivateConnectService> { return await createServiceWith(); }
 
 describe("Private Connect service lifecycle", () => {
   it("enables, pairs, grants, authenticates, and revokes a browser", async () => {
@@ -80,18 +126,82 @@ describe("Private Connect service lifecycle", () => {
     const session = service.session(cookie);
     expect(session).not.toBeNull();
     expect(service.issueWebSocketTicket(session!)).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    const port = service.state().diagnostics.gatewayPort;
+    if (!port) throw new Error("gateway did not start");
+    expect(await requestStatus(port, "desktop.example.ts.net:8443")).toBe(200);
+    expect(await requestStatus(port, "other.example.ts.net:8443")).toBe(400);
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/api/ws?ticket=${encodeURIComponent(service.issueWebSocketTicket(session!))}`, { headers: { Host: `127.0.0.1:${port}`, Origin: `https://127.0.0.1:${port}` } });
+    await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
+    const closed = new Promise<number>((resolve) => socket.once("close", (code: number) => resolve(code)));
     const ping = await service.handleRequest(session!, { protocolVersion: 1, type: "client.ping", requestId: "33333333-3333-4333-8333-333333333333" });
     expect(ping).toMatchObject({ ok: true, result: { kind: "pong" } });
+    const state = await service.handleRequest(session!, { protocolVersion: 1, type: "state.get", requestId: "55555555-5555-4555-8555-555555555555" });
+    expect(state).toMatchObject({ ok: true, result: { kind: "state", state: { capabilities: { scopes: ["private:read", "private:prompt", "private:input", "private:stop"], preset: "collaborate" } } } });
     await service.revokeDevice(deviceId);
     expect(service.session(cookie)).toBeNull();
+    await expect(closed).resolves.toBe(1008);
   });
 
   it("fails closed on lock and removes owned gateway state", async () => {
     const service = await createService();
     await service.setEnabled(true);
-    service.setPrivacyLocked(true);
+    await service.setPrivacyLocked(true);
     expect(service.state()).toMatchObject({ status: "error", externalUrl: null, diagnostics: { gatewayPort: null, mappingOwnership: "missing" } });
     await service.setEnabled(false);
     expect(service.state().status).toBe("off");
+  });
+
+  it("reconciles persisted Serve ownership and sessions after a restart", async () => {
+    const memory = testStore();
+    const firstCalls = { ensure: [] as unknown[][], disable: [] as number[] };
+    const first = await createServiceWith(memory, testTailscale(firstCalls));
+    await first.setEnabled(true);
+    const invitation = await first.createInvitation();
+    const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
+    const started = await first.pairStart({ invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
+    await first.approvePairing(started.requestId, "collaborate", [projectId]);
+    const approved = await first.pairStatus(started.requestId);
+    if (approved.status !== "approved") throw new Error("pairing did not approve");
+    const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
+    await first.shutdown();
+    expect(firstCalls.disable).toHaveLength(0);
+    const secondCalls = { ensure: [] as unknown[][], disable: [] as number[] };
+    const second = await createServiceWith(memory, testTailscale(secondCalls));
+    await second.startIfEnabled();
+    expect(second.state()).toMatchObject({ enabled: true, status: "ready" });
+    expect(secondCalls.ensure[0]?.slice(0, 3)).toEqual([expect.any(Number), 8443, `http://127.0.0.1:${firstCalls.ensure[0]?.[0] as number}`]);
+    expect(second.session(cookie)).not.toBeNull();
+    expect(second.issueWebSocketTicket(second.session(cookie)!)).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+  });
+
+  it("persists prompt delivery receipts so a restart cannot replay an accepted delivery", async () => {
+    const memory = testStore();
+    let commits = 0;
+    const runtime = {
+      preparePrivateConnectPrompt: async () => ({ preparationId: "66666666-6666-4666-8666-666666666666" }),
+      commitPrivateConnectPrompt: async (_subject: unknown, request: { requestId: string; deliveryId: string }, _preparationId: string) => {
+        commits += 1;
+        return { type: "response", requestId: request.requestId, ok: true, result: { kind: "prompt.accepted", deliveryId: request.deliveryId, turnId: "turn-1" } } as const;
+      },
+    };
+    const first = await createServiceWith(memory, testTailscale(), runtime);
+    await first.setEnabled(true);
+    const invitation = await first.createInvitation();
+    const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
+    const started = await first.pairStart({ invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
+    await first.approvePairing(started.requestId, "collaborate", [projectId]);
+    const approved = await first.pairStatus(started.requestId);
+    if (approved.status !== "approved") throw new Error("pairing did not approve");
+    const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
+    const session = first.session(cookie);
+    const request = { protocolVersion: 1 as const, type: "prompt.send" as const, requestId: "77777777-7777-4777-8777-777777777777", deliveryId: "88888888-8888-4888-8888-888888888888", conversationId: "44444444-4444-4444-8444-444444444444", content: "hello" };
+    await expect(first.handleRequest(session!, request)).resolves.toMatchObject({ ok: true, result: { kind: "prompt.accepted" } });
+    expect(commits).toBe(1);
+    await first.shutdown();
+    const second = await createServiceWith(memory, testTailscale(), runtime);
+    await second.startIfEnabled();
+    const replay = await second.handleRequest(second.session(cookie)!, { ...request, requestId: "99999999-9999-4999-8999-999999999999" });
+    expect(replay).toMatchObject({ ok: true, requestId: "99999999-9999-4999-8999-999999999999", result: { kind: "prompt.accepted" } });
+    expect(commits).toBe(1);
   });
 });

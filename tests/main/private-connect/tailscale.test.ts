@@ -27,27 +27,24 @@ describe("Private Connect Tailscale ownership", () => {
   });
 
   it("finds only exact non-Funnel loopback mappings", () => {
-    const status = parseTailscaleServeStatus({
-      Web: {
-        "desktop.example.ts.net:8443": {
-          "/": { Proxy: "http://127.0.0.1:41000" },
-        },
-      },
-      Funnel: {
-        "desktop.example.ts.net:443": {
-          "/": { Proxy: "http://127.0.0.1:41000" },
-        },
-      },
-    });
+    const status = parseTailscaleServeStatus(JSON.parse(readFileSync(join(import.meta.dirname, "../../fixtures/tailscale/serve-status-web-handlers.json"), "utf8")) as unknown);
     expect(status.mappings).toContainEqual({
       host: "desktop.example.ts.net:8443",
       port: 8443,
       target: "http://127.0.0.1:41000",
       funnel: false,
     });
-    expect(status.mappings.some((mapping) => mapping.funnel)).toBe(true);
+    expect(status.mappings).toContainEqual({ host: "desktop.example.ts.net:10443", port: 10443, target: "http://127.0.0.1:41000", funnel: true });
     expect(mappingMatchesPrivateConnect(status.mappings[0]!, { port: 8443, gatewayPort: 41000, target: privateConnectServeTarget(41000) })).toBe(true);
-    expect(choosePrivateConnectServePort(status.mappings, 8443)).toBe(9443);
+    expect(choosePrivateConnectServePort(status.mappings, 8443)).toBe(11443);
     expect(privateConnectExternalUrl("desktop.example.ts.net", 8443)).toBe("https://desktop.example.ts.net:8443/");
   });
+
+  it("parses the captured current status shape and normalizes its stable identity", () => {
+    const status = parseTailscaleStatus(JSON.parse(readFileSync(join(import.meta.dirname, "../../fixtures/tailscale/status-running.json"), "utf8")) as unknown);
+    expect(status).toMatchObject({ backendState: "Running", connected: true, dnsName: "desktop.example.ts.net", tailnetLabel: "example.com" });
+    expect(status.addresses).toHaveLength(2);
+  });
 });
+import { readFileSync } from "node:fs";
+import { join } from "node:path";

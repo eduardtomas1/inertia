@@ -125,7 +125,7 @@ export async function forceKillRuntimeProcessTree(
   });
   return killed.snapshotConfirmed
     && await waitForDescendantsExit(
-      killed.descendants,
+      [runtimePid, ...killed.descendants],
       kill,
       deadlineAt,
       now,

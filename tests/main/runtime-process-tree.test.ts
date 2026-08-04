@@ -72,6 +72,7 @@ describe("runtime process-tree termination", () => {
       [-101, "SIGKILL"],
       [101, "SIGKILL"],
       [100, "SIGKILL"],
+      [100, 0],
       [102, 0],
       [101, 0],
     ]);

@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { access, constants } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 
+import { forceKillRuntimeProcessTree } from "../runtime-process-tree";
+
 export type TailscaleFailureClass =
   | "not-installed"
   | "not-running"
@@ -16,6 +18,8 @@ export class TailscaleCommandError extends Error {
   constructor(
     readonly classification: TailscaleFailureClass,
     message: string,
+    readonly stdout = "",
+    readonly stderr = "",
   ) {
     super(message);
     this.name = "TailscaleCommandError";
@@ -51,14 +55,16 @@ export async function runTailscaleCommand(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let terminationStarted = false;
     const child = spawn(executable, [...args], {
+      detached: process.platform !== "win32",
       shell: false,
       windowsHide: true,
       env: sanitizedEnvironment(options.env ?? process.env),
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const finish = (error: Error | null, result?: TailscaleCommandResult): void => {
-      if (settled) return;
+    const finish = (error: Error | null, result?: TailscaleCommandResult, afterTermination = false): void => {
+      if (settled || (terminationStarted && !afterTermination)) return;
       settled = true;
       clearTimeout(timer);
       child.stdout?.removeAllListeners();
@@ -66,17 +72,26 @@ export async function runTailscaleCommand(
       if (error) reject(error);
       else resolve(result!);
     };
+    const terminate = (error: TailscaleCommandError): void => {
+      if (settled || terminationStarted) return;
+      terminationStarted = true;
+      if (!child.pid) { finish(error, undefined, true); return; }
+      void forceKillRuntimeProcessTree(child.pid, { environment: sanitizedEnvironment(options.env ?? process.env) }).then(
+        (confirmed) => finish(confirmed ? error : new TailscaleCommandError("unknown", "Tailscale process cleanup could not be confirmed."), undefined, true),
+        () => finish(new TailscaleCommandError("unknown", "Tailscale process cleanup could not be confirmed."), undefined, true),
+      );
+    };
     const append = (current: string, chunk: Buffer): string | null => {
       const next = current + chunk.toString("utf8");
       return Buffer.byteLength(next, "utf8") > outputBytes ? null : next;
     };
     child.stdout?.on("data", (chunk: Buffer) => {
       stdout = append(stdout, chunk) ?? "";
-      if (stdout === "") finish(new TailscaleCommandError("unknown", "Tailscale output exceeded its limit."));
+      if (stdout === "") terminate(new TailscaleCommandError("unknown", "Tailscale output exceeded its limit."));
     });
     child.stderr?.on("data", (chunk: Buffer) => {
       stderr = append(stderr, chunk) ?? "";
-      if (stderr === "") finish(new TailscaleCommandError("unknown", "Tailscale output exceeded its limit."));
+      if (stderr === "") terminate(new TailscaleCommandError("unknown", "Tailscale output exceeded its limit."));
     });
     child.once("error", (error: NodeJS.ErrnoException) => {
       finish(new TailscaleCommandError(
@@ -89,14 +104,15 @@ export async function runTailscaleCommand(
         finish(new TailscaleCommandError(
           classifyCommandFailure(stderr),
           "Tailscale did not accept the requested operation.",
+          stdout,
+          stderr,
         ));
         return;
       }
       finish(null, { stdout, stderr, code: code ?? 0 });
     });
     const timer = setTimeout(() => {
-      child.kill();
-      finish(new TailscaleCommandError("command-timeout", "Tailscale did not respond before the deadline."));
+      terminate(new TailscaleCommandError("command-timeout", "Tailscale did not respond before the deadline."));
     }, timeoutMs);
     timer.unref?.();
   });
@@ -127,9 +143,14 @@ export async function discoverTailscaleExecutable(
 
 function sanitizedEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const allowed = ["PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "TMP", "TEMP", "HOME", "USERPROFILE"];
-  return Object.fromEntries(allowed.flatMap((key) =>
+  return {
+    ...Object.fromEntries(allowed.flatMap((key) =>
     typeof environment[key] === "string" ? [[key, environment[key]!]] : [],
-  ));
+    )),
+    LC_ALL: "C",
+    LANG: "C",
+    LANGUAGE: "C",
+  };
 }
 
 async function isExecutable(path: string, platform: NodeJS.Platform): Promise<boolean> {
@@ -142,7 +163,7 @@ async function isExecutable(path: string, platform: NodeJS.Platform): Promise<bo
 }
 
 function classifyCommandFailure(stderr: string): TailscaleFailureClass {
-  const detail = stderr.toLowerCase();
+  const detail = stderr.toLocaleLowerCase("en-US");
   if (detail.includes("not running") || detail.includes("daemon")) return "not-running";
   if (detail.includes("login") || detail.includes("logged out")) return "logged-out";
   if (detail.includes("permission") || detail.includes("access denied")) return "permission-denied";

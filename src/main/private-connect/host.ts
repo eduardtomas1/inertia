@@ -57,7 +57,7 @@ export class PrivateConnectHost {
 
   private constructor(private readonly options: PrivateConnectHostOptions) {
     this.privacyMonitor = new PrivateConnectPrivacyMonitor(powerMonitor, (locked) => {
-      this.service?.setPrivacyLocked(locked);
+      void this.service?.setPrivacyLocked(locked);
     });
     this.registerIpc(options.assertTrusted);
   }

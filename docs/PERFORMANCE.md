@@ -200,31 +200,37 @@ host. Five deterministic streams produced these distributions in milliseconds:
 
 | Stage | Min | Median | p95 | Max |
 | --- | ---: | ---: | ---: | ---: |
-| Provider delta → channel accepted | 0 | 0 | 0 | 0 |
-| First-flush wait | 24 | 24 | 25 | 25 |
-| SQLite append | 0 | 1 | 1 | 1 |
+| Provider delta → channel accepted | 0 | 0 | 1 | 1 |
+| First-flush wait | 24 | 25 | 26 | 26 |
+| SQLite append | 0 | 0 | 1 | 1 |
 | Projection creation | 0 | 0 | 0 | 0 |
 | Runtime serialization/send | 0 | 0 | 0 | 0 |
-| Renderer WebSocket receipt | 0 | 0 | 0 | 0 |
-| Renderer state projection | 0 | 0 | 1 | 1 |
-| React live-text commit | 0 | 1 | 1 | 1 |
-| Commit → visible paint | 2 | 3 | 5 | 5 |
-| Total first delta → paint | 28 | 29 | 31 | 31 |
-| Provider completion → terminal persistence | 0 | 0 | 1 | 1 |
-| Terminal projection | 0 | 1 | 1 | 1 |
-| Final Markdown commit | 49 | 50 | 50 | 50 |
-| Final answer paint | 3 | 3 | 4 | 4 |
+| Renderer WebSocket receipt | 0 | 0 | 1 | 1 |
+| Renderer state projection | 0 | 0 | 0 | 0 |
+| React live-text commit | 1 | 1 | 1 | 1 |
+| Commit → visible paint | 2 | 4 | 7 | 7 |
+| Total first delta → paint | 28 | 31 | 34 | 34 |
+| Provider completion → terminal persistence | 0 | 1 | 1 | 1 |
+| Terminal projection | 0 | 0 | 1 | 1 |
+| Final Markdown commit | 51 | 52 | 53 | 53 |
+| Final answer paint | 2 | 3 | 4 | 4 |
 
-The end-to-end marker measurement was 29–32 ms to first visible paint and
-85–90 ms from provider completion to the final painted answer. Reader
+The end-to-end marker measurement was 29–35 ms to first visible paint and
+88–92 ms from provider completion to the final painted answer. Reader
 navigation was preserved in every sample. The immediate streaming bottom gap
 was at most 25 px; after terminal settlement and final Git-artifact layout it
 was 0 px in every sample.
 
+The renderer-receipt interval begins at a causal marker recorded immediately
+before the runtime sends the WebSocket event. The separate send-accepted marker
+remains in raw traces for same-process serialization/send cost, but it is not
+used as the cross-process receipt origin because the renderer can receive the
+message before the sender resumes after `send()`.
+
 On the authoritative 300-turn transcript, the measured display cadence was
-approximately 120 Hz. Frame intervals were 8.3 ms median, 8.4 ms p90/p95, and
-16.8 ms maximum, with no observed long tasks. Six virtual rows stayed mounted
-at both ends of the transcript; layout measurement was 1.5 ms median, 1.8 ms
+approximately 120 Hz. Frame intervals were 8.3 ms median, 8.6 ms p90, 9.3 ms
+p95, and 16.8 ms maximum, with no observed long tasks. Six virtual rows stayed
+mounted at both ends of the transcript; layout measurement was 1.5 ms median, 1.9 ms
 p95, and 2.2 ms maximum. These are stable-host observations, not a general
 claim that every device or hosted compositor is proven smooth.
 

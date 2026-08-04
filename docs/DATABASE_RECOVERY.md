@@ -13,11 +13,11 @@ first-settled-turn, hourly, and validation-retry triggers all enter one automati
 scheduler. The scheduler records the pending trigger kinds, deduplicates them
 against one pending timer or in-flight backup, and starts only when the runtime
 is quiet: no active turn, recovery import, recovery replacement, critical
-settlement, or other backup is in flight. Every relevant settlement replaces
-the interaction deadline with a full grace period measured from that latest
-settlement. Validation retry backoff has a separate deadline; an automatic
-backup waits for both deadlines, so a generic eligibility retry cannot shorten
-either one.
+settlement, or other backup is in flight. Every terminal settlement—completed,
+failed, or cancelled—replaces the interaction deadline with a full grace period
+measured from that latest settlement. Validation retry backoff has a separate
+deadline; an automatic backup waits for both deadlines, so a generic
+eligibility retry cannot shorten either one.
 
 An explicit manual backup has deliberately different semantics: after
 deduplicating with an in-flight backup, it starts immediately instead of being

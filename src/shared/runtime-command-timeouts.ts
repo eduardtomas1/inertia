@@ -11,6 +11,7 @@ export const CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS = 60_000;
 // Give the server one aggregate deadline, then leave transport/cleanup
 // headroom so its authoritative response reaches the renderer first.
 export const GIT_READ_OPERATION_TIMEOUT_MS = 120_000;
+export const TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS = 60_000;
 export const GIT_READ_REQUEST_TIMEOUT_MS =
   GIT_READ_OPERATION_TIMEOUT_MS + 60_000;
 

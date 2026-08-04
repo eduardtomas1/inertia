@@ -14,6 +14,9 @@ import {
 } from "@playwright/test";
 
 import { RuntimeStore } from "../../src/server/database";
+import {
+  TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
+} from "../../src/shared/runtime-command-timeouts";
 import { processExists } from "../e2e/support/app-fixture";
 
 const execFileAsync = promisify(execFile);
@@ -136,7 +139,7 @@ const stageMetricDefinitions = [
   ["sqliteAppendMs", "sqlite-append-started", "sqlite-append-completed"],
   ["projectionCreationMs", "sqlite-append-completed", "projection-event-created"],
   ["runtimeSerializationAndSendMs", "projection-event-created", "runtime-websocket-send-accepted"],
-  ["rendererWebSocketReceiptMs", "runtime-websocket-send-accepted", "renderer-websocket-message-received"],
+  ["rendererWebSocketReceiptMs", "runtime-websocket-send-started", "renderer-websocket-message-received"],
   ["rendererStateProjectionMs", "renderer-websocket-message-received", "renderer-projection-updated"],
   ["reactLiveTextCommitMs", "renderer-projection-updated", "renderer-live-text-commit"],
   ["commitToVisiblePaintMs", "renderer-live-text-commit", "stream-paint"],
@@ -171,7 +174,7 @@ function stageAttributionSample(
     "sqlite-append-completed",
     "projection-event-created",
     "runtime-event-serialized",
-    "runtime-websocket-send-accepted",
+    "runtime-websocket-send-started",
     "renderer-websocket-message-received",
     "renderer-projection-updated",
     "renderer-live-text-commit",
@@ -937,6 +940,16 @@ async function streamingResponsivenessSample(
     ).filter({ hasText: `STREAM_PROVIDER_COMPLETE_${sampleNumber}_` }).last();
     await finalAnswer.waitFor();
     finalAnswerVisible = await finalAnswer.isVisible();
+    const finalTurn = finalAnswer.locator(
+      "xpath=ancestor::section[@data-turn-id][1]",
+    );
+    const finalArtifact = finalTurn.locator("[data-turn-git-artifact-id]");
+    await finalArtifact.waitFor({ state: "attached" });
+    await expect.poll(
+      () => finalArtifact.evaluate((element) =>
+        element.classList.contains("is-pending")),
+      { timeout: TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS },
+    ).toBe(false);
     await expect.poll(() => liveViewport.evaluate(
       (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
     )).toBeLessThanOrEqual(2);
@@ -1611,7 +1624,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       limitations: [
         "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
-        "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; each first-delta and terminal chain is isolated to one run, while stage ordering remains authoritative within each process.",
+        "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; WebSocket receipt starts at the causal pre-send marker, each first-delta and terminal chain is isolated to one run, and stage ordering remains authoritative within each process.",
         "Animation-frame intervals describe compositor scheduling, while PerformanceObserver long-task durations describe main-thread stalls; hosted frame intervals are retained as observational evidence rather than a 60-fps claim.",
         "Chromium process working-set retention after panels close is not classified as a leak when JavaScript heap, DOM, terminal, workspace-surface, and split-pane counters are released.",
         "The product owns one BrowserWindow; split chat is measured instead of inventing a multi-window mode.",

@@ -10,6 +10,7 @@ export type StreamingTraceStage =
   | "sqlite-append-completed"
   | "projection-event-created"
   | "runtime-event-serialized"
+  | "runtime-websocket-send-started"
   | "runtime-websocket-send-accepted"
   | "provider-completion-received"
   | "terminal-persistence-completed"

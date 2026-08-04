@@ -267,10 +267,10 @@ export function ChatWorkspace({
           return;
         }
         current.scrollTo({ top: current.scrollHeight, behavior: "auto" });
-        const bottomGap = current.scrollHeight
-          - current.clientHeight
-          - current.scrollTop;
-        if (bottomGap > 2 && remainingFrames > 1) {
+        // A clamped scroll reports a zero gap before the virtualizer publishes
+        // its next measurement. Keep the bounded correction window alive even
+        // when this frame appears settled; reader intent still stops it above.
+        if (remainingFrames > 1) {
           correctMeasuredBottom(remainingFrames - 1);
         }
       });

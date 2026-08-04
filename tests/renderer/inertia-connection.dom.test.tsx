@@ -75,6 +75,46 @@ describe("useInertiaConnection", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
+  it("does not lose runtime readiness announced during an in-flight connection attempt", async () => {
+    let announceReady: (() => void) | undefined;
+    let rejectFirstConnection: ((error: Error) => void) | undefined;
+    const getRuntimeConnection = vi.fn()
+      .mockImplementationOnce(() => new Promise<never>((_resolve, reject) => {
+        rejectFirstConnection = reject;
+      }))
+      .mockResolvedValue({
+        websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+      });
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection,
+        onRuntimeReady: vi.fn((listener: () => void) => {
+          announceReady = listener;
+          return vi.fn();
+        }),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+
+    renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(getRuntimeConnection).toHaveBeenCalledTimes(1));
+
+    vi.useFakeTimers();
+    announceReady?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getRuntimeConnection).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rejectFirstConnection?.(new Error("The local service is unavailable."));
+      await Promise.resolve();
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(getRuntimeConnection).toHaveBeenCalledTimes(2);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
   it("retains one startup recovery notice across reconnects and does not recreate it after dismissal", async () => {
     let announceReady: (() => void) | undefined;
     const notice = {

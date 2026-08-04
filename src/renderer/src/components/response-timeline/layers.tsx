@@ -298,7 +298,12 @@ export function FinalAnswerDocument({
       presentation?.phase === "persisted"
       && presentation.content.includes("STREAM_PROVIDER_COMPLETE_")
     ) {
-      markTestStreamingStage("final-markdown-commit");
+      const sampleNumber = presentation.content.match(
+        /STREAM_PROVIDER_COMPLETE_(\d+)_/u,
+      )?.[1];
+      if (sampleNumber) {
+        markTestStreamingStage(`final-markdown-commit:${sampleNumber}`);
+      }
     }
   }, [presentation?.content, presentation?.phase]);
   if (!presentation) return null;

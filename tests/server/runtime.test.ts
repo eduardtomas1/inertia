@@ -15,7 +15,7 @@ import { delimiter, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { startRuntime, type RunningRuntime } from "../../src/server";
 import type {
@@ -176,6 +176,7 @@ describe("local runtime", () => {
     await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
     for (const restore of restoreEnvironment.splice(0).reverse()) restore();
     for (const directory of temporaryDirectories.splice(0)) await removeTemporaryDirectory(directory);
+    vi.restoreAllMocks();
   });
 
   function temporaryWorkspace(options: { withProject?: boolean } = {}): { root: string; data: string; workspace: string } {
@@ -263,7 +264,7 @@ if (args.length === 0) {
             },
           });
         } else if (event.type === "turn.completed") {
-          const complete = () => send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+          const complete = () => send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: event.status || "completed", items: [], error: event.error || null } } });
           if (event.delayMs) setTimeout(complete, event.delayMs);
           else complete();
         }
@@ -524,6 +525,72 @@ process.exit(child.status ?? 1);
       releaseSettlement();
     }
   }, 30_000);
+
+  it.each([
+    ["failed", "failed"],
+    ["interrupted", "cancelled"],
+  ] as const)(
+    "restarts backup quiet grace after a %s provider turn",
+    async (providerStatus, expectedStatus) => {
+      const { root, data, workspace } = temporaryWorkspace();
+      const { authFile, executable } = fakeCodex(root, [
+        {
+          type: "turn.completed",
+          status: providerStatus,
+          error: providerStatus === "failed"
+            ? { message: "Provider failed for the regression fixture." }
+            : null,
+        },
+      ]);
+      writeFileSync(authFile, "connected");
+      const backupRequest = vi.spyOn(
+        RuntimeStore.prototype,
+        "createInitialBackup",
+      );
+      const runtime = await startRuntime({
+        dataDirectory: data,
+        defaultWorkspacePath: workspace,
+        enableProviders: true,
+        codexBinaryPath: executable,
+      });
+      runtimes.push(runtime);
+      const client = await connect(runtime.websocketUrl);
+      const welcome = await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+          event.type === "server.welcome",
+      );
+      const ready = await providerSnapshot(
+        client.events,
+        welcome.snapshot,
+        "codex",
+        (provider) => provider.authState === "authenticated" && provider.canRun,
+      );
+      const conversationId = ready.activeConversationId!;
+      const requestId = randomUUID();
+      send(client.socket, {
+        type: "message.send",
+        requestId,
+        payload: { conversationId, content: `Settle as ${providerStatus}.` },
+      });
+      await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+          event.type === "request.result"
+          && event.requestId === requestId
+          && event.result.kind === "message.accepted",
+      );
+      await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+          event.type === "snapshot.updated"
+          && event.snapshot.conversations.some(({ id, latestTurn }) =>
+            id === conversationId
+            && latestTurn?.status === expectedStatus),
+      );
+      await expect.poll(() => backupRequest.mock.calls).toContainEqual([
+        { quietGraceMs: 1_000 },
+      ]);
+      backupRequest.mockRestore();
+    },
+  );
 
   it("starts empty, mutates, and persists a deterministic app snapshot", async () => {
     const { data, workspace } = temporaryWorkspace({ withProject: false });

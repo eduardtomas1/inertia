@@ -212,6 +212,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     const isStreamingEvent = event.type === "runtime.event"
       && event.event.type === "agent.text";
     if (isStreamingEvent) streamingTrace.mark("runtime-event-serialized");
+    if (isStreamingEvent) streamingTrace.mark("runtime-websocket-send-started");
     sendRuntimeEvent(socket, event);
     if (isStreamingEvent) streamingTrace.mark("runtime-websocket-send-accepted");
   };
@@ -626,12 +627,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         applyProviderMetadata(providerId, metadata);
       },
       onTurnSettled: (turn) => {
-        if (turn.status === "completed") {
-          // The durable turn is already settled. Backup work stays off the
-          // settlement path and the manager deduplicates it with quiet/hourly
-          // triggers.
-          void store.createInitialBackup({ quietGraceMs: 1_000 }).catch(() => undefined);
-        }
+        // The durable turn is already terminal. Backup work stays off the
+        // settlement path and the manager deduplicates it with quiet/hourly
+        // triggers. Failed and cancelled turns restart the same quiet window:
+        // their cleanup writes are just as real as a successful completion.
+        void store.createInitialBackup({ quietGraceMs: 1_000 }).catch(() => undefined);
         return testOnlyOnTurnSettled?.(turn);
       },
       testOnlyStreamingTrace: streamingTrace,

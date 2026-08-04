@@ -40,8 +40,12 @@ a high-water observation, not proof of retained live work; use the post-close,
 repeated-cycle, and soak deltas to decide whether product optimization is due.
 The deterministic streaming scenario measures the full provider-to-paint path,
 stage-by-stage attribution, visible update gaps, long tasks, frames, WAL growth,
-and memory. Its required stable-host targets are under 100 ms to first paint and
-under 100 ms at p95 between visible updates; under 50 ms remains aspirational.
+and memory. A stable/local run records five isolated samples; hosted CI records
+three so it remains bounded while still measuring more than one run. Every
+stage reports sample count, minimum, median, p95, and maximum, and the JSON keeps
+the raw per-sample runtime and renderer marks. Its required stable-host targets
+are under 100 ms to first paint and under 100 ms at p95 between visible updates;
+under 50 ms remains aspirational.
 The enforced cross-platform ceiling is intentionally looser so noisy hosted
 runners catch catastrophic regressions without pretending to be a lab.
 The platform report separately compares first-flush candidates of 12, 16, and
@@ -107,14 +111,25 @@ application produced alongside the AppImage, not AppImage mount time.
   activities, and Git artifact summaries. The report asserts no compatibility
   disclosure, virtualization, 300 total timeline rows, bounded mounted rows,
   real `.message-scroll` scrolling, changed scroll positions, top/bottom
-  reachability, DOM descendants, and 120 post-animation-frame samples.
+  reachability, DOM descendants, and 120 post-animation-frame samples. The
+  report estimates the observed refresh cadence, separates animation-frame
+  intervals from `longtask` observations, records median/p90/p95/maximum frame
+  intervals, and correlates overruns with row remounting and layout measurement
+  only as observational co-occurrence—not proof of causation.
 - Recovered compatibility history: a separate legacy/orphan fixture starts
   collapsed, mounts content only when opened, and releases it on close. It is
   not used as ordinary long-conversation scrolling evidence.
 - Follow-latest streaming: starts at the live edge, checks the real
   `.message-scroll` viewport, simulates reader navigation away from the bottom,
-  verifies streaming does not force-follow history, then checks Jump to latest
-  and final-answer visibility.
+  verifies streaming does not force-follow history, then records whether Jump
+  to latest reached the bounded streaming threshold, its immediate gap, final
+  answer visibility, and the post-settlement gap. The final settled viewport is
+  required to be within two pixels of the real bottom; no threshold result is
+  labeled as exact bottom reachability.
+- Workspace release: records DOM nodes, mounted virtual rows, terminal panels,
+  xterm containers, loaded workspace surfaces, and split panes immediately,
+  five seconds, and thirty seconds after tools, terminal, and split view close.
+  JavaScript heap and process working sets remain separate observations.
 - Long-session soak: five authoritative 120-frame scroll passes (600 real
   viewport frames) interleaved with tool cycles, with post-soak JS heap,
   renderer working set, and mounted-row samples.
@@ -177,6 +192,53 @@ terminal-session, repeated-cycle, and soak evidence separate from OS
 working-set retention. Working-set growth alone is not treated as a JavaScript
 leak or a deterministic macOS gate; if live objects are released while native
 Chromium memory remains high, the report classifies that as native retention.
+
+### Final V0.0.23 stabilization sample
+
+The final local sample used Node 22.23.2 on the same Apple M5 Pro/macOS arm64
+host. Five deterministic streams produced these distributions in milliseconds:
+
+| Stage | Min | Median | p95 | Max |
+| --- | ---: | ---: | ---: | ---: |
+| Provider delta → channel accepted | 0 | 0 | 1 | 1 |
+| First-flush wait | 24 | 25 | 26 | 26 |
+| SQLite append | 0 | 0 | 1 | 1 |
+| Projection creation | 0 | 0 | 0 | 0 |
+| Runtime serialization/send | 0 | 0 | 0 | 0 |
+| Renderer WebSocket receipt | 0 | 0 | 1 | 1 |
+| Renderer state projection | 0 | 0 | 0 | 0 |
+| React live-text commit | 1 | 1 | 1 | 1 |
+| Commit → visible paint | 2 | 4 | 7 | 7 |
+| Total first delta → paint | 28 | 31 | 34 | 34 |
+| Provider completion → terminal persistence | 0 | 1 | 1 | 1 |
+| Terminal projection | 0 | 0 | 1 | 1 |
+| Final Markdown commit | 51 | 52 | 53 | 53 |
+| Final answer paint | 2 | 3 | 4 | 4 |
+
+The end-to-end marker measurement was 29–35 ms to first visible paint and
+88–92 ms from provider completion to the final painted answer. Reader
+navigation was preserved in every sample. The immediate streaming bottom gap
+was at most 25 px; after terminal settlement and final Git-artifact layout it
+was 0 px in every sample.
+
+The renderer-receipt interval begins at a causal marker recorded immediately
+before the runtime sends the WebSocket event. The separate send-accepted marker
+remains in raw traces for same-process serialization/send cost, but it is not
+used as the cross-process receipt origin because the renderer can receive the
+message before the sender resumes after `send()`.
+
+On the authoritative 300-turn transcript, the measured display cadence was
+approximately 120 Hz. Frame intervals were 8.3 ms median, 8.6 ms p90, 9.3 ms
+p95, and 16.8 ms maximum, with no observed long tasks. Six virtual rows stayed
+mounted at both ends of the transcript; layout measurement was 1.5 ms median, 1.9 ms
+p95, and 2.2 ms maximum. These are stable-host observations, not a general
+claim that every device or hosted compositor is proven smooth.
+
+After terminal, tools, and split view closed, terminal panels, xterm containers,
+loaded workspace surfaces, and split panes were all zero immediately and after
+5/30 seconds. DOM nodes remained bounded at 782/782/790 and JavaScript heap was
+17.1/16.6/16.8 MiB. Renderer working set remained about 273 MiB, illustrating
+why native Chromium retention is reported separately rather than called a leak.
 
 ## Platform investigation and limitations
 

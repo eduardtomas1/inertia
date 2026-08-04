@@ -17,6 +17,9 @@ import type {
   TurnGitDiffSnapshot,
 } from "../shared/contracts";
 import {
+  TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
+} from "../shared/runtime-command-timeouts";
+import {
   RuntimeStore,
   type StoredTurnGitArtifact,
 } from "./database";
@@ -31,7 +34,6 @@ const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_COMPRESSED_BYTES = 4 * 1024 * 1024;
 const MAX_RETAINED_PATCHES = 200;
 const MAX_RETAINED_BYTES = 128 * 1024 * 1024;
-const DEFAULT_FINALIZATION_TIMEOUT_MS = 60_000;
 const DIGEST = /^[0-9a-f]{64}$/u;
 
 export interface CaptureTurnGitArtifactInput {
@@ -112,7 +114,8 @@ export class TurnGitArtifactManager {
     this.#checkpointDirectory = resolve(dataDirectory, "checkpoint-indexes");
     this.#finalizationTimeoutMs = Math.max(
       1,
-      options.finalizationTimeoutMs ?? DEFAULT_FINALIZATION_TIMEOUT_MS,
+      options.finalizationTimeoutMs
+        ?? TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
     );
   }
 

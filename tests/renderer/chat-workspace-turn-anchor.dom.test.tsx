@@ -7,6 +7,7 @@ import type {
   ChatMessage,
   Conversation,
   Project,
+  TurnGitArtifact,
 } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import type {
@@ -291,6 +292,40 @@ describe("transcript following motion", () => {
     expect(scrollTo.mock.calls.every(([options]) =>
       options?.behavior === "auto")).toBe(true);
 
+    const settledArtifact: TurnGitArtifact = {
+      id: "artifact-follow",
+      turnId: "turn-follow",
+      conversationId: activeConversation.id,
+      runId: "run-follow",
+      repositoryIdentity: null,
+      worktreeIdentity: null,
+      branch: "main",
+      beforeCheckpointId: null,
+      beforeFingerprint: null,
+      afterFingerprint: null,
+      files: [],
+      insertions: 0,
+      deletions: 0,
+      status: "ready",
+      completeness: "complete",
+      patchState: "none",
+      patchDigest: null,
+      capturedAt: "2026-08-02T10:00:02.000Z",
+      terminalAssistantMessageId: terminalMessage.id,
+      failureReason: null,
+      absenceReason: null,
+    };
+    scrollTo.mockClear();
+    view.rerender(
+      <ChatWorkspace
+        {...props}
+        messages={[terminalMessage]}
+        turnGitArtifacts={[settledArtifact]}
+        streamingText=""
+      />,
+    );
+    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+
     const transcript = screen.getByLabelText("Thread transcript");
     Object.defineProperties(transcript, {
       clientHeight: { configurable: true, value: 100 },
@@ -305,5 +340,71 @@ describe("transcript following motion", () => {
     expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({
       behavior: "auto",
     }));
+  });
+
+  it("keeps correcting delayed virtual measurements until reader intent", async () => {
+    const activeConversation = conversation("conversation-delayed-measurement");
+    const scheduled = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 0;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      const frameId = ++nextFrameId;
+      scheduled.set(frameId, callback);
+      return frameId;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((frameId) => {
+      scheduled.delete(frameId);
+    });
+    let height = 500;
+    let scrollTop = 0;
+    const scrollTo = vi.fn((options?: ScrollToOptions | number, y?: number) => {
+      const top = typeof options === "number" ? y ?? 0 : options?.top ?? 0;
+      scrollTop = Math.min(Number(top), height - 100);
+    });
+    HTMLElement.prototype.scrollTo = scrollTo as typeof HTMLElement.prototype.scrollTo;
+    const props = workspaceProps(activeConversation, async () => null);
+    const view = render(<ChatWorkspace {...props} />);
+    const transcript = screen.getByLabelText("Thread transcript");
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, get: () => height },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+        },
+      },
+    });
+    const message: ChatMessage = {
+      id: "delayed-measurement-message",
+      conversationId: activeConversation.id,
+      turnId: null,
+      role: "assistant",
+      content: "Measured on a later frame.",
+      attachments: [],
+      createdAt: "2026-08-02T10:00:01.000Z",
+    };
+    view.rerender(<ChatWorkspace {...props} messages={[message]} />);
+
+    const firstFrame = [...scheduled.entries()].at(-1)!;
+    scheduled.delete(firstFrame[0]);
+    firstFrame[1](0);
+    expect(scrollTop).toBe(400);
+    expect(scheduled.size).toBe(1);
+
+    height = 650;
+    const secondFrame = [...scheduled.entries()].at(-1)!;
+    scheduled.delete(secondFrame[0]);
+    secondFrame[1](16);
+    expect(scrollTop).toBe(550);
+    expect(scheduled.size).toBe(1);
+
+    fireEvent.wheel(transcript);
+    height = 800;
+    const readerIntentFrame = [...scheduled.entries()].at(-1)!;
+    scheduled.delete(readerIntentFrame[0]);
+    readerIntentFrame[1](32);
+    expect(scrollTop).toBe(550);
+    expect(scheduled.size).toBe(0);
   });
 });

@@ -8,15 +8,24 @@ transactionally safe, while a sudden host power loss can still lose the newest
 OS-buffered commits. Recovery is provided by validated rotating backups rather
 than by adding a full filesystem sync to every streamed update.
 
-At runtime, Inertia creates an online backup every hour. The first backup is
-eligible after 30 seconds or the first successfully settled authoritative turn,
-but eligibility is queued until the runtime is quiet: no active turn, recovery
-import, recovery replacement, critical settlement, or other backup is in
-flight. A small grace period after the last active turn prevents the backup
-from landing on the interaction path. Timer, first-turn, hourly, and manual
-triggers are deduplicated. Clean shutdown cancels unfinished backup work
-instead of starting a database-sized operation inside the process-wide
-shutdown deadline. `better-sqlite3`'s online backup API
+At runtime, Inertia creates an online backup every hour. Initial-timer,
+first-settled-turn, hourly, and validation-retry triggers all enter one automatic
+scheduler. The scheduler records the pending trigger kinds, deduplicates them
+against one pending timer or in-flight backup, and starts only when the runtime
+is quiet: no active turn, recovery import, recovery replacement, critical
+settlement, or other backup is in flight. Every terminal settlement—completed,
+failed, or cancelled—replaces the interaction deadline with a full grace period
+measured from that latest settlement. Validation retry backoff has a separate
+deadline; an automatic backup waits for both deadlines, so a generic
+eligibility retry cannot shorten either one.
+
+An explicit manual backup has deliberately different semantics: after
+deduplicating with an in-flight backup, it starts immediately instead of being
+held behind an unbounded interaction wait. Its successful publication also
+satisfies any automatic request that raced it. Clean shutdown cancels pending
+automatic timers and aborts unfinished backup work instead of starting a
+database-sized operation inside the process-wide shutdown deadline.
+`better-sqlite3`'s online backup API
 includes committed WAL data without racing a file copy. Backups are written
 beside the primary database:
 
@@ -92,5 +101,9 @@ interrupted partial cleanup, count/byte retention, bounded shutdown
 cancellation, future-schema preservation, owner-only permissions, strict and
 idempotent export/import containment, abrupt `SIGKILL` recovery, schema-41
 upgrade, oversized single-delta splitting, durable stream restart, and injected
-terminal-compaction rollback. Platform-independent scheduler and path tests run
-under the repository's Linux, macOS, and Windows CI matrix.
+terminal-compaction rollback. Scheduler regressions cover blocked hourly and
+recovery-import triggers, initial/hourly and manual/hourly races, repeated
+blocked ticks, rotation, shutdown cancellation, consecutive settlement grace
+replacement, and the precedence of interaction grace over validation retry
+backoff. Platform-independent scheduler and path tests run under the
+repository's Linux, macOS, and Windows CI matrix.

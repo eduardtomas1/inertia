@@ -228,6 +228,7 @@ export function ChatWorkspace({
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
+  const followCorrectionFrameRef = useRef<number | null>(null);
   const conversationId = conversation?.id ?? null;
   const [navigation, dispatchNavigation] = useReducer(
     transcriptNavigationReducer,
@@ -242,7 +243,7 @@ export function ChatWorkspace({
   const readerIntentRef = useRef(false);
   const showJump = activeNavigation.mode === "reading-history";
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
-  const contentSignal = `${turns.length}:${turns.at(-1)?.updatedAt ?? ""}:${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${subagents.length}:${subagents.at(-1)?.updatedAt ?? ""}:${plans.length}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
+  const contentSignal = `${turns.length}:${turns.at(-1)?.updatedAt ?? ""}:${messages.length}:${messages.at(-1)?.content.length ?? 0}:${activities.length}:${subagents.length}:${subagents.at(-1)?.updatedAt ?? ""}:${plans.length}:${checkpoints.length}:${turnGitArtifacts.length}:${turnGitArtifacts.at(-1)?.status ?? ""}:${turnGitArtifacts.at(-1)?.capturedAt ?? ""}:${streamingText.length}:${streamingReasoning.length}:${approvals.length}:${inputRequests.length}`;
 
   const performScrollToLatest = useCallback((
     behavior: ScrollBehavior = "smooth",
@@ -251,6 +252,33 @@ export function ChatWorkspace({
     if (!element) return;
     element.scrollTo({ top: element.scrollHeight, behavior });
     onLatestContentVisibilityChange?.(true);
+    if (followCorrectionFrameRef.current !== null) {
+      window.cancelAnimationFrame(followCorrectionFrameRef.current);
+    }
+    const correctMeasuredBottom = (remainingFrames: number): void => {
+      followCorrectionFrameRef.current = window.requestAnimationFrame(() => {
+        followCorrectionFrameRef.current = null;
+        const current = scrollRef.current;
+        if (!current || readerIntentRef.current) return;
+        if (!transcriptNavigationFollowsContent(navigationRef.current)) {
+          if (remainingFrames > 1) {
+            correctMeasuredBottom(remainingFrames - 1);
+          }
+          return;
+        }
+        current.scrollTo({ top: current.scrollHeight, behavior: "auto" });
+        // A clamped scroll reports a zero gap before the virtualizer publishes
+        // its next measurement. Keep the bounded correction window alive even
+        // when this frame appears settled; reader intent still stops it above.
+        if (remainingFrames > 1) {
+          correctMeasuredBottom(remainingFrames - 1);
+        }
+      });
+    };
+    // Virtual-row measurement can refine the total height after the first
+    // scroll. Converge for a few frames, but immediately yield to fresh reader
+    // intent instead of pinning someone who moved back into history.
+    correctMeasuredBottom(8);
   }, [onLatestContentVisibilityChange]);
 
   const scrollToLatest = useCallback((
@@ -273,7 +301,12 @@ export function ChatWorkspace({
   }, [conversationId, performScrollToLatest]);
 
   useEffect(
-    () => () => onLatestContentVisibilityChange?.(false),
+    () => () => {
+      if (followCorrectionFrameRef.current !== null) {
+        window.cancelAnimationFrame(followCorrectionFrameRef.current);
+      }
+      onLatestContentVisibilityChange?.(false);
+    },
     [onLatestContentVisibilityChange],
   );
 

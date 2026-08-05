@@ -53,6 +53,9 @@ function attachment(
   };
 }
 
+const hostedWindowsCi =
+  process.platform === "win32" && process.env.CI === "true";
+
 describe("document attachment execution context", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -84,8 +87,8 @@ describe("document attachment execution context", () => {
   // the native PDF stack while the full unit suite is contending for two
   // workers. The later packaged-app smoke is the authoritative Windows proof:
   // it loads the real stack after runtime readiness and extracts a real PDF.
-  // Keep this faster integration check on local, Linux, and macOS runs.
-  it.skipIf(process.platform === "win32" && process.env.CI === "true")(
+  // Keep these faster integration checks on local, Linux, and macOS runs.
+  it.skipIf(hostedWindowsCi)(
     "extracts bounded PDF text without exposing the private source path",
     async () => {
       const pdf = attachment({});
@@ -217,13 +220,17 @@ describe("document attachment execution context", () => {
     )).toBeLessThanOrEqual(96 * 1024);
   });
 
-  it("rejects PDFs without selectable text instead of pretending they were read", async () => {
-    const blank = pdfWithText(" ");
-    await expect(documentAttachmentContexts([{
-      attachment: attachment({}),
-      bytes: blank,
-    }])).rejects.toThrow(/no selectable text/u);
-  });
+  it.skipIf(hostedWindowsCi)(
+    "rejects PDFs without selectable text instead of pretending they were read",
+    async () => {
+      const blank = pdfWithText(" ");
+      await expect(documentAttachmentContexts([{
+        attachment: attachment({}),
+        bytes: blank,
+      }])).rejects.toThrow(/no selectable text/u);
+    },
+    PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000,
+  );
 
   it("aborts running and queued sibling PDFs after the first substantive failure", async () => {
     let started = 0;

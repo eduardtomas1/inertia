@@ -15,6 +15,10 @@ import {
   type PrivateConnectRuntimeResponse,
   type PrivateConnectRuntimeConversation,
 } from "../../shared/private-connect/runtime-contract";
+import {
+  PRIVATE_CONNECT_QUESTION_LIMITS,
+  type PrivateConnectSafeQuestion,
+} from "../../shared/private-connect/questions";
 import { privateConnectRuntimeGrantAllowsConversation } from "../../shared/private-connect/runtime-grants";
 import {
   privateConnectPromptSafetyIsUsable,
@@ -220,6 +224,10 @@ export class PrivateConnectRuntimeGateway {
         ?? { ...detail.conversation, latestTurn: null, pendingApproval: false, pendingInput: false },
       this.promptSafety(detail.conversation),
     );
+    const pendingInput = [...(this.dependencies.inputs?.() ?? [])].find(
+      ({ conversationId }) => conversationId === request.conversationId,
+    ) ?? null;
+    const answerableInput = remotelyAnswerableInput(pendingInput);
     const conditional = request.ifNoneMatch !== undefined;
     const response = boundPrivateConnectProjection({
       type: "response",
@@ -270,18 +278,13 @@ export class PrivateConnectRuntimeGateway {
               updatedAt: subagent.updatedAt,
             })),
           plan: safePrivateConnectPlan(detail.plans.at(-1)),
-          questions: safePrivateConnectQuestions(
-            this.dependencies.inputs?.(),
-            request.conversationId,
-          ),
-          inputRequestId: safePrivateConnectInputRequestId(
-            this.dependencies.inputs?.(),
-            request.conversationId,
-          ),
+          questions: safePrivateConnectQuestions(answerableInput),
+          inputRequestId: answerableInput?.id ?? null,
           waitingForLocalAction:
             projectedConversation.pendingLocalApproval
+            || (pendingInput !== null && answerableInput === null)
             || shell.conversations.some(
-              ({ id, pendingInput }) => id === request.conversationId && pendingInput,
+              ({ id, pendingInput: waiting }) => id === request.conversationId && waiting,
             ),
         },
       },
@@ -599,29 +602,39 @@ function safePrivateConnectPlan(
   };
 }
 
+function remotelyAnswerableInput(
+  pending: AgentInputRequest | null,
+): AgentInputRequest | null {
+  if (!pending) return null;
+  if (pending.questions.length === 0) return null;
+  if (pending.questions.some((question) => question.isSecret)) return null;
+  if (pending.questions.length > PRIVATE_CONNECT_QUESTION_LIMITS.questions) return null;
+  if (
+    pending.questions.some(
+      ({ id, options }) => id.length > PRIVATE_CONNECT_QUESTION_LIMITS.identifierCharacters
+        || options.length > PRIVATE_CONNECT_QUESTION_LIMITS.options
+        || options.some((option) => (
+          option.id.length > PRIVATE_CONNECT_QUESTION_LIMITS.identifierCharacters
+        )),
+    )
+  ) return null;
+  return pending;
+}
+
 function safePrivateConnectQuestions(
-  inputs: Iterable<AgentInputRequest> | undefined,
-  conversationId: string,
-): Array<{ id: string; label: string; options: Array<{ id: string; label: string }>; allowMultiple: boolean }> {
-  const pending = [...(inputs ?? [])].find(({ conversationId: id }) => id === conversationId);
-  if (!pending || pending.questions.some((question) => question.isSecret)) return [];
-  return pending.questions.map((question) => ({
+  answerable: AgentInputRequest | null,
+): PrivateConnectSafeQuestion[] {
+  if (!answerable) return [];
+  return answerable.questions.map((question) => ({
     id: question.id,
     label: sanitizePrivateConnectLabel(question.question) ?? "Question",
-    options: question.options.slice(0, 32).map((option) => ({
+    options: question.options.map((option) => ({
       id: option.id,
       label: sanitizePrivateConnectLabel(option.label) ?? "Option",
     })),
     allowMultiple: question.allowMultiple,
+    allowCustomAnswer: question.isOther || question.options.length === 0,
   }));
-}
-
-function safePrivateConnectInputRequestId(
-  inputs: Iterable<AgentInputRequest> | undefined,
-  conversationId: string,
-): string | null {
-  const pending = [...(inputs ?? [])].find(({ conversationId: id }) => id === conversationId);
-  return pending?.questions.some((question) => question.isSecret) ? null : pending?.id ?? null;
 }
 
 function preparedPromptKey(

@@ -6,6 +6,10 @@ import {
   type PrivateConnectConversationGrant,
 } from "./grants";
 import {
+  privateConnectQuestionAnswersSchema,
+  privateConnectSafeQuestionsSchema,
+} from "./questions";
+import {
   privateConnectPresetSchema,
   privateConnectScopeSchema,
   type PrivateConnectPreset,
@@ -91,8 +95,7 @@ export const privateConnectRequestSchema = z.discriminatedUnion("type", [
     requestId: uuid,
     conversationId: uuid,
     inputRequestId: uuid,
-    answers: z.record(z.string().min(1).max(80), z.array(entityId).min(1).max(32))
-      .refine((value) => Object.keys(value).length <= 32),
+    answers: privateConnectQuestionAnswersSchema,
   }).strict(),
   z.object({
     protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
@@ -168,19 +171,6 @@ export const privateConnectSafeSubagentSchema = z.object({
   updatedAt: timestamp,
 }).strict();
 
-export const privateConnectSafeQuestionSchema = z.object({
-  id: uuid,
-  label: z.string().max(240),
-  options: z.array(z.object({
-    id: entityId,
-    label: z.string().max(240),
-  }).strict()).max(32),
-  allowMultiple: z.boolean(),
-}).strict();
-export type PrivateConnectSafeQuestion = z.infer<
-  typeof privateConnectSafeQuestionSchema
->;
-
 export const privateConnectStateSchema = z.object({
   generatedAt: timestamp,
   projects: z.array(privateConnectSafeProjectSchema).max(1_000),
@@ -205,7 +195,7 @@ export const privateConnectConversationDetailSchema = z.object({
       status: z.enum(["pending", "inProgress", "completed"]),
     }).strict()).max(100),
   }).strict().nullable().optional(),
-  questions: z.array(privateConnectSafeQuestionSchema).max(32),
+  questions: privateConnectSafeQuestionsSchema,
   waitingForLocalAction: z.boolean(),
 }).strict();
 export type PrivateConnectConversationDetail = z.infer<

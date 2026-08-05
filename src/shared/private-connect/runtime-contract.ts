@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 import {
+  privateConnectQuestionAnswersSchema,
+  privateConnectSafeQuestionsSchema,
+} from "./questions";
+import {
   PRIVATE_CONNECT_RUNTIME_GRANT_LIMITS,
   privateConnectRuntimeGrantSchema,
   type PrivateConnectRuntimeGrant,
@@ -113,12 +117,7 @@ export const privateConnectRuntimeSafeConversationDetailSchema = z.object({
     }).strict()).max(100),
   }).strict().nullable().optional(),
   inputRequestId: uuid.nullable().optional(),
-  questions: z.array(z.object({
-    id: uuid,
-    label: safeLabel,
-    options: z.array(z.object({ id: entityId, label: safeLabel }).strict()).max(32),
-    allowMultiple: z.boolean(),
-  }).strict()).max(32).optional(),
+  questions: privateConnectSafeQuestionsSchema.optional(),
   waitingForLocalAction: z.boolean(),
 }).strict();
 
@@ -126,7 +125,7 @@ export const privateConnectRuntimeRequestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("state.get"), requestId: uuid, ifNoneMatch: projectionValidator.nullable().optional() }).strict(),
   z.object({ type: z.literal("conversation.get"), requestId: uuid, conversationId: uuid, ifNoneMatch: projectionValidator.nullable().optional() }).strict(),
   z.object({ type: z.literal("prompt.send"), requestId: uuid, deliveryId: uuid, conversationId: uuid, content: z.string().trim().min(1).max(PRIVATE_CONNECT_RUNTIME_LIMITS.promptCharacters) }).strict(),
-  z.object({ type: z.literal("input.respond"), requestId: uuid, inputRequestId: uuid, conversationId: uuid, answers: z.record(z.string().min(1).max(80), z.array(entityId).min(1).max(32)).refine((value) => Object.keys(value).length <= 32) }).strict(),
+  z.object({ type: z.literal("input.respond"), requestId: uuid, inputRequestId: uuid, conversationId: uuid, answers: privateConnectQuestionAnswersSchema }).strict(),
   z.object({ type: z.literal("run.stop"), requestId: uuid, runId: entityId, conversationId: uuid }).strict(),
 ]);
 export type PrivateConnectRuntimeRequest = z.infer<typeof privateConnectRuntimeRequestSchema>;

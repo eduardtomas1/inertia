@@ -22,10 +22,10 @@
 
 * { box-sizing: border-box; }
 body { min-width: 320px; min-height: 100vh; margin: 0; background: radial-gradient(circle at top, var(--background-glow), var(--background) 45%); }
-button, textarea { font: inherit; }
+button, input, textarea { font: inherit; }
 button { padding: 9px 13px; border: 1px solid var(--border-strong); border-radius: 10px; color: inherit; background: var(--surface-raised); cursor: pointer; }
 button:hover { border-color: var(--accent); }
-button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button:disabled { opacity: .55; cursor: not-allowed; }
 h1, h2, h3, p { margin-top: 0; }
 h1 { font-size: 26px; }
@@ -60,6 +60,7 @@ textarea { min-height: 72px; padding: 12px; flex: 1; resize: vertical; border: 1
 .question-card { margin-bottom: 14px; padding: 16px; border: 1px solid color-mix(in srgb, var(--accent) 70%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--accent-surface) 58%, var(--surface)); }
 .question-card fieldset { margin: 12px 0; padding: 0; border: 0; }
 .question-card label { display: block; padding: 5px 0; color: var(--text); }
+.question-custom { width: 100%; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 10px; color: inherit; background: var(--surface-input); }
 .banner { margin: 10px 0; padding: 12px 14px; border-radius: 10px; color: var(--warning-text); background: var(--warning-surface); }
 .work-summary { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted); }
 .work-summary summary { cursor: pointer; color: var(--text-muted); font-size: 13px; font-weight: 650; }

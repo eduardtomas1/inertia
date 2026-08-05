@@ -12,6 +12,7 @@ import {
   type PrivateConnectSocket,
   type PairingInvitation,
 } from "./connection";
+import { QuestionForm } from "./components/QuestionForm";
 
 type PairState =
   | { kind: "checking" }
@@ -32,7 +33,7 @@ type Detail = {
   activities?: Array<{ id: string; kind: string; title: string; status: string; createdAt: string }>;
   subagents?: Array<{ id: string; providerLabel: string; name: string | null; status: string; updatedAt: string }>;
   plan?: { steps: Array<{ label: string; status: "pending" | "inProgress" | "completed" }> } | null;
-  questions: Array<{ id: string; label: string; options: Array<{ id: string; label: string }>; allowMultiple: boolean }>;
+  questions: Array<{ id: string; label: string; options: Array<{ id: string; label: string }>; allowMultiple: boolean; allowCustomAnswer: boolean }>;
   inputRequestId?: string | null;
   waitingForLocalAction: boolean;
 };
@@ -45,7 +46,6 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
-  const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [socket, setSocket] = useState<PrivateConnectSocket | null>(null);
   const [pendingPromptDelivery, setPendingPromptDelivery] = useState<{
     conversationId: string;
@@ -61,7 +61,6 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
     setShell(null);
     setDetail(null);
     setSelectedConversation(null);
-    setAnswers({});
     stateValidatorRef.current = null;
     conversationValidatorsRef.current.clear();
   }, []);
@@ -295,13 +294,12 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
     } finally { setBusy(false); }
   };
 
-  const answerQuestions = async (): Promise<void> => {
+  const answerQuestions = async (answers: Record<string, string[]>): Promise<void> => {
     if (pair.kind !== "ready" || !selectedConversation || !detail?.inputRequestId || !shell?.capabilities.scopes.includes("private:input")) return;
     setBusy(true);
     try {
       const response = await request({ protocolVersion: 1, type: "input.respond", requestId: crypto.randomUUID(), conversationId: selectedConversation, inputRequestId: detail.inputRequestId, answers }, pair.csrf);
       if (!response.ok) throw new Error(response.message);
-      setAnswers({});
     } catch (error) {
       setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "The answer was not accepted." } : current);
     } finally { setBusy(false); }
@@ -331,7 +329,7 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
   if (pair.kind === "checking") return <main className="connect-card"><div className="brand-mark">I</div><h1>Inertia Private Connect</h1><p>Checking this browser’s connection…</p></main>;
   if (pair.kind === "pair") return <main className="connect-card"><div className="brand-mark">I</div><h1>Inertia Private Connect</h1><p>Pair this browser with your online Inertia computer through your private Tailscale network.</p>{pair.error && <p className="error">{pair.error}</p>}<p className="muted">Open a fresh pairing link from Connections &amp; devices on the desktop.</p></main>;
   if (pair.kind === "waiting") return <main className="connect-card"><div className="brand-mark">I</div><h1>Waiting for approval</h1><p>Approve this browser on the Inertia desktop.</p><div className="comparison-code" aria-label={`Comparison code ${pair.comparisonCode}`}>{pair.comparisonCode}</div><p className="muted">The code must match what your computer displays.</p></main>;
-  return <main className="shell"><header><div><span className="eyebrow">Inertia Private Connect</span><h1>Your workspace</h1></div><button type="button" onClick={() => void signOut()}>Sign out</button></header>{pair.error && <div className="banner error">{pair.error}</div>}<div className="layout"><aside><h2>Projects</h2>{shell?.projects.map((project) => <section key={project.id}><h3>{project.name}</h3>{shell.conversations.filter((conversation) => conversation.projectId === project.id).map((conversation) => <button type="button" className={selectedConversation === conversation.id ? "conversation-link selected" : "conversation-link"} key={conversation.id} onClick={() => { conversationValidatorsRef.current.delete(conversation.id); setSelectedConversation(conversation.id); setDetail(null); setAnswers({}); followLatestRef.current = true; }}><span>{conversation.title}</span><small>{conversation.status}</small></button>)}</section>)}</aside><section className="conversation-pane">{detail ? <><div className="conversation-heading"><div><span className="eyebrow">{detail.conversation.providerLabel}</span><h2>{detail.conversation.title}</h2></div>{shell?.capabilities.scopes.includes("private:stop") && detail.conversation.runId && <button type="button" onClick={() => void stopRun()}>Stop run</button>}</div><div className="messages" ref={messagesRef} onScroll={(event) => { const element = event.currentTarget; followLatestRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>{detail.messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span className="role">{message.role === "assistant" ? "Inertia" : "You"}</span><p>{message.content}</p></article>)}</div><ActivitySummary detail={detail} />{detail.questions.length > 0 && shell?.capabilities.scopes.includes("private:input") && <form className="question-card" onSubmit={(event) => { event.preventDefault(); void answerQuestions(); }}><h3>Inertia needs your answer</h3>{detail.questions.map((question) => <fieldset key={question.id}><legend>{question.label}</legend>{question.options.map((option) => <label key={option.id}><input type={question.allowMultiple ? "checkbox" : "radio"} name={question.id} checked={answers[question.id]?.includes(option.id) ?? false} onChange={() => setAnswers((current) => ({ ...current, [question.id]: question.allowMultiple ? current[question.id]?.includes(option.id) ? current[question.id]!.filter((id) => id !== option.id) : [...(current[question.id] ?? []), option.id] : [option.id] }))} /> {option.label}</label>)}</fieldset>)}<button type="submit" disabled={busy}>Answer</button></form>}{detail.waitingForLocalAction && <div className="banner">This conversation needs an action on the desktop. Secrets and approvals stay local.</div>}{shell?.capabilities.scopes.includes("private:prompt") && <form className="composer" onSubmit={(event) => { event.preventDefault(); void sendPrompt(); }}><textarea aria-label="Send a prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Send a supervised prompt" disabled={busy} /><button type="submit" disabled={busy || !prompt.trim()}>Send</button></form>}</> : <div className="empty"><h2>Choose a conversation</h2><p>Only projects and conversations granted by the desktop appear here.</p></div>}</section></div></main>;
+  return <main className="shell"><header><div><span className="eyebrow">Inertia Private Connect</span><h1>Your workspace</h1></div><button type="button" onClick={() => void signOut()}>Sign out</button></header>{pair.error && <div className="banner error">{pair.error}</div>}<div className="layout"><aside><h2>Projects</h2>{shell?.projects.map((project) => <section key={project.id}><h3>{project.name}</h3>{shell.conversations.filter((conversation) => conversation.projectId === project.id).map((conversation) => <button type="button" className={selectedConversation === conversation.id ? "conversation-link selected" : "conversation-link"} key={conversation.id} onClick={() => { conversationValidatorsRef.current.delete(conversation.id); setSelectedConversation(conversation.id); setDetail(null); followLatestRef.current = true; }}><span>{conversation.title}</span><small>{conversation.status}</small></button>)}</section>)}</aside><section className="conversation-pane">{detail ? <><div className="conversation-heading"><div><span className="eyebrow">{detail.conversation.providerLabel}</span><h2>{detail.conversation.title}</h2></div>{shell?.capabilities.scopes.includes("private:stop") && detail.conversation.runId && <button type="button" onClick={() => void stopRun()}>Stop run</button>}</div><div className="messages" ref={messagesRef} onScroll={(event) => { const element = event.currentTarget; followLatestRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>{detail.messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span className="role">{message.role === "assistant" ? "Inertia" : "You"}</span><p>{message.content}</p></article>)}</div><ActivitySummary detail={detail} />{detail.questions.length > 0 && detail.inputRequestId && shell?.capabilities.scopes.includes("private:input") && <QuestionForm key={detail.inputRequestId} questions={detail.questions} busy={busy} onAnswer={(answers) => void answerQuestions(answers)} />}{detail.waitingForLocalAction && <div className="banner">This conversation needs an action on the desktop. Secrets and approvals stay local.</div>}{shell?.capabilities.scopes.includes("private:prompt") && <form className="composer" onSubmit={(event) => { event.preventDefault(); void sendPrompt(); }}><textarea aria-label="Send a prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Send a supervised prompt" disabled={busy} /><button type="submit" disabled={busy || !prompt.trim()}>Send</button></form>}</> : <div className="empty"><h2>Choose a conversation</h2><p>Only projects and conversations granted by the desktop appear here.</p></div>}</section></div></main>;
 }
 
 type ProjectionResult =

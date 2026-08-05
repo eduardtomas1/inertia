@@ -213,7 +213,10 @@ export class PrivateConnectPrivacyMonitor {
 }
 
 export async function cleanupLegacyAuthority(userDataDirectory: string): Promise<{ cleaned: boolean }> {
-  const entries = await readdir(userDataDirectory).catch(() => [] as string[]);
+  const entries = await readdir(userDataDirectory).catch((error: unknown) => {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return [] as string[];
+    throw new Error("Legacy Private Connect authority files could not be inspected.");
+  });
   const candidates = entries.filter((name) => LEGACY_NAMES.some((pattern) => pattern.test(name)));
   let cleaned = false;
   for (const name of candidates) {

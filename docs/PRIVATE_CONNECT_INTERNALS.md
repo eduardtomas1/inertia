@@ -34,6 +34,16 @@ every pending question, so a partial projection would render a form that can
 never be submitted; an input that does not fit is withheld entirely and
 reported as requiring local action.
 
+## Packaging verification
+
+`scripts/package-smoke.mjs` reads the packaged `app.asar` header before
+launching the application and fails when `out/private-connect` is missing its
+HTML, web manifest, icons, or content-hashed assets, or when a retired remote
+artifact is still present. It parses the asar header directly rather than
+taking a dependency, and it accepts either the Linux/Windows `resources` layout
+or the macOS `Contents/Resources` layout while requiring exactly one match, so
+no platform-specific path is left unexercised.
+
 ## Gateway hardening notes
 
 The gateway derives its `connect-src` socket sources from the already-validated

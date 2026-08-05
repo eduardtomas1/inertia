@@ -65,9 +65,12 @@ export function privateConnectGrantsForSelectedProjects(
   const selectedProjectIds = [...new Set(projectIds.map((id) => id.trim()))]
     .filter(Boolean)
     .slice(0, PRIVATE_CONNECT_GRANT_LIMITS.projects);
+  const selectedProjectSet = new Set(selectedProjectIds);
   const suppliedByProject = new Map(
-    normalizePrivateConnectGrants(grants ?? [])
-      .filter(({ projectId }) => selectedProjectIds.includes(projectId))
+    normalizePrivateConnectGrants(
+      (grants ?? []).filter(({ projectId }) =>
+        selectedProjectSet.has(projectId.trim())),
+    )
       .map((grant) => [grant.projectId, grant]),
   );
   return selectedProjectIds.map((projectId) => suppliedByProject.get(projectId) ?? {

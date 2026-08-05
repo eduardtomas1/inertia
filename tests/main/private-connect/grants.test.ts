@@ -38,8 +38,8 @@ describe("Private Connect grants and scopes", () => {
     expect(privateConnectGrantAllowsConversation(grants, "missing", "future")).toBe(false);
     expect(privateConnectGrantsFromProjectIds(["b", "a", "b"])).toHaveLength(2);
     expect(privateConnectGrantsForSelectedProjects(["a", "b"], [
-      { projectId: "a", conversationIds: ["one"], includeFutureConversations: false },
       { projectId: "outside", conversationIds: ["leaked"], includeFutureConversations: true },
+      { projectId: "a", conversationIds: ["one"], includeFutureConversations: false },
     ])).toEqual([
       { projectId: "a", conversationIds: ["one"], includeFutureConversations: false },
       { projectId: "b", conversationIds: [], includeFutureConversations: true },

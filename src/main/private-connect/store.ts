@@ -42,7 +42,7 @@ const privateConnectSessionSchema = z.object({
   grantVersion: z.number().int().positive(),
 }).strict();
 
-const privateConnectDeliveryReceiptSchema = z.object({
+const privateConnectAcceptedDeliveryReceiptSchema = z.object({
   deliveryId: z.string().uuid(),
   conversationId: z.string().uuid(),
   contentDigest: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -57,6 +57,18 @@ const privateConnectDeliveryReceiptSchema = z.object({
     }).strict(),
   }).strict(),
 }).strict();
+
+const privateConnectUncertainDeliveryReceiptSchema = z.object({
+  deliveryId: z.string().uuid(),
+  conversationId: z.string().uuid(),
+  contentDigest: z.string().regex(/^[0-9a-f]{64}$/u),
+  uncertainAt: timestamp,
+}).strict();
+
+const privateConnectDeliveryReceiptSchema = z.union([
+  privateConnectAcceptedDeliveryReceiptSchema,
+  privateConnectUncertainDeliveryReceiptSchema,
+]);
 
 const privateConnectAuditSchema = z.object({
   id: z.string().uuid(),
@@ -94,7 +106,7 @@ const privateConnectStoreSchema = z.object({
   }).strict().nullable().default(null),
   devices: z.array(privateConnectDeviceSchema).max(16),
   sessions: z.array(privateConnectSessionSchema).max(PRIVATE_CONNECT_LIMITS.sessions),
-  deliveryReceipts: z.array(privateConnectDeliveryReceiptSchema).max(512).default([]),
+  deliveryReceipts: z.array(privateConnectDeliveryReceiptSchema).max(PRIVATE_CONNECT_LIMITS.deliveryReceipts).default([]),
   audit: z.array(privateConnectAuditSchema).max(PRIVATE_CONNECT_LIMITS.auditEvents),
   migrationNoticeShown: z.boolean(),
 }).strict();
@@ -146,7 +158,7 @@ export interface PersistedPrivateConnect {
   migrationNoticeShown: boolean;
 }
 
-export interface PrivateConnectDeliveryReceipt {
+export interface PrivateConnectAcceptedDeliveryReceipt {
   deliveryId: string;
   conversationId: string;
   contentDigest: string;
@@ -157,6 +169,17 @@ export interface PrivateConnectDeliveryReceipt {
     result: { kind: "prompt.accepted"; deliveryId: string; turnId: string };
   };
 }
+
+export interface PrivateConnectUncertainDeliveryReceipt {
+  deliveryId: string;
+  conversationId: string;
+  contentDigest: string;
+  uncertainAt: string;
+}
+
+export type PrivateConnectDeliveryReceipt =
+  | PrivateConnectAcceptedDeliveryReceipt
+  | PrivateConnectUncertainDeliveryReceipt;
 
 export interface PrivateConnectStoreEncryption {
   available(): boolean;

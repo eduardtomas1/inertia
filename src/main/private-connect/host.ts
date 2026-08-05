@@ -105,6 +105,7 @@ export class PrivateConnectHost {
         }
         this.service = service;
         this.initializationError = null;
+        await service.setPrivacyLocked(this.privacyMonitor.isLocked());
         if (migration.cleaned) {
           service.setNotice("Private Connect is ready. Previous browser pairings were removed; pair devices again through Connections & devices.");
         }
@@ -176,13 +177,22 @@ export class PrivateConnectHost {
   }
 }
 
-class PrivateConnectPrivacyMonitor {
+export class PrivateConnectPrivacyMonitor {
   private stopped = false;
-  constructor(private readonly events: Pick<typeof powerMonitor, "on" | "removeListener">, private readonly onLock: (locked: boolean) => void) {
+  private locked: boolean;
+  constructor(private readonly events: Pick<typeof powerMonitor, "getSystemIdleState" | "on" | "removeListener">, private readonly onLock: (locked: boolean) => void) {
+    this.locked = true;
     events.on("lock-screen", this.lock);
     events.on("suspend", this.lock);
     events.on("unlock-screen", this.unlock);
+    try {
+      const state = events.getSystemIdleState(1);
+      this.locked = state !== "active" && state !== "idle";
+    } catch {
+      this.locked = true;
+    }
   }
+  isLocked(): boolean { return this.locked; }
   shutdown(): void {
     if (this.stopped) return;
     this.stopped = true;
@@ -190,8 +200,16 @@ class PrivateConnectPrivacyMonitor {
     this.events.removeListener("suspend", this.lock);
     this.events.removeListener("unlock-screen", this.unlock);
   }
-  private readonly lock = (): void => { if (!this.stopped) this.onLock(true); };
-  private readonly unlock = (): void => { if (!this.stopped) this.onLock(false); };
+  private readonly lock = (): void => {
+    if (this.stopped) return;
+    this.locked = true;
+    this.onLock(true);
+  };
+  private readonly unlock = (): void => {
+    if (this.stopped) return;
+    this.locked = false;
+    this.onLock(false);
+  };
 }
 
 export async function cleanupLegacyAuthority(userDataDirectory: string): Promise<{ cleaned: boolean }> {

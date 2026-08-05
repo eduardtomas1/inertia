@@ -48,7 +48,7 @@ import {
   PrivateConnectTailscaleController,
   PrivateConnectTailscaleError,
 } from "./tailscale-controller";
-import type { PrivateConnectStore, PersistedPrivateConnect, PrivateConnectDevice, PrivateConnectAuditEvent, PrivateConnectSessionRecord, PrivateConnectDeliveryReceipt } from "./store";
+import type { PrivateConnectStore, PersistedPrivateConnect, PrivateConnectDevice, PrivateConnectAuditEvent, PrivateConnectSessionRecord, PrivateConnectDeliveryReceipt, PrivateConnectAcceptedDeliveryReceipt } from "./store";
 
 export interface PrivateConnectServiceOptions {
   store: PrivateConnectStore;
@@ -94,6 +94,11 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   private readonly tickets = new Map<string, WebSocketTicket>();
   private readonly pending = new Map<string, PendingPairing>();
   private readonly deliveries = new Map<string, PrivateConnectDeliveryReceipt>();
+  private readonly inFlightDeliveries = new Map<string, {
+    conversationId: string;
+    contentDigest: string;
+    response: Promise<PrivateConnectResponse>;
+  }>();
   private readonly activeMutations = new Set<Promise<unknown>>();
   private invitation: PrivateConnectInvitation | null = null;
   private status: PrivateConnectStateView["status"] = "off";
@@ -207,7 +212,8 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       this.privacyLocked = locked;
       if (locked) {
         this.enableOperation += 1;
-        this.resumeAfterUnlock = this.data?.enabled === true && this.status === "ready";
+        this.resumeAfterUnlock = this.data?.enabled === true
+          && (this.status === "ready" || this.status === "off");
         this.tickets.clear();
         this.gateway.closeAllSessions(
           PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable,
@@ -505,26 +511,56 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
         const prior = this.deliveries.get(promptRequest.deliveryId);
         if (prior) {
           if (prior.conversationId !== promptRequest.conversationId || prior.contentDigest !== contentDigest(promptRequest.content)) return failure(request.requestId, "invalid", "That delivery identifier was already used.");
-          return { ...prior.response, requestId: promptRequest.requestId };
+          return "response" in prior
+            ? { ...prior.response, requestId: promptRequest.requestId }
+            : failure(
+                request.requestId,
+                "uncertain",
+                "Prompt delivery is uncertain. Check the desktop conversation before sending it again.",
+              );
         }
-        return await this.trackMutation(async () => {
+        const promptDigest = contentDigest(promptRequest.content);
+        const inFlight = this.inFlightDeliveries.get(promptRequest.deliveryId);
+        if (inFlight) {
+          if (inFlight.conversationId !== promptRequest.conversationId || inFlight.contentDigest !== promptDigest) return failure(request.requestId, "invalid", "That delivery identifier was already used.");
+          const response = await inFlight.response;
+          return { ...response, requestId: promptRequest.requestId };
+        }
+        const operation = this.trackMutation(async () => {
           const response = await this.dispatchPrompt(session, device, promptRequest);
           if (response.ok && response.result && typeof response.result === "object" && (response.result as { kind?: unknown }).kind === "prompt.accepted") {
-            const receipt: PrivateConnectDeliveryReceipt = {
+            const receipt: PrivateConnectAcceptedDeliveryReceipt = {
               deliveryId: promptRequest.deliveryId,
               conversationId: promptRequest.conversationId,
               contentDigest: contentDigest(promptRequest.content),
-              response: response as PrivateConnectDeliveryReceipt["response"],
+              response: response as PrivateConnectAcceptedDeliveryReceipt["response"],
             };
-            this.deliveries.set(receipt.deliveryId, receipt);
-            while (this.deliveries.size > 512) this.deliveries.delete(this.deliveries.keys().next().value!);
-            if (this.data) {
-              this.data.deliveryReceipts = [...this.deliveries.values()];
-              await this.persist();
+            try {
+              await this.rememberDelivery(receipt);
+            } catch {
+              this.audit("prompt.uncertain", device.id, "A queued prompt acknowledgement could not be persisted.");
+              await this.persist().catch(() => undefined);
+              return failure(
+                promptRequest.requestId,
+                "uncertain",
+                "Prompt delivery is uncertain. Check the desktop conversation before sending it again.",
+              );
             }
           }
           return response;
         });
+        this.inFlightDeliveries.set(promptRequest.deliveryId, {
+          conversationId: promptRequest.conversationId,
+          contentDigest: promptDigest,
+          response: operation,
+        });
+        try {
+          return await operation;
+        } finally {
+          if (this.inFlightDeliveries.get(promptRequest.deliveryId)?.response === operation) {
+            this.inFlightDeliveries.delete(promptRequest.deliveryId);
+          }
+        }
       }
       const runtimeSubject = this.runtimeAuthorization(session, device);
       const runtimeRequest = parsed.data.type === "state.get"
@@ -703,8 +739,71 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     this.requireCurrentSession(session);
     this.requireDevice(device.id);
     if (!hasPrivateConnectScope(device.scopes, "private:prompt")) return failure(request.requestId, "forbidden", "Prompt permission changed before delivery.");
-    const response = await commit(subject, runtimeRequest, prepared.preparationId);
+    await this.rememberDelivery({
+      deliveryId: request.deliveryId,
+      conversationId: request.conversationId,
+      contentDigest: contentDigest(request.content),
+      uncertainAt: this.now().toISOString(),
+    });
+    let response: PrivateConnectRuntimeResponse;
+    try {
+      response = await commit(subject, runtimeRequest, prepared.preparationId);
+    } catch {
+      this.audit("prompt.uncertain", device.id, "A remote prompt lost its runtime acknowledgement after delivery began.");
+      await this.persist().catch(() => undefined);
+      throw new Error("Prompt delivery is uncertain. Check the desktop conversation before sending it again.");
+    }
+    if (!response.ok) {
+      try {
+        await this.forgetDelivery(request.deliveryId);
+      } catch {
+        this.audit("prompt.uncertain", device.id, "A rejected prompt's delivery marker could not be cleared.");
+        await this.persist().catch(() => undefined);
+        return failure(
+          request.requestId,
+          "uncertain",
+          "Prompt delivery is uncertain. Check the desktop conversation before sending it again.",
+        );
+      }
+    }
     return response;
+  }
+
+  private async rememberDelivery(receipt: PrivateConnectDeliveryReceipt): Promise<void> {
+    if (!this.data) throw new Error("Private Connect storage is unavailable.");
+    const previousDeliveries = new Map(this.deliveries);
+    const previousReceipts = this.data.deliveryReceipts;
+    this.deliveries.set(receipt.deliveryId, receipt);
+    while (this.deliveries.size > PRIVATE_CONNECT_LIMITS.deliveryReceipts) {
+      this.deliveries.delete(this.deliveries.keys().next().value!);
+    }
+    this.data.deliveryReceipts = [...this.deliveries.values()];
+    try {
+      await this.persist();
+    } catch (error) {
+      this.deliveries.clear();
+      for (const [deliveryId, previous] of previousDeliveries) {
+        this.deliveries.set(deliveryId, previous);
+      }
+      this.data.deliveryReceipts = previousReceipts;
+      throw error;
+    }
+  }
+
+  private async forgetDelivery(deliveryId: string): Promise<void> {
+    if (!this.data) return;
+    const previous = this.deliveries.get(deliveryId);
+    if (!previous) return;
+    const previousReceipts = this.data.deliveryReceipts;
+    this.deliveries.delete(deliveryId);
+    this.data.deliveryReceipts = [...this.deliveries.values()];
+    try {
+      await this.persist();
+    } catch (error) {
+      this.deliveries.set(deliveryId, previous);
+      this.data.deliveryReceipts = previousReceipts;
+      throw error;
+    }
   }
 
   private runtimeAuthorization(session: PrivateConnectSession, device: PrivateConnectDevice): PrivateConnectRuntimeAuthorization {

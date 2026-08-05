@@ -67,4 +67,22 @@ describe("Private Connect encrypted store", () => {
     const store = new PrivateConnectStore("/tmp/private-connect-test.vault", encryption(), { read: async () => encoded, write: async (next: string) => { encoded = next; } });
     expect(await store.load()).toMatchObject({ serveTarget: null, pendingAuthorityReduction: null, deliveryReceipts: [] });
   });
+
+  it("round-trips a fail-closed prompt delivery intent without storing prompt content", async () => {
+    let encoded: string | null = null;
+    const store = new PrivateConnectStore("/tmp/private-connect-test.vault", encryption(), {
+      read: async () => encoded,
+      write: async (next: string) => { encoded = next; },
+    });
+    const stored = value();
+    stored.deliveryReceipts = [{
+      deliveryId: "22222222-2222-4222-8222-222222222222",
+      conversationId: "33333333-3333-4333-8333-333333333333",
+      contentDigest: "a".repeat(64),
+      uncertainAt: "2030-01-01T00:00:00.000Z",
+    }];
+    await store.save(stored);
+    expect(await store.load()).toEqual(stored);
+    expect(Buffer.from(encoded!, "base64").toString("utf8")).not.toContain('"content":');
+  });
 });

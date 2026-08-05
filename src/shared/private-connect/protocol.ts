@@ -38,6 +38,7 @@ export const PRIVATE_CONNECT_LIMITS = Object.freeze({
   sessionTtlMs: 30 * 24 * 60 * 60 * 1_000,
   websocketTicketTtlMs: 45_000,
   websocketTickets: 64,
+  deliveryReceipts: 512,
   auditEvents: 1_000,
 });
 

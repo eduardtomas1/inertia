@@ -289,6 +289,22 @@ describe("Private Connect service lifecycle", () => {
     expect(service.session(cookie)).not.toBeNull();
   });
 
+  it("keeps persisted access closed when starting locked and resumes after unlock", async () => {
+    const memory = testStore();
+    const first = await createServiceWith(memory);
+    await first.setEnabled(true);
+    await first.shutdown();
+    const calls = { ensure: [] as unknown[][], disable: [] as number[] };
+    const second = await createServiceWith(memory, testTailscale(calls));
+    await second.setPrivacyLocked(true);
+    await expect(second.startIfEnabled()).rejects.toThrow("paused while the desktop is locked");
+    expect(calls.ensure).toHaveLength(0);
+    expect(second.state()).toMatchObject({ enabled: true, status: "error", externalUrl: null });
+    await second.setPrivacyLocked(false);
+    expect(calls.ensure).toHaveLength(1);
+    expect(second.state()).toMatchObject({ enabled: true, status: "ready" });
+  });
+
   it("reconciles persisted Serve ownership and sessions after a restart", async () => {
     const memory = testStore();
     const firstCalls = { ensure: [] as unknown[][], disable: [] as number[] };
@@ -522,6 +538,41 @@ describe("Private Connect service lifecycle", () => {
     await second.startIfEnabled();
     const replay = await second.handleRequest(second.session(cookie)!, { ...request, requestId: "99999999-9999-4999-8999-999999999999" });
     expect(replay).toMatchObject({ ok: true, requestId: "99999999-9999-4999-8999-999999999999", result: { kind: "prompt.accepted" } });
+    expect(commits).toBe(1);
+  });
+
+  it("persists uncertain prompt intent before queueing so restart retries cannot duplicate a turn", async () => {
+    const memory = testStore();
+    let commits = 0;
+    const runtime = {
+      preparePrivateConnectPrompt: async () => ({ preparationId: "66666666-6666-4666-8666-666666666666" }),
+      commitPrivateConnectPrompt: async () => {
+        commits += 1;
+        throw new Error("runtime acknowledgement lost");
+      },
+    };
+    const first = await createServiceWith(memory, testTailscale(), runtime);
+    await first.setEnabled(true);
+    const invitation = await first.createInvitation();
+    const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
+    const started = await first.pairStart({ invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
+    await first.approvePairing(started.requestId, "collaborate", [projectId]);
+    const approved = await first.pairStatus(started.requestId);
+    if (approved.status !== "approved") throw new Error("pairing did not approve");
+    const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
+    const request = { protocolVersion: 1 as const, type: "prompt.send" as const, requestId: "77777777-7777-4777-8777-777777777777", deliveryId: "88888888-8888-4888-8888-888888888888", conversationId: "44444444-4444-4444-8444-444444444444", content: "hello" };
+    await expect(first.handleRequest(first.session(cookie)!, request)).resolves.toMatchObject({ ok: false, code: "uncertain" });
+    expect(commits).toBe(1);
+    expect(memory.saved()?.deliveryReceipts).toEqual([
+      expect.objectContaining({ deliveryId: request.deliveryId, uncertainAt: expect.any(String) }),
+    ]);
+    await first.shutdown();
+    const second = await createServiceWith(memory, testTailscale(), runtime);
+    await second.startIfEnabled();
+    await expect(second.handleRequest(second.session(cookie)!, {
+      ...request,
+      requestId: "99999999-9999-4999-8999-999999999999",
+    })).resolves.toMatchObject({ ok: false, code: "uncertain" });
     expect(commits).toBe(1);
   });
 });

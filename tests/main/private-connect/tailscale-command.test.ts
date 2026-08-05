@@ -1,6 +1,6 @@
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join, relative } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -23,6 +23,24 @@ describe("Private Connect Tailscale command boundary", () => {
     await writeFile(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     await chmod(executable, 0o755);
     expect(await discoverTailscaleExecutable("linux", { PATH: directory })).toBe(executable);
+  });
+
+  it("ignores relative PATH entries when discovering Tailscale", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-tailscale-relative-"));
+    try {
+      const executable = join(directory, "tailscale");
+      await writeFile(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      await chmod(executable, 0o755);
+      const relativeDirectory = relative(process.cwd(), directory);
+      expect(await discoverTailscaleExecutable("linux", {
+        PATH: `${relativeDirectory}${delimiter}${directory}`,
+      })).toBe(executable);
+      expect(await discoverTailscaleExecutable("linux", {
+        PATH: relativeDirectory,
+      })).toBeNull();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("bounds arguments and child output", async () => {

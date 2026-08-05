@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { access, constants } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { posix, win32 } from "node:path";
 
 import { forceKillRuntimeProcessTree } from "../runtime-process-tree";
 
@@ -123,12 +123,15 @@ export async function discoverTailscaleExecutable(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string | null> {
   const candidates = new Set<string>();
-  const pathEntries = (environment.PATH ?? "").split(delimiter).filter(Boolean);
+  const path = platform === "win32" ? win32 : posix;
+  const pathEntries = (environment.PATH ?? "")
+    .split(path.delimiter)
+    .filter((entry) => path.isAbsolute(entry));
   const name = platform === "win32" ? "tailscale.exe" : "tailscale";
-  for (const entry of pathEntries) candidates.add(join(entry, name));
+  for (const entry of pathEntries) candidates.add(path.join(entry, name));
   if (platform === "win32") {
     for (const root of [environment.ProgramFiles, environment["ProgramFiles(x86)"], environment.LOCALAPPDATA]) {
-      if (root) candidates.add(join(root, "Tailscale", "tailscale.exe"));
+      if (root && path.isAbsolute(root)) candidates.add(path.join(root, "Tailscale", "tailscale.exe"));
     }
   }
   if (platform === "darwin") {

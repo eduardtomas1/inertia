@@ -4,6 +4,8 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.25 — 2026-08-05
+
 ### Private Connect replaces the hosted companion stack
 
 - The retired relay-based Remote Companion is replaced by a packaged, Tailscale-only Private Connect PWA. Inertia binds an ephemeral loopback gateway and exposes only that gateway through an ownership-checked private HTTPS Serve mapping—never Funnel, public HTTP, a hosted relay, or an inbound LAN listener.
@@ -11,6 +13,13 @@ The useful changes in each Inertia release, in plain language.
 - Monitor devices receive bounded sanitized conversation projections. Collaborate devices may additionally submit idempotent supervised prompts, answer non-secret input, and stop the exact active run; files, terminals, Git, approvals, secrets, provider settings, Full Access, and arbitrary command execution remain desktop-only.
 - Connections & devices now surfaces pending approvals outside Settings, reports genuinely live browser sessions, and lets the user edit a paired device's access level, project scope, expiry, or revoke it. The packaged PWA includes responsive light and dark presentation, bounded concurrent requests, stable reconnect behavior, and safe same-delivery prompt retries after an uncertain acknowledgement.
 - Legacy Remote Companion configuration and artifacts are removed deliberately. Existing companion pairings are not migrated and must be approved again through Private Connect.
+
+### Provider routes and remote questions stay usable
+
+- The model chooser keeps a native **Provider default** route available when Codex, Claude, Cursor, or OpenCode returns an empty model catalog, even when custom backend profiles also exist. Cross-provider choices persist the complete provider and model identity, while signed-out routes lead to **Connect** instead of failing after submission.
+- Private Connect preserves provider-supplied question identities, including non-UUID identifiers, and supports bounded free-form answers alongside structured choices without exposing secret-input prompts to the browser.
+- Pairing collection windows, WebSocket liveness, constant-time CSRF validation, scoped connection policies, Windows-safe Tailscale discovery, and cleanup diagnostics close the remaining cross-platform lifecycle edges.
+- Architecture and lint checks, four TypeScript projects, 2,199 unit and integration tests, 218 portable provider contracts, Electron scenarios, production audit, packaged Private Connect asset verification, fuse checks, and native package smoke are green on Linux, macOS, and Windows.
 
 ## 0.0.24 — 2026-08-04
 

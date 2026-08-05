@@ -112,9 +112,11 @@ describe("Settings external section targets", () => {
     expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
       "Inertia Private Connect",
     );
-    fireEvent.change(await screen.findByLabelText("Phone access"), {
+    const phoneAccess = await screen.findByLabelText("Phone access");
+    fireEvent.change(phoneAccess, {
       target: { value: "collaborate" },
     });
+    await waitFor(() => expect(phoneAccess).toHaveValue("collaborate"));
     fireEvent.click(screen.getByRole("button", { name: "Save access" }));
     await waitFor(() => expect(updatePrivateConnectDevice).toHaveBeenCalledWith(
       expect.objectContaining({

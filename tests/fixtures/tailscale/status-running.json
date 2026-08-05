@@ -1,0 +1,8 @@
+{
+  "BackendState": "Running",
+  "Self": {
+    "DNSName": "desktop.example.ts.net.",
+    "TailnetName": "example.com",
+    "TailscaleIPs": ["100.64.0.2", "fd7a:115c:a1e0::2"]
+  }
+}

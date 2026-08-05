@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.web.json",
+  "compilerOptions": { "composite": false, "noEmit": true },
+  "include": ["index.html", "src/**/*.ts", "src/**/*.tsx", "../../../src/shared/private-connect/**/*.ts"]
+}

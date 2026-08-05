@@ -41,12 +41,12 @@ function HeaderHarness({
   activeProject = null,
   workspaceToolsUnavailableReason = null,
   onOpenSettings = vi.fn(),
-  onOpenRemoteSettings = vi.fn(),
+  onOpenConnectionsSettings = vi.fn(),
 }: {
   activeProject?: Project | null;
   workspaceToolsUnavailableReason?: string | null;
   onOpenSettings?: () => void;
-  onOpenRemoteSettings?: () => void;
+  onOpenConnectionsSettings?: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(true);
   return (
@@ -73,7 +73,7 @@ function HeaderHarness({
         onSetEnvironmentOpen={setOpen}
         onCycleTheme={vi.fn()}
         onOpenSettings={onOpenSettings}
-        onOpenRemoteSettings={onOpenRemoteSettings}
+        onOpenConnectionsSettings={onOpenConnectionsSettings}
         onOpenProject={vi.fn()}
         onRefreshBranches={vi.fn()}
         onSwitchBranch={vi.fn()}
@@ -127,39 +127,90 @@ describe("environment summary header popover", () => {
     })).toHaveFocus();
   });
 
-  it("routes the Remote indicator directly to Remote Companion settings", async () => {
+  it("routes the Private Connect indicator directly to Connections & devices settings", async () => {
     const onOpenSettings = vi.fn();
-    const onOpenRemoteSettings = vi.fn();
+    const onOpenConnectionsSettings = vi.fn();
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
-        getRemoteAccessState: vi.fn(async () => ({
+        getPrivateConnectState: vi.fn(async () => ({
           available: true,
           enabled: true,
-          relayUrl: "wss://relay.example/remote",
-          connection: "online",
-          connectionMessage: null,
+          status: "ready",
+          statusMessage: null,
+          externalUrl: "https://inertia.tailnet.ts.net",
           activeSessions: 0,
           devices: [],
           pendingPairings: [],
           invitation: null,
-          audit: [],
+          notice: null,
+          diagnostics: { tailscale: "connected", magicDns: "available", gatewayPort: 1, servePort: 8443, externalUrl: "https://inertia.tailnet.ts.net", mappingOwnership: "owned", errorClass: null },
         })),
-        onRemoteAccessState: vi.fn(() => vi.fn()),
+        onPrivateConnectState: vi.fn(() => vi.fn()),
       },
     });
     try {
       render(<HeaderHarness
         activeProject={project}
         onOpenSettings={onOpenSettings}
-        onOpenRemoteSettings={onOpenRemoteSettings}
+        onOpenConnectionsSettings={onOpenConnectionsSettings}
       />);
       const indicator = await screen.findByRole("button", {
-        name: "Remote Companion online",
+        name: "Connections & devices ready",
       });
       indicator.click();
-      expect(onOpenRemoteSettings).toHaveBeenCalledOnce();
+      expect(onOpenConnectionsSettings).toHaveBeenCalledOnce();
       expect(onOpenSettings).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(window, "inertia");
+    }
+  });
+
+  it("surfaces a pending browser approval outside Settings", async () => {
+    const onOpenConnectionsSettings = vi.fn();
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getPrivateConnectState: vi.fn(async () => ({
+          available: true,
+          enabled: true,
+          status: "ready",
+          statusMessage: null,
+          externalUrl: "https://inertia.tailnet.ts.net",
+          activeSessions: 0,
+          devices: [],
+          pendingPairings: [{
+            requestId: "11111111-1111-4111-8111-111111111111",
+            deviceLabel: "Phone",
+            comparisonCode: "123456",
+            receivedAt: "2030-01-01T00:00:00.000Z",
+            expiresAt: "2030-01-01T00:05:00.000Z",
+            tailnetLabel: "example",
+          }],
+          invitation: null,
+          notice: null,
+          diagnostics: { tailscale: "connected", magicDns: "available", gatewayPort: 1, servePort: 8443, externalUrl: "https://inertia.tailnet.ts.net", mappingOwnership: "owned", errorClass: null },
+        })),
+        onPrivateConnectState: vi.fn(() => vi.fn()),
+      },
+    });
+    try {
+      render(<HeaderHarness
+        activeProject={project}
+        onOpenConnectionsSettings={onOpenConnectionsSettings}
+      />);
+      const indicator = await screen.findByRole("button", {
+        name: "Connections & devices, 1 pairing approval waiting",
+      });
+      expect(indicator).toHaveTextContent("Approve device");
+      const alert = screen.getByRole("alert", {
+        name: "Private Connect pairing approval",
+      });
+      expect(alert).toHaveTextContent("Phone wants to connect");
+      expect(alert).toHaveTextContent("123456");
+      expect(alert).toHaveTextContent("example");
+      screen.getByRole("button", { name: "Review access" }).click();
+      expect(onOpenConnectionsSettings).toHaveBeenCalledOnce();
     } finally {
       Reflect.deleteProperty(window, "inertia");
     }

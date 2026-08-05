@@ -17,7 +17,6 @@ import {
   Moon,
   PanelLeft,
   RefreshCw,
-  RadioTower,
   RotateCcw,
   ServerCog,
   ShieldCheck,
@@ -51,11 +50,11 @@ import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateD
 import { Switch } from "./ui";
 import { ModelBackendsSettings } from "./ModelBackendsSettings";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
-import { RemoteAccessSettings } from "./RemoteAccessSettings";
+import { ConnectionsAndDevicesSettings } from "./ConnectionsAndDevicesSettings";
 
 type SettingsViewProps = {
   target?: {
-    section: "providers" | "backends" | "remote";
+    section: "providers" | "backends" | "connections";
     profileId?: string;
   } | null;
   settings: AppSettings;
@@ -105,7 +104,7 @@ type SettingsViewProps = {
   onClearBackendDefault: (projectId: string | null) => Promise<void>;
 };
 
-type SettingsSection = "general" | "providers" | "backends" | "remote" | "source" | "keybindings" | "archive";
+type SettingsSection = "general" | "providers" | "backends" | "connections" | "source" | "keybindings" | "archive";
 
 const themes: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "System", icon: Laptop },
@@ -117,7 +116,7 @@ const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> 
   { id: "general", label: "General", icon: PanelLeft },
   { id: "providers", label: "Providers", icon: Bot },
   { id: "backends", label: "Model backends", icon: ServerCog },
-  { id: "remote", label: "Remote Companion", icon: RadioTower },
+  { id: "connections", label: "Connections & devices", icon: Laptop },
   { id: "source", label: "Source control", icon: GitCompareArrows },
   { id: "keybindings", label: "Keybindings", icon: Keyboard },
   { id: "archive", label: "Archive & data", icon: ArchiveRestore },
@@ -138,7 +137,7 @@ export function SettingsView({
   backendProfiles,
   backendDefaults,
   projects,
-  conversations,
+  conversations: _conversations,
   archived,
   databaseBackup,
   onUpdate,
@@ -487,8 +486,8 @@ export function SettingsView({
           />
         )}
 
-        {section === "remote" && (
-          <RemoteAccessSettings projects={projects} conversations={conversations} />
+        {section === "connections" && (
+          <ConnectionsAndDevicesSettings projects={projects} />
         )}
 
         {section === "source" && (

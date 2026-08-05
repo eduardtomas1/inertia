@@ -269,14 +269,14 @@ parentPort.on("message", (messageEvent) => {
     );
     return;
   }
-  if (command.type === "runtime.remote-forget") {
-    runtime?.forgetRemoteTranscripts(command.scope);
+  if (command.type === "runtime.private-connect-forget") {
+    runtime?.forgetPrivateConnectTranscripts(command.scope);
     return;
   }
-  if (command.type === "runtime.remote-request") {
+  if (command.type === "runtime.private-connect-request") {
     if (!runtime || stopping) {
       post({
-        type: "runtime.remote-response",
+        type: "runtime.private-connect-response",
         requestId: command.requestId,
         response: {
           type: "response",
@@ -288,14 +288,14 @@ parentPort.on("message", (messageEvent) => {
       });
       return;
     }
-    void runtime.remoteRequest(command.subject, command.request).then(
+    void runtime.privateConnectRequest(command.subject, command.request).then(
       (response) => post({
-        type: "runtime.remote-response",
+        type: "runtime.private-connect-response",
         requestId: command.requestId,
         response,
       }),
       () => post({
-        type: "runtime.remote-response",
+        type: "runtime.private-connect-response",
         requestId: command.requestId,
         response: {
           type: "response",
@@ -308,10 +308,10 @@ parentPort.on("message", (messageEvent) => {
     );
     return;
   }
-  if (command.type === "runtime.remote-prompt-prepare") {
+  if (command.type === "runtime.private-connect-prompt-prepare") {
     if (!runtime || stopping) {
       post({
-        type: "runtime.remote-prompt-result",
+        type: "runtime.private-connect-prompt-result",
         operationId: command.operationId,
         requestId: command.request.requestId,
         phase: "prepare",
@@ -326,11 +326,11 @@ parentPort.on("message", (messageEvent) => {
       });
       return;
     }
-    void runtime.prepareRemotePrompt(command.subject, command.request).then(
+    void runtime.preparePrivateConnectPrompt(command.subject, command.request).then(
       (result) => post(
         "preparationId" in result
           ? {
-              type: "runtime.remote-prompt-result",
+              type: "runtime.private-connect-prompt-result",
               operationId: command.operationId,
               requestId: command.request.requestId,
               phase: "prepare",
@@ -338,7 +338,7 @@ parentPort.on("message", (messageEvent) => {
               response: null,
             }
           : {
-              type: "runtime.remote-prompt-result",
+              type: "runtime.private-connect-prompt-result",
               operationId: command.operationId,
               requestId: command.request.requestId,
               phase: "prepare",
@@ -347,7 +347,7 @@ parentPort.on("message", (messageEvent) => {
             },
       ),
       () => post({
-        type: "runtime.remote-prompt-result",
+        type: "runtime.private-connect-prompt-result",
         operationId: command.operationId,
         requestId: command.request.requestId,
         phase: "prepare",
@@ -357,15 +357,15 @@ parentPort.on("message", (messageEvent) => {
           requestId: command.request.requestId,
           ok: false,
           code: "unavailable",
-          message: "The local runtime could not prepare the remote prompt.",
+          message: "The local runtime could not prepare the Private Connect prompt.",
         },
       }),
     );
     return;
   }
-  if (command.type === "runtime.remote-prompt-commit") {
+  if (command.type === "runtime.private-connect-prompt-commit") {
     const response = runtime && !stopping
-      ? runtime.commitRemotePrompt(
+      ? runtime.commitPrivateConnectPrompt(
           command.subject,
           command.request,
           command.preparationId,
@@ -378,7 +378,7 @@ parentPort.on("message", (messageEvent) => {
           message: "The local runtime is not ready.",
         };
     post({
-      type: "runtime.remote-prompt-result",
+      type: "runtime.private-connect-prompt-result",
       operationId: command.operationId,
       requestId: command.request.requestId,
       phase: "commit",

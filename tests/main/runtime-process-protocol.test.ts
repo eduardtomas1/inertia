@@ -13,8 +13,8 @@ import {
 } from "../../src/shared/claude-backend-profiles";
 import { backendSecretReferenceForProfile } from "../../src/main/credential-vault";
 import {
-  remoteConversationGrantsFromProjectIds,
-} from "../../src/shared/remote-grants";
+  privateConnectRuntimeGrantsFromProjectIds,
+} from "../../src/shared/private-connect/runtime-grants";
 
 const capabilityUrl = `ws://127.0.0.1:43210/runtime/${"a".repeat(43)}`;
 const dataDirectory = resolve(tmpdir(), "inertia data");
@@ -26,14 +26,14 @@ const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
 
 describe("runtime process protocol", () => {
-  it("accepts only strict correlated remote requests and responses", () => {
+  it("accepts only strict correlated Private Connect requests and responses", () => {
     const requestId = crypto.randomUUID();
     const subject = {
       deviceId: crypto.randomUUID(),
       sessionId: crypto.randomUUID(),
       scopes: ["view"],
       projectIds: [projectId],
-      grants: remoteConversationGrantsFromProjectIds([projectId]),
+      grants: privateConnectRuntimeGrantsFromProjectIds([projectId]),
       grantVersion: 1,
       expiresAt: "2030-01-01T00:00:00.000Z",
     };
@@ -42,7 +42,7 @@ describe("runtime process protocol", () => {
       requestId,
     };
     const command = {
-      type: "runtime.remote-request",
+      type: "runtime.private-connect-request",
       requestId,
       subject,
       request,
@@ -82,7 +82,7 @@ describe("runtime process protocol", () => {
       content: "prepare exactly",
     };
     const prepare = {
-      type: "runtime.remote-prompt-prepare",
+      type: "runtime.private-connect-prompt-prepare",
       operationId: crypto.randomUUID(),
       subject: { ...subject, scopes: ["view", "prompt"] },
       request: promptRequest,
@@ -94,7 +94,7 @@ describe("runtime process protocol", () => {
     })).toBeNull();
 
     const event = {
-      type: "runtime.remote-response",
+      type: "runtime.private-connect-response",
       requestId,
       response: {
         type: "response",
@@ -113,7 +113,7 @@ describe("runtime process protocol", () => {
       },
     })).toBeNull();
     const prepared = {
-      type: "runtime.remote-prompt-result",
+      type: "runtime.private-connect-prompt-result",
       operationId: prepare.operationId,
       requestId: promptRequest.requestId,
       phase: "prepare",
@@ -133,7 +133,7 @@ describe("runtime process protocol", () => {
       },
     })).toBeNull();
     const commit = {
-      type: "runtime.remote-prompt-commit",
+      type: "runtime.private-connect-prompt-commit",
       operationId: crypto.randomUUID(),
       preparationId: prepared.preparationId,
       subject: prepare.subject,

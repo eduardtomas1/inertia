@@ -28,7 +28,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Preview.
 - Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
 - Recover local history from validated rotating SQLite backups, or use explicit native-dialog export and import flows when manual recovery is required.
-- Pair the experimental self-hosted Remote Companion through a guided, tested HTTPS/WSS setup without exposing files, terminals, approvals, Git, provider settings, or Full Access to the browser.
+- Open the optional Inertia Private Connect PWA through your private Tailscale network without exposing files, terminals, approvals, Git, provider settings, or Full Access to the browser.
 - Search commands, projects, and threads from one keyboard-friendly palette.
 - Resize or collapse either side of the workspace whenever the conversation needs more room.
 - Choose System, Light, or Dark with a restrained glass finish and clear contrast.
@@ -103,19 +103,17 @@ Nested module repositories keep their own review marks, notes, questions, and se
 - Existing conversations keep their original execution route. Supported same-backend model changes can continue in place; changing the harness or backend opens a clearly separated new chat.
 - Choose whether Inertia opens on the compact Environment summary or the full workspace tools; fresh installs use the calmer summary.
 
-### Remote Companion, without surrendering the desktop
+### Private Connect, without surrendering the desktop
 
-Remote Companion is an experimental, self-hosted, opt-in way to follow safe conversation projections and send text prompts to an existing supervised chat while the Inertia desktop remains online. The desktop stays authoritative and opens only an outbound WebSocket; it never starts a relay, operates a hosted service, or opens an inbound listener on your machine. Releases include versioned, checksummed browser and relay artifacts plus a pinned private-network deployment recipe, but you deploy and operate that infrastructure yourself.
+Inertia Private Connect is an opt-in, Tailscale-only companion for a running desktop. Inertia keeps the authority, binds its gateway to loopback, and asks the local Tailscale CLI to expose only that gateway through Tailscale Serve. There is no VPS, relay, Cloudflare, Clerk, custom domain, public fallback, or separate companion artifact.
 
-Settings guides you through Local development or Self-hosted/private-network setup and tests HTTPS/WSS, TLS, origin policy, headers, component compatibility, endpoint ownership, and persistence before enablement. Pairing uses a fragment-only link and QR code with a visible countdown and exact device grant for selected projects and, optionally, selected conversations. Prompt-capable grants expire within seven days; every prompt is revalidated immediately before posting, and stale or archived scopes are removed.
+Open **Settings → Connections & devices** to enable it, create a five-minute fragment-only pairing link or QR code, and approve the browser from the desktop. Each paired device receives an explicit Monitor or Collaborate grant for selected projects. Monitor is read-only; Collaborate can send a prompt to an existing supervised conversation, answer non-secret agent questions, and stop an active run.
 
-The browser keeps its device identity in a non-extractable ECDH P-256 key and rejects malformed or mismatched stored key pairs. Relay endpoint authentication uses a durable host key, signed challenges, epochs, replay protection, and explicit reset/re-pair recovery. Application payloads remain end-to-end encrypted; the relay sees only unavoidable routing, timing, and size metadata.
+The desktop must remain online and unlocked. Locking it pauses live access but preserves a non-expired encrypted browser grant for reconnect after unlock; disabling Private Connect revokes active sessions. Project scope, access level, expiry, and revocation remain editable from the desktop.
 
-Remote transcript projections are sanitized and byte-bounded. Capable browsers retain strong grant-bound validators only in memory and receive an encrypted `not-modified` response when a projection is unchanged, avoiding repeated large-history transfers and re-renders without delaying acknowledgements or authority reductions. Legacy compatible peers keep the full-response contract.
+The packaged React PWA never receives credentials, files, terminals, approvals, provider settings, Git operations, secrets, Full Access, or arbitrary command execution. Pairing is single-use and device approval is explicit. App cookies are `Secure`, `HttpOnly`, and `SameSite=Strict`; state-changing requests require a same-origin check and CSRF token, while WebSocket access uses a short-lived single-use ticket. Transcript output is sanitized and bounded before it leaves the supervised runtime.
 
-The remote boundary is deliberately small. It can show sanitized user and assistant text and can submit text to an existing supervised conversation. Granting prompts lets the selected provider read project material under its own supervised policy, and its answer can contain project-derived prose; sanitization is not semantic data-loss prevention. The browser cannot directly browse or transfer files, approve commands, answer secret-input questions, use attachments or terminals, change provider settings, mutate Git, create projects or chats, stop runs, expose diagnostics, or enable Full Access.
-
-See the [Remote Companion protocol](docs/REMOTE_COMPANION_PROTOCOL.md), [threat model](docs/REMOTE_COMPANION_THREAT_MODEL.md), [onboarding and endpoint-security design](docs/REMOTE_COMPANION_ONBOARDING_SECURITY_DESIGN.md), and [self-hosting guide](remote/README.md) before enabling it. The implemented [database recovery model](docs/DATABASE_RECOVERY.md), [data-throughput design](docs/DATA_THROUGHPUT.md), [renderer isolation](docs/RENDERER_ISOLATION.md), and [security boundary coverage expectations](docs/SECURITY_BOUNDARY_COVERAGE.md) are documented separately.
+See the [Private Connect guide](docs/PRIVATE_CONNECT.md), [security model](docs/PRIVATE_CONNECT_SECURITY.md), and [internals](docs/PRIVATE_CONNECT_INTERNALS.md). The implemented [database recovery model](docs/DATABASE_RECOVERY.md), [data-throughput design](docs/DATA_THROUGHPUT.md), [renderer isolation](docs/RENDERER_ISOLATION.md), and [security boundary coverage expectations](docs/SECURITY_BOUNDARY_COVERAGE.md) are documented separately.
 
 ### Provider-native, local by default
 

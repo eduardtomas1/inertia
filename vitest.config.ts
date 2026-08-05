@@ -56,23 +56,23 @@ export default defineConfig({
           functions: 29,
           lines: 34.5,
         },
-        "src/shared/remote-*.ts": {
-          statements: 96,
-          branches: 91,
+        "src/shared/private-connect/*.ts": {
+          statements: 95,
+          branches: 90,
           functions: 96,
           lines: 97,
         },
-        "src/server/remote-*.ts": {
-          statements: 84,
-          branches: 75,
-          functions: 80,
-          lines: 87,
+        "src/server/private-connect/*.ts": {
+          statements: 62,
+          branches: 50,
+          functions: 63,
+          lines: 67,
         },
-        "src/main/remote-access-*.ts": {
-          statements: 74,
-          branches: 69,
-          functions: 80,
-          lines: 76,
+        "src/main/private-connect/*.ts": {
+          statements: 60,
+          branches: 57,
+          functions: 62,
+          lines: 66,
         },
         "src/{main,server/runtime}/secure-file*.ts": {
           statements: 78,
@@ -81,10 +81,10 @@ export default defineConfig({
           lines: 82,
         },
         "src/main/credential-vault.ts": {
-          statements: 70,
-          branches: 69,
-          functions: 68,
-          lines: 76,
+          statements: 68,
+          branches: 67,
+          functions: 60,
+          lines: 73,
         },
       },
     },

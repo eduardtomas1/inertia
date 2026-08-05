@@ -4,7 +4,7 @@ import type {
   PreviewStateUpdate,
   RuntimeConnection,
 } from "../shared/desktop.js";
-import { REMOTE_ACCESS_IPC } from "../shared/desktop.js";
+import { PRIVATE_CONNECT_IPC } from "../shared/desktop.js";
 
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -99,58 +99,25 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.clearBackendCredential, request) as ReturnType<DesktopBridge["clearBackendCredential"]>,
   getBackendCredentialState: (request: Parameters<DesktopBridge["getBackendCredentialState"]>[0]) =>
     ipcRenderer.invoke(IPC.getBackendCredentialState, request) as ReturnType<DesktopBridge["getBackendCredentialState"]>,
-  getRemoteAccessState: () =>
-    ipcRenderer.invoke(REMOTE_ACCESS_IPC.getState) as ReturnType<
-      DesktopBridge["getRemoteAccessState"]
-    >,
-  onRemoteAccessState: (
-    listener: Parameters<DesktopBridge["onRemoteAccessState"]>[0],
-  ) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      state: Parameters<typeof listener>[0],
-    ) => listener(state);
-    ipcRenderer.on(REMOTE_ACCESS_IPC.stateChanged, handler);
-    return () => ipcRenderer.removeListener(
-      REMOTE_ACCESS_IPC.stateChanged,
-      handler,
-    );
+  getPrivateConnectState: () =>
+    ipcRenderer.invoke(PRIVATE_CONNECT_IPC.getState) as ReturnType<DesktopBridge["getPrivateConnectState"]>,
+  onPrivateConnectState: (listener: Parameters<DesktopBridge["onPrivateConnectState"]>[0]) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
+    ipcRenderer.on(PRIVATE_CONNECT_IPC.stateChanged, handler);
+    return () => ipcRenderer.removeListener(PRIVATE_CONNECT_IPC.stateChanged, handler);
   },
-  setRemoteAccessEnabled: (
-    request: Parameters<DesktopBridge["setRemoteAccessEnabled"]>[0],
-  ) =>
-    ipcRenderer.invoke(
-      REMOTE_ACCESS_IPC.setEnabled,
-      request,
-    ) as ReturnType<DesktopBridge["setRemoteAccessEnabled"]>,
-  createRemotePairingInvitation: () =>
-    ipcRenderer.invoke(
-      REMOTE_ACCESS_IPC.createInvitation,
-    ) as ReturnType<DesktopBridge["createRemotePairingInvitation"]>,
-  approveRemotePairing: (
-    request: Parameters<DesktopBridge["approveRemotePairing"]>[0],
-  ) =>
-    ipcRenderer.invoke(
-      REMOTE_ACCESS_IPC.approvePairing,
-      request,
-    ) as ReturnType<DesktopBridge["approveRemotePairing"]>,
-  denyRemotePairing: (requestId: string) =>
-    ipcRenderer.invoke(
-      REMOTE_ACCESS_IPC.denyPairing,
-      requestId,
-    ) as ReturnType<DesktopBridge["denyRemotePairing"]>,
-  revokeRemoteDevice: (deviceId: string) =>
-    ipcRenderer.invoke(
-      REMOTE_ACCESS_IPC.revokeDevice,
-      deviceId,
-    ) as ReturnType<DesktopBridge["revokeRemoteDevice"]>,
-  updateRemoteDevice: (
-    request: Parameters<DesktopBridge["updateRemoteDevice"]>[0],
-  ) =>
-    ipcRenderer.invoke(
-      REMOTE_ACCESS_IPC.updateDevice,
-      request,
-    ) as ReturnType<DesktopBridge["updateRemoteDevice"]>,
+  setPrivateConnectEnabled: (request: Parameters<DesktopBridge["setPrivateConnectEnabled"]>[0]) =>
+    ipcRenderer.invoke(PRIVATE_CONNECT_IPC.setEnabled, request) as ReturnType<DesktopBridge["setPrivateConnectEnabled"]>,
+  createPrivateConnectInvitation: () =>
+    ipcRenderer.invoke(PRIVATE_CONNECT_IPC.createInvitation) as ReturnType<DesktopBridge["createPrivateConnectInvitation"]>,
+  approvePrivateConnectPairing: (request: Parameters<DesktopBridge["approvePrivateConnectPairing"]>[0]) =>
+    ipcRenderer.invoke(PRIVATE_CONNECT_IPC.approvePairing, request) as ReturnType<DesktopBridge["approvePrivateConnectPairing"]>,
+  denyPrivateConnectPairing: (requestId: string) =>
+    ipcRenderer.invoke(PRIVATE_CONNECT_IPC.denyPairing, requestId) as ReturnType<DesktopBridge["denyPrivateConnectPairing"]>,
+  revokePrivateConnectDevice: (deviceId: string) =>
+    ipcRenderer.invoke(PRIVATE_CONNECT_IPC.revokeDevice, deviceId) as ReturnType<DesktopBridge["revokePrivateConnectDevice"]>,
+  updatePrivateConnectDevice: (request: Parameters<DesktopBridge["updatePrivateConnectDevice"]>[0]) =>
+    ipcRenderer.invoke(PRIVATE_CONNECT_IPC.updateDevice, request) as ReturnType<DesktopBridge["updatePrivateConnectDevice"]>,
   getPlatform: () => process.platform,
 });
 

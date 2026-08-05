@@ -6,39 +6,19 @@ import { basename, join, resolve } from "node:path";
 const command = process.argv[2] ?? "";
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const version = packageJson.version;
-const remoteComponentVersions = JSON.parse(
-  await readFile("remote/component-versions.json", "utf8"),
-);
-const remoteBrowserVersion = remoteComponentVersions.browser;
-const remoteRelayVersion = remoteComponentVersions.relay;
 if (typeof version !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version)) {
   throw new Error("Release assets require a strict stable package version.");
 }
-for (const remoteVersion of [remoteBrowserVersion, remoteRelayVersion]) {
-  if (typeof remoteVersion !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(remoteVersion)) {
-    throw new Error("Remote Companion assets require strict stable component versions.");
-  }
-}
-
 const platforms = {
   "macos-arm64": [
     `Inertia-${version}-arm64.dmg`,
     `Inertia-${version}-arm64-mac.zip`,
   ],
   "windows-x64": [`Inertia.Setup.${version}.exe`],
-  "linux-x64": [
-    `Inertia-${version}.AppImage`,
-    `inertia-remote-browser-${remoteBrowserVersion}.tar.gz`,
-    `inertia-remote-relay-${remoteRelayVersion}.tar.gz`,
-    "REMOTE-SHA256SUMS.txt",
-  ],
+  "linux-x64": [`Inertia-${version}.AppImage`],
 };
 
-function releaseSource(name) {
-  return name.startsWith("inertia-remote-") || name === "REMOTE-SHA256SUMS.txt"
-    ? resolve("release", "remote", name)
-    : resolve("release", name);
-}
+function releaseSource(name) { return resolve("release", name); }
 
 async function sha256(path) {
   const hash = createHash("sha256");

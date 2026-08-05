@@ -1,25 +1,21 @@
 import type { ChatAttachmentMimeType } from "./attachments";
-import {
-  normalizeRemoteConversationGrants,
-  REMOTE_GRANT_LIMITS,
-  type RemoteConversationGrant,
-} from "./remote-grants";
 import type {
-  RemoteAccessState,
-  RemotePairingInvitation,
-  RemoteSetupMode,
-  RemoteScope,
-} from "./remote-protocol";
+  PrivateConnectConversationGrant,
+} from "./private-connect/grants";
+import type {
+  PrivateConnectPreset,
+} from "./private-connect/scopes";
+import type { PrivateConnectStateView } from "./private-connect/protocol";
 
-export const REMOTE_ACCESS_IPC = {
-  getState: "inertia:remote-access-state",
-  stateChanged: "inertia:remote-access-state-changed",
-  setEnabled: "inertia:remote-access-set-enabled",
-  createInvitation: "inertia:remote-access-create-invitation",
-  approvePairing: "inertia:remote-access-approve-pairing",
-  denyPairing: "inertia:remote-access-deny-pairing",
-  revokeDevice: "inertia:remote-access-revoke-device",
-  updateDevice: "inertia:remote-access-update-device",
+export const PRIVATE_CONNECT_IPC = {
+  getState: "inertia:private-connect-state",
+  stateChanged: "inertia:private-connect-state-changed",
+  setEnabled: "inertia:private-connect-set-enabled",
+  createInvitation: "inertia:private-connect-create-invitation",
+  approvePairing: "inertia:private-connect-approve-pairing",
+  denyPairing: "inertia:private-connect-deny-pairing",
+  revokeDevice: "inertia:private-connect-revoke-device",
+  updateDevice: "inertia:private-connect-update-device",
 } as const;
 
 export interface RuntimeConnection {
@@ -132,185 +128,95 @@ export function parseOpenProjectPathRequest(value: unknown): OpenProjectPathRequ
   };
 }
 
-export interface RemoteAccessEnableRequest {
+export interface PrivateConnectEnableRequest {
   enabled: boolean;
-  relayUrl: string;
-  setupMode?: RemoteSetupMode;
-  companionUrl?: string;
-  testOnly?: boolean;
-  resetEndpoint?: boolean;
 }
 
-export interface RemotePairingApprovalRequest {
+export interface PrivateConnectPairingApprovalRequest {
   requestId: string;
-  scopes: RemoteScope[];
+  preset: PrivateConnectPreset;
   projectIds: string[];
-  grants: RemoteConversationGrant[] | null;
+  grants?: PrivateConnectConversationGrant[];
   grantDays: number;
 }
 
-export interface RemoteDeviceUpdateRequest {
+export interface PrivateConnectDeviceUpdateRequest {
   deviceId: string;
-  scopes: RemoteScope[];
+  preset: PrivateConnectPreset;
   projectIds: string[];
-  grants: RemoteConversationGrant[] | null;
+  grants?: PrivateConnectConversationGrant[];
   expiresAt: string;
 }
 
-export function parseRemoteAccessEnableRequest(
-  value: unknown,
-): RemoteAccessEnableRequest | null {
-  if (!plainObject(value)) return null;
-  const keys = Object.keys(value);
-  if (
-    keys.length < 2
-    || keys.length > 6
-    || !keys.every((key) =>
-      key === "enabled"
-      || key === "relayUrl"
-      || key === "setupMode"
-      || key === "companionUrl"
-      || key === "testOnly"
-      || key === "resetEndpoint")
-    || (value.setupMode !== undefined
-      && value.setupMode !== "local-development"
-      && value.setupMode !== "self-hosted")
-    || (value.companionUrl !== undefined
-      && (typeof value.companionUrl !== "string"
-        || value.companionUrl.length > 2_048))
-    || (value.testOnly !== undefined && typeof value.testOnly !== "boolean")
-    || (value.resetEndpoint !== undefined
-      && typeof value.resetEndpoint !== "boolean")
-  ) return null;
-  return typeof value.enabled === "boolean"
-    && typeof value.relayUrl === "string"
-    && value.relayUrl.length <= 2_048
-    ? {
-        enabled: value.enabled,
-        relayUrl: value.relayUrl,
-        ...(value.setupMode === undefined
-          ? {}
-          : { setupMode: value.setupMode }),
-        ...(value.companionUrl === undefined
-          ? {}
-          : { companionUrl: value.companionUrl }),
-        ...(value.testOnly === undefined
-          ? {}
-          : { testOnly: value.testOnly }),
-        ...(value.resetEndpoint === undefined
-          ? {}
-          : { resetEndpoint: value.resetEndpoint }),
-      }
+export function parsePrivateConnectEnableRequest(value: unknown): PrivateConnectEnableRequest | null {
+  return plainObject(value)
+    && Object.keys(value).length === 1
+    && typeof value.enabled === "boolean"
+    ? { enabled: value.enabled }
     : null;
 }
 
-export function parseRemotePairingApprovalRequest(
-  value: unknown,
-): RemotePairingApprovalRequest | null {
+export function parsePrivateConnectPairingApprovalRequest(value: unknown): PrivateConnectPairingApprovalRequest | null {
   if (!plainObject(value)) return null;
   const keys = Object.keys(value);
   const hasGrants = Object.prototype.hasOwnProperty.call(value, "grants");
   if (
     keys.length !== (hasGrants ? 5 : 4)
-    || !keys.every((key) =>
-      key === "requestId"
-      || key === "scopes"
-      || key === "projectIds"
-      || key === "grants"
-      || key === "grantDays")
+    || !keys.every((key) => key === "requestId" || key === "preset" || key === "projectIds" || key === "grants" || key === "grantDays")
+    || typeof value.requestId !== "string"
+    || !UUID_PATTERN.test(value.requestId)
+    || (value.preset !== "monitor" && value.preset !== "collaborate")
+    || !boundedEntityIds(value.projectIds, 64)
+    || (hasGrants && !privateConnectGrantList(value.grants))
+    || typeof value.grantDays !== "number"
+    || !Number.isInteger(value.grantDays)
+    || value.grantDays < 1
+    || value.grantDays > 90
   ) return null;
-  const scopes = remoteScopes(value.scopes);
-  const projectIds = remoteProjectIds(value.projectIds);
-  const grants = remoteConversationGrants(value.grants);
-  return typeof value.requestId === "string"
-    && UUID_PATTERN.test(value.requestId)
-    && scopes
-    && projectIds
-    && grants !== false
-    && typeof value.grantDays === "number"
-    && Number.isInteger(value.grantDays)
-    && value.grantDays >= 1
-    && value.grantDays <= 90
-    ? {
-        requestId: value.requestId,
-        scopes,
-        projectIds,
-        grants,
-        grantDays: value.grantDays,
-      }
-    : null;
+  return {
+    requestId: value.requestId,
+    preset: value.preset,
+    projectIds: [...new Set(value.projectIds as string[])],
+    ...(hasGrants ? { grants: value.grants as PrivateConnectConversationGrant[] } : {}),
+    grantDays: value.grantDays,
+  };
 }
 
-export function parseRemoteDeviceUpdateRequest(
-  value: unknown,
-): RemoteDeviceUpdateRequest | null {
+export function parsePrivateConnectDeviceUpdateRequest(value: unknown): PrivateConnectDeviceUpdateRequest | null {
   if (!plainObject(value)) return null;
   const keys = Object.keys(value);
   const hasGrants = Object.prototype.hasOwnProperty.call(value, "grants");
   if (
     keys.length !== (hasGrants ? 5 : 4)
-    || !keys.every((key) =>
-      key === "deviceId"
-      || key === "scopes"
-      || key === "projectIds"
-      || key === "grants"
-      || key === "expiresAt")
+    || !keys.every((key) => key === "deviceId" || key === "preset" || key === "projectIds" || key === "grants" || key === "expiresAt")
+    || typeof value.deviceId !== "string"
+    || !UUID_PATTERN.test(value.deviceId)
+    || (value.preset !== "monitor" && value.preset !== "collaborate")
+    || !boundedEntityIds(value.projectIds, 64)
+    || (hasGrants && !privateConnectGrantList(value.grants))
+    || typeof value.expiresAt !== "string"
+    || !Number.isFinite(Date.parse(value.expiresAt))
   ) return null;
-  const scopes = remoteScopes(value.scopes);
-  const projectIds = remoteProjectIds(value.projectIds);
-  const grants = remoteConversationGrants(value.grants);
-  return typeof value.deviceId === "string"
-    && UUID_PATTERN.test(value.deviceId)
-    && scopes
-    && projectIds
-    && grants !== false
-    && typeof value.expiresAt === "string"
-    && Number.isFinite(Date.parse(value.expiresAt))
-    ? {
-        deviceId: value.deviceId,
-        scopes,
-        projectIds,
-        grants,
-        expiresAt: value.expiresAt,
-      }
-    : null;
+  return {
+    deviceId: value.deviceId,
+    preset: value.preset,
+    projectIds: [...new Set(value.projectIds as string[])],
+    ...(hasGrants ? { grants: value.grants as PrivateConnectConversationGrant[] } : {}),
+    expiresAt: value.expiresAt,
+  };
 }
 
-function remoteConversationGrants(
-  value: unknown,
-): RemoteConversationGrant[] | null | false {
-  if (value === undefined || value === null) return null;
-  if (
-    !Array.isArray(value)
-    || value.length > REMOTE_GRANT_LIMITS.projects
-  ) return false;
-  const grants: RemoteConversationGrant[] = [];
-  for (const candidate of value) {
+function privateConnectGrantList(value: unknown): value is PrivateConnectConversationGrant[] {
+  if (!Array.isArray(value) || value.length > 64) return false;
+  return value.every((candidate) => {
     if (!plainObject(candidate)) return false;
     const keys = Object.keys(candidate);
-    if (
-      keys.length !== 4
-      || !keys.every((key) =>
-        key === "projectId"
-        || key === "conversationIds"
-        || key === "includeFutureConversations"
-        || key === "legacyProjectWide")
-      || !boundedEntityId(candidate.projectId)
-      || !boundedEntityIds(
-        candidate.conversationIds,
-        REMOTE_GRANT_LIMITS.conversationsPerProject,
-      )
-      || typeof candidate.includeFutureConversations !== "boolean"
-      || typeof candidate.legacyProjectWide !== "boolean"
-    ) return false;
-    grants.push({
-      projectId: candidate.projectId,
-      conversationIds: candidate.conversationIds,
-      includeFutureConversations: candidate.includeFutureConversations,
-      legacyProjectWide: candidate.legacyProjectWide,
-    });
-  }
-  return normalizeRemoteConversationGrants(grants);
+    return keys.length === 3
+      && keys.every((key) => key === "projectId" || key === "conversationIds" || key === "includeFutureConversations")
+      && boundedEntityId(candidate.projectId)
+      && boundedEntityIds(candidate.conversationIds, 256)
+      && typeof candidate.includeFutureConversations === "boolean";
+  });
 }
 
 function boundedEntityId(value: unknown): value is string {
@@ -327,20 +233,6 @@ function boundedEntityIds(value: unknown, maximum: number): value is string[] {
 
 function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function remoteScopes(value: unknown): RemoteScope[] | null {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 2) return null;
-  if (!value.every((scope) => scope === "view" || scope === "prompt")) return null;
-  return [...new Set(value)] as RemoteScope[];
-}
-
-function remoteProjectIds(value: unknown): string[] | null {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 64) return null;
-  if (!value.every((id) => typeof id === "string" && UUID_PATTERN.test(id))) {
-    return null;
-  }
-  return [...new Set(value)];
 }
 
 export interface DesktopBridge {
@@ -396,22 +288,14 @@ export interface DesktopBridge {
   setBackendCredential: (request: SetBackendCredentialRequest) => Promise<BackendCredentialState>;
   clearBackendCredential: (request: BackendCredentialProfileRequest) => Promise<BackendCredentialState>;
   getBackendCredentialState: (request: BackendCredentialProfileRequest) => Promise<BackendCredentialState>;
-  getRemoteAccessState: () => Promise<RemoteAccessState>;
-  onRemoteAccessState: (
-    listener: (state: RemoteAccessState) => void,
-  ) => () => void;
-  setRemoteAccessEnabled: (
-    request: RemoteAccessEnableRequest,
-  ) => Promise<RemoteAccessState>;
-  createRemotePairingInvitation: () => Promise<RemotePairingInvitation>;
-  approveRemotePairing: (
-    request: RemotePairingApprovalRequest,
-  ) => Promise<RemoteAccessState>;
-  denyRemotePairing: (requestId: string) => Promise<RemoteAccessState>;
-  revokeRemoteDevice: (deviceId: string) => Promise<RemoteAccessState>;
-  updateRemoteDevice: (
-    request: RemoteDeviceUpdateRequest,
-  ) => Promise<RemoteAccessState>;
+  getPrivateConnectState: () => Promise<PrivateConnectStateView>;
+  onPrivateConnectState: (listener: (state: PrivateConnectStateView) => void) => () => void;
+  setPrivateConnectEnabled: (request: PrivateConnectEnableRequest) => Promise<PrivateConnectStateView>;
+  createPrivateConnectInvitation: () => Promise<{ url: string; expiresAt: string }>;
+  approvePrivateConnectPairing: (request: PrivateConnectPairingApprovalRequest) => Promise<PrivateConnectStateView>;
+  denyPrivateConnectPairing: (requestId: string) => Promise<PrivateConnectStateView>;
+  revokePrivateConnectDevice: (deviceId: string) => Promise<PrivateConnectStateView>;
+  updatePrivateConnectDevice: (request: PrivateConnectDeviceUpdateRequest) => Promise<PrivateConnectStateView>;
   getPlatform: () => string;
 }
 

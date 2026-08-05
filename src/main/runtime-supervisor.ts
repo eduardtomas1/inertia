@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { UtilityProcess } from "electron";
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
 import type {
-  RemoteAuthorizationSubject,
-  RemoteRequest,
-  RemoteResponse,
-} from "../shared/remote-protocol";
+  PrivateConnectRuntimeAuthorization,
+  PrivateConnectRuntimeRequest,
+  PrivateConnectRuntimeResponse,
+} from "../shared/private-connect/runtime-contract";
 
 import type {
   DatabaseRecoveryStartupNotice,
@@ -18,8 +18,8 @@ import {
   type RuntimeDatabaseStartupRecoveryReport,
   type RuntimeDatabaseRecoverySummary,
   type RuntimeCredentialOperation,
-  type RuntimeRemoteForgetScope,
-  type RuntimeRemotePromptPreparation,
+  type RuntimePrivateConnectForgetScope,
+  type RuntimePrivateConnectPromptPreparation,
   type RuntimeWorkerCommand,
   type RuntimeWorkerOptions,
 } from "../node/runtime-process-protocol.js";
@@ -32,7 +32,7 @@ import {
   type RuntimeAttachmentBroker,
 } from "./runtime-attachment-broker.js";
 import { forceKillRuntimeProcessTree } from "./runtime-process-tree.js";
-import { RuntimeRemotePromptCoordinator } from "./runtime-remote-prompt-coordinator.js";
+import { RuntimePrivateConnectPromptCoordinator } from "./runtime-private-connect-prompt-coordinator.js";
 
 export type { RuntimeAttachmentBroker } from "./runtime-attachment-broker.js";
 
@@ -82,10 +82,10 @@ interface PendingCredentialRequest {
   controller: AbortController;
 }
 
-interface PendingRemoteRequest {
+interface PendingPrivateConnectRuntimeRequest {
   record: RuntimeProcessRecord;
   timer: Timer;
-  resolve: (response: RemoteResponse) => void;
+  resolve: (response: PrivateConnectRuntimeResponse) => void;
   reject: (error: Error) => void;
 }
 
@@ -98,7 +98,7 @@ interface PendingDatabaseRecoveryRequest {
   reject: (error: Error) => void;
 }
 
-type RemotePromptRequest = Extract<RemoteRequest, { type: "prompt.send" }>;
+type PrivateConnectPromptRequest = Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>;
 
 interface PendingSecureFileRequest {
   record: RuntimeProcessRecord;
@@ -201,11 +201,11 @@ export class RuntimeSupervisor {
   private shutdownTimer: Timer | null = null;
   private shutdownDeadlineTimer: Timer | null = null;
   private readonly pendingProjectPaths = new Map<string, PendingProjectPath>();
-  private readonly pendingRemoteRequests = new Map<string, PendingRemoteRequest>();
+  private readonly pendingPrivateConnectRuntimeRequests = new Map<string, PendingPrivateConnectRuntimeRequest>();
   private readonly pendingDatabaseRecoveryRequests =
     new Map<string, PendingDatabaseRecoveryRequest>();
-  private readonly remotePrompts:
-    RuntimeRemotePromptCoordinator<RuntimeProcessRecord>;
+  private readonly privateConnectPrompts:
+    RuntimePrivateConnectPromptCoordinator<RuntimeProcessRecord>;
   private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
   private readonly secureFileBroker?: RuntimeSecureFileBroker;
   private readonly pendingSecureFileRequests =
@@ -225,7 +225,7 @@ export class RuntimeSupervisor {
     this.forceKill = options.forceKill
       ?? ((pid, deadlineAt) =>
         forceKillRuntimeProcessTree(pid, { deadlineAt }));
-    this.remotePrompts = new RuntimeRemotePromptCoordinator({
+    this.privateConnectPrompts = new RuntimePrivateConnectPromptCoordinator({
       timeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
       setTimer: this.setTimer,
       clearTimer: this.clearTimer,
@@ -374,10 +374,10 @@ export class RuntimeSupervisor {
     });
   }
 
-  remoteRequest(
-    subject: RemoteAuthorizationSubject,
-    request: Exclude<RemoteRequest, { type: "prompt.send" }>,
-  ): Promise<RemoteResponse> {
+  privateConnectRequest(
+    subject: PrivateConnectRuntimeAuthorization,
+    request: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
+  ): Promise<PrivateConnectRuntimeResponse> {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
       return Promise.reject(new Error(
@@ -386,24 +386,24 @@ export class RuntimeSupervisor {
           : "The local service is starting. Try again in a moment.",
       ));
     }
-    if (this.pendingRemoteRequests.has(request.requestId)) {
+    if (this.pendingPrivateConnectRuntimeRequests.has(request.requestId)) {
       return Promise.reject(new Error(
-        "The remote request identifier is already active.",
+        "The Private Connect request identifier is already active.",
       ));
     }
-    return new Promise<RemoteResponse>((resolve, reject) => {
+    return new Promise<PrivateConnectRuntimeResponse>((resolve, reject) => {
       const timer = this.setTimer(() => {
-        this.pendingRemoteRequests.delete(request.requestId);
-        reject(new Error("The remote request timed out."));
+        this.pendingPrivateConnectRuntimeRequests.delete(request.requestId);
+        reject(new Error("The Private Connect request timed out."));
       }, DEFAULT_REQUEST_TIMEOUT_MS);
-      this.pendingRemoteRequests.set(request.requestId, {
+      this.pendingPrivateConnectRuntimeRequests.set(request.requestId, {
         record,
         timer,
         resolve,
         reject,
       });
       this.post(record.child, {
-        type: "runtime.remote-request",
+        type: "runtime.private-connect-request",
         requestId: request.requestId,
         subject,
         request,
@@ -411,32 +411,32 @@ export class RuntimeSupervisor {
     });
   }
 
-  prepareRemotePrompt(
-    subject: RemoteAuthorizationSubject,
-    request: RemotePromptRequest,
-  ): Promise<RuntimeRemotePromptPreparation | RemoteResponse> {
-    const record = this.remotePromptRecord();
+  preparePrivateConnectPrompt(
+    subject: PrivateConnectRuntimeAuthorization,
+    request: PrivateConnectPromptRequest,
+  ): Promise<RuntimePrivateConnectPromptPreparation | PrivateConnectRuntimeResponse> {
+    const record = this.privateConnectPromptRecord();
     return record instanceof Error
       ? Promise.reject(record)
-      : this.remotePrompts.prepare(record, subject, request);
+      : this.privateConnectPrompts.prepare(record, subject, request);
   }
 
-  forgetRemoteTranscripts(scope: RuntimeRemoteForgetScope): void {
+  forgetPrivateConnectTranscripts(scope: RuntimePrivateConnectForgetScope): void {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) return;
-    this.post(record.child, { type: "runtime.remote-forget", scope });
+    this.post(record.child, { type: "runtime.private-connect-forget", scope });
   }
 
-  commitRemotePrompt(
-    subject: RemoteAuthorizationSubject,
-    request: RemotePromptRequest,
+  commitPrivateConnectPrompt(
+    subject: PrivateConnectRuntimeAuthorization,
+    request: PrivateConnectPromptRequest,
     preparationId: string,
     onPosted?: () => void,
-  ): Promise<RemoteResponse> {
-    const record = this.remotePromptRecord();
+  ): Promise<PrivateConnectRuntimeResponse> {
+    const record = this.privateConnectPromptRecord();
     return record instanceof Error
       ? Promise.reject(record)
-      : this.remotePrompts.commit(
+      : this.privateConnectPrompts.commit(
           record,
           subject,
           request,
@@ -445,7 +445,7 @@ export class RuntimeSupervisor {
         );
   }
 
-  private remotePromptRecord(): RuntimeProcessRecord | Error {
+  private privateConnectPromptRecord(): RuntimeProcessRecord | Error {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
       return new Error(
@@ -496,7 +496,7 @@ export class RuntimeSupervisor {
       this.current,
       "The local service is stopping.",
     );
-    this.rejectRemoteRequests(this.current, "The local service is stopping.");
+    this.rejectPrivateConnectRuntimeRequests(this.current, "The local service is stopping.");
     this.clearCredentialRequests(this.current);
     this.clearSecureFileRequests(this.current);
     const secureFilesStopped = this.secureFileBroker?.shutdown?.()
@@ -641,10 +641,10 @@ export class RuntimeSupervisor {
       else pending.reject(new Error(event.message));
       return;
     }
-    if (event.type === "runtime.remote-response") {
-      const pending = this.pendingRemoteRequests.get(event.requestId);
+    if (event.type === "runtime.private-connect-response") {
+      const pending = this.pendingPrivateConnectRuntimeRequests.get(event.requestId);
       if (!pending || pending.record !== record) return;
-      this.pendingRemoteRequests.delete(event.requestId);
+      this.pendingPrivateConnectRuntimeRequests.delete(event.requestId);
       this.clearTimer(pending.timer);
       pending.resolve(event.response);
       return;
@@ -667,8 +667,8 @@ export class RuntimeSupervisor {
       }
       return;
     }
-    if (event.type === "runtime.remote-prompt-result") {
-      this.remotePrompts.handle(record, event);
+    if (event.type === "runtime.private-connect-prompt-result") {
+      this.privateConnectPrompts.handle(record, event);
       return;
     }
     if (event.type === "runtime.startup-failed") {
@@ -729,9 +729,9 @@ export class RuntimeSupervisor {
       record,
       "The local service stopped before the database recovery request completed.",
     );
-    this.rejectRemoteRequests(
+    this.rejectPrivateConnectRuntimeRequests(
       record,
-      "The local service stopped before the remote request completed.",
+      "The local service stopped before the Private Connect request completed.",
     );
     this.clearCredentialRequests(record);
     this.clearSecureFileRequests(record);
@@ -827,18 +827,18 @@ export class RuntimeSupervisor {
     }
   }
 
-  private rejectRemoteRequests(
+  private rejectPrivateConnectRuntimeRequests(
     record: RuntimeProcessRecord | null,
     message: string,
   ): void {
     if (!record) return;
-    for (const [requestId, pending] of this.pendingRemoteRequests) {
+    for (const [requestId, pending] of this.pendingPrivateConnectRuntimeRequests) {
       if (pending.record !== record) continue;
-      this.pendingRemoteRequests.delete(requestId);
+      this.pendingPrivateConnectRuntimeRequests.delete(requestId);
       this.clearTimer(pending.timer);
       pending.reject(new Error(message));
     }
-    this.remotePrompts.reject(record, message);
+    this.privateConnectPrompts.reject(record, message);
   }
 
   private rejectDatabaseRecoveryRequests(

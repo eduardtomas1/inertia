@@ -59,6 +59,19 @@ function provider(): ProviderInfo {
   };
 }
 
+function claudeWithoutCatalog(): ProviderInfo {
+  return {
+    ...provider(),
+    id: "claude",
+    label: "Claude",
+    command: "claude",
+    authState: "unauthenticated",
+    canRun: false,
+    statusMessage: "Sign in required",
+    models: [],
+  };
+}
+
 function customProfile(
   state: ModelBackendProfileView["compatibility"]["state"] =
     "partially-compatible",
@@ -159,6 +172,25 @@ describe("composer model chooser route projection", () => {
     });
     expect(JSON.stringify(route)).not.toContain(profile.endpointHost);
     expect(JSON.stringify(route)).not.toContain("credential");
+  });
+
+  it("keeps an empty native Claude catalog selectable when other profiles exist", () => {
+    const current = nativeModelSelection({ providerId: "codex" });
+    const routes = buildComposerModelRoutes(
+      [provider(), claudeWithoutCatalog()],
+      [customProfile()],
+      current,
+    );
+
+    expect(routes.find(({ providerId }) => providerId === "claude"))
+      .toMatchObject({
+        displayName: "Provider default",
+        modelId: "provider-default",
+        harnessId: "claude-agent-sdk",
+        backendProfileId: "builtin:anthropic",
+        providerId: "claude",
+        selectable: true,
+      });
   });
 
   it("does not preserve a selection from an older backend revision", () => {

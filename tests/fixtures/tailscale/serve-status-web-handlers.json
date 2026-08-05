@@ -1,0 +1,23 @@
+{
+  "Web": {
+    "https://desktop.example.ts.net:8443": {
+      "/": {
+        "Handlers": {
+          "Proxy": "http://127.0.0.1:41000"
+        }
+      }
+    },
+    "https://desktop.example.ts.net:9443": {
+      "/": {
+        "Proxy": "http://127.0.0.1:42000"
+      }
+    }
+  },
+  "AllowFunnel": {
+    "https://desktop.example.ts.net:10443": {
+      "/": {
+        "Proxy": "http://127.0.0.1:41000"
+      }
+    }
+  }
+}

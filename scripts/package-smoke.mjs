@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, copyFile, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdtemp, mkdir, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
@@ -42,6 +42,71 @@ async function isExecutableFile(path) {
   } catch {
     return false;
   }
+}
+
+async function readAsarFileTree(archive) {
+  const handle = await open(archive, "r");
+  try {
+    const prefix = Buffer.alloc(16);
+    const { bytesRead } = await handle.read(prefix, 0, 16, 0);
+    if (bytesRead !== 16) throw new Error("The packaged archive has no asar header.");
+    const jsonLength = prefix.readUInt32LE(12);
+    if (jsonLength <= 0 || jsonLength > 64 * 1024 * 1024) {
+      throw new Error("The packaged archive reported an unreasonable asar header size.");
+    }
+    const json = Buffer.alloc(jsonLength);
+    const header = await handle.read(json, 0, jsonLength, 16);
+    if (header.bytesRead !== jsonLength) throw new Error("The packaged asar header was truncated.");
+    return JSON.parse(json.toString("utf8"));
+  } finally {
+    await handle.close();
+  }
+}
+
+function asarEntry(tree, segments) {
+  let node = tree;
+  for (const segment of segments) {
+    node = node?.files?.[segment];
+    if (!node) return null;
+  }
+  return node;
+}
+
+async function requirePackagedPrivateConnectAssets(executable) {
+  const executableDirectory = dirname(executable);
+  const candidates = [
+    resolve(executableDirectory, "resources", "app.asar"),
+    resolve(executableDirectory, "..", "Resources", "app.asar"),
+  ];
+  const archives = [];
+  for (const candidate of candidates) {
+    if (await stat(candidate).then((value) => value.isFile(), () => false)) archives.push(candidate);
+  }
+  if (archives.length !== 1) {
+    throw new Error(`Expected exactly one packaged app.asar next to ${executable}; found ${archives.length}.`);
+  }
+  const tree = await readAsarFileTree(archives[0]);
+  const client = asarEntry(tree, ["out", "private-connect"]);
+  if (!client?.files) throw new Error("The packaged app.asar does not contain the Private Connect web client.");
+  const names = Object.keys(client.files);
+  for (const required of ["index.html", "manifest.webmanifest", "assets", "icons"]) {
+    if (!names.includes(required)) {
+      throw new Error(`The packaged Private Connect client is missing ${required}.`);
+    }
+  }
+  const assets = Object.keys(client.files.assets?.files ?? {});
+  const hashed = (extension) => assets.filter((name) =>
+    name.endsWith(extension) && /[.-][A-Za-z0-9_-]{8,}\./u.test(name));
+  if (hashed(".js").length === 0 || hashed(".css").length === 0) {
+    throw new Error(`The packaged Private Connect client has no content-hashed assets: ${assets.join(", ") || "none"}.`);
+  }
+  const icons = Object.keys(client.files.icons?.files ?? {});
+  if (icons.length === 0) throw new Error("The packaged Private Connect client has no icons.");
+  const retired = Object.keys(tree.files ?? {}).filter((name) => /remote/iu.test(name));
+  if (retired.length > 0) {
+    throw new Error(`The packaged app still ships retired remote artifacts: ${retired.join(", ")}.`);
+  }
+  console.log(`Packaged Private Connect assets verified (${names.length} entries, ${assets.length} hashed assets, ${icons.length} icons).`);
 }
 
 async function locatePackagedExecutable() {
@@ -296,6 +361,7 @@ function appendOutput(current, chunk) {
 }
 
 const executable = await locatePackagedExecutable();
+await requirePackagedPrivateConnectAssets(executable);
 const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-package-smoke-"));
 const markerPath = join(temporaryRoot, "ready.json");
 const dataDirectory = join(temporaryRoot, "data");

@@ -11,7 +11,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { createRequire } from "node:module";
 import { Worker } from "node:worker_threads";
 
 import Database from "better-sqlite3";
@@ -125,9 +124,6 @@ export class DatabaseBackupCancelledError extends Error {
   }
 }
 
-const betterSqlite3ModulePath = createRequire(import.meta.url)
-  .resolve("better-sqlite3");
-
 function safeDatabaseStem(databasePath: string): string {
   const raw = basename(databasePath, extname(databasePath));
   return /^[A-Za-z0-9_-]{1,80}$/u.test(raw) ? raw : "inertia";
@@ -178,7 +174,10 @@ function validateOpenDatabase(
     readonly [number, readonly string[]]
   )[],
 ): DatabaseValidation {
-  if (database.pragma(check, { simple: true }) !== "ok") return "corrupt";
+  const integrityResult = database.prepare(`PRAGMA ${check}`).get() as
+    | Record<string, unknown>
+    | undefined;
+  if (Object.values(integrityResult ?? {})[0] !== "ok") return "corrupt";
   const tables = new Set(
     (database.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table'",
@@ -326,12 +325,12 @@ function validateDatabaseOffThread(
   if (signal.aborted) return Promise.reject(new DatabaseBackupCancelledError());
   const workerSource = `
     const { parentPort, workerData } = require("node:worker_threads");
-    const Database = require(workerData.modulePath);
+    const { DatabaseSync } = require("node:sqlite");
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
     let result = "corrupt";
     try {
-      database = new Database(workerData.path, { readonly: true, fileMustExist: true });
+      database = new DatabaseSync(workerData.path, { readOnly: true });
       result = validate(
         database,
         "integrity_check",
@@ -341,7 +340,7 @@ function validateDatabaseOffThread(
     } catch {
       result = "corrupt";
     } finally {
-      if (database && database.open) database.close();
+      if (database) database.close();
     }
     // Receipt follows handle closure: Windows cannot publish the validated
     // partial while any worker still holds the SQLite file open.
@@ -351,9 +350,9 @@ function validateDatabaseOffThread(
   return new Promise<DatabaseValidation>((resolveValidation, rejectValidation) => {
     const worker = new Worker(workerSource, {
       eval: true,
+      execArgv: ["--no-warnings"],
       workerData: {
         currentSchemaVersion: CURRENT_DATABASE_SCHEMA_VERSION,
-        modulePath: betterSqlite3ModulePath,
         path,
         requiredTablesBySchemaVersion: REQUIRED_TABLES_BY_SCHEMA_VERSION,
       },

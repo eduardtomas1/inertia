@@ -18,13 +18,13 @@ import {
 } from "../shared/attachments";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments";
 import {
-  remoteAuthorizationSubjectSchema,
-  remoteRequestSchema,
-  remoteResponseSchema,
-  type RemoteAuthorizationSubject,
-  type RemoteRequest,
-  type RemoteResponse,
-} from "../shared/remote-protocol";
+  privateConnectRuntimeAuthorizationSchema,
+  privateConnectRuntimeRequestSchema,
+  privateConnectRuntimeResponseSchema,
+  type PrivateConnectRuntimeAuthorization,
+  type PrivateConnectRuntimeRequest,
+  type PrivateConnectRuntimeResponse,
+} from "../shared/private-connect/runtime-contract";
 import {
   parseSecureFileRequest,
   parseSecureFileResult,
@@ -55,11 +55,11 @@ export interface RuntimeWorkerOptions {
   };
 }
 
-export interface RuntimeRemotePromptPreparation {
+export interface RuntimePrivateConnectPromptPreparation {
   preparationId: string;
 }
 
-export type RuntimeRemoteForgetScope =
+export type RuntimePrivateConnectForgetScope =
   | { kind: "all" }
   | { kind: "conversation"; conversationId: string };
 
@@ -87,25 +87,25 @@ export type RuntimeWorkerCommand =
   | { type: "runtime.shutdown" }
   | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
   | {
-      type: "runtime.remote-request";
+      type: "runtime.private-connect-request";
       requestId: string;
-      subject: RemoteAuthorizationSubject;
-      request: Exclude<RemoteRequest, { type: "prompt.send" }>;
+      subject: PrivateConnectRuntimeAuthorization;
+      request: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>;
     }
   | {
-      type: "runtime.remote-prompt-prepare";
+      type: "runtime.private-connect-prompt-prepare";
       operationId: string;
-      subject: RemoteAuthorizationSubject;
-      request: Extract<RemoteRequest, { type: "prompt.send" }>;
+      subject: PrivateConnectRuntimeAuthorization;
+      request: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>;
     }
   | {
-      type: "runtime.remote-prompt-commit";
+      type: "runtime.private-connect-prompt-commit";
       operationId: string;
       preparationId: string;
-      subject: RemoteAuthorizationSubject;
-      request: Extract<RemoteRequest, { type: "prompt.send" }>;
+      subject: PrivateConnectRuntimeAuthorization;
+      request: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>;
     }
-  | { type: "runtime.remote-forget"; scope: RuntimeRemoteForgetScope }
+  | { type: "runtime.private-connect-forget"; scope: RuntimePrivateConnectForgetScope }
   | {
       type: "runtime.database-recovery";
       operationId: string;
@@ -242,17 +242,17 @@ export type RuntimeWorkerEvent =
       message: string;
     }
   | {
-      type: "runtime.remote-response";
+      type: "runtime.private-connect-response";
       requestId: string;
-      response: RemoteResponse;
+      response: PrivateConnectRuntimeResponse;
     }
   | {
-      type: "runtime.remote-prompt-result";
+      type: "runtime.private-connect-prompt-result";
       operationId: string;
       requestId: string;
       phase: "prepare" | "commit";
       preparationId: string | null;
-      response: RemoteResponse | null;
+      response: PrivateConnectRuntimeResponse | null;
     }
   | {
       type: "runtime.attachment-request";
@@ -326,26 +326,26 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       : null;
   }
   if (
-    value.type === "runtime.remote-forget"
+    value.type === "runtime.private-connect-forget"
     && Object.keys(value).length === 2
   ) {
-    const scope = parseRuntimeRemoteForgetScope(value.scope);
-    return scope ? { type: "runtime.remote-forget", scope } : null;
+    const scope = parseRuntimePrivateConnectForgetScope(value.scope);
+    return scope ? { type: "runtime.private-connect-forget", scope } : null;
   }
   if (
-    value.type === "runtime.remote-request"
+    value.type === "runtime.private-connect-request"
     && Object.keys(value).length === 4
     && typeof value.requestId === "string"
     && UUID_PATTERN.test(value.requestId)
   ) {
-    const subject = remoteAuthorizationSubjectSchema.safeParse(value.subject);
-    const request = remoteRequestSchema.safeParse(value.request);
+    const subject = privateConnectRuntimeAuthorizationSchema.safeParse(value.subject);
+    const request = privateConnectRuntimeRequestSchema.safeParse(value.request);
     return subject.success
       && request.success
       && request.data.type !== "prompt.send"
       && request.data.requestId === value.requestId
       ? {
-          type: "runtime.remote-request",
+          type: "runtime.private-connect-request",
           requestId: value.requestId,
           subject: subject.data,
           request: request.data,
@@ -354,39 +354,39 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   }
   if (
     (
-      value.type === "runtime.remote-prompt-prepare"
-      || value.type === "runtime.remote-prompt-commit"
+      value.type === "runtime.private-connect-prompt-prepare"
+      || value.type === "runtime.private-connect-prompt-commit"
     )
     && Object.keys(value).length === (
-      value.type === "runtime.remote-prompt-commit" ? 5 : 4
+      value.type === "runtime.private-connect-prompt-commit" ? 5 : 4
     )
     && typeof value.operationId === "string"
     && UUID_PATTERN.test(value.operationId)
   ) {
     if (
-      value.type === "runtime.remote-prompt-commit"
+      value.type === "runtime.private-connect-prompt-commit"
       && (
         typeof value.preparationId !== "string"
         || !UUID_PATTERN.test(value.preparationId)
       )
     ) return null;
-    const subject = remoteAuthorizationSubjectSchema.safeParse(value.subject);
-    const request = remoteRequestSchema.safeParse(value.request);
+    const subject = privateConnectRuntimeAuthorizationSchema.safeParse(value.subject);
+    const request = privateConnectRuntimeRequestSchema.safeParse(value.request);
     if (
       !subject.success
       || !request.success
       || request.data.type !== "prompt.send"
     ) return null;
-    return value.type === "runtime.remote-prompt-commit"
+    return value.type === "runtime.private-connect-prompt-commit"
       ? {
-          type: "runtime.remote-prompt-commit",
+          type: "runtime.private-connect-prompt-commit",
           operationId: value.operationId,
           preparationId: value.preparationId as string,
           subject: subject.data,
           request: request.data,
         }
       : {
-          type: "runtime.remote-prompt-prepare",
+          type: "runtime.private-connect-prompt-prepare",
           operationId: value.operationId,
           subject: subject.data,
           request: request.data,
@@ -546,22 +546,22 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     return { type: "runtime.shutdown-unconfirmed" };
   }
   if (
-    value.type === "runtime.remote-response"
+    value.type === "runtime.private-connect-response"
     && Object.keys(value).length === 3
     && typeof value.requestId === "string"
     && UUID_PATTERN.test(value.requestId)
   ) {
-    const response = remoteResponseSchema.safeParse(value.response);
+    const response = privateConnectRuntimeResponseSchema.safeParse(value.response);
     return response.success && response.data.requestId === value.requestId
       ? {
-          type: "runtime.remote-response",
+          type: "runtime.private-connect-response",
           requestId: value.requestId,
           response: response.data,
         }
       : null;
   }
   if (
-    value.type === "runtime.remote-prompt-result"
+    value.type === "runtime.private-connect-prompt-result"
     && Object.keys(value).length === 6
     && typeof value.operationId === "string"
     && UUID_PATTERN.test(value.operationId)
@@ -571,7 +571,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   ) {
     const response = value.response === null
       ? null
-      : remoteResponseSchema.safeParse(value.response);
+      : privateConnectRuntimeResponseSchema.safeParse(value.response);
     const preparationId = typeof value.preparationId === "string"
       && UUID_PATTERN.test(value.preparationId)
       ? value.preparationId
@@ -589,7 +589,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       && validResponse;
     if (!validPrepare && !validCommit) return null;
     return {
-      type: "runtime.remote-prompt-result",
+      type: "runtime.private-connect-prompt-result",
       operationId: value.operationId,
       requestId: value.requestId,
       phase: value.phase,
@@ -836,9 +836,9 @@ function parseRuntimeDatabaseStartupRecovery(
   };
 }
 
-function parseRuntimeRemoteForgetScope(
+function parseRuntimePrivateConnectForgetScope(
   value: unknown,
-): RuntimeRemoteForgetScope | null {
+): RuntimePrivateConnectForgetScope | null {
   if (typeof value !== "object" || value === null) return null;
   const scope = value as Record<string, unknown>;
   if (scope.kind === "all" && Object.keys(scope).length === 1) {

@@ -7,7 +7,7 @@ import type { EnvironmentSummarySnapshot } from "../utils/environmentSummary";
 import { EnvironmentSummary } from "./EnvironmentSummary";
 import type { WorkspacePanelTab } from "./WorkspacePanel";
 import { IconButton } from "./ui";
-import { useRemoteAccessState } from "../hooks/useRemoteAccessState";
+import { usePrivateConnectState } from "../hooks/usePrivateConnectState";
 import {
   loadActivityCenter,
   loadCommitDialog,
@@ -36,7 +36,7 @@ type WorkspaceHeaderProps = {
   onSetEnvironmentOpen: (open: boolean) => void;
   onCycleTheme: () => void;
   onOpenSettings: () => void;
-  onOpenRemoteSettings: () => void;
+  onOpenConnectionsSettings: () => void;
   onOpenProject: () => void;
   onRefreshBranches: () => void;
   onSwitchBranch: (name: string) => void;
@@ -73,7 +73,7 @@ export function WorkspaceHeader({
   onSetEnvironmentOpen,
   onCycleTheme,
   onOpenSettings,
-  onOpenRemoteSettings,
+  onOpenConnectionsSettings,
   onOpenProject,
   onRefreshBranches,
   onSwitchBranch,
@@ -88,8 +88,10 @@ export function WorkspaceHeader({
   onToggleActivity,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | null>(null);
-  const remoteLoad = useRemoteAccessState();
-  const remoteAccess = remoteLoad.status === "ready" ? remoteLoad.state : null;
+  const privateConnectLoad = usePrivateConnectState();
+  const privateConnect = privateConnectLoad.state;
+  const pendingPrivateConnectPairings = privateConnect?.pendingPairings.length ?? 0;
+  const pendingPrivateConnectPairing = privateConnect?.pendingPairings[0] ?? null;
   useNativePreviewSuspension(menu !== null);
   const environmentAnchorRef = useRef<HTMLDivElement>(null);
   const title = view === "settings" ? "Settings" : conversation?.title ?? project?.name ?? "Workspace";
@@ -138,22 +140,45 @@ export function WorkspaceHeader({
       </div>
 
       <div className="header-actions no-drag">
-        {remoteAccess?.enabled && (
-          <button
-            type="button"
-            className={`header-button remote-access-indicator${remoteAccess.activeSessions > 0 ? " is-active" : ""}`}
-            aria-label={remoteAccess.activeSessions > 0
-              ? `Remote Companion, ${remoteAccess.activeSessions} active sessions`
-              : `Remote Companion ${remoteAccess.connection}`}
-            onClick={onOpenRemoteSettings}
-          >
-            <RadioTower size={14} />
-            <span>
-              {remoteAccess.activeSessions > 0
-                ? `Remote · ${remoteAccess.activeSessions} active`
-                : "Remote on"}
-            </span>
-          </button>
+        {privateConnect && (
+          <div className="header-popover-anchor private-connect-alert-anchor">
+            <button
+              type="button"
+              className={`header-button private-connect-indicator${
+                pendingPrivateConnectPairings > 0
+                  ? " has-pending"
+                  : privateConnect.activeSessions > 0
+                    ? " is-active"
+                    : ""
+              }`}
+              aria-label={pendingPrivateConnectPairings > 0
+                ? `Connections & devices, ${pendingPrivateConnectPairings} pairing ${pendingPrivateConnectPairings === 1 ? "approval" : "approvals"} waiting`
+                : privateConnect.activeSessions > 0
+                  ? `Connections & devices, ${privateConnect.activeSessions} active browsers`
+                  : `Connections & devices ${privateConnect.status}`}
+              onClick={onOpenConnectionsSettings}
+            >
+              <RadioTower size={14} />
+              <span>
+                {pendingPrivateConnectPairings > 0
+                  ? pendingPrivateConnectPairings === 1
+                    ? "Approve device"
+                    : `Approve ${pendingPrivateConnectPairings} devices`
+                  : privateConnect.activeSessions > 0
+                  ? `Devices · ${privateConnect.activeSessions} active`
+                  : "Devices"}
+              </span>
+            </button>
+            {pendingPrivateConnectPairing && (
+              <div className="private-connect-pairing-alert" role="alert" aria-label="Private Connect pairing approval">
+                <strong>{pendingPrivateConnectPairing.deviceLabel} wants to connect</strong>
+                <span>Code <code>{pendingPrivateConnectPairing.comparisonCode}</code></span>
+                <small>{pendingPrivateConnectPairing.tailnetLabel ?? "Tailnet identity unavailable"}</small>
+                {pendingPrivateConnectPairings > 1 && <small>+{pendingPrivateConnectPairings - 1} more waiting</small>}
+                <button type="button" onClick={onOpenConnectionsSettings}>Review access</button>
+              </div>
+            )}
+          </div>
         )}
         {view === "workspace" && project && (
           <>

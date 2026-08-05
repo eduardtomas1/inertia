@@ -1,10 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
 import { defaultSettings } from "../../src/shared/contracts";
-import type { RemoteAccessState } from "../../src/shared/remote-protocol";
+import type { PrivateConnectStateView } from "../../src/shared/private-connect/protocol";
 
 afterEach(() => {
   Reflect.deleteProperty(window, "inertia");
@@ -12,33 +12,41 @@ afterEach(() => {
 
 describe("Settings external section targets", () => {
   it("responds to each new target while preserving ordinary local navigation", async () => {
-    const state: RemoteAccessState = {
+    const state: PrivateConnectStateView = {
       available: true,
       enabled: false,
-      relayUrl: "wss://relay.example/remote",
-      setupMode: "self-hosted",
-      companionUrl: "https://companion.example/",
-      diagnostics: {
-        status: "untested", testedAt: null, transport: null, tls: null,
-        originPolicy: "unknown", relayVersion: null, browserVersion: null,
-        desktopVersion: "0.2.0", relayProtocol: null, remoteProtocol: null,
-        endpointAuthentication: null, persistence: null,
-        endpointOwnership: "unclaimed", endpointEpoch: null, lastConnectedAt: null,
-        retryClass: "none", failureClass: "none", message: null,
-      },
-      connection: "offline",
-      connectionMessage: null,
+      status: "off",
+      statusMessage: null,
+      externalUrl: null,
+      diagnostics: { tailscale: "unknown", magicDns: "unknown", gatewayPort: null, servePort: null, externalUrl: null, mappingOwnership: "unknown", errorClass: null },
       activeSessions: 0,
-      devices: [],
+      devices: [{
+        id: "11111111-1111-4111-8111-111111111111",
+        label: "Phone",
+        preset: "monitor",
+        scopes: ["private:read"],
+        projectIds: ["22222222-2222-4222-8222-222222222222"],
+        grants: [{
+          projectId: "22222222-2222-4222-8222-222222222222",
+          conversationIds: [],
+          includeFutureConversations: true,
+        }],
+        createdAt: "2026-08-04T10:00:00.000Z",
+        expiresAt: "2030-09-01T10:00:00.000Z",
+        lastSeenAt: null,
+        revokedAt: null,
+      }],
       pendingPairings: [],
       invitation: null,
-      audit: [],
+      notice: null,
     };
+    const updatePrivateConnectDevice = vi.fn(async () => state);
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
-        getRemoteAccessState: vi.fn(async () => state),
-        onRemoteAccessState: vi.fn(() => vi.fn()),
+        getPrivateConnectState: vi.fn(async () => state),
+        onPrivateConnectState: vi.fn(() => vi.fn()),
+        updatePrivateConnectDevice,
       },
     });
     const providersTarget = { section: "providers" as const };
@@ -99,24 +107,35 @@ describe("Settings external section targets", () => {
       "General",
     );
 
-    const remoteTarget = { section: "remote" as const };
-    view.rerender(<SettingsView {...props} target={remoteTarget} />);
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "Remote Companion",
+    const connectionsTarget = { section: "connections" as const };
+    view.rerender(<SettingsView {...props} target={connectionsTarget} />);
+    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
+      "Inertia Private Connect",
     );
+    fireEvent.change(await screen.findByLabelText("Phone access"), {
+      target: { value: "collaborate" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save access" }));
+    await waitFor(() => expect(updatePrivateConnectDevice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceId: "11111111-1111-4111-8111-111111111111",
+        preset: "collaborate",
+        projectIds: ["22222222-2222-4222-8222-222222222222"],
+      }),
+    ));
 
     fireEvent.click(screen.getByRole("button", { name: "General" }));
-    view.rerender(<SettingsView {...props} target={remoteTarget} disabled />);
+    view.rerender(<SettingsView {...props} target={connectionsTarget} disabled />);
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
       "General",
     );
 
     view.rerender(<SettingsView
       {...props}
-      target={{ section: "remote" }}
+      target={{ section: "connections" }}
     />);
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "Remote Companion",
+    expect(screen.getByRole("heading", { level: 3 })).toHaveTextContent(
+      "Inertia Private Connect",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));

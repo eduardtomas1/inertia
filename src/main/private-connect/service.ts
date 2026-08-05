@@ -333,6 +333,8 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const maximumDays = preset === "collaborate" ? 30 : 90;
     const expiresAt = new Date(this.now().getTime() + Math.min(Math.max(1, grantDays), maximumDays) * 24 * 60 * 60 * 1_000).toISOString();
     const existing = this.data.devices.find((device) => device.id === pending.deviceId);
+    const retainedDevices = this.data.devices.filter((candidate) =>
+      candidate.id !== pending.deviceId && this.deviceCurrent(candidate));
     const dataBefore = existing ? null : structuredClone(this.data);
     const sessionsBefore = existing ? null : new Map(this.sessions);
     const authorityReduction = existing
@@ -350,14 +352,14 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       revokedAt: null,
       grantVersion: (existing?.grantVersion ?? 0) + 1,
     };
-    if (!existing && this.data.devices.filter((candidate) => this.deviceCurrent(candidate)).length >= 16) throw new Error("The paired-device limit has been reached.");
+    if (retainedDevices.length >= 16) throw new Error("The paired-device limit has been reached.");
     if (existing) {
       for (const session of this.sessions.values()) {
         if (session.deviceId === existing.id) this.sessions.delete(session.id);
       }
       this.data.sessions = this.data.sessions.filter((session) => session.deviceId !== existing.id);
     }
-    this.data.devices = [...this.data.devices.filter((candidate) => candidate.id !== device.id), device];
+    this.data.devices = [...retainedDevices, device];
     this.data.grantGeneration = authorityReduction?.generation
       ?? this.data.grantGeneration + 1;
     const session = this.createSession(device);

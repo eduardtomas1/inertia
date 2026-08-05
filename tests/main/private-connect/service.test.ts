@@ -620,4 +620,34 @@ describe("Private Connect service lifecycle", () => {
     })).resolves.toMatchObject({ ok: false, code: "uncertain" });
     expect(commits).toBe(1);
   });
+
+  it("prunes expired device history before persisting a new pairing", async () => {
+    const memory = testStore();
+    const first = await createServiceWith(memory);
+    await first.setEnabled(true);
+    await first.shutdown();
+    const persisted = memory.saved();
+    if (!persisted) throw new Error("Private Connect state was not persisted");
+    persisted.devices = Array.from({ length: 16 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      label: `Expired ${index + 1}`,
+      scopes: ["private:read"] as const,
+      projectIds: [projectId],
+      grants: [{ projectId, conversationIds: [], includeFutureConversations: true }],
+      createdAt: "2029-01-01T00:00:00.000Z",
+      expiresAt: "2029-02-01T00:00:00.000Z",
+      lastSeenAt: null,
+      revokedAt: null,
+      grantVersion: 1,
+    }));
+    const second = await createServiceWith(memory);
+    await second.startIfEnabled();
+    const invitation = await second.createInvitation();
+    const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
+    const started = await second.pairStart({ invitation: parsed!, deviceId, deviceLabel: "New browser" }, "example");
+    await expect(second.approvePairing(started.requestId, "monitor", [projectId])).resolves.toBeUndefined();
+    expect(memory.saved()?.devices).toEqual([
+      expect.objectContaining({ id: deviceId, label: "New browser" }),
+    ]);
+  });
 });

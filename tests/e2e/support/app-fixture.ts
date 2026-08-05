@@ -457,15 +457,16 @@ export async function createAppFixture(
           { timeout: 5_000 },
         ).toBe(false);
       }
-      // Windows can retain the closed SQLite handle for a brief interval after
-      // the utility process exits. Use Node's bounded EBUSY/EPERM retry path
-      // so successful scenarios are not reported as product failures.
+      // Closed SQLite handles on Windows and recently-settled Git checkpoint
+      // writes on macOS can remain visible for a brief interval after their
+      // owning process exits. Node's recursive removal retries the bounded set
+      // of transient EBUSY/ENOTEMPTY/EPERM failures without hiding a persistent
+      // cleanup problem.
       await rm(testDirectory, {
         recursive: true,
         force: true,
-        ...(process.platform === "win32"
-          ? { maxRetries: 8, retryDelay: 100 }
-          : {}),
+        maxRetries: 8,
+        retryDelay: 100,
       });
     },
   };

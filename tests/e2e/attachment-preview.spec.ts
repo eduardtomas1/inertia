@@ -321,7 +321,10 @@ test("sends a Linux-style pasted PDF as verified agent context", async () => {
   const acceptedRequest = page.getByRole("region", {
     name: "Recovered legacy and orphaned history",
   }).getByText("Summarize the attached PDF.", { exact: true });
-  await expect(acceptedRequest).toBeVisible();
+  // Hosted Windows runners can spend longer than Playwright's default five
+  // seconds cold-loading the bounded PDF stack. Keep this assertion inside
+  // the production initialization deadline instead of racing valid work.
+  await expect(acceptedRequest).toBeVisible({ timeout: 30_000 });
   await expect(attachments).toHaveCount(0);
   await expect(textarea).toHaveValue("");
   await expect(page.getByRole("alert")).toHaveCount(0);

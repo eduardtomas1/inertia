@@ -144,13 +144,13 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.24
+### Version 0.0.25
 
-This release makes recovery scheduling, long-transcript navigation, and provider startup more dependable under real desktop load.
+This release replaces the retired hosted companion stack with **Private Connect**, a Tailscale-only way to monitor selected conversations and collaborate with supervised agents from another device while the desktop remains authoritative.
 
-Automatic SQLite backups now share one quiet-time scheduler with bounded retry and shutdown behavior, while manual recovery stays immediate. Long transcripts reach the real settled bottom without allowing late layout work to drag a reader out of history, including on slower Windows runners. Runtime-ready recovery reconnects immediately, shell-free Codex launches understand `CODEX_HOME=~/…`, and the production desktop benchmark now proves authoritative 300-turn scrolling, provider-to-paint streaming, reader navigation, release, soak, packaging, and shutdown behavior across Linux, macOS, and Windows.
+Private Connect ships inside the desktop app, uses short-lived fragment-only invitations and explicit device grants, and never exposes files, terminals, Git, approvals, secrets, provider settings, Full Access, or arbitrary command execution to the browser. The release also makes provider switching dependable when a native model catalog is empty, routes signed-out providers to their real connection flow, and carries provider questions and free-form answers through the private client without weakening secret-input boundaries.
 
-Download [Inertia v0.0.24](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.24):
+Download [Inertia v0.0.25](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.25):
 
 | Platform | Download |
 | --- | --- |

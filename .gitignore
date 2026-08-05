@@ -61,6 +61,7 @@ Desktop.ini
 *.tmp
 *.swp
 *.swo
+inertia-tailscale-relative-*/
 
 # Local security-review output (never commit)
 .security-reports/

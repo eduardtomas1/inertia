@@ -21,6 +21,23 @@ const session: PrivateConnectSession = {
 };
 const hostHeader = (address: { port: number }): string => `127.0.0.1:${address.port}`;
 
+function rootResponseWithHost(
+  port: number,
+  host: string,
+): Promise<{ status: number; csp: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({ hostname: "127.0.0.1", port, path: "/", headers: { host } }, (response) => {
+      response.resume();
+      response.once("end", () => resolve({
+        status: response.statusCode ?? 0,
+        csp: String(response.headers["content-security-policy"] ?? ""),
+      }));
+    });
+    request.once("error", reject);
+    request.end();
+  });
+}
+
 function requestWithHost(port: number, host: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const request = httpRequest({ hostname: "127.0.0.1", port, path: "/", headers: { host } }, (response) => {
@@ -92,6 +109,10 @@ describe("Private Connect loopback gateway", () => {
       .headers.get("content-security-policy") ?? "";
     expect(policy).toContain(`connect-src 'self' wss://${hostValue} ws://${hostValue}`);
     expect(policy).not.toMatch(/connect-src[^;]*\swss:(?!\/\/)/u);
+    const rejected = await rootResponseWithHost(address.port, `127.0.0.1:${address.port + 1}`);
+    expect(rejected.status).toBe(400);
+    expect(rejected.csp).not.toContain("wss://");
+    expect(rejected.csp).not.toContain("ws://");
   });
 
   it("compares the CSRF guard without leaking a prefix match", async () => {

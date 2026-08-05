@@ -180,9 +180,10 @@ export class PrivateConnectGatewayServer {
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const parsedRequestUrl = parseUrl(request);
     const requestHost = request.headers.host;
+    const hostAllowed = this.validHost(requestHost);
     const headers = securityHeaders(
       parsedRequestUrl?.pathname === "/" || parsedRequestUrl?.pathname.endsWith(".html") === true,
-      this.validHost(requestHost) ? requestHost! : null,
+      hostAllowed ? requestHost!.toLowerCase() : null,
     );
     for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
     if (this.stopped) {
@@ -190,7 +191,7 @@ export class PrivateConnectGatewayServer {
       return;
     }
     const url = parsedRequestUrl;
-    if (!url || !this.validHost(request.headers.host)) {
+    if (!url || !hostAllowed) {
       writeJson(response, 400, { error: "invalid", message: "The request host is invalid." });
       return;
     }

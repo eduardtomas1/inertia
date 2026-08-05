@@ -197,6 +197,7 @@ export const privateConnectConversationDetailSchema = z.object({
     }).strict()).max(100),
   }).strict().nullable().optional(),
   questions: privateConnectSafeQuestionsSchema,
+  inputRequestId: uuid.nullable().optional(),
   waitingForLocalAction: z.boolean(),
 }).strict();
 export type PrivateConnectConversationDetail = z.infer<

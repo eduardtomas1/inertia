@@ -11,7 +11,7 @@ import { PrivateConnectService, type PrivateConnectServiceOptions } from "../../
 import type { PrivateConnectTailscaleController } from "../../../src/main/private-connect/tailscale-controller";
 import type { PrivateConnectStore, PersistedPrivateConnect } from "../../../src/main/private-connect/store";
 import { parsePrivateConnectPairingFragment } from "../../../src/shared/private-connect/pairing-link";
-import { PRIVATE_CONNECT_LIMITS, PRIVATE_CONNECT_SOCKET_CLOSE, type PrivateConnectStateView } from "../../../src/shared/private-connect/protocol";
+import { PRIVATE_CONNECT_LIMITS, PRIVATE_CONNECT_SOCKET_CLOSE, privateConnectConversationDetailSchema, type PrivateConnectStateView } from "../../../src/shared/private-connect/protocol";
 import { privateConnectRuntimeRequestSchema } from "../../../src/shared/private-connect/runtime-contract";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
@@ -232,6 +232,69 @@ describe("Private Connect service lifecycle", () => {
 
     currentTime += PRIVATE_CONNECT_LIMITS.pairingCollectionMs;
     await expect(service.pairStatus(started.requestId)).rejects.toThrow();
+  });
+
+  it("adapts runtime projections into exactly the contract the packaged client parses", async () => {
+    const providerQuestionId = "toolu_01AbCdEfGhIjKlMnOpQrStUv:question:1";
+    const inputRequestId = "88888888-8888-4888-8888-888888888888";
+    const conversationId = "44444444-4444-4444-8444-444444444444";
+    const service = await createServiceWith(testStore(), testTailscale(), {
+      privateConnectRequest: async (_subject, request) => {
+        privateConnectRuntimeRequestSchema.parse(request);
+        return {
+          type: "response", requestId: request.requestId, ok: true,
+          result: {
+            kind: "conversation",
+            validator: "B".repeat(43),
+            detail: {
+              generatedAt: "2030-01-01T00:00:00.000Z",
+              conversation: { id: conversationId, projectId, title: "Conversation", providerLabel: "Test", runId: null, status: "needs-input", pendingLocalApproval: false, promptSafety: { supported: true, headline: "Supported", explanation: "Supervised." }, updatedAt: "2030-01-01T00:00:00.000Z" },
+              messages: [], activities: [], subagents: [],
+              plan: { steps: [{ label: "Investigate", status: "inProgress" }] },
+              inputRequestId,
+              questions: [{
+                id: providerQuestionId,
+                label: "Which branch?",
+                options: [{ id: "main", label: "main" }],
+                allowMultiple: false,
+                allowCustomAnswer: true,
+              }],
+              waitingForLocalAction: false,
+            },
+          },
+        };
+      },
+    });
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+    const started = await service.pairStart({
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId,
+      deviceLabel: "Browser",
+    }, "example");
+    await service.approvePairing(started.requestId, "collaborate", [projectId]);
+    const approved = await service.pairStatus(started.requestId);
+    if (approved.status !== "approved") throw new Error("pairing was not approved");
+    const session = service.session(approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? null);
+
+    const response = await service.handleRequest(session!, {
+      protocolVersion: 1,
+      type: "conversation.get",
+      requestId: "55555555-5555-4555-8555-555555555555",
+      conversationId,
+    });
+    expect(response.ok).toBe(true);
+    if (!response.ok) return;
+    const detail = (response.result as { detail: unknown }).detail;
+    const parsed = privateConnectConversationDetailSchema.safeParse(detail);
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.questions[0]).toMatchObject({
+      id: providerQuestionId,
+      allowCustomAnswer: true,
+    });
+    expect(parsed.data.inputRequestId).toBe(inputRequestId);
   });
 
   it("enables, pairs, grants, authenticates, and revokes a browser", async () => {

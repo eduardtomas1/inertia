@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   PRIVATE_CONNECT_SOCKET_CLOSE,
+  privateConnectConversationDetailSchema,
+  privateConnectStateSchema,
   type PrivateConnectResponse,
 } from "../../../shared/private-connect/protocol";
 import {
@@ -352,10 +354,16 @@ function projectionResult(response: Extract<PrivateConnectResponse, { ok: true }
     || typeof result.validator !== "string"
     || !/^[A-Za-z0-9_-]{43}$/u.test(result.validator)) return null;
   if (kind === "state" && "state" in result) {
-    return { kind, validator: result.validator, state: result.state as Shell };
+    const state = privateConnectStateSchema.safeParse(result.state);
+    return state.success
+      ? { kind, validator: result.validator, state: state.data }
+      : null;
   }
   if (kind === "conversation" && "detail" in result) {
-    return { kind, validator: result.validator, detail: result.detail as Detail };
+    const detail = privateConnectConversationDetailSchema.safeParse(result.detail);
+    return detail.success
+      ? { kind, validator: result.validator, detail: detail.data }
+      : null;
   }
   return kind === "not-modified"
     ? { kind, validator: result.validator }

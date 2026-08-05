@@ -82,6 +82,7 @@ const privateConnectAuditSchema = z.object({
     "device.revoked",
     "device.scope-changed",
     "authority.recovered",
+    "serve.ownership-warning",
     "session.connected",
     "session.disconnected",
     "prompt.accepted",

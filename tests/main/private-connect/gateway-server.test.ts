@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   PrivateConnectGatewayServer,
+  secretsMatch,
   type PrivateConnectGatewayHost,
   type PrivateConnectSession,
 } from "../../../src/main/private-connect/gateway-server";
@@ -82,6 +83,41 @@ describe("Private Connect loopback gateway", () => {
     const ticket = await fetch(`http://${host}/api/session/ws-ticket`, { method: "POST", headers: { Host: host, Origin: origin, Cookie: "__Host-inertia-private-connect=session-token", "Content-Type": "application/json", "Content-Length": String(body.length), "x-inertia-private-connect-csrf": session.csrf }, body });
     expect(ticket.status).toBe(200);
     expect(await ticket.json()).toEqual({ ticket: "ticket", expiresInMs: 45_000 });
+  });
+
+  it("scopes browser socket sources to the validated host instead of every wss origin", async () => {
+    const { address } = await startServer();
+    const hostValue = hostHeader(address);
+    const policy = (await fetch(`http://${hostValue}/`, { headers: { Host: hostValue } }))
+      .headers.get("content-security-policy") ?? "";
+    expect(policy).toContain(`connect-src 'self' wss://${hostValue} ws://${hostValue}`);
+    expect(policy).not.toMatch(/connect-src[^;]*\swss:(?!\/\/)/u);
+  });
+
+  it("compares the CSRF guard without leaking a prefix match", async () => {
+    expect(secretsMatch("csrf-token", "csrf-token")).toBe(true);
+    expect(secretsMatch("csrf-tokenX", "csrf-token")).toBe(false);
+    expect(secretsMatch("csrf-toke", "csrf-token")).toBe(false);
+    expect(secretsMatch("", "csrf-token")).toBe(false);
+    expect(secretsMatch("anything", "")).toBe(false);
+    const { address } = await startServer();
+    const hostValue = hostHeader(address);
+    const request = JSON.stringify({ protocolVersion: 1, type: "client.ping", requestId: "33333333-3333-4333-8333-333333333333" } satisfies PrivateConnectRequest);
+    for (const presented of ["csrf-tok", "csrf-tokenX"]) {
+      const response = await fetch(`http://${hostValue}/api/request`, {
+        method: "POST",
+        headers: {
+          Host: hostValue,
+          Origin: `https://${hostValue}`,
+          Cookie: "__Host-inertia-private-connect=session-token",
+          "Content-Type": "application/json",
+          "Content-Length": String(Buffer.byteLength(request)),
+          "x-inertia-private-connect-csrf": presented,
+        },
+        body: request,
+      });
+      expect(response.status).toBe(403);
+    }
   });
 
   it("requires strict pairing schemas, same-origin mutations, and CSRF", async () => {

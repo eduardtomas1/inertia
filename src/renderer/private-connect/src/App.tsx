@@ -12,31 +12,15 @@ import {
   type PrivateConnectSocket,
   type PairingInvitation,
 } from "./connection";
-import { QuestionForm } from "./components/QuestionForm";
+import { CheckingScreen, PairScreen, WaitingScreen } from "./pairing/PairingScreen";
+import { WorkspaceShell } from "./workspace/WorkspaceShell";
+import type { Detail, Shell } from "./types";
 
 type PairState =
   | { kind: "checking" }
   | { kind: "pair"; invitation: PairingInvitation | null; error: string | null }
   | { kind: "waiting"; requestId: string; comparisonCode: string; error: string | null }
   | { kind: "ready"; csrf: string; error: string | null };
-
-type Shell = {
-  generatedAt: string;
-  projects: Array<{ id: string; name: string }>;
-  conversations: Array<{ id: string; projectId: string; title: string; providerLabel: string; runId: string | null; status: string; pendingLocalApproval: boolean; pendingLocalAction: boolean; updatedAt: string }>;
-  capabilities: { scopes: string[]; preset: "monitor" | "collaborate"; expiresAt: string };
-};
-
-type Detail = {
-  conversation: Shell["conversations"][number];
-  messages: Array<{ id: string; role: "user" | "assistant"; content: string; createdAt: string; turnId: string | null }>;
-  activities?: Array<{ id: string; kind: string; title: string; status: string; createdAt: string }>;
-  subagents?: Array<{ id: string; providerLabel: string; name: string | null; status: string; updatedAt: string }>;
-  plan?: { steps: Array<{ label: string; status: "pending" | "inProgress" | "completed" }> } | null;
-  questions: Array<{ id: string; label: string; options: Array<{ id: string; label: string }>; allowMultiple: boolean; allowCustomAnswer: boolean }>;
-  inputRequestId?: string | null;
-  waitingForLocalAction: boolean;
-};
 
 export default function App({ initialPairingFragment }: { initialPairingFragment: string | null }): React.JSX.Element {
   const invitation = useMemo(() => parsePairingFragment(initialPairingFragment), [initialPairingFragment]);
@@ -326,10 +310,32 @@ export default function App({ initialPairingFragment }: { initialPairingFragment
     }
   };
 
-  if (pair.kind === "checking") return <main className="connect-card"><div className="brand-mark">I</div><h1>Inertia Private Connect</h1><p>Checking this browser’s connection…</p></main>;
-  if (pair.kind === "pair") return <main className="connect-card"><div className="brand-mark">I</div><h1>Inertia Private Connect</h1><p>Pair this browser with your online Inertia computer through your private Tailscale network.</p>{pair.error && <p className="error">{pair.error}</p>}<p className="muted">Open a fresh pairing link from Connections &amp; devices on the desktop.</p></main>;
-  if (pair.kind === "waiting") return <main className="connect-card"><div className="brand-mark">I</div><h1>Waiting for approval</h1><p>Approve this browser on the Inertia desktop.</p><div className="comparison-code" aria-label={`Comparison code ${pair.comparisonCode}`}>{pair.comparisonCode}</div><p className="muted">The code must match what your computer displays.</p></main>;
-  return <main className="shell"><header><div><span className="eyebrow">Inertia Private Connect</span><h1>Your workspace</h1></div><button type="button" onClick={() => void signOut()}>Sign out</button></header>{pair.error && <div className="banner error">{pair.error}</div>}<div className="layout"><aside><h2>Projects</h2>{shell?.projects.map((project) => <section key={project.id}><h3>{project.name}</h3>{shell.conversations.filter((conversation) => conversation.projectId === project.id).map((conversation) => <button type="button" className={selectedConversation === conversation.id ? "conversation-link selected" : "conversation-link"} key={conversation.id} onClick={() => { conversationValidatorsRef.current.delete(conversation.id); setSelectedConversation(conversation.id); setDetail(null); followLatestRef.current = true; }}><span>{conversation.title}</span><small>{conversation.status}</small></button>)}</section>)}</aside><section className="conversation-pane">{detail ? <><div className="conversation-heading"><div><span className="eyebrow">{detail.conversation.providerLabel}</span><h2>{detail.conversation.title}</h2></div>{shell?.capabilities.scopes.includes("private:stop") && detail.conversation.runId && <button type="button" onClick={() => void stopRun()}>Stop run</button>}</div><div className="messages" ref={messagesRef} onScroll={(event) => { const element = event.currentTarget; followLatestRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>{detail.messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span className="role">{message.role === "assistant" ? "Inertia" : "You"}</span><p>{message.content}</p></article>)}</div><ActivitySummary detail={detail} />{detail.questions.length > 0 && detail.inputRequestId && shell?.capabilities.scopes.includes("private:input") && <QuestionForm key={detail.inputRequestId} questions={detail.questions} busy={busy} onAnswer={(answers) => void answerQuestions(answers)} />}{detail.waitingForLocalAction && <div className="banner">This conversation needs an action on the desktop. Secrets and approvals stay local.</div>}{shell?.capabilities.scopes.includes("private:prompt") && <form className="composer" onSubmit={(event) => { event.preventDefault(); void sendPrompt(); }}><textarea aria-label="Send a prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Send a supervised prompt" disabled={busy} /><button type="submit" disabled={busy || !prompt.trim()}>Send</button></form>}</> : <div className="empty"><h2>Choose a conversation</h2><p>Only projects and conversations granted by the desktop appear here.</p></div>}</section></div></main>;
+  if (pair.kind === "checking") return <CheckingScreen />;
+  if (pair.kind === "pair") return <PairScreen error={pair.error} />;
+  if (pair.kind === "waiting") return <WaitingScreen comparisonCode={pair.comparisonCode} />;
+  return (
+    <WorkspaceShell
+      shell={shell}
+      detail={detail}
+      error={pair.error}
+      prompt={prompt}
+      busy={busy}
+      selectedConversation={selectedConversation}
+      messagesRef={messagesRef}
+      onSelectConversation={(conversationId) => {
+        conversationValidatorsRef.current.delete(conversationId);
+        setSelectedConversation(conversationId);
+        setDetail(null);
+        followLatestRef.current = true;
+      }}
+      onScrollIntent={(followLatest) => { followLatestRef.current = followLatest; }}
+      onPromptChange={setPrompt}
+      onSendPrompt={() => void sendPrompt()}
+      onAnswer={(answers) => void answerQuestions(answers)}
+      onStopRun={() => void stopRun()}
+      onSignOut={() => void signOut()}
+    />
+  );
 }
 
 type ProjectionResult =
@@ -354,27 +360,6 @@ function projectionResult(response: Extract<PrivateConnectResponse, { ok: true }
   return kind === "not-modified"
     ? { kind, validator: result.validator }
     : null;
-}
-
-function ActivitySummary({ detail }: { detail: Detail }): React.JSX.Element | null {
-  const activities = (detail.activities ?? []).slice(-6);
-  const subagents = detail.subagents ?? [];
-  const steps = detail.plan?.steps ?? [];
-  if (activities.length === 0 && subagents.length === 0 && steps.length === 0) return null;
-  return (
-    <details className="work-summary">
-      <summary>Current work</summary>
-      {steps.length > 0 && (
-        <section><h3>Plan</h3><ol>{steps.map((step, index) => <li key={`${index}-${step.label}`} data-status={step.status}>{step.label}</li>)}</ol></section>
-      )}
-      {activities.length > 0 && (
-        <section><h3>Recent activity</h3><ul>{activities.map((activity) => <li key={activity.id}><span>{activity.title}</span><small>{activity.status}</small></li>)}</ul></section>
-      )}
-      {subagents.length > 0 && (
-        <section><h3>Delegated agents</h3><ul>{subagents.map((subagent) => <li key={subagent.id}><span>{subagent.name ?? subagent.providerLabel}</span><small>{subagent.status}</small></li>)}</ul></section>
-      )}
-    </details>
-  );
 }
 
 function suggestedDeviceLabel(): string {

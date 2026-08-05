@@ -377,6 +377,9 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       else await this.persist();
       pending.status = "approved";
       pending.cookie = createSessionCookie(sessionCookieValue(session), session.expiresAt);
+      pending.expiresAt = new Date(
+        this.now().getTime() + PRIVATE_CONNECT_LIMITS.pairingCollectionMs,
+      ).toISOString();
       if (this.invitation?.invitationId === pending.invitationId) this.invitation = null;
     } catch (error) {
       if (dataBefore && sessionsBefore) {
@@ -671,9 +674,18 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       this.audit("enabled", null, "Private Connect enabled through private Tailscale HTTPS.");
       await this.persist();
     } catch (error) {
-      await this.tailscale.disableOwnedServe(address.port).catch(() => undefined);
+      const cleanupFailure = await this.tailscale
+        .disableOwnedServe(address.port)
+        .then(() => null, (failure: unknown) => failure);
       await gateway.stop().catch(() => undefined);
       if (operation !== this.enableOperation || this.privacyLocked || this.stopped) return;
+      if (
+        cleanupFailure instanceof PrivateConnectTailscaleError
+        && cleanupFailure.classification === "mapping-ownership-lost"
+      ) {
+        this.diagnostics.mappingOwnership = "unknown";
+        this.audit("serve.ownership-warning", null, "Inertia left an unrecognized Tailscale Serve mapping untouched.");
+      }
       this.status = "error";
       this.statusMessage = error instanceof PrivateConnectTailscaleError ? error.message : "Private Connect could not be established safely.";
       this.diagnostics.errorClass = error instanceof PrivateConnectTailscaleError ? error.classification : "unknown";

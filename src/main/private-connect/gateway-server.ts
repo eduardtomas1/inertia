@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { readFile, realpath, stat } from "node:fs/promises";
@@ -178,7 +179,11 @@ export class PrivateConnectGatewayServer {
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const parsedRequestUrl = parseUrl(request);
-    const headers = securityHeaders(parsedRequestUrl?.pathname === "/" || parsedRequestUrl?.pathname.endsWith(".html") === true);
+    const requestHost = request.headers.host;
+    const headers = securityHeaders(
+      parsedRequestUrl?.pathname === "/" || parsedRequestUrl?.pathname.endsWith(".html") === true,
+      this.validHost(requestHost) ? requestHost! : null,
+    );
     for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
     if (this.stopped) {
       writeJson(response, 503, { error: "unavailable", message: "Private Connect is shutting down." });
@@ -382,6 +387,7 @@ export class PrivateConnectGatewayServer {
       else if (socket.readyState === WebSocket.OPEN) socket.ping();
     }, 30_000);
     heartbeat.unref?.();
+    socket.on("pong", () => { lastActivity = this.now().getTime(); });
     socket.on("message", (raw, isBinary) => {
       lastActivity = this.now().getTime();
       const cutoff = lastActivity - RATE_WINDOW_MS;
@@ -491,7 +497,9 @@ export class PrivateConnectGatewayServer {
   }
 
   private validCsrf(request: IncomingMessage, session: PrivateConnectSession): boolean {
-    return request.headers[CSRF_HEADER] === this.host.csrf(session);
+    const presented = request.headers[CSRF_HEADER];
+    return typeof presented === "string"
+      && secretsMatch(presented, this.host.csrf(session));
   }
 
   private clientKey(request: IncomingMessage): string {
@@ -543,6 +551,15 @@ function requestIdFromBody(value: unknown): string {
 
 function requestIdFromRaw(raw: WebSocket.RawData): string {
   try { return requestIdFromBody(JSON.parse(raw.toString("utf8")) as unknown); } catch { return "00000000-0000-4000-8000-000000000000"; }
+}
+
+export function secretsMatch(presented: string, expected: string): boolean {
+  const left = Buffer.from(presented, "utf8");
+  const right = Buffer.from(expected, "utf8");
+  if (right.byteLength === 0) return false;
+  const padded = Buffer.alloc(right.byteLength);
+  left.copy(padded);
+  return timingSafeEqual(padded, right) && left.byteLength === right.byteLength;
 }
 
 function plainObject(value: unknown): value is Record<string, unknown> {
@@ -597,10 +614,13 @@ function normalizeNetworkLabel(value: string | string[] | undefined): string | n
   return sanitized || null;
 }
 
-function securityHeaders(html: boolean): Record<string, string> {
+function securityHeaders(html: boolean, validatedHost: string | null): Record<string, string> {
+  const socketSources = validatedHost === null
+    ? ""
+    : ` wss://${validatedHost} ws://${validatedHost}`;
   return {
     "Content-Security-Policy": html
-      ? "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' wss:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+      ? `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'${socketSources}; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
       : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",

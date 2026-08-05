@@ -11,7 +11,7 @@ import { PrivateConnectService, type PrivateConnectServiceOptions } from "../../
 import type { PrivateConnectTailscaleController } from "../../../src/main/private-connect/tailscale-controller";
 import type { PrivateConnectStore, PersistedPrivateConnect } from "../../../src/main/private-connect/store";
 import { parsePrivateConnectPairingFragment } from "../../../src/shared/private-connect/pairing-link";
-import { PRIVATE_CONNECT_SOCKET_CLOSE, type PrivateConnectStateView } from "../../../src/shared/private-connect/protocol";
+import { PRIVATE_CONNECT_LIMITS, PRIVATE_CONNECT_SOCKET_CLOSE, type PrivateConnectStateView } from "../../../src/shared/private-connect/protocol";
 import { privateConnectRuntimeRequestSchema } from "../../../src/shared/private-connect/runtime-contract";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
@@ -205,6 +205,33 @@ describe("Private Connect service lifecycle", () => {
     await expect(service.createInvitation()).resolves.toMatchObject({
       expiresAt: expect.any(String),
     });
+  });
+
+  it("gives a late approval its own collection window instead of the invitation deadline", async () => {
+    let currentTime = Date.parse("2030-01-01T00:00:00.000Z");
+    const service = await createServiceWith(
+      testStore(),
+      testTailscale(),
+      {},
+      () => new Date(currentTime),
+    );
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+    const started = await service.pairStart({
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId,
+      deviceLabel: "Browser",
+    }, "example");
+    currentTime = Date.parse(invitation.expiresAt) - 1_000;
+    await service.approvePairing(started.requestId, "monitor", [projectId]);
+
+    currentTime = Date.parse(invitation.expiresAt) + 5_000;
+    const collected = await service.pairStatus(started.requestId);
+    expect(collected.status).toBe("approved");
+    expect(collected).toHaveProperty("cookie");
+
+    currentTime += PRIVATE_CONNECT_LIMITS.pairingCollectionMs;
+    await expect(service.pairStatus(started.requestId)).rejects.toThrow();
   });
 
   it("enables, pairs, grants, authenticates, and revokes a browser", async () => {

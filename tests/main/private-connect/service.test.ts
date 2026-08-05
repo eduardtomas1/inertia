@@ -12,8 +12,10 @@ import type { PrivateConnectTailscaleController } from "../../../src/main/privat
 import type { PrivateConnectStore, PersistedPrivateConnect } from "../../../src/main/private-connect/store";
 import { parsePrivateConnectPairingFragment } from "../../../src/shared/private-connect/pairing-link";
 import { PRIVATE_CONNECT_SOCKET_CLOSE } from "../../../src/shared/private-connect/protocol";
+import { privateConnectRuntimeRequestSchema } from "../../../src/shared/private-connect/runtime-contract";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
+const otherProjectId = "99999999-9999-4999-8999-999999999999";
 const deviceId = "22222222-2222-4222-8222-222222222222";
 const directories: string[] = [];
 const services: PrivateConnectService[] = [];
@@ -34,15 +36,23 @@ afterEach(async () => {
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 
-function testStore(initial: PersistedPrivateConnect | null = null): { store: PrivateConnectStore; saved: () => PersistedPrivateConnect | null } {
+function testStore(initial: PersistedPrivateConnect | null = null): { store: PrivateConnectStore; saved: () => PersistedPrivateConnect | null; failNextSave: () => void } {
   let state: PersistedPrivateConnect | null = initial;
+  let rejectNextSave = false;
   return {
     store: {
       available: () => true,
       load: async () => state,
-      save: async (next: PersistedPrivateConnect) => { state = structuredClone(next); },
+      save: async (next: PersistedPrivateConnect) => {
+        if (rejectNextSave) {
+          rejectNextSave = false;
+          throw new Error("simulated persistence failure");
+        }
+        state = structuredClone(next);
+      },
     } as unknown as PrivateConnectStore,
     saved: () => state,
+    failNextSave: () => { rejectNextSave = true; },
   };
 }
 
@@ -63,7 +73,7 @@ function testTailscale(calls?: { ensure: unknown[][]; disable: number[] }): Priv
   } as unknown as PrivateConnectTailscaleController;
 }
 
-async function createServiceWith(memory = testStore(), tailscale = testTailscale(), runtimeOverrides: Partial<PrivateConnectServiceOptions["runtime"]> = {}): Promise<PrivateConnectService> {
+async function createServiceWith(memory = testStore(), tailscale = testTailscale(), runtimeOverrides: Partial<PrivateConnectServiceOptions["runtime"]> = {}, now: () => Date = () => new Date("2030-01-01T00:00:00.000Z")): Promise<PrivateConnectService> {
   const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-service-"));
   directories.push(directory);
   await mkdir(join(directory, "static"));
@@ -72,6 +82,7 @@ async function createServiceWith(memory = testStore(), tailscale = testTailscale
     store: memory.store,
     runtime: {
       privateConnectRequest: async (_subject, request) => {
+        privateConnectRuntimeRequestSchema.parse(request);
         if (request.type === "state.get") return {
           type: "response", requestId: request.requestId, ok: true,
           result: {
@@ -104,7 +115,7 @@ async function createServiceWith(memory = testStore(), tailscale = testTailscale
     staticRoot: join(directory, "static"),
     buildVersion: "test",
     tailscale,
-    now: () => new Date("2030-01-01T00:00:00.000Z"),
+    now,
   });
   services.push(service);
   return service;
@@ -113,6 +124,66 @@ async function createServiceWith(memory = testStore(), tailscale = testTailscale
 async function createService(): Promise<PrivateConnectService> { return await createServiceWith(); }
 
 describe("Private Connect service lifecycle", () => {
+  it("does not expose an approved browser session before its grant is durable", async () => {
+    const memory = testStore();
+    const service = await createServiceWith(memory);
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+    const started = await service.pairStart({
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId,
+      deviceLabel: "Browser",
+    }, "example");
+    memory.failNextSave();
+
+    await expect(service.approvePairing(started.requestId, "collaborate", [projectId]))
+      .rejects.toThrow("simulated persistence failure");
+    await expect(service.pairStatus(started.requestId)).resolves.toMatchObject({
+      status: "pending",
+    });
+    expect(service.state().devices).toEqual([]);
+    expect(memory.saved()?.devices).toEqual([]);
+
+    await service.approvePairing(started.requestId, "collaborate", [projectId], 30, [
+      { projectId, conversationIds: ["allowed-conversation"], includeFutureConversations: false },
+      { projectId: otherProjectId, conversationIds: [], includeFutureConversations: true },
+    ]);
+    expect(service.state().devices[0]).toMatchObject({
+      projectIds: [projectId],
+      grants: [{ projectId, conversationIds: ["allowed-conversation"], includeFutureConversations: false }],
+    });
+    await expect(service.pairStatus(started.requestId)).resolves.toMatchObject({
+      status: "approved",
+    });
+  });
+
+  it("expires an approved invitation that the browser never collects", async () => {
+    let currentTime = Date.parse("2030-01-01T00:00:00.000Z");
+    const service = await createServiceWith(
+      testStore(),
+      testTailscale(),
+      {},
+      () => new Date(currentTime),
+    );
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+    const started = await service.pairStart({
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId,
+      deviceLabel: "Browser",
+    }, "example");
+    await service.approvePairing(started.requestId, "monitor", [projectId]);
+    currentTime = Date.parse(invitation.expiresAt) + 1;
+
+    await expect(service.pairStatus(started.requestId)).resolves.toEqual({
+      status: "expired",
+      requestId: started.requestId,
+    });
+    await expect(service.createInvitation()).resolves.toMatchObject({
+      expiresAt: expect.any(String),
+    });
+  });
+
   it("enables, pairs, grants, authenticates, and revokes a browser", async () => {
     const service = await createService();
     await service.setEnabled(true);
@@ -141,6 +212,21 @@ describe("Private Connect service lifecycle", () => {
     expect(ping).toMatchObject({ ok: true, result: { kind: "pong" } });
     const state = await service.handleRequest(session!, { protocolVersion: 1, type: "state.get", requestId: "55555555-5555-4555-8555-555555555555" });
     expect(state).toMatchObject({ ok: true, result: { kind: "state", validator: "A".repeat(43), state: { capabilities: { scopes: ["private:read", "private:prompt", "private:input", "private:stop"], preset: "collaborate" } } } });
+    await expect(service.handleRequest(session!, {
+      protocolVersion: 1,
+      type: "input.respond",
+      requestId: "66666666-6666-4666-8666-666666666666",
+      conversationId: "44444444-4444-4444-8444-444444444444",
+      inputRequestId: "77777777-7777-4777-8777-777777777777",
+      answers: { choice: ["yes"] },
+    })).resolves.toMatchObject({ ok: false, code: "unavailable" });
+    await expect(service.handleRequest(session!, {
+      protocolVersion: 1,
+      type: "run.stop",
+      requestId: "88888888-8888-4888-8888-888888888888",
+      conversationId: "44444444-4444-4444-8444-444444444444",
+      runId: "run-1",
+    })).resolves.toMatchObject({ ok: false, code: "unavailable" });
     await service.revokeDevice(deviceId);
     expect(service.session(cookie)).toBeNull();
     await expect(closed).resolves.toBe(
@@ -302,7 +388,13 @@ describe("Private Connect service lifecycle", () => {
       "monitor",
       [projectId],
       "2030-01-15T00:00:00.000Z",
+      [{ projectId: otherProjectId, conversationIds: [], includeFutureConversations: true }],
     );
+
+    expect(service.state().devices[0]).toMatchObject({
+      projectIds: [projectId],
+      grants: [{ projectId, conversationIds: [], includeFutureConversations: true }],
+    });
 
     await expect(closed).resolves.toBe(
       PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged,
@@ -326,6 +418,7 @@ describe("Private Connect service lifecycle", () => {
     const stopGate = new Promise<void>((resolve) => { releaseStop = resolve; });
     const service = await createServiceWith(testStore(), testTailscale(), {
       privateConnectRequest: async (_subject, request) => {
+        privateConnectRuntimeRequestSchema.parse(request);
         if (request.type !== "run.stop") throw new Error("unexpected request");
         stopEntered = true;
         await stopGate;

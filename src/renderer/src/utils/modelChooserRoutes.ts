@@ -243,9 +243,19 @@ export function buildComposerModelRoutes(
   if (backendProfiles.length === 0) {
     return fallbackNativeRoutes(providers, currentSelection);
   }
-  return backendProfiles.flatMap((profile) =>
+  const profileRoutes = backendProfiles.flatMap((profile) =>
     profile.models.map((model) =>
       profileRoute(profile, model.id, providers, currentSelection)));
+  const nativeProvidersWithRoutes = new Set(
+    profileRoutes.flatMap((route) =>
+      route.source === "built-in" && route.providerId
+        ? [route.providerId]
+        : []),
+  );
+  const missingNativeRoutes = fallbackNativeRoutes(providers, currentSelection)
+    .filter(({ providerId }) =>
+      providerId !== null && !nativeProvidersWithRoutes.has(providerId));
+  return [...profileRoutes, ...missingNativeRoutes];
 }
 
 export function selectedModelSearchRoute(

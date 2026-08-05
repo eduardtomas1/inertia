@@ -16,9 +16,8 @@ import {
   createPrivateConnectPairingLink,
 } from "../../shared/private-connect/pairing-link";
 import {
-  normalizePrivateConnectGrants,
+  privateConnectGrantsForSelectedProjects,
   privateConnectGrantedProjectIds,
-  privateConnectGrantsFromProjectIds,
   type PrivateConnectConversationGrant,
 } from "../../shared/private-connect/grants";
 import {
@@ -282,8 +281,9 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   async pairStatus(requestId: string): Promise<PrivateConnectPairStatus> {
     const pending = this.pending.get(requestId);
     if (!pending) throw new Error("That pairing request is no longer available.");
-    if (pending.status === "pending" && Date.parse(pending.expiresAt) <= this.now().getTime()) {
+    if (Date.parse(pending.expiresAt) <= this.now().getTime()) {
       pending.status = "expired";
+      pending.cookie = null;
     }
     if (pending.status === "approved" && pending.cookie) {
       const result: PrivateConnectPairStatus = {
@@ -320,10 +320,12 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const normalizedProjects = [...new Set(projectIds.map((id) => id.trim()))].filter((id) => isUuid(id)).slice(0, PRIVATE_CONNECT_LIMITS.projectIds);
     if (normalizedProjects.length === 0) throw new Error("Choose at least one project.");
     const scopes = scopesForPreset(preset);
-    const normalizedGrants = normalizePrivateConnectGrants(grants ?? privateConnectGrantsFromProjectIds(normalizedProjects));
+    const normalizedGrants = privateConnectGrantsForSelectedProjects(normalizedProjects, grants);
     const maximumDays = preset === "collaborate" ? 30 : 90;
     const expiresAt = new Date(this.now().getTime() + Math.min(Math.max(1, grantDays), maximumDays) * 24 * 60 * 60 * 1_000).toISOString();
     const existing = this.data.devices.find((device) => device.id === pending.deviceId);
+    const dataBefore = existing ? null : structuredClone(this.data);
+    const sessionsBefore = existing ? null : new Map(this.sessions);
     const authorityReduction = existing
       ? await this.beginAuthorityReduction()
       : null;
@@ -350,12 +352,19 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     this.data.grantGeneration = authorityReduction?.generation
       ?? this.data.grantGeneration + 1;
     const session = this.createSession(device);
-    pending.status = "approved";
-    pending.cookie = createSessionCookie(sessionCookieValue(session), session.expiresAt);
     this.audit("pairing.accepted", device.id, `Paired browser with ${preset === "collaborate" ? "Collaborate" : "Monitor"} access.`);
     try {
       if (authorityReduction) await this.finishAuthorityReduction(authorityReduction);
       else await this.persist();
+      pending.status = "approved";
+      pending.cookie = createSessionCookie(sessionCookieValue(session), session.expiresAt);
+    } catch (error) {
+      if (dataBefore && sessionsBefore) {
+        this.data = dataBefore;
+        this.sessions.clear();
+        for (const [id, priorSession] of sessionsBefore) this.sessions.set(id, priorSession);
+      }
+      throw error;
     } finally {
       if (existing) this.gateway.closeSessionsForDevice(existing.id);
     }
@@ -393,7 +402,10 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const expiry = Date.parse(expiresAt);
     const maximum = this.now().getTime() + (preset === "collaborate" ? 30 : 90) * 24 * 60 * 60 * 1_000;
     if (!Number.isFinite(expiry) || expiry <= this.now().getTime() || expiry > maximum) throw new Error("The device expiry is outside the allowed range.");
-    const normalizedGrants = normalizePrivateConnectGrants(grants ?? privateConnectGrantsFromProjectIds(projectIds));
+    const normalizedProjects = [...new Set(projectIds.map((id) => id.trim()))]
+      .filter((id) => isUuid(id))
+      .slice(0, PRIVATE_CONNECT_LIMITS.projectIds);
+    const normalizedGrants = privateConnectGrantsForSelectedProjects(normalizedProjects, grants);
     if (normalizedGrants.length === 0) throw new Error("Choose at least one project.");
     const authorityReduction = await this.beginAuthorityReduction();
     device.scopes = scopesForPreset(preset);
@@ -476,10 +488,14 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       if (parsed.data.type === "client.ping") return success(request.requestId, { kind: "pong", at: this.now().toISOString() });
       if (!hasPrivateConnectScope(device.scopes, requiredScope(parsed.data.type))) return failure(request.requestId, "forbidden", "This device does not have permission for that action.");
       if (parsed.data.type === "input.respond" || parsed.data.type === "run.stop") {
+        const lifecycleRequest = parsed.data;
         return await this.trackMutation(async () => {
+          const runtimeRequest: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }> = lifecycleRequest.type === "input.respond"
+            ? { type: "input.respond", requestId: lifecycleRequest.requestId, conversationId: lifecycleRequest.conversationId, inputRequestId: lifecycleRequest.inputRequestId, answers: lifecycleRequest.answers }
+            : { type: "run.stop", requestId: lifecycleRequest.requestId, conversationId: lifecycleRequest.conversationId, runId: lifecycleRequest.runId };
           const response = await this.options.runtime.privateConnectRequest(
             this.runtimeAuthorization(session, device),
-            parsed.data as Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
+            runtimeRequest,
           );
           return adaptPrivateConnectRuntimeResponse(response, device);
         });
@@ -665,7 +681,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   private prunePendingPairings(): void {
     const now = this.now().getTime();
     for (const [requestId, pending] of this.pending) {
-      if (pending.status === "pending" && Date.parse(pending.expiresAt) <= now) pending.status = "expired";
+      if (Date.parse(pending.expiresAt) <= now) pending.status = "expired";
       if (pending.status === "expired" || pending.status === "denied") this.pending.delete(requestId);
     }
   }

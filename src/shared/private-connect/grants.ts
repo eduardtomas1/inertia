@@ -58,6 +58,25 @@ export function privateConnectGrantsFromProjectIds(
   );
 }
 
+export function privateConnectGrantsForSelectedProjects(
+  projectIds: readonly string[],
+  grants?: readonly PrivateConnectConversationGrant[],
+): PrivateConnectConversationGrant[] {
+  const selectedProjectIds = [...new Set(projectIds.map((id) => id.trim()))]
+    .filter(Boolean)
+    .slice(0, PRIVATE_CONNECT_GRANT_LIMITS.projects);
+  const suppliedByProject = new Map(
+    normalizePrivateConnectGrants(grants ?? [])
+      .filter(({ projectId }) => selectedProjectIds.includes(projectId))
+      .map((grant) => [grant.projectId, grant]),
+  );
+  return selectedProjectIds.map((projectId) => suppliedByProject.get(projectId) ?? {
+    projectId,
+    conversationIds: [],
+    includeFutureConversations: true,
+  });
+}
+
 export function privateConnectGrantedProjectIds(
   grants: readonly PrivateConnectConversationGrant[],
 ): string[] {

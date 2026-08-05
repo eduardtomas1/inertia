@@ -7,6 +7,7 @@ import type {
 } from "@shared/private-connect/protocol";
 import type { PrivateConnectPreset } from "@shared/private-connect/scopes";
 import { usePrivateConnectState } from "../hooks/usePrivateConnectState";
+import { writeClipboardText } from "../utils/clipboard";
 
 type UpdateState = (
   operation: () => Promise<PrivateConnectStateView>,
@@ -82,7 +83,7 @@ export function ConnectionsAndDevicesSettings({
   const copyInvitation = async (): Promise<void> => {
     if (!state.invitation) return;
     try {
-      await navigator.clipboard.writeText(state.invitation.url);
+      if (!await writeClipboardText(state.invitation.url)) throw new Error("Clipboard write failed.");
       setMessage("Pairing link copied.");
     } catch {
       setMessage("Copy failed. Select the link and copy it manually.");

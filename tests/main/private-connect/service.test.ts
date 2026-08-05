@@ -11,7 +11,7 @@ import { PrivateConnectService, type PrivateConnectServiceOptions } from "../../
 import type { PrivateConnectTailscaleController } from "../../../src/main/private-connect/tailscale-controller";
 import type { PrivateConnectStore, PersistedPrivateConnect } from "../../../src/main/private-connect/store";
 import { parsePrivateConnectPairingFragment } from "../../../src/shared/private-connect/pairing-link";
-import { PRIVATE_CONNECT_SOCKET_CLOSE } from "../../../src/shared/private-connect/protocol";
+import { PRIVATE_CONNECT_SOCKET_CLOSE, type PrivateConnectStateView } from "../../../src/shared/private-connect/protocol";
 import { privateConnectRuntimeRequestSchema } from "../../../src/shared/private-connect/runtime-contract";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
@@ -73,7 +73,13 @@ function testTailscale(calls?: { ensure: unknown[][]; disable: number[] }): Priv
   } as unknown as PrivateConnectTailscaleController;
 }
 
-async function createServiceWith(memory = testStore(), tailscale = testTailscale(), runtimeOverrides: Partial<PrivateConnectServiceOptions["runtime"]> = {}, now: () => Date = () => new Date("2030-01-01T00:00:00.000Z")): Promise<PrivateConnectService> {
+async function createServiceWith(
+  memory = testStore(),
+  tailscale = testTailscale(),
+  runtimeOverrides: Partial<PrivateConnectServiceOptions["runtime"]> = {},
+  now: () => Date = () => new Date("2030-01-01T00:00:00.000Z"),
+  onStateChange?: PrivateConnectServiceOptions["onStateChange"],
+): Promise<PrivateConnectService> {
   const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-service-"));
   directories.push(directory);
   await mkdir(join(directory, "static"));
@@ -116,6 +122,7 @@ async function createServiceWith(memory = testStore(), tailscale = testTailscale
     buildVersion: "test",
     tailscale,
     now,
+    onStateChange,
   });
   services.push(service);
   return service;
@@ -303,6 +310,44 @@ describe("Private Connect service lifecycle", () => {
     await second.setPrivacyLocked(false);
     expect(calls.ensure).toHaveLength(1);
     expect(second.state()).toMatchObject({ enabled: true, status: "ready" });
+  });
+
+  it("cancels an in-progress startup before a queued lock cleanup can run", async () => {
+    let releaseEnsure!: () => void;
+    let reportEnsureEntered!: () => void;
+    const ensureEntered = new Promise<void>((resolve) => { reportEnsureEntered = resolve; });
+    const ensureReleased = new Promise<void>((resolve) => { releaseEnsure = resolve; });
+    const observed: PrivateConnectStateView[] = [];
+    const calls = { disable: 0 };
+    const tailscale = {
+      ensurePrivateServe: async (_gatewayPort: number) => {
+        reportEnsureEntered();
+        await ensureReleased;
+        return {
+          status: { backendState: "Running", connected: true, dnsName: "desktop.example.ts.net", tailnetLabel: "example", addresses: ["100.64.0.2"] },
+          servePort: 8443,
+          gatewayPort: _gatewayPort,
+          externalUrl: "https://desktop.example.ts.net:8443/",
+          ownership: { port: 8443, gatewayPort: _gatewayPort, target: `http://127.0.0.1:${_gatewayPort}` },
+        };
+      },
+      disableOwnedServe: async () => { calls.disable += 1; },
+    } as unknown as PrivateConnectTailscaleController;
+    const service = await createServiceWith(
+      testStore(),
+      tailscale,
+      {},
+      undefined,
+      (state) => observed.push(state),
+    );
+    const enabling = service.setEnabled(true);
+    await ensureEntered;
+    const locking = service.setPrivacyLocked(true);
+    releaseEnsure();
+    await Promise.all([enabling, locking]);
+    expect(observed.some(({ status }) => status === "ready")).toBe(false);
+    expect(calls.disable).toBeGreaterThan(0);
+    expect(service.state()).toMatchObject({ enabled: false, status: "error", externalUrl: null });
   });
 
   it("reconciles persisted Serve ownership and sessions after a restart", async () => {

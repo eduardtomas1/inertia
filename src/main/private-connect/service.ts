@@ -206,14 +206,16 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   async setPrivacyLocked(locked: boolean): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || this.privacyLocked === locked) return;
+    this.privacyLocked = locked;
+    if (locked) {
+      this.enableOperation += 1;
+      this.resumeAfterUnlock = this.data?.enabled === true
+        && (this.status === "ready" || this.status === "starting" || this.status === "off");
+    }
     await this.enqueueLifecycle(async () => {
-      if (this.privacyLocked === locked || this.stopped) return;
-      this.privacyLocked = locked;
+      if (this.stopped) return;
       if (locked) {
-        this.enableOperation += 1;
-        this.resumeAfterUnlock = this.data?.enabled === true
-          && (this.status === "ready" || this.status === "off");
         this.tickets.clear();
         this.gateway.closeAllSessions(
           PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable,
@@ -226,6 +228,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
         this.emit();
         return;
       }
+      if (this.privacyLocked) return;
       if (this.resumeAfterUnlock && this.data?.enabled) {
         this.resumeAfterUnlock = false;
         try { await this.enable(); }

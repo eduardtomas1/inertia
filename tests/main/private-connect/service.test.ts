@@ -131,6 +131,22 @@ async function createServiceWith(
 async function createService(): Promise<PrivateConnectService> { return await createServiceWith(); }
 
 describe("Private Connect service lifecycle", () => {
+  it("rejoins a pending pairing when the browser retries the same invitation", async () => {
+    const service = await createService();
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+    const request = {
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId,
+      deviceLabel: "Browser",
+    };
+
+    const started = await service.pairStart(request, "example");
+
+    await expect(service.pairStart(request, "example")).resolves.toEqual(started);
+    expect(service.state().pendingPairings).toHaveLength(1);
+  });
+
   it("does not expose an approved browser session before its grant is durable", async () => {
     const memory = testStore();
     const service = await createServiceWith(memory);

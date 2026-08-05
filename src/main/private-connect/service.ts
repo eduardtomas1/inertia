@@ -263,9 +263,18 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       this.invitation = null;
       throw new Error("That Private Connect invitation has expired.");
     }
-    if (this.pending.size > 0) throw new Error("A pairing request is already waiting for approval.");
     const deviceLabel = sanitizeDeviceLabel(request.deviceLabel);
     if (!deviceLabel || !isUuid(request.deviceId)) throw new Error("The browser identity is invalid.");
+    const existing = [...this.pending.values()].find((pending) => pending.invitationId === invitation.invitationId);
+    if (existing) {
+      if (existing.deviceId !== request.deviceId) throw new Error("A pairing request is already waiting for approval.");
+      return {
+        requestId: existing.requestId,
+        expiresAt: existing.expiresAt,
+        comparisonCode: existing.comparisonCode,
+      };
+    }
+    if (this.pending.size > 0) throw new Error("A pairing request is already waiting for approval.");
     const requestId = randomUUID();
     const comparisonCode = comparisonCodeFor(this.data!.hostId, request.deviceId, invitation.invitationId);
     const pending: PendingPairing = {
@@ -281,7 +290,6 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       cookie: null,
     };
     this.pending.set(requestId, pending);
-    this.invitation = null;
     this.audit("pairing.requested", request.deviceId, "A browser requested Private Connect pairing.");
     this.emit();
     return { requestId, expiresAt: pending.expiresAt, comparisonCode };
@@ -369,6 +377,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       else await this.persist();
       pending.status = "approved";
       pending.cookie = createSessionCookie(sessionCookieValue(session), session.expiresAt);
+      if (this.invitation?.invitationId === pending.invitationId) this.invitation = null;
     } catch (error) {
       if (dataBefore && sessionsBefore) {
         this.data = dataBefore;
@@ -386,6 +395,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const pending = this.pending.get(requestId);
     if (!pending) return;
     pending.status = "denied";
+    if (this.invitation?.invitationId === pending.invitationId) this.invitation = null;
     this.audit("pairing.denied", pending.deviceId, "A Private Connect pairing request was denied.");
     this.emit();
   }
@@ -723,7 +733,10 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const now = this.now().getTime();
     for (const [requestId, pending] of this.pending) {
       if (Date.parse(pending.expiresAt) <= now) pending.status = "expired";
-      if (pending.status === "expired" || pending.status === "denied") this.pending.delete(requestId);
+      if (pending.status === "expired" || pending.status === "denied") {
+        this.pending.delete(requestId);
+        if (this.invitation?.invitationId === pending.invitationId) this.invitation = null;
+      }
     }
   }
 

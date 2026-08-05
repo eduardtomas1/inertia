@@ -1,6 +1,6 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join, relative } from "node:path";
+import { delimiter, isAbsolute, join, relative } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +10,16 @@ import {
   runTailscaleCommand,
 } from "../../../src/main/private-connect/tailscale-command";
 
+const hostPlatform = process.platform;
+const hostExecutableName = hostPlatform === "win32" ? "tailscale.exe" : "tailscale";
+
+async function writeDiscoverableExecutable(directory: string): Promise<string> {
+  const executable = join(directory, hostExecutableName);
+  await writeFile(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  if (hostPlatform !== "win32") await chmod(executable, 0o755);
+  return executable;
+}
+
 describe("Private Connect Tailscale command boundary", () => {
   it("accepts only the trusted Tailscale consent origin", () => {
     expect(extractTrustedServeConsentUrl("https://login.tailscale.com/a?b=c")).toBe("https://login.tailscale.com/a?b=c");
@@ -17,29 +27,40 @@ describe("Private Connect Tailscale command boundary", () => {
     expect(extractTrustedServeConsentUrl("not a URL")).toBeNull();
   });
 
-  it("discovers an executable without invoking a shell", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "inertia-tailscale-command-"));
-    const executable = join(directory, "tailscale");
-    await writeFile(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-    await chmod(executable, 0o755);
-    expect(await discoverTailscaleExecutable("linux", { PATH: directory })).toBe(executable);
+  it("discovers an executable in a spaced directory without invoking a shell", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia tailscale command "));
+    try {
+      const executable = await writeDiscoverableExecutable(directory);
+      expect(await discoverTailscaleExecutable(hostPlatform, { PATH: directory })).toBe(executable);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("ignores relative PATH entries when discovering Tailscale", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "inertia-tailscale-relative-"));
+    const directory = await mkdtemp(join(process.cwd(), "inertia-tailscale-relative-"));
     try {
-      const executable = join(directory, "tailscale");
-      await writeFile(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-      await chmod(executable, 0o755);
+      const executable = await writeDiscoverableExecutable(directory);
       const relativeDirectory = relative(process.cwd(), directory);
-      expect(await discoverTailscaleExecutable("linux", {
+      expect(isAbsolute(relativeDirectory)).toBe(false);
+      expect(await discoverTailscaleExecutable(hostPlatform, {
         PATH: `${relativeDirectory}${delimiter}${directory}`,
       })).toBe(executable);
-      expect(await discoverTailscaleExecutable("linux", {
+      expect(await discoverTailscaleExecutable(hostPlatform, {
         PATH: relativeDirectory,
       })).toBeNull();
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("never resolves a relative PATH entry for any target platform", async () => {
+    for (const platform of ["linux", "darwin", "win32"] as const) {
+      const separator = platform === "win32" ? ";" : ":";
+      const found = await discoverTailscaleExecutable(platform, {
+        PATH: [".", "bin", "..", ""].join(separator),
+      });
+      expect(found === null || isAbsolute(found)).toBe(true);
     }
   });
 

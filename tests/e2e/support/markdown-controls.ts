@@ -13,16 +13,17 @@ export async function revealVirtualizedTimelineTurn(input: {
   lastIndex: number;
 }): Promise<void> {
   const { page, target, index, lastIndex } = input;
+  const virtualRows = page.locator(".response-virtual-item");
+  await expect.poll(() => virtualRows.count()).toBeGreaterThan(0);
   if (await target.count() === 0) {
     const minimap = page.getByRole("navigation", {
       name: "Conversation minimap",
     });
     if (await minimap.isVisible().catch(() => false)) {
-      await minimap.getByRole("button").nth(index).click();
-      await expect.poll(
-        () => target.count(),
-        { timeout: 2_000 },
-      ).toBe(1).catch(() => undefined);
+      const markers = minimap.getByRole("button");
+      await expect(markers).toHaveCount(lastIndex + 1);
+      await markers.nth(index).click();
+      await expect(target).toHaveCount(1);
     }
     if (await target.count() === 0) {
       const transcript = page.locator(".message-scroll");
@@ -32,9 +33,10 @@ export async function revealVirtualizedTimelineTurn(input: {
       }, index / lastIndex);
       await expect.poll(async () => {
         if (await target.count() === 1) return true;
-        const mounted = await page.locator(".response-virtual-item")
+        const mounted = await virtualRows
           .evaluateAll((items) => items.map((item) =>
             Number((item as HTMLElement).dataset.index)));
+        if (mounted.length === 0) return false;
         await transcript.evaluate((element, direction) => {
           const step = Math.max(100, element.clientHeight * 0.75);
           element.scrollTop += direction * step;

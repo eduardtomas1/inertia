@@ -10,28 +10,12 @@ export function mergeConversationShell(
   detail: ConversationDetail,
   shell: ConversationShell,
 ): ConversationDetail {
-  const conversation: Conversation = {
-    ...detail.conversation,
-    id: shell.id,
-    projectId: shell.projectId,
-    title: shell.title,
-    providerId: shell.providerId,
-    model: shell.model,
-    reasoningEffort: shell.reasoningEffort,
-    interactionMode: shell.interactionMode,
-    accessMode: shell.accessMode,
-    status: shell.status,
-    attentionKind: shell.attentionKind,
-    branch: shell.branch,
-    worktreePath: shell.worktreePath,
-    providerSessionId: shell.providerSessionId,
-    archivedAt: shell.archivedAt,
-    settledAt: shell.settledAt,
-    completedAt: shell.completedAt,
-    lastViewedAt: shell.lastViewedAt,
-    createdAt: shell.createdAt,
-    updatedAt: shell.updatedAt,
-  };
+  const conversation = Object.fromEntries(
+    Object.entries(shell).filter(([field]) =>
+      field !== "latestTurn"
+      && field !== "pendingApproval"
+      && field !== "pendingInput"),
+  ) as unknown as Conversation;
   const latestTurn = shell.latestTurn;
   if (!latestTurn) return { ...detail, conversation };
   const turnIndex = detail.agentTurns.findIndex(

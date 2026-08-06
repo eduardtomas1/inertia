@@ -11,6 +11,11 @@ import {
   publishCapturedWebSocketEvent,
 } from "./support/browser-websocket-fixture";
 import { createQuietLedgerFixture } from "./support/quiet-ledger-fixture";
+import {
+  revealVirtualizedTimelineTurn,
+  verifyDesktopMarkdownControls,
+  verifyNarrowDesktopMarkdownControls,
+} from "./support/markdown-controls";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -23,7 +28,11 @@ let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "quiet-ledger", initialState: "conversation" });
+  app = await createAppFixture({
+    name: "quiet-ledger",
+    initialState: "conversation",
+    windowDisplay: "primary",
+  });
   electronApp = app.electronApp;
   page = app.page;
   testDirectory = app.testDirectory;
@@ -84,6 +93,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       contentType: "image/png",
     });
   };
+  const revealTurn = (target: Locator, index: number): Promise<void> =>
+    revealVirtualizedTimelineTurn({ page, target, index, lastIndex: 9 });
 
   try {
     await page.reload();
@@ -102,7 +113,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     }
 
     const activeTurn = page.locator(`[data-turn-id="${active.turn.id}"]`);
-    await activeTurn.scrollIntoViewIfNeeded();
+    await revealTurn(activeTurn, 9);
     await expect(activeTurn.locator(".turn-execution-rail.is-live")).toBeVisible();
     await expect(activeTurn.locator(".turn-commentary-row")).toHaveCount(2);
     await expect(activeTurn.locator(".turn-activity-group")).toHaveCount(2);
@@ -234,7 +245,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     const approvalTurn = page.locator(
       `[data-turn-id="${approval.turn.id}"]`,
     );
-    await approvalTurn.scrollIntoViewIfNeeded();
+    await revealTurn(approvalTurn, 6);
     const approvalCard = approvalTurn.locator(
       '[data-agent-request-state="approval"]',
     );
@@ -255,7 +266,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     const providerQuestionTurn = page.locator(
       `[data-turn-id="${providerQuestion.turn.id}"]`,
     );
-    await providerQuestionTurn.scrollIntoViewIfNeeded();
+    await revealTurn(providerQuestionTurn, 7);
     const providerQuestionCard = providerQuestionTurn.locator(
       '[data-agent-request-state="question"]',
     );
@@ -276,7 +287,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     const completedTurn = page.locator(`[data-turn-id="${completed.turn.id}"]`);
     const detailedTurn = page.locator(`[data-turn-id="${detailed.turn.id}"]`);
     const kimiTurn = page.locator(`[data-turn-id="${kimi.turn.id}"]`);
-    await completedTurn.scrollIntoViewIfNeeded();
+    await revealTurn(completedTurn, 0);
     for (const successfulFixture of [completed, detailed, kimi]) {
       const successfulTurn = page.locator(`[data-turn-id="${successfulFixture.turn.id}"]`);
       await expect(successfulTurn.locator(".turn-settled-summary")).toHaveCount(0);
@@ -419,10 +430,13 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       "rich-markdown-dark",
       completedTurn.locator('[data-turn-layer="final-answer"]'),
     );
+    await verifyDesktopMarkdownControls({
+      page, electronApp, completedTurn, testInfo,
+    });
 
-    await detailedTurn.scrollIntoViewIfNeeded();
+    await revealTurn(detailedTurn, 1);
     await captureScenario("settled-history-dark-1440x920");
-    await detailedTurn.scrollIntoViewIfNeeded();
+    await revealTurn(detailedTurn, 1);
     const detailsSummary = detailedTurn.getByRole("button", { name: "Run details" });
     await expect(detailsSummary).toHaveAttribute("aria-expanded", "false");
     const followingKimiTurn = page.locator(`[data-turn-id="${kimi.turn.id}"]`);
@@ -438,20 +452,20 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     )).toBeLessThanOrEqual(2);
     await captureScenario("expanded-details");
 
-    await kimiTurn.scrollIntoViewIfNeeded();
+    await revealTurn(kimiTurn, 2);
     await expect(kimiTurn.locator('[data-final-answer-identity="historical-model-selection"]'))
       .toHaveText("Claude · Kimi · K3");
     await captureScenario("kimi-through-claude");
 
     const warningTurn = page.locator(`[data-turn-id="${warning.turn.id}"]`);
-    await warningTurn.scrollIntoViewIfNeeded();
+    await revealTurn(warningTurn, 3);
     await expect(warningTurn.locator(".turn-settled-summary")).toContainText("Worked for 42s · 1 action");
     await expect(warningTurn.locator('[data-activity-severity="warning"]'))
       .toContainText("optional provider capability skipped");
     await expect(warningTurn.locator('[data-activity-severity="warning"]')).toBeVisible();
 
     const failedTurn = page.locator(`[data-turn-id="${failed.turn.id}"]`);
-    await failedTurn.scrollIntoViewIfNeeded();
+    await revealTurn(failedTurn, 4);
     await expect(failedTurn.locator(".turn-settled-summary")).toContainText("Failed after 42s · 2 actions");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toContainText("Renderer verification failed");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toBeVisible();
@@ -498,7 +512,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await captureScenario("exception-history-dark-1440x920");
 
     const cancelledTurn = page.locator(`[data-turn-id="${cancelled.turn.id}"]`);
-    await cancelledTurn.scrollIntoViewIfNeeded();
+    await revealTurn(cancelledTurn, 5);
     await expect(cancelledTurn.locator(".turn-settled-summary"))
       .toContainText("Stopped after 42s · 1 action");
     await expect(cancelledTurn.locator(".turn-settled-summary")).toBeVisible();
@@ -509,16 +523,16 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     const lightCompletedTurn = page.locator(`[data-turn-id="${completed.turn.id}"]`);
-    await lightCompletedTurn.scrollIntoViewIfNeeded();
+    await revealTurn(lightCompletedTurn, 0);
     await expect(lightCompletedTurn.locator(".turn-settled-summary")).toHaveCount(0);
     await expect(lightCompletedTurn.getByText("Worked 42s", { exact: true })).toHaveCount(1);
     await captureElementScenario(
       "rich-markdown-light",
       lightCompletedTurn.locator('[data-turn-layer="final-answer"]'),
     );
-    await page.locator(`[data-turn-id="${kimi.turn.id}"]`).scrollIntoViewIfNeeded();
+    await revealTurn(page.locator(`[data-turn-id="${kimi.turn.id}"]`), 2);
     await captureScenario("settled-history-light-1440x920");
-    await page.locator(`[data-turn-id="${failed.turn.id}"]`).scrollIntoViewIfNeeded();
+    await revealTurn(page.locator(`[data-turn-id="${failed.turn.id}"]`), 4);
     await captureScenario("exception-history-light-1440x920");
 
     const darkSettings = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
@@ -534,9 +548,9 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       await page.getByRole("button", { name: "Toggle project navigation" }).click();
       await expect(navigation).toBeHidden();
     }
-    await kimiTurn.scrollIntoViewIfNeeded();
+    await revealTurn(kimiTurn, 2);
     await captureScenario("settled-history-narrow-760x680");
-    await activeTurn.scrollIntoViewIfNeeded();
+    await revealTurn(activeTurn, 9);
     await expect(activeTurn.getByRole("button", { name: "Stop Codex · OpenAI run" })).toBeVisible();
     await expectNoViewportOverflow();
     const narrowGeometry = await activeTurn.evaluate((element) => {
@@ -558,7 +572,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     expect(narrowGeometry.executionInside).toBe(true);
     await captureScenario("narrow-workspace");
 
-    await completedTurn.scrollIntoViewIfNeeded();
+    await revealTurn(completedTurn, 0);
     await runDetailsToggle.click();
     await changedFilesSummary.click();
     await expect(runDetails).toBeVisible();
@@ -620,6 +634,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       tableOverflowOwned: true,
       changedRowsInside: true,
     });
+    await verifyNarrowDesktopMarkdownControls({ electronApp, completedTurn });
     await captureScenario("narrow-completed-surfaces");
     await captureElementScenario(
       "narrow-rich-markdown",

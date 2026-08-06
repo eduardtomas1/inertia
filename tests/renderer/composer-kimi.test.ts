@@ -31,10 +31,10 @@ describe("Kimi composer identity", () => {
     );
     expect(toolbarSource).toContain("selectedRoute={selectedModelRoute}");
     expect(toolbarSource).toContain("<ModelChooser");
-    expect(source).toContain("modelSelectionIdentityLabel");
-    expect(source).toContain(
-      "reasoningOptions: KIMI_CLAUDE_REASONING_OPTIONS",
-    );
+    expect(source).toContain("const selectedIdentityLabel");
+    expect(source).toContain("composerHarnessLabel(selectedBackendProfile.harnessId)");
+    expect(source).toContain("resolveComposerRouteState");
+    expect(source).toContain("selectedModel?.reasoningOptions");
     expect(KIMI_CLAUDE_REASONING_OPTIONS.map(({ value, description }) => [
       value,
       description,

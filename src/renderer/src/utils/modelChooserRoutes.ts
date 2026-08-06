@@ -1,4 +1,5 @@
 import type {
+  BackendModelDefinition,
   ContinuationIdentity,
   HarnessBackendCompatibility,
   ModelBackendProfileView,
@@ -15,6 +16,7 @@ import {
   nativeModelSelection,
   resolveHarnessBackendCompatibility,
 } from "../../../shared/model-routing";
+import { officiallyAllowsModelSwitchWithinSession } from "../../../shared/continuation-policy";
 import type { ModelChooserSelectionCompatibility } from "../components/ModelChooserRow";
 import { modelRouteIdentityKey } from "./modelFavorites";
 import type { ModelSearchRoute } from "./modelSearch";
@@ -100,10 +102,12 @@ function selectionForProfileModel(
     backendProfileId: profile.id,
     backendProfileDisplayName: profile.displayName,
     modelId: model.id,
-    alias: profile.preset === "kimi-code"
+    alias: profile.preset === "kimi-code" || model.id === "provider-default"
       ? null
       : model.displayName === model.id ? null : model.displayName,
-    reasoningEffort: profile.preset === "kimi-code"
+    reasoningEffort: model.id === "provider-default"
+      ? null
+      : profile.preset === "kimi-code"
       ? "high"
       : model.reasoningOptions[0]?.value ?? null,
     contextWindowOverride: model.contextWindowTokens,
@@ -127,9 +131,13 @@ function profileRoute(
     : generatedSelection;
   const providerId = legacyProviderIdForHarness(profile.harnessId);
   const provider = providers.find(({ id }) => id === providerId);
+  const nativeCatalogCurrent = profile.preset !== "native"
+    || model.id === "provider-default"
+    || provider?.metadataState.models.freshness === "fresh";
   const selectable = profile.enabled
     && profile.compatibility.state !== "unknown"
-    && profile.compatibility.state !== "unavailable";
+    && profile.compatibility.state !== "unavailable"
+    && nativeCatalogCurrent;
   return {
     key: modelRouteIdentityKey(selection),
     displayName: model.displayName,
@@ -154,12 +162,16 @@ function profileRoute(
       ...model.reasoningOptions.map(({ value }) => value),
     ])),
     selectable,
-    unavailableReason: selectable ? null : profile.compatibility.reason,
+    unavailableReason: selectable
+      ? null
+      : !nativeCatalogCurrent
+        ? "Refresh provider models before selecting this exact route."
+        : profile.compatibility.reason,
     selection,
     continuationIdentity: continuationIdentityForSelection(
       selection,
       profile.endpointIdentity,
-      !profile.compatibility.allowsModelSwitchWithinSession,
+      !officiallyAllowsModelSwitchWithinSession(profile.compatibility),
     ),
     compatibility: profile.compatibility,
     rowCompatibility: compatibilityForRow(profile.compatibility),
@@ -172,14 +184,14 @@ function fallbackNativeRoutes(
   currentSelection: ModelSelection,
 ): ComposerModelRoute[] {
   return providers.flatMap((provider) => {
-    const models = provider.models.length > 0
-      ? provider.models
-      : [{
-          id: "provider-default",
-          label: "Provider default",
-        defaultReasoningEffort: "",
-        reasoningOptions: [],
-        }];
+    const defaultModel = provider.models.find(({ isDefault }) => isDefault)
+      ?? provider.models[0];
+    const models = [{
+      id: "provider-default",
+      label: "Provider default",
+      defaultReasoningEffort: "",
+      reasoningOptions: defaultModel?.reasoningOptions ?? [],
+    }, ...provider.models.filter(({ id }) => id !== "provider-default")];
     const backend = nativeBackendProfile(provider.id);
     const harnessId = nativeHarnessId(provider.id);
     const compatibility = resolveHarnessBackendCompatibility(
@@ -191,11 +203,15 @@ function fallbackNativeRoutes(
         providerId: provider.id,
         modelId: model.id,
         alias: model.id === "provider-default" ? null : model.label,
-        reasoningEffort: model.defaultReasoningEffort || null,
+        reasoningEffort: model.id === "provider-default"
+          ? null
+          : model.defaultReasoningEffort || null,
       });
       const selection = sameRoute(generatedSelection, currentSelection)
         ? currentSelection
         : generatedSelection;
+      const selectable = model.id === "provider-default"
+        || provider.metadataState.models.freshness === "fresh";
       return {
         key: modelRouteIdentityKey(selection),
         displayName: model.label,
@@ -215,13 +231,15 @@ function fallbackNativeRoutes(
           ...(selection.reasoningEffort ? [selection.reasoningEffort] : []),
           ...model.reasoningOptions.map(({ value }) => value),
         ])),
-        selectable: true,
-        unavailableReason: null,
+        selectable,
+        unavailableReason: selectable
+          ? null
+          : "Refresh provider models before selecting this exact route.",
         selection,
         continuationIdentity: continuationIdentityForSelection(
           selection,
           null,
-          !compatibility.allowsModelSwitchWithinSession,
+          !officiallyAllowsModelSwitchWithinSession(compatibility),
         ),
         compatibility,
         rowCompatibility: null,
@@ -229,6 +247,42 @@ function fallbackNativeRoutes(
       };
     });
   });
+}
+
+function nativeProviderDefaultModel(
+  provider: ProviderInfo | undefined,
+): BackendModelDefinition {
+  const currentDefault = provider?.models.find(({ isDefault }) => isDefault)
+    ?? provider?.models[0];
+  return {
+    id: "provider-default",
+    displayName: "Provider default",
+    contextWindowTokens: null,
+    reasoningOptions: currentDefault?.reasoningOptions.map((option) => ({
+      ...option,
+    })) ?? [],
+    capabilities: [],
+  };
+}
+
+function profileWithProviderDefault(
+  profile: ModelBackendProfileView,
+  providers: readonly ProviderInfo[],
+): ModelBackendProfileView {
+  if (
+    profile.preset !== "native"
+    || profile.models.some(({ id }) => id === "provider-default")
+  ) return profile;
+  const providerId = legacyProviderIdForHarness(profile.harnessId);
+  return {
+    ...profile,
+    models: [
+      nativeProviderDefaultModel(
+        providers.find(({ id }) => id === providerId),
+      ),
+      ...profile.models,
+    ],
+  };
 }
 
 /**
@@ -243,9 +297,11 @@ export function buildComposerModelRoutes(
   if (backendProfiles.length === 0) {
     return fallbackNativeRoutes(providers, currentSelection);
   }
-  const profileRoutes = backendProfiles.flatMap((profile) =>
-    profile.models.map((model) =>
-      profileRoute(profile, model.id, providers, currentSelection)));
+  const profileRoutes = backendProfiles.flatMap((sourceProfile) => {
+    const profile = profileWithProviderDefault(sourceProfile, providers);
+    return profile.models.map((model) =>
+      profileRoute(profile, model.id, providers, currentSelection));
+  });
   const nativeProvidersWithRoutes = new Set(
     profileRoutes.flatMap((route) =>
       route.source === "built-in" && route.providerId

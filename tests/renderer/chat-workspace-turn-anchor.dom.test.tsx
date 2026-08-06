@@ -92,6 +92,7 @@ function workspaceProps(
   return {
     project,
     conversation: activeConversation,
+    latestTurnSummary: null,
     turns: [],
     messages: [],
     activities: [],

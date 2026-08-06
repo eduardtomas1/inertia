@@ -188,36 +188,9 @@ export function createTurnInteractionCommandHandler(
                   ?? "This agent is not ready. Open Settings to finish setup.",
               );
             }
-            const selectedModel = !backendReadiness
-              ? conversation.model
-                ? selectedProvider?.models.find(
-                    ({ id }) => id === conversation.model,
-                  )
-                : selectedProvider?.models.find(({ isDefault }) => isDefault)
-                  ?? selectedProvider?.models[0]
-              : undefined;
-            if (
-              !backendReadiness
-              && conversation.model
-              && (selectedProvider?.models.length ?? 0) > 0
-              && !selectedModel
-            ) {
-              throw new RuntimeRequestError(
-                "That model is no longer offered by this provider. Choose another model before sending.",
-              );
-            }
-            if (
-              !backendReadiness
-              && conversation.reasoningEffort
-              && selectedModel?.reasoningOptions.length
-              && !selectedModel.reasoningOptions.some(
-                ({ value }) => value === conversation.reasoningEffort,
-              )
-            ) {
-              throw new RuntimeRequestError(
-                "That reasoning level is not supported by the selected model.",
-              );
-            }
+            // The authoritative selection validator owns native model and
+            // reasoning admission; the legacy conversation model fields must
+            // never substitute another route here.
           } catch (error) {
             await relinquishAttachments();
             throw error;

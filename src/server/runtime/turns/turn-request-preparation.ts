@@ -1,6 +1,12 @@
 import type { AgentActivity } from "../../../shared/contracts";
-import { resolveContinuationDecision } from "../../../shared/continuation-policy";
-import { modelSelectionSchema } from "../../../shared/model-routing";
+import {
+  officiallyAllowsModelSwitchWithinSession,
+  resolveContinuationDecision,
+} from "../../../shared/continuation-policy";
+import {
+  nativeModelSelection,
+  modelSelectionSchema,
+} from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
 import type { ProviderActivityEvent } from "../../provider/contracts";
@@ -81,11 +87,20 @@ export function resolveTurnRequest(
     ? selectedProvider?.models.find(({ id }) => id === requestedModelId)
     : selectedProvider?.models.find(({ isDefault }) => isDefault)
       ?? selectedProvider?.models[0];
-  const modelSelection = modelSelectionSchema.parse({
-    ...conversation.modelSelection,
-    modelId: selectedModel?.id ?? requestedModelId,
-  });
-  const route = dependencies.providers.resolveModelRoute(modelSelection);
+  const routeSelection = modelSelectionSchema.parse(conversation.modelSelection);
+  const modelSelection = requestedModelId === "provider-default" && selectedModel
+    ? nativeModelSelection({
+        providerId: conversation.providerId,
+        modelId: selectedModel.id,
+        alias: selectedModel.label === selectedModel.id
+          ? null
+          : selectedModel.label,
+        reasoningEffort: routeSelection.reasoningEffort
+          ?? selectedModel.defaultReasoningEffort
+          ?? null,
+      })
+    : routeSelection;
+  const route = dependencies.providers.resolveModelRoute(routeSelection);
   const latestTurn = dependencies.store.latestAgentTurnForConversation(
     conversation.id,
   );
@@ -94,15 +109,17 @@ export function resolveTurnRequest(
       ?? conversation.continuationIdentity
       ?? null,
     nextIdentity: route.continuationIdentity,
-    previousModelId: latestTurn?.modelSelection.modelId
+    previousModelId: routeSelection.modelId === "provider-default"
+      ? "provider-default"
+      : latestTurn?.modelSelection.modelId
       ?? (conversation.continuationIdentity
-        ? conversation.modelSelection.modelId
+        ? routeSelection.modelId
         : null),
-    nextModelId: modelSelection.modelId,
+    nextModelId: routeSelection.modelId,
     hasProviderSession: conversation.providerSessionId !== null,
     hasTurns: latestTurn !== null,
     allowsModelSwitchWithinSession:
-      route.compatibility.allowsModelSwitchWithinSession,
+      officiallyAllowsModelSwitchWithinSession(route.compatibility),
   });
   if (continuation.action === "new-conversation-required") {
     throw new Error(continuation.reason);
@@ -113,17 +130,17 @@ export function resolveTurnRequest(
     harnessId: route.harnessId,
     backendProfile: route.backendProfile,
     backendCompatibility: route.compatibility,
-    modelSelection,
+    modelSelection: routeSelection,
     continuationIdentity: route.continuationIdentity,
     conversationId: conversation.id,
     runId,
     turnId,
     cwd: dependencies.store.conversationPath(conversation.id),
     prompt: assembled.executionPrompt,
-    model: modelSelection.modelId === "provider-default"
+    model: routeSelection.modelId === "provider-default"
       ? undefined
-      : modelSelection.modelId,
-    reasoningEffort: modelSelection.reasoningEffort || undefined,
+      : routeSelection.modelId,
+    reasoningEffort: routeSelection.reasoningEffort || undefined,
     interactionMode: conversation.interactionMode,
     access: conversation.accessMode,
     sessionId: canResume ? conversation.providerSessionId! : undefined,

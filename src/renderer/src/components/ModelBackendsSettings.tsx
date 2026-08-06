@@ -26,6 +26,7 @@ import {
   type Project,
 } from "@shared/contracts";
 import {
+  backendProfileSemanticUpdate,
   backendProfileIsReady,
   setBackendDraftAdvancedRouting,
   updateBackendDraftModel,
@@ -170,6 +171,8 @@ export function ModelBackendsSettings({
   );
   const [detail, setDetail] = useState<ModelBackendProfileDetail | null>(null);
   const [draft, setDraft] = useState<ModelBackendProfileDraft | null>(null);
+  const [originalDraft, setOriginalDraft] =
+    useState<ModelBackendProfileDraft | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
   const [credentialDraft, setCredentialDraft] =
@@ -270,16 +273,13 @@ export function ModelBackendsSettings({
       const value = editingId
         ? await onUpdate(
             editingId,
-            selected?.source === "built-in"
-              ? {
-                  models: draft.models,
-                  routing: draft.routing,
-                  capabilityHints: draft.capabilityHints,
-                }
+            originalDraft
+              ? backendProfileSemanticUpdate(originalDraft, draft)
               : draft,
           )
         : await onCreate(draft);
       setDraft(null);
+      setOriginalDraft(null);
       setEditingId(null);
       return value;
     });
@@ -290,7 +290,7 @@ export function ModelBackendsSettings({
     setCredentialDraft(null);
     setEditingId(profile.id);
     setAdvanced(profile.routing.mode === "advanced");
-    setDraft({
+    const nextDraft: ModelBackendProfileDraft = {
       displayName: profile.displayName,
       harnessId: profile.harnessId,
       protocol: profile.protocol,
@@ -307,7 +307,9 @@ export function ModelBackendsSettings({
         ? { ...profile.routing }
         : { ...profile.routing, tierModels: { ...profile.routing.tierModels } },
       capabilityHints: profile.capabilityHints.map((capability) => ({ ...capability })),
-    });
+    };
+    setDraft(nextDraft);
+    setOriginalDraft(structuredClone(nextDraft));
     setError(null);
   };
 
@@ -417,6 +419,7 @@ export function ModelBackendsSettings({
           onClick={() => {
             setCredentialDraft(null);
             setDraft(defaultDraft());
+            setOriginalDraft(null);
             setEditingId(null);
             setDetail(null);
             setError(null);
@@ -440,6 +443,7 @@ export function ModelBackendsSettings({
                 selectionEpochRef.current += 1;
                 setCredentialDraft(null);
                 setDraft(null);
+                setOriginalDraft(null);
                 setEditingId(null);
                 setSelectedId(profile.id);
                 setError(null);
@@ -470,7 +474,7 @@ export function ModelBackendsSettings({
               <div className="backend-editor-heading">
                 <span className="backend-profile-icon"><Plus size={16} /></span>
                 <span><strong>{editingId ? "Edit backend configuration" : "Create a backend profile"}</strong><small>{editingId ? "Saving execution changes increments the profile revision and requires a fresh compatibility test." : "Custom endpoints stay isolated from native provider configuration."}</small></span>
-                <button type="button" className="icon-button" aria-label="Cancel profile editing" onClick={() => { setDraft(null); setEditingId(null); }}><X size={15} /></button>
+                <button type="button" className="icon-button" aria-label="Cancel profile editing" onClick={() => { setDraft(null); setOriginalDraft(null); setEditingId(null); }}><X size={15} /></button>
               </div>
 
               <div className="backend-form-section">
@@ -536,7 +540,7 @@ export function ModelBackendsSettings({
               </div>
 
               <div className="backend-editor-actions">
-                <button type="button" className="secondary-button" onClick={() => { setDraft(null); setEditingId(null); }}>Cancel</button>
+                <button type="button" className="secondary-button" onClick={() => { setDraft(null); setOriginalDraft(null); setEditingId(null); }}>Cancel</button>
                 <button type="button" className="primary-button" disabled={disabled || Boolean(busy)} onClick={() => { void create(); }}>{busy === "create" ? "Creating…" : busy === "save" ? "Saving…" : editingId ? "Save configuration" : "Create profile"}</button>
               </div>
             </>

@@ -22,6 +22,7 @@ import {
   buildNewConversationPayload,
   withNewConversationModelSelection,
 } from "../lib/newConversation";
+import { defaultConversationPayloadForProject } from "../utils/defaultConversationSelection";
 import { projectNameFromPath } from "../lib/format";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
@@ -118,16 +119,9 @@ export function useDraftConversation({
 
   const start = (projectId: string): void => {
     discard();
-    const backendDefault = snapshot?.backendDefaults?.find(
-      ({ scope }) => scope === "global",
-    );
-    const defaultPayload = buildNewConversationPayload(projectId, settings);
-    const payload = backendDefault
-      ? withNewConversationModelSelection(
-          defaultPayload,
-          backendDefault.selection,
-        )
-      : defaultPayload;
+    const payload = snapshot
+      ? defaultConversationPayloadForProject(snapshot, settings, projectId)
+      : buildNewConversationPayload(projectId, settings);
     replaceDraft({
       conversation: buildDraftConversation(payload),
       payload,

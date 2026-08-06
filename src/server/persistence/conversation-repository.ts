@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { Conversation } from "../../shared/contracts";
+import { officiallyAllowsModelSwitchWithinSession } from "../../shared/continuation-policy";
 import {
   continuationIdentityForSelection,
   continuationIdentitySchema,
@@ -211,7 +212,7 @@ export class ConversationRepository {
       next.continuationIdentity = continuationIdentityForSelection(
         modelSelection,
         native.endpointIdentity,
-        !compatibility.allowsModelSwitchWithinSession,
+        !officiallyAllowsModelSwitchWithinSession(compatibility),
       );
     }
     const modelSelectionJson = JSON.stringify(modelSelection);

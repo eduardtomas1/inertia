@@ -56,7 +56,7 @@ export interface ModelChooserProps {
   selectedRoute: SelectedModelChipRoute;
   disabled?: boolean;
   closeSignal?: string | null;
-  onSelect: (route: ComposerModelRoute) => void;
+  onSelect: (route: ComposerModelRoute) => void | Promise<void>;
   onOpenChange?: (open: boolean) => void;
 }
 
@@ -448,8 +448,15 @@ export function ModelChooser({
 
   const select = useCallback((route: ComposerModelRoute): void => {
     if (!route.selectable) return;
-    onSelect(route);
-    close(true);
+    const completion = onSelect(route);
+    if (!completion) {
+      close(true);
+      return;
+    }
+    void completion.then(
+      () => close(true),
+      () => undefined,
+    );
   }, [close, onSelect]);
 
   const toggleFavorite = useCallback((route: ComposerModelRoute): void => {

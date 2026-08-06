@@ -32,7 +32,7 @@ export interface ComposerMoreMenuProps {
   running: boolean;
   menuController: ComposerMenuController;
   onRunAction: (action: ProjectAction) => void;
-  onUpdateReasoningEffort: (reasoningEffort: string) => void;
+  onUpdateReasoningEffort: (reasoningEffort: string) => Promise<void>;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -40,7 +40,6 @@ export interface ComposerMoreMenuProps {
     >>,
   ) => Promise<void>;
   conversationUpdatePending: boolean;
-  conversationUpdateError: string | null;
 }
 
 export function ComposerMoreMenu({
@@ -56,7 +55,6 @@ export function ComposerMoreMenu({
   onUpdateReasoningEffort,
   onUpdateConversation,
   conversationUpdatePending,
-  conversationUpdateError,
 }: ComposerMoreMenuProps): React.JSX.Element {
   const {
     menu,
@@ -114,10 +112,13 @@ export function ComposerMoreMenu({
           type="button"
           role="menuitemradio"
           aria-checked={selectedReasoning === option.value}
-          key={option.value}
-          onClick={() => {
-            onUpdateReasoningEffort(option.value);
-            dismissMenu("selection");
+        key={option.value}
+        disabled={conversationUpdatePending}
+        onClick={() => {
+          void onUpdateReasoningEffort(option.value).then(
+            () => dismissMenu("selection"),
+            () => undefined,
+          );
           }}
         >
           <span>
@@ -287,11 +288,6 @@ export function ComposerMoreMenu({
                 </div>
                 <div className="composer-more-options" data-more-submenu>
                   {renderMoreSectionOptions(moreSection)}
-                  {moreSection === "access" && conversationUpdateError && (
-                    <p className="composer-control-error" role="alert">
-                      {conversationUpdateError}
-                    </p>
-                  )}
                 </div>
               </>
             ) : (
@@ -368,11 +364,6 @@ export function ComposerMoreMenu({
                 {moreSectionLabel(moreSection)}
               </div>
               {renderMoreSectionOptions(moreSection)}
-              {moreSection === "access" && conversationUpdateError && (
-                <p className="composer-control-error" role="alert">
-                  {conversationUpdateError}
-                </p>
-              )}
             </div>
           )}
         </div>

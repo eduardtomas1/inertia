@@ -31,6 +31,7 @@ import type {
   ChatAttachment,
   ChatMessage,
   CheckpointSummary,
+  ConversationLatestTurnSummary,
   Conversation,
   ModelBackendProfileView,
   ModelSelection,
@@ -71,6 +72,7 @@ type ChatWorkspaceProps = {
   embedded?: boolean;
   project: Project | null;
   conversation: Conversation | null;
+  latestTurnSummary: ConversationLatestTurnSummary | null;
   turns: AgentTurn[];
   messages: ChatMessage[];
   activities: AgentActivity[];
@@ -119,7 +121,10 @@ type ChatWorkspaceProps = {
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => Promise<void>;
-  onCreateConversationForSelection: (selection: ModelSelection) => Promise<void>;
+  onCreateConversationForSelection: (
+    selection: ModelSelection,
+    options?: { prefillText?: string },
+  ) => Promise<void>;
   onChooseAttachments: () => Promise<ChatAttachment[]>;
   onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
   onReleaseAttachment: (id: string) => Promise<void>;
@@ -150,6 +155,7 @@ export function ChatWorkspace({
   embedded = false,
   project,
   conversation,
+  latestTurnSummary,
   turns,
   messages,
   activities,
@@ -583,6 +589,7 @@ export function ChatWorkspace({
           running={conversation.status === "running" || conversation.status === "needs-input"}
           backendProfiles={backendProfiles}
           latestTurn={turns.at(-1) ?? null}
+          latestTurnSummary={latestTurnSummary}
           onSend={sendMessage}
           onListSkills={onListSkills}
           onToggleSkill={onToggleSkill}

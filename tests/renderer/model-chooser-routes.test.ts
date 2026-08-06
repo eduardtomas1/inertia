@@ -140,15 +140,42 @@ describe("composer model chooser route projection", () => {
     });
     const routes = buildComposerModelRoutes([provider()], [], current);
 
-    expect(routes.map(({ modelId }) => modelId)).toEqual(["alpha", "beta"]);
-    expect(routes[0]?.selection).toEqual(current);
+    expect(routes.map(({ modelId }) => modelId)).toEqual([
+      "provider-default",
+      "alpha",
+      "beta",
+    ]);
+    expect(routes[1]?.selection).toEqual(current);
     expect(routes[0]).toMatchObject({
+      displayName: "Provider default",
+      modelId: "provider-default",
+      selectable: true,
+    });
+    expect(routes[1]).toMatchObject({
       harnessId: "codex-app-server",
       backendProfileId: "builtin:openai",
       providerId: "codex",
       selectable: true,
     });
-    expect(routes[0]?.continuationIdentity.modelIdentity).toBeNull();
+    expect(routes[1]?.continuationIdentity.modelIdentity).toBeNull();
+  });
+
+  it("keeps Provider default selectable while marking stale concrete catalog routes unavailable", () => {
+    const staleProvider = provider();
+    staleProvider.metadataState.models.freshness = "stale";
+    const routes = buildComposerModelRoutes(
+      [staleProvider],
+      [],
+      nativeModelSelection({ providerId: "codex", modelId: "alpha" }),
+    );
+
+    expect(routes.find(({ modelId }) => modelId === "provider-default"))
+      .toMatchObject({ selectable: true, unavailableReason: null });
+    expect(routes.find(({ modelId }) => modelId === "alpha"))
+      .toMatchObject({
+        selectable: false,
+        unavailableReason: "Refresh provider models before selecting this exact route.",
+      });
   });
 
   it("projects custom compatibility without leaking endpoint or credential metadata", () => {

@@ -151,6 +151,10 @@ export const createQuietLedgerFixture = ({
     "```ts",
     "const routeIdentity = \"authoritative\"; const deliberatelyLongVerificationCommand = \"pnpm vitest run tests/renderer/quiet-ledger-responsive.test.ts --coverage --reporter=verbose\";",
     "```",
+    "",
+    "```json",
+    "{\"route\":\"secondary\",\"verified\":true}",
+    "```",
   ].join("\n"));
   store.createTurnGitArtifact({
     id: `${fixturePrefix}-completed-artifact`,
@@ -407,9 +411,19 @@ export const createQuietLedgerFixture = ({
     }],
   };
 
+  const history = beginTurn(
+    "history",
+    8,
+    "Keep one more settled result available in the virtualized history.",
+  );
+  settleTurn(
+    history,
+    "The historical result remains available without displacing the active work.",
+  );
+
   const active = beginTurn(
     "active",
-    8,
+    9,
     "Refine the response experience and keep me oriented while the work is running.",
   );
   const activeAt = (seconds: number) =>

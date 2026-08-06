@@ -53,9 +53,11 @@ describe("accessibility focus policy", () => {
   });
 
   it("focuses and restores the route-change confirmation without trapping ordinary composer controls", () => {
-    expect(composerSource).toContain(
-      "window.requestAnimationFrame(() => routeCancelRef.current?.focus())",
+    expect(composerSource).toMatch(
+      /window\.requestAnimationFrame\(\(\) => \{[\s\S]*?window\.requestAnimationFrame\(\(\) =>[\s\S]*?routeCancelRef\.current\?\.focus\(\)\)/u,
     );
+    expect(composerSource).toContain("window.cancelAnimationFrame(closeFrame)");
+    expect(composerSource).toContain("window.cancelAnimationFrame(settleFrame)");
     expect(routeConfirmationSource).toContain('role="alertdialog"');
     expect(routeConfirmationSource).toContain('aria-modal="false"');
     expect(routeConfirmationSource).toContain(

@@ -9,6 +9,47 @@ export type BackendDraftModelField =
   | "displayName"
   | "contextWindowTokens";
 
+export type BackendProfileSemanticUpdate = Partial<ModelBackendProfileDraft>;
+
+function semanticallyEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Build the narrow command delta instead of resending the complete edit form. */
+export function backendProfileSemanticUpdate(
+  current: ModelBackendProfileDraft,
+  next: ModelBackendProfileDraft,
+): BackendProfileSemanticUpdate {
+  return {
+    ...(current.displayName !== next.displayName
+      ? { displayName: next.displayName }
+      : {}),
+    ...(current.harnessId !== next.harnessId
+      ? { harnessId: next.harnessId }
+      : {}),
+    ...(current.protocol !== next.protocol
+      ? { protocol: next.protocol }
+      : {}),
+    ...(current.authenticationMode !== next.authenticationMode
+      ? { authenticationMode: next.authenticationMode }
+      : {}),
+    ...(current.preset !== next.preset ? { preset: next.preset } : {}),
+    ...(current.baseUrl !== next.baseUrl ? { baseUrl: next.baseUrl } : {}),
+    ...(current.allowInsecureLocalhost !== next.allowInsecureLocalhost
+      ? { allowInsecureLocalhost: next.allowInsecureLocalhost }
+      : {}),
+    ...(!semanticallyEqual(current.models, next.models)
+      ? { models: next.models }
+      : {}),
+    ...(!semanticallyEqual(current.routing, next.routing)
+      ? { routing: next.routing }
+      : {}),
+    ...(!semanticallyEqual(current.capabilityHints, next.capabilityHints)
+      ? { capabilityHints: next.capabilityHints }
+      : {}),
+  };
+}
+
 export function backendProfileIsReady(
   profile: Pick<
     ModelBackendProfileView,

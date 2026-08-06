@@ -67,11 +67,11 @@ export interface ComposerToolbarProps {
   onRemoveStashedPrompt: (entryId: string) => void;
   modelRoutes: ComposerModelRoute[];
   selectedModelRoute: ModelSearchRoute;
-  onChooseModelRoute: (route: ComposerModelRoute) => void;
+  onChooseModelRoute: (route: ComposerModelRoute) => Promise<void>;
   selectedModel: ComposerSettingsModel | undefined;
   selectedReasoning: string;
   reasoningLabel: string;
-  onUpdateReasoningEffort: (reasoningEffort: string) => void;
+  onUpdateReasoningEffort: (reasoningEffort: string) => Promise<void>;
   conversation: Conversation;
   onUpdateConversation: (
     update: Partial<Pick<
@@ -247,6 +247,15 @@ export function ComposerToolbar({
           }}
           onSelect={onChooseModelRoute}
         />
+        {conversationUpdateError && (
+          <p
+            className="composer-control-error composer-route-control-error"
+            role="alert"
+            aria-live="assertive"
+          >
+            {conversationUpdateError}
+          </p>
+        )}
         <ComposerSettings
           selectedModel={selectedModel}
           selectedReasoning={selectedReasoning}
@@ -258,7 +267,6 @@ export function ComposerToolbar({
           onUpdateReasoningEffort={onUpdateReasoningEffort}
           onUpdateConversation={onUpdateConversation}
           conversationUpdatePending={conversationUpdatePending}
-          conversationUpdateError={conversationUpdateError}
         />
         <ComposerMoreMenu
           actions={actions}
@@ -273,7 +281,6 @@ export function ComposerToolbar({
           onUpdateReasoningEffort={onUpdateReasoningEffort}
           onUpdateConversation={onUpdateConversation}
           conversationUpdatePending={conversationUpdatePending}
-          conversationUpdateError={conversationUpdateError}
         />
         {selectedProvider && (
           <UsageIndicator

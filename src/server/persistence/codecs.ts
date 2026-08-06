@@ -20,6 +20,7 @@ import {
   type ThreadUsageSnapshot,
   type WorkspaceRun,
 } from "../../shared/contracts";
+import { officiallyAllowsModelSwitchWithinSession } from "../../shared/continuation-policy";
 import {
   continuationIdentityForSelection,
   continuationIdentitySchema,
@@ -123,7 +124,7 @@ function legacyNativeContinuationIdentity(
   return continuationIdentityForSelection(
     selection,
     native.endpointIdentity,
-    !compatibility.allowsModelSwitchWithinSession,
+    !officiallyAllowsModelSwitchWithinSession(compatibility),
   );
 }
 

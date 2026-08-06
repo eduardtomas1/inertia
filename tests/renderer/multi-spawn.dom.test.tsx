@@ -424,7 +424,7 @@ describe("multi-spawn", () => {
       .toBe("gpt-5.5");
   });
 
-  it("resolves an out-of-box provider default to its advertised model", () => {
+  it("keeps an out-of-box provider default unpinned and ready", () => {
     render(
       <MultiSpawnDialog
         open
@@ -443,7 +443,9 @@ describe("multi-spawn", () => {
       />,
     );
 
-    expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(2);
+    expect(screen.getAllByRole("button", {
+      name: /Choose model\..*Provider default/u,
+    })).toHaveLength(2);
     expect(screen.queryByText("Model route unavailable")).not.toBeInTheDocument();
     const reasoning = screen.getByLabelText("Chat 1 reasoning");
     expect(reasoning).toHaveValue("");
@@ -732,7 +734,7 @@ describe("multi-spawn", () => {
     workspace.remove();
   });
 
-  it("requires a stale selected model to be replaced before launch", () => {
+  it("falls back visibly when the configured default is known to be removed", () => {
     render(
       <MultiSpawnDialog
         open
@@ -753,11 +755,15 @@ describe("multi-spawn", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Launch duo" })).toBeDisabled();
-    expect(screen.getAllByText("Model route unavailable")).toHaveLength(2);
-    expect(screen.getAllByText(
-      "This saved model route is no longer available.",
-    )).toHaveLength(2);
+    expect(screen.getAllByRole("button", {
+      name: /Choose model\..*Provider default/u,
+    })).toHaveLength(2);
+    expect(screen.queryByText("Model route unavailable"))
+      .not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+      target: { value: "Compare the safe fallback route." },
+    });
+    expect(screen.getByRole("button", { name: "Launch duo" })).toBeEnabled();
   });
 
   it("blocks launch and exposes route-specific setup when a route is unavailable", () => {

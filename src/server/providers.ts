@@ -1,4 +1,5 @@
 import type { AgentApprovalDecision } from "./provider/interactions";
+import { officiallyAllowsModelSwitchWithinSession } from "../shared/continuation-policy";
 import {
   backendProbeMatchesProfile,
   backendCompatibilityProbeResultSchema,
@@ -275,7 +276,7 @@ export class ProviderManager {
       continuationIdentity: continuationIdentityForSelection(
         selection,
         backendProfile.endpointIdentity,
-        !compatibility.allowsModelSwitchWithinSession,
+        !officiallyAllowsModelSwitchWithinSession(compatibility),
       ),
     };
   }

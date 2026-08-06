@@ -34,6 +34,7 @@ export interface ComposerInputZoneProps {
   creatingRouteConversation: boolean;
   routeCancelRef: RefObject<HTMLButtonElement | null>;
   canCreateRouteConversation: boolean;
+  routeCreationBlockedReason?: string | null;
   onDismissPendingRoute: () => void;
   onCreateRouteConversation: () => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -68,6 +69,7 @@ export function ComposerInputZone({
   creatingRouteConversation,
   routeCancelRef,
   canCreateRouteConversation,
+  routeCreationBlockedReason = null,
   onDismissPendingRoute,
   onCreateRouteConversation,
   textareaRef,
@@ -170,6 +172,7 @@ export function ComposerInputZone({
             creating={creatingRouteConversation}
             cancelRef={routeCancelRef}
             canCreate={canCreateRouteConversation}
+            blockedReason={routeCreationBlockedReason}
             onDismiss={onDismissPendingRoute}
             onCreate={onCreateRouteConversation}
           />

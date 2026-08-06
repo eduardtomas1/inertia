@@ -7,16 +7,14 @@ import type {
   ModelSelection,
   Project,
 } from "@shared/contracts";
-import {
-  legacyProviderIdForHarness,
-  nativeModelSelection,
-} from "../../../shared/model-routing";
+import { legacyProviderIdForHarness } from "../../../shared/model-routing";
 import {
   buildNewConversationPayload,
   withNewConversationModelSelection,
   type NewConversationPayload,
 } from "../lib/newConversation";
 import type { ComposerModelRoute } from "./modelChooserRoutes";
+import { defaultSelectionForProject } from "./defaultConversationSelection";
 
 export const MULTI_SPAWN_PRESET_STORAGE_KEY =
   "inertia:multi-spawn:preset:v1";
@@ -257,26 +255,6 @@ export function clearMultiSpawnPreset(
   }
 }
 
-export function defaultSelectionForProject(
-  snapshot: AppSnapshot,
-  settings: AppSettings,
-  projectId: string,
-): ModelSelection {
-  const backendDefault = snapshot.backendDefaults?.find(
-    ({ scope, projectId: scopedProjectId }) =>
-      scope === "project" && scopedProjectId === projectId,
-  ) ?? snapshot.backendDefaults?.find(({ scope }) => scope === "global");
-  if (backendDefault) {
-    return cloneSelection(backendDefault.selection);
-  }
-  return nativeModelSelection({
-    providerId: settings.defaultProvider,
-    modelId: settings.defaultModel || "provider-default",
-    alias: settings.defaultModel || null,
-    reasoningEffort: settings.defaultReasoningEffort || null,
-  });
-}
-
 function matchingPresetRoute(
   routes: readonly ComposerModelRoute[],
   reference: MultiSpawnRouteReference,
@@ -334,41 +312,12 @@ export function selectionFromPreset(
   });
 }
 
-function concreteDefaultSelection(
-  snapshot: AppSnapshot,
+function currentDefaultSelection(
   routes: readonly ComposerModelRoute[],
   fallback: ModelSelection,
 ): ModelSelection {
   const refreshed = refreshMultiSpawnSelection(routes, fallback);
-  if (refreshed !== fallback) return refreshed;
-  if (fallback.modelId !== "provider-default") {
-    return cloneSelection(fallback);
-  }
-  const profile = snapshot.backendProfiles?.find(({ id, harnessId }) =>
-    id === fallback.backendProfileId
-    && harnessId === fallback.harnessId);
-  const providerId = legacyProviderIdForHarness(fallback.harnessId);
-  const provider = snapshot.providers.find(({ id }) => id === providerId);
-  const defaultModelId = profile?.routing.primaryModelId
-    ?? provider?.models.find(({ isDefault }) => isDefault)?.id
-    ?? provider?.models[0]?.id;
-  if (!defaultModelId) return cloneSelection(fallback);
-  const route = routes.find((candidate) =>
-    candidate.selectable
-    && candidate.harnessId === fallback.harnessId
-    && candidate.backendProfileId === fallback.backendProfileId
-    && candidate.modelId === defaultModelId);
-  if (!route) return cloneSelection(fallback);
-  const reasoningEffort = (
-    fallback.reasoningEffort === null
-    || route.reasoningOptions.includes(fallback.reasoningEffort)
-  )
-    ? fallback.reasoningEffort
-    : route.selection.reasoningEffort;
-  return cloneSelection({
-    ...route.selection,
-    reasoningEffort,
-  });
+  return cloneSelection(refreshed);
 }
 
 export function initialMultiSpawnDraft(input: {
@@ -386,11 +335,7 @@ export function initialMultiSpawnDraft(input: {
     input.activeProjectId,
   );
   const routes = input.routesForSelection(fallback);
-  const resolvedFallback = concreteDefaultSelection(
-    input.snapshot,
-    routes,
-    fallback,
-  );
+  const resolvedFallback = currentDefaultSelection(routes, fallback);
   const side = (
     index: 0 | 1,
     defaultTitle: string,

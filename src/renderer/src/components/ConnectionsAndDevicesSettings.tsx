@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import type { Project } from "@shared/contracts";
 import type {
@@ -324,15 +324,33 @@ function PairedDeviceEditor({
   busy: boolean;
   update: UpdateState;
 }): React.JSX.Element {
+  const initialExpiresAt = toLocalDateTime(device.expiresAt);
   const [preset, setPreset] = useState<PrivateConnectPreset>(device.preset);
   const [projectIds, setProjectIds] = useState(device.projectIds);
-  const [expiresAt, setExpiresAt] = useState(toLocalDateTime(device.expiresAt));
+  const [expiresAt, setExpiresAt] = useState(initialExpiresAt);
+  const previousAuthority = useRef({
+    preset: device.preset,
+    projectIds: device.projectIds,
+    expiresAt: initialExpiresAt,
+  });
 
   useEffect(() => {
+    const nextExpiresAt = toLocalDateTime(device.expiresAt);
+    const previous = previousAuthority.current;
+    if (
+      previous.preset === device.preset
+      && sameProjectIds(previous.projectIds, device.projectIds)
+      && previous.expiresAt === nextExpiresAt
+    ) return;
+    previousAuthority.current = {
+      preset: device.preset,
+      projectIds: device.projectIds,
+      expiresAt: nextExpiresAt,
+    };
     setPreset(device.preset);
     setProjectIds(device.projectIds);
-    setExpiresAt(toLocalDateTime(device.expiresAt));
-  }, [device]);
+    setExpiresAt(nextExpiresAt);
+  }, [device.expiresAt, device.preset, device.projectIds]);
 
   const toggleProject = (projectId: string): void => {
     setProjectIds((current) => current.includes(projectId)
@@ -410,6 +428,11 @@ function PairedDeviceEditor({
       </div>
     </article>
   );
+}
+
+function sameProjectIds(left: string[], right: string[]): boolean {
+  return left.length === right.length
+    && left.every((projectId) => right.includes(projectId));
 }
 
 function ProjectGrantFields({

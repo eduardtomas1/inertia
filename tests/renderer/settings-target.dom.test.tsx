@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 
@@ -41,11 +41,17 @@ describe("Settings external section targets", () => {
       notice: null,
     };
     const updatePrivateConnectDevice = vi.fn(async () => state);
+    let publishPrivateConnectState:
+      | ((next: PrivateConnectStateView) => void)
+      | null = null;
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
         getPrivateConnectState: vi.fn(async () => state),
-        onPrivateConnectState: vi.fn(() => vi.fn()),
+        onPrivateConnectState: vi.fn((listener) => {
+          publishPrivateConnectState = listener;
+          return vi.fn();
+        }),
         updatePrivateConnectDevice,
       },
     });
@@ -116,7 +122,18 @@ describe("Settings external section targets", () => {
     fireEvent.change(phoneAccess, {
       target: { value: "collaborate" },
     });
-    await waitFor(() => expect(phoneAccess).toHaveValue("collaborate"));
+    act(() => publishPrivateConnectState?.({
+      ...state,
+      devices: state.devices.map((device) => ({
+        ...device,
+        projectIds: [...device.projectIds],
+        grants: device.grants.map((grant) => ({
+          ...grant,
+          conversationIds: [...grant.conversationIds],
+        })),
+      })),
+    }));
+    expect(phoneAccess).toHaveValue("collaborate");
     fireEvent.click(screen.getByRole("button", { name: "Save access" }));
     await waitFor(() => expect(updatePrivateConnectDevice).toHaveBeenCalledWith(
       expect.objectContaining({

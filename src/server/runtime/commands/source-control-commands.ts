@@ -477,7 +477,10 @@ export function createSourceControlCommandHandler(
       case "git.branches": {
         const deadlineAt = Date.now() + GIT_READ_OPERATION_TIMEOUT_MS;
         const branches = await listBranches(
-          dependencies.workspacePath(command.payload.projectId),
+          dependencies.workspacePath(
+            command.payload.projectId,
+            command.payload.conversationId,
+          ),
           { deadlineAt },
         );
         dependencies.send(socket, {
@@ -501,9 +504,12 @@ export function createSourceControlCommandHandler(
         const result = await dependencies.workspaceRuns.trackSourceControl(
           "Create branch",
           command.payload.projectId,
-          undefined,
+          command.payload.conversationId,
           async () => await createBranch(
-            dependencies.workspacePath(command.payload.projectId),
+            dependencies.workspacePath(
+              command.payload.projectId,
+              command.payload.conversationId,
+            ),
             command.payload.name,
           ),
         );
@@ -522,9 +528,12 @@ export function createSourceControlCommandHandler(
         const result = await dependencies.workspaceRuns.trackSourceControl(
           "Switch branch",
           command.payload.projectId,
-          undefined,
+          command.payload.conversationId,
           async () => await switchBranch(
-            dependencies.workspacePath(command.payload.projectId),
+            dependencies.workspacePath(
+              command.payload.projectId,
+              command.payload.conversationId,
+            ),
             command.payload.name,
           ),
         );

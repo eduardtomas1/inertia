@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import {
   WebContentsView,
   type BrowserWindow,
+  type Input,
+  type KeyboardInputEvent,
   type Rectangle,
   type Session,
 } from "electron";
@@ -27,6 +29,32 @@ interface PreviewBrokerOptions {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const hardenedSessions = new WeakSet<Session>();
+const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n"]);
+
+export function previewAppShortcutKey(input: Pick<
+  Input,
+  "alt" | "control" | "key" | "meta" | "shift" | "type"
+>): string | null {
+  const key = input.key.toLowerCase();
+  return input.type === "keyDown"
+      && (input.meta || input.control)
+      && !input.alt
+      && !input.shift
+      && APP_SHORTCUT_KEYS.has(key)
+    ? key
+    : null;
+}
+
+function forwardedKeyboardInput(input: Input): KeyboardInputEvent {
+  const modifiers: NonNullable<KeyboardInputEvent["modifiers"]> = [];
+  if (input.control) modifiers.push("control");
+  if (input.meta) modifiers.push("meta");
+  return {
+    type: input.type === "keyUp" ? "keyUp" : "keyDown",
+    keyCode: input.key,
+    modifiers,
+  };
+}
 
 export function createPreviewPartition(): string {
   return `inertia-preview-${randomUUID()}`;
@@ -276,6 +304,21 @@ export class PreviewBroker {
     });
     view.webContents.on("will-redirect", (event, url) => {
       this.#guardNavigation(event, url);
+    });
+    const ownedKeyUps = new Set<string>();
+    view.webContents.on("before-input-event", (event, input) => {
+      const shortcutKey = previewAppShortcutKey(input);
+      const key = input.key.toLowerCase();
+      const ownsKeyUp = input.type === "keyUp" && ownedKeyUps.delete(key);
+      if (!shortcutKey && !ownsKeyUp) {
+        if (input.type === "keyDown") ownedKeyUps.delete(key);
+        return;
+      }
+      event.preventDefault();
+      if (shortcutKey) ownedKeyUps.add(shortcutKey);
+      const target = this.options.getWindow()?.webContents;
+      if (!target || target.isDestroyed()) return;
+      target.sendInputEvent(forwardedKeyboardInput(input));
     });
     hardenDesktopSession(view.webContents.session);
     const publish = () => this.#publish(ownerId, contextId);

@@ -291,7 +291,10 @@ export function useWorkspaceGit({
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     void request({
       type: "git.branches",
-      payload: { projectId: project.id },
+      payload: {
+        projectId: project.id,
+        conversationId: conversation?.id,
+      },
     }).then(resultEvent).then((event) => {
       if (
         authorityRef.current === owner
@@ -321,14 +324,18 @@ export function useWorkspaceGit({
     if (!project) return;
     void run(type, {
       type,
-      payload: { projectId: project.id, name },
+      payload: {
+        projectId: project.id,
+        conversationId: conversation?.id,
+        name,
+      },
     } as CommandWithoutId).then(() =>
       Promise.all([
         loadGit({ authoritative: true }),
         Promise.resolve(loadBranches()),
       ])
     ).catch(() => undefined);
-  }, [loadBranches, loadGit, project, run]);
+  }, [conversation?.id, loadBranches, loadGit, project, run]);
 
   const commit = useCallback(async (
     message: string,

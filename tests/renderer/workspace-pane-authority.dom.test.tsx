@@ -600,6 +600,84 @@ describe("workspace pane authority", () => {
     )).toHaveLength(0);
   });
 
+  it("includes the chat checkout authority in branch reads and mutations", async () => {
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "git.refresh") {
+        return Promise.resolve(result({
+          kind: "git.status",
+          status: {
+            isRepository: true,
+            authorityRef: "66666666-6666-4666-8666-666666666666",
+            root: "/alpha-worktree",
+            branch: "inertia/alpha-chat",
+            upstream: null,
+            ahead: 0,
+            behind: 0,
+            hasRemote: false,
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
+        }));
+      }
+      if (command.type === "git.branches") {
+        return Promise.resolve(result({
+          kind: "git.branches",
+          branches: [{
+            name: "inertia/alpha-chat",
+            current: true,
+            remote: false,
+            worktreePath: null,
+          }],
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected ${command.type} command`));
+    });
+    const run = vi.fn(() => new Promise<ServerEvent>(() => undefined));
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: true,
+      loadStatusOnMount: true,
+      loadWorkspaceOnMount: false,
+      project: alpha,
+      conversation: alphaChat,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request,
+      run,
+      setActionError,
+    }));
+
+    await waitFor(() => {
+      expect(hook.result.current.gitStatus?.branch)
+        .toBe("inertia/alpha-chat");
+    });
+    act(() => hook.result.current.loadBranches());
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledWith({
+        type: "git.branches",
+        payload: {
+          projectId: alpha.id,
+          conversationId: alphaChat.id,
+        },
+      });
+    });
+
+    act(() => hook.result.current.mutateBranch(
+      "git.branch.switch",
+      "feature/chat-checkout",
+    ));
+    expect(run).toHaveBeenCalledWith("git.branch.switch", {
+      type: "git.branch.switch",
+      payload: {
+        projectId: alpha.id,
+        conversationId: alphaChat.id,
+        name: "feature/chat-checkout",
+      },
+    });
+  });
+
   it("coalesces duplicate Git loads for the same pane authority", async () => {
     let settleWorkspace!: (event: ServerEvent) => void;
     const workspaceRefresh = new Promise<ServerEvent>((resolve) => {

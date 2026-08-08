@@ -80,4 +80,32 @@ describe("runtime conversation references", () => {
       "loadGitOnMount: !workspaceToolsUnavailable,",
     );
   });
+
+  it("keeps local drafts visible until route selection is authoritative", () => {
+    const projectSelection = appSource.slice(
+      appSource.indexOf("const selectProject ="),
+      appSource.indexOf("const selectConversation ="),
+    );
+    const conversationSelection = appSource.slice(
+      appSource.indexOf("const selectConversation ="),
+      appSource.indexOf("const openConversationInSplit ="),
+    );
+
+    expect(projectSelection).not.toContain("clearDraftConversation");
+    expect(conversationSelection).not.toContain("clearDraftConversation");
+  });
+
+  it("discards an abandoned draft only after a replacement chat is created", () => {
+    const createConversation = appSource.slice(
+      appSource.indexOf("const createConversation ="),
+      appSource.indexOf("useGlobalShortcuts({"),
+    );
+    const discard = createConversation.indexOf("discardDraftConversation()");
+    const createRequest = createConversation.indexOf(
+      'run("conversation.create"',
+    );
+
+    expect(createRequest).toBeGreaterThan(-1);
+    expect(discard).toBeGreaterThan(createRequest);
+  });
 });

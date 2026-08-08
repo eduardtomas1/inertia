@@ -145,6 +145,48 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   ).toBe(true);
 });
 
+test("keeps app shortcuts active while the native preview owns focus", async () => {
+  await resizeWindow(1440, 920);
+  await ensureWorkspaceTools();
+  await page.getByRole("tab", { name: /Preview/ }).click();
+  const focusedPreviewUrl = `${previewUrl}shortcut-focus`;
+  await page.getByRole("textbox", { name: "Preview address" })
+    .fill(focusedPreviewUrl);
+  await page.getByRole("button", { name: "Go", exact: true }).click();
+  await expect.poll(
+    () => electronApp.evaluate(({ webContents }, url) =>
+      webContents.getAllWebContents().some(
+        (contents) => contents.getURL() === url,
+      ), focusedPreviewUrl),
+  ).toBe(true);
+
+  await electronApp.evaluate(({ webContents }, { url, modifier }) => {
+    const preview = webContents.getAllWebContents().find(
+      (contents) => contents.getURL() === url,
+    );
+    if (!preview) throw new Error("The native preview is unavailable.");
+    preview.focus();
+    preview.sendInputEvent({
+      type: "keyDown",
+      keyCode: "K",
+      modifiers: [modifier as "meta" | "control"],
+    });
+    preview.sendInputEvent({
+      type: "keyUp",
+      keyCode: "K",
+      modifiers: [modifier as "meta" | "control"],
+    });
+  }, {
+    url: focusedPreviewUrl,
+    modifier: process.platform === "darwin" ? "meta" : "control",
+  });
+
+  await expect(page.getByRole("dialog", { name: "Search Inertia" }))
+    .toBeVisible();
+  await page.getByRole("button", { name: "Close search" }).click();
+  expect(rendererErrors).toEqual([]);
+});
+
 test("navigates the project file hierarchy lazily with an accessible keyboard tree", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const addProject = page.getByRole("button", { name: "Add your first project" });

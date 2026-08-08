@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createPreviewPartition } from "../../src/main/preview-broker";
+import {
+  createPreviewPartition,
+  previewAppShortcutKey,
+} from "../../src/main/preview-broker";
 
 describe("preview broker isolation", () => {
   it("assigns each native preview an unpredictable non-persistent partition", () => {
@@ -12,5 +15,22 @@ describe("preview broker isolation", () => {
     expect(second).not.toBe(first);
     expect(first.startsWith("persist:")).toBe(false);
     expect(second.startsWith("persist:")).toBe(false);
+  });
+
+  it("recognizes only exact app shortcuts from native preview input", () => {
+    const input = {
+      type: "keyDown",
+      key: "K",
+      control: false,
+      meta: true,
+      alt: false,
+      shift: false,
+    };
+
+    expect(previewAppShortcutKey(input)).toBe("k");
+    expect(previewAppShortcutKey({ ...input, key: "X" })).toBeNull();
+    expect(previewAppShortcutKey({ ...input, meta: false })).toBeNull();
+    expect(previewAppShortcutKey({ ...input, alt: true })).toBeNull();
+    expect(previewAppShortcutKey({ ...input, type: "keyUp" })).toBeNull();
   });
 });

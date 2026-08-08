@@ -350,6 +350,10 @@ describe("Duo third-model comparison", () => {
     expect(judgePrompt).not.toContain("source-session-must-not-cross");
     expect(judgePrompt).not.toContain("hidden-tool-history-must-not-cross");
     expect(judgePrompt).not.toContain(runtime.workspace);
+    expect(judgePrompt).not.toContain("Prepared left");
+    expect(judgePrompt).not.toContain("gpt-test");
+    expect(judgePrompt).not.toContain("Access used by source");
+    expect(judgePrompt).not.toContain("Reasoning:");
 
     await settleNextProvider(runtime, "Source A is stronger.");
     const comparisonTurnId = running.comparison?.turnId;

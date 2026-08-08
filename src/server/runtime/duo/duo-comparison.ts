@@ -10,7 +10,6 @@ export const DUO_COMPARISON_SOURCE_RESULT_MAX_CHARS = 5_500;
 export const DUO_COMPARISON_PROMPT_MAX_CHARS = 20_000;
 
 interface LockedSourceResult {
-  title: string;
   turn: AgentTurn;
   brief: string;
   result: string;
@@ -26,11 +25,6 @@ function clipVisibleText(
   const last = clipped.charCodeAt(clipped.length - 1);
   if (last >= 0xD800 && last <= 0xDBFF) clipped = clipped.slice(0, -1);
   return `${clipped}\n\n[${label} truncated by Inertia: ${value.length.toLocaleString("en-US")} characters total.]`;
-}
-
-function boundedAttribute(value: string | null, fallback: string): string {
-  const normalized = value?.trim() || fallback;
-  return clipVisibleText(normalized, 240, "attribute");
 }
 
 function lockedSource(
@@ -59,7 +53,6 @@ function lockedSource(
     .filter(Boolean)
     .join("\n\n");
   return {
-    title: detail.conversation.title,
     turn,
     brief,
     result: assistantResult,
@@ -70,14 +63,9 @@ function sourceBlock(
   label: "A" | "B",
   source: LockedSourceResult,
 ): string {
-  const route = source.turn.modelSelection;
   const result = source.result || "[No assistant result was persisted for this terminal turn.]";
   return [
     `## Source ${label} — quoted evidence`,
-    `Chat: ${boundedAttribute(source.title, `Source ${label}`)}`,
-    `Route: ${boundedAttribute(route.harnessId, "unknown harness")} / ${boundedAttribute(route.backendProfileDisplayName, "unknown backend")} / ${boundedAttribute(route.modelId, "unknown model")}`,
-    `Reasoning: ${boundedAttribute(route.reasoningEffort, "provider default")}`,
-    `Access used by source: ${source.turn.accessMode}`,
     `Authoritative terminal status: ${source.turn.status}`,
     "Assistant result:",
     clipVisibleText(
@@ -90,8 +78,9 @@ function sourceBlock(
 
 /**
  * Builds the only cross-chat representation admitted to the judge. Source
- * sessions, reasoning, tool/activity history, attachments, approvals,
- * credentials, filesystem state, and provider-hidden context are excluded.
+ * sessions, chat titles, model routes, reasoning/access settings,
+ * tool/activity history, attachments, approvals, credentials, filesystem
+ * state, and provider-hidden context are excluded.
  */
 export function buildDuoComparisonPrompt(
   store: RuntimeStore,

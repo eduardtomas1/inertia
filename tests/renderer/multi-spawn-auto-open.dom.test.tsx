@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useMultiSpawn } from "../../src/renderer/src/hooks/useMultiSpawn";
+import { useConversationSelectionQueue } from "../../src/renderer/src/hooks/useConversationSelectionQueue";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import type { MultiSpawnDraft } from "../../src/renderer/src/utils/multiSpawn";
 import type { AppSnapshot, Project, ServerEvent } from "../../src/shared/contracts";
@@ -260,11 +261,13 @@ describe("Duo comparison navigation", () => {
     }
   });
 
-  it("does not collapse the split when navigation changes during judge selection", async () => {
+  it("keeps a newer user selection authoritative when judge selection is pending", async () => {
     let currentSnapshot = snapshot;
     let splitConversationId: string | null = null;
     const generation = { current: 2 };
     let finishJudgeSelection: (() => void) | null = null;
+    let activeConversationId: string | null = conversationIds[0];
+    const userConversationId = "99999999-9999-4999-8999-999999999999";
     const baseRuntime = runtime();
     const run = vi.fn(async (
       key: string,
@@ -278,36 +281,53 @@ describe("Duo comparison navigation", () => {
           finishJudgeSelection = resolve;
         });
       }
-      return baseRuntime(key, command);
+      const event = await baseRuntime(key, command);
+      if (command.type === "conversation.select") {
+        activeConversationId = command.payload.conversationId;
+      }
+      return event;
     });
     const updateSplitConversationId = vi.fn((next: string | null) => {
       splitConversationId = next;
     });
     const focusWorkspace = vi.fn();
-    const hook = renderHook(() => useMultiSpawn({
-      snapshot: currentSnapshot,
-      settings,
-      run,
-      request: (command) => run("multi-spawn:background", command),
-      splitConversationId,
-      conversationSelectionGenerationRef: generation,
-      splitSelectionTransitionsRef: { current: 0 },
-      updateSplitConversationId,
-      showWorkspace: vi.fn(),
-      closeSidebar: vi.fn(),
-      focusWorkspace,
-      discardDraftConversation: vi.fn(),
-      setActionError: vi.fn(),
-    }));
+    const hook = renderHook(() => {
+      const selectConversationCommand = useConversationSelectionQueue(run);
+      return {
+        selectConversationCommand,
+        multiSpawn: useMultiSpawn({
+          snapshot: currentSnapshot,
+          settings,
+          run,
+          request: (command) => run("multi-spawn:background", command),
+          selectConversationCommand,
+          splitConversationId,
+          conversationSelectionGenerationRef: generation,
+          splitSelectionTransitionsRef: { current: 0 },
+          updateSplitConversationId,
+          showWorkspace: vi.fn(),
+          closeSidebar: vi.fn(),
+          focusWorkspace,
+          discardDraftConversation: vi.fn(),
+          setActionError: vi.fn(),
+        }),
+      };
+    });
 
-    await act(async () => hook.result.current.submit(draft()));
+    await act(async () => hook.result.current.multiSpawn.submit(draft()));
     currentSnapshot = { ...snapshot, activeConversationId: conversationIds[0] };
     hook.rerender();
     await waitFor(() => expect(finishJudgeSelection).not.toBeNull());
 
     generation.current += 1;
+    const userSelection = hook.result.current.selectConversationCommand(
+      "conversation.select",
+      userConversationId,
+    );
     await act(async () => finishJudgeSelection?.());
+    await act(async () => userSelection);
 
+    expect(activeConversationId).toBe(userConversationId);
     expect(updateSplitConversationId).not.toHaveBeenCalledWith(null);
     expect(focusWorkspace).toHaveBeenCalledTimes(1);
   });

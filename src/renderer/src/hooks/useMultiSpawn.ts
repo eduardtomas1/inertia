@@ -151,6 +151,7 @@ export function useMultiSpawn({
   settings,
   run,
   request,
+  selectConversationCommand,
   splitConversationId = null,
   conversationSelectionGenerationRef,
   splitSelectionTransitionsRef,
@@ -168,6 +169,10 @@ export function useMultiSpawn({
     command: CommandWithoutId,
   ) => Promise<ServerEvent>;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
+  selectConversationCommand?: (
+    key: string,
+    conversationId: string,
+  ) => Promise<ServerEvent>;
   splitConversationId?: string | null;
   conversationSelectionGenerationRef?: MutableRefObject<number>;
   splitSelectionTransitionsRef: MutableRefObject<number>;
@@ -216,6 +221,16 @@ export function useMultiSpawn({
     setRecoveryStatusState(status);
   }, []);
 
+  const selectConversation = useCallback((
+    key: string,
+    conversationId: string,
+  ): Promise<ServerEvent> => selectConversationCommand
+    ? selectConversationCommand(key, conversationId)
+    : run(key, {
+        type: "conversation.select",
+        payload: { conversationId },
+      }), [run, selectConversationCommand]);
+
   useEffect(() => () => {
     operationGenerationRef.current += 1;
   }, []);
@@ -227,10 +242,7 @@ export function useMultiSpawn({
   ): Promise<boolean> => {
     splitSelectionTransitionsRef.current += 1;
     try {
-      await run("multi-spawn:select", {
-        type: "conversation.select",
-        payload: { conversationId: primaryConversationId },
-      });
+      await selectConversation("multi-spawn:select", primaryConversationId);
       if (!isCurrent()) return false;
       updateSplitConversationId(secondaryConversationId);
       showWorkspace();
@@ -246,7 +258,7 @@ export function useMultiSpawn({
     }
   }, [
     closeSidebar,
-    run,
+    selectConversation,
     showWorkspace,
     splitSelectionTransitionsRef,
     updateSplitConversationId,
@@ -350,10 +362,10 @@ export function useMultiSpawn({
     comparisonOpenedRef.current = watched.launchId;
     watchedComparisonRef.current = null;
     splitSelectionTransitionsRef.current += 1;
-    void run("multi-spawn:comparison:select", {
-      type: "conversation.select",
-      payload: { conversationId: comparison.conversationId },
-    }).then(() => {
+    void selectConversation(
+      "multi-spawn:comparison:select",
+      comparison.conversationId,
+    ).then(() => {
       if (
         splitConversationIdRef.current !== watched.secondaryConversationId
         || (
@@ -384,7 +396,7 @@ export function useMultiSpawn({
     conversationSelectionGenerationRef,
     focusWorkspace,
     recoveryStatus,
-    run,
+    selectConversation,
     setActionError,
     showWorkspace,
     snapshot?.activeConversationId,

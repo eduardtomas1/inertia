@@ -21,6 +21,7 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
+import { useConversationSelectionQueue } from "./hooks/useConversationSelectionQueue";
 import {
   agentWorkflowRouteIdentity,
   agentWorkflowTargetConversation,
@@ -307,6 +308,7 @@ export default function App(): React.JSX.Element {
     setBusyAction,
     setActionError,
   });
+  const selectConversationCommand = useConversationSelectionQueue(run);
   const draftConversation = useDraftConversation({
     snapshot: connection.snapshot,
     settings,
@@ -334,6 +336,7 @@ export default function App(): React.JSX.Element {
     settings,
     run,
     request,
+    selectConversationCommand,
     splitConversationId,
     conversationSelectionGenerationRef,
     splitSelectionTransitionsRef,
@@ -501,10 +504,10 @@ export default function App(): React.JSX.Element {
       conversationSelectionGenerationRef.current + 1;
     conversationSelectionGenerationRef.current = selectionGeneration;
     splitSelectionTransitionsRef.current += 1;
-    void run("conversation.select", {
-      type: "conversation.select",
-      payload: { conversationId: nextConversation.id },
-    }).then(() => {
+    void selectConversationCommand(
+      "conversation.select",
+      nextConversation.id,
+    ).then(() => {
       if (
         selectionGeneration === conversationSelectionGenerationRef.current
       ) {
@@ -518,7 +521,7 @@ export default function App(): React.JSX.Element {
     });
   }, [
     conversation,
-    run,
+    selectConversationCommand,
     splitConversation,
     updateSplitConversationId,
   ]);
@@ -624,10 +627,10 @@ export default function App(): React.JSX.Element {
       event.type !== "request.result"
       || event.result.kind !== "conversation.created"
     ) throw new Error("The new chat could not be identified.");
-    await run("conversation.select", {
-      type: "conversation.select",
-      payload: { conversationId: event.result.conversationId },
-    });
+    await selectConversationCommand(
+      "conversation.select",
+      event.result.conversationId,
+    );
     if (options?.prefillText) {
       const conversationId = event.result.conversationId;
       window.requestAnimationFrame(() => requestComposerPrefill({

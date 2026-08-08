@@ -1,5 +1,4 @@
 import type Database from "better-sqlite3";
-
 import type { ProviderId } from "../../../shared/contracts";
 import {
   continuationIdentityForSelection,
@@ -23,9 +22,9 @@ import {
 } from "./catalog";
 import { durableDataMigrationDefinitions } from "./durable-data";
 import { protectInterruptedPairedLaunchDeletion, rebuildPairedLaunchProjectDeletionTrigger } from "./duo-deletion-trigger";
+import { persistDuoThirdModelComparison } from "./duo-comparison-migration";
 import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
 import { quotedSqlIdentifier } from "./sql-identifiers";
-
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const;
 const MODEL_SELECTION_COLUMNS = [
   "model_selection_json",
@@ -1206,6 +1205,7 @@ export function migrateRuntimeDatabase(database: Database.Database): void {
     });
     migrationExtensions.push(...durableDataMigrationDefinitions);
     migrationExtensions.push({ name: "ProtectInterruptedDuoRecovery", up: protectInterruptedPairedLaunchDeletion });
+    migrationExtensions.push({ name: "PersistDuoThirdModelComparison", up: persistDuoThirdModelComparison });
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,
       migrationExtensions,

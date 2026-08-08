@@ -5,7 +5,10 @@ import {
   Columns2,
   Folder,
   KeyRound,
+  LockKeyhole,
+  Scale,
   ShieldCheck,
+  TriangleAlert,
   X,
   Zap,
 } from "lucide-react";
@@ -63,10 +66,14 @@ export interface MultiSpawnDialogProps {
   recoveryStatus?: DuoLaunchStatus | null;
   recheckingRecovery?: boolean;
   acknowledgingRecovery?: boolean;
+  retryingComparison?: boolean;
+  cancellingComparison?: boolean;
   onClose: () => void;
   onSubmit: (draft: MultiSpawnDraft) => Promise<void>;
   onRecheckRecovery?: () => Promise<void>;
   onAcknowledgeRecovery?: () => Promise<void>;
+  onRetryComparison?: () => Promise<void>;
+  onCancelComparison?: () => Promise<void>;
   onOpenProviderSetup: (providerId: ProviderId) => void;
   onOpenBackendSetup: (profileId: string) => void;
 }
@@ -118,7 +125,7 @@ function MultiSpawnSideEditor({
   onChange,
   onRepair,
 }: {
-  index: 0 | 1;
+  index: 0 | 1 | 2;
   side: MultiSpawnSideDraft;
   projects: AppSnapshot["projects"];
   routeState: RouteState;
@@ -138,18 +145,22 @@ function MultiSpawnSideEditor({
       === side.selection.backendConfigurationRevision);
   const reasoningOptions = route?.reasoningOptions ?? [];
   const ready = routeState.ready;
+  const isJudge = index === 2;
+  const chatLabel = isJudge ? "Comparison chat" : `Chat ${index + 1}`;
 
   return (
     <section
       className="multi-spawn-side"
-      data-route-side={index === 0 ? "a" : "b"}
+      data-route-side={index === 0 ? "a" : index === 1 ? "b" : "judge"}
       aria-labelledby={`multi-spawn-side-heading-${index}`}
     >
       <header>
-        <span className="multi-spawn-side-number">{index + 1}</span>
+        <span className="multi-spawn-side-number">
+          {isJudge ? <Scale size={13} /> : index + 1}
+        </span>
         <span>
           <strong id={`multi-spawn-side-heading-${index}`}>
-            {index === 0 ? "Route A" : "Route B"}
+            {index === 0 ? "Route A" : index === 1 ? "Route B" : "Judge route"}
           </strong>
           <small>
             {routeState.selected.harnessLabel} ·{" "}
@@ -167,11 +178,15 @@ function MultiSpawnSideEditor({
           <span>Chat name</span>
           <input
             id={titleId}
-            aria-label={`Chat ${index + 1} name`}
+            aria-label={`${chatLabel} name`}
             value={side.title}
             maxLength={120}
             disabled={disabled}
-            placeholder={index === 0 ? "Implementation review" : "Second opinion"}
+            placeholder={index === 0
+              ? "Implementation review"
+              : index === 1
+                ? "Second opinion"
+                : "Independent comparison"}
             onChange={(event) => onChange({
               ...side,
               title: event.currentTarget.value,
@@ -182,7 +197,7 @@ function MultiSpawnSideEditor({
           <span><Folder size={11} /> Project</span>
           <select
             id={projectId}
-            aria-label={`Chat ${index + 1} project`}
+            aria-label={`${chatLabel} project`}
             value={side.projectId}
             disabled={disabled}
             onChange={(event) => onChange({
@@ -217,7 +232,7 @@ function MultiSpawnSideEditor({
           <span><Brain size={11} /> Reasoning</span>
           <select
             id={reasoningId}
-            aria-label={`Chat ${index + 1} reasoning`}
+            aria-label={`${chatLabel} reasoning`}
             value={side.selection.reasoningEffort ?? ""}
             disabled={disabled || reasoningOptions.length === 0}
             onChange={(event) => onChange({
@@ -240,7 +255,7 @@ function MultiSpawnSideEditor({
           <span><ShieldCheck size={11} /> Access</span>
           <select
             id={accessId}
-            aria-label={`Chat ${index + 1} access`}
+            aria-label={`${chatLabel} access`}
             value={side.accessMode}
             disabled={disabled}
             onChange={(event) => onChange({
@@ -285,10 +300,14 @@ export function MultiSpawnDialog({
   recoveryStatus = null,
   recheckingRecovery = false,
   acknowledgingRecovery = false,
+  retryingComparison = false,
+  cancellingComparison = false,
   onClose,
   onSubmit,
   onRecheckRecovery,
   onAcknowledgeRecovery,
+  onRetryComparison,
+  onCancelComparison,
   onOpenProviderSetup,
   onOpenBackendSetup,
 }: MultiSpawnDialogProps): React.JSX.Element | null {
@@ -301,7 +320,11 @@ export function MultiSpawnDialog({
     string | null
   >(null);
   useNativePreviewSuspension(open);
-  const busy = submitting || cancelling || acknowledgingRecovery;
+  const busy = submitting
+    || cancelling
+    || acknowledgingRecovery
+    || retryingComparison
+    || cancellingComparison;
   const copyRecoveryCommand = async (
     key: string,
     commandText: string,
@@ -353,9 +376,14 @@ export function MultiSpawnDialog({
         routesForSelection(current.sides[1].selection),
         current.sides[1].selection,
       );
+      const comparison = refreshMultiSpawnSelection(
+        routesForSelection(current.comparison.side.selection),
+        current.comparison.side.selection,
+      );
       if (
         first === current.sides[0].selection
         && second === current.sides[1].selection
+        && comparison === current.comparison.side.selection
       ) return current;
       return {
         ...current,
@@ -363,6 +391,13 @@ export function MultiSpawnDialog({
           { ...current.sides[0], selection: first },
           { ...current.sides[1], selection: second },
         ],
+        comparison: {
+          ...current.comparison,
+          side: {
+            ...current.comparison.side,
+            selection: comparison,
+          },
+        },
       };
     });
   }, [open, routesForSelection]);
@@ -422,7 +457,7 @@ export function MultiSpawnDialog({
 
   if (!open || !snapshot || !draft) return null;
 
-  const routeStates = draft.sides.map((side): RouteState => {
+  const routeStateFor = (side: MultiSpawnSideDraft): RouteState => {
     const providerId = legacyProviderIdForHarness(side.selection.harnessId);
     const provider = snapshot.providers.find(({ id }) => id === providerId);
     const profile = snapshot.backendProfiles?.find(
@@ -466,15 +501,28 @@ export function MultiSpawnDialog({
         : selected.unavailableReason
           ?? "Choose a model route that is currently available.",
     };
-  }) as [RouteState, RouteState];
+  };
+  const routeStates: [RouteState, RouteState] = [
+    routeStateFor(draft.sides[0]),
+    routeStateFor(draft.sides[1]),
+  ];
+  const comparisonRouteState = routeStateFor(draft.comparison.side);
   const validationError = validateMultiSpawnDraft(draft);
-  const routesReady = routeStates.every(({ ready }) => ready);
+  const routesReady = routeStates.every(({ ready }) => ready)
+    && (!draft.comparison.enabled || comparisonRouteState.ready);
   const sharesLocalCheckout = settings.newThreadMode === "local"
     && projectsShareLocalCheckout(
       snapshot.projects,
       draft.sides[0].projectId,
       draft.sides[1].projectId,
     );
+  const judgeSharesSourceCheckout = draft.comparison.enabled
+    && draft.comparison.side.accessMode !== "supervised"
+    && draft.sides.some((side) => projectsShareLocalCheckout(
+      snapshot.projects,
+      side.projectId,
+      draft.comparison.side.projectId,
+    ));
 
   const updateSide = (
     index: 0 | 1,
@@ -488,8 +536,19 @@ export function MultiSpawnDialog({
     } : current);
   };
 
-  const openRepair = (index: 0 | 1): void => {
-    const route = routeStates[index];
+  const updateComparison = (next: MultiSpawnSideDraft): void => {
+    setDraft((current) => current ? {
+      ...current,
+      comparison: {
+        ...current.comparison,
+        side: next,
+      },
+    } : current);
+  };
+
+  const openRepair = (index: 0 | 1 | 2): void => {
+    const route = index === 2 ? comparisonRouteState : routeStates[index];
+    const side = index === 2 ? draft.comparison.side : draft.sides[index];
     restoreFocusRef.current = false;
     onClose();
     if (
@@ -502,7 +561,7 @@ export function MultiSpawnDialog({
       || route.repairAction === "configure"
       || route.repairAction === "probe"
     ) {
-      onOpenBackendSetup(draft.sides[index].selection.backendProfileId);
+      onOpenBackendSetup(side.selection.backendProfileId);
     } else {
       onOpenProviderSetup(route.providerId);
     }
@@ -597,6 +656,87 @@ export function MultiSpawnDialog({
           />
         </div>
 
+        <section
+          className={`multi-spawn-comparison${draft.comparison.enabled ? " is-enabled" : ""}`}
+          aria-labelledby="multi-spawn-comparison-title"
+        >
+          <label className="multi-spawn-comparison-toggle">
+            <input
+              type="checkbox"
+              aria-label="Compare with a third model"
+              checked={draft.comparison.enabled}
+              disabled={busy}
+              onChange={(event) => setDraft({
+                ...draft,
+                comparison: {
+                  ...draft.comparison,
+                  enabled: event.currentTarget.checked,
+                },
+              })}
+            />
+            <span className="multi-spawn-comparison-lock" aria-hidden="true">
+              <LockKeyhole size={16} />
+            </span>
+            <span>
+              <strong id="multi-spawn-comparison-title">
+                Lock these two results for a third-model comparison
+              </strong>
+              <small>
+                Pins the two source chats and their first Duo turns. It does
+                not freeze either chat, session, project, or working tree.
+              </small>
+            </span>
+          </label>
+
+          {draft.comparison.enabled && (
+            <div className="multi-spawn-comparison-body">
+              <div className="multi-spawn-lock-contract" role="note">
+                <span className="multi-spawn-lock-rail" aria-hidden="true">
+                  <span>A</span><span>B</span><LockKeyhole size={13} /><Scale size={14} />
+                </span>
+                <span>
+                  <strong>What the lock sends</strong>
+                  <small>
+                    Inertia waits until both pinned turns are completed,
+                    failed, cancelled, or interrupted. A fresh judge turn then
+                    receives only the shared brief, each terminal status, and
+                    up to 5,500 characters of each attributed assistant result.
+                    It receives no source session, source reasoning, source
+                    tool history, source permissions, credentials, attachments,
+                    or hidden context.
+                  </small>
+                  <small>
+                    The judge uses only the project, route, and access selected
+                    below. Choosing a source project here is explicit; the lock
+                    itself never attaches one.
+                  </small>
+                </span>
+              </div>
+              <MultiSpawnSideEditor
+                index={2}
+                side={draft.comparison.side}
+                projects={snapshot.projects}
+                routeState={comparisonRouteState}
+                disabled={busy}
+                onChange={updateComparison}
+                onRepair={() => openRepair(2)}
+              />
+              {judgeSharesSourceCheckout && (
+                <div className="multi-spawn-judge-risk" role="status">
+                  <TriangleAlert size={15} />
+                  <span>
+                    <strong>Judge can edit a source checkout</strong>
+                    The selected access is write-capable. The judge starts only
+                    after both source turns end, but the lock does not make this
+                    checkout read-only. Choose Supervised or another project if
+                    comparison should not make autonomous edits.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
         {sharesLocalCheckout && (
           <div className="multi-spawn-dialog-status" role="status">
             Both agents will share this project checkout. Concurrent edits can
@@ -611,7 +751,9 @@ export function MultiSpawnDialog({
             role={error ? "alert" : "status"}
           >
             {error
-              ?? "Choose two ready routes before launching the duo."}
+              ?? (draft.comparison.enabled
+                ? "Choose three ready routes before launching the Duo comparison."
+                : "Choose two ready routes before launching the duo.")}
             {recoveryStatus && (
               <section
                 className="multi-spawn-recovery-status"
@@ -650,6 +792,70 @@ export function MultiSpawnDialog({
                     </div>
                   ))}
                 </dl>
+                {recoveryStatus.comparison && (
+                  <section
+                    className="multi-spawn-comparison-status"
+                    aria-label="Third-model comparison status"
+                  >
+                    <span>
+                      <Scale size={14} />
+                      <strong>Separate third-model judge</strong>
+                    </span>
+                    <dl>
+                      <div>
+                        <dt>State</dt>
+                        <dd>{({
+                          waiting: "Locked · waiting for both source turns",
+                          dispatching: "Durable judge dispatch claimed",
+                          running: "Judge is comparing",
+                          completed: "Comparison completed",
+                          failed: "Judge failed · explicit retry available",
+                          cancelled: "Comparison cancelled · lock released",
+                          interrupted: "Judge outcome interrupted · not retried",
+                        } as const)[recoveryStatus.comparison.state]}</dd>
+                      </div>
+                      <div>
+                        <dt>Judge chat</dt>
+                        <dd><code>{recoveryStatus.comparison.conversationId ?? "Not created"}</code></dd>
+                      </div>
+                      <div>
+                        <dt>Attempts</dt>
+                        <dd>{recoveryStatus.comparison.attempt}</dd>
+                      </div>
+                    </dl>
+                    {recoveryStatus.comparison.error && (
+                      <p>{recoveryStatus.comparison.error}</p>
+                    )}
+                    <div>
+                      {(recoveryStatus.comparison.state === "failed"
+                        || recoveryStatus.comparison.state === "interrupted")
+                        && onRetryComparison && (
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          disabled={busy}
+                          onClick={() => { void onRetryComparison(); }}
+                        >
+                          {retryingComparison ? "Retrying judge…" : "Retry judge explicitly"}
+                        </button>
+                      )}
+                      {recoveryStatus.comparison.state !== "completed"
+                        && recoveryStatus.comparison.state !== "cancelled"
+                        && onCancelComparison && (
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          disabled={busy}
+                          onClick={() => { void onCancelComparison(); }}
+                        >
+                          {cancellingComparison
+                            ? "Cancelling comparison…"
+                            : "Cancel comparison and release lock"}
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                )}
                 {onRecheckRecovery && (
                   <button
                     type="button"
@@ -752,7 +958,10 @@ export function MultiSpawnDialog({
             />
             <span>
               <strong>Save this pairing</strong>
-              <small>Saves names, routes, reasoning, and access locally.</small>
+              <small>
+                Saves names, routes, reasoning, access, and the compare toggle
+                locally — never prompts or projects.
+              </small>
             </span>
           </label>
           <div>
@@ -769,7 +978,9 @@ export function MultiSpawnDialog({
               className="primary-button multi-spawn-launch"
               disabled={busy || Boolean(validationError) || !routesReady}
               title={validationError ?? (!routesReady
-                ? "Both routes must be ready."
+                ? (draft.comparison.enabled
+                    ? "All three routes must be ready."
+                    : "Both routes must be ready.")
                 : undefined)}
               onClick={submitDraft}
             >

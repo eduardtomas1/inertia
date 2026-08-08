@@ -15,6 +15,7 @@ import type {
 import {
   clearMultiSpawnPreset,
   clearPendingMultiSpawnLaunchId,
+  multiSpawnComparisonPayload,
   multiSpawnConversationPayload,
   validateMultiSpawnDraft,
   writeMultiSpawnPreset,
@@ -48,11 +49,15 @@ export interface MultiSpawnController {
   recoveryStatus: DuoStatusResult | null;
   recheckingRecovery: boolean;
   acknowledgingRecovery: boolean;
+  retryingComparison: boolean;
+  cancellingComparison: boolean;
   openDialog: () => void;
   closeDialog: () => void;
   submit: (draft: MultiSpawnDraft) => Promise<void>;
   recheckRecovery: () => Promise<void>;
   acknowledgeRecovery: () => Promise<void>;
+  retryComparison: () => Promise<void>;
+  cancelComparison: () => Promise<void>;
 }
 
 function errorMessage(error: unknown): string {
@@ -68,6 +73,15 @@ function reconciliationMessage(detail: string): string {
 }
 
 function launchStatusMessage(status: DuoStatusResult): string | null {
+  const comparison = status.comparison;
+  if (comparison?.state === "failed") {
+    return comparison.error
+      ?? "The third-model judge failed. The two source results remain locked; retry explicitly or cancel the comparison.";
+  }
+  if (comparison?.state === "interrupted") {
+    return comparison.error
+      ?? "The third-model judge was interrupted and was not retried automatically. The source results remain locked.";
+  }
   if (status.state === "running") return null;
   const startedRoutes: number[] = [];
   const failedRoutes: number[] = [];
@@ -163,6 +177,8 @@ export function useMultiSpawn({
     useState<DuoStatusResult | null>(null);
   const [recheckingRecovery, setRecheckingRecovery] = useState(false);
   const [acknowledgingRecovery, setAcknowledgingRecovery] = useState(false);
+  const [retryingComparison, setRetryingComparison] = useState(false);
+  const [cancellingComparison, setCancellingComparison] = useState(false);
   const recoveryStatusRef = useRef<DuoStatusResult | null>(null);
   const recoveryProjectIdsRef = useRef<string[]>([]);
   const submittingRef = useRef(false);
@@ -465,6 +481,17 @@ export function useMultiSpawn({
               activate: false,
             },
           ],
+          ...(draft.comparison.enabled
+            ? {
+                comparison: {
+                  ...multiSpawnComparisonPayload(
+                    draft.comparison.side,
+                    settings,
+                  ),
+                  activate: false as const,
+                },
+              }
+            : {}),
         },
       }));
       if (!isCurrent()) return;
@@ -679,6 +706,90 @@ export function useMultiSpawn({
     run,
   ]);
 
+  const retryComparison = useCallback(async (): Promise<void> => {
+    if (
+      !recoveryStatus?.comparison
+      || (
+        recoveryStatus.comparison.state !== "failed"
+        && recoveryStatus.comparison.state !== "interrupted"
+      )
+      || retryingComparison
+      || cancellingComparison
+    ) return;
+    const generation = operationGenerationRef.current;
+    const launchId = recoveryStatus.launchId;
+    setRetryingComparison(true);
+    setError(null);
+    try {
+      const event = resultEvent(await run("multi-spawn:comparison:retry", {
+        type: "duo.comparison.retry",
+        payload: { launchId },
+      }));
+      if (operationGenerationRef.current !== generation) return;
+      if (event.result.kind !== "duo.status") {
+        throw new Error(
+          "The local service returned an unexpected judge retry response.",
+        );
+      }
+      setRecoveryStatus(event.result);
+      setError(launchStatusMessage(event.result));
+    } catch (caught) {
+      if (operationGenerationRef.current !== generation) return;
+      setError(`The third-model judge could not be retried. ${errorMessage(caught)}`);
+    } finally {
+      if (operationGenerationRef.current === generation) {
+        setRetryingComparison(false);
+      }
+    }
+  }, [
+    cancellingComparison,
+    recoveryStatus,
+    retryingComparison,
+    run,
+    setRecoveryStatus,
+  ]);
+
+  const cancelComparison = useCallback(async (): Promise<void> => {
+    if (
+      !recoveryStatus?.comparison
+      || recoveryStatus.comparison.state === "completed"
+      || recoveryStatus.comparison.state === "cancelled"
+      || retryingComparison
+      || cancellingComparison
+    ) return;
+    const generation = operationGenerationRef.current;
+    const launchId = recoveryStatus.launchId;
+    setCancellingComparison(true);
+    setError(null);
+    try {
+      const event = resultEvent(await run("multi-spawn:comparison:cancel", {
+        type: "duo.comparison.cancel",
+        payload: { launchId },
+      }));
+      if (operationGenerationRef.current !== generation) return;
+      if (event.result.kind !== "duo.status") {
+        throw new Error(
+          "The local service returned an unexpected judge cancellation response.",
+        );
+      }
+      setRecoveryStatus(event.result);
+      setError(launchStatusMessage(event.result));
+    } catch (caught) {
+      if (operationGenerationRef.current !== generation) return;
+      setError(`The third-model comparison could not be cancelled. ${errorMessage(caught)}`);
+    } finally {
+      if (operationGenerationRef.current === generation) {
+        setCancellingComparison(false);
+      }
+    }
+  }, [
+    cancellingComparison,
+    recoveryStatus,
+    retryingComparison,
+    run,
+    setRecoveryStatus,
+  ]);
+
   return {
     open,
     submitting,
@@ -688,10 +799,14 @@ export function useMultiSpawn({
     recoveryStatus,
     recheckingRecovery,
     acknowledgingRecovery,
+    retryingComparison,
+    cancellingComparison,
     openDialog,
     closeDialog,
     submit,
     recheckRecovery,
     acknowledgeRecovery,
+    retryComparison,
+    cancelComparison,
   };
 }

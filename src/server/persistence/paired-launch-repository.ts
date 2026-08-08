@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 
 import type {
+  AgentTurnTerminalStatus,
+  DuoComparisonState,
   DuoDispatchState,
   DuoLaunchState,
   DuoLaunchStatus,
@@ -43,7 +45,19 @@ export interface StoredPairedLaunch extends DuoLaunchStatus {
   cancelRequested: boolean;
   createdAt: string;
   updatedAt: string;
+  comparison?: DuoLaunchStatus["comparison"] & {
+    plannedConversationId: string;
+  };
   plans: [StoredPairedLaunchSidePlan, StoredPairedLaunchSidePlan];
+}
+
+export interface PairedLaunchComparisonPlan {
+  plannedConversationId: string;
+}
+
+export interface PairedLaunchTurnOwner {
+  launchId: string;
+  role: "source" | "comparison";
 }
 
 export interface PendingPairedLaunchIds {
@@ -65,13 +79,24 @@ export class PairedLaunchRepository {
     launchId: string,
     sides: [PairedLaunchSidePlan, PairedLaunchSidePlan],
     now: string,
+    comparison: PairedLaunchComparisonPlan | null = null,
   ): StoredPairedLaunch {
     this.database.transaction(() => {
       this.database.prepare(`
         INSERT INTO paired_launches (
-          id, status, cancel_requested, failure_message, created_at, updated_at
-        ) VALUES (?, 'preparing', 0, NULL, ?, ?)
-      `).run(launchId, now, now);
+          id, status, cancel_requested, failure_message,
+          comparison_state, comparison_planned_conversation_id,
+          comparison_conversation_id, comparison_turn_id,
+          comparison_attempt, comparison_failure_message,
+          created_at, updated_at
+        ) VALUES (?, 'preparing', 0, NULL, ?, ?, NULL, NULL, 0, NULL, ?, ?)
+      `).run(
+        launchId,
+        comparison ? "waiting" : null,
+        comparison?.plannedConversationId ?? null,
+        now,
+        now,
+      );
       const insertSide = this.database.prepare(`
         INSERT INTO paired_launch_sides (
           launch_id, ordinal, project_id, planned_conversation_id,
@@ -113,6 +138,19 @@ export class PairedLaunchRepository {
       cancelRequested: launch.cancel_requested === 1,
       createdAt: launch.created_at,
       updatedAt: launch.updated_at,
+      ...(launch.comparison_state && launch.comparison_planned_conversation_id
+        ? {
+            comparison: {
+              state: launch.comparison_state,
+              plannedConversationId:
+                launch.comparison_planned_conversation_id,
+              conversationId: launch.comparison_conversation_id,
+              turnId: launch.comparison_turn_id,
+              attempt: launch.comparison_attempt,
+              error: launch.comparison_failure_message,
+            },
+          }
+        : {}),
       sides: sides.map((side) => ({
         ordinal: side.ordinal,
         conversationId: side.conversation_id,
@@ -170,19 +208,36 @@ export class PairedLaunchRepository {
     const rows = this.database.prepare(`
       SELECT launch.id
       FROM paired_launches AS launch
-      WHERE launch.status IN (
-        'preparing', 'prepared', 'dispatching', 'interrupted',
-        'recovery-required'
+      WHERE (
+        launch.status IN (
+          'preparing', 'prepared', 'dispatching', 'interrupted',
+          'recovery-required'
+        )
+        OR launch.comparison_state IN (
+          'waiting', 'dispatching', 'running', 'failed', 'interrupted'
+        )
       )
-        AND EXISTS (
+        AND (
+          EXISTS (
           SELECT 1
           FROM paired_launch_sides AS project_side
           WHERE project_side.launch_id = launch.id
             AND project_side.project_id IN (${placeholders})
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM conversations AS comparison_conversation
+            WHERE comparison_conversation.id = launch.comparison_conversation_id
+              AND comparison_conversation.project_id IN (${placeholders})
+          )
         )
       ORDER BY launch.created_at DESC, launch.id ASC
       LIMIT ?
-    `).all(...exactProjectIds, limit + 1) as Array<{ id: string }>;
+    `).all(
+      ...exactProjectIds,
+      ...exactProjectIds,
+      limit + 1,
+    ) as Array<{ id: string }>;
     return {
       launchIds: rows.slice(0, limit).map(({ id }) => id),
       hasMore: rows.length > limit,
@@ -193,9 +248,15 @@ export class PairedLaunchRepository {
     const blocked = this.database.prepare(`
       SELECT 1
       FROM paired_launches AS launch
-      JOIN paired_launch_sides AS conversation_side
-        ON conversation_side.launch_id = launch.id
-      WHERE conversation_side.conversation_id = ?
+      WHERE (
+        launch.comparison_conversation_id = ?
+        OR EXISTS (
+          SELECT 1
+          FROM paired_launch_sides AS conversation_side
+          WHERE conversation_side.launch_id = launch.id
+            AND conversation_side.conversation_id = ?
+        )
+      )
         AND (
           launch.status IN (
             'preparing', 'prepared', 'dispatching', 'interrupted',
@@ -217,14 +278,17 @@ export class PairedLaunchRepository {
               FROM paired_launch_sides AS missing_turn
               WHERE missing_turn.launch_id = launch.id
                 AND missing_turn.turn_id IS NULL
-            )
+              )
+          )
+          OR launch.comparison_state IN (
+            'waiting', 'dispatching', 'running', 'failed', 'interrupted'
           )
         )
       LIMIT 1
-    `).get(conversationId);
+    `).get(conversationId, conversationId);
     if (blocked) {
       throw new Error(
-        "Cancel the active Duo launch, or acknowledge an interrupted dispatch, before deleting this thread.",
+        "Cancel the active Duo launch, acknowledge an interrupted dispatch, or cancel the locked comparison before deleting this thread.",
       );
     }
   }
@@ -233,9 +297,20 @@ export class PairedLaunchRepository {
     const blocked = this.database.prepare(`
       SELECT 1
       FROM paired_launches AS launch
-      JOIN paired_launch_sides AS project_side
-        ON project_side.launch_id = launch.id
-      WHERE project_side.project_id = ?
+      WHERE (
+        EXISTS (
+          SELECT 1
+          FROM paired_launch_sides AS project_side
+          WHERE project_side.launch_id = launch.id
+            AND project_side.project_id = ?
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM conversations AS comparison_conversation
+          WHERE comparison_conversation.id = launch.comparison_conversation_id
+            AND comparison_conversation.project_id = ?
+        )
+      )
         AND (
           launch.status IN (
             'preparing', 'prepared', 'dispatching', 'interrupted',
@@ -274,12 +349,32 @@ export class PairedLaunchRepository {
                 OR unresolved_worktree.worktree_cleanup_outcome <> 'absent'
               )
           )
+          OR launch.comparison_state IN (
+            'waiting', 'dispatching', 'running', 'failed', 'interrupted'
+          )
         )
       LIMIT 1
-    `).get(projectId, projectId);
+    `).get(projectId, projectId, projectId);
     if (blocked) {
       throw new Error(
-        "Cancel the active Duo launch, or acknowledge an interrupted dispatch, before removing this project.",
+        "Cancel the active Duo launch, acknowledge an interrupted dispatch, or cancel the locked comparison before removing this project.",
+      );
+    }
+  }
+
+  assertComparisonTurnAllowed(conversationId: string): void {
+    const blocked = this.database.prepare(`
+      SELECT 1
+      FROM paired_launches
+      WHERE comparison_conversation_id = ?
+        AND comparison_state IN (
+          'waiting', 'dispatching', 'running', 'failed', 'interrupted'
+        )
+      LIMIT 1
+    `).get(conversationId);
+    if (blocked) {
+      throw new Error(
+        "This judge chat is reserved for its locked Duo comparison. Retry or cancel the comparison before sending other work.",
       );
     }
   }
@@ -559,6 +654,26 @@ export class PairedLaunchRepository {
     this.touch(launchId, "preparing", null, now);
   }
 
+  attachComparisonConversation(
+    launchId: string,
+    conversationId: string,
+    now: string,
+  ): void {
+    const result = this.database.prepare(`
+      UPDATE paired_launches
+      SET comparison_conversation_id = ?, updated_at = ?
+      WHERE id = ?
+        AND comparison_state = 'waiting'
+        AND comparison_planned_conversation_id = ?
+        AND comparison_conversation_id IS NULL
+    `).run(conversationId, now, launchId, conversationId);
+    if (result.changes !== 1) {
+      throw new Error(
+        "The Duo comparison conversation did not match its durable plan.",
+      );
+    }
+  }
+
   attachTurns(
     launchId: string,
     turnIds: [string, string],
@@ -583,6 +698,177 @@ export class PairedLaunchRepository {
       WHERE id = ? AND status NOT IN ('cancelled', 'failed', 'interrupted')
     `).run(now, launchId);
     if (result.changes === 0) this.get(launchId);
+    return this.get(launchId);
+  }
+
+  launchForTurn(turnId: string): PairedLaunchTurnOwner | null {
+    const row = this.database.prepare(`
+      SELECT launch.id AS launch_id,
+        CASE
+          WHEN launch.comparison_turn_id = ? THEN 'comparison'
+          ELSE 'source'
+        END AS role
+      FROM paired_launches AS launch
+      WHERE launch.comparison_turn_id = ?
+        OR EXISTS (
+          SELECT 1
+          FROM paired_launch_sides AS source_side
+          WHERE source_side.launch_id = launch.id
+            AND source_side.turn_id = ?
+        )
+      ORDER BY CASE WHEN launch.comparison_turn_id = ? THEN 0 ELSE 1 END
+      LIMIT 1
+    `).get(turnId, turnId, turnId, turnId) as {
+      launch_id: string;
+      role: PairedLaunchTurnOwner["role"];
+    } | undefined;
+    return row ? { launchId: row.launch_id, role: row.role } : null;
+  }
+
+  comparisonLaunchIds(): string[] {
+    return (this.database.prepare(`
+      SELECT id
+      FROM paired_launches
+      WHERE comparison_state IN (
+        'waiting', 'dispatching', 'running', 'failed', 'interrupted'
+      )
+      ORDER BY created_at ASC, id ASC
+    `).all() as Array<{ id: string }>).map(({ id }) => id);
+  }
+
+  claimComparison(
+    launchId: string,
+    retry: boolean,
+    now: string,
+  ): boolean {
+    return this.database.transaction(() => {
+      const launch = this.get(launchId);
+      if (
+        !launch.comparison
+        || !launch.comparison.conversationId
+        || launch.cancelRequested
+        || (
+          retry
+            ? launch.comparison.state !== "failed"
+              && launch.comparison.state !== "interrupted"
+            : launch.comparison.state !== "waiting"
+        )
+      ) return false;
+      const sourceTurnIds = launch.sides.map(({ turnId }) => turnId);
+      if (!sourceTurnIds[0] || !sourceTurnIds[1]) return false;
+      const terminalCount = this.database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM agent_turns
+        WHERE id IN (?, ?)
+          AND status IN ('completed', 'failed', 'cancelled', 'interrupted')
+      `).get(sourceTurnIds[0], sourceTurnIds[1]) as { count: number };
+      if (terminalCount.count !== 2) return false;
+      const states = retry
+        ? ["failed", "interrupted"]
+        : ["waiting"];
+      const placeholders = states.map(() => "?").join(", ");
+      const result = this.database.prepare(`
+        UPDATE paired_launches
+        SET comparison_state = 'dispatching', comparison_turn_id = NULL,
+          comparison_attempt = comparison_attempt + 1,
+          comparison_failure_message = NULL, updated_at = ?
+        WHERE id = ?
+          AND cancel_requested = 0
+          AND comparison_conversation_id IS NOT NULL
+          AND comparison_state IN (${placeholders})
+      `).run(now, launchId, ...states);
+      return result.changes === 1;
+    })();
+  }
+
+  attachComparisonTurn(
+    launchId: string,
+    turnId: string,
+    now: string,
+  ): void {
+    const result = this.database.prepare(`
+      UPDATE paired_launches
+      SET comparison_turn_id = ?, updated_at = ?
+      WHERE id = ?
+        AND comparison_state = 'dispatching'
+        AND comparison_turn_id IS NULL
+    `).run(turnId, now, launchId);
+    if (result.changes !== 1) {
+      throw new Error("The Duo comparison turn was already adopted.");
+    }
+  }
+
+  markComparisonRunning(
+    launchId: string,
+    turnId: string,
+    now: string,
+  ): StoredPairedLaunch {
+    this.database.prepare(`
+      UPDATE paired_launches
+      SET comparison_state = 'running', updated_at = ?
+      WHERE id = ?
+        AND comparison_state = 'dispatching'
+        AND comparison_turn_id = ?
+    `).run(now, launchId, turnId);
+    return this.get(launchId);
+  }
+
+  settleComparisonTurn(
+    launchId: string,
+    turnId: string,
+    status: AgentTurnTerminalStatus,
+    now: string,
+  ): StoredPairedLaunch {
+    const state: DuoComparisonState = status === "completed"
+      ? "completed"
+      : status === "cancelled"
+        ? "cancelled"
+        : status === "interrupted"
+          ? "interrupted"
+          : "failed";
+    const failure = status === "completed" || status === "cancelled"
+      ? null
+      : status === "interrupted"
+        ? "The judge turn was interrupted. It was not retried automatically."
+        : "The judge turn failed. Retry explicitly or cancel the locked comparison.";
+    this.database.prepare(`
+      UPDATE paired_launches
+      SET comparison_state = ?, comparison_failure_message = ?, updated_at = ?
+      WHERE id = ?
+        AND comparison_turn_id = ?
+        AND comparison_state IN ('dispatching', 'running')
+    `).run(state, failure, now, launchId, turnId);
+    return this.get(launchId);
+  }
+
+  failComparison(
+    launchId: string,
+    state: Extract<DuoComparisonState, "failed" | "interrupted">,
+    message: string,
+    now: string,
+  ): StoredPairedLaunch {
+    this.database.prepare(`
+      UPDATE paired_launches
+      SET comparison_state = ?, comparison_failure_message = ?, updated_at = ?
+      WHERE id = ?
+        AND comparison_state IN ('waiting', 'dispatching', 'running')
+    `).run(state, boundedFailure(message), now, launchId);
+    return this.get(launchId);
+  }
+
+  cancelComparison(
+    launchId: string,
+    now: string,
+  ): StoredPairedLaunch {
+    this.database.prepare(`
+      UPDATE paired_launches
+      SET comparison_state = 'cancelled',
+        comparison_failure_message = NULL, updated_at = ?
+      WHERE id = ?
+        AND comparison_state IN (
+          'waiting', 'dispatching', 'running', 'failed', 'interrupted'
+        )
+    `).run(now, launchId);
     return this.get(launchId);
   }
 
@@ -642,6 +928,14 @@ export class PairedLaunchRepository {
       this.database.prepare(`
         UPDATE paired_launch_sides SET dispatch_state = 'cancelled'
         WHERE launch_id = ? AND dispatch_state IN ('pending', 'claimed')
+      `).run(launchId);
+      this.database.prepare(`
+        UPDATE paired_launches
+        SET comparison_state = 'cancelled', comparison_failure_message = NULL
+        WHERE id = ?
+          AND comparison_state IN (
+            'waiting', 'dispatching', 'running', 'failed', 'interrupted'
+          )
       `).run(launchId);
       this.touch(
         launchId,
@@ -712,6 +1006,13 @@ export class PairedLaunchRepository {
           END
           WHERE launch_id = ?
         `).run(id);
+        if (!uncertain) {
+          this.database.prepare(`
+            UPDATE paired_launches
+            SET comparison_state = 'cancelled', comparison_failure_message = NULL
+            WHERE id = ? AND comparison_state = 'waiting'
+          `).run(id);
+        }
         this.touch(
           id,
           uncertain ? "interrupted" : "recovery-required",

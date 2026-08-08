@@ -90,7 +90,7 @@ export function createProjectWorkspaceCommandHandler(
         } catch (error) {
           if (
             error instanceof Error
-            && error.message === "Cancel the active Duo launch before removing this project."
+            && error.message.includes("Cancel the active Duo launch")
           ) throw new RuntimeRequestError(error.message);
           throw error;
         }

@@ -75,6 +75,7 @@ function dependencies(options: {
   ) => void>;
   conversationPath?: string;
   checkpointCount?: Mock<() => number>;
+  assertDuoComparisonTurnAllowed?: Mock<(conversationId: string) => void>;
 }): TurnInteractionCommandDependencies {
   const provider = {
     id: "codex",
@@ -102,6 +103,8 @@ function dependencies(options: {
       })),
       conversationPath: vi.fn(() => options.conversationPath ?? tmpdir()),
       checkpointCount: options.checkpointCount ?? vi.fn(() => 0),
+      assertDuoComparisonTurnAllowed:
+        options.assertDuoComparisonTurnAllowed ?? vi.fn(),
       addCheckpoint: vi.fn(() => ({
         id: "55555555-5555-4555-8555-555555555555",
       })),
@@ -155,6 +158,24 @@ function dependencies(options: {
 }
 
 describe("message attachment ownership transfer", () => {
+  it("blocks ordinary sends while the judge chat is reserved", async () => {
+    const handlerDependencies = dependencies({
+      queue: vi.fn(),
+      relinquishAll: vi.fn(async () => undefined),
+      assertDuoComparisonTurnAllowed: vi.fn(() => {
+        throw new Error(
+          "This judge chat is reserved for its locked Duo comparison.",
+        );
+      }),
+    });
+
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never,
+      messageCommand(),
+    )).rejects.toThrow("reserved for its locked Duo comparison");
+    expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
+  });
+
   it("aborts attachment resolution at the aggregate deadline", async () => {
     vi.useFakeTimers();
     try {

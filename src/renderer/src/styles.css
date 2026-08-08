@@ -6072,6 +6072,10 @@ textarea {
   background: var(--question-accent);
 }
 
+.multi-spawn-side[data-route-side="judge"]::before {
+  background: linear-gradient(90deg, var(--success-state), var(--accent));
+}
+
 .multi-spawn-side > header {
   display: grid;
   min-width: 0;
@@ -6120,6 +6124,12 @@ textarea {
   border-color: color-mix(in srgb, var(--question-accent) 42%, var(--border));
   color: color-mix(in srgb, var(--question-accent) 84%, var(--text));
   background: color-mix(in srgb, var(--question-surface) 82%, var(--surface-strong));
+}
+
+.multi-spawn-side[data-route-side="judge"] .multi-spawn-side-number {
+  border-color: color-mix(in srgb, var(--success-state) 44%, var(--border));
+  color: var(--success-state);
+  background: color-mix(in srgb, var(--success-state) 10%, var(--surface-strong));
 }
 
 .multi-spawn-readiness {
@@ -6261,6 +6271,164 @@ textarea {
   font-weight: 680;
 }
 
+.multi-spawn-comparison {
+  display: grid;
+  gap: 0;
+  margin: 0 20px 14px;
+  overflow: visible;
+  border: 1px solid var(--border-strong);
+  border-radius: 13px;
+  background: var(--surface);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.multi-spawn-comparison.is-enabled {
+  border-color: color-mix(in srgb, var(--success-state) 34%, var(--border-strong));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--shadow) 42%, transparent);
+}
+
+.multi-spawn-comparison-toggle {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 13px 15px;
+  cursor: pointer;
+}
+
+.multi-spawn-comparison-toggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--success-state);
+}
+
+.multi-spawn-comparison-toggle > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.multi-spawn-comparison-toggle strong {
+  font-size: max(var(--ui-font-main), 12px);
+  letter-spacing: -0.01em;
+}
+
+.multi-spawn-comparison-toggle small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.4;
+}
+
+.multi-spawn-comparison-lock {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  color: var(--text-muted);
+  background: var(--surface-strong);
+}
+
+.multi-spawn-comparison.is-enabled .multi-spawn-comparison-lock {
+  border-color: color-mix(in srgb, var(--success-state) 38%, var(--border));
+  color: var(--success-state);
+  background: color-mix(in srgb, var(--success-state) 8%, var(--surface-strong));
+}
+
+.multi-spawn-comparison-body {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(240px, 0.82fr) minmax(0, 1.18fr);
+  gap: 12px;
+  padding: 14px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--success-state) 2%, var(--surface));
+}
+
+.multi-spawn-lock-contract {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 11px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--success-state) 22%, var(--border));
+  border-radius: 11px;
+  color: var(--text-soft);
+  background: var(--surface-strong);
+}
+
+.multi-spawn-lock-contract > span:last-child {
+  display: grid;
+  gap: 7px;
+}
+
+.multi-spawn-lock-contract strong {
+  color: var(--text);
+  font-size: var(--ui-font-main);
+}
+
+.multi-spawn-lock-contract small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.48;
+}
+
+.multi-spawn-lock-rail {
+  display: grid;
+  width: 28px;
+  align-content: start;
+  justify-items: center;
+  gap: 5px;
+  color: var(--success-state);
+}
+
+.multi-spawn-lock-rail > span {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text-soft);
+  background: var(--surface);
+  font-size: var(--ui-font-micro);
+  font-weight: 750;
+}
+
+.multi-spawn-judge-risk {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border-left: 2px solid var(--warning);
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+  font-size: var(--ui-font-secondary);
+  line-height: 1.45;
+}
+
+.multi-spawn-judge-risk svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--warning);
+}
+
+.multi-spawn-judge-risk span {
+  display: grid;
+  gap: 2px;
+}
+
+.multi-spawn-judge-risk strong {
+  color: var(--text);
+}
+
 .multi-spawn-dialog-status {
   margin: 0 18px 10px;
   padding: 8px 10px;
@@ -6284,6 +6452,32 @@ textarea {
   border: 1px solid color-mix(in srgb, var(--failure-state) 24%, var(--border));
   border-radius: 8px;
   background: var(--surface-strong);
+}
+
+.multi-spawn-comparison-status {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--success-state) 24%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--success-state) 5%, var(--surface));
+}
+
+.multi-spawn-comparison-status > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success-state);
+}
+
+.multi-spawn-comparison-status > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.multi-spawn-comparison-status p {
+  margin: 0;
 }
 
 .multi-spawn-recovery-status p,
@@ -6342,7 +6536,8 @@ textarea {
 }
 
 .multi-spawn-recovery-status .secondary-button,
-.multi-spawn-recovery-guidance .secondary-button {
+.multi-spawn-recovery-guidance .secondary-button,
+.multi-spawn-comparison-status .secondary-button {
   width: max-content;
   max-width: 100%;
   margin: 0;
@@ -6428,6 +6623,10 @@ textarea {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .multi-spawn-comparison-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .multi-spawn-pair-arrow {
     width: 28px;
     height: 18px;
@@ -6462,6 +6661,23 @@ textarea {
   .multi-spawn-sides {
     padding-right: 14px;
     padding-left: 14px;
+  }
+
+  .multi-spawn-comparison {
+    margin-right: 14px;
+    margin-left: 14px;
+  }
+
+  .multi-spawn-comparison-toggle {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .multi-spawn-comparison-toggle input {
+    grid-row: 1;
+  }
+
+  .multi-spawn-comparison-lock {
+    display: none;
   }
 
   .multi-spawn-field-grid,

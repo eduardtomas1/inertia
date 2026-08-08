@@ -54,6 +54,16 @@ const draft: MultiSpawnDraft = {
       interactionMode: "build",
     },
   ],
+  comparison: {
+    enabled: false,
+    side: {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      title: "Duo comparison",
+      selection: codexSelection,
+      accessMode: "supervised",
+      interactionMode: "plan",
+    },
+  },
 };
 
 function storage(): Storage {
@@ -154,7 +164,8 @@ describe("multi-spawn preset", () => {
     expect(raw).not.toContain("prompt");
     expect(raw).not.toContain("providerOptions");
     expect(readMultiSpawnPreset(target)).toEqual({
-      version: 1,
+      version: 2,
+      comparison: null,
       sides: [
         {
           title: "Correctness",
@@ -177,6 +188,53 @@ describe("multi-spawn preset", () => {
           accessMode: "full",
         },
       ],
+    });
+  });
+
+  it("persists an opted-in judge route without prompt or project scope", () => {
+    const target = storage();
+    writeMultiSpawnPreset(target, {
+      ...draft,
+      comparison: {
+        ...draft.comparison,
+        enabled: true,
+      },
+    });
+
+    const raw = target.getItem(MULTI_SPAWN_PRESET_STORAGE_KEY) ?? "";
+    expect(raw).not.toContain("projectId");
+    expect(raw).not.toContain("Review this implementation");
+    expect(readMultiSpawnPreset(target)?.comparison).toEqual({
+      title: "Duo comparison",
+      route: {
+        harnessId: codexSelection.harnessId,
+        backendProfileId: codexSelection.backendProfileId,
+        modelId: codexSelection.modelId,
+        reasoningEffort: codexSelection.reasoningEffort,
+      },
+      accessMode: "supervised",
+    });
+  });
+
+  it("migrates the safe v1 pairing with comparison disabled", () => {
+    const target = storage();
+    target.setItem(MULTI_SPAWN_PRESET_STORAGE_KEY, JSON.stringify({
+      version: 1,
+      sides: [0, 1].map((index) => ({
+        title: `Perspective ${index + 1}`,
+        route: {
+          harnessId: codexSelection.harnessId,
+          backendProfileId: codexSelection.backendProfileId,
+          modelId: codexSelection.modelId,
+          reasoningEffort: null,
+        },
+        accessMode: "supervised",
+      })),
+    }));
+
+    expect(readMultiSpawnPreset(target)).toMatchObject({
+      version: 2,
+      comparison: null,
     });
   });
 

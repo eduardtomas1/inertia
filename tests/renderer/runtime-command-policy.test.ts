@@ -89,6 +89,14 @@ describe("runtime command delivery policy", () => {
       timeoutMs: 15_000,
       timeoutDelivery: "rejected",
     });
+    expect(runtimeCommandPolicy("duo.comparison.retry")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "ambiguous",
+    });
+    expect(runtimeCommandPolicy("duo.comparison.cancel")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "ambiguous",
+    });
   });
 
   it("assigns an explicit supported timeout-delivery state to every mapped command", () => {

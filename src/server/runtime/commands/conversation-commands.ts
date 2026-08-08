@@ -409,6 +409,19 @@ export function createConversationCommandHandler(
           || update.interactionMode !== undefined
           || update.accessMode !== undefined
         );
+        if (changesRunConfiguration) {
+          try {
+            dependencies.store.assertDuoComparisonTurnAllowed(
+              conversationId,
+            );
+          } catch (error) {
+            throw new RuntimeRequestError(
+              error instanceof Error
+                ? error.message
+                : "That judge chat is reserved for a Duo comparison.",
+            );
+          }
+        }
         if (
           changesRunConfiguration
           && dependencies.store.hasActiveWorkspaceRunForConversation(
@@ -499,7 +512,7 @@ export function createConversationCommandHandler(
         } catch (error) {
           if (
             error instanceof Error
-            && error.message === "Cancel the active Duo launch before deleting this thread."
+            && error.message.includes("Cancel the active Duo launch")
           ) throw new RuntimeRequestError(error.message);
           throw error;
         }

@@ -38,6 +38,7 @@ const firstProjectId = "11111111-1111-4111-8111-111111111111";
 const secondProjectId = "22222222-2222-4222-8222-222222222222";
 const firstConversationId = "33333333-3333-4333-8333-333333333333";
 const secondConversationId = "44444444-4444-4444-8444-444444444444";
+const comparisonConversationId = "77777777-7777-4777-8777-777777777777";
 const firstTurnId = "55555555-5555-4555-8555-555555555555";
 const secondTurnId = "66666666-6666-4666-8666-666666666666";
 const now = "2026-07-29T14:00:00.000Z";
@@ -259,6 +260,16 @@ function multiSpawnDraft(): MultiSpawnDraft {
         interactionMode: "build",
       },
     ],
+    comparison: {
+      enabled: false,
+      side: {
+        projectId: firstProjectId,
+        title: "Duo comparison",
+        selection,
+        accessMode: "supervised",
+        interactionMode: "plan",
+      },
+    },
   };
 }
 
@@ -928,6 +939,7 @@ describe("multi-spawn", () => {
               { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId },
               { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId },
             ],
+            comparison: { conversationId: comparisonConversationId },
           },
         };
       }
@@ -944,6 +956,13 @@ describe("multi-spawn", () => {
               { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "started" },
               { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "started" },
             ],
+            comparison: {
+              state: "waiting",
+              conversationId: comparisonConversationId,
+              turnId: null,
+              attempt: 0,
+              error: null,
+            },
           },
         };
       }
@@ -968,6 +987,7 @@ describe("multi-spawn", () => {
       setActionError: vi.fn(),
     }));
     const draft = multiSpawnDraft();
+    draft.comparison.enabled = true;
 
     await act(async () => hook.result.current.submit(draft));
 
@@ -1008,8 +1028,24 @@ describe("multi-spawn", () => {
             },
           },
         ],
+        comparison: {
+          projectId: firstProjectId,
+          title: "Duo comparison",
+          accessMode: "supervised",
+          interactionMode: "plan",
+          modelSelection: {
+            modelId: "gpt-5.6-sol",
+            reasoningEffort: "high",
+          },
+        },
       },
     });
+    expect((prepare as Extract<CommandWithoutId, {
+      type: "duo.prepare";
+    }>).payload.comparison).not.toHaveProperty("useWorktree");
+    expect((prepare as Extract<CommandWithoutId, {
+      type: "duo.prepare";
+    }>).payload.comparison).not.toHaveProperty("worktreePath");
     expect(focusWorkspace).toHaveBeenCalledTimes(1);
     expect(window.localStorage.getItem(
       MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,

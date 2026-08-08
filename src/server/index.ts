@@ -201,6 +201,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
+  let duoLaunches: DuoLaunchCoordinator | null = null;
   let closed = false;
   let databaseRecoveryImportActive = false;
   let activeRuntimeCommands = 0;
@@ -626,18 +627,19 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         );
         applyProviderMetadata(providerId, metadata);
       },
-      onTurnSettled: (turn) => {
+      onTurnSettled: async (turn) => {
         // The durable turn is already terminal. Backup work stays off the
         // settlement path and the manager deduplicates it with quiet/hourly
         // triggers. Failed and cancelled turns restart the same quiet window:
         // their cleanup writes are just as real as a successful completion.
         void store.createInitialBackup({ quietGraceMs: 1_000 }).catch(() => undefined);
-        return testOnlyOnTurnSettled?.(turn);
+        await duoLaunches?.onTurnSettled(turn);
+        await testOnlyOnTurnSettled?.(turn);
       },
       testOnlyStreamingTrace: streamingTrace,
     },
   );
-  const duoLaunches = new DuoLaunchCoordinator(
+  const duoLaunchCoordinator = new DuoLaunchCoordinator(
     store,
     providers,
     backendProfileController,
@@ -645,11 +647,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     dataDirectory,
     () => providerInfo,
   );
+  duoLaunches = duoLaunchCoordinator;
+  await duoLaunchCoordinator.resumeComparisons();
 
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       createDuoCommandHandler({
-        coordinator: duoLaunches,
+        coordinator: duoLaunchCoordinator,
         broadcastSnapshot: flushSnapshot,
         send,
       }),

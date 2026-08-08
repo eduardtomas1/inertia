@@ -15,12 +15,13 @@ interface DiffParseJob {
 }
 
 interface DiffParserSlot {
-  worker: Worker;
+  worker: Worker | null;
   current: DiffParseJob | null;
 }
 
 const MAX_DIFF_PARSER_WORKERS = 4;
 let pool: DiffParserPool | null = null;
+let poolUnavailableError: Error | null = null;
 
 function cancelledError(): Error {
   return new Error("Diff parsing was superseded.");
@@ -37,7 +38,15 @@ class DiffParserPool {
       1,
       Math.min(MAX_DIFF_PARSER_WORKERS, Math.floor(available / 2)),
     );
-    this.#slots = Array.from({ length: size }, () => this.#createSlot());
+    this.#slots = [];
+    try {
+      for (let index = 0; index < size; index += 1) {
+        this.#slots.push(this.#createSlot());
+      }
+    } catch (error) {
+      for (const slot of this.#slots) slot.worker?.terminate();
+      throw error;
+    }
   }
 
   parse(patch: string, signal: AbortSignal): Promise<StructuredDiff> {
@@ -61,7 +70,7 @@ class DiffParserPool {
 
   #createSlot(): DiffParserSlot {
     const slot: DiffParserSlot = {
-      worker: undefined as unknown as Worker,
+      worker: null,
       current: null,
     };
     this.#replaceWorker(slot);
@@ -87,21 +96,35 @@ class DiffParserPool {
       ));
       this.#pump();
     });
-    worker.addEventListener("error", () => {
-      const current = slot.current;
-      slot.current = null;
-      current?.reject(new Error(
-        "The diff parser worker stopped unexpectedly.",
-      ));
-      worker.terminate();
-      this.#replaceWorker(slot);
+    worker.addEventListener("error", (event) => {
+      event.preventDefault();
+      this.#disableSlot(
+        slot,
+        new Error("The diff parser worker stopped unexpectedly."),
+      );
       this.#pump();
     });
   }
 
+  #disableSlot(slot: DiffParserSlot, error: Error): void {
+    const current = slot.current;
+    slot.current = null;
+    slot.worker?.terminate();
+    slot.worker = null;
+    current?.reject(error);
+  }
+
+  #rejectQueuedIfUnavailable(): boolean {
+    if (this.#slots.some(({ worker }) => worker !== null)) return false;
+    const error = new Error("The diff parser worker is unavailable.");
+    for (const job of this.#queue.splice(0)) job.reject(error);
+    return true;
+  }
+
   #pump(): void {
+    if (this.#rejectQueuedIfUnavailable()) return;
     for (const slot of this.#slots) {
-      if (slot.current) continue;
+      if (!slot.worker || slot.current) continue;
       let next = this.#queue.shift() ?? null;
       while (next?.cancelled) {
         next.reject(cancelledError());
@@ -109,8 +132,18 @@ class DiffParserPool {
       }
       if (!next) return;
       slot.current = next;
-      slot.worker.postMessage({ id: next.id, patch: next.patch });
+      try {
+        slot.worker.postMessage({ id: next.id, patch: next.patch });
+      } catch (error) {
+        this.#disableSlot(
+          slot,
+          error instanceof Error
+            ? error
+            : new Error("The diff parser worker could not accept work."),
+        );
+      }
     }
+    this.#rejectQueuedIfUnavailable();
   }
 }
 
@@ -118,6 +151,14 @@ export function parseDiffOffMainThread(
   patch: string,
   signal: AbortSignal,
 ): Promise<StructuredDiff> {
-  pool ??= new DiffParserPool();
+  if (poolUnavailableError) return Promise.reject(poolUnavailableError);
+  try {
+    pool ??= new DiffParserPool();
+  } catch (error) {
+    poolUnavailableError = error instanceof Error
+      ? error
+      : new Error("The diff parser worker could not be started.");
+    return Promise.reject(poolUnavailableError);
+  }
   return pool.parse(patch, signal);
 }

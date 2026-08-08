@@ -520,6 +520,40 @@ setInterval(() => {}, 1000);
     await expect(detectProvider("claude", { command: signedOut, cwd: signedOutRoot })).resolves.toMatchObject({ authState: "unauthenticated", canRun: false });
   });
 
+  it("does not treat OpenCode's successful zero-credential listing as runnable", async () => {
+    const executable = join(temporaryRoot(), "opencode");
+    await expect(detectProvider("opencode", { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_candidate, args) => ({
+        exitCode: 0,
+        output: args[0] === "--version" ? "opencode 1.18.10" : "Credentials\n0 credentials",
+        started: true,
+        timedOut: false,
+      }),
+    })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      statusMessage: "Installed; connection not confirmed",
+    });
+  });
+
+  it("recognizes OpenCode credentials supplied through its active environment", async () => {
+    const executable = join(temporaryRoot(), "opencode");
+    await expect(detectProvider("opencode", { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_candidate, args) => ({
+        exitCode: 0,
+        output: args[0] === "--version"
+          ? "opencode 1.18.10"
+          : "Credentials\n0 credentials\nEnvironment\n1 environment variable",
+        started: true,
+        timedOut: false,
+      }),
+    })).resolves.toMatchObject({ authState: "configured", canRun: true, statusMessage: "Configured" });
+  });
+
   it("accepts Cursor only after the executable advertises ACP", async () => {
     const readyRoot = temporaryRoot();
     const wrongRoot = temporaryRoot();

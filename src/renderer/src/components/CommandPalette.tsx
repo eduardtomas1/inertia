@@ -1,5 +1,5 @@
 import { Folder, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -45,10 +45,29 @@ function filterItems(items: PaletteItem[], query: string): PaletteItem[] {
     .map(({ item }) => item);
 }
 
+function paletteFocusableElements(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(
+    "input:not(:disabled), button:not(:disabled), [href], "
+      + "[tabindex]:not([tabindex='-1'])",
+  )].filter((element) => !element.hasAttribute("hidden"));
+}
+
 export function CommandPalette({ open, projects, conversations, onClose, onSelectProject, onSelectConversation, onNewThread, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
   useNativePreviewSuspension(open);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    searchRef.current?.focus();
+    return () => {
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [open]);
 
   const allItems = useMemo(() => {
     const actions: PaletteItem[] = [
@@ -82,11 +101,30 @@ export function CommandPalette({ open, projects, conversations, onClose, onSelec
 
   return (
     <div className="palette-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closePalette(); }}>
-      <section className="command-palette" role="dialog" aria-modal="true" aria-label="Search Inertia">
+      <section
+        className="command-palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search Inertia"
+        onKeyDown={(event) => {
+          if (event.key !== "Tab") return;
+          const focusable = paletteFocusableElements(event.currentTarget);
+          const first = focusable[0];
+          const last = focusable.at(-1);
+          if (!first || !last) return;
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+      >
         <div className="palette-search">
           <Search size={17} />
           <input
-            autoFocus
+            ref={searchRef}
             value={query}
             onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
             onKeyDown={(event) => {

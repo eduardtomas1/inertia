@@ -734,7 +734,7 @@ export const Composer = memo(function Composer({
       if (selectedBackendProfile) onOpenBackendSetup(selectedBackendProfile.id);
       return;
     }
-    if (action === "probe" && !selectedBackendProfile?.enabled) {
+    if (action === "configure") {
       if (selectedBackendProfile) onOpenBackendSetup(selectedBackendProfile.id);
       return;
     }

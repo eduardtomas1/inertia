@@ -156,8 +156,13 @@ export function createOpenCodeSdkHarness(
   };
 }
 
-function openCodeModels(providers: Provider[], defaults: Record<string, string>): ProviderModel[] {
-  return providers.flatMap((provider) => Object.values(provider.models).map((model) => {
+function openCodeModels(
+  providers: Provider[],
+  defaults: Record<string, string>,
+  connectedProviderIds: readonly string[],
+): ProviderModel[] {
+  const connected = new Set(connectedProviderIds);
+  return providers.filter((provider) => connected.has(provider.id)).flatMap((provider) => Object.values(provider.models).map((model) => {
     const variants = Object.keys(model.variants ?? {});
     return {
       id: `${provider.id}/${model.id}`,
@@ -166,7 +171,9 @@ function openCodeModels(providers: Provider[], defaults: Record<string, string>)
       isDefault: defaults[provider.id] === model.id,
       inputModalities: model.capabilities.input.image ? ["text", "image"] : ["text"],
       reasoningOptions: variants.map((variant) => ({ value: variant, label: variant, description: `${variant} model variant` })),
-      defaultReasoningEffort: variants[0] ?? "",
+      // Catalog variants are explicit overlays; their record order does not
+      // identify the base model's effective default.
+      defaultReasoningEffort: "",
     } satisfies ProviderModel;
   })).slice(0, 128);
 }
@@ -208,7 +215,7 @@ export async function readOpenCodeSdkModels(
         { signal, throwOnError: true },
       ),
     );
-    return openCodeModels(response.data.all, response.data.default);
+    return openCodeModels(response.data.all, response.data.default, response.data.connected);
   } finally {
     await requireProcessTreeTermination(
       terminateOwnedProcessTree, started.child, true, "OpenCode metadata server process tree",
@@ -387,11 +394,19 @@ function startOpenCodeRun(
           ),
         ]),
       );
-      const discoveredModels = openCodeModels(providerData.data.all, providerData.data.default);
+      const discoveredModels = openCodeModels(
+        providerData.data.all,
+        providerData.data.default,
+        providerData.data.connected,
+      );
       if (discoveredModels.length > 0) {
         emitter.rich({ type: "metadata", metadata: { models: discoveredModels }, source: "provider", complete: true });
       }
-      const selectedModel = resolveOpenCodeModel(options.input.model, providerData.data.all);
+      const selectedModel = resolveOpenCodeModel(
+        options.input.model,
+        providerData.data.all,
+        providerData.data.connected,
+      );
       const agent = resolveOpenCodeAgent(options.input.interactionMode, agents.data);
       if (options.input.reasoningEffort && selectedModel && !selectedModel.variants?.[options.input.reasoningEffort]) {
         throw new Error(`OpenCode does not advertise the selected reasoning variant '${options.input.reasoningEffort}'.`);
@@ -816,7 +831,11 @@ function trackOpenCodePart(
   state.retainedPartChars = retainedPartChars;
 }
 
-export function resolveOpenCodeModel(selection: string | undefined, providers: Provider[]): Model | undefined {
+export function resolveOpenCodeModel(
+  selection: string | undefined,
+  providers: Provider[],
+  connectedProviderIds: readonly string[],
+): Model | undefined {
   if (!selection) return undefined;
   const slash = selection.indexOf("/");
   if (slash <= 0 || slash === selection.length - 1) {
@@ -824,6 +843,9 @@ export function resolveOpenCodeModel(selection: string | undefined, providers: P
   }
   const providerId = selection.slice(0, slash);
   const modelId = selection.slice(slash + 1);
+  if (!connectedProviderIds.includes(providerId)) {
+    throw new Error(`OpenCode does not advertise the selected model '${selection}' from a connected provider.`);
+  }
   const model = findOpenCodeModel(providerId, modelId, providers);
   if (!model) throw new Error(`OpenCode does not advertise the selected model '${selection}'.`);
   return model;

@@ -361,6 +361,7 @@ function startClaudeRun(
   let messageIterator: AsyncIterator<SDKMessage> | undefined;
   let cancelRequested = false;
   let acceptingFollowUps = false;
+  let acceptedFollowUp = false;
   let sessionId = options.input.sessionId;
   let latestContextUsage: Awaited<ReturnType<typeof readClaudeContextUsage>>;
   let contextUsageRequest: Promise<void> | null = null;
@@ -720,7 +721,7 @@ function startClaudeRun(
     if (cancelRequested && !force) return;
     cancelRequested = true;
     acceptingFollowUps = false;
-    promptChannel.close();
+    promptChannel.cancel();
     emitter.status("cancelling");
     cancelPending();
     if (force) {
@@ -728,7 +729,20 @@ function startClaudeRun(
       try { query?.close(); } catch { /* Best-effort force close. */ }
       return;
     }
-    void query?.interrupt().catch(() => abortController.abort());
+    const runningQuery = query;
+    if (!runningQuery) return;
+    void runningQuery.interrupt().then((receipt) => {
+      // Inertia's follow-ups are UUID-less and therefore cannot appear in the
+      // SDK's still_queued receipt, even when they survived the interrupt.
+      const queuedInputMaySurvive = acceptedFollowUp
+        || Boolean(receipt?.still_queued.length);
+      if (!queuedInputMaySurvive) return;
+      // The SDK explicitly reports these messages WILL run after interrupt.
+      // Close this per-turn Query rather than allowing a stopped run to drain
+      // queued input, potentially with full-access tool permissions.
+      abortController.abort();
+      try { runningQuery.close(); } catch { /* Best-effort queued-input stop. */ }
+    }).catch(() => abortController.abort());
   };
 
   return {
@@ -742,12 +756,14 @@ function startClaudeRun(
       respondToInput: settleInput,
       steer: async (content) => {
         const followUp = claudeTextFollowUp(content);
-        return Boolean(
+        const accepted = Boolean(
           acceptingFollowUps
           && !cancelRequested
           && followUp
           && promptChannel.push(followUp),
         );
+        if (accepted) acceptedFollowUp = true;
+        return accepted;
       },
       stopSubagent: async (providerTaskId) => {
         if (

@@ -499,6 +499,7 @@ export function MultiSpawnDialog({
     ) return;
     if (
       route.repairAction === "add-key"
+      || route.repairAction === "configure"
       || route.repairAction === "probe"
     ) {
       onOpenBackendSetup(draft.sides[index].selection.backendProfileId);

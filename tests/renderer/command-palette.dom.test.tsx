@@ -87,6 +87,27 @@ function ResetHarness({ onOpenSettings }: {
   );
 }
 
+function FocusHarness(): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Open palette</button>
+      <button type="button">Background action</button>
+      <CommandPalette
+        open={open}
+        projects={[project]}
+        conversations={[conversation]}
+        onClose={() => setOpen(false)}
+        onSelectProject={noOp}
+        onSelectConversation={noOp}
+        onNewThread={noOp}
+        onAddProject={noOp}
+        onOpenSettings={noOp}
+      />
+    </>
+  );
+}
+
 describe("CommandPalette behavior", () => {
   it("takes focus synchronously when it opens over a focused widget", () => {
     const view = render(
@@ -160,5 +181,30 @@ describe("CommandPalette behavior", () => {
     expect(screen.getByRole("combobox", {
       name: "Search commands, projects, and threads",
     })).toHaveValue("");
+  });
+
+  it("traps Tab within the modal and restores the opening control", async () => {
+    const user = userEvent.setup();
+    render(<FocusHarness />);
+    const trigger = screen.getByRole("button", { name: "Open palette" });
+
+    await user.click(trigger);
+    const search = screen.getByRole("combobox", {
+      name: "Search commands, projects, and threads",
+    });
+    const lastOption = screen.getAllByRole("option").at(-1)!;
+    expect(search).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(lastOption).toHaveFocus();
+    await user.tab();
+    expect(search).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Background action" }))
+      .not.toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Search Inertia" }))
+      .not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });

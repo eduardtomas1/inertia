@@ -1138,6 +1138,86 @@ describe("Claude Agent SDK harness", () => {
     ]);
   });
 
+  it("discards accepted follow-ups and closes SDK survivors when Stop interrupts the parent", async () => {
+    const root = portableFixtureRoot("Claude SDK stop with queued follow-up");
+    roots.push(root);
+    let promptIterator: AsyncIterator<SDKUserMessage> | undefined;
+    let releaseStream!: () => void;
+    const streamReleased = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    let markInitialPromptRead!: () => void;
+    const initialPromptRead = new Promise<void>((resolve) => {
+      markInitialPromptRead = resolve;
+    });
+    let markInterrupted!: () => void;
+    const interrupted = new Promise<void>((resolve) => {
+      markInterrupted = resolve;
+    });
+    let queuedAfterCancel: IteratorResult<SDKUserMessage> | undefined;
+    let closeCalls = 0;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ prompt }) => {
+        promptIterator = (prompt as AsyncIterable<SDKUserMessage>)[
+          Symbol.asyncIterator
+        ]();
+        const stream = (async function* (): AsyncGenerator<SDKMessage> {
+          await promptIterator!.next();
+          markInitialPromptRead();
+          yield claudeSessionState("running");
+          await streamReleased;
+        })();
+        return fixtureClaudeQuery(stream, {
+          interrupt: async () => {
+            queuedAfterCancel = await promptIterator!.next();
+            markInterrupted();
+            // UUID-less follow-ups are omitted even when the SDK has already
+            // pulled them into its own queue.
+            return { still_queued: [] };
+          },
+          close: () => {
+            closeCalls += 1;
+            releaseStream();
+          },
+        });
+      },
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath }, cancelGraceMs: 30_000 },
+      new AgentHarnessRegistry([harness]),
+    );
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-stop-queued-follow-up",
+      runId: "claude-stop-queued-run",
+      turnId: "claude-stop-queued-turn",
+      cwd: root,
+      prompt: "Start the parent turn",
+      interactionMode: "build",
+      access: "full",
+    }));
+
+    await initialPromptRead;
+    await expect(manager.steer(
+      "claude-stop-queued-follow-up",
+      "Run another tool after this response.",
+      {
+        runId: "claude-stop-queued-run",
+        turnId: "claude-stop-queued-turn",
+      },
+    )).resolves.toBe(true);
+    expect(manager.cancel("claude-stop-queued-follow-up")).toBe(true);
+    await interrupted;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const closedBeforeForceFallback = closeCalls > 0;
+    releaseStream();
+
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    expect(queuedAfterCancel).toMatchObject({ done: true });
+    expect(closedBeforeForceFallback).toBe(true);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
   it("bounds an unacknowledged task stop without cancelling the parent", async () => {
     const root = portableFixtureRoot("Claude SDK bounded task stop");
     roots.push(root);

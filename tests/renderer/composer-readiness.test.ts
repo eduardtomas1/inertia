@@ -174,6 +174,18 @@ describe("composer route readiness", () => {
     expect(JSON.stringify(readiness)).not.toContain("Claude needs attention");
   });
 
+  it("opens setup instead of advertising a probe for a disabled backend", () => {
+    expect(composerRouteReadiness({
+      provider: provider({ id: "claude", label: "Claude", command: "claude" }),
+      profile: profile({ enabled: false }),
+      selection: customSelection(),
+    })).toMatchObject({
+      ready: false,
+      badge: "Disabled",
+      action: "configure",
+    });
+  });
+
   it("distinguishes a missing harness CLI from backend configuration", () => {
     expect(composerRouteReadiness({
       provider: provider({

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { access, constants } from "node:fs/promises";
 import { posix, win32 } from "node:path";
 
@@ -36,6 +36,8 @@ export interface TailscaleCommandOptions {
   timeoutMs?: number;
   outputBytes?: number;
   env?: NodeJS.ProcessEnv;
+  /** @internal Deterministic process-boundary injection for tests. */
+  spawnProcess?: (executable: string, args: string[], options: SpawnOptions) => ChildProcess;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -56,7 +58,7 @@ export async function runTailscaleCommand(
     let stderr = "";
     let settled = false;
     let terminationStarted = false;
-    const child = spawn(executable, [...args], {
+    const child = (options.spawnProcess ?? spawn)(executable, [...args], {
       detached: process.platform !== "win32",
       shell: false,
       windowsHide: true,
@@ -99,7 +101,7 @@ export async function runTailscaleCommand(
         error.code === "ENOENT" ? "Tailscale is not installed." : "Tailscale could not be started.",
       ));
     });
-    child.once("exit", (code) => {
+    child.once("close", (code) => {
       if (code !== 0) {
         finish(new TailscaleCommandError(
           classifyCommandFailure(stderr),

@@ -1,6 +1,8 @@
 import { win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { cursorAcpProcessInvocation } from "../../src/server/provider/cursor-acp-harness";
+import { openCodeServerProcessInvocation } from "../../src/server/provider/opencode-owned-server";
 import { providerProcessInvocation, providerPtyArguments } from "../../src/server/provider/process";
 import {
   parseWhereExecutableOutput,
@@ -78,6 +80,41 @@ describe("Windows Codex discovery primitives", () => {
     expect(providerPtyArguments(shim)).toBe(
       "/d /s /v:off /c \"C:\\Users\\Álex^ ^(Dev^)\\AppData\\Roaming\\npm\\codex.cmd ^\"app-server^\" ^\"--help^\"\"",
     );
+  });
+
+  it("routes rich Cursor and OpenCode batch-shim launches through the hardened Windows adapter", () => {
+    const environment = { ComSpec: "C:\\Windows\\System32\\cmd.exe" };
+
+    expect(cursorAcpProcessInvocation(
+      "C:\\Users\\Calm Dev\\AppData\\Roaming\\npm\\cursor-agent.cmd",
+      environment,
+      "win32",
+    )).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: [
+        "/d",
+        "/s",
+        "/v:off",
+        "/c",
+        "\"C:\\Users\\Calm^ Dev\\AppData\\Roaming\\npm\\cursor-agent.cmd ^\"acp^\"\"",
+      ],
+      windowsVerbatimArguments: true,
+    });
+    expect(openCodeServerProcessInvocation(
+      "C:\\Users\\Calm Dev\\AppData\\Roaming\\npm\\opencode.cmd",
+      environment,
+      "win32",
+    )).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: [
+        "/d",
+        "/s",
+        "/v:off",
+        "/c",
+        "\"C:\\Users\\Calm^ Dev\\AppData\\Roaming\\npm\\opencode.cmd ^\"serve^\" ^\"--hostname=127.0.0.1^\" ^\"--port=0^\"\"",
+      ],
+      windowsVerbatimArguments: true,
+    });
   });
 
   it("prevents command-string injection while preserving literal percent signs", () => {

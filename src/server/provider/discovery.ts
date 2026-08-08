@@ -165,12 +165,21 @@ function authStateFromProbe(providerId: ProviderId, probe: ProbeResult): Provide
     } catch { /* Older Claude releases may return text. */ }
   }
 
+  if (providerId === "opencode") {
+    if (probe.exitCode !== 0) return "unknown";
+    const configurationCounts = [...lower.matchAll(/\b(\d+)\s+(?:credentials?|environment variables?)\b/gu)]
+      .map((match) => Number(match[1]));
+    if (configurationCounts.some((count) => count > 0)) return "configured";
+    // Current OpenCode exits successfully even when `auth list` reports zero
+    // usable credentials. Unknown output must not be promoted to runnable.
+    return "unknown";
+  }
+
   if (/not (?:logged|signed) in|loggedin["']?\s*:\s*false|authentication required|no credentials|please (?:log|sign) in/iu.test(lower)) {
-    return providerId === "opencode" ? "unknown" : "unauthenticated";
+    return "unauthenticated";
   }
   if (/logged in|signed in|authenticated|loggedin["']?\s*:\s*true/iu.test(lower)) return "authenticated";
-  if (providerId === "opencode" && probe.exitCode === 0 && normalized.length > 0) return "configured";
-  if (probe.exitCode && probe.exitCode !== 0) return providerId === "opencode" ? "unknown" : "unauthenticated";
+  if (probe.exitCode && probe.exitCode !== 0) return "unauthenticated";
   return "unknown";
 }
 
@@ -283,7 +292,9 @@ export async function detectProvider(
   const authenticated = authState === "authenticated" || authState === "configured";
   const appServerReady = selected.appServerReady;
   const cleanupUnconfirmed = authProbe.cleanupConfirmed === false;
-  const canRun = authenticated && appServerReady && !cleanupUnconfirmed;
+  const canRun = authenticated
+    && appServerReady
+    && !cleanupUnconfirmed;
   return {
     provider,
     available: true,

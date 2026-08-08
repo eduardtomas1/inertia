@@ -268,7 +268,11 @@ const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringi
 const sessionId = "44444444-4444-4444-8444-444444444444";
 const configOptions = [
   { type: "select", id: "model", name: "Model", category: "model", currentValue: "model-a", options: [{ value: "model-a", name: "Model A" }] },
-  { type: "select", id: "effort", name: "Effort", category: "thought_level", currentValue: "low", options: [{ value: "high", name: "High" }] }
+  { type: "select", id: "effort-before-model", name: "Effort", category: "thought_level", currentValue: "low", options: [{ value: "low", name: "Low" }] }
+];
+const modelAConfigOptions = [
+  configOptions[0],
+  { type: "select", id: "effort-model-a", name: "Effort", category: "thought_level", currentValue: "low", options: [{ value: "high", name: "High" }] }
 ];
 let promptRequestId;
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
@@ -278,7 +282,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: true } }, agentInfo: { name: "Cursor", version: "9.9.9" } } });
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }, { id: "plan", name: "Plan" }] }, configOptions } });
   if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
-  if (message.method === "session/set_config_option") return send({ jsonrpc: "2.0", id: message.id, result: { configOptions } });
+  if (message.method === "session/set_config_option") return send({ jsonrpc: "2.0", id: message.id, result: { configOptions: modelAConfigOptions } });
   if (message.method === "session/prompt") {
     promptRequestId = message.id;
     return send({ jsonrpc: "2.0", id: 100, method: "session/request_permission", params: { sessionId, toolCall: { toolCallId: "tool-1", title: "Run tests", kind: "execute", status: "pending", rawInput: { command: "npm test" } }, options: [{ optionId: "allow", name: "Allow once", kind: "allow_once" }, { optionId: "reject", name: "Reject", kind: "reject_once" }] } });
@@ -378,7 +382,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
     expect(metadata).toContainEqual(["model-a"]);
     expect(manager.cachedMetadata("cursor")).toMatchObject({
-      models: [expect.objectContaining({ id: "model-a", inputModalities: ["text", "image"] })],
+      models: [expect.objectContaining({
+        id: "model-a",
+        inputModalities: ["text", "image"],
+        reasoningOptions: [expect.objectContaining({ value: "high" })],
+      })],
       metadataState: { models: { freshness: "fresh", provenance: "session" } },
     });
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<Record<string, unknown>>;
@@ -397,6 +405,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       expect.objectContaining({ type: "image", mimeType: "image/png", data: "iVBORw==" }),
       { type: "text", text: "Build this" },
     ]));
+    expect(captured.filter((message) => message.method === "session/set_config_option"))
+      .toMatchObject([
+        { params: { configId: "model", value: "model-a" } },
+        { params: { configId: "effort-model-a", value: "high" } },
+      ]);
   });
 
   it("fails closed on malformed ACP frames", async () => {

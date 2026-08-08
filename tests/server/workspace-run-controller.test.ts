@@ -122,6 +122,100 @@ describe("workspace run controller", () => {
     expect(workspaceServicePort("Listening without a local URL")).toBeNull();
   });
 
+  it("blocks project actions and Git mutations while a terminal owns the conversation", async () => {
+    const runtime = await fixture();
+    try {
+      const sibling = runtime.store.createConversation(
+        runtime.project.id,
+        "Sibling chat in the same checkout",
+      );
+      expect(runtime.store.conversationWork.reserve(runtime.conversation.id)).toBe(true);
+      await expect(runtime.controller.startAction({
+        owner: {},
+        cwd: runtime.workspace,
+        projectId: runtime.project.id,
+        conversationId: sibling.id,
+        actionId: "check",
+        cols: 80,
+        rows: 24,
+        onStarted: vi.fn(),
+      })).rejects.toThrow("End the resumed provider terminal");
+      await expect(runtime.controller.startAction({
+        owner: {},
+        cwd: runtime.workspace,
+        projectId: "duplicate-project-record",
+        actionId: "check",
+        cols: 80,
+        rows: 24,
+        onStarted: vi.fn(),
+      })).rejects.toThrow("End the resumed provider terminal");
+      await expect(runtime.controller.trackSourceControl(
+        "Commit changes",
+        runtime.project.id,
+        sibling.id,
+        runtime.workspace,
+        "55555555-5555-4555-8555-555555555555",
+        async () => "commit-id",
+      )).rejects.toThrow("End the resumed provider terminal");
+      await expect(runtime.controller.trackSourceControl(
+        "Switch branch",
+        "duplicate-project-record",
+        undefined,
+        runtime.workspace,
+        "66666666-6666-4666-8666-666666666666",
+        async () => "main",
+      )).rejects.toThrow("End the resumed provider terminal");
+      expect(runtime.terminals.inputs).toEqual([]);
+      expect(runtime.store.shellSnapshot().runs).toEqual([]);
+    } finally {
+      runtime.store.conversationWork.release(runtime.conversation.id);
+      runtime.store.close();
+    }
+  });
+
+  it("holds checkout authority while project actions and Git mutations are active", async () => {
+    const runtime = await fixture();
+    try {
+      const sibling = runtime.store.createConversation(
+        runtime.project.id,
+        "Sibling chat in the same checkout",
+      );
+      const terminalId = await runtime.controller.startAction({
+        owner: {},
+        cwd: runtime.workspace,
+        projectId: runtime.project.id,
+        actionId: "check",
+        cols: 80,
+        rows: 24,
+        onStarted: vi.fn(),
+      });
+      expect(runtime.store.conversationWork.reserve(sibling.id)).toBe(false);
+      runtime.terminals.finish(terminalId, 0);
+      expect(runtime.store.conversationWork.reserve(sibling.id)).toBe(true);
+      runtime.store.conversationWork.release(sibling.id);
+
+      let finishGit!: () => void;
+      const gitGate = new Promise<void>((resolve) => {
+        finishGit = resolve;
+      });
+      const gitOperation = runtime.controller.trackSourceControl(
+        "Switch branch",
+        runtime.project.id,
+        undefined,
+        runtime.workspace,
+        "77777777-7777-4777-8777-777777777777",
+        async () => await gitGate,
+      );
+      expect(runtime.store.conversationWork.reserve(sibling.id)).toBe(false);
+      finishGit();
+      await gitOperation;
+      expect(runtime.store.conversationWork.reserve(sibling.id)).toBe(true);
+      runtime.store.conversationWork.release(sibling.id);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
   it("owns action discovery, process identity, port updates, and stop transitions", async () => {
     const runtime = await fixture();
     try {
@@ -239,6 +333,7 @@ describe("workspace run controller", () => {
         "Commit changes",
         runtime.project.id,
         runtime.conversation.id,
+        runtime.workspace,
         "11111111-1111-4111-8111-111111111111",
         async () => "commit-id",
       )).resolves.toBe("commit-id");
@@ -246,6 +341,7 @@ describe("workspace run controller", () => {
         "Push branch",
         runtime.project.id,
         undefined,
+        runtime.workspace,
         "22222222-2222-4222-8222-222222222222",
         async () => {
           throw new Error("remote unavailable");
@@ -294,6 +390,7 @@ describe("workspace run controller", () => {
         "Switch first branch",
         runtime.project.id,
         runtime.conversation.id,
+        runtime.workspace,
         "33333333-3333-4333-8333-333333333333",
         async () => await firstGate,
       );
@@ -301,6 +398,7 @@ describe("workspace run controller", () => {
         "Switch final branch",
         runtime.project.id,
         runtime.conversation.id,
+        runtime.workspace,
         "44444444-4444-4444-8444-444444444444",
         async () => await secondGate,
       );

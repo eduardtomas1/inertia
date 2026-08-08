@@ -19,6 +19,7 @@ import type {
   SubagentTrace,
   TurnRequestContext,
 } from "@shared/contracts";
+import { providerTerminalResumeAvailability } from "@shared/provider-terminal-resume";
 
 import type { PlanPanel } from "../PlanPanel";
 import type { WorkspaceSceneProps } from "../WorkspaceScene";
@@ -222,6 +223,14 @@ export function createWorkspaceSceneModel({
   const runtimeConversation = runtimeConversationReference(
     persistedConversation,
   );
+  const terminalResume = persistedConversation
+    ? providerTerminalResumeAvailability(
+        persistedConversation,
+        connection.snapshot?.providers.find(
+          ({ id }) => id === persistedConversation.providerId,
+        ),
+      )
+    : null;
   const {
     activeTool,
     setActiveTool,
@@ -572,6 +581,7 @@ export function createWorkspaceSceneModel({
         theme: settings.theme,
         sendCommand: connection.sendCommand,
         subscribe: connection.subscribe,
+        providerResume: terminalResume,
         actionId: activityActions.pendingActionId,
         onActionStarted: activityActions.clearPendingAction,
         onClose: () => setActiveTool(null),

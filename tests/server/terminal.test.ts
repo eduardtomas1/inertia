@@ -40,7 +40,7 @@ function processExists(pid: number): boolean {
   }
 }
 
-function fakeTerminal(): {
+function fakeTerminal(pid = 42): {
   emitData: (data: string) => void;
   emitExit: () => void;
   pty: IPty;
@@ -53,7 +53,7 @@ function fakeTerminal(): {
     dispose: () => exitListeners.delete(callback),
   });
   const pty = {
-    pid: 42,
+    pid,
     onData: vi.fn((callback: (data: string) => void) => {
       dataListeners.add(callback);
       return {
@@ -243,6 +243,42 @@ describe("TerminalManager", () => {
     }
   });
 
+  it("publishes a client-close exit only after the process tree is confirmed stopped", async () => {
+    const terminal = fakeTerminal();
+    const frames: string[] = [];
+    let confirmStopped!: (confirmed: boolean) => void;
+    const stopped = new Promise<boolean>((resolve) => {
+      confirmStopped = resolve;
+    });
+    const owner = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: (payload: string) => frames.push(payload),
+    } as unknown as WebSocket;
+    const manager = new TerminalManager({
+      spawnTerminal: vi.fn(() => terminal.pty),
+      terminateProcessTree: async () => await stopped,
+    });
+    const terminalId = manager.createProcess(
+      owner,
+      process.cwd(),
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+    );
+
+    manager.close(owner, terminalId);
+    expect(frames).toEqual([]);
+
+    confirmStopped(true);
+    await waitFor("confirmed client-close exit", () => frames.length === 1);
+    expect(frames.map((frame) => JSON.parse(frame))).toEqual([
+      { type: "terminal.exit", terminalId, exitCode: 130 },
+    ]);
+  });
+
   it("terminates a slow WebSocket and drops its remaining terminal burst", () => {
     const terminal = fakeTerminal();
     const frames: string[] = [];
@@ -324,6 +360,206 @@ describe("TerminalManager", () => {
     }
   });
 
+  it("replaces an owned terminal without consuming another window slot", async () => {
+    const terminals = Array.from({ length: 5 }, (_, index) =>
+      fakeTerminal(100 + index));
+    const spawnTerminal = vi.fn(() => terminals[spawnTerminal.mock.calls.length - 1]!.pty);
+    let confirmOldStopped!: (confirmed: boolean) => void;
+    const oldStopped = new Promise<boolean>((resolve) => {
+      confirmOldStopped = resolve;
+    });
+    const terminateProcessTree = vi.fn(async (pid: number) =>
+      pid === 100 ? await oldStopped : true);
+    const owner = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+    const manager = new TerminalManager({
+      spawnTerminal,
+      terminateProcessTree,
+    });
+    const ids = Array.from({ length: 4 }, () => manager.createProcess(
+      owner,
+      process.cwd(),
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+    ));
+    expect(() => manager.createProcess(
+      owner,
+      process.cwd(),
+      "fifth-shell",
+      [],
+      {},
+      80,
+      24,
+    )).toThrow("maximum number of terminals");
+
+    const replacement = manager.replaceProcess(
+      owner,
+      ids[0]!,
+      process.cwd(),
+      "provider-cli",
+      ["resume", "session-id"],
+      {},
+      80,
+      24,
+    );
+
+    expect(spawnTerminal).toHaveBeenCalledTimes(4);
+    expect(() => manager.createProcess(
+      owner,
+      process.cwd(),
+      "slot-stealer",
+      [],
+      {},
+      80,
+      24,
+    )).toThrow("maximum number of terminals");
+    for (const id of ids.slice(1)) manager.input(owner, id, "unrelated");
+    expect(terminals.slice(1, 4).every(({ pty }) =>
+      vi.mocked(pty.write).mock.calls.some(([data]) => data === "unrelated")))
+      .toBe(true);
+
+    confirmOldStopped(true);
+    const replacementId = await replacement;
+
+    expect(spawnTerminal).toHaveBeenCalledTimes(5);
+    expect(terminateProcessTree).toHaveBeenCalledWith(100, expect.any(Function));
+    expect(() => manager.input(owner, ids[0]!, "old")).toThrow("Terminal not found");
+    manager.input(owner, replacementId, "new");
+    expect(terminals[4]!.pty.write).toHaveBeenCalledWith("new");
+    expect(owner.send).toHaveBeenCalledWith(JSON.stringify({
+      type: "terminal.exit",
+      terminalId: ids[0],
+      exitCode: 130,
+    }));
+  });
+
+  it("reports the intended terminal closed when its replacement cannot spawn", async () => {
+    const terminal = fakeTerminal();
+    const spawnTerminal = vi.fn()
+      .mockReturnValueOnce(terminal.pty)
+      .mockImplementationOnce(() => {
+        throw new Error("spawn failed");
+      });
+    const owner = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+    const manager = new TerminalManager({
+      spawnTerminal,
+      terminateProcessTree: async () => true,
+    });
+    const terminalId = manager.createProcess(
+      owner,
+      process.cwd(),
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+    );
+
+    await expect(manager.replaceProcess(
+      owner,
+      terminalId,
+      process.cwd(),
+      "provider-cli",
+      ["resume", "session-id"],
+      {},
+      80,
+      24,
+    )).rejects.toThrow("Unable to start a terminal");
+    expect(() => manager.input(owner, terminalId, "closed")).toThrow(
+      "Terminal not found",
+    );
+    expect(owner.send).toHaveBeenCalledWith(JSON.stringify({
+      type: "terminal.exit",
+      terminalId,
+      exitCode: 130,
+    }));
+  });
+
+  it("does not spawn a replacement after runtime terminal shutdown begins", async () => {
+    const terminals = [fakeTerminal(200), fakeTerminal(201)];
+    const spawnTerminal = vi.fn(() =>
+      terminals[spawnTerminal.mock.calls.length - 1]!.pty);
+    let confirmStopped!: (confirmed: boolean) => void;
+    const stopped = new Promise<boolean>((resolve) => {
+      confirmStopped = resolve;
+    });
+    const owner = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+    const manager = new TerminalManager({
+      spawnTerminal,
+      terminateProcessTree: async () => await stopped,
+    });
+    const terminalId = manager.createProcess(
+      owner,
+      process.cwd(),
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+    );
+    const replacement = manager.replaceProcess(
+      owner,
+      terminalId,
+      process.cwd(),
+      "provider-cli",
+      ["resume", "session-id"],
+      {},
+      80,
+      24,
+    );
+    const shutdown = manager.disposeAll();
+
+    expect(spawnTerminal).toHaveBeenCalledOnce();
+    confirmStopped(true);
+
+    await expect(replacement).rejects.toThrow("terminal service is stopping");
+    await expect(shutdown).resolves.toBeUndefined();
+    expect(spawnTerminal).toHaveBeenCalledOnce();
+  });
+
+  it("does not replace a terminal from another project workspace", async () => {
+    const terminal = fakeTerminal();
+    const manager = new TerminalManager({
+      spawnTerminal: vi.fn(() => terminal.pty),
+    });
+    const owner = {} as WebSocket;
+    const terminalId = manager.createProcess(
+      owner,
+      "/workspace/primary",
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+    );
+
+    await expect(manager.replaceProcess(
+      owner,
+      terminalId,
+      "/workspace/secondary",
+      "provider-cli",
+      ["resume", "session-id"],
+      {},
+      80,
+      24,
+    )).rejects.toThrow("does not belong to this project workspace");
+    expect(terminal.pty.write).not.toHaveBeenCalled();
+  });
+
   it.skipIf(process.platform === "win32")(
     "uses the node-pty root process group on POSIX",
     async () => {
@@ -394,9 +630,13 @@ describe("TerminalManager", () => {
           80,
           24,
         );
-        await waitFor("the detached terminal child PID", () =>
-          existsSync(pidPath));
-        childPid = Number(readFileSync(pidPath, "utf8"));
+        await waitFor("the detached terminal child PID", () => {
+          if (!existsSync(pidPath)) return false;
+          const observedPid = Number(readFileSync(pidPath, "utf8"));
+          if (!Number.isInteger(observedPid) || observedPid <= 1) return false;
+          childPid = observedPid;
+          return true;
+        });
         expect(childPid).toBeGreaterThan(1);
         expect(processExists(childPid)).toBe(true);
 

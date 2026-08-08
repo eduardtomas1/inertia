@@ -39,6 +39,7 @@ import { PROVIDER_IDS, ProviderManager, type ProviderDetection } from "./provide
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
 import { ProviderMaintenanceController } from "./provider/maintenance-controller";
 import type { ProviderMaintenanceTarget } from "./provider/maintenance-capabilities";
+import { ProviderTerminalResumeRegistry } from "./provider/terminal-resume";
 import { TerminalManager } from "./terminal";
 import { runRuntimeShutdownPhases } from "./runtime-shutdown";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
@@ -117,6 +118,7 @@ import {
 } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 import { PrivateConnectRuntimeGateway } from "./private-connect/runtime-gateway";
+import { queuePrivateConnectPrompt } from "./private-connect/prompt-admission";
 import { PrivateConnectTranscriptCache } from "./private-connect/transcript-cache";
 import {
   privateConnectPromptSafetyForHarness,
@@ -305,6 +307,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
   const enableProviders = options.enableProviders ?? true;
   const terminals = new TerminalManager();
+  const providerTerminalResumes = new ProviderTerminalResumeRegistry(store.conversationWork);
   const metadataCache = new ProviderMetadataCache({
     persistence: {
       load: () => store.loadProviderMetadata(),
@@ -682,6 +685,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         providers,
         backendProfileController,
         workspaceRuns,
+        providerTerminalResumes,
         runtimeSync,
         deletedConversationIds,
         dataDirectory,
@@ -704,6 +708,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         enableProviders,
         attachmentResolver,
         workflows: agentWorkflows,
+        providerTerminalResumes,
         providerInfo: () => providerInfo,
         broadcast,
         broadcastSnapshot,
@@ -754,6 +759,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createProjectWorkspaceCommandHandler({
         store,
         workspaceRuns,
+        turns,
+        providers,
+        providerTerminalResumes,
         terminals,
         secureFiles,
         secureFileAuthorities,
@@ -873,38 +881,18 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     transcriptCache: privateConnectTranscriptCache,
     privateConnectPromptSafety: (conversation) =>
       privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId),
-    queuePrompt: (conversationId, content) => {
-      let queued: ReturnType<TurnController["queue"]> | null = null;
-      try {
-        queued = turns.queue({
-          conversationId,
-          content,
-          attachments: [],
-          activateConversation: false,
-          skills: [],
-          rendererOwnerId: null,
-        });
+    queuePrompt: (conversationId, content) => queuePrivateConnectPrompt({
+      authority: providerTerminalResumes,
+      turns,
+      isolatedRuns,
+      onQueued: (queuedConversationId) => {
         broadcast({
           type: "conversation.detail.invalidated",
-          conversationId,
+          conversationId: queuedConversationId,
         });
         broadcastSnapshot();
-        if (!turns.start(queued.turn.id)) {
-          throw new Error("The remote turn could not start.");
-        }
-        return { turnId: queued.turn.id };
-      } catch (error) {
-        if (queued) {
-          turns.failBeforeStart(
-            conversationId,
-            error instanceof Error
-              ? error.message
-              : "The remote turn could not start.",
-          );
-        }
-        throw error;
-      }
-    },
+      },
+    }, conversationId, content),
     respondToInput: (conversationId, inputRequestId, answers) => {
       const pending = pendingInputs.get(inputRequestId);
       if (!pending || pending.conversationId !== conversationId || pending.questions.some((question) => question.isSecret)) return false;

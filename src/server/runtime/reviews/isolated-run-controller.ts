@@ -116,7 +116,10 @@ export interface IsolatedRunProviderRuntime {
   ): Promise<OwnedProviderStopResult>;
 }
 
-export type IsolatedRunStore = Pick<RuntimeStore, "createWorkspaceRun" | "updateWorkspaceRun">;
+export type IsolatedRunStore = Pick<RuntimeStore, "createWorkspaceRun" | "updateWorkspaceRun">
+  & {
+    conversationWork?: Pick<RuntimeStore["conversationWork"], "hasConversation">;
+  };
 
 export interface IsolatedRunFileSystem {
   create(prefix: string): Promise<string>;
@@ -283,6 +286,12 @@ export class IsolatedRunController<Owner extends object> {
 
   async run<Value>(request: IsolatedRunRequest<Owner, Value>): Promise<IsolatedRunCompletion<Value>> {
     if (this.closing) throw new IsolatedRunError("runtime-shutdown");
+    if (this.store.conversationWork?.hasConversation(request.conversationId)) {
+      throw new IsolatedRunError(
+        "setup-failed",
+        "End the resumed provider terminal before starting another agent task for this chat.",
+      );
+    }
     if (this.activeByConversation.has(request.conversationId)) {
       throw new IsolatedRunError("setup-failed", "An isolated agent task is already running for this thread.");
     }

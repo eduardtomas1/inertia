@@ -201,95 +201,112 @@ export function createIsolatedReviewCommandHandler(
               ?? "The selected agent is unavailable.",
           );
         }
-        const context = await selectedReviewContext(
-          dependencies.store,
-          command.payload,
-          "revision",
-          dependencies.secureFiles,
-        );
-        const beforeFiles = Object.fromEntries(
-          parseUnifiedDiff(context.patch).files.map((file) => [
-            file.path,
-            diffFileFingerprint(file),
-          ]),
-        );
-        const checkpoint = await captureRequiredCheckpoint(
-          dependencies.store,
-          dependencies.dataDirectory,
-          conversation.id,
-          `Before revision · ${context.filePath}`,
-          dependencies.publicError,
-        );
-        const queued = dependencies.turns.queue({
-          conversationId: conversation.id,
-          content: context.visibleContent,
-          context: context.requestContext,
-          internalInstructions: [{
-            label: "selected-diff-revision-scope",
-            text: "Treat the selected lines as the requested focus, not a perfect technical write fence. Avoid unrelated files and hunks, and report any necessary spillover. A recovery checkpoint was created before this turn.",
-          }],
-          checkpointId: checkpoint.id,
-          onSettled: async (status, turnId) => {
-            let audit =
-              "The refreshed diff could not be audited automatically. Use the recovery checkpoint if the result is not acceptable.";
-            try {
-              const current = await getUnifiedDiff(
-                dependencies.store.conversationPath(conversation.id),
-                { ignoreWhitespace: command.payload.ignoreWhitespace },
-                undefined,
-                dependencies.secureFiles,
-              );
-              if (!current.truncated) {
-                reconcileReviews(
-                  dependencies.store,
-                  conversation.id,
-                  current.text,
-                );
-                const afterFiles = Object.fromEntries(
-                  parseUnifiedDiff(current.text).files.map((file) => [
-                    file.path,
-                    diffFileFingerprint(file),
-                  ]),
-                );
-                const outsidePaths = [
-                  ...new Set([
-                    ...Object.keys(beforeFiles),
-                    ...Object.keys(afterFiles),
-                  ]),
-                ]
-                  .filter((path) => (
-                    path !== context.filePath
-                    && beforeFiles[path] !== afterFiles[path]
-                  ))
-                  .sort();
-                audit = outsidePaths.length > 0
-                  ? `Potential unrelated changes were detected outside the selected file: ${outsidePaths.join(", ")}. Review them before committing.`
-                  : "No changes outside the selected file were detected automatically. Review other hunks in the selected file because line boundaries are guidance, not a technical write fence.";
-              }
-            } catch {
-              // The persistent checkpoint remains the recovery path.
-            }
-            const outcome = status === "completed"
-              ? "completed"
-              : status === "cancelled"
-                ? "was cancelled"
-                : "failed";
-            dependencies.store.createMessage(
-              conversation.id,
-              `Revision ${outcome}. Scope: ${context.filePath} · ${context.hunkHeader} · ${context.selectedLineCount} selected lines. ${audit} Recovery checkpoint: ${checkpoint.label}.`,
-              "system",
-              [],
-              turnId,
+        if (!dependencies.store.conversationWork.reserve(conversation.id)) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal before starting another agent task for this chat.",
+          );
+        }
+        try {
+          if (
+            dependencies.turns.isActive(conversation.id)
+            || dependencies.isolatedRuns.has(conversation.id)
+          ) {
+            throw new RuntimeRequestError(
+              "Wait for the current agent or review turn to finish first.",
             );
-          },
-        });
-        dependencies.send(socket, {
-          type: "request.ok",
-          requestId: command.requestId,
-        });
-        dependencies.broadcastSnapshot();
-        dependencies.turns.start(queued.turn.id);
-        return "handled";
+          }
+          const context = await selectedReviewContext(
+            dependencies.store,
+            command.payload,
+            "revision",
+            dependencies.secureFiles,
+          );
+          const beforeFiles = Object.fromEntries(
+            parseUnifiedDiff(context.patch).files.map((file) => [
+              file.path,
+              diffFileFingerprint(file),
+            ]),
+          );
+          const checkpoint = await captureRequiredCheckpoint(
+            dependencies.store,
+            dependencies.dataDirectory,
+            conversation.id,
+            `Before revision · ${context.filePath}`,
+            dependencies.publicError,
+          );
+          const queued = dependencies.turns.queue({
+            conversationId: conversation.id,
+            content: context.visibleContent,
+            context: context.requestContext,
+            internalInstructions: [{
+              label: "selected-diff-revision-scope",
+              text: "Treat the selected lines as the requested focus, not a perfect technical write fence. Avoid unrelated files and hunks, and report any necessary spillover. A recovery checkpoint was created before this turn.",
+            }],
+            checkpointId: checkpoint.id,
+            onSettled: async (status, turnId) => {
+              let audit =
+                "The refreshed diff could not be audited automatically. Use the recovery checkpoint if the result is not acceptable.";
+              try {
+                const current = await getUnifiedDiff(
+                  dependencies.store.conversationPath(conversation.id),
+                  { ignoreWhitespace: command.payload.ignoreWhitespace },
+                  undefined,
+                  dependencies.secureFiles,
+                );
+                if (!current.truncated) {
+                  reconcileReviews(
+                    dependencies.store,
+                    conversation.id,
+                    current.text,
+                  );
+                  const afterFiles = Object.fromEntries(
+                    parseUnifiedDiff(current.text).files.map((file) => [
+                      file.path,
+                      diffFileFingerprint(file),
+                    ]),
+                  );
+                  const outsidePaths = [
+                    ...new Set([
+                      ...Object.keys(beforeFiles),
+                      ...Object.keys(afterFiles),
+                    ]),
+                  ]
+                    .filter((path) => (
+                      path !== context.filePath
+                      && beforeFiles[path] !== afterFiles[path]
+                    ))
+                    .sort();
+                  audit = outsidePaths.length > 0
+                    ? `Potential unrelated changes were detected outside the selected file: ${outsidePaths.join(", ")}. Review them before committing.`
+                    : "No changes outside the selected file were detected automatically. Review other hunks in the selected file because line boundaries are guidance, not a technical write fence.";
+                }
+              } catch {
+                // The persistent checkpoint remains the recovery path.
+              }
+              const outcome = status === "completed"
+                ? "completed"
+                : status === "cancelled"
+                  ? "was cancelled"
+                  : "failed";
+              dependencies.store.createMessage(
+                conversation.id,
+                `Revision ${outcome}. Scope: ${context.filePath} · ${context.hunkHeader} · ${context.selectedLineCount} selected lines. ${audit} Recovery checkpoint: ${checkpoint.label}.`,
+                "system",
+                [],
+                turnId,
+              );
+            },
+          });
+          dependencies.send(socket, {
+            type: "request.ok",
+            requestId: command.requestId,
+          });
+          dependencies.broadcastSnapshot();
+          dependencies.turns.start(queued.turn.id);
+          return "handled";
+        } finally {
+          dependencies.store.conversationWork.release(conversation.id);
+        }
       }
       case "review.summary.generate": {
         if (!dependencies.enableProviders) {

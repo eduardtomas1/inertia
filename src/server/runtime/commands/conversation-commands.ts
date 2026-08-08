@@ -28,6 +28,7 @@ import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
+import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -72,6 +73,7 @@ export interface ConversationCommandDependencies {
   providers: ProviderManager;
   backendProfileController: BackendProfileController;
   workspaceRuns: WorkspaceRunController<WebSocket>;
+  providerTerminalResumes: ProviderTerminalResumeRegistry;
   runtimeSync: RuntimeSyncHub<WebSocket>;
   deletedConversationIds: Set<string>;
   dataDirectory: string;
@@ -239,6 +241,7 @@ export function createConversationCommandHandler(
               "Create worktree",
               command.payload.projectId,
               conversation.id,
+              repositoryPath,
               command.requestId,
               async () => await createWorktree(
                 repositoryPath,
@@ -451,6 +454,11 @@ export function createConversationCommandHandler(
         return "mutation";
       }
       case "conversation.archive":
+        if (dependencies.providerTerminalResumes.isActive(command.payload.conversationId)) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal before archiving this thread.",
+          );
+        }
         if (
           dependencies.store.hasActiveWorkspaceRunForConversation(
             command.payload.conversationId,
@@ -473,6 +481,11 @@ export function createConversationCommandHandler(
         );
         return "mutation";
       case "conversation.settle":
+        if (dependencies.providerTerminalResumes.isActive(command.payload.conversationId)) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal before settling this thread.",
+          );
+        }
         if (
           dependencies.store.hasActiveWorkspaceRunForConversation(
             command.payload.conversationId,
@@ -497,63 +510,72 @@ export function createConversationCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
-        if (
-          dependencies.store.hasActiveWorkspaceRunForConversation(
-            conversation.id,
-          )
-        ) {
+        if (!dependencies.providerTerminalResumes.acquire(conversation.id)) {
           throw new RuntimeRequestError(
-            "Stop the active run or review before deleting this thread.",
+            "End the resumed provider terminal before deleting this thread.",
           );
         }
         try {
-          dependencies.store.assertConversationDeletionAllowed(
-            conversation.id,
-          );
-        } catch (error) {
           if (
-            error instanceof Error
-            && error.message.includes("Cancel the active Duo launch")
-          ) throw new RuntimeRequestError(error.message);
-          throw error;
-        }
-        if (conversation.worktreePath) {
-          const sharedCheckout = dependencies.store.shellSnapshot()
-            .conversations.some((candidate) => (
-              candidate.id !== conversation.id
-              && candidate.projectId === conversation.projectId
-              && candidate.worktreePath !== null
-              && resolve(candidate.worktreePath)
-                === resolve(conversation.worktreePath!)
-            ));
-          if (!sharedCheckout) {
-            try {
-              await removeWorktree(
-                dependencies.store.projectPath(conversation.projectId),
-                conversation.worktreePath,
-                false,
-              );
-            } catch (error) {
-              if (
-                !(error instanceof GitError && error.code === "not-found")
-              ) {
-                throw error;
+            dependencies.store.hasRecordedActiveWorkspaceRunForConversation(
+              conversation.id,
+            )
+          ) {
+            throw new RuntimeRequestError(
+              "Stop the active run or review before deleting this thread.",
+            );
+          }
+          try {
+            dependencies.store.assertConversationDeletionAllowed(
+              conversation.id,
+            );
+          } catch (error) {
+            if (
+              error instanceof Error
+              && error.message.includes("Cancel the active Duo launch")
+            ) throw new RuntimeRequestError(error.message);
+            throw error;
+          }
+          if (conversation.worktreePath) {
+            const sharedCheckout = dependencies.store.shellSnapshot()
+              .conversations.some((candidate) => (
+                candidate.id !== conversation.id
+                && candidate.projectId === conversation.projectId
+                && candidate.worktreePath !== null
+                && resolve(candidate.worktreePath)
+                  === resolve(conversation.worktreePath!)
+              ));
+            if (!sharedCheckout) {
+              try {
+                await removeWorktree(
+                  dependencies.store.projectPath(conversation.projectId),
+                  conversation.worktreePath,
+                  false,
+                );
+              } catch (error) {
+                if (
+                  !(error instanceof GitError && error.code === "not-found")
+                ) {
+                  throw error;
+                }
               }
             }
           }
+          await deleteCheckpoints(
+            dependencies.store.projectPath(conversation.projectId),
+            conversation.id,
+          ).catch(() => undefined);
+          dependencies.store.deleteConversation(
+            command.payload.conversationId,
+          );
+          dependencies.rememberDeletedConversation(
+            command.payload.conversationId,
+          );
+          dependencies.forgetRemoteTranscript(command.payload.conversationId);
+          return "mutation";
+        } finally {
+          dependencies.providerTerminalResumes.release(conversation.id);
         }
-        await deleteCheckpoints(
-          dependencies.store.projectPath(conversation.projectId),
-          conversation.id,
-        ).catch(() => undefined);
-        dependencies.store.deleteConversation(
-          command.payload.conversationId,
-        );
-        dependencies.rememberDeletedConversation(
-          command.payload.conversationId,
-        );
-        dependencies.forgetRemoteTranscript(command.payload.conversationId);
-        return "mutation";
       }
       default:
         return "not-handled";

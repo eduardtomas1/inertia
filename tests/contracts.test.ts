@@ -134,6 +134,33 @@ describe("client command contract", () => {
     expect(clientCommandSchema.safeParse(command).success).toBe(false);
   });
 
+  it("accepts only owning identifiers and dimensions for provider terminal resume", () => {
+    const command = {
+      type: "terminal.provider.resume",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId: crypto.randomUUID(),
+        conversationId: crypto.randomUUID(),
+        terminalId: crypto.randomUUID(),
+        cols: 80,
+        rows: 24,
+      },
+    };
+    expect(clientCommandSchema.safeParse(command).success).toBe(true);
+    for (const injected of [
+      { providerId: "codex" },
+      { sessionId: "renderer-chosen-session" },
+      { executable: "/tmp/codex" },
+      { prompt: "renderer-chosen prompt" },
+      { env: { OPENAI_API_KEY: "secret" } },
+    ]) {
+      expect(clientCommandSchema.safeParse({
+        ...command,
+        payload: { ...command.payload, ...injected },
+      }).success).toBe(false);
+    }
+  });
+
   it("accepts conflict-checked workspace writes and rejects unbounded payloads", () => {
     const base = {
       type: "workspace.file.write",

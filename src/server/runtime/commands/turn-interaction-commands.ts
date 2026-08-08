@@ -24,6 +24,7 @@ import type { IsolatedRunController } from "../reviews/isolated-run-controller";
 import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
+import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -47,6 +48,7 @@ export interface TurnInteractionCommandDependencies {
   enableProviders: boolean;
   attachmentResolver: TrustedAttachmentResolver | null;
   workflows: AgentWorkflowController;
+  providerTerminalResumes: ProviderTerminalResumeRegistry;
   providerInfo(): readonly ProviderInfo[];
   broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void;
@@ -72,6 +74,11 @@ export function createTurnInteractionCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
+        if (dependencies.providerTerminalResumes.isActive(conversation.id)) {
+          throw new RuntimeRequestError(
+            "End the resumed provider terminal for this chat before sending another message.",
+          );
+        }
         if (dependencies.turns.isActive(conversation.id)) {
           if (
             command.payload.attachments.length > 0
@@ -211,6 +218,29 @@ export function createTurnInteractionCommandHandler(
           await relinquishAttachments();
           throw error;
         }
+        let providerTransitionReserved = false;
+        try {
+          assertMessageSendPreparationPending(preparationDeadlineAt);
+          dependencies.workflows.assertTurnSkillsCurrent(
+            conversation.id,
+            resolvedSkills.routeKey,
+          );
+          if (
+            dependencies.enableProviders
+            && !dependencies.providerTerminalResumes.acquire(conversation.id)
+          ) {
+            throw new RuntimeRequestError(
+              "End the resumed provider terminal for this chat before sending another message.",
+            );
+          }
+          providerTransitionReserved = dependencies.enableProviders;
+        } catch (error) {
+          if (providerTransitionReserved) {
+            dependencies.providerTerminalResumes.release(conversation.id);
+          }
+          await relinquishAttachments();
+          throw error;
+        }
         let checkpointId: string | null = null;
         let capturedCheckpoint: {
           repositoryPath: string;
@@ -275,6 +305,10 @@ export function createTurnInteractionCommandHandler(
               // A checkpoint is protective but not a reason to block a run.
             }
             if (messageSendPreparationExpired(preparationDeadlineAt)) {
+              if (providerTransitionReserved) {
+                dependencies.providerTerminalResumes.release(conversation.id);
+                providerTransitionReserved = false;
+              }
               await relinquishAttachments();
               assertMessageSendPreparationPending(preparationDeadlineAt);
             }
@@ -282,11 +316,6 @@ export function createTurnInteractionCommandHandler(
         }
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
         try {
-          assertMessageSendPreparationPending(preparationDeadlineAt);
-          dependencies.workflows.assertTurnSkillsCurrent(
-            conversation.id,
-            resolvedSkills.routeKey,
-          );
           if (pendingCheckpoint) {
             checkpointId = dependencies.store.addCheckpoint({
               conversationId: conversation.id,
@@ -311,6 +340,9 @@ export function createTurnInteractionCommandHandler(
               })
             : null;
         } catch (error) {
+          if (providerTransitionReserved) {
+            dependencies.providerTerminalResumes.release(conversation.id);
+          }
           if (pendingCheckpoint && checkpointId === null) {
             await deleteCheckpoint(
               pendingCheckpoint.repositoryPath,
@@ -367,8 +399,16 @@ export function createTurnInteractionCommandHandler(
           });
           dependencies.broadcastSnapshot();
           if (queued) dependencies.turns.start(queued.turn.id);
+          if (providerTransitionReserved) {
+            dependencies.providerTerminalResumes.release(conversation.id);
+            providerTransitionReserved = false;
+          }
           return "handled";
         } catch (error) {
+          if (providerTransitionReserved) {
+            dependencies.providerTerminalResumes.release(conversation.id);
+            providerTransitionReserved = false;
+          }
           if (queued) {
             dependencies.turns.failBeforeStart(
               conversation.id,

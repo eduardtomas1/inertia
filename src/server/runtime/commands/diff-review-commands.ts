@@ -137,6 +137,7 @@ export function createDiffReviewCommandHandler(
           `Revert ${command.payload.lineIds.length} selected ${command.payload.lineIds.length === 1 ? "line" : "lines"} · ${workspaceGitFilePath(repositoryPath, command.payload.filePath)}`,
           command.payload.projectId,
           command.payload.conversationId,
+          workspaceRoot,
           command.requestId,
           async () => await revertDiffSelection(
             secureRoot.root,
@@ -278,6 +279,7 @@ export function createDiffReviewCommandHandler(
           "Undo selective reversal",
           command.payload.projectId,
           command.payload.conversationId,
+          workspaceRoot,
           command.requestId,
           async () => await undoDiffSelection(
             secureRoot.root,

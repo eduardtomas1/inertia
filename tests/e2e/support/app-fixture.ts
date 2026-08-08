@@ -51,9 +51,11 @@ interface AppFixtureOptions {
   seedAssistantCodeBlock?: boolean;
   seedSecondProject?: boolean;
   codexAppServerSource?: string;
+  codexResumeSource?: string;
   beforeLaunch?: (fixture: {
     testDirectory: string;
     workspaceDirectory: string;
+    secondWorkspaceDirectory: string | null;
   }) => void | Promise<void>;
 }
 
@@ -306,35 +308,46 @@ export async function createAppFixture(
     join(tmpdir(), `inertia-${options.name}-`),
   );
   const workspace = await createWorkspace(testDirectory);
-  if (options.codexAppServerSource) {
-    await Promise.all([
-      writeFile(
-        join(workspace.workspaceDirectory, "app-server"),
-        options.codexAppServerSource,
-        "utf8",
-      ),
-      writeFile(
-        join(workspace.workspaceDirectory, "login"),
-        [
-          'if (process.argv[2] === "status") {',
-          '  process.stdout.write("Logged in using ChatGPT\\n");',
-          "  process.exit(0);",
-          "}",
-          'process.stdout.write("Sign-in complete\\n");',
-          "",
-        ].join("\n"),
-        "utf8",
-      ),
-      writeFile(
-        join(workspace.workspaceDirectory, ".git", "info", "exclude"),
-        "app-server\nlogin\n",
-        { encoding: "utf8", flag: "a" },
-      ),
-    ]);
-  }
   const secondWorkspaceDirectory = options.seedSecondProject
     ? await createSecondWorkspace(testDirectory)
     : null;
+  if (options.codexAppServerSource) {
+    await Promise.all(
+      [workspace.workspaceDirectory, secondWorkspaceDirectory]
+        .filter((directory): directory is string => Boolean(directory))
+        .flatMap((directory) => [
+          writeFile(
+            join(directory, "app-server"),
+            options.codexAppServerSource!,
+            "utf8",
+          ),
+          writeFile(
+            join(directory, "login"),
+            [
+              'if (process.argv[2] === "status") {',
+              '  process.stdout.write("Logged in using ChatGPT\\n");',
+              "  process.exit(0);",
+              "}",
+              'process.stdout.write("Sign-in complete\\n");',
+              "",
+            ].join("\n"),
+            "utf8",
+          ),
+          ...(options.codexResumeSource
+            ? [writeFile(
+                join(directory, "resume"),
+                options.codexResumeSource,
+                "utf8",
+              )]
+            : []),
+          writeFile(
+            join(directory, ".git", "info", "exclude"),
+            `app-server\nlogin\n${options.codexResumeSource ? "resume\n" : ""}`,
+            { encoding: "utf8", flag: "a" },
+          ),
+        ]),
+    );
+  }
   if (options.initialState === "conversation") {
     await mkdir(join(testDirectory, "data"), { recursive: true });
     seedConversation(
@@ -359,6 +372,7 @@ export async function createAppFixture(
   await options.beforeLaunch?.({
     testDirectory,
     workspaceDirectory: workspace.workspaceDirectory,
+    secondWorkspaceDirectory,
   });
   const rendererErrors: string[] = [];
   const electronApp = await electron.launch({

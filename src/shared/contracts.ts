@@ -7,6 +7,7 @@ export * from "./model-routing";
 export * from "./backend-profile-settings";
 export * from "./attachments";
 export * from "./provider-maintenance";
+export * from "./provider-terminal-resume";
 export * from "./contracts/agent";
 export * from "./contracts/agent-workflows";
 export * from "./contracts/app";

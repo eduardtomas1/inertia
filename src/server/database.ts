@@ -104,6 +104,7 @@ import type {
   UpsertSubagentTraceInput,
   UpsertSubagentTraceResult,
 } from "./persistence/types";
+import { ConversationWorkAuthority } from "./runtime/conversation-work-authority";
 import type { WorktreeFilesystemReceipt } from "./worktree-filesystem-identity";
 
 export { RecordNotFoundError } from "./persistence/errors";
@@ -144,6 +145,7 @@ export class RuntimeStore {
   private readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
+  readonly conversationWork = new ConversationWorkAuthority((id) => ({ projectId: this.conversation(id).projectId, checkoutPath: this.conversationPath(id) }));
 
   constructor(
     databasePath: string,
@@ -278,6 +280,7 @@ export class RuntimeStore {
 
   close(): void {
     this.backupManager.stop();
+    this.conversationWork.clear();
     if (this.database.open) this.database.close();
   }
 
@@ -1123,13 +1126,10 @@ export class RuntimeStore {
     return this.workspaceRunRepository.forConversation(conversationId);
   }
 
-  hasActiveWorkspaceRunForProject(projectId: string): boolean {
-    return this.workspaceRunRepository.hasActiveForProject(projectId);
-  }
-
-  hasActiveWorkspaceRunForConversation(conversationId: string): boolean {
-    return this.workspaceRunRepository.hasActiveForConversation(conversationId);
-  }
+  hasRecordedActiveWorkspaceRunForProject(projectId: string): boolean { return this.workspaceRunRepository.hasActiveForProject(projectId); }
+  hasRecordedActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.workspaceRunRepository.hasActiveForConversation(conversationId); }
+  hasActiveWorkspaceRunForProject(projectId: string): boolean { return this.conversationWork.hasProject(projectId) || this.hasRecordedActiveWorkspaceRunForProject(projectId); }
+  hasActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.conversationWork.hasConversation(conversationId) || this.hasRecordedActiveWorkspaceRunForConversation(conversationId); }
 
   markWorkspaceRunSeen(id: string): WorkspaceRun {
     return this.workspaceRunRepository.markSeen(id);

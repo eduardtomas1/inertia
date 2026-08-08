@@ -509,6 +509,7 @@ export function createSourceControlCommandHandler(
           "Create branch",
           command.payload.projectId,
           command.payload.conversationId,
+          path,
           command.requestId,
           async () => await createBranch(
             path,
@@ -535,6 +536,7 @@ export function createSourceControlCommandHandler(
           "Switch branch",
           command.payload.projectId,
           command.payload.conversationId,
+          path,
           command.requestId,
           async () => await switchBranch(
             path,
@@ -579,6 +581,7 @@ export function createSourceControlCommandHandler(
           "Create worktree",
           command.payload.projectId,
           command.payload.conversationId,
+          dependencies.store.projectPath(command.payload.projectId),
           command.requestId,
           async () => await createWorktree(
             dependencies.store.projectPath(command.payload.projectId),
@@ -615,6 +618,7 @@ export function createSourceControlCommandHandler(
           "Pull changes",
           command.payload.projectId,
           command.payload.conversationId,
+          path,
           command.requestId,
           async () => await pullRepository(path),
         );
@@ -637,6 +641,7 @@ export function createSourceControlCommandHandler(
           "Commit changes",
           command.payload.projectId,
           command.payload.conversationId,
+          path,
           command.requestId,
           async () => await commitChanges(
             path,
@@ -679,6 +684,7 @@ export function createSourceControlCommandHandler(
           "Push branch",
           command.payload.projectId,
           command.payload.conversationId,
+          path,
           command.requestId,
           async () => await pushCurrentBranch(path),
         );
@@ -701,6 +707,7 @@ export function createSourceControlCommandHandler(
           "Prepare pull request",
           command.payload.projectId,
           command.payload.conversationId,
+          path,
           command.requestId,
           async () => await getPullRequestCreateUrl(path),
         );

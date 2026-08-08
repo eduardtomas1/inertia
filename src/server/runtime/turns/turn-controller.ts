@@ -172,6 +172,18 @@ export class TurnController {
     return this.activeByConversation.has(conversationId);
   }
 
+  hasActiveCheckout(checkoutPath: string): boolean {
+    const conversationIds = new Set([
+      ...this.activeByConversation.keys(),
+      ...this.providerCleanupBarriers.keys(),
+    ]);
+    return [...conversationIds].some((conversationId) =>
+      this.store.conversationWork.conversationMatchesCheckout(
+        conversationId,
+        checkoutPath,
+      ));
+  }
+
   activeConversationIds(): string[] {
     return [...this.activeByConversation.keys()];
   }

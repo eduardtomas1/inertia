@@ -11,6 +11,7 @@ import * as duoExports from "../src/shared/contracts/duo";
 import * as eventExports from "../src/shared/contracts/events";
 import * as modelRoutingExports from "../src/shared/model-routing";
 import * as providerMaintenanceExports from "../src/shared/provider-maintenance";
+import * as providerTerminalResumeExports from "../src/shared/provider-terminal-resume";
 import * as workspaceExports from "../src/shared/contracts/workspace";
 import { clientCommandSchema } from "../src/shared/contracts/client-command";
 
@@ -21,6 +22,7 @@ describe("shared contracts boundary", () => {
       ...backendProfileExports,
       ...attachmentExports,
       ...providerMaintenanceExports,
+      ...providerTerminalResumeExports,
       ...agentExports,
       ...agentWorkflowExports,
       ...appExports,
@@ -127,6 +129,7 @@ describe("shared contracts boundary", () => {
       "project.action.run",
       "checkpoint.revert",
       "terminal.create",
+      "terminal.provider.resume",
       "terminal.input",
       "terminal.resize",
       "terminal.close",

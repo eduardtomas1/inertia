@@ -11,6 +11,7 @@ import type {
   ProviderMaintenanceOperation,
   ProviderMaintenanceStatus,
 } from "../provider-maintenance";
+import type { ProviderTerminalResumeDescriptor } from "../provider-terminal-resume";
 import type {
   AgentActivity,
   AgentApprovalRequest,
@@ -171,6 +172,11 @@ export type ServerEvent =
         | ConversationDetailResult;
     }
   | RuntimeMutationEvent
-  | { type: "terminal.created"; requestId: string; terminalId: string }
+  | {
+      type: "terminal.created";
+      requestId: string;
+      terminalId: string;
+      providerResume?: ProviderTerminalResumeDescriptor;
+    }
   | { type: "terminal.output"; terminalId: string; data: string }
   | { type: "terminal.exit"; terminalId: string; exitCode: number };

@@ -423,12 +423,21 @@ describe("Duo third-model comparison", () => {
     })).toThrow(/reserved/u);
 
     runtime.provider.throwOnRun = null;
+    expect(runtime.store.conversationWork.reserve(
+      prepared.comparison!.conversationId,
+    )).toBe(true);
     await expect(launches.retryComparison(prepared.launchId)).resolves
-      .toMatchObject({ comparison: { state: "running", attempt: 2 } });
+      .toMatchObject({ comparison: { state: "failed", attempt: 2 } });
+    expect(runtime.provider.inputs).toHaveLength(3);
+    runtime.store.conversationWork.release(
+      prepared.comparison!.conversationId,
+    );
+    await expect(launches.retryComparison(prepared.launchId)).resolves
+      .toMatchObject({ comparison: { state: "running", attempt: 3 } });
     expect(runtime.provider.inputs).toHaveLength(4);
     expect(runtime.provider.inputs[3]?.prompt).toContain("Only surviving result");
     expect(launches.cancelComparison(prepared.launchId).comparison)
-      .toMatchObject({ state: "cancelled", attempt: 2 });
+      .toMatchObject({ state: "cancelled", attempt: 3 });
     expect(runtime.provider.cancellations).toContain(
       prepared.comparison!.conversationId,
     );

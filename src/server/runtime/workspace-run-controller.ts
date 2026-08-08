@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type {
   Conversation,
   ProviderInfo,
@@ -21,7 +23,10 @@ const SERVICE_OUTPUT_WINDOW = 4_096;
 
 type WorkspaceRunStore = Pick<
   RuntimeStore,
-  "conversation" | "createWorkspaceRun" | "updateWorkspaceRun"
+  | "conversation"
+  | "createWorkspaceRun"
+  | "updateWorkspaceRun"
+  | "conversationWork"
 >;
 
 export interface WorkspaceActionTerminalManager<Owner> {
@@ -128,107 +133,127 @@ export class WorkspaceRunController<Owner> {
   }
 
   async startAction(input: StartWorkspaceActionInput<Owner>): Promise<string> {
-    const scripts = await discoverPackageScripts(input.cwd);
-    const action = scripts.scripts.find((script) => script.name === input.actionId);
-    if (!action) throw new RuntimeRequestError("That project action is no longer available.");
-
-    const preview = identifyPreviewScripts(scripts.scripts).some((script) => script.name === action.name);
-    const kind = workspaceActionKind(action.name, action.command, preview);
-    const conversation = input.conversationId
-      ? this.store.conversation(input.conversationId)
-      : null;
-    const activity = this.store.createWorkspaceRun({
-      kind,
-      projectId: input.projectId,
-      conversationId: input.conversationId ?? null,
-      actionId: action.name,
-      label: action.name,
-      detail: kind === "service" && conversation
-        ? conversationDetail(conversation)
-        : action.command,
-      status: "running",
-      port: null,
-    });
-
-    let detectedPort: number | null = null;
-    let serviceOutput = "";
-    let startingFailed = false;
-    let terminalId: string;
-    try {
-      terminalId = this.terminals.create(
-        input.owner,
-        input.cwd,
-        input.cols,
-        input.rows,
-        (exitCode) => {
-          this.managedActions.delete(activity.id);
-          if (startingFailed) return;
-          try {
-            this.store.updateWorkspaceRun(activity.id, {
-              status: exitCode === 0
-                ? "succeeded"
-                : exitCode === 130
-                  ? "cancelled"
-                  : "failed",
-              detail: exitCode === 0
-                ? activity.detail
-                : exitCode === 130
-                  ? "Stopped"
-                  : `Exited with code ${exitCode}`,
-            });
-          } catch {
-            return; // The project may have been removed while its process was exiting.
-          }
-          if (!this.isClosed()) this.broadcastSnapshot();
-        },
-        (output) => {
-          if (kind !== "service" || detectedPort !== null) return;
-          serviceOutput = `${serviceOutput}${output}`.slice(-SERVICE_OUTPUT_WINDOW);
-          const port = workspaceServicePort(serviceOutput);
-          if (!port) return;
-          detectedPort = port;
-          try {
-            this.store.updateWorkspaceRun(activity.id, { port });
-          } catch {
-            return;
-          }
-          if (!this.isClosed()) this.broadcastSnapshot();
-        },
+    const reservationId = `workspace-action:${randomUUID()}`;
+    if (!this.store.conversationWork.reserveCheckout(
+      reservationId,
+      input.projectId,
+      input.cwd,
+    )) {
+      throw new RuntimeRequestError(
+        "End the resumed provider terminal before starting project actions in this workspace.",
       );
-    } catch (error) {
-      this.store.updateWorkspaceRun(activity.id, {
-        status: "failed",
-        detail: publicRuntimeError(error),
-      });
-      this.broadcastSnapshot();
-      throw error;
     }
-    this.managedActions.set(activity.id, { terminalId });
-
+    let terminalOwnsReservation = false;
     try {
-      this.terminals.input(
-        input.owner,
-        terminalId,
-        `${projectActionCommand(scripts.packageManager, action.name)}\r`,
-      );
-      input.onStarted(terminalId);
-    } catch (error) {
-      startingFailed = true;
+      const scripts = await discoverPackageScripts(input.cwd);
+      const action = scripts.scripts.find((script) => script.name === input.actionId);
+      if (!action) throw new RuntimeRequestError("That project action is no longer available.");
+
+      const preview = identifyPreviewScripts(scripts.scripts).some((script) => script.name === action.name);
+      const kind = workspaceActionKind(action.name, action.command, preview);
+      const conversation = input.conversationId
+        ? this.store.conversation(input.conversationId)
+        : null;
+      const activity = this.store.createWorkspaceRun({
+        kind,
+        projectId: input.projectId,
+        conversationId: input.conversationId ?? null,
+        actionId: action.name,
+        label: action.name,
+        detail: kind === "service" && conversation
+          ? conversationDetail(conversation)
+          : action.command,
+        status: "running",
+        port: null,
+      });
+
+      let detectedPort: number | null = null;
+      let serviceOutput = "";
+      let startingFailed = false;
+      let terminalId: string;
       try {
-        this.terminals.close(input.owner, terminalId);
-      } catch {
-        this.managedActions.delete(activity.id);
+        terminalId = this.terminals.create(
+          input.owner,
+          input.cwd,
+          input.cols,
+          input.rows,
+          (exitCode) => {
+            this.store.conversationWork.release(reservationId);
+            this.managedActions.delete(activity.id);
+            if (startingFailed) return;
+            try {
+              this.store.updateWorkspaceRun(activity.id, {
+                status: exitCode === 0
+                  ? "succeeded"
+                  : exitCode === 130
+                    ? "cancelled"
+                    : "failed",
+                detail: exitCode === 0
+                  ? activity.detail
+                  : exitCode === 130
+                    ? "Stopped"
+                    : `Exited with code ${exitCode}`,
+              });
+            } catch {
+              return; // The project may have been removed while its process was exiting.
+            }
+            if (!this.isClosed()) this.broadcastSnapshot();
+          },
+          (output) => {
+            if (kind !== "service" || detectedPort !== null) return;
+            serviceOutput = `${serviceOutput}${output}`.slice(-SERVICE_OUTPUT_WINDOW);
+            const port = workspaceServicePort(serviceOutput);
+            if (!port) return;
+            detectedPort = port;
+            try {
+              this.store.updateWorkspaceRun(activity.id, { port });
+            } catch {
+              return;
+            }
+            if (!this.isClosed()) this.broadcastSnapshot();
+          },
+        );
+        terminalOwnsReservation = true;
+      } catch (error) {
+        this.store.updateWorkspaceRun(activity.id, {
+          status: "failed",
+          detail: publicRuntimeError(error),
+        });
+        this.broadcastSnapshot();
+        throw error;
       }
-      this.store.updateWorkspaceRun(activity.id, {
-        status: "failed",
-        detail: publicRuntimeError(error),
-      });
-      this.broadcastSnapshot();
-      throw error;
-    }
+      this.managedActions.set(activity.id, { terminalId });
 
-    this.broadcastSnapshot();
-    return terminalId;
+      try {
+        this.terminals.input(
+          input.owner,
+          terminalId,
+          `${projectActionCommand(scripts.packageManager, action.name)}\r`,
+        );
+        input.onStarted(terminalId);
+      } catch (error) {
+        startingFailed = true;
+        try {
+          this.terminals.close(input.owner, terminalId);
+        } catch {
+          this.managedActions.delete(activity.id);
+          terminalOwnsReservation = false;
+        }
+        this.store.updateWorkspaceRun(activity.id, {
+          status: "failed",
+          detail: publicRuntimeError(error),
+        });
+        this.broadcastSnapshot();
+        throw error;
+      }
+
+      this.broadcastSnapshot();
+      return terminalId;
+    } finally {
+      if (!terminalOwnsReservation) {
+        this.store.conversationWork.release(reservationId);
+      }
+    }
   }
 
   canStopManagedAction(run: WorkspaceRun): boolean {
@@ -249,50 +274,65 @@ export class WorkspaceRunController<Owner> {
     label: string,
     projectId: string,
     conversationId: string | undefined,
+    cwd: string,
     requestId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const invalidationScope = `${projectId}:${conversationId ?? ""}`;
-    const detail = conversationId
-      ? conversationDetail(this.store.conversation(conversationId))
-      : "Started from the workspace";
-    const activity = this.store.createWorkspaceRun({
-      kind: "source-control",
+    const reservationId = `source-control:${requestId}`;
+    if (!this.store.conversationWork.reserveCheckout(
+      reservationId,
       projectId,
-      conversationId: conversationId ?? null,
-      label,
-      detail,
-      status: "running",
-      port: null,
-    });
-    this.sourceControlInFlight.set(
-      invalidationScope,
-      (this.sourceControlInFlight.get(invalidationScope) ?? 0) + 1,
-    );
-    this.broadcastSnapshot();
+      cwd,
+    )) {
+      throw new RuntimeRequestError(
+        "End the resumed provider terminal before changing this workspace with Git.",
+      );
+    }
     try {
-      const result = await operation();
-      this.store.updateWorkspaceRun(activity.id, { status: "succeeded" });
-      return result;
-    } catch (error) {
-      this.store.updateWorkspaceRun(activity.id, {
-        status: "failed",
-        detail: publicRuntimeError(error),
+      const invalidationScope = `${projectId}:${conversationId ?? ""}`;
+      const detail = conversationId
+        ? conversationDetail(this.store.conversation(conversationId))
+        : "Started from the workspace";
+      const activity = this.store.createWorkspaceRun({
+        kind: "source-control",
+        projectId,
+        conversationId: conversationId ?? null,
+        label,
+        detail,
+        status: "running",
+        port: null,
       });
-      throw error;
-    } finally {
+      this.sourceControlInFlight.set(
+        invalidationScope,
+        (this.sourceControlInFlight.get(invalidationScope) ?? 0) + 1,
+      );
       this.broadcastSnapshot();
-      const remaining = (this.sourceControlInFlight.get(invalidationScope) ?? 1) - 1;
-      if (remaining > 0) {
-        this.sourceControlInFlight.set(invalidationScope, remaining);
-      } else {
-        this.sourceControlInFlight.delete(invalidationScope);
-        this.broadcastGitInvalidated(
-          requestId,
-          projectId,
-          conversationId ?? null,
-        );
+      try {
+        const result = await operation();
+        this.store.updateWorkspaceRun(activity.id, { status: "succeeded" });
+        return result;
+      } catch (error) {
+        this.store.updateWorkspaceRun(activity.id, {
+          status: "failed",
+          detail: publicRuntimeError(error),
+        });
+        throw error;
+      } finally {
+        this.broadcastSnapshot();
+        const remaining = (this.sourceControlInFlight.get(invalidationScope) ?? 1) - 1;
+        if (remaining > 0) {
+          this.sourceControlInFlight.set(invalidationScope, remaining);
+        } else {
+          this.sourceControlInFlight.delete(invalidationScope);
+          this.broadcastGitInvalidated(
+            requestId,
+            projectId,
+            conversationId ?? null,
+          );
+        }
       }
+    } finally {
+      this.store.conversationWork.release(reservationId);
     }
   }
 }

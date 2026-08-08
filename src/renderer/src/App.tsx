@@ -333,6 +333,7 @@ export default function App(): React.JSX.Element {
     snapshot: connection.snapshot,
     settings,
     run,
+    request,
     splitConversationId,
     conversationSelectionGenerationRef,
     splitSelectionTransitionsRef,

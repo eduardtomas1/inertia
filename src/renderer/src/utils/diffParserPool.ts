@@ -60,9 +60,7 @@ class DiffParserPool {
         reject,
       };
       this.#nextId += 1;
-      signal.addEventListener("abort", () => {
-        job.cancelled = true;
-      }, { once: true });
+      signal.addEventListener("abort", () => this.#abort(job), { once: true });
       this.#queue.push(job);
       this.#pump();
     });
@@ -86,6 +84,7 @@ class DiffParserPool {
     worker.addEventListener("message", (
       event: MessageEvent<DiffParseResponse>,
     ) => {
+      if (slot.worker !== worker) return;
       const current = slot.current;
       if (!current || event.data.id !== current.id) return;
       slot.current = null;
@@ -97,6 +96,7 @@ class DiffParserPool {
       this.#pump();
     });
     worker.addEventListener("error", (event) => {
+      if (slot.worker !== worker) return;
       event.preventDefault();
       this.#disableSlot(
         slot,
@@ -104,6 +104,30 @@ class DiffParserPool {
       );
       this.#pump();
     });
+  }
+
+  #abort(job: DiffParseJob): void {
+    if (job.cancelled) return;
+    job.cancelled = true;
+    const queuedIndex = this.#queue.indexOf(job);
+    if (queuedIndex >= 0) {
+      this.#queue.splice(queuedIndex, 1);
+      job.reject(cancelledError());
+      return;
+    }
+    const slot = this.#slots.find(({ current }) => current === job);
+    if (!slot) return;
+    slot.current = null;
+    slot.worker?.terminate();
+    slot.worker = null;
+    job.reject(cancelledError());
+    try {
+      this.#replaceWorker(slot);
+    } catch {
+      // Other healthy slots may continue. If none remain, #pump rejects every
+      // queued job instead of retrying construction in a loop.
+    }
+    this.#pump();
   }
 
   #disableSlot(slot: DiffParserSlot, error: Error): void {

@@ -150,6 +150,7 @@ export function useMultiSpawn({
   snapshot,
   settings,
   run,
+  request,
   splitConversationId = null,
   conversationSelectionGenerationRef,
   splitSelectionTransitionsRef,
@@ -166,6 +167,7 @@ export function useMultiSpawn({
     key: string,
     command: CommandWithoutId,
   ) => Promise<ServerEvent>;
+  request: (command: CommandWithoutId) => Promise<ServerEvent>;
   splitConversationId?: string | null;
   conversationSelectionGenerationRef?: MutableRefObject<number>;
   splitSelectionTransitionsRef: MutableRefObject<number>;
@@ -263,6 +265,19 @@ export function useMultiSpawn({
     return event.result;
   }, [run]);
 
+  const queryLaunchStatusInBackground = useCallback(async (
+    launchId: string,
+  ): Promise<DuoStatusResult> => {
+    const event = resultEvent(await request({
+      type: "duo.status",
+      payload: { launchId },
+    }));
+    if (event.result.kind !== "duo.status") {
+      throw new Error("The local service returned an unexpected duo status.");
+    }
+    return event.result;
+  }, [request]);
+
   useEffect(() => {
     const comparisonState = recoveryStatus?.comparison?.state;
     if (
@@ -276,7 +291,7 @@ export function useMultiSpawn({
     let cancelled = false;
     let timer: number | null = null;
     const poll = (): void => {
-      void queryLaunchStatus(recoveryStatus.launchId).then((status) => {
+      void queryLaunchStatusInBackground(recoveryStatus.launchId).then((status) => {
         if (cancelled) return;
         setRecoveryGuidance(identifiedRecoveryGuidance(status));
         setRecoveryStatus(status);
@@ -297,7 +312,12 @@ export function useMultiSpawn({
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [queryLaunchStatus, recoveryStatus, setActionError, setRecoveryStatus]);
+  }, [
+    queryLaunchStatusInBackground,
+    recoveryStatus,
+    setActionError,
+    setRecoveryStatus,
+  ]);
 
   useEffect(() => {
     const watched = watchedComparisonRef.current;

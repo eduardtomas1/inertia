@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useMultiSpawn } from "../../src/renderer/src/hooks/useMultiSpawn";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
@@ -128,8 +128,89 @@ function runtime(): (key: string, command: CommandWithoutId) => Promise<ServerEv
 }
 
 beforeEach(() => window.localStorage.clear());
+afterEach(() => vi.useRealTimers());
 
 describe("Duo comparison navigation", () => {
+  it("polls a live comparison without entering the foreground action runner", async () => {
+    vi.useFakeTimers();
+    const baseRuntime = runtime();
+    let launchId = "";
+    const run = vi.fn(async (
+      key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      const event = await baseRuntime(key, command);
+      if (
+        command.type !== "duo.dispatch"
+        || event.type !== "request.result"
+        || event.result.kind !== "duo.status"
+      ) return event;
+      launchId = command.payload.launchId;
+      return {
+        ...event,
+        result: {
+          ...event.result,
+          comparison: {
+            state: "waiting",
+            conversationId: comparisonConversationId,
+            turnId: null,
+            attempt: 0,
+            error: null,
+          },
+        },
+      };
+    });
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      expect(command).toEqual({
+        type: "duo.status",
+        payload: { launchId },
+      });
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "duo.status",
+          launchId,
+          state: "running",
+          error: null,
+          sides: [
+            { ordinal: 0, conversationId: conversationIds[0], turnId: turnIds[0], dispatchState: "started" },
+            { ordinal: 1, conversationId: conversationIds[1], turnId: turnIds[1], dispatchState: "started" },
+          ],
+          comparison: {
+            state: "completed",
+            conversationId: comparisonConversationId,
+            turnId: "88888888-8888-4888-8888-888888888888",
+            attempt: 1,
+            error: null,
+          },
+        },
+      };
+    });
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot,
+      settings,
+      run,
+      request,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(),
+      showWorkspace: vi.fn(),
+      closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(),
+      discardDraftConversation: vi.fn(),
+      setActionError: vi.fn(),
+    }));
+
+    await act(async () => hook.result.current.submit(draft()));
+    await act(async () => vi.advanceTimersByTimeAsync(750));
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls.some(([, command]) => command.type === "duo.status"))
+      .toBe(false);
+  });
+
   it.each([
     { navigatedAway: false, shouldOpen: true },
     { navigatedAway: true, shouldOpen: false },
@@ -146,6 +227,7 @@ describe("Duo comparison navigation", () => {
       snapshot: currentSnapshot,
       settings,
       run,
+      request: (command) => run("multi-spawn:background", command),
       splitConversationId,
       conversationSelectionGenerationRef: generation,
       splitSelectionTransitionsRef: { current: 0 },
@@ -206,6 +288,7 @@ describe("Duo comparison navigation", () => {
       snapshot: currentSnapshot,
       settings,
       run,
+      request: (command) => run("multi-spawn:background", command),
       splitConversationId,
       conversationSelectionGenerationRef: generation,
       splitSelectionTransitionsRef: { current: 0 },

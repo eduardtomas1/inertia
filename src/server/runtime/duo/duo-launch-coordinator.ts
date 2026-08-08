@@ -644,7 +644,22 @@ export class DuoLaunchCoordinator {
 
     let turnId: string | null = null;
     let startAccepted = false;
+    let transitionReserved = false;
     try {
+      const checkoutPath = this.store.conversationPath(
+        comparison.conversationId,
+      );
+      if (!this.store.conversationWork.reserve(comparison.conversationId)) {
+        throw new Error(
+          "The judge checkout is already owned by another provider or workspace operation.",
+        );
+      }
+      transitionReserved = true;
+      if (this.turns.hasActiveCheckout(checkoutPath)) {
+        throw new Error(
+          "Another agent is already working in the judge checkout.",
+        );
+      }
       const queued = this.turns.queue({
         conversationId: comparison.conversationId,
         authorizedDuoComparisonLaunchId: launchId,
@@ -681,6 +696,10 @@ export class DuoLaunchCoordinator {
           ? "The judge start outcome became uncertain"
           : "The judge could not be queued"} and was not retried automatically.`,
       ));
+    } finally {
+      if (transitionReserved) {
+        this.store.conversationWork.release(comparison.conversationId);
+      }
     }
   }
 
